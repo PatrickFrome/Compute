@@ -1,21 +1,26 @@
 "use client";
-// ── PAGEBAR R85: compact Resolve-style page dock ───────────────────────────────
-// Ten task contexts remain first-class; labels progressively collapse instead
-// of forcing the entire application chrome to scroll on normal desktop widths.
+// ── PAGEBAR R95: compact Resolve-style workflow dock ───────────────────────────
+// Seven workflow stages (COMMAND→PLAN→BUILD→RUN→FLEET→OBSERVE→SYSTEM) remain
+// first-class; labels progressively collapse instead of forcing the entire
+// application chrome to scroll on normal desktop widths. Workspace switcher
+// stays here until the R96 TopBar breadcrumb lands (IA prototype scope).
 
-import { PAGES, WORKSPACES, useMe2, type PageKey } from "@/components/me2/store";
+import { PAGES, WORKSPACES, useMe2 } from "@/components/me2/store";
 import {
-  LayoutDashboard, Bot, Globe, Code2, ListChecks, ShieldCheck, Cpu, BrainCircuit,
-  Activity, Settings2, ChevronDown, Check, RotateCcw,
+  Target, ListChecks, Code2, Globe, Bot, Activity, Settings2, ChevronDown, Check, RotateCcw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-const PAGE_ICONS: Record<PageKey, LucideIcon> = {
-  command: LayoutDashboard, agents: Bot, browser: Globe, code: Code2, tasks: ListChecks,
-  supervisor: ShieldCheck, compute: Cpu, memory: BrainCircuit, observability: Activity, system: Settings2,
+const PAGE_ICONS: Record<string, LucideIcon> = {
+  command: Target,
+  plan: ListChecks,
+  build: Code2,
+  run: Globe,
+  fleet: Bot,
+  observe: Activity,
+  system: Settings2,
 };
-const GROUP_END = new Set<PageKey>(["browser", "tasks", "memory"]);
 
 export function PageBar() {
   const page = useMe2((s) => s.page);
@@ -59,7 +64,7 @@ export function PageBar() {
           className="flex h-7 max-w-36 items-center gap-1.5 border border-zinc-800 bg-zinc-950 px-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
           title={`Workspace: ${activeWs.hint}`}
         >
-          <LayoutDashboard className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
+          <Target className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
           <span className="hidden truncate lg:inline">{activeWs.label}</span>
           <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${wsOpen ? "rotate-180" : ""}`} aria-hidden />
         </button>
@@ -103,31 +108,30 @@ export function PageBar() {
 
       <div role="tablist" aria-label="Pages" className="flex min-w-0 flex-1 items-stretch justify-center" data-testid="panel-tabs">
         {PAGES.map((p) => {
-          const Icon = PAGE_ICONS[p.key];
+          const Icon = PAGE_ICONS[p.key] ?? Target;
           const active = page === p.key;
           return (
-            <div key={p.key} className={`flex items-stretch ${GROUP_END.has(p.key) ? "mr-1 border-r border-zinc-800 pr-1" : ""}`}>
-              <button
-                role="tab"
-                aria-selected={active}
-                aria-label={`${p.label} · Alt+${p.num}`}
-                data-testid={`page-tab-${p.key}`}
-                data-panel-tab={p.key}
-                className={`panel-tab-${p.key} group relative flex min-w-8 items-center justify-center gap-1.5 px-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition-colors xl:px-2.5`}
-                onClick={() => setPage(p.key)}
-                title={`${p.label} · Alt+${p.num}`}
-              >
-                <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-emerald-400" : "text-zinc-500 group-hover:text-zinc-300"}`} aria-hidden />
-                <span className={`hidden xl:inline ${active ? "text-emerald-300" : "text-zinc-500 group-hover:text-zinc-300"}`}>{p.label}</span>
-                {active ? <span className="absolute inset-x-1 bottom-0 h-px bg-emerald-400" aria-hidden /> : null}
-              </button>
-            </div>
+            <button
+              key={p.key}
+              role="tab"
+              aria-selected={active}
+              aria-label={`${p.label} · Alt+${p.num}`}
+              data-testid={`page-tab-${p.key}`}
+              data-panel-tab={p.key}
+              className={`panel-tab-${p.key} group relative flex min-w-8 items-center justify-center gap-1.5 px-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition-colors xl:px-2.5`}
+              onClick={() => setPage(p.key)}
+              title={`${p.label} · Alt+${p.num}`}
+            >
+              <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-emerald-400" : "text-zinc-500 group-hover:text-zinc-300"}`} aria-hidden />
+              <span className={`hidden xl:inline ${active ? "text-emerald-300" : "text-zinc-500 group-hover:text-zinc-300"}`}>{p.label}</span>
+              {active ? <span className="absolute inset-x-1 bottom-0 h-px bg-emerald-400" aria-hidden /> : null}
+            </button>
           );
         })}
       </div>
 
       <div className="flex shrink-0 items-center pl-2">
-        <span className="hidden font-mono text-[8px] text-zinc-700 xl:inline">Alt+1…0</span>
+        <span className="hidden font-mono text-[8px] text-zinc-700 xl:inline">Alt+1…7</span>
       </div>
     </nav>
   );

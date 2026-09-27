@@ -188,7 +188,20 @@ let primaryCommandRailOpen = true;
 let primaryContextDrawerOpen = false;
 let primaryContextDrawerHeight = 200;
 let primaryShellUrl = null;
-const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
+const ME2_PRIMARY_PAGES = new Set(['command','plan','build','run','fleet','observe','system']);
+// R95 workflow-IA migration: native TabRegistry and old URL hashes may still
+// deliver legacy page keys. They normalize onto their workflow host page;
+// no legacy key loses its destination.
+const ME2_PRIMARY_PAGE_ALIASES = new Map([
+  ['agents', 'fleet'],
+  ['browser', 'run'],
+  ['code', 'build'],
+  ['tasks', 'plan'],
+  ['supervisor', 'fleet'],
+  ['compute', 'system'],
+  ['memory', 'observe'],
+  ['observability', 'observe'],
+]);
 let devosSourceSnapshot = null;
 let devosSessionLayoutsLoaded = false;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -580,8 +593,11 @@ function fallbackSelectedSurface() {
 }
 
 function nativeBrowserSurfaceAllowed() {
+  // R95: the native Browser surface belongs to the RUN workflow page only.
+  // COMMAND became mission control and never carries remote pixels; all other
+  // pages are pure ME2 web surfaces.
   return primaryShellMode !== 'ME2_PRIMARY'
-    || (primaryShellPage === 'command' && primaryShellOverlayActive !== true);
+    || (primaryShellPage === 'run' && primaryShellOverlayActive !== true);
 }
 
 async function preparePrimaryShellTarget() {
@@ -759,8 +775,10 @@ function layout() {
     width,
     height,
     state: shellLayoutState,
-    surface_profile: primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'command'
-      ? 'ME2_R75_COMMAND'
+    // R95: RUN reserves the exact ME2 web chrome (page strip + compact
+    // BrowserStage + telemetry inspector); every other page is pure web UI.
+    surface_profile: primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'run'
+      ? 'ME2_R95_RUN'
       : 'LEGACY_BROWSER_SHELL',
     me2_command_rail_open: primaryCommandRailOpen,
     me2_context_drawer_open: primaryContextDrawerOpen,
@@ -1955,8 +1973,12 @@ async function createWindow() {
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
   assertShellSender(event);
-  const page = String(rawPage || '').trim().toLowerCase();
-  if (!ME2_PRIMARY_PAGES.has(page)) throw new Error('primary_shell_page_invalid');
+  const requested = String(rawPage || '').trim().toLowerCase();
+  // R95: accept workflow keys directly and normalize legacy keys onto hosts.
+  const page = ME2_PRIMARY_PAGES.has(requested)
+    ? requested
+    : (ME2_PRIMARY_PAGE_ALIASES.get(requested) ?? null);
+  if (!page) throw new Error('primary_shell_page_invalid');
   primaryShellPage = page;
   layout();
   return Object.freeze({

@@ -39,6 +39,7 @@ const me2Pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell
 const me2Statusbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/statusbar.tsx', import.meta.url), 'utf8');
 const me2Palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
 const me2Command = await readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8');
+const me2RunPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url), 'utf8');
 const me2BrowserStage = await readFile(new URL('../../me2-ui/src/components/me2/stages/browser-stage.tsx', import.meta.url), 'utf8');
 const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
 const me2AgentChatFeed = await readFile(new URL('../../me2-ui/src/hooks/use-agentchat-sessions.ts', import.meta.url), 'utf8');
@@ -300,11 +301,13 @@ test('R85 persistent chrome is compact and cannot directly fire emergency flush'
   assert.match(me2Palette, /setConfirmFlush\(true\)/);
 });
 
-test('R85 Command remains an integrated native-stage workbench with R75 anchors', () => {
+test('R95 COMMAND is mission control and RUN hosts the compact native-stage Browser', () => {
   assert.match(me2Command, /data-testid="page-command"/);
   assert.match(me2Command, /data-testid="agent-sidebar"/);
   assert.match(me2Command, /w-\[252px\]/);
-  assert.match(me2Command, /<BrowserStage compact defaultCastOn \/>/);
+  assert.doesNotMatch(me2Command, /BrowserStage/);
+  assert.match(me2RunPage, /data-testid="page-browser"/);
+  assert.match(me2RunPage, /<BrowserStage compact defaultCastOn \/>/);
   assert.match(me2Topbar, /data-testid="topbar"/);
   assert.match(me2Pagebar, /data-testid="pagebar"/);
   assert.match(me2Statusbar, /data-testid="statusbar"/);
@@ -638,7 +641,7 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
 
   assert.match(main, /let primaryShellOverlayActive = false/);
-  assert.match(main, /primaryShellPage === 'command'\s*&& primaryShellOverlayActive !== true/);
+  assert.match(main, /primaryShellPage === 'run'\s*&& primaryShellOverlayActive !== true/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-overlay'/);
   assert.match(main, /typeof rawActive !== 'boolean'/);
 

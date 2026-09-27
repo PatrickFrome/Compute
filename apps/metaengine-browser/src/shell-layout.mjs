@@ -23,6 +23,15 @@ export const ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT = 200;
 export const ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT = 160;
 export const ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT = 360;
 export const ME2_PRIMARY_MIN_BROWSER_HEIGHT = 320;
+// R95 RUN workflow page: the native Browser surface projects ONLY on RUN
+// (COMMAND became mission control and owns no remote pixels). RUN composes a
+// fixed h-8 page strip (reuses ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT=32)
+// above the same compact BrowserStage chrome. The legacy telemetry inspector
+// (w-96 + gap-2) is visible at the web lg breakpoint and must stay clear of
+// native pixels; it degrades before the active surface like all chrome.
+export const ME2_PRIMARY_RUN_INSPECTOR_WIDTH = 384;
+export const ME2_PRIMARY_RUN_INSPECTOR_GAP = 8;
+export const ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH = 1024;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const OPERATIONS_MODES = new Set(['OPEN', 'CLOSED']);
@@ -112,6 +121,8 @@ export function planShellLayout({
     // ME2 shell itself owns all chrome. Reserve the exact visible chrome and
     // command-page agent rail, then place the native Browser in the center.
     // On narrow windows the rail degrades before the native browser stage.
+    // R95: retained for the pure geometry contract (tests); the live native
+    // flow now selects ME2_R95_RUN because COMMAND hosts no Browser surface.
     top = Math.min(
       ME2_PRIMARY_TOP_HEIGHT
         + ME2_PRIMARY_PAGE_PADDING
@@ -165,11 +176,69 @@ export function planShellLayout({
     } else if (!railFits) {
       adaptations.push('ME2_AGENT_RAIL_RESERVED_SPACE_RELEASED_FOR_ACTIVE_SURFACE');
     }
+  } else if (surfaceProfile === 'ME2_R95_RUN') {
+    // R95: RUN is the only page with a native Browser surface. Composition is
+    // fixed: TopBar + page padding + h-8 page strip + tabstrip + urlbar above;
+    // browser status + padding + PageBar + StatusBar (+ Context Drawer) below;
+    // the telemetry inspector degrades before the active surface.
+    top = Math.min(
+      ME2_PRIMARY_TOP_HEIGHT
+        + ME2_PRIMARY_PAGE_PADDING
+        + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT
+        + ME2_PRIMARY_COMMAND_GAP
+        + ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT
+        + ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
+      windowHeight,
+    );
+    const baseBottom = Math.min(
+      ME2_PRIMARY_PAGEBAR_HEIGHT
+        + ME2_PRIMARY_STATUSBAR_HEIGHT
+        + ME2_PRIMARY_PAGE_PADDING
+        + ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
+      Math.max(0, windowHeight - top),
+    );
+    const drawerRequested = me2_context_drawer_open === true;
+    const requestedDrawerHeight = Math.max(
+      ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
+      Math.min(ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT, Math.floor(Number(me2_context_drawer_height) || ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT)),
+    );
+    const drawerCapacity = Math.max(0, windowHeight - top - baseBottom - ME2_PRIMARY_MIN_BROWSER_HEIGHT);
+    const effectiveDrawerHeight = drawerRequested && drawerCapacity >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT
+      ? Math.min(requestedDrawerHeight, drawerCapacity)
+      : 0;
+    const drawerEffective = effectiveDrawerHeight >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT;
+    bottom = Math.min(
+      baseBottom + effectiveDrawerHeight,
+      Math.max(0, windowHeight - top),
+    );
+    if (drawerRequested && !drawerEffective) {
+      adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
+    } else if (drawerRequested && effectiveDrawerHeight < requestedDrawerHeight) {
+      adaptations.push('ME2_CONTEXT_DRAWER_CLAMPED_FOR_ACTIVE_SURFACE');
+    }
+    const inspectorRequested = windowWidth >= ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH;
+    const inspectorFits = windowWidth
+      - ME2_PRIMARY_PAGE_PADDING * 2
+      - (ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP)
+      >= SHELL_MIN_REMOTE_WIDTH;
+    const inspectorVisible = inspectorRequested && inspectorFits;
+    left = ME2_PRIMARY_PAGE_PADDING;
+    right = inspectorVisible
+      ? ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP
+      : ME2_PRIMARY_PAGE_PADDING;
+    contentWidth = Math.max(0, windowWidth - left - right);
+    remoteHeight = Math.max(0, windowHeight - top - bottom);
+    effectiveSidebar = 'HIDDEN';
+    effectiveOperations = 'CLOSED';
+    if (inspectorRequested && !inspectorVisible) {
+      adaptations.push('ME2_RUN_INSPECTOR_RELEASED_FOR_ACTIVE_SURFACE');
+    }
   } else if (surfaceProfile !== 'LEGACY_BROWSER_SHELL') {
     surfaceProfile = 'LEGACY_BROWSER_SHELL';
   }
 
   const activeSurfaceWidthTarget = Math.min(SHELL_MIN_REMOTE_WIDTH, windowWidth);
+  const isMe2DrawerSurface = surfaceProfile === 'ME2_R75_COMMAND' || surfaceProfile === 'ME2_R95_RUN';
 
   return Object.freeze({
     schema: 'metaengine.browser-shell.layout-plan.v1',
@@ -187,17 +256,17 @@ export function planShellLayout({
     active_surface_target_satisfied: contentWidth >= activeSurfaceWidthTarget,
     active_surface_priority: true,
     me2_command_rail_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_command_rail_open !== false : null,
-    me2_context_drawer_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_context_drawer_open === true : null,
-    me2_context_drawer_requested_height: surfaceProfile === 'ME2_R75_COMMAND'
+    me2_context_drawer_requested_open: isMe2DrawerSurface ? me2_context_drawer_open === true : null,
+    me2_context_drawer_requested_height: isMe2DrawerSurface
       ? Math.max(
           ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
           Math.min(ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT, Math.floor(Number(me2_context_drawer_height) || ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT)),
         )
       : null,
-    me2_context_drawer_effective_open: surfaceProfile === 'ME2_R75_COMMAND'
+    me2_context_drawer_effective_open: isMe2DrawerSurface
       ? (me2_context_drawer_open === true && !adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE'))
       : null,
-    me2_context_drawer_height: surfaceProfile === 'ME2_R75_COMMAND'
+    me2_context_drawer_height: isMe2DrawerSurface
       ? Math.max(0, bottom - (
           ME2_PRIMARY_PAGEBAR_HEIGHT
             + ME2_PRIMARY_STATUSBAR_HEIGHT

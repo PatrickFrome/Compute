@@ -1,9 +1,10 @@
 "use client";
-// ── ME2 SHELL: professional control-room shell (R85) ─────────────────────────
-// One stable global command bar, one task-focused page surface, Resolve-style
-// page dock and a thin read-only status line. Closed overlays are not mounted:
-// this keeps the native Browser semantic projection free from hidden palette
-// controls and reduces false automation targets.
+// ── ME2 SHELL: professional control-room shell (R95 workflow-IA) ─────────────
+// Seven workflow Pages (COMMAND→PLAN→BUILD→RUN→FLEET→OBSERVE→SYSTEM) host the
+// ten legacy module surfaces; one stable global command bar, one task-focused
+// page surface, Resolve-style page dock and a thin read-only status line.
+// Closed overlays are not mounted: this keeps the native Browser semantic
+// projection free from hidden palette controls and reduces false automation targets.
 
 import { useEffect } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
@@ -15,28 +16,24 @@ import { ContextDrawer } from "@/components/me2/shell/context-drawer";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
 import { CommandPage } from "@/components/me2/pages/command";
-import { AgentsPage } from "@/components/me2/pages/agents";
 import { BrowserPage } from "@/components/me2/pages/browser";
 import { CodePage } from "@/components/me2/pages/code";
 import { TasksPage } from "@/components/me2/pages/tasks";
-import { SupervisorPage } from "@/components/me2/pages/supervisor";
-import { ComputePage } from "@/components/me2/pages/compute";
-import { MemoryPage } from "@/components/me2/pages/memory";
-import { ObservabilityPage } from "@/components/me2/pages/observability";
-import { SystemPage } from "@/components/me2/pages/system";
+import { FleetPage } from "@/components/me2/pages/fleet";
+import { ObservePage } from "@/components/me2/pages/observe";
+import { SystemSuitePage } from "@/components/me2/pages/system-suite";
 
 function PageOutlet({ page }: { page: PageKey }) {
+  // R95: PLAN/BUILD/RUN — прямое хостинг legacy-модулей; FLEET/OBSERVE/SYSTEM —
+  // таб-хосты пар модулей; COMMAND — rebuilt mission control.
   switch (page) {
     case "command": return <CommandPage />;
-    case "agents": return <AgentsPage />;
-    case "browser": return <BrowserPage />;
-    case "code": return <CodePage />;
-    case "tasks": return <TasksPage />;
-    case "supervisor": return <SupervisorPage />;
-    case "compute": return <ComputePage />;
-    case "memory": return <MemoryPage />;
-    case "observability": return <ObservabilityPage />;
-    case "system": return <SystemPage />;
+    case "plan": return <TasksPage />;
+    case "build": return <CodePage />;
+    case "run": return <BrowserPage />;
+    case "fleet": return <FleetPage />;
+    case "observe": return <ObservePage />;
+    case "system": return <SystemSuitePage />;
     default: return null;
   }
 }

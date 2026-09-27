@@ -53,11 +53,11 @@ export function TopBar() {
   const budgetLimit = snap?.budget.limit ?? 24;
   const budgetPct = Math.round((budgetUsed / Math.max(1, budgetLimit)) * 100);
   const attentionItems = [
-    !connected ? { id: "transport", label: "Transport offline", detail: "Socket :3040 unavailable; REST fallback may be active.", page: "observability" as const, tone: "rose" } : null,
-    failedTasks > 0 ? { id: "tasks", label: String(failedTasks) + " failed task" + (failedTasks === 1 ? "" : "s"), detail: "Current work queue contains failed tasks; inspect exact evidence before retry.", page: "tasks" as const, tone: "rose" } : null,
-    failedCommands > 0 ? { id: "commands", label: String(failedCommands) + " recent failed command" + (failedCommands === 1 ? "" : "s"), detail: "Failures from the last 15 minutes; inspect receipts and never blind-retry ambiguous effects.", page: "observability" as const, tone: "rose" } : null,
-    mirrorAttention ? { id: "mirror", label: "Mirror " + (mirror?.mode ?? "unknown"), detail: "Outbox " + String(mirror?.pending ?? 0) + (mirror?.last_error ? " · " + mirror.last_error.slice(0, 90) : ""), page: "observability" as const, tone: "amber" } : null,
-    offlineWorkers > 0 ? { id: "workers", label: String(offlineWorkers) + " offline worker" + (offlineWorkers === 1 ? "" : "s"), detail: "Worker registry reports offline capacity.", page: "compute" as const, tone: "amber" } : null,
+    !connected ? { id: "transport", label: "Transport offline", detail: "Socket :3040 unavailable; REST fallback may be active.", page: "observe" as const, tone: "rose" } : null,
+    failedTasks > 0 ? { id: "tasks", label: String(failedTasks) + " failed task" + (failedTasks === 1 ? "" : "s"), detail: "Current work queue contains failed tasks; inspect exact evidence before retry.", page: "plan" as const, tone: "rose" } : null,
+    failedCommands > 0 ? { id: "commands", label: String(failedCommands) + " recent failed command" + (failedCommands === 1 ? "" : "s"), detail: "Failures from the last 15 minutes; inspect receipts and never blind-retry ambiguous effects.", page: "observe" as const, tone: "rose" } : null,
+    mirrorAttention ? { id: "mirror", label: "Mirror " + (mirror?.mode ?? "unknown"), detail: "Outbox " + String(mirror?.pending ?? 0) + (mirror?.last_error ? " · " + mirror.last_error.slice(0, 90) : ""), page: "observe" as const, tone: "amber" } : null,
+    offlineWorkers > 0 ? { id: "workers", label: String(offlineWorkers) + " offline worker" + (offlineWorkers === 1 ? "" : "s"), detail: "Worker registry reports offline capacity.", page: "system" as const, tone: "amber" } : null,
     budgetPct >= 75 ? { id: "budget", label: "Command budget " + String(budgetPct) + "%", detail: String(budgetUsed) + "/" + String(budgetLimit) + " cost units used in the current window.", page: "system" as const, tone: "amber" } : null,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
@@ -107,16 +107,16 @@ export function TopBar() {
           type="button"
           onClick={() => setContextDrawer(!contextDrawerPreferredOpen)}
           aria-pressed={contextDrawerOpen}
-          aria-label={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Context Drawer скрыт из-за высоты окна" : contextDrawerOpen ? "Закрыть Context Drawer" : "Открыть Context Drawer"}
+          aria-label={contextDrawerPreferredOpen && !contextDrawerOpen && page === "run" ? "Context Drawer скрыт из-за высоты окна" : contextDrawerOpen ? "Закрыть Context Drawer" : "Открыть Context Drawer"}
           data-testid="context-drawer-toggle"
           className={`flex h-7 min-w-7 items-center justify-center border px-2 transition-colors ${
             contextDrawerOpen
               ? "border-cyan-900/70 bg-cyan-950/20 text-cyan-300"
-              : contextDrawerPreferredOpen && page === "command"
+              : contextDrawerPreferredOpen && page === "run"
                 ? "border-amber-900/70 bg-amber-950/20 text-amber-300"
                 : "border-zinc-800 bg-zinc-950 text-zinc-600 hover:text-zinc-300"
           }`}
-          title={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Drawer сохранён, но Browser minimum height имеет приоритет. Увеличьте окно." : "Context Drawer · Ctrl/Cmd+J"}
+          title={contextDrawerPreferredOpen && !contextDrawerOpen && page === "run" ? "Drawer сохранён, но Browser minimum height имеет приоритет. Увеличьте окно." : "Context Drawer · Ctrl/Cmd+J"}
         >
           <PanelBottom className="h-3 w-3" aria-hidden />
         </button>

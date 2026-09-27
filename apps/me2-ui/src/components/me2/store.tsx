@@ -1,5 +1,8 @@
 "use client";
-// ── ME2 STORE: единый центральный стор UI (R74 Page-архитектура) ────────────────
+// ── ME2 STORE: единый центральный стор UI (R95 workflow-IA поверх R74) ──────────
+// R95: Pages — это СТАДИИ производственного цикла (COMMAND→PLAN→BUILD→RUN→FLEET→
+// OBSERVE→SYSTEM), а не список подсистем. Все 10 legacy-модулей сохранены как
+// ModuleKey-поверхности внутри workflow-страниц (ни один модуль не удалён).
 // WS-данные (snapshot/event) + навигация Pages + workspace + selection агентов +
 // глобальные диалоги + hotkeys. Страничные REST-опросы живут ЛОКАЛЬНО в страницах
 // (панели монтируются условно — перф-паттерн legacy сохранён).
@@ -12,34 +15,71 @@ import {
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
 
-// ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
+// ── Pages (R95: DaVinci-принцип — стадии производственного цикла, не модули) ───
+// COMMAND — миссия/внимание/быстрые действия · PLAN — задачи/зависимости/претензии ·
+// BUILD — код/worktrees/терминал/тесты · RUN — браузер/превью приложения ·
+// FLEET — агенты+супервизор+делегирование · OBSERVE — события/память/здоровье ·
+// SYSTEM — compute/runtime/releases/settings.
 export type PageKey =
+  | "command" | "plan" | "build" | "run" | "fleet" | "observe" | "system";
+
+// Legacy-модули R74–R94: поверхности сохранены и хостятся workflow-страницами.
+export type ModuleKey =
   | "command" | "agents" | "browser" | "code" | "tasks"
   | "supervisor" | "compute" | "memory" | "observability" | "system";
 
 export const PAGES: { key: PageKey; label: string; num: string }[] = [
   { key: "command", label: "COMMAND", num: "1" },
-  { key: "agents", label: "AGENTS", num: "2" },
-  { key: "browser", label: "BROWSER", num: "3" },
-  { key: "code", label: "CODE", num: "4" },
-  { key: "tasks", label: "TASKS", num: "5" },
-  { key: "supervisor", label: "SUPERVISOR", num: "6" },
-  { key: "compute", label: "COMPUTE", num: "7" },
-  { key: "memory", label: "MEMORY", num: "8" },
-  { key: "observability", label: "OBSERV", num: "9" },
-  { key: "system", label: "SYSTEM", num: "0" },
+  { key: "plan", label: "PLAN", num: "2" },
+  { key: "build", label: "BUILD", num: "3" },
+  { key: "run", label: "RUN", num: "4" },
+  { key: "fleet", label: "FLEET", num: "5" },
+  { key: "observe", label: "OBSERVE", num: "6" },
+  { key: "system", label: "SYSTEM", num: "7" },
 ];
+
+// R95 миграция: legacy-ключи страниц (localStorage/#hash/native tab events)
+// отображаются на workflow-страницы-хосты. Ни один ключ не теряет своё место.
+export const PAGE_ALIASES: Record<string, PageKey> = {
+  agents: "fleet",
+  browser: "run",
+  code: "build",
+  tasks: "plan",
+  supervisor: "fleet",
+  compute: "system",
+  memory: "observe",
+  observability: "observe",
+};
+
+export function normalizePageKey(raw: string | null | undefined): PageKey | null {
+  const key = String(raw ?? "").trim().toLowerCase();
+  if (!key) return null;
+  if (PAGES.some((p) => p.key === key)) return key as PageKey;
+  return PAGE_ALIASES[key] ?? null;
+}
+
+// Хостинг legacy-модулей внутри workflow-страниц (для контракт-тестов IA).
+export const PAGE_MODULES: Record<PageKey, ModuleKey[]> = {
+  command: ["command"],
+  plan: ["tasks"],
+  build: ["code"],
+  run: ["browser"],
+  fleet: ["agents", "supervisor"],
+  observe: ["observability", "memory"],
+  system: ["system", "compute"],
+};
 
 // ── Workspaces (пресеты рабочих контекстов) ─────────────────────────────────────
 export type WorkspaceKey = "development" | "browser-ops" | "debugging" | "monitoring" | "supervise";
 export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint: string }[] = [
-  { key: "development", label: "Development", page: "command", hint: "агенты + браузер + супервизор" },
-  { key: "browser-ops", label: "Browser Ops", page: "browser", hint: "браузерная инфраструктура" },
-  { key: "debugging", label: "Debugging", page: "code", hint: "код, exec, песочницы" },
-  { key: "monitoring", label: "Monitoring", page: "observability", hint: "журналы, метрики, здоровье" },
-  { key: "supervise", label: "Supervisor", page: "supervisor", hint: "цели, оркестрация, control-plane" },
+  { key: "development", label: "Development", page: "command", hint: "миссия + план + build" },
+  { key: "browser-ops", label: "Browser Ops", page: "run", hint: "браузерная инфраструктура" },
+  { key: "debugging", label: "Debugging", page: "build", hint: "код, exec, песочницы" },
+  { key: "monitoring", label: "Monitoring", page: "observe", hint: "журналы, метрики, здоровье" },
+  { key: "supervise", label: "Supervisor", page: "fleet", hint: "цели, оркестрация, control-plane" },
 ];
 
+// PaletteMode остаётся legacy-совместимым: режимы палитры не зависят от набора Pages.
 export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
@@ -238,7 +278,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
     const wantedHeight = clampContextDrawerHeight(
       typeof height === "number" ? height : get().contextDrawerPreferredHeight,
     );
-    if (request.page !== "command") {
+    // R95: native Browser surface проецируется только на RUN — native-резерв
+    // высоты drawer нужен только там; на остальных страницах web владеет пикселями.
+    if (request.page !== "run") {
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: want,
@@ -356,9 +398,11 @@ export const useMe2 = create<Me2State>((set, get) => ({
       try {
         const h = window.location.hash.replace("#", "");
         const stored = localStorage.getItem(PAGE_LS);
-        const raw = (PAGES.some((p) => p.key === h) && h) || stored;
-        if (raw && PAGES.some((p) => p.key === raw)) {
-          set({ page: raw as PageKey, recentPages: [raw as PageKey], pageHistoryIndex: 0 });
+        // R95: legacy-ключи (#tasks, #agents, #observability…) мигрируют на
+        // workflow-хосты через normalizePageKey — закладки не ломаются.
+        const raw = normalizePageKey(h) ?? normalizePageKey(stored);
+        if (raw) {
+          set({ page: raw, recentPages: [raw], pageHistoryIndex: 0 });
           try {
             const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
             void shell?.setPrimaryPage?.(raw);
@@ -453,6 +497,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       } else if ((e.key === "n" || e.key === "n") && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
         e.preventDefault(); set({ dialog: "newTask" });
       } else if (e.altKey && !e.metaKey && !e.ctrlKey) {
+        // R95: Alt+1..7 — workflow Pages; Alt+0 сохранён как алиас SYSTEM.
         if (e.key >= "1" && e.key <= "9") {
           const p = PAGES[Number(e.key) - 1]; if (p) { e.preventDefault(); get().setPage(p.key); }
         } else if (e.key === "0") {
@@ -477,7 +522,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const { me2Desktop } = await import("@/lib/me2-desktop");
         const d = me2Desktop();
         if (!d) return;
-        d.onTabActivated((p) => { if (p?.kind === "page" && p.key) get().setPage(p.key as PageKey); });
+        d.onTabActivated((p) => {
+          if (p?.kind === "page" && p.key) {
+            // R95: native TabRegistry может присылать legacy-ключи — нормализуем.
+            const page = normalizePageKey(p.key);
+            if (page) get().setPage(page);
+          }
+        });
         d.onNativeEvent((p) => {
           const type = String(p?.type ?? "");
           if (type === "open-site-prompt") {
@@ -515,7 +566,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
 
   setPage: (p) => {
     // Any page transition invalidates in-flight drawer geometry replies.
-    // A new COMMAND sync below gets a fresh sequence/context token.
+    // A new RUN sync below gets a fresh sequence/context token.
     contextDrawerSyncSeq += 1;
     set((st) => {
       if (st.page === p) return st;
@@ -528,7 +579,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       };
     });
     syncPagePresentation(p);
-    if (p === "command") get().syncContextDrawer();
+    if (p === "run") get().syncContextDrawer();
     else set({
       contextDrawerOpen: get().contextDrawerPreferredOpen,
       contextDrawerHeight: get().contextDrawerPreferredHeight,

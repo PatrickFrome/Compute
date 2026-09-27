@@ -73,7 +73,7 @@ function registerPresentationIpc() {
     return Object.freeze({
       schema: 'metaengine.browser.r85-visual.primary-overlay.v1',
       active: overlay,
-      native_browser_surface_visible: !overlay && page === 'command',
+      native_browser_surface_visible: !overlay && page === 'run',
       presentation_only: true,
       authority_effect: false,
     });

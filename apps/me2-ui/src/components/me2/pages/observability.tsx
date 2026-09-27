@@ -115,22 +115,30 @@ function EventLogPanel() {
   const [frozenSeq, setFrozenSeq] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
 
+  // Restore saved view AFTER hydration paint (deferred like store.init) —
+  // no synchronous setState cascade from the effect body.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("me2.obs.events.view.v1");
-      if (saved === "compact" || saved === "full") setViewMode(saved);
-    } catch { /* private mode */ }
+    const t = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("me2.obs.events.view.v1");
+        if (saved === "compact" || saved === "full") setViewMode(saved);
+      } catch { /* private mode */ }
+    }, 0);
+    return () => window.clearTimeout(t);
   }, []);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
-      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) {
-        setViewPreset(saved);
-        const preset = EVENT_VIEW_PRESETS.find((item) => item.key === saved);
-        if (preset) setLaneFilter(preset.lane);
-      }
-    } catch { /* private mode */ }
+    const t = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
+        if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) {
+          setViewPreset(saved);
+          const preset = EVENT_VIEW_PRESETS.find((item) => item.key === saved);
+          if (preset) setLaneFilter(preset.lane);
+        }
+      } catch { /* private mode */ }
+    }, 0);
+    return () => window.clearTimeout(t);
   }, []);
 
   const applyViewPreset = useCallback((key: Exclude<EventViewPresetKey, "custom">) => {

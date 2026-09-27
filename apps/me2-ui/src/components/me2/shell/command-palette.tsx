@@ -11,22 +11,18 @@ import { PAGES, useMe2 } from "@/components/me2/store";
 import { sendCommand, spawnAgent, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
 import {
   Plus, Bot, RefreshCw, Zap, Boxes, Download, Gauge, Trash2, Search, Rocket,
-  LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, Cpu, BrainCircuit,
-  Activity, Settings2,
+  LayoutDashboard, ListChecks, Terminal, Globe, Activity, Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const PAGE_META: Record<string, { icon: LucideIcon; hint: string }> = {
-  command: { icon: LayoutDashboard, hint: "агенты + браузер + супервизор" },
-  agents: { icon: Bot, hint: "флот агентов" },
-  browser: { icon: Globe, hint: "браузерная инфраструктура" },
-  code: { icon: Terminal, hint: "код, exec, песочницы" },
-  tasks: { icon: ListChecks, hint: "задачи и граф" },
-  supervisor: { icon: ShieldCheck, hint: "control-plane оркестрации" },
-  compute: { icon: Cpu, hint: "пул, workers, квоты" },
-  memory: { icon: BrainCircuit, hint: "память и знание" },
-  observability: { icon: Activity, hint: "журналы и здоровье" },
-  system: { icon: Settings2, hint: "конфигурация" },
+  command: { icon: LayoutDashboard, hint: "миссия · внимание · исходы" },
+  plan: { icon: ListChecks, hint: "задачи · зависимости · претензии" },
+  build: { icon: Terminal, hint: "код · worktrees · терминал · тесты" },
+  run: { icon: Globe, hint: "браузер · превью приложения" },
+  fleet: { icon: Bot, hint: "агенты · супервизор · делегирование" },
+  observe: { icon: Activity, hint: "события · память · здоровье" },
+  system: { icon: Settings2, hint: "compute · runtime · releases · settings" },
 };
 
 function laneChip(lane: string): string {
@@ -203,7 +199,7 @@ export function CommandPalette() {
         <CommandEmpty>не найдено</CommandEmpty>
 
         {/* PAGES */}
-        {(mode === "all" || mode === "pages") && <CommandGroup heading="Pages · Alt+1..0">
+        {(mode === "all" || mode === "pages") && <CommandGroup heading="Pages · Alt+1..7">
           {PAGES.map((p) => {
             const m = PAGE_META[p.key];
             const Icon = m?.icon ?? LayoutDashboard;
@@ -225,7 +221,7 @@ export function CommandPalette() {
         {(mode === "all" || mode === "agents") && (
           <CommandGroup heading={`Агенты · ${chats.length}`}>
             {chats.slice(0, 8).map((a) => (
-              <CommandItem key={a.id} value={`agent ${a.id} ${a.role}`} onSelect={() => { setChatId(a.id); setPage("command"); setOpen(false); }}>
+              <CommandItem key={a.id} value={`agent ${a.id} ${a.role}`} onSelect={() => { setChatId(a.id); setPage("fleet"); setOpen(false); }}>
                 <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
                 <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
                 <span className="ml-auto font-mono text-[9px] text-zinc-600">{a.model}</span>
