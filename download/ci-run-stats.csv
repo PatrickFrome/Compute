@@ -1,0 +1,12 @@
+branch,workflow,n,mean_min,p50_min,p95_min,max_min
+work/r85-control-room-ui-v1,Browser Meta Orchestrator V1,9,1.2,0.9,3.8,3.8
+work/r85-control-room-ui-v1,Browser Typed Workspaces V1,5,0.4,0.3,0.9,0.9
+work/r85-control-room-ui-v1,Browser Windows Installed Chat Qualification,3,6.2,6.2,6.3,6.3
+work/r85-control-room-ui-v1,Browser Windows Package Smoke,3,8.5,9.4,10.7,10.7
+work/r85-control-room-ui-v1,METAENGINE Browser Critical Audit V1,4,4.3,3.9,6.5,6.5
+work/r85-control-room-ui-v1,METAENGINE Browser Final Runtime Activation V1,3,6.7,6.8,6.9,6.9
+work/r85-control-room-ui-v1,METAENGINE Browser Self Update E2E,2,16.6,15.9,17.3,17.3
+work/r85-control-room-ui-v1,METAENGINE Browser Shell V1,4,3.1,3.0,3.8,3.8
+work/r85-control-room-ui-v1,METAENGINE Browser Shell-First Dirty Profile V1,9,4.1,4.0,5.7,5.7
+work/r85-control-room-ui-v1,METAENGINE Browser Windows Autonomous Soak V1,3,9.8,8.8,13.6,13.6
+work/r85-control-room-ui-v1,R84 Desktop Convergence V1,4,0.7,0.6,1.3,1.3
