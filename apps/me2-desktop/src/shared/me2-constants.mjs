@@ -44,6 +44,26 @@ export const UI_HOST = {
   PROBE_INTERVAL_MS: 1000,
 };
 
+/**
+ * Guardian-parity light (GAP #2, R81): external watchdog + beacon contract.
+ * The client writes an atomic beacon (pid/boot_id/ts) into userData; the
+ * external guardian (scripts/guardian.mjs) evaluates liveness with the SAME
+ * journal contract (durable JSONL) and honest caps — no restart storms.
+ * A clean operator quit is marked in the beacon and is NEVER fought.
+ */
+export const GUARDIAN = {
+  BEACON_NAME: 'me2-desktop-beacon.json',
+  BEACON_INTERVAL_MS: 5_000,
+  JOURNAL_NAME: 'me2-desktop-guardian.jsonl',
+  WATCH_INTERVAL_MS: 5_000,
+  STALE_MS: 20_000, // 4 missed beats → stale (client hung or beacon broke)
+  BACKOFF_START_MS: 15_000,
+  BACKOFF_MAX_MS: 120_000,
+  STABLE_RESET_MS: 5 * 60 * 1000, // alive this long → backoff resets
+  MAX_RESTARTS_WINDOW_MS: 60 * 60 * 1000,
+  MAX_RESTARTS_PER_WINDOW: 8, // mirrors DAEMON_HOST.MAX_RESTARTS (honest parity)
+};
+
 /** Desktop self-update channel (own schema — not the legacy rail format). */
 export const UPDATE = {
   MANIFEST_SCHEMA: 'me2.desktop-update-manifest.v1',

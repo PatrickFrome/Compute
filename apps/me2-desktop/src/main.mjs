@@ -7,14 +7,17 @@
  */
 import { app, BrowserWindow } from 'electron';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { LifecycleJournal } from './core/journal.mjs';
+import { writeJsonAtomic } from './shared/durable-file.mjs';
 import { Me2Plane } from './me2/plane.mjs';
 import { createWindowShell } from './core/window-shell.mjs';
 import { StagedUpdater } from './update/staged-updater.mjs';
 import { ActivationManager } from './update/activator.mjs';
-import { resolveInstanceAction, UPDATE } from './shared/me2-constants.mjs';
+import { resolveInstanceAction, UPDATE, GUARDIAN } from './shared/me2-constants.mjs';
 import { createNonce, verifyResurrectionData, resolveSecondaryHandoff } from './me2/instance-nonce.mjs';
+import { makeBeacon } from './me2/guardian-contract.mjs';
 
 const SMOKE = process.argv.includes('--me2-smoke');
 
@@ -24,6 +27,31 @@ let shell = null;
 let journal = null;
 let updater = null;
 let activation = null;
+let beaconTimer = null;
+let beaconFile = null;
+let bootId = null;
+
+// R81 GAP #2: the client beats honestly (atomic beacon into userData) so the
+// EXTERNAL guardian can evaluate liveness with the same journal contract.
+// Smoke mode never beats — CI is not a watched patient.
+function startGuardianBeacon(userDataDir) {
+  bootId = randomUUID();
+  beaconFile = join(userDataDir, GUARDIAN.BEACON_NAME);
+  const beat = () => writeJsonAtomic(beaconFile, makeBeacon({ pid: process.pid, bootId, now: Date.now() }));
+  beat();
+  beaconTimer = setInterval(beat, GUARDIAN.BEACON_INTERVAL_MS);
+  beaconTimer.unref?.();
+  journal.record('guardian_beacon', { started: true, boot_id: bootId, interval_ms: GUARDIAN.BEACON_INTERVAL_MS });
+}
+
+function stopGuardianBeacon({ clean = false } = {}) {
+  if (beaconTimer) { clearInterval(beaconTimer); beaconTimer = null; }
+  if (!beaconFile || !bootId) return;
+  try {
+    writeJsonAtomic(beaconFile, makeBeacon({ pid: process.pid, bootId, now: Date.now(), cleanExit: clean }));
+  } catch { /* last write loses nothing — the journal holds the truth */ }
+  journal?.record('guardian_beacon', { started: false, clean });
+}
 
 async function boot() {
   const userDataDir = app.getPath('userData');
@@ -67,6 +95,10 @@ async function boot() {
   const status = await plane.bringUp();
   journal.record('plane_up', { status });
   plane.startKeepalive(); // R79: epoch-fenced keepalive (no-ops in tests — not called there)
+
+  // R81 GAP #2: guardian beacon AFTER the plane is honestly up (a beaten boot
+  // before this point would lie to the watchdog about a half-alive client).
+  if (!SMOKE) startGuardianBeacon(userDataDir);
 
   // R80 GAP #1a: a fresh staged update arms the handoff (spawn installer on quit).
   if (status.update.last?.staged && plane.updater) {
@@ -120,6 +152,7 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 app.on('before-quit', () => {
+  stopGuardianBeacon({ clean: true }); // R81: mark the quit — the guardian never fights the operator
   journal?.record('exit', {});
   plane?.shutdown();
   activation?.spawnHandoff(); // R80 GAP #1a: armed → detached installer, survives exit
