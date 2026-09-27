@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Radar, RefreshCw, ScanEye, ShieldCheck, Zap } from "lucide-react";
 import { PageHeader, Sec, Chip } from "@/components/me2/ui/primitives";
-import { me2Fetch, toastBus } from "@/lib/me2-bus";
+import { me2Fetch, toastBus, hhmmss } from "@/lib/me2-bus";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
 
 // ── типы (зеркало daemon: sense.ts / obsv.ts / effect.ts) ───────────────────────
@@ -285,7 +285,7 @@ function ObsvSection() {
           <li className="text-zinc-600">событий нет — подожди трафик вкладки или нажми «attach» и подожди</li>
         ) : items.map((e, i) => (
           <li key={`${e.kind}-${e.t}-${i}`} className="flex items-start gap-1.5">
-            <span className="shrink-0 text-zinc-600">{new Date(e.t).toLocaleTimeString("ru-RU", { hour12: false })}</span>
+            <span className="shrink-0 text-zinc-600" title="время Europe/Moscow">{hhmmss(e.t)}</span>
             <span className={`shrink-0 uppercase ${e.level === "error" ? "text-rose-300" : e.level === "warning" ? "text-amber-300" : "text-zinc-500"}`}>{e.kind}</span>
             <span className="min-w-0 break-all text-zinc-400" title={e.text}>{e.text}</span>
           </li>

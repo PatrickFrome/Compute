@@ -257,6 +257,20 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
           );
         })}
       </svg>
+      {/* EV-CHARTS: легенда статусов ветвей — цвет=статус, тултип на каждом элементе */}
+      <div
+        className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 px-1 pt-1 font-mono text-[9px] text-zinc-500"
+        aria-label="Легенда статусов ветвей задач"
+      >
+        {Object.entries(BRANCH_COLOR).map(([st, c]) => (
+          <span key={st} className="inline-flex items-center gap-1" title={`статус ветви: ${st}`}>
+            <svg viewBox="0 0 8 8" className="h-2 w-2 shrink-0" aria-hidden>
+              <circle cx="4" cy="4" r="3.4" fill={c} />
+            </svg>
+            {st.toLowerCase()}
+          </span>
+        ))}
+      </div>
       {hover && typeof document !== "undefined"
         ? createPortal(
             (() => {

@@ -105,7 +105,8 @@ export function age(iso: string): string {
   return `${Math.floor(ms / 3_600_000)}ч`;
 }
 export function hhmmss(iso: string): string {
-  return new Date(iso).toLocaleTimeString("ru-RU", { hour12: false });
+  // EV-CHARTS: подписи времени всегда Europe/Moscow — операторский пояс, независимо от TZ браузера
+  return new Date(iso).toLocaleTimeString("ru-RU", { hour12: false, timeZone: "Europe/Moscow" });
 }
 export function toastBus(p: ToastPayload): void {
   try { window.dispatchEvent(new CustomEvent<ToastPayload>("me2:toast", { detail: p })); } catch { /* SSR */ }

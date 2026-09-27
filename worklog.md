@@ -10785,3 +10785,35 @@ Work Log:
 
 Stage Summary:
 - Механики стабильны: 16 работает / 6 не работает (корневой блокер submit→conversation — ожидание operator cleanup) / прочее не проверено. Протокол v2 предотвращает дальнейшее загрязнение драфта.
+
+---
+Task ID: EVOLVE-ROUND-20
+Agent: self-evolve v1.42 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-CHARTS] полировка recharts: тултипы, легенда, подписи времени Europe/Moscow
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = unknown%
+- движок: self-check DEGRADED, зеркала пересинхронизированы, версия движка: 1.42
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-CHARTS] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-CHARTS' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 20 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-20
+Agent: GLM (Super Z, session web-0e323763, Job 416839 tick 05:00+08)
+Task: SELF-EVOLVE тик ME2 OS: прогон движка, реализация EV-CHARTS в Mission Control, верификация через gateway :81, self-update, расширение BACKLOG, синхронизация зеркал.
+
+Work Log:
+- Движок: bash scripts/phoenix/self-evolve.sealed.sh evolve → round=20, client HTTP 200 (:81), lint 0/0, next_task=EV-CHARTS ("полировка recharts: тултипы, легенда, подписи времени Europe/Moscow"), v=1.43.
+- Реализация (4 файла, только /-route; чужой aside zai-chat-export в page.tsx НЕ тронут):
+  1) src/lib/me2-bus.ts: hhmmss() → timeZone:"Europe/Moscow" (канонический форматтер всех data-лейблов времени);
+  2) src/components/me2/pages/tasks.tsx: легенда статусов ветвей под графом (9 статусов BRANCH_COLOR, цветные SVG-точки, title-тултип, aria-label);
+  3) src/components/me2/pages/observability.tsx: тултипы истории eval обогащены (московское время + длительность + passed/total);
+  4) src/components/me2/pages/browser.tsx: лог событий вкладки переведён на hhmmss (консистентность подписей, title "время Europe/Moscow").
+- Верификация: bun run lint = 0/0; agent-browser через gateway :81 (не raw :3000): страница грузится, TASKS-легенда LEGEND-OK (9 статусов), тайм-лейблы OBSERV = 00:06:11 (=21:06:11Z+3, Europe/Moscow ✓), page errors отсутствуют.
+- Найдено вне скоупа (для будущих тиков): 4 форматтера времени вне hhmmss (topbar-часы, mirror-panel ×2, code.tsx generatedAt) показывают TZ браузера; EV-DATES в BACKLOG уже покрывает, но topbar-часы возможно оставить локальными.
+- self-update implemented-EV-CHARTS → v1.44 (tasks_done=11, score=88%). BACKLOG +1: EV-SPARKLINES (микро-спарклайны в чипах, продолжение EV-CHARTS). Зеркала синхронизированы: /tmp/context-vault-mirror/phoenix-sealed/ + /home/sync/me2-context-backups/phoenix-sealed/.
+
+Stage Summary:
+- EV-CHARTS реализован и верифицирован: легенда графа ветвей, тултипы eval-истории, подписи времени Europe/Moscow в observability/browser. Клиент стабилен (:81 HTTP 200, lint 0/0, page errors нет). Движок v1.44, round=20, BACKLOG=23 entries. Секреты не печатались, force-push нет, hot-tree правки (aside) сохранены.

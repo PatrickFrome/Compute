@@ -538,7 +538,7 @@ export function ObservabilityPage() {
                 </ul>
               )}
               {(evalData?.history ?? []).slice(0, 5).map((h) => (
-                <div key={h.run_id} className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-0.5 font-mono text-[9px]" title={`run ${h.run_id} · ${h.started_at}`}>
+                <div key={h.run_id} className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-0.5 font-mono text-[9px]" title={`run ${h.run_id} · ${hhmmss(h.started_at)} Europe/Moscow · ${h.duration_ms}ms · ${h.passed}/${h.total}`}>
                   <span className="shrink-0 text-zinc-600">{hhmmss(h.started_at)}</span>
                   <span className={`shrink-0 font-semibold ${h.verdict === "PASS" ? "text-emerald-400" : h.verdict === "FAIL" ? "text-rose-400" : "text-amber-400"}`}>{h.verdict}</span>
                   <span className="text-zinc-500">{h.passed}/{h.total}</span>
