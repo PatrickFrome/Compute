@@ -10772,3 +10772,16 @@ Stage Summary:
 - Статус механик неизменен: 16 работает / 6 не работает (корневой блокер submit→conversation жив, 5-е подтверждение косвенное — draft по-прежнему аккумулятивен и невидим для CAPTURE) / прочее не проверено.
 - Protocol v2 отработал как задуман: детектор READ_TRANSCRIPT корректно вернул DIRTY_DRAFT и предотвратил лишнюю typing-пробу (в отличие от CAPTURE-детектора тика 0400, давшего ложный CLEAN).
 - Ожидание: operator cleanup composer + localStorage["chat-input-"] chat.z.ai → следующие тики при CLEAN автоматически исполняют unlock-цепь (NEW_TAB→SEMANTIC_TYPE+submit→проверка /c/).
+
+---
+Task ID: BROWSER-TEST-20260928-0500
+Agent: GLM (Super Z, session web-0e323763, Job 419203 tick 05:00+08)
+Task: Пятый тик BROWSER-TEST: read-only мониторинг по протоколу v2 (детектор драфта = READ_TRANSCRIPT; typing заморожены).
+
+Work Log:
+- FLEET_STATUS: 4/4 ACTIVE (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC). TAB_CENSUS: total=18 (GLM_CHAT=17, -1 с прошлого тика). Probe-скрипт параметризован (tick-probe-0430.py <tag>) для переиспользования.
+- Draft-статус: READ_TRANSCRIPT tab_a66fab40 → DIRTY_DRAFT (все 5 маркеров, len=6128 без роста — нулевое загрязнение за тик; очистка оператором не выполнена).
+- Unlock-цепь не запускалась (CLEAN не выполнен). T01-T02b read-only COMPLETED. Артефакт: browser-test-results-t0500.json.
+
+Stage Summary:
+- Механики стабильны: 16 работает / 6 не работает (корневой блокер submit→conversation — ожидание operator cleanup) / прочее не проверено. Протокол v2 предотвращает дальнейшее загрязнение драфта.

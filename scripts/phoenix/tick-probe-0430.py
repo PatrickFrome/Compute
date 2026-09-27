@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-# tick-probe-0430.py — Job 419203 tick 04:30: READ-ONLY monitoring probe (protocol v2).
+# tick-probe.py — Job 419203 recurring READ-ONLY monitoring probe (protocol v2).
 # Draft-state detector = READ_TRANSCRIPT tail (CAPTURE is BLIND to invisible account draft).
 # Typing probes FROZEN until transcript shows NO flush-seed AND NO accumulated texts.
+# Usage: python3 tick-probe-0430.py <HHMM-tag>  (e.g. 0500) — results file gets the tag.
 import json, sys
+TAG = sys.argv[1] if len(sys.argv) > 1 else "manual"
 sys.path.insert(0, "/home/z/my-project/scripts/phoenix")
 import importlib.util
 spec = importlib.util.spec_from_file_location("bmt", "/home/z/my-project/scripts/phoenix/browser-mechanics-test.py")
@@ -11,7 +13,7 @@ sys.argv = ["bmt", "NONE"]
 sys.modules["bmt"] = bmt
 spec.loader.exec_module(bmt)
 
-RESULTS = "/home/z/my-project/scripts/phoenix/browser-test-results-t0430.json"
+RESULTS = f"/home/z/my-project/scripts/phoenix/browser-test-results-t{TAG}.json"
 bmt.RESULTS = RESULTS
 bmt._results = []
 
@@ -20,7 +22,7 @@ MARKERS = ["FLEET BOOTSTRAP FLUSH", "SUPERVISOR CONVERSATION SEED",
            "METAENGINE tick probe (GLM diag 0330)", "METAENGINE tick probe (GLM diag 0400)"]
 PROBE_TAB = "tab_a66fab40-2cf7-418b-8fa1-9148d31de8d7"  # own probe tab from 0400 tick
 
-print("=== TICK PROBE 04:30 (read-only, protocol v2) ===", flush=True)
+print(f"=== TICK PROBE {TAG} (read-only, protocol v2) ===", flush=True)
 
 # 1) FLEET_STATUS
 fl = bmt.run_test("T01", "FLEET_STATUS", payload={}, platform="GLM_ZAI", timeout=45)
@@ -69,7 +71,7 @@ if draft_state == "CLEAN":
                 sem = t; break
         if sem:
             st = {"tab_id": newtab, "role": "textbox", "semantic_ref": sem["semantic_ref"],
-                  "text": "METAENGINE tick probe (GLM diag 0430)", "submit_after_type": True, "replace_existing": False}
+                  "text": f"METAENGINE tick probe (GLM diag {TAG})", "submit_after_type": True, "replace_existing": False}
             bmt.run_test("T06", "SEMANTIC_TYPE", payload=st, platform="GLM_ZAI", mutating=True, timeout=45)
             bmt.run_test("T07", "PRESS_KEY", payload={"key": "Enter", "tab_id": newtab}, platform="GLM_ZAI", mutating=True, timeout=45)
             cap3 = bmt.run_test("T08", "CAPTURE", payload={"tab_id": newtab}, platform="GLM_ZAI", timeout=60)
@@ -81,4 +83,4 @@ if draft_state == "CLEAN":
 else:
     print(f"NO UNLOCK CHAIN (draft_state={draft_state}) — zero pollution maintained", flush=True)
 
-print(f"TICK PROBE 04:30 DONE: draft={draft_state} fleet={len(agents)} conversation_created={conv_created}", flush=True)
+print(f"TICK PROBE {TAG} DONE: draft={draft_state} fleet={len(agents)} conversation_created={conv_created}", flush=True)
