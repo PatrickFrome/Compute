@@ -128,7 +128,8 @@ test('ambiguous safety companion requests readback and never retry',()=>{
     {point_id:'meta.core.critic',state:'AMBIGUOUS',lease_generation:1},
   ];
   const r=run(p,{tasks});
-  assert.equal(r.state,'RECONCILING');
+  assert.equal(r.state,'VERIFYING');
+  assert.equal(r.reason,'RESULT_READY_REQUIRES_INDEPENDENT_VERIFICATION');
   assert.equal(r.actions[0].type,'REQUEST_RECONCILIATION');
   assert.equal(r.actions[0].automatic_retry_allowed,false);
   assert.equal(r.actions.some((row)=>String(row.type).includes('RETRY')),false);
