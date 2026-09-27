@@ -21,6 +21,7 @@ const fleetTransportProof = {
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
   conversation_url_sha256: 'a'.repeat(64),
+  agent_surface_sha256: 'b'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
 };
@@ -40,7 +41,17 @@ const fleet = {
     authority_effect: false,
   }],
 };
-const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
+const semref = (id) => ({ schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + String(id).padEnd(64, '0').slice(0, 64) });
+const composer = { role: 'textbox', name: 'Send a Message', semantic_ref: semref('composer'), backend_node_id: 3, value_length: 0 };
+const semanticButton = (name, backend_node_id) => ({ role: 'button', name, backend_node_id, semantic_ref: semref(name) });
+const agentSurfaceControls = [
+  semanticButton('Agent', 3336),
+  semanticButton('New Task', 3346),
+  semanticButton('Select a model', 9469),
+  semanticButton('Full-Stack', 11846),
+  semanticButton('Writing', 11852),
+  semanticButton('Data Insight', 11858),
+];
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
 const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
@@ -49,11 +60,15 @@ const supervisorTab = 'tab_supervisor';
 function response(status, body) { return { status, ok: status >= 200 && status < 300, async json(){ return structuredClone(body); } }; }
 function frame({ url = 'https://chat.z.ai/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {
+    schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
     target_id: lease.target_id,
+    process_incarnation_id: '11111111-2222-4333-8444-555555555555',
+    state_revision_id: 'rev_' + 'c'.repeat(64),
     url,
     viewport,
-    semantic_targets: [composer, ...(sendVisible ? [send] : []), ...(stopActive ? [stop] : [])],
+    semantic_targets: [composer, ...agentSurfaceControls, ...(sendVisible ? [send] : []), ...(stopActive ? [stop] : [])],
+    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
     authority_effect: false,
   };
 }
@@ -80,6 +95,9 @@ test('exact task-agent-tab-target-generation binding is fenced by ACTIVE transpo
   const noProof = structuredClone(fleet);
   noProof.agents[0].transport_proof = null;
   assert.throws(() => assertLiveLeaseBinding(lease, noProof), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  const chatOnlyProof = structuredClone(fleet);
+  delete chatOnlyProof.agents[0].transport_proof.agent_surface_sha256;
+  assert.throws(() => assertLiveLeaseBinding(lease, chatOnlyProof), /devos_agent_state_invalid:ADMISSION_FENCED/);
   const driftedProof = structuredClone(fleet);
   driftedProof.agents[0].transport_proof.target_id = 'webcontents:99';
   assert.throws(() => assertLiveLeaseBinding(lease, driftedProof), /devos_agent_state_invalid:ADMISSION_FENCED/);
