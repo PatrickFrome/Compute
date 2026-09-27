@@ -178,7 +178,6 @@ function assertBaseMetrics(row) {
 }
 
 async function main() {
-  await app.whenReady();
   const watchdog = setTimeout(() => {
     console.error(JSON.stringify({
       schema: 'metaengine.browser.r85-visual-evidence.v1',
@@ -188,7 +187,7 @@ async function main() {
     }));
     app.exit(2);
   }, VISUAL_PHASE_TIMEOUT_MS);
-  watchdog.unref?.();
+  await withTimeout(app.whenReady(), 20_000, 'app_ready');
   await fs.mkdir(OUTPUT_ROOT, { recursive: true });
   registerPresentationIpc();
   markPhase('START_UI_HOST');
