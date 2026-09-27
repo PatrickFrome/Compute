@@ -719,3 +719,24 @@ test('ME2 UI routing authority is revoked on stop, degradation, or owned-process
   assert.equal(adoptedStopped.external_adopt_authorized, false);
   assert.equal(adoptedStopped.routing_authorized, false);
 });
+
+test('R87 BrowserStage clears stale live frames before degraded fallback becomes visible', () => {
+  assert.match(me2BrowserStage, /const hideCastImage = \(\) => \{[\s\S]{0,220}img\.style\.opacity = "0";[\s\S]{0,120}img\.removeAttribute\("src"\)/);
+  assert.match(me2BrowserStage, /ws\.onerror = \(\) => \{[\s\S]{0,160}hideCastImage\(\)/);
+  assert.match(me2BrowserStage, /ws\.onclose = \(\) => \{[\s\S]{0,160}hideCastImage\(\)/);
+  assert.match(me2BrowserStage, /return \(\) => \{[\s\S]{0,220}hideCastImage\(\)[\s\S]{0,180}ws\?\.close\(\)/);
+});
+
+test('R87 physical visual qualification isolates live Browser transports from renderer UI evidence', () => {
+  assert.match(r85VisualHarness, /blockedRemoteBrowserPorts = new Set\(\)/);
+  assert.match(r85VisualHarness, /webRequest\.onBeforeRequest/);
+  assert.match(r85VisualHarness, /<all_urls>/);
+  assert.match(r85VisualHarness, /port === '3042' \|\| port === '3043'/);
+  assert.match(r85VisualHarness, /remote_browser_pixels_visible/);
+  assert.match(r85VisualHarness, /r85_visual_remote_browser_pixels_visible/);
+  assert.match(r85VisualHarness, /remote_browser_transport_blocked:/);
+  assert.match(r85VisualHarness, /blocked_remote_browser_ports:/);
+  assert.match(packageSmokeWorkflow, /remote_browser_transport_blocked -ne \$true/);
+  assert.match(packageSmokeWorkflow, /blocked_remote_browser_ports\) -contains '3042'/);
+  assert.match(packageSmokeWorkflow, /blocked_remote_browser_ports\) -contains '3043'/);
+});
