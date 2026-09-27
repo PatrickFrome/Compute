@@ -182,7 +182,7 @@ let devosSurfaceGridPlan = null;
 // user-facing shell. The legacy metaengine://shell remains a local recovery
 // surface only when the packaged ME2 plane cannot prove itself healthy.
 let primaryShellMode = 'LEGACY_RECOVERY';
-let primaryShellPage = 'command';
+let primaryShellPage = 'browser';
 let primaryShellOverlayActive = false;
 let primaryCommandRailOpen = true;
 let primaryContextDrawerOpen = false;
@@ -430,6 +430,126 @@ function selectBrowserTabForPresentation(tabId) {
   return tab;
 }
 
+function primaryChatFleetRoster() {
+  const selectedTabId = String(registry.selected()?.tab_id || '');
+  const fleetSnapshot = fleet?.snapshot() || null;
+  const supervisorSnapshot = nativeSupervisor?.snapshot() || null;
+  const supervisorRows = Array.isArray(supervisorSnapshot?.supervisor_mesh?.mesh?.supervisors)
+    ? supervisorSnapshot.supervisor_mesh.mesh.supervisors
+    : (Array.isArray(supervisorSnapshot?.supervisor_mesh?.supervisors)
+      ? supervisorSnapshot.supervisor_mesh.supervisors
+      : []);
+  const actors = [];
+  const usedTabs = new Set();
+
+  const liveChatTab = (rawTabId) => {
+    const tabId = String(rawTabId || '');
+    if (!tabId || usedTabs.has(tabId)) return null;
+    const tab = registry.get(tabId);
+    const view = views.get(tabId);
+    if (!tab || !view || view.webContents.isDestroyed()) return null;
+    try {
+      const url = new URL(String(tab.url || ''));
+      if (!isAgentPlatformHost(url.hostname)) return null;
+    } catch {
+      return null;
+    }
+    usedTabs.add(tabId);
+    return tab;
+  };
+
+  for (const row of supervisorRows) {
+    if (String(row?.status || '').toUpperCase() !== 'ACTIVE') continue;
+    const tab = liveChatTab(row?.tab_id);
+    if (!tab) continue;
+    const supervisorId = String(row?.supervisor_id || '').trim();
+    if (!supervisorId) continue;
+    actors.push(Object.freeze({
+      actor_id: `supervisor:${supervisorId}`,
+      actor_type: 'SUPERVISOR',
+      role: 'SUPERVISOR',
+      state: 'ACTIVE',
+      tab_id: tab.tab_id,
+      selected: tab.tab_id === selectedTabId,
+      title: tab.title || 'Supervisor',
+      model: 'GLM-5.3-Flash',
+      exact_native_binding: true,
+      presentation_only: true,
+      authority_effect: false,
+    }));
+  }
+
+  for (const row of (fleetSnapshot?.agents || [])) {
+    if (!['ACTIVE','BOUND_UNVERIFIED','PROVISIONING'].includes(String(row?.lifecycle_state || '').toUpperCase())) continue;
+    const tab = liveChatTab(row?.tab_id);
+    if (!tab) continue;
+    const agentId = String(row?.agent_id || '').trim().toLowerCase();
+    if (!agentId) continue;
+    actors.push(Object.freeze({
+      actor_id: `agent:${agentId}`,
+      actor_type: 'AGENT',
+      role: String(row?.role || 'AGENT').toUpperCase(),
+      state: String(row?.lifecycle_state || 'UNKNOWN').toUpperCase(),
+      tab_id: tab.tab_id,
+      selected: tab.tab_id === selectedTabId,
+      title: tab.title || String(row?.role || 'Agent'),
+      model: 'GLM-5.3-Flash',
+      exact_native_binding: true,
+      presentation_only: true,
+      authority_effect: false,
+    }));
+  }
+
+  return Object.freeze({
+    schema: 'metaengine.browser.primary-chat-fleet-roster.v1',
+    actors: Object.freeze(actors),
+    actor_count: actors.length,
+    supervisor_count: actors.filter((row) => row.actor_type === 'SUPERVISOR').length,
+    agent_count: actors.filter((row) => row.actor_type === 'AGENT').length,
+    selected_actor_id: actors.find((row) => row.selected)?.actor_id || null,
+    bounded: true,
+    renderer_routing_authority: false,
+    browser_command_authority: false,
+    scheduler_authority: false,
+    update_authority: false,
+    authority_effect: false,
+  });
+}
+
+function selectPrimaryChatActor(actorId) {
+  const id = String(actorId || '').trim();
+  if (!id || id.length > 320) throw new Error('primary_chat_actor_invalid');
+  const matches = primaryChatFleetRoster().actors.filter((row) => row.actor_id === id);
+  if (matches.length !== 1) {
+    const error = new Error(matches.length === 0 ? 'primary_chat_actor_not_bound' : 'primary_chat_actor_ambiguous');
+    error.automatic_retry_allowed = false;
+    throw error;
+  }
+  const actor = matches[0];
+  const selected = selectBrowserTabForPresentation(actor.tab_id);
+  const after = primaryChatFleetRoster().actors.find((row) => row.actor_id === id) || null;
+  if (!after?.selected || after.tab_id !== selected.tab_id) {
+    const error = new Error('primary_chat_actor_selection_not_proven');
+    error.automatic_retry_allowed = false;
+    throw error;
+  }
+  return Object.freeze({
+    schema: 'metaengine.browser.primary-chat-actor-selection.v1',
+    actor_id: id,
+    actor_type: actor.actor_type,
+    tab_id: actor.tab_id,
+    selection_applied: true,
+    exact_native_binding: true,
+    presentation_only: true,
+    renderer_routing_authority: false,
+    browser_command_authority: false,
+    scheduler_authority: false,
+    update_authority: false,
+    authority_effect: false,
+  });
+}
+
+
 function applyPresentationFocusIntent(request) {
   return applyDevOSPresentationActivation({
     devos: currentDevOSPresentationProjection(),
@@ -604,12 +724,12 @@ async function preparePrimaryShellTarget() {
       && host?.routing_authorized === true;
     if (ready) {
       primaryShellMode = 'ME2_PRIMARY';
-      primaryShellPage = 'command';
+      primaryShellPage = 'browser';
       primaryShellOverlayActive = false;
       primaryCommandRailOpen = true;
       primaryContextDrawerOpen = false;
       primaryContextDrawerHeight = 200;
-      primaryShellUrl = `${gateway.url}/#command`;
+      primaryShellUrl = `${gateway.url}/#browser`;
       return { mode: primaryShellMode, url: primaryShellUrl, reason: 'PACKAGED_ME2_UI_PROVEN' };
     }
     recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL', new Error(
@@ -623,7 +743,7 @@ async function preparePrimaryShellTarget() {
   return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
-const ME2_R75_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'page-command', 'cc-sidebar-toggle', 'pagebar', 'statusbar']);
+const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'primary-chat-fleet', 'chat-fleet-rail', 'global-cmdbar', 'settings-button']);
 
 function cdpBoxVisible(model) {
   const points = Array.isArray(model?.content) && model.content.length >= 8
@@ -640,9 +760,9 @@ function cdpBoxVisible(model) {
   return Math.max(...xs) - Math.min(...xs) >= 2 && Math.max(...ys) - Math.min(...ys) >= 2;
 }
 
-async function probeMe2R75InstalledDomOnce(webContents) {
-  const present = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
-  const visible = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+async function probeMe2R97InstalledDomOnce(webContents) {
+  const present = Object.fromEntries(ME2_R97_DOM_IDS.map((id) => [id, false]));
+  const visible = Object.fromEntries(ME2_R97_DOM_IDS.map((id) => [id, false]));
   const dbg = webContents?.debugger;
   let attachedHere = false;
   let error = null;
@@ -658,7 +778,7 @@ async function probeMe2R75InstalledDomOnce(webContents) {
     const documentResult = await dbg.sendCommand('DOM.getDocument', { depth: 2, pierce: true });
     const rootNodeId = Number(documentResult?.root?.nodeId || 0);
     if (!Number.isSafeInteger(rootNodeId) || rootNodeId <= 0) throw new Error('me2_r75_dom_root_missing');
-    for (const id of ME2_R75_DOM_IDS) {
+    for (const id of ME2_R97_DOM_IDS) {
       const found = await dbg.sendCommand('DOM.querySelector', {
         nodeId: rootNodeId,
         selector: `[data-testid="${id}"]`,
@@ -679,7 +799,7 @@ async function probeMe2R75InstalledDomOnce(webContents) {
     try { if (attachedHere && dbg?.isAttached()) dbg.detach(); } catch {}
   }
   const complete = error == null
-    && ME2_R75_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
+    && ME2_R97_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
   return Object.freeze({
     complete,
     present: Object.freeze({ ...present }),
@@ -688,7 +808,7 @@ async function probeMe2R75InstalledDomOnce(webContents) {
   });
 }
 
-async function probeMe2R75InstalledDom(webContents, {
+async function probeMe2R97InstalledDom(webContents, {
   timeoutMs = 12000,
   intervalMs = 150,
 } = {}) {
@@ -704,7 +824,7 @@ async function probeMe2R75InstalledDom(webContents, {
 
   do {
     attempts += 1;
-    last = await probeMe2R75InstalledDomOnce(webContents);
+    last = await probeMe2R97InstalledDomOnce(webContents);
     if (last.complete === true) break;
     if (Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, pauseMs));
@@ -712,12 +832,12 @@ async function probeMe2R75InstalledDom(webContents, {
 
   const complete = last?.complete === true;
   const row = Object.freeze({
-    schema: 'metaengine.browser.me2-r75-installed-ui.v1',
-    state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
+    schema: 'metaengine.browser.me2-r97-installed-ui.v1',
+    state: complete ? 'ME2_R97_UI_CONTRACT_CONFIRMED' : 'ME2_R97_UI_CONTRACT_INCOMPLETE',
     page: primaryShellPage,
-    required: ME2_R75_DOM_IDS,
-    present: last?.present || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
-    visible: last?.visible || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    required: ME2_R97_DOM_IDS,
+    present: last?.present || Object.fromEntries(ME2_R97_DOM_IDS.map((id) => [id, false])),
+    visible: last?.visible || Object.fromEntries(ME2_R97_DOM_IDS.map((id) => [id, false])),
     evidence_source: 'MAIN_PROCESS_CDP_DOM_BOX_MODEL_BOUNDED_CONVERGENCE',
     probe_attempts: attempts,
     probe_elapsed_ms: Math.max(0, Date.now() - startedAt),
@@ -745,6 +865,18 @@ async function probeMe2R75InstalledDom(webContents, {
 
 function computeDevOSSurfaceGrid() {
   if (!shellLayoutPlan) return null;
+  // R97 main workspace is intentionally one selected native chat surface.
+  // Old DevOS multi-surface focus remains available only on advanced/recovery
+  // surfaces; it never competes with the user's selected chat on the main page.
+  if (primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'browser') {
+    const surfaces = fallbackSelectedSurface();
+    return planDevOSSurfaceGrid({
+      bounds: shellLayoutPlan.remote_bounds,
+      surfaces,
+      focused_surface_id: surfaces[0]?.surface_id || null,
+      requested_layout: 'SINGLE',
+    });
+  }
   const shell = currentDevOSPresentationShellView();
   const focusedSession = shell?.valid === true && shell.selected_session ? shell.selected_session : null;
   const surfaces = focusedSession ? shell.selected_session_surfaces : fallbackSelectedSurface();
@@ -1919,9 +2051,9 @@ async function createWindow() {
   try {
     await shellView.webContents.loadURL(shellTarget.url);
     if (shellTarget.mode === 'ME2_PRIMARY') {
-      const r75 = await probeMe2R75InstalledDom(shellView.webContents);
-      if (r75.complete !== true) {
-        throw new Error(`me2_r75_primary_shell_contract_incomplete:${r75.error || 'dom_or_geometry_missing'}`);
+      const r97 = await probeMe2R97InstalledDom(shellView.webContents);
+      if (r97.complete !== true) {
+        throw new Error(`me2_r97_primary_shell_contract_incomplete:${r97.error || 'dom_or_geometry_missing'}`);
       }
     }
   } catch (error) {
@@ -2051,6 +2183,14 @@ ipcMain.handle('metaengine:shell:primary-context-drawer', async (event, rawOpen,
     release_authority: false,
     authority_effect: false,
   });
+});
+ipcMain.handle('metaengine:shell:primary-chat-fleet-roster', async (event) => {
+  assertShellSender(event);
+  return primaryChatFleetRoster();
+});
+ipcMain.handle('metaengine:shell:primary-chat-actor-select', async (event, rawActorId) => {
+  assertShellSender(event);
+  return selectPrimaryChatActor(rawActorId);
 });
 ipcMain.handle('metaengine:shell:primary-agent-session-select', async (event, rawSessionId) => {
   assertShellSender(event);
