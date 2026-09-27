@@ -33,7 +33,26 @@ test('R96 hold-Space controller closes on release and keeps Arrow navigation ins
   assert.match(hook, /input, textarea, select/);
   assert.match(hook, /\[role="textbox"\]/);
   assert.match(hook, /\[role="combobox"\]/);
+  assert.match(hook, /isReservedInteractionTarget\(event\.target, kind\)/);
+  assert.match(hook, /button, a\[href\], summary/);
+  assert.match(hook, /data-peek-kind=/);
   assert.doesNotMatch(hook, /sendCommand|me2Fetch|fetch\(|WebSocket|agentChatOp/);
+});
+
+test('R96 Peek never steals native Space activation from unrelated controls', () => {
+  assert.match(hook, /function isReservedInteractionTarget/);
+  assert.match(hook, /\[role="button"\]/);
+  assert.match(hook, /\[role="menuitem"\]/);
+  assert.match(hook, /\[role="tab"\]/);
+  assert.match(hook, /if \(target\.closest\(\`\[data-peek-kind=/);
+  assert.match(hook, /isEditableTarget\(event\.target\) \|\| isReservedInteractionTarget\(event\.target, kind\)/);
+});
+
+test('R96 held Peek rebinds or closes when live snapshot membership changes', () => {
+  assert.match(hook, /if \(!heldRef\.current\) return/);
+  assert.match(hook, /if \(!selectedId \|\| !ids\.includes\(selectedId\)\)/);
+  assert.match(hook, /heldRef\.current = false;[\s\S]{0,80}setPeekTarget\(null\)/);
+  assert.match(hook, /setPeekTarget\(\{ kind, id: selectedId \}\)/);
 });
 
 test('R96 inspector resolves only existing snapshot entities and never gains an action plane', () => {
