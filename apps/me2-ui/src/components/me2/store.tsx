@@ -11,6 +11,7 @@ import {
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
+import { taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -687,9 +688,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
       if (!d?.events) return;
       const exactFetched = d.events.filter((event) => event.task_id === id);
       set((state) => {
-        if (requestSeq !== taskStreamRequestSeq
-            || state.inspectedTaskId !== id
-            || state.streamTaskId !== id) return {};
+        if (!taskStreamResponseStillCurrent(
+          { seq: requestSeq, taskId: id },
+          { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
+        )) return {};
         const bySeq = new Map(state.stream.map((event) => [event.seq, event]));
         for (const event of exactFetched) bySeq.set(event.seq, event);
         return {
