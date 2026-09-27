@@ -41,16 +41,17 @@ test('packaged browser enters through the final runtime activation hook', () => 
 
 test('final runtime workflow binds immutable Package Smoke bytes to the exact candidate head', () => {
   const workflow = source('../../.github/workflows/browser-final-runtime-activation-v1.yml');
-  assert.match(workflow, /installer-provenance\.mjs acquire/);
-  assert.match(workflow, /--allow-in-progress true/);
-  assert.match(workflow, /--expect-head \$expectedHead/);
-  assert.match(workflow, /--expect-run-id \$resolved\.run_id/);
-  assert.match(workflow, /--expect-run-number \$resolved\.run_number/);
-  assert.match(workflow, /--expect-run-attempt \$resolved\.run_attempt/);
-  assert.match(workflow, /installer-provenance\.mjs wait/);
-  assert.match(workflow, /producer_terminal_success/);
+  assert.match(workflow, /qualified-installer-consumer\.ps1 -Mode Acquire/);
+  assert.match(workflow, /-ExpectedHead \$expectedHead/);
+  assert.match(workflow, /ME2_INSTALLER_BINDING_PATH/);
+  assert.match(workflow, /qualified-installer-consumer\.ps1 -Mode Wait/);
+  assert.match(workflow, /final-runtime-activation-proof\.json/);
+  assert.match(workflow, /producer_run_id=\[int64\]\$binding\.producer_run_id/);
+  assert.match(workflow, /producer_run_number=\[int64\]\$binding\.producer_run_number/);
+  assert.match(workflow, /producer_run_attempt=\[int64\]\$binding\.producer_run_attempt/);
   assert.match(workflow, /apps\/me2-ui\/\*\*/);
   assert.match(workflow, /apps\/me2-daemon\/\*\*/);
+  assert.doesNotMatch(workflow, /installer-provenance\.mjs acquire|installer-provenance\.mjs wait/);
   assert.doesNotMatch(workflow, /ME2_BUILD_SHA|bun run build|Build and pack ME2 UI/);
 });
 
