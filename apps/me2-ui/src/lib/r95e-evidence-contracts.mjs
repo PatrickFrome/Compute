@@ -41,13 +41,9 @@ export function mergeExactTaskEvidenceEvents({
   if (!id) return [];
 
   const bySeq = new Map();
-  for (const event of Array.isArray(events) ? events : []) {
-    if (String(event?.task_id ?? "") !== id) continue;
-    const seq = Number(event?.seq);
-    if (!Number.isSafeInteger(seq)) continue;
-    bySeq.set(seq, event);
-  }
 
+  // Fetched history may be older than the live global window. Admit it first,
+  // then let the currently observed global event win on an identical sequence.
   if (String(streamTaskId ?? "") === id) {
     for (const event of Array.isArray(stream) ? stream : []) {
       if (String(event?.task_id ?? "") !== id) continue;
@@ -55,6 +51,13 @@ export function mergeExactTaskEvidenceEvents({
       if (!Number.isSafeInteger(seq)) continue;
       bySeq.set(seq, event);
     }
+  }
+
+  for (const event of Array.isArray(events) ? events : []) {
+    if (String(event?.task_id ?? "") !== id) continue;
+    const seq = Number(event?.seq);
+    if (!Number.isSafeInteger(seq)) continue;
+    bySeq.set(seq, event);
   }
 
   const boundedLimit = Math.max(1, Math.min(200, Number.isSafeInteger(Number(limit)) ? Number(limit) : 40));
