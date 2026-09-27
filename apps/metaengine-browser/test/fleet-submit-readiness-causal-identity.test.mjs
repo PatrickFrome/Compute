@@ -2,6 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateFleetSubmitReadiness } from '../src/fleet-submit-readiness.mjs';
 
+
+function semref(id) {
+  return { schema:'metaengine.native-browser.semantic-ref.v1', semantic_ref_id:`semref_${String(id).padEnd(64,'0').slice(0,64)}` };
+}
+
+function glmAgentFrame({ model = 'GLM-5.3-Flash', tab_id = 'tab-fleet-1', target_id = 'webcontents:17' } = {}) {
+  const target = (name, backend_node_id) => ({ role:'button', name, backend_node_id, semantic_ref:semref(name) });
+  return {
+    schema:'metaengine.native-browser.perception.v1',
+    tab_id,
+    target_id,
+    url:'https://chat.z.ai/',
+    process_incarnation_id:'11111111-2222-4333-8444-555555555555',
+    state_revision_id:'rev_'.padEnd(68,'a'),
+    viewport:{ width:0, height:0 },
+    semantic_targets:[
+      { role:'textbox', name:'Send a Message', backend_node_id:3, semantic_ref:semref('composer') },
+      target('Agent',3336), target('New Task',3346), target('Select a model',9469),
+      target('Full-Stack',11846), target('Writing',11852), target('Data Insight',11858),
+    ],
+    interaction_tree:{ schema:'metaengine.native-browser.interaction-tree.v1', elements:[{role:'statictext',text:model}] },
+    authority_effect:false,
+  };
+}
+
 const EXPECTED = Object.freeze({
   expected_tab_id: 'tab-fleet-1',
   observed_tab_id: 'tab-fleet-1',
@@ -53,19 +78,16 @@ test('D-C2: GLM lane readiness is TAB-SCOPED — a foreground mismatch never fai
     platform: 'GLM_ZAI',
     phase: 'PRE_TYPE',
     selected_tab_id: 'tab-other',
-    frame: {
-      tab_id: 'tab-fleet-1',
-      target_id: 'webcontents:17',
-      viewport: { width: 0, height: 0 },
-      semantic_targets: [{ role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-1' }],
-    },
+    frame: glmAgentFrame(),
   });
 
-  // Semantic addressing is geometry-independent and dispatch is tab-scoped
-  // (D-S2 + D-C2): the unselected fleet tab with a 0x0 viewport is still
-  // submittable, and the foreground drift is reported as an observation.
+  // Semantic addressing is geometry-independent and dispatch is tab-scoped.
+  // The surface must additionally prove z.ai Agent mode and the exact required
+  // model; an ordinary Chat composer is no longer task-admitted.
   assert.equal(readiness.ready, true);
-  assert.equal(readiness.reason, 'READY_FOR_ENTER_SUBMIT');
+  assert.equal(readiness.reason, 'READY_FOR_AGENT_TASK_ENTER_SUBMIT');
+  assert.equal(readiness.agent_surface.stage, 'AGENT_HOME');
+  assert.equal(readiness.model_proof.model, 'GLM-5.3-Flash');
   assert.equal(readiness.viewport_rendered, false);
 });
 
@@ -102,4 +124,32 @@ test('Fleet submit readiness fails closed when CAPTURE target identity drifts ev
   assert.equal(readiness.ready, false);
   assert.equal(readiness.reason, 'TARGET_INCARNATION_MISMATCH');
   assert.equal(readiness.authority_effect, false);
+});
+
+
+test('GLM lane rejects an ordinary z.ai Chat composer without Agent surface proof', () => {
+  const readiness = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    frame:{
+      ...glmAgentFrame(),
+      semantic_targets:[{ role:'textbox', name:'How can I help you today?', backend_node_id:3, semantic_ref:semref('chat-composer') }],
+    },
+  });
+  assert.equal(readiness.ready,false);
+  assert.equal(readiness.reason,'AGENT_SURFACE_NOT_PROVEN');
+});
+
+test('GLM lane rejects Agent surface when selected model is GLM-5.2', () => {
+  const readiness = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    frame:glmAgentFrame({model:'GLM-5.2'}),
+  });
+  assert.equal(readiness.ready,false);
+  assert.equal(readiness.reason,'AGENT_MODEL_MISMATCH');
+  assert.equal(readiness.observed_model,'GLM-5.2');
+  assert.equal(readiness.required_model,'GLM-5.3-Flash');
 });
