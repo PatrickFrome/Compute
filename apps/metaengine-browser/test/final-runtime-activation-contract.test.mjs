@@ -39,12 +39,19 @@ test('packaged browser enters through the final runtime activation hook', () => 
   assert.match(supervisor, /final_runtime_activation_required/);
 });
 
-test('final runtime workflow binds staged ME2 UI to the exact candidate head', () => {
+test('final runtime workflow binds immutable Package Smoke bytes to the exact candidate head', () => {
   const workflow = source('../../.github/workflows/browser-final-runtime-activation-v1.yml');
-  assert.match(workflow, /ME2_BUILD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
-  assert.doesNotMatch(workflow, /ME2_BUILD_SHA:\s*\$\{\{ github\.sha \}\}/);
-  assert.match(workflow, /verify-me2-ui-bundle\.mjs --root "\$STUB" --expected-sha "\$ME2_BUILD_SHA"/);
-  assert.match(workflow, /exact-head provenance verification failed/);
+  assert.match(workflow, /installer-provenance\.mjs acquire/);
+  assert.match(workflow, /--allow-in-progress true/);
+  assert.match(workflow, /--expect-head \$expectedHead/);
+  assert.match(workflow, /--expect-run-id \$resolved\.run_id/);
+  assert.match(workflow, /--expect-run-number \$resolved\.run_number/);
+  assert.match(workflow, /--expect-run-attempt \$resolved\.run_attempt/);
+  assert.match(workflow, /installer-provenance\.mjs wait/);
+  assert.match(workflow, /producer_terminal_success/);
+  assert.match(workflow, /apps\/me2-ui\/\*\*/);
+  assert.match(workflow, /apps\/me2-daemon\/\*\*/);
+  assert.doesNotMatch(workflow, /ME2_BUILD_SHA|bun run build|Build and pack ME2 UI/);
 });
 
 test('Host activation is primary before enrollment while remote signing remains fail-closed', () => {
