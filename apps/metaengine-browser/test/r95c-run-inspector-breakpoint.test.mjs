@@ -16,6 +16,7 @@ const read = (url) => readFile(new URL(url, import.meta.url), 'utf8');
 const browserPage = await read('../../me2-ui/src/components/me2/pages/browser.tsx');
 const store = await read('../../me2-ui/src/components/me2/store.tsx');
 const main = await read('../src/main.mjs');
+const visualHarness = await read('./me2-r85-visual-evidence.mjs');
 
 test('R95C.2 native layout is the single authority for RUN telemetry visibility', () => {
   assert.equal(ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH, 1124);
@@ -109,4 +110,12 @@ test('R95C.2 RUN geometry readback is causally ordered after the primary-page IP
   assert.match(restoreBlock, /const primaryPageAck = syncPagePresentation\(restoredPage\)/);
   assert.match(restoreBlock, /restoredPage === "browser" && primaryPageAck/);
   assert.match(restoreBlock, /primaryPageAck\.then\(reconcileRestoredGeometry\)/);
+});
+
+
+test('R95C.2 physical visual harness exercises the Main-to-renderer telemetry decision', () => {
+  assert.match(visualHarness, /run_inspector_visible: page === 'browser'/);
+  assert.match(visualHarness, /run_telemetry_inspector: rect\('run-telemetry-inspector'\)/);
+  assert.match(visualHarness, /r95c2_visual_native_readback_telemetry_missing/);
+  assert.match(visualHarness, /r95c2_visual_right_utility_must_release_telemetry/);
 });
