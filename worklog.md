@@ -10605,3 +10605,37 @@ Work Log:
 Stage Summary:
 - Round 18 закрыт как ENGINE-FIX: re-pick цикл заблокированных фризом задач устранён durably — frozen=CSV пропускает EV-EMPTYSTATE-COVERAGE/EV-EMPTYSTATE-APPLY в pick без ложного закрытия; возврат в оборот — self-update frozen-clear-<MARKER> после разморозки оператором
 - Backlog порядка pick: EV-DONOR-404 (исполняемая при фризе — daemon-route) → EV-TOPO → EV-TOASTS → EV-WS-RESILIENCE → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE → EV-DESKTOP-KBD
+
+---
+Task ID: EVOLVE-ROUND-19
+Agent: self-evolve v1.15 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = unknown%
+- движок: self-check DEGRADED, зеркала пересинхронизированы, версия движка: 1.15
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-FOOTER] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-FOOTER'
+
+Stage Summary:
+- раунд 19 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-19
+Agent: Super Z (cron SELF-EVOLVE tick, Job 416839) + self-evolve v1.41→v1.42 (rebuilt engine)
+Task: Раунд 19 — [EV-DONOR-404] fix daemon-route: GET /donor-registry 404 no-route на :3041 → read-only маршрут (НЕ page.tsx, фризом не блокируется) + археология/реконструкция движка после env-reset ~00:00 +08
+
+Work Log:
+- АРХЕОЛОГИЯ RESET (~00:00 +08 2026-09-28): vault+/tmp+scripts/phoenix вычищены; worklog усечён 553793B (хвост 14:52) → восстановлен 1937790B sha12=b1a42d9ec1e6 из 3 зеркал (polarfs/ossfs/supabase, quorum-вердикт УСЕЧЕНИЕ → --restore) на guard-тике 00:00; CONTEXT.md/PHOENIX-PROTOCOL.md восстановлены из ossfs (17844B/8040B); секреты пережили (PolarFS), github.env пересоздан api=200
+- ЗОМБИ-РАУНД: все 4 копии self-evolve.sealed.sh откатились к v1.16 (naive tail-grep pick, без state-CSV протокола) → движок открыл EVOLVE-ROUND-19 по [EV-FOOTER] (уже в implemented=) — ЛОЖНЫЙ re-pick, секция зомби остаётся в worklog как свидетельство (append-only), закрывается настоящим R19
+- v1.40 УТЕРЯН безвозвратно (зеркала тоже откатились; следы только в тексте worklog) — реконструкция v1.41 на базе v1.16 с полным протоколом R13-R18: implemented=/frozen= CSV как единственный источник закрытий/деферралов, frozen-add/clear self-update ветки, client_tasks_done инкремент, BACKLOG 22 entries, handover с фриз-протоколом, gateway :81 health
+- Regression-тесты субшеллом (ME2_EVOLVE_NO_SYNC=1, защита от R18-инцидента зеркал): T1 pick skips impl+frozen → EV-CHARTS; T2 pick advance → EV-MOTION; T3 frozen-clear targeted; T4/T4b frozen-add idempotent; T6 implemented idempotent; НОВЫЕ T5 dry-run не мутирует state; T6c дубликат implemented не накручивает счётчик — все PASS
+- БАГИ РЕКОНСТРУКЦИИ, пойманные и исправленные: (1) tail-grep-эвристика из v1.16 давала ложный EV-BACKLOG-CYCLE (маркеры всех задач в хвосте через pick-order списки) → удалена, state CSV авторитарен; (2) dry-run мутировал rounds/last_task/version → guarded; (3) .gitignore *.sealed.* потерян при reset → восстановлен (check-ignore ok)
+- EV-DONOR-404 РЕАЛИЗАЦИЯ: mini-services/me2-daemon/index.ts +GET /donor-registry (read-only, честный пустой реестр donors:[] count:0 с note про desktop donor PR #967; вне шины, 47-инвариант не тронут); bun --hot перезагрузил daemon (boot 17:06, v0.57.1, 47 actions); верификация: daemon напрямую 200 JSON, через gateway :81?XTransformPort=3041 → 200 (был 404 — блокер R17 снят); live-UI проверка панели невозможна: консольные панели откатились к R74-архитектуре (page.tsx 65L вместо 3229L — hot-tree R16/R17 умер, donor-панель отсутствует в текущем дереве)
+- lint: bun run lint = 0/0; page.tsx не тронут (фриз соблюдён, 0 строк)
+- закрытие: self-update implemented-EV-DONOR-404 → state CSV durable (v1.42, tasks_done=10); зеркала 2/2 identical (15997B: /tmp/context-vault-mirror/phoenix-sealed/, /home/sync/me2-context-backups/phoenix-sealed/)
+- нетронуто: src/app/page.tsx (0 строк), remote main не упоминался, force-push не применялся, секреты не печатались (*.sealed.* gitignored)
+
+Stage Summary:
+- Round 19: EV-DONOR-404 закрыта честно — daemon-route фикс живой (gateway 200), блокер «донор-панель в вечном skeleton» снят на уровне API
+- Движок пережил reset-археологию: v1.16-зомби → v1.41 (реконструкция R13-R18 протокола + 2 новых регресс-фикса T5/T6c) → v1.42 (закрытие DONOR-404); замечено: post-reset рабочий дерево откатилось глубже, чем считалось (консольные панели R16/R17 отсутствуют; подлинная страница :3000 = R74 METAENGINE-приложение) — следующие консольные EV сверять с ЖИВЫМ деревом, не с worklog-описаниями
+- Порядок pick (v1.42): EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE → EV-DESKTOP-KBD; frozen=EV-EMPTYSTATE-COVERAGE,EV-EMPTYSTATE-APPLY (до разморозки оператором)
