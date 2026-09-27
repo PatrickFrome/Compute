@@ -63,7 +63,7 @@ const GLM_ROOT_DRAFT_FLUSH_MARKER = '[METAENGINE FLEET BOOTSTRAP FLUSH v1 - prio
 // bootstrapped with a tiny deterministic seed (far below any site-side
 // refusal threshold) that proves the conversation before the real dispatch
 // runs against the conversation surface, where replace+Enter are proven.
-const GLM_ROOT_CONVERSATION_SEED = 'METAENGINE FLEET CONVERSATION SEED v1 — bootstrap message: a verified fleet task block arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
+export const GLM_ROOT_CONVERSATION_SEED = 'METAENGINE FLEET CONVERSATION SEED v1 — bootstrap message: a verified fleet task block arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
 // D-C1: context tokens are re-issued at most this often per agent+epoch so the
 // rendered prompt (and its journal hash) stays deterministic within a lease.
 // Closed-loop audit fix (fleet scale): raised 64 -> 128 for larger fleets.
