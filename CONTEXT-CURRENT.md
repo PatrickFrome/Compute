@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T00:29:33Z | worklog: 1860830B / 10150L | sha12=f8ff577e0c2d
+gen: 2026-09-27T01:01:06Z | worklog: 1868218B / 10201L | sha12=899ed8d371ec
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -9,7 +9,7 @@ gen: 2026-09-27T00:29:33Z | worklog: 1860830B / 10150L | sha12=f8ff577e0c2d
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1860830B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1868218B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -24,9 +24,6 @@ gen: 2026-09-27T00:29:33Z | worklog: 1860830B / 10150L | sha12=f8ff577e0c2d
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- R80-PUSH-20260927-0627 → push main→sandbox/me2-os + 2 архивных ветки, ls-remote верификация
-- DB-GITHUB-20260927 → подключить БД (db/custom.db) к GitHub-треку sandbox/me2-os
-- R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 - EV-HEARTBEAT-V2.1 → аудит и апгрейд scripts/phoenix/phoenix-heartbeat.sh (v2.0 → v2.1)
 - EVOLVE-ROUND-11 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-WS-RESILIENCE] WS (:3040): reconnect c backoff + бейдж состояния связи в UI
 - HB-V2.2 → Критический анализ phoenix-heartbeat.sh и улучшение (запрос оператора после прогона 06:48 UTC+8)
@@ -39,47 +36,50 @@ gen: 2026-09-27T00:29:33Z | worklog: 1860830B / 10150L | sha12=f8ff577e0c2d
 - SEC-RESTORE-2 → Оператор ре-постнул секреты (88B-blob + service_role eyJ-JWT). Восстановить Supabase-канал, обновить носители, обновить cron-payload heartbeat до v2.2.
 - R85-LIVE-AUDIT → фиксация состояния R85 qualification: exact head 35cacda4, PR #987, test-drift, Package Smoke #2422
 - R85-INSTALLER-FORGE-20260927 → закрыть audit-loop R85 и реализовать архитектурный срез build-once installer provenance
+- R80 → Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
+- R80 → Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
+- R86-BUILD-ONCE-PROVENANCE-20260927 → Полноценная разработка браузера (директива оператора: не мониторинг/аудит): закрыть следующий архитектурный срез «build once → immutable installer SHA/provenance → downstream gates тестируют одни и те же bytes» (устранить 4× дублирование NSIS-сборки), НЕ мешая R85 visual capture.
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-
-Work Log:
-- exact head 35cacda4d75f86c1e93832e628661e866c1a4e67 — НЕ qualified; PR #987 по-прежнему OPEN / DRAFT / mergeable=true
-- Найден test drift (НЕ product defect): Critical Audit / Shell / Self Update E2E падают на одном устаревшем regression assertion в me2-primary-shell-runtime.test.mjs — тест требует старую схему `const syncSeq = ++contextDrawerSyncSeq; if (syncSeq !== contextDrawerSyncSeq) return`, тогда как R85-код уже сильнее: request фиксирует causal identity {seq, workspace, page}, setPage()/setWorkspace() инвалидируют generation, async resolve/reject сверяются с текущей тройкой + presentationSyncStillCurrent(...)
-- Node suite: 3436 PASS / 1 FAIL / 2 SKIP — единственный failure = «R85 Context Drawer splitter is keyboard-accessible and native-sync fenced» на stale regex
-- Live-матрица: Desktop Convergence, Typed Workspaces, Meta Orchestrator, Dirty Profile — SUCCESS; focused authority/causal/wake в Critical Audit — SUCCESS; Brain/scale в Autonomous Soak зелёные (1M/128 cells/128 agents, continuous 100k, 2000 tasks/2048 peers, chaos seeds); Installed UI 72-activation — в процессе; Installed Chat — свой NSIS собран, идёт installed clean-genesis/preconnect proof; Final Runtime — на сборке NSIS
-- Package Smoke #2422 СОХРАНЁН (не отменялся): workflow имеет cancel-in-progress:true → новый commit сейчас отменил бы физический visual capture «Capture R85 primary ME2 visual evidence» — поэтому даже test-only fix намеренно НЕ закоммичен
-- Локализованный patch: 3 stale assertions в me2-primary-shell-runtime.test.mjs → заменить на проверки `seq: ++contextDrawerSyncSeq` и `presentationSyncStillCurrent(request, { seq, workspace, page })`; product-код не трогать, gate не ослаблять
-- Порядок после terminal outcome #2422: (1) забрать и проверить r85-command-1440x960.png + r85-command-drawer-1440x960.png + JSON; (2) минимальный test-contract-only commit; (3) новый exact-head qualification; если visual step красный — приоритет: конкретный physical visual defect
-- Подтверждена проблема 4× дублирования NSIS-сборки (Installed Chat, Final Runtime, Soak, Package Smoke): следующий архитектурный срез = build once → immutable installer SHA/provenance → downstream gates тестируют одни и те же bytes
-- Два product-fix (2 новых фикса до exact head) считаются корректными; красный CI — только stale contract-test
-- write-ahead snapshot перед правкой ok
-
 Stage Summary:
-- 35cacda4 = potential-green кроме одного stale contract-test; главный незакрытый сигнал — физический R85 visual capture #2422 (Windows run сохранён); план: visual capture → test-contract-only fix → exact-head qualification → build-once installer provenance
+- Публикация актуальна: sandbox/me2-os = 3b630e6a; дерево чистое; блокеров нет
 
 ---
-Task ID: R85-INSTALLER-FORGE-20260927
-Agent: Super-Z (dev-round, директива оператора «продолжить разработку браузера, полноценную»)
-Task: закрыть audit-loop R85 и реализовать архитектурный срез build-once installer provenance
+Task ID: R80
+Agent: cron-413338
+Task: Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
 
 Work Log:
-- CONTEXT GUARD Job 416526 исполнен: guard ok (snaps=37, latest_sha a20e90dd…)
-- Live-стейт: голова PR #987 СДВИНУЛАСЬ после аудита: 35cacda4 → 1c487f59 → e3668e65 (параллельная линия: 631ac0e3 «qualify causal drawer identity contract» = ровно тот test-contract fix, что локализовал аудит; далее bounding harness + final-runtime UI provenance)
-- Package Smoke: #2422 cancelled 23:55:22Z (пуш 507a1418), #2426 cancelled 00:14:27Z; факел visual capture теперь #2433 in_progress на e3668e65 — PNG (r85-command-1440x960.png, r85-command-drawer-1440x960.png) лягут в артефакт metaengine-browser-windows-candidate-<sha> при первом же terminal success
-- Локальная верификация test-drift фикса на 1c487f59 (worktree /home/z/me2-r85): me2-primary-shell-runtime 40/40 PASS — старый regex `syncSeq !== contextDrawerSyncSeq` заменён на `seq: ++contextDrawerSyncSeq` + presentationSyncStillCurrent(request,{seq,workspace,page}) + doesNotMatch старой схемы (gate усилен, не ослаблен); фикс НЕ дублирован
-- НОВЫЙ СРЕЗ реализован (ветка work/r85-installer-forge-v1, commit b3ec5440, draft PR #988 → work/r85-control-room-ui-v1):
-  - scripts/installer-provenance.mjs: контракт metaengine.installer.provenance.v1 (write/verify, машинные коды 0/2/3/4/5, zero deps)
-  - test/installer-provenance.test.mjs: 9/9 PASS (поведенческие: tamper/expect-sha/schema/usage + контрактные: пинят resolve/import/verify/publish в обоих workflow)
-  - browser-installer-forge-v1.yml: standalone forge (workflow_dispatch + workflow_call c outputs), immutable артефакт me2-installer-forge-<head_sha> с provenance.json, cancel-in-progress: false
-  - browser-windows-package-smoke.yml: resolve-forge (gh api, actions:read) → import по run-id (пин download-artifact как в r1-live) → provenance-verify + source_head drift hard-fail → пропуск inline build; inline-путь тоже штампуется (installer_source='inline-primary') и публикует артефакт СРАЗУ после сборки, ДО install/visual фазы (анти-#2422: retry переиспользует bytes); все install/proof шаги нетронуты
-  - YAML-parse OK; зависимые suite зелёные: guardian-native-staging 6/6+skip, release-exact-sha-contract 4/4, release-physical-gate-chain 3/3
-  - CI PR-ветки (b3ec5440): Package Smoke #2434 in_progress — первый end-to-end прогон нового resolve→inline→publish пути на Windows + ещё 5 workflow
-- Секреты: push по PAT-паттерну set-url→push→clean-url, токен не печатался, git diff --cached скан = 0
+- .github.env валиден (token=valid, без печати)
+- push-pending-r80.sh: main→sandbox/me2-os up-to-date (ff-состояние подтверждено), архив-ветки up-to-date
+- ls-remote ≡ local HEAD = fbb125e9 ✅
 
 Stage Summary:
-- Audit-loop R85 закрыт: test-drift фикс подтверждён в дереве (не дублирован), судьбы #2422/#2426 установлены, visual capture = #2433 на e3668e65
-- Build-once installer provenance опубликован как draft PR #988: гарантия «все downstream gates тестируют одни и те же bytes»; роллаут на Installed Chat / Final Runtime / Soak — следующий раунд (шаги resolve+import идентичны)
-- Backlog: (1) import-шаги в 3 оставшихся gate; (2) забрать r85 PNG при terminal #2433; (3) ребейз #988 на движущуюся голову R85 перед промоушеном; (4) EV-backlog без изменений
-- Worktree /home/z/me2-r85 (work/r85-installer-forge-v1) сохранён для следующих раундов
+- Публикация актуальна: sandbox/me2-os = fbb125e9; дерево чистое; блокеров нет
+---
+Task ID: R86-BUILD-ONCE-PROVENANCE-20260927
+Agent: Z.ai Code (main)
+Task: Полноценная разработка браузера (директива оператора: не мониторинг/аудит): закрыть следующий архитектурный срез «build once → immutable installer SHA/provenance → downstream gates тестируют одни и те же bytes» (устранить 4× дублирование NSIS-сборки), НЕ мешая R85 visual capture.
+
+Work Log:
+- Аудит: daemon 0.21.0 жив (47/47, last_seq 226); /home/z/.a2/.github.env валиден; кодовая база браузера локализована = /home/z/me2-desktop (origin PatrickFrome/Compute), R85-ветка work/r85-control-room-ui-v1, PR #987 OPEN/DRAFT/mergeable=true
+- PR-head ушёл вперёд во время раунда: 35cacda4 → … → ca04c934 → ac6e1d60 (2-4 коммита/час, драйвит другой цикл). test-contract fix УЖЕ приземлился коммитом 631ac0e3 «test(r85): qualify causal drawer identity contract»: тест теперь требует seq:++contextDrawerSyncSeq + presentationSyncStillCurrent(request,{seq,workspace,page}) — ровно как предписывал оператор; Critical Audit/Shell/и др. на новых головах SUCCESS
+- CI-гонка: cancel-in-progress отменяет Package Smoke каждой волны при следующем пуше (#2422→#2423 cancelled, далее #2424→#2426→#2427→…→#2436 in_progress) → пуш в PR-ветку заблокирован весь раунд (правило оператора «не отменять visual capture» соблюдено)
+- Картография 4× NSIS: package-smoke / installed-chat / final-runtime / soak — идентичная «npx electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json» (4 легаси-workflow вне R85-волны не тронуты)
+- NEW scripts/installer-provenance.mjs (zero-dep, node>=18): write | verify | resolve | download | acquire; схемы metaengine.browser.installer-provenance.v1 / -acquired.v1 / installer-run-resolved.v1 / installer-artifact-downloaded.v1 / -error.v1; fail-closed коды: sha_mismatch, size_mismatch, head_mismatch, name_mismatch, installer_missing, provenance_schema_invalid, provenance_field_invalid, artifact_not_found, artifact_expired, installer_provenance_producer_failed/_run_absent/_timeout
+- Package Smoke (продюсер, единственный NSIS-builder): после digest — «installer-provenance.mjs write» (installer/blockmap/config sha256, GITHUB_RUN_ID/NUMBER, source-head); installer-provenance.json добавлен в артефакт metaengine-browser-windows-candidate-<head>
+- Consumers ×3 (Installed Chat / Final Runtime / Soak package-session-soak): шаг «Build exact-head…» заменён на «Acquire provenanced exact-head installer from Package Smoke» (acquire→Expand-Archive→verify fail-closed), прежние RUNNER_TEMP-пути и proof-JSON-схемы сохранены байт-в-байт; permissions += actions:read; таймауты 28→75 / 30→80 / 45→90 (poll 45м, interval 30s, absent-grace 10м)
+- Тесты: test/installer-provenance.test.mjs ×19 (CLI spawnSync — не-сетевые; resolve/download/acquire — in-process против локального http-фейка GitHub API; loopback capability-probe со skip) — 19/19
+- Урок среды (UX-урок №9): в песочнице fetch на loopback из процесса-внука (spawnSync) висит НАВСЕГДА без ошибки/запроса; лечение — скрипт экспортирует API при не-CLI-запуске (pathToFileURL-гейт), сетевые тесты идут in-process
+- Верификация: YAML-парс 4/4 ok; node --check ok; node --test: 19/19 + clean-genesis/release-exact-sha-workflow-contract/package-identity 27/27 + me2-primary-shell-runtime 40/40; после ребейза 59/59; секрет-скан диффа = 0
+- Ребейз на ac6e1d60 чистый (их: «repair visual harness selector syntax», «fail fast on visual harness parse errors» — пересечений нет); локальный коммит 1880a83a «ci(r86): build-once installer provenance for all downstream gates» — НАМЕРЕННО НЕ ЗАПУШЕН
+- Наблюдение: /home/z/.a2 частично деградировал (остался только .github.env); supabase-канал жив через ENVF/sealed-носители (heartbeat 11ok/0fail), функционального разрыва нет — восстановление дословно из ENVF при необходимости
+
+Stage Summary:
+- R86 СДЕЛАН: build-once provenance реализован и протестирован локально — 1 NSIS-сборка на head вместо 4; все downstream-гейты верифицируют одни и те же байты (fail-closed), product-код и R85-гейты не ослаблены
+- Push-процедура в окне тишины (Package Smoke текущего head не in-flight): cd /home/z/me2-wt-r86 && git fetch origin work/r85-control-room-ui-v1 && git rebase FETCH_HEAD && (cd apps/metaengine-browser && node --test test/installer-provenance.test.mjs) && git push origin HEAD:work/r85-control-room-ui-v1
+- После пуша: первый acquire-прогон покажет единственность NSIS-builder; следить за installer_provenance_* кодами в installed-chat/final-runtime/soak
+- Backlog R87: подрезка таймаутов по фактической статистике прогонов; перевод 4 легаси-workflow на build-once; прокинуть provenance в release-evidence-gate/fast-autorelease аттестацию; EV-A11Y; watcher CI-гонки
+- Открытое: R2 S3 secret access key (оператор); .a2 partial (не блокер); terminal outcome R85 visual capture (#2436…) — ждём
 ```
