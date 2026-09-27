@@ -359,6 +359,12 @@ async function main() {
     if (drawerHeight < 160 || drawerHeight > 360) throw new Error(`r95c_visual_drawer_height:${drawerHeight}`);
     if (runBottom.metrics?.context_drawer_dock !== 'bottom') throw new Error(`r95c_visual_bottom_dock:${runBottom.metrics?.context_drawer_dock}`);
 
+    markPhase('EXPAND_RUN_FOR_RIGHT_UTILITY');
+    const currentContentBounds = windowRef.getContentBounds();
+    windowRef.setContentBounds({ ...currentContentBounds, width: 1680, height: 960 });
+    shellView.setBounds({ x: 0, y: 0, width: 1680, height: 960 });
+    await settle(shellView.webContents);
+
     markPhase('DOCK_RUN_UTILITY_RIGHT');
     await withTimeout(
       shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="utility-panel-dock-right"]')?.click(); true`),
@@ -367,7 +373,7 @@ async function main() {
     );
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer]')?.getAttribute('data-drawer-dock') === 'right'");
     markPhase('CAPTURE_RUN_UTILITY_RIGHT');
-    const runRight = await capture(shellView, 'r95c-run-utility-right-1440x960');
+    const runRight = await capture(shellView, 'r95c-run-utility-right-1680x960');
     assertRunMetrics(runRight);
     const drawerWidth = Math.round(runRight.metrics?.context_drawer?.width || 0);
     if (drawerWidth < 320 || drawerWidth > 520) throw new Error(`r95c_visual_right_drawer_width:${drawerWidth}`);
