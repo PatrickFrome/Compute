@@ -98,6 +98,12 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
     const prof = CAST_PROFILES[castProfile];
     const pacing = prof.pacing as "push" | "ack";
     let autoFps: number = prof.maxFps; // для «авто»: текущий адаптивный потолок
+    const hideCastImage = () => {
+      const img = castImgRef.current;
+      if (!img) return;
+      img.style.opacity = "0";
+      img.removeAttribute("src");
+    };
     try {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3042&maxFps=${prof.maxFps}${pacing === "ack" ? "&pacing=ack" : ""}`);
@@ -147,13 +153,20 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
           }
         } catch { /* не-JSON кадр — игнор */ }
       };
-      ws.onerror = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: false, error: "стрим недоступен (:3042)" })); };
-      ws.onclose = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: false })); };
+      ws.onerror = () => {
+        hideCastImage();
+        if (!stopped) setCastStat((s) => ({ ...s, connected: false, error: "стрим недоступен (:3042)" }));
+      };
+      ws.onclose = () => {
+        hideCastImage();
+        if (!stopped) setCastStat((s) => ({ ...s, connected: false }));
+      };
     } catch {
       setCastStat((s) => ({ ...s, connected: false, error: "WS не открыт" }));
     }
     return () => {
       stopped = true;
+      hideCastImage();
       try { ws?.close(); } catch { /* уже закрыт */ }
       castWsRef.current = null;
       setCastStat((s) => ({ ...s, connected: false, fps: 0, kbs: null }));
