@@ -102,6 +102,7 @@ test('raising the floor invalidates an ACTIVE transport proof and requires fresh
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
     conversation_url: 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc',
+    agent_surface_sha256: 'a'.repeat(64),
   });
   agent = h.provisioner.snapshot().agents[0];
   assert.equal(agent.lifecycle_state, 'ACTIVE');
