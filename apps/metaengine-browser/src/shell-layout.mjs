@@ -253,18 +253,6 @@ export function planShellLayout({
       Math.max(0, windowHeight - top),
     );
     left = ME2_PRIMARY_PAGE_PADDING;
-    const inspectorRequested = windowWidth >= ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH;
-    const inspectorFits = windowWidth
-      - ME2_PRIMARY_PAGE_PADDING * 2
-      - (ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP)
-      >= SHELL_MIN_REMOTE_WIDTH;
-    const inspectorVisible = inspectorRequested && inspectorFits;
-    const baseRight = inspectorVisible
-      ? ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP
-      : ME2_PRIMARY_PAGE_PADDING;
-    right = baseRight;
-    bottom = baseBottom;
-
     const rawDock = String(me2_context_drawer_dock || 'BOTTOM').trim().toUpperCase();
     const requestedDock = ME2_DRAWER_DOCKS.has(rawDock) ? rawDock : 'BOTTOM';
     const drawerRequested = me2_context_drawer_open === true;
@@ -280,6 +268,25 @@ export function planShellLayout({
       ME2_PRIMARY_CONTEXT_DRAWER_MAX_WIDTH,
       ME2_PRIMARY_CONTEXT_DRAWER_WIDTH,
     );
+
+    // The telemetry inspector is optional. A user-requested Right Utility Panel
+    // gets first claim on the presentation budget, then the inspector may use
+    // the remaining width. Native Browser minimum remains the hard floor.
+    const inspectorRequested = windowWidth >= ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH;
+    const drawerRightFloor = drawerRequested && requestedDock === 'RIGHT'
+      ? ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH
+      : 0;
+    const inspectorFits = windowWidth
+      - ME2_PRIMARY_PAGE_PADDING * 2
+      - (ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP)
+      - drawerRightFloor
+      >= SHELL_MIN_REMOTE_WIDTH;
+    const inspectorVisible = inspectorRequested && inspectorFits;
+    const baseRight = inspectorVisible
+      ? ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP
+      : ME2_PRIMARY_PAGE_PADDING;
+    right = baseRight;
+    bottom = baseBottom;
     me2DrawerRequestedOpen = drawerRequested;
     me2DrawerRequestedDock = requestedDock;
     me2DrawerRequestedHeight = requestedDrawerHeight;
@@ -322,7 +329,11 @@ export function planShellLayout({
     remoteHeight = Math.max(0, windowHeight - top - bottom);
     effectiveSidebar = 'HIDDEN';
     effectiveOperations = 'CLOSED';
-    if (inspectorRequested && !inspectorVisible) adaptations.push('ME2_RUN_INSPECTOR_RELEASED_FOR_ACTIVE_SURFACE');
+    if (inspectorRequested && !inspectorVisible) {
+      adaptations.push(drawerRequested && requestedDock === 'RIGHT'
+        ? 'ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL'
+        : 'ME2_RUN_INSPECTOR_RELEASED_FOR_ACTIVE_SURFACE');
+    }
   } else if (surfaceProfile !== 'LEGACY_BROWSER_SHELL') {
     surfaceProfile = 'LEGACY_BROWSER_SHELL';
   }
