@@ -47,6 +47,7 @@ export function Me2Shell() {
   const paletteOpen = useMe2((s) => s.paletteOpen);
   const dialog = useMe2((s) => s.dialog);
   const detail = useMe2((s) => s.detail);
+  const contextDrawerDock = useMe2((s) => s.contextDrawerDock);
   const chromeOverlaySources = useMe2((s) => s.chromeOverlaySources);
   const { toast } = useToast();
 
@@ -81,14 +82,17 @@ export function Me2Shell() {
       data-testid="me2-shell"
     >
       <TopBar />
-      <main
-        className="min-h-0 flex-1 overflow-hidden p-1.5"
-        data-testid="page-outlet"
-        data-page={page}
-      >
-        <PageOutlet page={page} />
-      </main>
-      <ContextDrawer />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <main
+          className="min-h-0 min-w-0 flex-1 overflow-hidden p-1.5"
+          data-testid="page-outlet"
+          data-page={page}
+        >
+          <PageOutlet page={page} />
+        </main>
+        {contextDrawerDock === "right" ? <ContextDrawer /> : null}
+      </div>
+      {contextDrawerDock === "bottom" ? <ContextDrawer /> : null}
       <PageBar />
       <StatusBar />
       {paletteOpen ? <CommandPalette /> : null}
