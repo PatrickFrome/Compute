@@ -56,7 +56,7 @@ async function hashFile(filePath) {
   const info = await stat(filePath).catch(() => null);
   if (!info?.isFile()) fail('installer_provenance_asset_missing', { file: filePath });
   const hash = crypto.createHash('sha256');
-  await pipeline(createReadStream(filePath), hash);
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
   return Object.freeze({
     name: path.basename(filePath),
     sha256: hash.digest('hex'),
