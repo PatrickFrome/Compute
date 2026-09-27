@@ -22,8 +22,14 @@ test('R96D nested action buttons honor both standard button activation keys', ()
 });
 
 test('R96D nested button activation cannot bubble into row-open or Peek behavior', () => {
-  const retry = tasks.match(/className="branch-retry cursor-pointer"[\s\S]{0,700}?<\/g>/)?.[0] ?? '';
-  const reflect = tasks.match(/className="branch-reflect cursor-pointer"[\s\S]{0,900}?<\/g>/)?.[0] ?? '';
+  const retryStart = tasks.indexOf('className="branch-retry cursor-pointer"');
+  const reflectStart = tasks.indexOf('className="branch-reflect cursor-pointer"');
+  assert.ok(retryStart >= 0);
+  assert.ok(reflectStart > retryStart);
+
+  const retry = tasks.slice(retryStart, reflectStart);
+  const reflect = tasks.slice(reflectStart, tasks.indexOf('</>', reflectStart) >= 0 ? tasks.indexOf('</>', reflectStart) : reflectStart + 1800);
+
   assert.match(retry, /e\.stopPropagation\(\)/);
   assert.match(reflect, /e\.stopPropagation\(\)/);
   assert.doesNotMatch(retry, /onOpen\(t\)/);
