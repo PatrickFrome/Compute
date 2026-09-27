@@ -68,6 +68,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
 export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
+export type ContextDrawerDock = "bottom" | "right";
 
 interface Me2State {
   // связь
@@ -95,6 +96,9 @@ interface Me2State {
   contextDrawerFollowSelection: boolean;
   contextDrawerPreferredHeight: number;
   contextDrawerHeight: number;
+  contextDrawerPreferredWidth: number;
+  contextDrawerWidth: number;
+  contextDrawerDock: ContextDrawerDock;
   commandRailPreferredOpen: boolean;
   // selection (agent-first)
   chatId: string | null;
@@ -112,7 +116,9 @@ interface Me2State {
   setContextDrawerTab: (tab: ContextDrawerTab) => void;
   setContextDrawerFollowSelection: (follow: boolean) => void;
   setContextDrawerHeight: (height: number, persist?: boolean) => void;
-  syncContextDrawer: (preferred?: boolean, height?: number) => void;
+  setContextDrawerWidth: (width: number, persist?: boolean) => void;
+  setContextDrawerDock: (dock: ContextDrawerDock) => void;
+  syncContextDrawer: (preferred?: boolean, height?: number, width?: number, dock?: ContextDrawerDock) => void;
   setCommandRailPreference: (open: boolean) => void;
   resetWorkspaceLayout: () => void;
   openTask: (id: string) => void;
@@ -132,9 +138,16 @@ const WORKSPACE_LAYOUTS_LS = "me2.workspace-layouts.v1";
 const CONTEXT_DRAWER_DEFAULT_HEIGHT = 200;
 const CONTEXT_DRAWER_MIN_HEIGHT = 160;
 const CONTEXT_DRAWER_MAX_HEIGHT = 360;
+const CONTEXT_DRAWER_DEFAULT_WIDTH = 380;
+const CONTEXT_DRAWER_MIN_WIDTH = 320;
+const CONTEXT_DRAWER_MAX_WIDTH = 520;
 const clampContextDrawerHeight = (height: number) => Math.max(
   CONTEXT_DRAWER_MIN_HEIGHT,
   Math.min(CONTEXT_DRAWER_MAX_HEIGHT, Math.round(Number(height) || CONTEXT_DRAWER_DEFAULT_HEIGHT)),
+);
+const clampContextDrawerWidth = (width: number) => Math.max(
+  CONTEXT_DRAWER_MIN_WIDTH,
+  Math.min(CONTEXT_DRAWER_MAX_WIDTH, Math.round(Number(width) || CONTEXT_DRAWER_DEFAULT_WIDTH)),
 );
 
 type WorkspaceLayoutPreference = {
@@ -142,6 +155,8 @@ type WorkspaceLayoutPreference = {
   drawerTab: ContextDrawerTab;
   drawerFollowSelection: boolean;
   drawerHeight: number;
+  drawerWidth: number;
+  drawerDock: ContextDrawerDock;
   commandRailOpen: boolean;
 };
 
@@ -161,6 +176,8 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
           drawerTab: tab,
           drawerFollowSelection: typeof row.drawerFollowSelection === "boolean" ? row.drawerFollowSelection : true,
           drawerHeight: clampContextDrawerHeight(Number(row.drawerHeight ?? CONTEXT_DRAWER_DEFAULT_HEIGHT)),
+          drawerWidth: clampContextDrawerWidth(Number(row.drawerWidth ?? CONTEXT_DRAWER_DEFAULT_WIDTH)),
+          drawerDock: row.drawerDock === "right" ? "right" : "bottom",
           commandRailOpen: rail,
         };
       }
@@ -173,6 +190,8 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
       drawerTab: legacyTab === "selection" || legacyTab === "commands" || legacyTab === "runtime" ? legacyTab : "events",
       drawerFollowSelection: true,
       drawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT,
+      drawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
+      drawerDock: "bottom",
       commandRailOpen: legacyRail !== "0",
     };
   } catch {
@@ -181,6 +200,8 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
       drawerTab: "events",
       drawerFollowSelection: true,
       drawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT,
+      drawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
+      drawerDock: "bottom",
       commandRailOpen: true,
     };
   }
@@ -235,6 +256,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
   contextDrawerFollowSelection: true,
   contextDrawerPreferredHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT,
   contextDrawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT,
+  contextDrawerPreferredWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
+  contextDrawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
+  contextDrawerDock: "bottom",
   commandRailPreferredOpen: true,
   chatId: null,
   busyAction: false,
@@ -253,7 +277,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     });
   },
 
-  syncContextDrawer: (preferred, height) => {
+  syncContextDrawer: (preferred, height, width, dock) => {
     const request = {
       seq: ++contextDrawerSyncSeq,
       workspace: get().workspace,
@@ -263,47 +287,76 @@ export const useMe2 = create<Me2State>((set, get) => ({
     const wantedHeight = clampContextDrawerHeight(
       typeof height === "number" ? height : get().contextDrawerPreferredHeight,
     );
+    const wantedWidth = clampContextDrawerWidth(
+      typeof width === "number" ? width : get().contextDrawerPreferredWidth,
+    );
+    const wantedDock: ContextDrawerDock = dock === "right" || dock === "bottom"
+      ? dock
+      : get().contextDrawerDock;
+
     if (request.page !== "command") {
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: want,
         contextDrawerPreferredHeight: wantedHeight,
         contextDrawerHeight: wantedHeight,
+        contextDrawerPreferredWidth: wantedWidth,
+        contextDrawerWidth: wantedWidth,
+        contextDrawerDock: wantedDock,
       });
       return;
     }
+
     const shell = (window as Window & {
       metaengineShell?: {
         setPrimaryContextDrawer?: (
           open: boolean,
+          dock: ContextDrawerDock,
           height: number,
-        ) => Promise<{ effective_open?: boolean; drawer_height?: number } | null>;
+          width: number,
+        ) => Promise<{
+          effective_open?: boolean;
+          dock?: ContextDrawerDock;
+          drawer_height?: number;
+          drawer_width?: number;
+        } | null>;
       };
     }).metaengineShell;
+
     if (!shell?.setPrimaryContextDrawer) {
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: want,
         contextDrawerPreferredHeight: wantedHeight,
         contextDrawerHeight: wantedHeight,
+        contextDrawerPreferredWidth: wantedWidth,
+        contextDrawerWidth: wantedWidth,
+        contextDrawerDock: wantedDock,
       });
       return;
     }
-    void shell.setPrimaryContextDrawer(want, wantedHeight).then((result) => {
+
+    void shell.setPrimaryContextDrawer(want, wantedDock, wantedHeight, wantedWidth).then((result) => {
       if (!presentationSyncStillCurrent(request, {
         seq: contextDrawerSyncSeq,
         workspace: get().workspace,
         page: get().page,
       })) return;
       const effectiveOpen = typeof result?.effective_open === "boolean" ? result.effective_open : want;
-      const effectiveHeight = effectiveOpen
+      const effectiveHeight = effectiveOpen && wantedDock === "bottom"
         ? clampContextDrawerHeight(Number(result?.drawer_height ?? wantedHeight))
         : wantedHeight;
+      const effectiveWidth = effectiveOpen && wantedDock === "right"
+        ? clampContextDrawerWidth(Number(result?.drawer_width ?? wantedWidth))
+        : wantedWidth;
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: effectiveOpen,
         contextDrawerPreferredHeight: wantedHeight,
         contextDrawerHeight: effectiveHeight,
+        contextDrawerPreferredWidth: wantedWidth,
+        contextDrawerWidth: effectiveWidth,
+        contextDrawerDock: wantedDock,
       });
     }).catch(() => {
       if (!presentationSyncStillCurrent(request, {
@@ -316,6 +369,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerOpen: false,
         contextDrawerPreferredHeight: wantedHeight,
         contextDrawerHeight: wantedHeight,
+        contextDrawerPreferredWidth: wantedWidth,
+        contextDrawerWidth: wantedWidth,
+        contextDrawerDock: wantedDock,
       });
     });
   },
@@ -323,7 +379,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   setContextDrawer: (open) => {
     set({ contextDrawerPreferredOpen: open });
     writeWorkspaceLayout(get().workspace, { drawerOpen: open });
-    get().syncContextDrawer(open, get().contextDrawerPreferredHeight);
+    get().syncContextDrawer(open, get().contextDrawerPreferredHeight, get().contextDrawerPreferredWidth, get().contextDrawerDock);
   },
 
   setContextDrawerTab: (tab) => {
@@ -340,7 +396,21 @@ export const useMe2 = create<Me2State>((set, get) => ({
     const wantedHeight = clampContextDrawerHeight(height);
     set({ contextDrawerPreferredHeight: wantedHeight });
     if (persist) writeWorkspaceLayout(get().workspace, { drawerHeight: wantedHeight });
-    get().syncContextDrawer(get().contextDrawerPreferredOpen, wantedHeight);
+    get().syncContextDrawer(get().contextDrawerPreferredOpen, wantedHeight, get().contextDrawerPreferredWidth, get().contextDrawerDock);
+  },
+
+  setContextDrawerWidth: (width, persist = true) => {
+    const wantedWidth = clampContextDrawerWidth(width);
+    set({ contextDrawerPreferredWidth: wantedWidth });
+    if (persist) writeWorkspaceLayout(get().workspace, { drawerWidth: wantedWidth });
+    get().syncContextDrawer(get().contextDrawerPreferredOpen, get().contextDrawerPreferredHeight, wantedWidth, get().contextDrawerDock);
+  },
+
+  setContextDrawerDock: (dock) => {
+    if (dock !== "bottom" && dock !== "right") return;
+    set({ contextDrawerDock: dock });
+    writeWorkspaceLayout(get().workspace, { drawerDock: dock });
+    get().syncContextDrawer(get().contextDrawerPreferredOpen, get().contextDrawerPreferredHeight, get().contextDrawerPreferredWidth, dock);
   },
 
   setCommandRailPreference: (open) => {
@@ -354,6 +424,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
       drawerTab: "events",
       drawerFollowSelection: true,
       drawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT,
+      drawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
+      drawerDock: "bottom",
       commandRailOpen: true,
     };
     writeWorkspaceLayout(get().workspace, defaults);
@@ -363,9 +435,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
       contextDrawerFollowSelection: defaults.drawerFollowSelection,
       contextDrawerPreferredHeight: defaults.drawerHeight,
       contextDrawerHeight: defaults.drawerHeight,
+      contextDrawerPreferredWidth: defaults.drawerWidth,
+      contextDrawerWidth: defaults.drawerWidth,
+      contextDrawerDock: defaults.drawerDock,
       commandRailPreferredOpen: defaults.commandRailOpen,
     });
-    get().syncContextDrawer(defaults.drawerOpen, defaults.drawerHeight);
+    get().syncContextDrawer(defaults.drawerOpen, defaults.drawerHeight, defaults.drawerWidth, defaults.drawerDock);
     try {
       window.dispatchEvent(new CustomEvent("me2:workspace-layout-reset", { detail: get().workspace }));
     } catch { /* browser unavailable */ }
@@ -404,10 +479,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
           contextDrawerFollowSelection: workspaceLayout.drawerFollowSelection,
           contextDrawerPreferredHeight: workspaceLayout.drawerHeight,
           contextDrawerHeight: workspaceLayout.drawerHeight,
+          contextDrawerPreferredWidth: workspaceLayout.drawerWidth,
+          contextDrawerWidth: workspaceLayout.drawerWidth,
+          contextDrawerDock: workspaceLayout.drawerDock,
           commandRailPreferredOpen: workspaceLayout.commandRailOpen,
         });
         writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
-        get().syncContextDrawer(workspaceLayout.drawerOpen, workspaceLayout.drawerHeight);
+        get().syncContextDrawer(workspaceLayout.drawerOpen, workspaceLayout.drawerHeight, workspaceLayout.drawerWidth, workspaceLayout.drawerDock);
       } catch { /* приватный режим */ }
     }, 0);
 
@@ -556,6 +634,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     else set({
       contextDrawerOpen: get().contextDrawerPreferredOpen,
       contextDrawerHeight: get().contextDrawerPreferredHeight,
+      contextDrawerWidth: get().contextDrawerPreferredWidth,
     });
   },
 
@@ -570,6 +649,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
       contextDrawerFollowSelection: layoutPreference.drawerFollowSelection,
       contextDrawerPreferredHeight: layoutPreference.drawerHeight,
       contextDrawerHeight: layoutPreference.drawerHeight,
+      contextDrawerPreferredWidth: layoutPreference.drawerWidth,
+      contextDrawerWidth: layoutPreference.drawerWidth,
+      contextDrawerDock: layoutPreference.drawerDock,
       commandRailPreferredOpen: layoutPreference.commandRailOpen,
     });
     try { localStorage.setItem(WS_LS, w); } catch { /* приватный режим */ }
