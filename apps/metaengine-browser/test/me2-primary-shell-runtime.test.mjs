@@ -473,11 +473,12 @@ test('R85 native open-site intent uses the ME2 overlay plane instead of window.p
   assert.match(me2Dialogs, /\.test\(value\)/);
 });
 
-test('R85 page history uses a real cursor for Alt back and forward', () => {
+test('R97 retains bounded page-history metadata without a direct Alt navigation path', () => {
   assert.match(store, /pageHistoryIndex:\s*number/);
-  assert.match(store, /nextIndex = st\.pageHistoryIndex \+ delta/);
-  assert.match(store, /set\(\{ page: target, pageHistoryIndex: nextIndex \}\)/);
   assert.match(store, /const prefix = st\.recentPages\.slice\(0, st\.pageHistoryIndex \+ 1\)/);
+  assert.doesNotMatch(store, /nextIndex = st\.pageHistoryIndex \+ delta/);
+  assert.doesNotMatch(store, /set\(\{ page: target, pageHistoryIndex: nextIndex \}\)/);
+  assert.doesNotMatch(store, /e\.key === "ArrowLeft" \|\| e\.key === "ArrowRight"/);
   assert.doesNotMatch(store, /rp\.length - 2/);
 });
 
