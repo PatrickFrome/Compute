@@ -195,7 +195,7 @@ export function AgentsPage() {
                   key={a.id}
                   role="group"
                   tabIndex={0}
-                  aria-keyshortcuts="Enter Space ArrowUp ArrowDown"
+                  aria-keyshortcuts="Enter Space"
                   aria-label={`Агент ${a.role} · Enter открыть чат · Space Peek`}
                   data-peek-kind="agent"
                   data-peek-id={a.id}
