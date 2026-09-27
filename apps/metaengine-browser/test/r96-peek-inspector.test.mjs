@@ -55,6 +55,13 @@ test('R96 Peek never steals native Space activation from unrelated controls', ()
   assert.match(hook, /isEditableTarget\(event\.target\) \|\| isReservedInteractionTarget\(event\.target, kind\)/);
 });
 
+test('R96A Space Peek begins only from the currently focused selected row', () => {
+  assert.match(hook, /function isFocusedPeekRow/);
+  assert.match(hook, /target\.closest\(\`\[data-peek-kind=/);
+  assert.match(hook, /row\?\.getAttribute\("data-peek-id"\) === selectedId/);
+  assert.match(hook, /if \(!id \|\| !isFocusedPeekRow\(event\.target, kind, id\)\) return/);
+});
+
 test('R96 held Peek rebinds or closes when live snapshot membership changes', () => {
   assert.match(hook, /if \(!heldRef\.current\) return/);
   assert.match(hook, /if \(!selectedId \|\| !ids\.includes\(selectedId\)\)/);
