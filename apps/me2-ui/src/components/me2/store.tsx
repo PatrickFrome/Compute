@@ -11,7 +11,7 @@ import {
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
-import { reduceExactTaskHistoryResponse } from "@/lib/r95e-evidence-contracts.mjs";
+import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -691,16 +691,25 @@ export const useMe2 = create<Me2State>((set, get) => ({
       `/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`,
       { signal: AbortSignal.timeout(8_000) },
     ).then((d) => {
-      set((state) => reduceExactTaskHistoryResponse({
-        request: { seq: requestSeq, taskId: id },
-        current: {
-          seq: taskStreamRequestSeq,
-          taskId: state.inspectedTaskId,
-          streamTaskId: state.streamTaskId,
-        },
-        fetchedEvents: d?.events ?? null,
-        liveStream: state.stream,
-      }) ?? {});
+      set((state) => {
+        if (!taskStreamResponseStillCurrent(
+          { seq: requestSeq, taskId: id },
+          { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
+        )) return {};
+        const resolved = resolveExactTaskStreamResponse({
+          request: { seq: requestSeq, taskId: id },
+          current: {
+            seq: taskStreamRequestSeq,
+            taskId: state.inspectedTaskId,
+            streamTaskId: state.streamTaskId,
+            stream: state.stream,
+          },
+          responseEvents: d?.events ?? null,
+          limit: 200,
+        });
+        if (!resolved.applied || !resolved.patch) return {};
+        return resolved.patch as Pick<Me2State, "stream" | "streamState">;
+      });
     });
   },
 
