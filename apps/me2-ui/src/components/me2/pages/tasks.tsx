@@ -15,6 +15,7 @@ import {
 } from "@/lib/me2-bus";
 import { agentChatOp } from "@/lib/me2-socket";
 import { useMe2 } from "@/components/me2/store";
+import { useTemporaryPeekList } from "@/hooks/use-temporary-peek";
 import { Chip, PageHeader, Sec, StatusBadge } from "@/components/me2/ui/primitives";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -81,12 +82,14 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
  *  Рейка таймлайна, каждая задача — ветвь с точкой статуса; retry-линии (parent_id → merge-дуга
  *  к родителю); hover-tooltip через portal (fixed, не обрезается скролл-контейнером); окно 60
  *  ветвей (старшие скрыты за toggle); ↻ retry и ✦ LLM-рефлексия на FAILED/CANCELLED строках. */
-function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
+function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selectedId, onSelect }: {
   tasks: Task[];
   onOpen: (t: Task) => void;
   onRetry: (t: Task) => void;
   onReflect?: (t: Task) => void;
   reflectingId?: string | null;
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   const ROW_H = 30, W = 340, RAIL_X = 16, FORK_X = 46, DOT_X = 208, TEXT_X = 220, STEPS_X = 334;
   const WINDOW = 60;
@@ -184,16 +187,23 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
               key={t.id}
               className="branch-row"
               data-branch-id={t.id}
-              onClick={() => onOpen(t)}
+              data-peek-kind="task"
+              data-peek-id={t.id}
+              data-peek-selected={selectedId === t.id ? "true" : "false"}
+              onClick={() => { onSelect?.(t.id); onOpen(t); }}
               onMouseEnter={set}
               onMouseMove={set}
               onMouseLeave={clearThis}
-              onFocus={set}
+              onFocus={(e) => { set(e); onSelect?.(t.id); }}
               onBlur={clearThis}
               role="button"
               tabIndex={0}
+              aria-current={selectedId === t.id ? "true" : undefined}
               aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов`}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(t); } }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); onOpen(t); }
+                else if (e.key === " ") e.preventDefault();
+              }}
             >
               <rect className="branch-hover" x={4} y={y - ROW_H / 2 + 2} width={W - 8} height={ROW_H - 4} rx={6} fill="#ffffff" />
               <title>{`${t.title} · ${t.status} · ${t.steps}/${t.max_steps}`}</title>
@@ -433,6 +443,20 @@ export function TasksPage() {
     () => (snap?.tasks ?? []).filter((t) => t.status === "READY" || t.status === "HANDED_OFF" || t.status === "PARKED"),
     [snap],
   );
+  const [peekTaskId, setPeekTaskId] = useState<string | null>(null);
+  const peekTaskIds = useMemo(() => {
+    const ids = [...branchTasks.map((t) => t.id), ...queueTasks.map((t) => t.id)];
+    return Array.from(new Set(ids));
+  }, [branchTasks, queueTasks]);
+  const effectivePeekTaskId = peekTaskId && peekTaskIds.includes(peekTaskId)
+    ? peekTaskId
+    : peekTaskIds[0] ?? null;
+  useTemporaryPeekList({
+    kind: "task",
+    ids: peekTaskIds,
+    selectedId: effectivePeekTaskId,
+    onSelect: setPeekTaskId,
+  });
   const etaOf = useCallback((t: Task): string | null => {
     const nb = t.not_before_ms ?? 0;
     if (t.status === "PARKED" || nb > nowMs) {
@@ -514,6 +538,8 @@ export function TasksPage() {
                   onRetry={(t) => void retryBranch(t)}
                   onReflect={(t) => void reflectTask(t)}
                   reflectingId={reflectingId}
+                  selectedId={effectivePeekTaskId}
+                  onSelect={setPeekTaskId}
                 />
               )}
             </div>
@@ -542,8 +568,15 @@ export function TasksPage() {
                 return (
                   <button
                     key={t.id}
-                    className="w-full rounded-md border border-zinc-800/80 bg-zinc-900/60 p-2.5 text-left transition hover:border-zinc-600 hover:bg-zinc-800/60"
-                    onClick={() => openTask(t.id)}
+                    data-peek-kind="task"
+                    data-peek-id={t.id}
+                    data-peek-selected={effectivePeekTaskId === t.id ? "true" : "false"}
+                    className={`w-full rounded-md border bg-zinc-900/60 p-2.5 text-left transition hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-600 ${
+                      effectivePeekTaskId === t.id ? "border-cyan-900/80" : "border-zinc-800/80 hover:border-zinc-600"
+                    }`}
+                    onFocus={() => setPeekTaskId(t.id)}
+                    onClick={() => { setPeekTaskId(t.id); openTask(t.id); }}
+                    onKeyDown={(e) => { if (e.key === " ") e.preventDefault(); }}
                     aria-label={`Открыть задачу ${t.title}`}
                   >
                     <div className="flex items-center gap-2">
