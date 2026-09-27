@@ -11,6 +11,7 @@ import {
   ACQUIRE_SCHEMA,
   DOWNLOAD_SCHEMA,
   PROVENANCE_SCHEMA,
+  PRODUCER_WAIT_SCHEMA,
   PRODUCER_WORKFLOW,
   RESOLUTION_SCHEMA,
   VERIFY_SCHEMA,
@@ -19,6 +20,7 @@ import {
   fileEvidence,
   resolveProducerRun,
   verifyProvenance,
+  waitProducerSuccess,
   writeProvenance,
 } from '../scripts/installer-provenance.mjs';
 
@@ -153,6 +155,45 @@ test('verifyProvenance fails closed on source-head drift', async () => {
       configPath: f.config,
     }),
     (error) => error?.code === 'head_mismatch',
+  );
+});
+
+test('verifyProvenance binds provenance to the resolved producer run and attempt', async () => {
+  const f = await writtenFixture();
+  const ok = await verifyProvenance({
+    provenancePath: f.provenance,
+    expectedHead: HEAD,
+    installerPath: f.installer,
+    blockmapPath: f.blockmap,
+    configPath: f.config,
+    expectedRunId: 101,
+    expectedRunAttempt: 2,
+  });
+  assert.equal(ok.producer_run_id, 101);
+
+  await assert.rejects(
+    verifyProvenance({
+      provenancePath: f.provenance,
+      expectedHead: HEAD,
+      installerPath: f.installer,
+      blockmapPath: f.blockmap,
+      configPath: f.config,
+      expectedRunId: 102,
+      expectedRunAttempt: 2,
+    }),
+    (error) => error?.code === 'producer_run_mismatch',
+  );
+  await assert.rejects(
+    verifyProvenance({
+      provenancePath: f.provenance,
+      expectedHead: HEAD,
+      installerPath: f.installer,
+      blockmapPath: f.blockmap,
+      configPath: f.config,
+      expectedRunId: 101,
+      expectedRunAttempt: 3,
+    }),
+    (error) => error?.code === 'producer_run_attempt_mismatch',
   );
 });
 
@@ -322,6 +363,46 @@ test('resolveProducerRun reports exact-head producer absence after bounded wait'
   });
 });
 
+test('resolveProducerRun can return an immutable artifact while producer proof is still in progress', async () => {
+  await withServer((req, res) => {
+    if (req.url.startsWith('/repos/o/r/actions/runs?')) {
+      return json(res, 200, { workflow_runs: [{
+        id: 77,
+        run_attempt: 4,
+        name: PRODUCER_WORKFLOW,
+        head_sha: HEAD,
+        status: 'in_progress',
+        conclusion: null,
+      }] });
+    }
+    if (req.url.startsWith('/repos/o/r/actions/runs/77/artifacts?')) {
+      return json(res, 200, { artifacts: [{
+        id: 88,
+        name: `metaengine-browser-windows-candidate-${HEAD}`,
+        expired: false,
+        archive_download_url: 'http://127.0.0.1/unused',
+      }] });
+    }
+    res.writeHead(404); res.end();
+  }, async (base) => {
+    const result = await resolveProducerRun({
+      repo: 'o/r',
+      head: HEAD,
+      artifactName: `metaengine-browser-windows-candidate-${HEAD}`,
+      apiBase: base,
+      timeoutMs: 100,
+      pollMs: 10,
+      allowInProgressArtifact: true,
+    });
+    assert.equal(result.schema, RESOLUTION_SCHEMA);
+    assert.equal(result.producer_run_id, 77);
+    assert.equal(result.producer_run_attempt, 4);
+    assert.equal(result.producer_completed, false);
+    assert.equal(result.producer_conclusion, null);
+    assert.equal(result.artifact_id, 88);
+  });
+});
+
 test('resolveProducerRun reports bounded timeout for in-progress producer', async () => {
   await withServer((req, res) => {
     if (req.url.startsWith('/repos/o/r/actions/runs?')) {
@@ -375,6 +456,98 @@ test('resolveProducerRun rejects success without exact artifact', async () => {
         pollMs: 10,
       }),
       (error) => error?.code === 'installer_provenance_artifact_absent',
+    );
+  });
+});
+
+test('waitProducerSuccess binds the exact early-artifact run until terminal success', async () => {
+  let reads = 0;
+  await withServer((req, res) => {
+    if (req.url === '/repos/o/r/actions/runs/77') {
+      reads += 1;
+      return json(res, 200, {
+        id: 77,
+        run_attempt: 4,
+        name: PRODUCER_WORKFLOW,
+        head_sha: HEAD,
+        status: reads < 2 ? 'in_progress' : 'completed',
+        conclusion: reads < 2 ? null : 'success',
+      });
+    }
+    res.writeHead(404); res.end();
+  }, async (base) => {
+    const result = await waitProducerSuccess({
+      repo: 'o/r',
+      head: HEAD,
+      runId: 77,
+      runAttempt: 4,
+      apiBase: base,
+      timeoutMs: 200,
+      pollMs: 10,
+    });
+    assert.equal(result.schema, PRODUCER_WAIT_SCHEMA);
+    assert.equal(result.producer_run_id, 77);
+    assert.equal(result.producer_run_attempt, 4);
+    assert.equal(result.producer_conclusion, 'success');
+    assert.equal(result.verified, true);
+  });
+  assert.equal(reads, 2);
+});
+
+test('waitProducerSuccess fails closed when the bound producer finishes red', async () => {
+  await withServer((req, res) => {
+    if (req.url === '/repos/o/r/actions/runs/77') {
+      return json(res, 200, {
+        id: 77,
+        run_attempt: 4,
+        name: PRODUCER_WORKFLOW,
+        head_sha: HEAD,
+        status: 'completed',
+        conclusion: 'failure',
+      });
+    }
+    res.writeHead(404); res.end();
+  }, async (base) => {
+    await assert.rejects(
+      waitProducerSuccess({
+        repo: 'o/r',
+        head: HEAD,
+        runId: 77,
+        runAttempt: 4,
+        apiBase: base,
+        timeoutMs: 100,
+        pollMs: 10,
+      }),
+      (error) => error?.code === 'installer_provenance_producer_failed',
+    );
+  });
+});
+
+test('waitProducerSuccess rejects producer identity drift before trusting terminal state', async () => {
+  await withServer((req, res) => {
+    if (req.url === '/repos/o/r/actions/runs/77') {
+      return json(res, 200, {
+        id: 77,
+        run_attempt: 4,
+        name: PRODUCER_WORKFLOW,
+        head_sha: OTHER_HEAD,
+        status: 'completed',
+        conclusion: 'success',
+      });
+    }
+    res.writeHead(404); res.end();
+  }, async (base) => {
+    await assert.rejects(
+      waitProducerSuccess({
+        repo: 'o/r',
+        head: HEAD,
+        runId: 77,
+        runAttempt: 4,
+        apiBase: base,
+        timeoutMs: 100,
+        pollMs: 10,
+      }),
+      (error) => error?.code === 'producer_head_mismatch',
     );
   });
 });
