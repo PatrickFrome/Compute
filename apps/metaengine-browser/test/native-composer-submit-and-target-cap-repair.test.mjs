@@ -212,6 +212,68 @@ test('R84 live regression: editable AX descendants do not become false composer 
   assert.equal(frame.semantic_targets.some((row) => row.backend_node_id === 2303), false, 'editable paragraph descendant stays non-actionable');
 });
 
+test('R97: CAPTURE exposes exact AX focus readback without geometry', async () => {
+  const { captureSemanticFrame } = await import('../src/native-browser-control.mjs');
+  const nodes = [
+    {
+      ...ax('button', 'Agent', 2401),
+      properties: [
+        { name: 'focusable', value: { type: 'boolean', value: true } },
+        { name: 'focused', value: { type: 'boolean', value: true } },
+      ],
+    },
+    {
+      ...ax('button', 'Chat', 2402),
+      properties: [
+        { name: 'focusable', value: { type: 'boolean', value: true } },
+        { name: 'focused', value: { type: 'boolean', value: false } },
+      ],
+    },
+  ];
+
+  const listeners = new Map();
+  let attached = false;
+  const debuggerApi = {
+    isAttached: () => attached,
+    attach: () => { attached = true; },
+    detach: () => { attached = false; },
+    on(name, fn) { const rows = listeners.get(name) || new Set(); rows.add(fn); listeners.set(name, rows); },
+    off(name, fn) { listeners.get(name)?.delete(fn); },
+    async sendCommand(method) {
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame-root', url: 'https://chat.z.ai/' } } };
+      if (method === 'Runtime.enable') {
+        for (const fn of listeners.get('message') || []) {
+          fn({}, 'Runtime.executionContextCreated', { context: { id: 1, uniqueId: 'ctx-r97-focus', auxData: { frameId: 'frame-root', isDefault: true } } }, null);
+        }
+        return {};
+      }
+      if (method === 'Accessibility.getFullAXTree') return { nodes };
+      if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1200, clientHeight: 800 } };
+      if (['Page.enable', 'DOM.enable', 'Accessibility.enable', 'Page.setLifecycleEventsEnabled', 'Network.enable', 'Target.setAutoAttach', 'DOM.getDocument'].includes(method)) return {};
+      throw new Error(`unexpected_debugger_command:${method}`);
+    },
+  };
+  const webContents = {
+    id: 9401,
+    debugger: debuggerApi,
+    isDestroyed: () => false,
+    getURL: () => 'https://chat.z.ai/',
+    getTitle: () => 'Z.ai',
+    getOSProcessId: () => 99401,
+    getOrCreateDevToolsTargetId: () => 'target-9401',
+  };
+
+  const frame = await captureSemanticFrame(webContents);
+  const agent = frame.semantic_targets.find((row) => row.name === 'Agent');
+  assert.equal(agent.focusable, true);
+  assert.equal(agent.focused, true);
+  assert.equal(frame.focused_target_count, 1);
+  assert.equal(frame.focused_target?.name, 'Agent');
+  assert.equal(frame.focused_target?.backend_node_id, 2401);
+  assert.equal(frame.focus_readback_geometry_free, true);
+  assert.ok(frame.focused_target?.semantic_ref, 'focused target retains exact semantic identity');
+});
+
 // ---------------------------------------------------------------------------
 // D-P2 (2026-09-18): the ChatGPT composer stopped acting on a synthetic Enter;
 // the submit path must keep Enter (zero-geometry background contract) but fall
