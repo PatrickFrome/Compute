@@ -73,6 +73,12 @@ For grouped stages the dock exposes a small module menu. Thus the primary vocabu
 
 The R94 dock keeps the existing 36px (`h-9`) pagebar height. This is important because native Browser WebContentsView bounds reserve `ME2_PRIMARY_PAGEBAR_HEIGHT`; changing renderer height without the native layout contract would cause overlap/drift.
 
+## Post-implementation visual review
+
+Physical Package Smoke capture of the first R94 pass confirmed the seven-stage dock works, but also exposed one duplicated navigation axis: the workspace name appeared both in the new TopBar breadcrumb and as a second selector in the bottom dock. That weakens the intended model because workspace (global context) and workflow stage (current production step) read as peers.
+
+R94 therefore moves the actual Workspace selector/reset control into TopBar and removes it from PageBar. The bottom strip now has one job only: workflow-stage navigation. This keeps the two axes visually and semantically separate without changing the existing workspace persistence model.
+
 ## Keyboard transition
 
 `Alt+1..7` selects the seven workflow stages. `Alt+Left/Right` retains exact page history. Legacy modules remain reachable from grouped menus and global palette.
