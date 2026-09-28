@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { classifyAgentPlatformSurface } from './browser-agent-platform.mjs';
+import { assertAgentSurfaceProofBinding } from './agent-origin-proof.mjs';
 
 let fleetRuntime = null;
 
@@ -133,6 +134,7 @@ export async function markFleetTransportProvenFromNativeFrame({
   expected_conversation_url_sha256,
   expected_transport_url_sha256,
   expected_agent_surface_sha256,
+  expected_agent_surface_proof,
 } = {}) {
   if (!fleetRuntime) throw new Error('fleet_runtime_unavailable');
   const agent = exactAgent(fleetRuntime.snapshot(), binding);
@@ -155,8 +157,21 @@ export async function markFleetTransportProvenFromNativeFrame({
     throw new Error('fleet_runtime_agent_surface_hash_required');
   }
 
+  const currentStage = String(agent?.transport_proof?.transport_stage || 'CONVERSATION');
+  const requiresOriginProof = transport.stage === 'CONVERSATION'
+    && (String(agent.lifecycle_state) !== 'ACTIVE' || currentStage === 'PRECONVERSATION_ROOT');
+  let agentOriginBinding = null;
+  if (transport.stage === 'CONVERSATION' && (requiresOriginProof || expected_agent_surface_proof)) {
+    if (!expected_agent_surface_proof) throw new Error('fleet_runtime_agent_surface_proof_required');
+    agentOriginBinding = assertAgentSurfaceProofBinding({
+      proof: expected_agent_surface_proof,
+      expected_sha256: agentSurfaceHash,
+      target_id: agent.target_id,
+      process_incarnation_id: processIncarnation,
+    });
+  }
+
   if (String(agent.lifecycle_state) === 'ACTIVE') {
-    const currentStage = String(agent?.transport_proof?.transport_stage || 'CONVERSATION');
     if (currentStage !== 'PRECONVERSATION_ROOT') {
       if (transport.stage === 'CONVERSATION'
           && String(agent?.transport_proof?.agent_surface_sha256 || '').toLowerCase() !== agentSurfaceHash) {
@@ -205,6 +220,7 @@ export async function markFleetTransportProvenFromNativeFrame({
       generation_epoch: upgraded.generation_epoch,
       conversation_url_sha256: expectedHash,
       agent_surface_sha256: agentSurfaceHash,
+      agent_origin_proof_validated: Boolean(agentOriginBinding),
       process_incarnation_sha256: sha256(processIncarnation),
       automatic_retry_allowed: false,
       authority_effect: false,
@@ -259,6 +275,7 @@ export async function markFleetTransportProvenFromNativeFrame({
     transport_stage: transport.stage,
     conversation_url_sha256: expectedHash,
     agent_surface_sha256: transport.stage === 'CONVERSATION' ? agentSurfaceHash : null,
+    agent_origin_proof_validated: transport.stage === 'CONVERSATION' ? Boolean(agentOriginBinding) : false,
     process_incarnation_sha256: sha256(processIncarnation),
     automatic_retry_allowed: false,
     authority_effect: false,
