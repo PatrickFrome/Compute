@@ -49,7 +49,10 @@ async function smoke(exe, manifest) {
       Path: runtimePath,
       NODE_PATH: '',
       BUN_INSTALL: '',
-      ME2_BOOT_MODE: 'probe',
+      // Deliberately hostile values: the packaged Browser daemon must ignore
+      // them and still boot under the probe-only entrypoint.
+      ME2_BOOT_MODE: 'full',
+      ME2_DAEMON_BOOT_MODE: 'full',
       ME2_DATA_DIR: dataDir,
       ME2_REST_PORT: String(restPort),
       ME2_WS_PORT: String(wsPort),
@@ -99,6 +102,7 @@ async function smoke(exe, manifest) {
       state_version: String(stateVersion),
       state_contract: String(state.contract),
       boot_mode: 'probe',
+      hostile_boot_mode_override_rejected: true,
       external_bun_used: false,
       external_runtime_path_sanitized: process.platform === 'win32',
     };
@@ -120,6 +124,8 @@ assert.match(String(manifest.daemon_version), /^\d+\.\d+\.\d+(?:[-+].+)?$/);
 assert.equal(manifest.runtime_embedded, true);
 assert.equal(manifest.external_bun_required, false);
 assert.equal(manifest.default_browser_host_boot_mode, 'probe');
+assert.equal(manifest.probe_only_entrypoint, 'browser-probe-entry.ts');
+assert.equal(manifest.browser_host_mode_override_allowed, false);
 assert.equal(manifest.browser_probe_read_only, true);
 assert.equal(manifest.model_execution_enabled, false);
 assert.equal(manifest.provider_api_enabled, false);
@@ -145,6 +151,8 @@ const proof = {
   runtime_embedded: true,
   external_bun_required: false,
   package_manifest_verified: true,
+  probe_only_entrypoint: manifest.probe_only_entrypoint,
+  browser_host_mode_override_allowed: manifest.browser_host_mode_override_allowed,
   browser_probe_read_only: true,
   model_execution_enabled: false,
   provider_api_enabled: false,
