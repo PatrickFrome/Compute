@@ -1,7 +1,10 @@
+import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
+  isAgentPlatformConversationUrl,
+  normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformComposer,
   resolveAgentPlatformSelectedModel,
@@ -10,6 +13,8 @@ import {
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
 const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
+const HASH_RE = /^[a-f0-9]{64}$/;
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
 function exact(frame, role, names) {
   const rows = (frame?.semantic_targets || []).filter((row) => {
@@ -29,6 +34,7 @@ export function evaluateFleetSubmitReadiness({
   selected_tab_id,
   phase = 'PRE_CLICK',
   platform = 'CHATGPT',
+  agent_origin_proof = null,
 } = {}) {
   const expectedTab = String(expected_tab_id || '');
   const frameTab = String(frame?.tab_id || '');
@@ -77,6 +83,56 @@ export function evaluateFleetSubmitReadiness({
   // (semantic addressing is geometry-independent by design). The viewport is
   // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
+    // R98: a task may run in a /c/<id> frame only when the current exact
+    // tab/target is backed by the durable proof created by the Agent-home
+    // promotion path. The URL by itself has zero Agent authority.
+    if (isAgentPlatformConversationUrl(frame?.url)) {
+      const proof = agent_origin_proof;
+      if (!proof
+          || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1'
+          || proof.authority_effect !== false
+          || String(proof.tab_id || '') !== expectedTab
+          || String(proof.target_id || '').toLowerCase() !== expectedTarget
+          || !HASH_RE.test(String(proof.conversation_url_sha256 || '').toLowerCase())
+          || !HASH_RE.test(String(proof.agent_surface_sha256 || '').toLowerCase())) {
+        return Object.freeze({ ready: false, reason: 'AGENT_ORIGIN_PROOF_INVALID', foreground, authority_effect: false });
+      }
+      let normalizedConversation = null;
+      try { normalizedConversation = normalizeAgentPlatformConversationUrl(frame.url); } catch {}
+      if (!normalizedConversation || sha256(normalizedConversation) !== String(proof.conversation_url_sha256).toLowerCase()) {
+        return Object.freeze({ ready: false, reason: 'AGENT_SESSION_CONVERSATION_MISMATCH', foreground, authority_effect: false });
+      }
+      const composer = resolveAgentPlatformComposer(frame);
+      if (!composer) {
+        return Object.freeze({ ready: false, reason: 'AGENT_SESSION_COMPOSER_NOT_UNIQUE', foreground, authority_effect: false });
+      }
+      return Object.freeze({
+        ready: true,
+        reason: 'READY_FOR_PROVEN_AGENT_SESSION_ENTER_SUBMIT',
+        phase: readinessPhase,
+        platform: AGENT_PLATFORM_ID,
+        agent_surface: null,
+        model_proof: null,
+        durable_agent_origin_proof: Object.freeze({
+          conversation_url_sha256: String(proof.conversation_url_sha256).toLowerCase(),
+          agent_surface_sha256: String(proof.agent_surface_sha256).toLowerCase(),
+        }),
+        composer,
+        send_control: null,
+        viewport: Object.freeze({ width, height }),
+        viewport_rendered: width > 0 && height > 0,
+        submit_strategy: 'PROVEN_AGENT_SESSION_TYPE_WITH_ENTER_READBACK',
+        send_required_before_type: false,
+        send_required_before_click: false,
+        named_send_control_exists: false,
+        automatic_retry_allowed: false,
+        page_data_authority: false,
+        authority_effect: false,
+      });
+    }
+
+    // Promotion-time readiness remains semantic and must positively prove the
+    // Agent home + required model + exact Agent task composer.
     const agentSurface = resolveAgentPlatformAgentSurface(frame);
     if (!agentSurface) {
       return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
