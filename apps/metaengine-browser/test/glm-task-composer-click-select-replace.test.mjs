@@ -239,7 +239,7 @@ test('conversation surface: ignored clear fails closed with no coordinate fallba
   assert.equal(h.calls.some(([m]) => m === 'Input.dispatchMouseEvent'), false);
 });
 
-test('preexisting exact match verifies without any gesture (resume path)', async () => {
+test('preexisting exact match skips replace gesture while submit readback can prove a new Agent conversation', async () => {
   const h = fakeTaskSurface({ initialDraft: 'D-M3 TASK PROMPT' });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
@@ -248,7 +248,7 @@ test('preexisting exact match verifies without any gesture (resume path)', async
   assert.equal(result.replace_gesture, 'PREEXISTING_MATCH');
   assert.equal(h.counts().insertCount, 0);
   assert.equal(h.counts().enterCount, 1);
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
 });
 
 test('replace_gesture is null on the unverified legacy lane', async () => {
