@@ -8,7 +8,7 @@ const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
 const ROLE_RE=/^[A-Z][A-Z0-9_]{1,63}$/;
 const FINALISH=new Set(['RESULT_READY','BLOCKED','AMBIGUOUS','COMPLETED','FAILED']);
 const RECOVERY_CLASSES=new Set(['PRE_EFFECT_ABORTED','EFFECT_PROVEN']);
-const EFFECT_STATES=new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION']);
+const EFFECT_STATES=new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED']);
 const TRANSPORT_ADMISSION_FENCES=new Set([
   'devos_transport_claim_state_invalid',
   'devos_transport_supervisor_snapshot_missing',
@@ -117,9 +117,10 @@ function recovery(body={}){
   if(row.physical_effect_attempted!==true||row.effect_barrier_crossed!==true||!proof||typeof proof!=='object'||Array.isArray(proof))throw new Error('devos_recovery_effect_proven_invalid');
   const proofPrompt=String(proof.prompt_sha256||'').toLowerCase();
   const conversation=String(proof.conversation_url_sha256||'').toLowerCase();
+  const agentSurface=String(proof.agent_surface_sha256||'').toLowerCase();
   const effectState=String(proof.effect_state||'').toUpperCase();
-  if(proofPrompt!==prompt_sha256||!HASH_RE.test(conversation)||!EFFECT_STATES.has(effectState))throw new Error('devos_recovery_effect_proven_invalid');
-  return {recovery_class,prompt_sha256,physical_effect_attempted:true,effect_barrier_crossed:true,proof:{prompt_sha256:proofPrompt,conversation_url_sha256:conversation,effect_state:effectState},automatic_retry_allowed:false,authority_effect:false};
+  if(proofPrompt!==prompt_sha256||!HASH_RE.test(conversation)||!HASH_RE.test(agentSurface)||!EFFECT_STATES.has(effectState))throw new Error('devos_recovery_effect_proven_invalid');
+  return {recovery_class,prompt_sha256,physical_effect_attempted:true,effect_barrier_crossed:true,proof:{prompt_sha256:proofPrompt,conversation_url_sha256:conversation,agent_surface_sha256:agentSurface,effect_state:effectState},automatic_retry_allowed:false,authority_effect:false};
 }
 function boundedAgents(value){
   const rows=Array.isArray(value?.agents)?value.agents:[];
@@ -185,15 +186,18 @@ function runningForAgents(snapshot,agents){
   const proofByKey=new Map();
   for(const e of Array.isArray(snapshot?.recent_events)?snapshot.recent_events:[]){
     if(String(e?.event_type||'')!=='TASK_TRANSPORT_PROVEN')continue;
-    const hash=String(e?.payload?.conversation_url_sha256||'').toLowerCase();
-    if(HASH_RE.test(hash))proofByKey.set(`${String(e.task_id||'').toLowerCase()}:${Number(e.lease_generation)}`,hash);
+    const conversation=String(e?.payload?.conversation_url_sha256||'').toLowerCase();
+    const agentSurface=String(e?.payload?.agent_surface_sha256||'').toLowerCase();
+    if(HASH_RE.test(conversation)&&HASH_RE.test(agentSurface)){
+      proofByKey.set(`${String(e.task_id||'').toLowerCase()}:${Number(e.lease_generation)}`,{conversation_url_sha256:conversation,agent_surface_sha256:agentSurface});
+    }
   }
   const out=[];
   for(const t of Array.isArray(snapshot?.active_tasks)?snapshot.active_tasks:[]){
     if(String(t?.state||'').toUpperCase()!=='RUNNING')continue;
     const agentId=String(t?.lease_agent_id||'').toLowerCase(); const agent=allowed.get(agentId); if(!agent)continue;
     const generation=Number(t?.lease_generation); const proof=proofByKey.get(`${String(t?.task_id||'').toLowerCase()}:${generation}`)||null;
-    out.push({task_id:t.task_id,agent_id:agentId,role:String(t.role||'').toUpperCase(),base_sha:String(t.base_sha||'').toLowerCase(),lease_generation:generation,tab_id:String(t.lease_tab_id||''),target_id:String(t.lease_target_id||'').toLowerCase(),agent_generation_epoch:Number(t.lease_agent_generation_epoch),conversation_url_sha256:proof,automatic_retry_allowed:false,authority_effect:false});
+    out.push({task_id:t.task_id,agent_id:agentId,role:String(t.role||'').toUpperCase(),base_sha:String(t.base_sha||'').toLowerCase(),lease_generation:generation,tab_id:String(t.lease_tab_id||''),target_id:String(t.lease_target_id||'').toLowerCase(),agent_generation_epoch:Number(t.lease_agent_generation_epoch),conversation_url_sha256:proof?.conversation_url_sha256||null,agent_surface_sha256:proof?.agent_surface_sha256||null,automatic_retry_allowed:false,authority_effect:false});
   }
   return out;
 }
@@ -338,9 +342,13 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
-      if(!HASH_RE.test(String(proof.prompt_sha256||'').toLowerCase())||!HASH_RE.test(String(proof.conversation_url_sha256||'').toLowerCase())||!EFFECT_STATES.has(String(proof.effect_state||'').toUpperCase()))return json(400,{error:'transport_not_proven'});
+      const promptSha=String(proof.prompt_sha256||'').toLowerCase();
+      const conversationSha=String(proof.conversation_url_sha256||'').toLowerCase();
+      const agentSurfaceSha=String(proof.agent_surface_sha256||'').toLowerCase();
+      const effectState=String(proof.effect_state||'').toUpperCase();
+      if(!HASH_RE.test(promptSha)||!HASH_RE.test(conversationSha)||!HASH_RE.test(agentSurfaceSha)||!EFFECT_STATES.has(effectState))return json(400,{error:'transport_not_proven'});
       try{
-        const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:{prompt_sha256:String(proof.prompt_sha256).toLowerCase(),conversation_url_sha256:String(proof.conversation_url_sha256).toLowerCase(),effect_state:String(proof.effect_state).toUpperCase()}});
+        const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:{prompt_sha256:promptSha,conversation_url_sha256:conversationSha,agent_surface_sha256:agentSurfaceSha,effect_state:effectState}});
         return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
       }catch(error){const fenced=fencedRpcResponse(error);if(fenced)return fenced;throw error;}
     }
