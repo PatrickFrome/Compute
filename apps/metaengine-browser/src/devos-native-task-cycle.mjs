@@ -504,6 +504,10 @@ export class DevOsNativeTaskCycle {
         // promotion lease, reset only this Browser-owned tab to the canonical
         // authenticated root, then prove the root by fresh CAPTURE. No model
         // message is sent and the old conversation is never task-admitted.
+        if (!bootstrapBarrier) {
+          await beginFleetTransportBootstrapAttempt(binding);
+          bootstrapBarrier = true;
+        }
         bootstrapEffectState = 'UNPROVEN_CONVERSATION_RESET_DISPATCHED';
         await this.#executeCommand({
           action: 'NAVIGATE',
@@ -563,8 +567,10 @@ export class DevOsNativeTaskCycle {
               authority_effect: false,
             };
           } else {
-            await beginFleetTransportBootstrapAttempt(binding);
-            bootstrapBarrier = true;
+            if (!bootstrapBarrier) {
+              await beginFleetTransportBootstrapAttempt(binding);
+              bootstrapBarrier = true;
+            }
             bootstrapEffectState = 'AGENT_NAV_DISPATCHED';
             await this.#executeCommand({
               action: 'TYPED_CLICK',
