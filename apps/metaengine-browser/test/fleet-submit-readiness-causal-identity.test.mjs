@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { evaluateFleetSubmitReadiness } from '../src/fleet-submit-readiness.mjs';
 
+
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
 function semref(id) {
   return { schema:'metaengine.native-browser.semantic-ref.v1', semantic_ref_id:`semref_${String(id).padEnd(64,'0').slice(0,64)}` };
@@ -152,4 +155,79 @@ test('GLM lane rejects Agent surface when selected model is GLM-5.2', () => {
   assert.equal(readiness.reason,'AGENT_MODEL_MISMATCH');
   assert.equal(readiness.observed_model,'GLM-5.2');
   assert.equal(readiness.required_model,'GLM-5.3-Flash');
+});
+
+
+test('GLM conversation readiness accepts only exact durable Agent-origin evidence for the same conversation', () => {
+  const url = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+  const frame = {
+    ...glmAgentFrame(),
+    url,
+    semantic_targets: [
+      { role:'textbox', name:'Describe your task', backend_node_id:33, semantic_ref:semref('task-composer') },
+    ],
+    interaction_tree:{ schema:'metaengine.native-browser.interaction-tree.v1', elements:[{role:'statictext',text:'GLM-5.3-Flash'}] },
+  };
+  const proof = {
+    schema:'metaengine.browser.fleet-transport-proof.v1',
+    tab_id:EXPECTED.expected_tab_id,
+    target_id:EXPECTED.expected_target_id,
+    generation_epoch:7,
+    conversation_url_sha256:sha256(url),
+    agent_surface_sha256:'d'.repeat(64),
+    proven_at:'2026-09-28T00:00:00.000Z',
+    authority_effect:false,
+  };
+  const readiness = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    frame,
+    agent_transport_proof:proof,
+    agent_lifecycle_state:'ACTIVE',
+    expected_agent_generation_epoch:7,
+  });
+  assert.equal(readiness.ready,true);
+  assert.equal(readiness.agent_surface,null);
+  assert.equal(readiness.agent_origin_proof.stage,'AGENT_CONVERSATION');
+  assert.equal(readiness.agent_origin_proof.agent_surface_sha256,'d'.repeat(64));
+});
+
+test('GLM conversation readiness rejects stale or mismatched durable Agent-origin evidence', () => {
+  const url = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+  const frame = {
+    ...glmAgentFrame(),
+    url,
+    semantic_targets: [
+      { role:'textbox', name:'Describe your task', backend_node_id:33, semantic_ref:semref('task-composer') },
+    ],
+    interaction_tree:{ schema:'metaengine.native-browser.interaction-tree.v1', elements:[{role:'statictext',text:'GLM-5.3-Flash'}] },
+  };
+  const baseProof = {
+    schema:'metaengine.browser.fleet-transport-proof.v1',
+    tab_id:EXPECTED.expected_tab_id,
+    target_id:EXPECTED.expected_target_id,
+    generation_epoch:7,
+    conversation_url_sha256:sha256(url),
+    agent_surface_sha256:'d'.repeat(64),
+    proven_at:'2026-09-28T00:00:00.000Z',
+    authority_effect:false,
+  };
+  for (const proof of [
+    { ...baseProof, conversation_url_sha256:'e'.repeat(64) },
+    { ...baseProof, agent_surface_sha256:null },
+    { ...baseProof, generation_epoch:8 },
+  ]) {
+    const readiness = evaluateFleetSubmitReadiness({
+      ...EXPECTED,
+      platform:'GLM_ZAI',
+      phase:'PRE_TYPE',
+      frame,
+      agent_transport_proof:proof,
+      agent_lifecycle_state:'ACTIVE',
+      expected_agent_generation_epoch:7,
+    });
+    assert.equal(readiness.ready,false);
+    assert.equal(readiness.reason,'AGENT_SURFACE_NOT_PROVEN');
+  }
 });
