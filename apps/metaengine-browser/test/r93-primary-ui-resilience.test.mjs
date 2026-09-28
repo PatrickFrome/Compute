@@ -86,19 +86,17 @@ test('R93 canonical ME2 session selection uses Browser-owned session->tab bindin
   }
 });
 
-test('R93 primary renderer exposes only the narrow bound-session presentation intent', async () => {
-  const preload = await fs.readFile(path.join(browserRoot, 'src', 'preload-shell.cjs'), 'utf8');
-  const main = await fs.readFile(path.join(browserRoot, 'src', 'main.mjs'), 'utf8');
+test('R102 retired Command renderer cannot consume the old bound-session presentation intent', async () => {
   const command = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx'), 'utf8');
 
-  assert.match(preload, /selectPrimaryAgentSession/);
-  assert.match(preload, /metaengine:shell:primary-agent-session-select/);
-  assert.match(main, /me2MissionSelectSession/);
-  assert.match(main, /primary-agent-session-select/);
-  assert.match(command, /selectPrimaryAgentSession/);
+  assert.match(command, /data-testid="retired-command-page"/);
+  assert.match(command, /data-authority-effect="false"/);
+  assert.match(command, /legacy daemon Command surface is retired/i);
+  assert.doesNotMatch(command, /selectPrimaryAgentSession/);
   assert.doesNotMatch(command, /BROWSER_SELECT_TAB/);
   assert.doesNotMatch(command, /loadBrowserTabs/);
   assert.doesNotMatch(command, /resolveExactAgentTab/);
+  assert.doesNotMatch(command, /me2MissionSelectSession/);
 });
 
 test('R93 shared agent list polling has a bounded request lifetime', async () => {
