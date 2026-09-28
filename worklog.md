@@ -11557,3 +11557,61 @@ Stage Summary:
 - RESEARCHER: silent-but-alive (re-issues TOOL_REQUEST each generation); no supervisor action needed until their next generation lands or next tick readback.
 - Next tick: (1) RESEARCHER ACK + CRITIC-gates readback (marker-based); (2) if operator green-light observed (or 419203 lane idle), capsule refresh proposal ready: content-sync 49 paths, 1 commit, T1-lease discipline; (3) TYPED_CLICK static-element probe remains in 419203 lane.
 - Security: no secrets printed/committed; read-only operations this tick (zero browser mutations, zero shared-branch mutations).
+
+---
+Task ID: 419718-1330-SCHEMA-CLICK
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718 @13:30)
+Task: Directive-verified continuation (sha 0aa0957922d0f9d6). Per 1315 next-tick: (1) RESEARCHER ACK readback; (2) TYPED_CLICK static-element probe; (3) DOWNLOAD_STATUS schema calibration.
+
+Work Log:
+- R0 attribution (recent-40 commands audit): ALL issuers are zai-* lanes (1240/1300/1307/1330); NO rogue command actor. 27-29 tab census decomposed by TAB_CENSUS v1 roles: USER 24-25 (operator's own Windows machine — browser is their desktop), FLEET 4 (intact), SUPERVISOR 1 (Mission Control console). USER tabs left untouched (unowned).
+- R1 RESEARCHER marker-readback: SILENT — total_chars=34786 unchanged since 13:07, 6x TOOL_REQUEST re-issues, reply-zone 234B after last TOOL_REQUEST, no ACK, no gate words. Noise discipline held: no re-ping (delivery chain 3x proven; consumption expected on their generation cadence).
+- M-lane TYPED_CLICK static probe: NEW_TAB -> NAVIGATE example.com (COMPLETED, effect-proofed) -> CAPTURE. Link-picker fallback selected an accessible_name=None anchor (real "More information" link not matched by name/text/label fields) -> TYPED_CLICK COMPLETED with NO navigation effect (url unchanged) -> verdict RPC-OK-NO-EFFECT, no blind retry per protocol. Root cause isolated: CAPTURE accessible-name field mapping for links — next probe must dump ALL link target fields (href if exposed) and select precisely. REPAIRED-pending verdict unchanged (validation plane + native execution already proven; effect proof blocked on target SELECTION, not the mechanic).
+- SCHEMA WINS (2 open items closed): (1) TAB_CENSUS v1 metaengine.browser.tab-census.v1 — counts under total_tabs/by_kind/by_role, fleet_tab_ids/supervisor_tab_ids explicit, ceilings (max_tabs=48) + backpressure fields; earlier "census=0" was MY parse bug (wrong keys), not browser anomaly. (2) DOWNLOAD_STATUS v1 metaengine.verified-download-manager.v1 — top keys last/active/schema/root_path/authority_effect/install_authority/arbitrary_execution; the 13:00 "items list empty" mystery RESOLVED (list lives under last|active, not downloads/items); last receipt = verified 13:04 CONTEXT.md download (sha256 match, authority_effect=true). DOWNLOAD_CANCEL remains UNTESTED (active=None during window).
+- Cleanup: own probe tab CLOSE_TAB COMPLETED (census release_signal=PHYSICAL_TAB_CLOSED); fleet 4/4 intact; tab ceilings healthy (headroom 19+ user, 24 fleet, 3 supervisor).
+- Artifacts: browser-test-results-r419718-1330.json (16 records), browser-test-results-r419718-1335-census.json (raw census + DL receipts), r419718-1330.py, r419718-1335-census.py.
+
+Stage Summary:
+- Receipt schemas calibrated for TAB_CENSUS and DOWNLOAD_STATUS (both now fully mapped; future parsing uses v1 schema keys).
+- TYPED_CLICK static-element effect proof remains open with instrumented fix path (full link-target dump next probe).
+- RESEARCHER silent-but-alive; USER-role tab growth attributed to operator machine, no supervisor action needed.
+- Next tick: (1) TYPED_CLICK probe v2 — dump all link targets, select "More information" by exposed fields, effect-proof via iana.org URL; (2) RESEARCHER marker-readback; (3) capsule refresh (content-sync 49 paths) gated on operator green-light; (4) DOWNLOAD_CANCEL probe only when an active download exists.
+- Security: no secrets printed/committed; mutations on own tab only (NEW_TAB/NAVIGATE/TYPED_CLICK/CLOSE_TAB), gaps >=16-18s, readback after each.
+
+---
+Task ID: AUD-20260928-054252
+Agent: Super Z (GLM, IM cron-agent-loop, Job 416761 @13:42)
+Task: FULL-AUDIT tick. Script was MISSING post-reset -> restored from PolarFS mirror, ran v2.0.
+
+Work Log:
+- full-audit.sh restored (15894B) from /tmp/my-project/scripts/phoenix/ (PolarFS) — "lost in reset" gap CLOSED; anonymous-clone fallback not needed.
+- Audit: score=85% (was 73% per CONTEXT §10) DONE=17 PARTIAL=2 BLOCKED=2; report audit/audit-20260928-054252.md.
+- BLOCKED x2, both operator-side R2 credentials, NOT autonomously fixable, no operator re-request per discipline: (1) R2 buckets list — cfat_ scope token insufficient (success:false); (2) R2 S3 SIGv4 — secret access key not provided (only Access Key ID exists).
+- KEY STATUS UPDATE: Supabase REST=200, service JWT ALIVE since 2026-09-27 (section 3.2; corroborated by heartbeat sb=9ok) — CONTEXT.md §9 note "JWT lost 2026-09-26" was STALE, fixed in-place this tick. GitHub API 200, cfut_ verify success, vault 23 snapshots HEAD 48e7514, worklog canonical sha12=ffc1be28581f.
+- Minor script defects noted (line-178 incidents.log path, cut delimiter warning) — cosmetic, audit output complete.
+
+Stage Summary:
+- Score 73->85; remaining blocker = single R2 credential pair (operator-side).
+- full-audit.sh restored + executable; audit channel fully operational again.
+- CONTEXT.md §9 corrected (Supabase channel alive); compactor/heartbeat will propagate.
+- Security: no secrets printed; values masked in report.
+
+---
+Task ID: 419718-1350-CLICK-EFFECT-PLANE
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718 @13:45)
+Task: Directive-verified continuation (sha 0aa0957922d0f9d6). Per 1330 next-tick: (1) TYPED_CLICK probe v2 with full link-target dump; (2) RESEARCHER readback.
+
+Work Log:
+- R1 RESEARCHER: SILENT again (total_chars=34786 unchanged since 13:07; reply-zone 234B, no ACK). No re-ping (noise discipline).
+- Probe v2 target dump (example.com): CAPTURE returns EXACTLY 1 semantic target — link "Learn more" (IANA redesigned the page: classic "More information..." premise OBSOLETE). Field mapping: name (NOT accessible_name — my 1330 picker missed it for this reason). semantic-ref v1 schema documented: {schema: metaengine.native-browser.semantic-ref.v1, evidence:{name, role, identity_authority:false}, frame_id, target_id: webcontents:NNN, backend_node_id}.
+- TYPED_CLICK with REAL ref (v2): COMPLETED, URL unchanged after 25s -> no navigation effect.
+- Probe v3 = DIFFERENT mechanism per directive §4 priority-5 (NOT a blind retry): SEMANTIC_FOCUS(link) -> COMPLETED; PRESS_KEY Enter -> COMPLETED; URL still unchanged after 25s.
+- NEW DIAGNOSTIC FINDING: effect-plane gap on link activation — TWO independent activation mechanisms (typed click w/ real ref; focus+keyboard) both return COMPLETED with zero navigation effect on the same external static element. Command plane (validation, ref acceptance, native dispatch) is healthy; the effect vanishes between dispatch and DOM. Family-consistent with 13:00 "target closed while handling command" (view lifecycle). Exactly the directive §19 trap: COMPLETED != success — recorded with physical evidence (url_pre/url_post pairs).
+- Census (post): total_tabs=31 (USER 26 — operator actively browsing, +1 during tick; FLEET 4/4 intact; SUPERVISOR 1). All own probe tabs closed (CLOSE_TAB COMPLETED x2).
+- Artifacts: browser-test-results-r419718-1345.json (full target dump + verdicts), browser-test-results-r419718-1350-kbd.json, browser-test-results-r419718-1335-census.json (re-run), r419718-1345.py, r419718-1350-keyboard.py.
+
+Stage Summary:
+- TYPED_CLICK static-element closure BLOCKED by effect-plane: not a mechanic/contract issue — activation effect on external <a> does not materialize despite COMPLETED from two mechanisms. REPAIRED-pending verdict replaced by precise diagnosis: COMMAND-PLANE WORKS / LINK-EFFECT-PLANE NO-OP.
+- CAPTURE link-target schema calibrated (name field; ref v1 structure) — future pickers must use name/href, not accessible_name.
+- Next tick: (1) effect-plane isolation — TYPED_CLICK on an IN-APP element with verifiable non-nav effect (z.ai sidebar/UI state via CAPTURE delta) to split "activation dead everywhere" vs "cross-origin nav swallowed"; (2) RESEARCHER marker-readback; (3) capsule refresh (49 paths) still gated on operator green-light.
+- Security: no secrets printed/committed; mutations own-tab only, gaps >=16-25s, readback after each.
