@@ -4,86 +4,26 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { me2FleetTabsSetHost } from '../src/me2/me2-fleet-tabs-host.mjs';
-import {
-  me2MissionReconcile,
-  me2MissionSessionBinding,
-  me2MissionSelectSession,
-} from '../src/me2/me2-mission-control.mjs';
-
 const here = path.dirname(fileURLToPath(import.meta.url));
 const browserRoot = path.resolve(here, '..');
 const appsRoot = path.resolve(browserRoot, '..');
 
-test('R93 canonical ME2 session selection uses Browser-owned session->tab binding, not session-id URL inference', async () => {
-  const sessionId = 'me2_internal_session_alpha';
-  const conversationUrl = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-  const rows = new Map([
-    ['tab_supervisor', {
-      tab_id: 'tab_supervisor',
-      role: 'SUPERVISOR',
-      url: 'http://127.0.0.1:3041/ui',
-      title: 'ME2 Mission Control',
-    }],
-    ['tab_agent', {
-      tab_id: 'tab_agent',
-      role: 'FLEET',
-      url: conversationUrl,
-      title: 'Native agent conversation',
-    }],
-  ]);
-  let selected = null;
-  const registry = {
-    snapshot: () => ({ tabs: [...rows.values()] }),
-    census: () => ({ by_role: { SUPERVISOR: 1, FLEET: 1 } }),
-    get: (id) => rows.get(String(id)) ?? null,
-    update: (id, patch) => {
-      const current = rows.get(String(id));
-      if (current) rows.set(String(id), { ...current, ...patch });
-    },
-  };
-  me2FleetTabsSetHost({
-    registry,
-    createTab: async () => { throw new Error('unexpected_create'); },
-    selectTab: async (tabId) => { selected = String(tabId); },
-  });
+test('R107 primary Agent selection belongs only to the native Browser fleet roster', async () => {
+  const main = await fs.readFile(path.join(browserRoot, 'src', 'main.mjs'), 'utf8');
+  const preload = await fs.readFile(path.join(browserRoot, 'src', 'preload-shell.cjs'), 'utf8');
+  const shell = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'shell', 'me2-shell.tsx'), 'utf8');
 
-  const savedFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    ok: true,
-    sessions: [{
-      id: sessionId,
-      status: 'ACTIVE',
-      conversation_url: conversationUrl,
-      title: 'Internal ME2 agent',
-      role: 'CODE',
-    }],
-    status: { total: 1, active: 1 },
-  }), { status: 200, headers: { 'content-type': 'application/json' } });
-  try {
-    await me2MissionReconcile();
-    const binding = me2MissionSessionBinding(sessionId);
-    assert.equal(binding.state, 'BOUND');
-    assert.equal(binding.tab_id, 'tab_agent');
-    assert.equal(binding.conversation_url, conversationUrl);
-    assert.equal(binding.exact_session_binding, true);
-    assert.equal(binding.renderer_routing_authority, false);
-    assert.equal(binding.browser_command_authority, false);
-
-    const selectedResult = await me2MissionSelectSession(sessionId);
-    assert.equal(selectedResult.state, 'BOUND');
-    assert.equal(selectedResult.selection_applied, true);
-    assert.equal(selected, 'tab_agent');
-
-    rows.set('tab_agent', { ...rows.get('tab_agent'), url: 'https://chat.z.ai/c/bbbbbbbb-cccc-4ddd-8eee-ffffffffffff' });
-    selected = null;
-    const stale = await me2MissionSelectSession(sessionId);
-    assert.equal(stale.state, 'STALE');
-    assert.equal(stale.selection_applied, false);
-    assert.equal(selected, null);
-  } finally {
-    globalThis.fetch = savedFetch;
-  }
+  assert.match(main, /function primaryChatFleetRoster\(\)/);
+  assert.match(main, /function selectPrimaryChatActor\(actorId\)/);
+  assert.match(main, /metaengine:shell:primary-chat-fleet-roster/);
+  assert.match(main, /metaengine:shell:primary-chat-actor-select/);
+  assert.doesNotMatch(main, /me2MissionSelectSession|primary-agent-session-select|me2FleetTabsSetHost/);
+  assert.match(preload, /primaryChatFleetRoster/);
+  assert.match(preload, /selectPrimaryChatActor/);
+  assert.doesNotMatch(preload, /selectPrimaryAgentSession|primary-agent-session-select/);
+  assert.match(shell, /primaryChatFleetRoster/);
+  assert.match(shell, /selectPrimaryChatActor/);
+  assert.doesNotMatch(shell, /selectPrimaryAgentSession|me2MissionSelectSession/);
 });
 
 test('R106 retired Command renderer file cannot re-enter the product', async () => {
