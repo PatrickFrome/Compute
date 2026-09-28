@@ -19,6 +19,17 @@ test('R100 PageKey contains product surfaces only', () => {
   }
 });
 
+test('R100 retired route strings normalize to the native Browser fleet without re-entering PageKey', () => {
+  const store = read('me2-ui/src/components/me2/store.tsx');
+  assert.match(store, /export function normalizePageKey\(value: unknown\): PageKey/);
+  assert.match(store, /raw === "command" \|\| raw === "agents" \|\| raw === "compute"/);
+  assert.match(store, /const nextPage = normalizePageKey\(p\)/);
+  const pageType = store.slice(store.indexOf('export type PageKey'), store.indexOf('// R97 native swarm convergence'));
+  assert.equal(pageType.includes('"command"'), false);
+  assert.equal(pageType.includes('"agents"'), false);
+  assert.equal(pageType.includes('"compute"'), false);
+});
+
 test('R100 primary shell imports no daemon Agent/Command/Compute page', () => {
   const shell = read('me2-ui/src/components/me2/shell/me2-shell.tsx');
   for (const legacyImport of [
