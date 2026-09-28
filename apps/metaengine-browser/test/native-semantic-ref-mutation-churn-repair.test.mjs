@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
 
-// D-M1 contract: mutation-only DOM churn (carousel ticks, skeleton loaders,
-// timers) advances ONLY semantic_generation. Before the repair every capture
+// D-M1 contract on a canonical Agent conversation: mutation-only DOM churn
+// (carousel ticks, skeleton loaders, timers) advances ONLY semantic_generation.
+// Before the repair every capture
 // died instantly on such surfaces (live 2026-09-19: three consecutive
 // CAPTURE -> SEMANTIC_TYPE native_semantic_ref_stale failures). The repair
 // re-anchors the ref across that churn by re-resolving the exact node
@@ -34,7 +35,7 @@ function fakeChurningZai({
   composerBox = STANDARD_BOX,
 } = {}) {
   let attached = false;
-  let url = 'https://chat.z.ai/';
+  let url = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   let composerValue = '';
   let axReads = 0;
   let enterCount = 0;
