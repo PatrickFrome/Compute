@@ -17,9 +17,9 @@ function ax(role, name, id, value = null) {
 }
 
 let nextWebContentsId = 7100;
-function fakeZai({ submitWorks = true, navigateOnSubmit = false } = {}) {
+function fakeZai({ submitWorks = true, navigateOnSubmit = false, initialUrl = 'https://chat.z.ai/' } = {}) {
   let attached = false;
-  let url = 'https://chat.z.ai/';
+  let url = initialUrl;
   let composerValue = '';
   let axReads = 0;
   const calls = [];
@@ -109,7 +109,7 @@ test('perception exposes the unnamed GLM composer as a semantic-ref-addressable 
 });
 
 test('GLM composer submits with Enter and proves the composer cleared, zero geometry', async () => {
-  const h = fakeZai();
+  const h = fakeZai({ initialUrl: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   const prompt = 'METAENGINE GLM AGENT PLATFORM TEST TASK';
   const frame = await captureSemanticFrame(h.webContents);
   const composer = frame.semantic_targets.find((row) => row.role === 'textbox');
@@ -161,7 +161,7 @@ test('GLM submit on a fresh conversation proves the /c/ transition', async () =>
       submit_after_type: true,
     },
   });
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
   assert.equal(result.composer_cleared, true);
   assert.equal(result.new_conversation_observed, true);
   assert.match(String(result.post_url_sha256 || ''), /^[a-f0-9]{64}$/);
