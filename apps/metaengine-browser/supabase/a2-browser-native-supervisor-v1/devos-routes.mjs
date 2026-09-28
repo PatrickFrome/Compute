@@ -117,9 +117,10 @@ function recovery(body={}){
   if(row.physical_effect_attempted!==true||row.effect_barrier_crossed!==true||!proof||typeof proof!=='object'||Array.isArray(proof))throw new Error('devos_recovery_effect_proven_invalid');
   const proofPrompt=String(proof.prompt_sha256||'').toLowerCase();
   const conversation=String(proof.conversation_url_sha256||'').toLowerCase();
+  const agentSurface=String(proof.agent_surface_sha256||'').toLowerCase();
   const effectState=String(proof.effect_state||'').toUpperCase();
-  if(proofPrompt!==prompt_sha256||!HASH_RE.test(conversation)||!EFFECT_STATES.has(effectState))throw new Error('devos_recovery_effect_proven_invalid');
-  return {recovery_class,prompt_sha256,physical_effect_attempted:true,effect_barrier_crossed:true,proof:{prompt_sha256:proofPrompt,conversation_url_sha256:conversation,effect_state:effectState},automatic_retry_allowed:false,authority_effect:false};
+  if(proofPrompt!==prompt_sha256||!HASH_RE.test(conversation)||!HASH_RE.test(agentSurface)||!EFFECT_STATES.has(effectState))throw new Error('devos_recovery_effect_proven_invalid');
+  return {recovery_class,prompt_sha256,physical_effect_attempted:true,effect_barrier_crossed:true,proof:{prompt_sha256:proofPrompt,conversation_url_sha256:conversation,agent_surface_sha256:agentSurface,effect_state:effectState},automatic_retry_allowed:false,authority_effect:false};
 }
 function boundedAgents(value){
   const rows=Array.isArray(value?.agents)?value.agents:[];
@@ -338,9 +339,9 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
-      if(!HASH_RE.test(String(proof.prompt_sha256||'').toLowerCase())||!HASH_RE.test(String(proof.conversation_url_sha256||'').toLowerCase())||!EFFECT_STATES.has(String(proof.effect_state||'').toUpperCase()))return json(400,{error:'transport_not_proven'});
+      if(!HASH_RE.test(String(proof.prompt_sha256||'').toLowerCase())||!HASH_RE.test(String(proof.conversation_url_sha256||'').toLowerCase())||!HASH_RE.test(String(proof.agent_surface_sha256||'').toLowerCase())||!EFFECT_STATES.has(String(proof.effect_state||'').toUpperCase()))return json(400,{error:'transport_not_proven'});
       try{
-        const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:{prompt_sha256:String(proof.prompt_sha256).toLowerCase(),conversation_url_sha256:String(proof.conversation_url_sha256).toLowerCase(),effect_state:String(proof.effect_state).toUpperCase()}});
+        const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:{prompt_sha256:String(proof.prompt_sha256).toLowerCase(),conversation_url_sha256:String(proof.conversation_url_sha256).toLowerCase(),agent_surface_sha256:String(proof.agent_surface_sha256).toLowerCase(),effect_state:String(proof.effect_state).toUpperCase()}});
         return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
       }catch(error){const fenced=fencedRpcResponse(error);if(fenced)return fenced;throw error;}
     }
