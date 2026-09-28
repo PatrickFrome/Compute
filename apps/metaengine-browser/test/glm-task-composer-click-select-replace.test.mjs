@@ -8,11 +8,11 @@ import { captureSemanticFrame, executeSemanticCommand } from '../src/native-brow
 // Meanwhile Ctrl+A+Delete through CDP key events DO select-all+clear the whole
 // textarea when the element is FOCUSED — the historical D-M3 "ignored keys"
 // were keys landing on <body> because the gesture never focused the composer.
-// The replace is therefore KEY_ATOMIC-first on EVERY surface (DOM.focus →
-// Ctrl+A → Delete → insertText), with CLICK_SELECT (triple-click + insertText)
-// as the fallback. A gesture that neither verifies nor provably no-ops stops
-// the sequence so no double-append can occur. A preexisting exact match needs
-// no gesture (resume path).
+// R97/R98 replaces that historical gesture chain with independently proven
+// clear-before-insert: DOM.focus → SelectAll/DeleteBackward editor commands →
+// AX value must be exactly empty → one Input.insertText. If clear cannot be
+// proven, no prompt bytes are inserted and no submit occurs. A preexisting
+// exact match needs no replacement gesture (resume path).
 
 function ax(role, name, id, value = null) {
   const node = {
@@ -88,13 +88,15 @@ function fakeTaskSurface({
         // submit — three live dispatches proved Enter submits from the root
         // task surface.
         if (params.key === 'Enter' && params.type === 'rawKeyDown') {
-          if (submitWorks) composerValue = '';
+          if (submitWorks) {
+            composerValue = '';
+            if (currentUrl === 'https://chat.z.ai/') currentUrl = 'https://chat.z.ai/c/11111111-2222-3333-4444-555555555555';
+          }
           enterCount += 1;
           return {};
         }
         if (!keysHonored) return {};
-        if (params.key === 'a' && params.modifiers === 2 && params.type === 'rawKeyDown') composerValue = '';
-        if (params.key === 'Delete' && params.type === 'rawKeyDown' && composerValue === '') composerValue = '';
+        if (params.key === 'Backspace' && params.type === 'rawKeyDown' && (params.commands || []).includes('DeleteBackward')) composerValue = '';
         return {};
       }
       if (method === 'Input.dispatchKeyEvent.enter') return {};
@@ -164,8 +166,8 @@ test('root task surface: focused key-atomic replaces an oversized account-synced
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.replace_gesture, 'CDP_EDIT_COMMAND_CLEAR');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
   assert.equal(result.value_length_before, 'POISONED DRAFT x 26763 chars'.length);
   assert.equal(result.value_length_after, 'D-M3 TASK PROMPT'.length);
   assert.equal(h.counts().tripleClicks, 0);
@@ -178,14 +180,14 @@ test('root task surface: focused key-atomic replaces an oversized account-synced
   assert.ok(focusCalls.length >= 1, 'DOM.focus on the composer expected before KEY_ATOMIC');
 });
 
-test('root task surface: an empty composer types through the key-atomic path without clicks', async () => {
+test('root task surface: an empty composer inserts only after empty-state proof', async () => {
   const h = fakeTaskSurface({ initialDraft: '' });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.replace_gesture, 'EMPTY_COMPOSER_INSERT');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
   assert.equal(h.counts().insertCount, 1);
   assert.equal(h.counts().tripleClicks, 0);
 });
@@ -203,11 +205,9 @@ test('root task surface: ignored keys mutate the draft and fail fast before clic
     () => dispatchTask(h, composer.semantic_ref),
     /native_semantic_type_replace_unverified/,
   );
-  // Exactly ONE insertText ran - the append damage is bounded to a single
-  // prompt, never two.
-  assert.equal(h.counts().insertCount, 1);
+  assert.equal(h.counts().insertCount, 0, 'failed clear stops before any prompt insertion');
   assert.equal(h.counts().enterCount, 0);
-  assert.equal(h.state().composerValue, 'OLDD-M3 TASK PROMPT');
+  assert.equal(h.state().composerValue, 'OLD');
 });
 
 test('conversation surface: the proven key-atomic gesture stays first', async () => {
@@ -220,7 +220,7 @@ test('conversation surface: the proven key-atomic gesture stays first', async ()
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
+  assert.equal(result.replace_gesture, 'CDP_EDIT_COMMAND_CLEAR');
   assert.equal(h.counts().tripleClicks, 0);
   assert.equal(h.counts().enterCount, 1);
 });
@@ -240,7 +240,7 @@ test('conversation surface: click-select rescues when keys are a provable no-op'
     () => dispatchTask(h, composer.semantic_ref),
     /native_semantic_type_replace_unverified/,
   );
-  assert.equal(h.counts().insertCount, 1);
+  assert.equal(h.counts().insertCount, 0, 'clear no-op stops before insertion');
 });
 
 test('preexisting exact match verifies without any gesture (resume path)', async () => {
@@ -252,7 +252,7 @@ test('preexisting exact match verifies without any gesture (resume path)', async
   assert.equal(result.replace_gesture, 'PREEXISTING_MATCH');
   assert.equal(h.counts().insertCount, 0);
   assert.equal(h.counts().enterCount, 1);
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
 });
 
 test('replace_gesture is null on the unverified legacy lane', async () => {
