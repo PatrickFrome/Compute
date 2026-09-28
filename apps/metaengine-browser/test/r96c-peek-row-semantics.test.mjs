@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const read = (url) => readFile(new URL(url, import.meta.url), 'utf8');
 const tasks = await read('../../me2-ui/src/components/me2/pages/tasks.tsx');
-const agents = await read('../../me2-ui/src/components/me2/pages/agents.tsx');
 const hook = await read('../../me2-ui/src/hooks/use-temporary-peek.ts');
 
 test('R96C task Peek rows keep focus semantics while Space remains presentation-only preview', () => {
@@ -17,14 +17,9 @@ test('R96C task Peek rows keep focus semantics while Space remains presentation-
   assert.doesNotMatch(tasks, /aria-keyshortcuts="[^"]*Arrow(?:Up|Down)/);
 });
 
-test('R102 retired Agents compatibility page cannot resurrect AgentChat row controls or Peek authority', () => {
-  assert.match(agents, /data-testid="retired-agents-page"/);
-  assert.match(agents, /data-authority-effect="false"/);
-  assert.match(agents, /legacy daemon Agents surface is retired/i);
-  assert.doesNotMatch(agents, /data-peek-kind="agent"/);
-  assert.doesNotMatch(agents, /openAgentChat|retireAgent|agentChatOp|sendCommand|me2Fetch/);
-  assert.doesNotMatch(agents, /aria-keyshortcuts|onKeyDown=|onClick=/);
-  assert.doesNotMatch(agents, /Пауза|Возобновить/);
+test('R106 retired Agents page is physically absent and cannot own Peek or AgentChat controls', () => {
+  const agentsUrl = new URL('../../me2-ui/src/components/me2/pages/agents.tsx', import.meta.url);
+  assert.equal(fs.existsSync(agentsUrl), false);
 });
 
 test('R96C generic Peek capture still reserves nested real controls without creating an effect path', () => {
