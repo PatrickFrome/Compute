@@ -11172,3 +11172,20 @@ Stage Summary:
 - Title map updated: 项目状态评估与开发计划=supervisor chat; essay/research/critic titles stable; supervisor session title visible in agent sidebar.
 - Registry additions: (1) transcript text plane = sidebar + user inputs only, assistant replies excluded; (2) anonymous-button census 28 on agent page (stop-button detector candidate: presence of unnamed button during generation).
 - Next tick: scheduled re-prompt loop (periodic CONTINUATION briefs = de-facto swarm autonomy) + FLEET_RECONCILE drift check (PLANNER tab at home, transport proof stale).
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0915
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718)
+Task: Directive tick 09:15 — fleet drift check + reconcile + re-prompt loop #2 (de-facto swarm autonomy, repeat-run). Directive sha256 re-verified OK.
+
+Work Log:
+- FLEET drift check (FLEET_STATUS): all 4 agents ACTIVE, but transport proofs fleet-wide STALE: PLANNER proven_at 2026-09-27T20:10Z (~13h), RESEARCHER/IMPLEMENTER proven_at 17:38Z (~16h) and BOTH have EMPTY conversation_url in transport_proof; fleet-CRITIC 19:20Z with /c/1c569d09. Proof is only minted on real transport action, not refreshed by status/reconcile.
+- FLEET_RECONCILE target=4 COMPLETED (6.5s, no error); post-reconcile FLEET_STATUS: 4/4 ACTIVE. Reconcile preserves fleet but does NOT refresh transport proofs (confirmed drift semantics).
+- Re-prompt loop #2 (repeat-run of 0907 primitive): agent-space tab was on supervisor chat /c/579ed13b -> CAPTURE -> TYPED_CLICK sidebar title "Top Risks &..." COMPLETED -> readback url=/c/cfefd09f (on_critic=True) -> SEMANTIC_TYPE "CONTINUATION TASK 2 (P0/P1/P2 checklist brief)" submit=True -> effect=AMBIGUOUS_AFTER_ENTER (expected) -> readback draft=EMPTY(placeholder) delivered=True same_thread=True.
+- Mutation discipline: 20s gaps before both mutating commands, readback after every action, no retries.
+
+Stage Summary:
+- NEW PROVEN primitives: (1) thread-switching via sidebar TYPED_CLICK with url readback — any agent thread reachable on demand without NAVIGATE; (2) re-prompt recipe REPEATABLE (2nd independent delivery + draft consumption). Combined with 0907: swarm can navigate-to-agent + re-task in-place = full delivery loop for continuous development.
+- Registry lessons: (1) transport_proof staleness is fleet-wide (2/4 agents missing conversation_url) — readiness contract TRANSPORT_PROOF_REQUIRED means fleet-wide NOT transport-ready; a real SEMANTIC_TYPE/CAPTURE per agent would mint fresh proofs; (2) FLEET_RECONCILE != proof refresh.
+- Reply-readback still blocked by thread-scope client gap (unchanged).
+- Next tick: mint fresh transport proofs per fleet agent (targeted CAPTURE/READ_TRANSCRIPT on each fleet tab), then supervisor-side task dispatch experiment (brief PLANNER via its own thread).
