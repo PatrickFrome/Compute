@@ -6,24 +6,27 @@ const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx'
 const pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell/pagebar.tsx', import.meta.url), 'utf8');
 const topbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url), 'utf8');
 
-test('R94 primary shell navigation is seven workflow stages, not ten architecture modules', () => {
-  for (const label of ['COMMAND', 'PLAN', 'BUILD', 'RUN', 'FLEET', 'OBSERVE', 'SYSTEM']) {
+test('R98 primary shell navigation is six product workflow stages, not architecture modules', () => {
+  for (const label of ['FLEET', 'PLAN', 'BUILD', 'SUPERVISE', 'OBSERVE', 'SYSTEM']) {
     assert.match(store, new RegExp(`label: "${label}"`));
   }
-  assert.match(store, /WorkflowStageKey = "command" \| "plan" \| "build" \| "run" \| "fleet" \| "observe" \| "system"/);
+  assert.match(store, /WorkflowStageKey = "plan" \| "build" \| "run" \| "fleet" \| "observe" \| "system"/);
+  assert.doesNotMatch(store, /key: "command"[\s\S]{0,180}label: "COMMAND"/);
   assert.match(pagebar, /WORKFLOW_STAGES\.map/);
   assert.match(pagebar, /data-testid="workflow-stage-tabs"/);
   assert.doesNotMatch(pagebar, /PAGES\.map\(\(p\)/);
+  assert.doesNotMatch(pagebar, /Alt\+\$\{stage\.num\}|Alt\+1…7/);
 });
 
-test('R94 stages preserve every legacy module page through explicit grouped ownership', () => {
-  assert.match(store, /key: "command"[\s\S]{0,180}pages: \["command"\]/);
+test('R98 stages own only retained product pages; retired daemon/API pages are compatibility-fenced', () => {
+  assert.match(store, /key: "run"[\s\S]{0,180}pages: \["browser"\]/);
   assert.match(store, /key: "plan"[\s\S]{0,180}pages: \["tasks"\]/);
   assert.match(store, /key: "build"[\s\S]{0,180}pages: \["code"\]/);
-  assert.match(store, /key: "run"[\s\S]{0,180}pages: \["browser"\]/);
-  assert.match(store, /key: "fleet"[\s\S]{0,220}pages: \["agents", "supervisor"\]/);
+  assert.match(store, /key: "fleet"[\s\S]{0,220}pages: \["supervisor"\]/);
   assert.match(store, /key: "observe"[\s\S]{0,220}pages: \["observability", "memory"\]/);
-  assert.match(store, /key: "system"[\s\S]{0,220}pages: \["system", "compute"\]/);
+  assert.match(store, /key: "system"[\s\S]{0,220}pages: \["system"\]/);
+  assert.match(store, /\(p === "command" \|\| p === "agents" \|\| p === "compute"\) \? "browser" : p/);
+  assert.doesNotMatch(store, /pages: \["agents", "supervisor"\]|pages: \["system", "compute"\]/);
   assert.match(pagebar, /stage\.pages\.map\(\(modulePage\)/);
 });
 
@@ -46,7 +49,6 @@ test('R97 top chrome keeps workflow modules out of the persistent main workspace
   assert.match(topbar, /data-testid="global-cmdbar"/);
   assert.match(topbar, /data-testid="settings-button"/);
 });
-
 
 test('R97 workspace and workflow selectors are advanced-only instead of persistent chrome', () => {
   assert.doesNotMatch(topbar, /data-testid="workspace-switcher"/);
