@@ -91,6 +91,11 @@ const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe";
 const PROBE_BLOCKED_GET_PATHS = new Set([
   "/providers", "/llm", "/glm", "/agents", "/agentchat", "/pool",
   "/governor", "/demand", "/tokens",
+  // These GET routes can cross the process boundary (token mint/readback,
+  // Supabase inspection/reconcile) and therefore are not read-only Browser
+  // probe surfaces even though their HTTP verb is GET.
+  "/sqlmirror/ui-token", "/sqlmirror/ui-token/verify", "/sqlmirror/feed",
+  "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile",
 ]);
 const PROBE_POLICY = Object.freeze({
   boot_mode: "probe",
@@ -1378,7 +1383,7 @@ if (!PROBE_MODE) {
 // Решение оператора R53 было зашито только в start.sh; ui-host (supervisor-keepalive R50) респавнит
 // daemon БЕЗ наследования этого env → зеркало молча уходило в OFF. Восстанавливаем решение из того
 // же условия, что и start.sh: SUPABASE_DB_URL в supabase-cloud.env = операторское решение активно.
-if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase-cloud.env")) {
+if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase-cloud.env")) {
   try {
     if (/^SUPABASE_DB_URL=/m.test(readFileSync("/home/z/.a2/supabase-cloud.env", "utf8"))) {
       process.env.ME2_SQL_MIRROR = "1";
@@ -1389,16 +1394,27 @@ if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase
 // R70 (аудит): третий путь восстановления — персистентное решение в meta sqlmirror_gate='1'
 // (записывается конструктором SqlMirror при первом буте с env=1 + ключом). Гасит сценарий
 // «рестарт без start.sh → зеркало молча OFF» даже без SUPABASE_DB_URL в env-файле.
-if (process.env.ME2_SQL_MIRROR === undefined && sqlmirrorGatePersisted(db)) {
+if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && sqlmirrorGatePersisted(db)) {
   process.env.ME2_SQL_MIRROR = "1";
   console.log("e2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
 }
-const sqlMirror = new SqlMirror(db);
-sqlMirror.start();
-// R57: gotrue-канал — разогрев кэша токена сервис-аккаунта (best-effort; анти-шторм держит,
-// панель при неудаче честно покажет auth.last_error)
-void gotrueToken().catch(() => { /* honest degradation */ });
-if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
+// Browser probe mode must not even construct SqlMirror: its constructor persists
+// the operator gate and subscribes to token changes. Keep an inert structural
+// projection so retained read-only UI can report OFF without cloud/token effects.
+const sqlMirror = PROBE_MODE
+  ? {
+      status: () => ({ state: "OFF", configured: false, probe_read_only: true }),
+      readFeed: async (_limit = 20) => ({ ok: false, error: "ME2_BROWSER_PROBE_READ_ONLY" }),
+      start: () => {},
+    }
+  : new SqlMirror(db);
+if (!PROBE_MODE) {
+  sqlMirror.start();
+  // R57: gotrue-канал — разогрев кэша токена сервис-аккаунта (best-effort; анти-шторм держит,
+  // панель при неудаче честно покажет auth.last_error)
+  void gotrueToken().catch(() => { /* honest degradation */ });
+  if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
+}
 // R59: периодический самоаудит (RLS-политики + сверка RPC-реестра) — внутренний цикл daemon'а
 // (не внешний cron; приказ R55-5 про cron-джобы не трогает внутренние интервалы). События
 // только на переходах (FAIL/RECOVERED) — узор Kubernetes reconcile, ровный PASS не шумит.
