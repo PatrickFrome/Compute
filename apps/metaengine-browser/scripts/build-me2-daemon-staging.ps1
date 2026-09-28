@@ -40,7 +40,9 @@ try {
   & $bunCommand @bunPrefix install --frozen-lockfile
   if ($LASTEXITCODE -ne 0) { throw "me2_daemon_bun_install_exit_$LASTEXITCODE" }
 
-  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64 index.ts --outfile $exePath
+  $probeEntrypoint = Join-Path $daemonRoot 'browser-probe-entry.ts'
+  if (-not (Test-Path $probeEntrypoint -PathType Leaf)) { throw 'me2_daemon_browser_probe_entry_missing' }
+  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
   if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
 } finally {
   Pop-Location
@@ -61,6 +63,8 @@ $manifest = [ordered]@{
   runtime_embedded = $true
   external_bun_required = $false
   default_browser_host_boot_mode = 'probe'
+  probe_only_entrypoint = 'browser-probe-entry.ts'
+  browser_host_mode_override_allowed = $false
   browser_probe_read_only = $true
   model_execution_enabled = $false
   provider_api_enabled = $false
