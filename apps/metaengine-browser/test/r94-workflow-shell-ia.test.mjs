@@ -11,9 +11,12 @@ test('R98 primary shell navigation exposes six product workflow stages, not lega
     assert.match(store, new RegExp(`label: "${label}"`));
   }
   for (const removed of ['COMMAND', 'RUN']) assert.doesNotMatch(store, new RegExp(`label: "${removed}"`));
+  assert.match(store, /WorkflowStageKey = "plan" \| "build" \| "run" \| "fleet" \| "observe" \| "system"/);
+  assert.doesNotMatch(store, /WorkflowStageKey = [^\n]*"command"/);
   assert.match(pagebar, /WORKFLOW_STAGES\.map/);
   assert.match(pagebar, /data-testid="workflow-stage-tabs"/);
   assert.doesNotMatch(pagebar, /PAGES\.map\(\(p\)/);
+  assert.doesNotMatch(pagebar, /LayoutDashboard|Alt\+\$\{stage\.num\}|Alt\+1…7/);
 });
 
 test('R98 workflow ownership excludes retired daemon/API-agent product pages', () => {
