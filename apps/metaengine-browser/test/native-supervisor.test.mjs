@@ -294,6 +294,9 @@ test('native semantic perception exposes unique accessibility targets and typed 
       if (method === 'Accessibility.getFullAXTree') return { nodes };
       if (method === 'Page.getLayoutMetrics') return { cssVisualViewport:{ clientWidth:1000, clientHeight:700, pageX:0, pageY:0, scale:1 } };
       if (method === 'DOM.getBoxModel') return { model:{ content:[10,20,110,20,110,70,10,70] } };
+      if (method === 'DOM.resolveNode') return { object:{ objectId:`node-${Number(params?.backendNodeId || 0)}` } };
+      if (method === 'Runtime.callFunctionOn') return { result:{ value:true } };
+      if (method === 'Runtime.releaseObject') return {};
       return {};
     },
   };
@@ -307,9 +310,12 @@ test('native semantic perception exposes unique accessibility targets and typed 
   assert.ok(send.semantic_ref);
   const result = await executeSemanticCommand(webContents, { action:'TYPED_CLICK', payload:{ role:'button', accessible_name:'Send', semantic_ref:send.semantic_ref } });
   assert.equal(result.target.backend_node_id, 42);
-  assert.equal(result.point.x, 60);
-  assert.equal(result.point.y, 45);
-  assert.ok(calls.some(([method]) => method === 'Input.dispatchMouseEvent'));
+  assert.equal(result.activation.method, 'DOM_CLICK');
+  assert.equal(result.mouse_geometry_required, false);
+  assert.equal(result.viewport_geometry_required, false);
+  assert.ok(calls.some(([method]) => method === 'DOM.resolveNode'));
+  assert.ok(calls.some(([method]) => method === 'Runtime.callFunctionOn'));
+  assert.equal(calls.some(([method]) => method === 'Input.dispatchMouseEvent'), false);
 });
 
 test('dedicated STOP_GENERATION recognizes current Russian ChatGPT stop-response control', async () => {
@@ -326,6 +332,9 @@ test('dedicated STOP_GENERATION recognizes current Russian ChatGPT stop-response
       calls.push([method, params || null]);
       if (method === 'Accessibility.getFullAXTree') return { nodes };
       if (method === 'DOM.getBoxModel') return { model:{ content:[0,0,100,0,100,40,0,40] } };
+      if (method === 'DOM.resolveNode') return { object:{ objectId:`node-${Number(params?.backendNodeId || 0)}` } };
+      if (method === 'Runtime.callFunctionOn') return { result:{ value:true } };
+      if (method === 'Runtime.releaseObject') return {};
       return {};
     },
   };
@@ -334,5 +343,7 @@ test('dedicated STOP_GENERATION recognizes current Russian ChatGPT stop-response
   assert.equal(result.target.name, 'Остановить ответ');
   assert.equal(result.target.backend_node_id, 77);
   assert.equal(result.authority_effect, true);
-  assert.ok(calls.some(([method]) => method === 'Input.dispatchMouseEvent'));
+  assert.equal(result.activation.method, 'DOM_CLICK');
+  assert.equal(result.mouse_geometry_required, false);
+  assert.equal(calls.some(([method]) => method === 'Input.dispatchMouseEvent'), false);
 });
