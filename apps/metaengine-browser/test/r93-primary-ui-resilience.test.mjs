@@ -86,16 +86,20 @@ test('R93 canonical ME2 session selection uses Browser-owned session->tab bindin
   }
 });
 
-test('R93 primary renderer exposes only the narrow bound-session presentation intent', async () => {
+test('R102 retired COMMAND renderer cannot expose the legacy bound-session presentation intent', async () => {
   const preload = await fs.readFile(path.join(browserRoot, 'src', 'preload-shell.cjs'), 'utf8');
   const main = await fs.readFile(path.join(browserRoot, 'src', 'main.mjs'), 'utf8');
   const command = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx'), 'utf8');
 
+  // The trusted Browser may keep its exact session-selection primitive for
+  // native consumers, but the retired daemon COMMAND page must not expose it.
   assert.match(preload, /selectPrimaryAgentSession/);
   assert.match(preload, /metaengine:shell:primary-agent-session-select/);
   assert.match(main, /me2MissionSelectSession/);
   assert.match(main, /primary-agent-session-select/);
-  assert.match(command, /selectPrimaryAgentSession/);
+  assert.match(command, /data-testid="retired-command-page"/);
+  assert.match(command, /data-authority-effect="false"/);
+  assert.doesNotMatch(command, /selectPrimaryAgentSession/);
   assert.doesNotMatch(command, /BROWSER_SELECT_TAB/);
   assert.doesNotMatch(command, /loadBrowserTabs/);
   assert.doesNotMatch(command, /resolveExactAgentTab/);
