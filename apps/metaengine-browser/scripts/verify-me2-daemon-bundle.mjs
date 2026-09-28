@@ -95,7 +95,14 @@ async function smoke(exe, manifest) {
     assert.equal(state?.browser_probe?.browser_actuation_authority, false);
     assert.equal(state?.browser_probe?.command_mutation_enabled, false);
     assert.equal(state?.browser_probe?.token_mutation_enabled, false);
+    assert.equal(state?.browser_probe?.persistent_state_write_enabled, false);
+    assert.equal(state?.browser_probe?.model_execution_guard, 'BROWSER_PROBE_HARD_GUARD_V1');
+    assert.equal(state?.browser_probe?.provider_sdk_static_import_allowed, false);
+    assert.equal(state?.browser_probe?.durable_state_authority, false);
+    assert.equal(state?.browser_probe?.state_storage, 'EPHEMERAL_MEMORY_ONLY');
     assert.equal(state?.browser_probe?.authority_effect, false);
+    const persistedDb = path.join(dataDir, 'me2.db');
+    await assert.rejects(fs.stat(persistedDb), { code: 'ENOENT' }, 'Browser probe must not create durable ME2 SQLite state');
     return {
       runtime_smoke: 'PASS',
       health_version: String(health.version),
@@ -103,6 +110,8 @@ async function smoke(exe, manifest) {
       state_contract: String(state.contract),
       boot_mode: 'probe',
       hostile_boot_mode_override_rejected: true,
+      durable_state_file_created: false,
+      state_storage: 'EPHEMERAL_MEMORY_ONLY',
       external_bun_used: false,
       external_runtime_path_sanitized: process.platform === 'win32',
     };
@@ -128,6 +137,8 @@ assert.equal(manifest.probe_only_entrypoint, 'browser-probe-entry.ts');
 assert.equal(manifest.browser_host_mode_override_allowed, false);
 assert.equal(manifest.browser_probe_read_only, true);
 assert.equal(manifest.model_execution_enabled, false);
+assert.equal(manifest.model_execution_guard, 'BROWSER_PROBE_HARD_GUARD_V1');
+assert.equal(manifest.provider_sdk_static_import_allowed, false);
 assert.equal(manifest.provider_api_enabled, false);
 assert.equal(manifest.agentchat_mutation_enabled, false);
 assert.equal(manifest.command_mutation_enabled, false);
@@ -159,6 +170,11 @@ const proof = {
   agentchat_mutation_enabled: false,
   command_mutation_enabled: false,
   token_mutation_enabled: false,
+  persistent_state_write_enabled: false,
+  model_execution_guard: 'BROWSER_PROBE_HARD_GUARD_V1',
+  provider_sdk_static_import_allowed: false,
+  durable_state_authority: false,
+  state_storage: 'EPHEMERAL_MEMORY_ONLY',
   smoke_child_external_runtime_path_sanitized: args.smoke && process.platform === 'win32',
   ...(args.smoke ? await smoke(exe, manifest) : { runtime_smoke: 'NOT_REQUESTED' }),
   authority_effect: false,
