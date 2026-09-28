@@ -28,8 +28,12 @@ $match = [regex]::Match($storeText, 'export\s+const\s+VERSION\s*=\s*["'']([^"'']
 if (-not $match.Success) { throw 'me2_daemon_runtime_version_missing' }
 $runtimeVersion = [string]$match.Groups[1].Value
 $packageVersion = [string]$package.version
-if (-not $packageVersion -or $packageVersion -ne $runtimeVersion) {
-  throw "me2_daemon_version_drift:${packageVersion}:${runtimeVersion}"
+$probeText = Get-Content (Join-Path $daemonRoot 'browser-probe-entry.ts') -Raw
+$probeVersionMatch = [regex]::Match($probeText, 'const\s+VERSION\s*=\s*["'']([^"'']+)["'']')
+if (-not $probeVersionMatch.Success) { throw 'me2_daemon_probe_version_missing' }
+$probeVersion = [string]$probeVersionMatch.Groups[1].Value
+if (-not $packageVersion -or $packageVersion -ne $runtimeVersion -or $probeVersion -ne $runtimeVersion) {
+  throw "me2_daemon_version_drift:${packageVersion}:${runtimeVersion}:${probeVersion}"
 }
 
 Remove-Item $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -37,9 +41,9 @@ New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
 
 Push-Location $daemonRoot
 try {
-  & $bunCommand @bunPrefix install --frozen-lockfile
-  if ($LASTEXITCODE -ne 0) { throw "me2_daemon_bun_install_exit_$LASTEXITCODE" }
-
+  # R105 standalone probe imports Node/Bun built-ins only. Do not install the
+  # legacy daemon dependency graph (including model/provider SDKs) merely to
+  # build the Browser compatibility process.
   $probeEntrypoint = Join-Path $daemonRoot 'browser-probe-entry.ts'
   if (-not (Test-Path $probeEntrypoint -PathType Leaf)) { throw 'me2_daemon_browser_probe_entry_missing' }
   & $bunCommand @bunPrefix build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
@@ -66,11 +70,18 @@ $manifest = [ordered]@{
   probe_only_entrypoint = 'browser-probe-entry.ts'
   browser_host_mode_override_allowed = $false
   browser_probe_read_only = $true
+  standalone_probe_runtime = $true
+  legacy_daemon_module_loaded = $false
+  legacy_dependency_install_required = $false
   model_execution_enabled = $false
   provider_api_enabled = $false
+  provider_network_enabled = $false
   agentchat_mutation_enabled = $false
   command_mutation_enabled = $false
   token_mutation_enabled = $false
+  filesystem_mutation_enabled = $false
+  sql_mutation_enabled = $false
+  socket_mutation_surface_enabled = $false
   scheduler_authority = $false
   browser_actuation_authority = $false
   authority_effect = $false
