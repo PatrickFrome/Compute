@@ -40,6 +40,7 @@ const fleet = {
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
       conversation_url_sha256: conversationHash,
+      agent_surface_sha256: 'c'.repeat(64),
       proven_at: '2026-09-01T00:00:00.000Z',
       authority_effect: false,
     },
@@ -61,9 +62,10 @@ const state = (selected) => ({
 const frame = ({ sent = false } = {}) => ({
   tab_id: lease.tab_id,
   target_id: lease.target_id,
-  url: sent ? conversationUrl : 'https://chat.z.ai/',
+  url: conversationUrl,
   viewport: { width: 1200, height: 700 },
   semantic_targets: sent ? [composer, stop] : [composer, send],
+  interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
   authority_effect: false,
 });
 const journalBinding = () => ({
@@ -93,7 +95,7 @@ function commandHarness(calls, selectedRef, { sentInitially = false } = {}) {
       return frame({ sent });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: !sentInitially, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
