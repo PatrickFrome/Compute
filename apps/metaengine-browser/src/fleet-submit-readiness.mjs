@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import {
   AGENT_PLATFORM_ID,
@@ -5,11 +6,54 @@ import {
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformComposer,
   resolveAgentPlatformSelectedModel,
+  normalizeAgentPlatformConversationUrl,
 } from './browser-agent-platform.mjs';
 
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
 const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
+const HASH_RE = /^[a-f0-9]{64}$/;
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+
+function durableAgentOriginProof({
+  frame,
+  proof,
+  lifecycle_state,
+  expected_tab_id,
+  expected_target_id,
+  expected_generation_epoch,
+} = {}) {
+  if (String(lifecycle_state || '') !== 'ACTIVE') return null;
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1' || proof.authority_effect !== false) return null;
+  if (String(proof.transport_stage || 'CONVERSATION') !== 'CONVERSATION') return null;
+  if (String(proof.tab_id || '') !== String(expected_tab_id || '')) return null;
+  if (String(proof.target_id || '').toLowerCase() !== String(expected_target_id || '').toLowerCase()) return null;
+  if (!Number.isSafeInteger(Number(expected_generation_epoch))
+      || Number(proof.generation_epoch) !== Number(expected_generation_epoch)) return null;
+  const conversationHash = String(proof.conversation_url_sha256 || '').toLowerCase();
+  const agentSurfaceHash = String(proof.agent_surface_sha256 || '').toLowerCase();
+  if (!HASH_RE.test(conversationHash) || !HASH_RE.test(agentSurfaceHash)) return null;
+  const provenAt = Date.parse(String(proof.proven_at || ''));
+  if (!Number.isFinite(provenAt)) return null;
+  let currentUrl = null;
+  try {
+    currentUrl = normalizeAgentPlatformConversationUrl(frame?.url);
+  } catch {
+    return null;
+  }
+  if (sha256(currentUrl) !== conversationHash) return null;
+  return Object.freeze({
+    schema: 'metaengine.browser.agent-origin-readiness-proof.v1',
+    stage: 'AGENT_CONVERSATION',
+    conversation_url_sha256: conversationHash,
+    agent_surface_sha256: agentSurfaceHash,
+    proven_at: String(proof.proven_at),
+    authority_effect: false,
+  });
+}
 
 function exact(frame, role, names) {
   const rows = (frame?.semantic_targets || []).filter((row) => {
@@ -27,6 +71,9 @@ export function evaluateFleetSubmitReadiness({
   expected_target_id,
   observed_target_id,
   selected_tab_id,
+  agent_transport_proof = null,
+  agent_lifecycle_state = null,
+  expected_agent_generation_epoch = null,
   phase = 'PRE_CLICK',
   platform = 'CHATGPT',
 } = {}) {
@@ -78,8 +125,21 @@ export function evaluateFleetSubmitReadiness({
   // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
     const agentSurface = resolveAgentPlatformAgentSurface(frame);
-    if (!agentSurface) {
-      return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
+    const agentOrigin = durableAgentOriginProof({
+      frame,
+      proof: agent_transport_proof,
+      lifecycle_state: agent_lifecycle_state,
+      expected_tab_id: expectedTab,
+      expected_target_id: expectedTarget,
+      expected_generation_epoch: expected_agent_generation_epoch,
+    });
+    // A visible Agent Home is discovery/bootstrap evidence, not task-dispatch
+    // authority. Normal work starts only after the wrapper has created a real
+    // Agent session and persisted its exact origin proof against this current
+    // conversation URL. This keeps "Agent UI is visible" distinct from
+    // "this conversation is a canonical METAENGINE Agent session".
+    if (!agentOrigin) {
+      return Object.freeze({ ready: false, reason: 'AGENT_ORIGIN_PROOF_NOT_DURABLE', foreground, authority_effect: false });
     }
     const modelProof = resolveAgentPlatformSelectedModel(frame);
     if (!modelProof) {
@@ -105,6 +165,7 @@ export function evaluateFleetSubmitReadiness({
       phase: readinessPhase,
       platform: AGENT_PLATFORM_ID,
       agent_surface: agentSurface,
+      agent_origin_proof: agentOrigin,
       model_proof: modelProof,
       composer,
       send_control: null,
