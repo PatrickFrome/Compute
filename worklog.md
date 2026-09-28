@@ -11498,3 +11498,62 @@ Stage Summary:
 - R28 policy engine: battle-tested in dispatch+sweep paths; allowlist gap closed; ESCALATE-PROCEED owner-mandate mechanism proven auditable.
 - Next tick: (1) TYPED_CLICK via RPC with REAL semantic_ref (CAPTURE -> pick real element) -> if COMPLETED, RPC path fully restored; (2) RESEARCHER reply collection (FULL telemetry ACK + 3 CRITIC-gate checks); (3) SELF_UPDATE_STATUS version check (possible browser update 12:15->12:40 — validator behavior changed); (4) DOWNLOAD_FILE re-probe when recipe confirmed stable.
 - Security: no secrets printed/committed; secrets redaction held.
+
+---
+Task ID: BROWSER-TEST-20260928-1300
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419203 @13:00)
+Task: Delta tick per 1240 next-tick list: (1) TYPED_CLICK RPC with REAL semantic_ref; (2) SELF_UPDATE_STATUS version check; (3) RESEARCHER reply collection; (4) DOWNLOAD_FILE re-probe.
+
+Work Log:
+- D0 SELF_UPDATE_STATUS: COMPLETED state=CURRENT current_version=0.7.0-dev.36336130139.1 (UNCHANGED) -> RPC-validator behavior change (12:15 fields_invalid -> 12:40 native_semantic_ref_invalid -> 13:00 execution) was NOT a version bump; validator accepts real payloads now regardless.
+- D1-D2 TYPED_CLICK via RPC with REAL semantic_ref (textbox "How can I help you today?" from CAPTURE): payload ACCEPTED (no validator error) -> reached native execution -> FAILED "target closed while handling command" (view-lifecycle during composer click). VERDICT: RPC path REPAIRED (validation plane fixed); mechanic needs timing-stable target — next probe should use static link element, not composer.
+- D3 RESEARCHER collection: CORRECTION vs first parse — heuristic FALSE-POSITIVE (ack_full/critic flags matched MY OWN brief text: "CONNECTED-TOOLRESULT-FULL-1231" + nonce are literals inside my task section; total_chars=40152 UNCHANGED since 12:38; tail = my brief -> their old TOOL_REQUEST_V1 -> page footer). REAL state: NO researcher reply yet; FULL body awaits their next generation; TOOL_REQUEST_V1 adac6557-systel-01 still their last message. LESSON: readback verdicts must use transcript GROWTH (total_chars delta vs prior readback) + marker search AFTER last page-footer boundary; my-brief literals always present.
+- D4 DOWNLOAD_FILE re-probe (T2 owner-mandate, recipe {url, filename, expected_sha256}, pinned raw CONTEXT.md@sandbox/me2-os 17844B sha256 precomputed): COMPLETED, no error — "interrupted path" from 12:15 did NOT reproduce. VERDICT: DOWNLOAD_FILE upgraded BROKEN -> WORKS (1 clean pass; keep-list candidate). DOWNLOAD_STATUS COMPLETED but items list empty under downloads/items keys — receipt schema needs calibration.
+- Cleanup: CLOSE_TAB own tab COMPLETED, final TAB_CENSUS COMPLETED; fleet tabs untouched; policy ledger clean (ESCALATE-PROCEED only for T2 DOWNLOAD_FILE under owner mandate Job 419203).
+- Artifacts: browser-test-results-mt419203-delta1300.json (13 records); scripts/phoenix/mt-419203-delta-1300.py.
+
+Stage Summary:
+- VERDICT DELTA: TYPED_CLICK-RPC BROKEN->REPAIRED-pending-stable-target-proof; DOWNLOAD_FILE BROKEN->WORKS (clean pass, recipe confirmed); SELF_UPDATE no change (version pinned).
+- Updated tally vs 12:15 table: WORKS 26 (+BACK,+FORWARD,+NAVIGATE effect-proven,+DOWNLOAD_FILE), REPAIRED-pending 1 (TYPED_CLICK RPC), BROKEN 1 (STOP_GENERATION), typed-reject-correct 3 (GATE_ENABLE/DISABLE/ENABLE_ALL), UNTESTED 1 (DOWNLOAD_CANCEL — no active download during window).
+- Fleet: 4/4 roles intact; browser left clean (no own tabs).
+- Next tick: (1) TYPED_CLICK RPC on static link element (example.com "More information") -> if COMPLETED, close REPAIRED verdict; (2) RESEARCHER reply via GROWTH-based readback (total_chars > 40152 + ACK after footer); (3) DOWNLOAD_STATUS items schema calibration (find list key); (4) STOP_GENERATION remains build-fix backlog.
+- Security: no secrets printed/committed; DOWNLOAD expected_sha256 computed from public raw file (no secrets).
+
+---
+Task ID: 419718-1307-REPING-R28
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718 @13:07)
+Task: Directive-verified continuation (sha 0aa0957922d0f9d6). Pending from 1231: (1) RESEARCHER reply via growth-readback / re-ping; (2) divergence-merge plan 83/222; (3) ledger -> durable channels.
+
+Work Log:
+- Growth-readback #1 (r419718-1307-researcher-readback.py): text_len=40152 == baseline, not grown, reply zone after their TOOL_REQUEST empty -> RESEARCHER silent 35+ min -> re-ping per 1231 plan.
+- Re-ping (r419718-1307-reping.py, short reminder 820B, NO duplicate brief): CAPTURE/FOCUS COMPLETED, TYPE AMBIGUOUS (artifact), readback initially FALSE-NEGATIVE (total_chars SHRANK 40152->34786 -> growth heuristic failed). Full transcript dump (tr-full-dump-1307.txt) resolved: TRFULL-REMIND-1307 PRESENT, TOOLRESULT-FULL-1231 present, their TOOL_REQUEST re-issued as last message (agent actively looping; next generation should consume). METHOD FIX: transcript total_chars is NOT monotonic (platform compacts old turns; has_more=False) -> verdict = marker-present + tail-position, never raw growth. Two false-positive/negative incidents today (1300 ack-heuristic, 1307 growth-heuristic) both root-caused to transcript-window dynamics — rule added to readback protocol.
+- Bonus observation (transcript head): RESEARCHER "REFUSED - credential capsule not accepted" — agent-side security refusal working as designed.
+- Divergence-merge plan 83/222 WRITTEN: scripts/me2-r28/divergence-merge-plan-83.md — constraints (unrelated history, merge FORBIDDEN, semantic extraction only; cf747798 authority), A/B/C classification, batch order (C-first <=15 files, B by R-roadmap priority, A mechanical), verification gates (divergence count decreasing, CI wiring C-1 prerequisite for runtime paths, policy T1/T2 on shared/release branches), rollback (worktree-only, no force-push), dependencies (CI wiring, RESEARCHER CRITIC baseline, secrets rotation).
+- Policy ledger mirrored: 43 entries -> /home/z/context-vault/latest/me2-policy-ledger.jsonl + ossfs latest/ (durable, no secrets — decision records only).
+- Artifacts: browser-test-results-trremind-1307.json, tr-full-dump-1307.txt, r419718-1307-{researcher-readback,reping}.py, divergence-merge-plan-83.md.
+
+Stage Summary:
+- RESEARCHER loop ALIVE (re-issues TOOL_REQUEST each generation); FULL body + reminder both in-transcript; delivery chain 3x proven, consumption pending their generation cadence.
+- Readback protocol hardened after 2 heuristic incidents: marker + tail-position + compaction-aware, no monotonic-growth assumptions.
+- R28 deliverable #3 exists: divergence-merge plan (bounded, executable, gated). Ledger now durable-mirrored.
+- Next tick: (1) RESEARCHER ACK + 3 CRITIC-gate checks (marker-based readback); (2) execute divergence batch-0 regeneration (div list artifact) when operator green-lights mutations; (3) TYPED_CLICK static-element probe queued in 419203 lane.
+- Security: no secrets printed/committed; researcher credential-refusal noted positively.
+
+---
+Task ID: 419718-1315-BATCH0-DIVERGENCE
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718 @13:15)
+Task: Directive-verified continuation (sha 0aa0957922d0f9d6). Per 1307 next-tick: (1) RESEARCHER reply collection; (2) divergence batch-0 list regeneration (read-only part — no operator gate needed).
+
+Work Log:
+- RESEARCHER readback (marker-based, 2nd pass): text_len=34786 UNCHANGED from 13:07, reply zone still empty (their TOOL_REQUEST last message). No reply within 8 min of re-ping -> NO re-ping this tick (noise discipline; consumption expected on their generation cadence; delivery chain already 3x proven).
+- Divergence batch-0 EXECUTED (read-only): git diff --name-status 73c5021c (capsule head, SECURITY-FIX) .. main HEAD 83598aa4 -> 49 paths (46 A + 3 M + 0 D); tracked trees 2552 (capsule) <-> 2598 (main). Earlier '83/222' (11:00) basis differed — current numbers authoritative, documented in artifact header.
+- C-class (both-modified) COLLAPSED to 3 trivial resolutions, all "take me2-os": CONTEXT-CURRENT.md (live heartbeat digest), scripts/swarm/gh.sh (fix already on main), worklog.md (canonical append-only journal). D-class ZERO -> nothing capsule-only to port.
+- A-class (46): today's R28 modules + browser-test artifacts + phoenix results — one-way propagation main->capsule at capsule refresh.
+- CONVERGENCE VERDICT: main is a strict content superset of capsule (0 D + all M resolve to main side) -> capsule refresh = fast-forward-style content sync, NO risky semantic merge needed. Remaining gate: mutation on shared branch -> operator green-light per merge-plan section 5.
+- Artifacts: scripts/me2-r28/divergence-list-batch0.txt (49 paths + basis header), /tmp/div-batch0-raw.txt.
+
+Stage Summary:
+- Merge-plan risk profile DROPPED: C-class review (was: highest-risk semantic extraction) = 3 trivial decisions, all main-side. Batch execution is now a single mechanical capsule refresh, gated only by operator approval + CI-wiring preference (C-1 no longer blocking content sync — only build/runtime verification).
+- RESEARCHER: silent-but-alive (re-issues TOOL_REQUEST each generation); no supervisor action needed until their next generation lands or next tick readback.
+- Next tick: (1) RESEARCHER ACK + CRITIC-gates readback (marker-based); (2) if operator green-light observed (or 419203 lane idle), capsule refresh proposal ready: content-sync 49 paths, 1 commit, T1-lease discipline; (3) TYPED_CLICK static-element probe remains in 419203 lane.
+- Security: no secrets printed/committed; read-only operations this tick (zero browser mutations, zero shared-branch mutations).
