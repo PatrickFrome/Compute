@@ -11223,3 +11223,20 @@ Stage Summary:
 - Registry updates: (1) CAPTURE is NOT a proof-minter (0915 hypothesis disproved by direct test); (2) proof conversation_url field can be EMPTY while tab actually sits in a conversation (RESEARCHER /c/00868e19) — proof metadata unreliable for locating agent threads; (3) TYPED_CLICK sidebar-nav not effective on fleet-owned tabs (COMPLETED but no navigation; works on agent-space/user tabs) — fleet tab UI surface differs or button non-navigating.
 - Verdicts unchanged: 23 work / 15 broken / next-revision unverified. Dispatch to fleet PLANNER thread remains OPEN (needs either effective nav on fleet tab or operator client-fix).
 - Next tick: alternative dispatch path — READ_TRANSCRIPT on PLANNER tab to map its sidebar structure precisely, or dispatch via NEW task session (proven recipe) routed to PLANNER-role brief.
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0934
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718)
+Task: Directive tick 09:34 — continue DIRECTIVE-LOOP-0930 plan: (a) SELECT_TAB proof-mint test, (b) RESEARCHER live-thread /c/00868e19 investigation. Directive sha256 re-verified OK. (Note: 0930 directive section was written by a parallel echo run — continued from its plan without repeating.)
+
+Work Log:
+- (b) CAPTURE on RESEARCHER fleet tab (on /c/00868e19): COMPLETED but 0 named buttons, 0 text nodes, 1 empty textbox -> thread body invisible in semantic plane on fleet tab too (thread-scope gap applies fleet-wide for CAPTURE).
+- (a) SELECT_TAB proof-mint test: SELECT_TAB COMPLETED err=None, FLEET_STATUS before/after -> proven_at UNCHANGED (17:38:20.294Z). DISPROVED: SELECT_TAB does not mint transport proofs either. Combined with 0930: CAPTURE no, SELECT_TAB no -> no supervisor-driven proof-mint path found on fleet tabs; proofs appear client-internal only (operator-ask candidate).
+- BREAKTHROUGH (read-only): READ_TRANSCRIPT on RESEARCHER fleet tab returns 6774 chars of FULL thread dialogue — GLM-5.3-Flash "Thought Process" + actual assistant replies + the complete fleet seed brief. Fleet agent reply-readback IS possible via READ_TRANSCRIPT (earlier "reply-readback blocked" verdict applies ONLY to agent-space supervisor tab surface; fleet tabs expose dialogue through transcript text plane).
+- Seed brief contents (registry summary, no infra duplication): role=RESEARCHER, lease_generation=1, target_branch=work/devos-maintenance-researcher-g180, bounded research episode task; TOOL PROTOCOL TOOL_REQUEST_V1 (agent may request CAPTURE|READ_TRANSCRIPT|TAB_TELEMETRY|SYSTEM_TELEMETRY|SCROLL|SEMANTIC_FOCUS via fenced tool blocks, max 4/reply, results as TOOL_RESULT_V1 in next task message); AGENT ACCESS CAPSULE v1 (client-internal supervisor edge — separate supabase host, device-signed routes; workspace id matches ours 2de9f84b).
+- Read-only throughout; one mutation (SELECT_TAB) with 20s pace + readbacks.
+
+Stage Summary:
+- VERDICT CHANGES: (1) reply-readback: WORKS for fleet agents via READ_TRANSCRIPT (fleet-tab surface); still blocked on agent-space tab surface. (2) proof-minting: NO supervisor path (CAPTURE/SELECT_TAB disproved) — proofs client-internal, operator-ask. (3) Fleet autonomy loop is BY DESIGN: agents hold TOOL_REQUEST_V1 protocol + lease generations + target branches — the missing piece is task-message delivery INTO fleet agents (fleet-tab dispatch anomaly from 0930 blocks the feedback half of TOOL_RESULT_V1 loop).
+- STRATEGIC: the system already has an agent tasking/tool-result protocol; convergence path = restore fleet-tab task-message delivery (operator fix or find delivery channel), NOT build a new protocol in agent-space sessions.
+- Next tick: full transcript archaeology of all 4 fleet tabs (map each agent's seed brief, generation, last tool requests) via READ_TRANSCRIPT; check whether TOOL_RESULT_V1 blocks ever appeared (did the client ever answer agent tool requests?).
