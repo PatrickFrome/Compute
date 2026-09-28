@@ -35,7 +35,7 @@ import {
   retireEligibleFleetAgents,
 } from './fleet-elastic-governor.mjs';
 
-export { normalizeLease, planBacklogCapacity, renderDevosTaskPrompt };
+export { GLM_ROOT_CONVERSATION_SEED, normalizeLease, planBacklogCapacity, renderDevosTaskPrompt };
 export { ELASTIC_FLEET_CONTRACT, planElasticFleetCapacity, retireEligibleFleetAgents };
 
 const HASH_RE = /^[a-f0-9]{64}$/;
