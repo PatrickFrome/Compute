@@ -21,6 +21,9 @@ const SAFE_PROBE = Object.freeze({
   browser_actuation_authority: false,
   command_mutation_enabled: false,
   token_mutation_enabled: false,
+  persistent_state_write_enabled: false,
+  durable_state_authority: false,
+  state_storage: 'EPHEMERAL_MEMORY_ONLY',
   authority_effect: false,
 });
 
@@ -119,4 +122,20 @@ test('R103 Browser launch cannot be promoted to the historical full daemon by en
   assert.match(verify, /ME2_BOOT_MODE:\s*'full'/);
   assert.match(verify, /ME2_DAEMON_BOOT_MODE:\s*'full'/);
   assert.match(verify, /hostile_boot_mode_override_rejected:\s*true/);
+});
+
+
+test('R104 Browser probe state is ephemeral and cannot become a parallel durable truth', () => {
+  const store = source('apps/me2-daemon/store.ts');
+  const daemon = source('apps/me2-daemon/index.ts');
+  const verify = source('apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs');
+
+  assert.match(store, /BROWSER_PROBE_MODE = process\.env\.ME2_HOSTED_BY_BROWSER === "1"/);
+  assert.match(store, /DB_FILE = BROWSER_PROBE_MODE \? ":memory:" : join\(HERE, "me2\.db"\)/);
+  assert.match(store, /if \(!BROWSER_PROBE_MODE\) mkdirSync/);
+  assert.match(daemon, /persistent_state_write_enabled: false/);
+  assert.match(daemon, /durable_state_authority: false/);
+  assert.match(daemon, /state_storage: "EPHEMERAL_MEMORY_ONLY"/);
+  assert.match(verify, /Browser probe must not create durable ME2 SQLite state/);
+  assert.match(verify, /durable_state_file_created: false/);
 });
