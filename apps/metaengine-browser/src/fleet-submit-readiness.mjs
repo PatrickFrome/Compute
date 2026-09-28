@@ -1,7 +1,9 @@
+import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
+  normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformComposer,
   resolveAgentPlatformSelectedModel,
@@ -10,6 +12,40 @@ import {
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
 const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
+const HASH_RE = /^[a-f0-9]{64}$/;
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+
+function exactAgentSessionOrigin(frame, proof, expectedTab, expectedTarget, expectedGeneration) {
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1' || proof.authority_effect !== false) return null;
+  if (String(proof.transport_stage || 'CONVERSATION') !== 'CONVERSATION') return null;
+  if (String(proof.tab_id || '') !== expectedTab) return null;
+  if (String(proof.target_id || '').toLowerCase() !== expectedTarget) return null;
+  if (Number.isSafeInteger(Number(expectedGeneration)) && Number(expectedGeneration) > 0
+      && Number(proof.generation_epoch) !== Number(expectedGeneration)) return null;
+  const agentSurfaceSha = String(proof.agent_surface_sha256 || '').toLowerCase();
+  const expectedConversationSha = String(proof.conversation_url_sha256 || '').toLowerCase();
+  if (!HASH_RE.test(agentSurfaceSha) || !HASH_RE.test(expectedConversationSha)) return null;
+  let currentUrl;
+  try {
+    currentUrl = normalizeAgentPlatformConversationUrl(frame?.url);
+  } catch {
+    return null;
+  }
+  const currentConversationSha = sha256(currentUrl);
+  if (currentConversationSha !== expectedConversationSha) return null;
+  return Object.freeze({
+    schema: 'metaengine.browser.agent-session-origin-proof.v1',
+    stage: 'AGENT_SESSION',
+    url: currentUrl,
+    target_id: expectedTarget,
+    generation_epoch: Number(proof.generation_epoch),
+    conversation_url_sha256: currentConversationSha,
+    agent_surface_sha256: agentSurfaceSha,
+    page_data_authority: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+}
 
 function exact(frame, role, names) {
   const rows = (frame?.semantic_targets || []).filter((row) => {
@@ -29,6 +65,8 @@ export function evaluateFleetSubmitReadiness({
   selected_tab_id,
   phase = 'PRE_CLICK',
   platform = 'CHATGPT',
+  agent_session_proof = null,
+  expected_agent_generation_epoch = null,
 } = {}) {
   const expectedTab = String(expected_tab_id || '');
   const frameTab = String(frame?.tab_id || '');
@@ -77,7 +115,21 @@ export function evaluateFleetSubmitReadiness({
   // (semantic addressing is geometry-independent by design). The viewport is
   // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
-    const agentSurface = resolveAgentPlatformAgentSurface(frame);
+    // A fresh Agent-home semantic proof is sufficient while creating a session.
+    // Once New Task has transitioned to /c/<id>, the home controls may no longer
+    // be rendered. In that state we accept ONLY a causally bound durable proof
+    // that this exact conversation originated from a previously proven Agent
+    // surface, and only when its tab/target/generation + URL hash still match.
+    // A normal z.ai Chat conversation without that origin proof remains fenced.
+    const liveAgentSurface = resolveAgentPlatformAgentSurface(frame);
+    const sessionOrigin = liveAgentSurface ? null : exactAgentSessionOrigin(
+      frame,
+      agent_session_proof,
+      expectedTab,
+      expectedTarget,
+      expected_agent_generation_epoch,
+    );
+    const agentSurface = liveAgentSurface || sessionOrigin;
     if (!agentSurface) {
       return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
     }
