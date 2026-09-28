@@ -15,8 +15,14 @@ import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
-  | "command" | "agents" | "browser" | "code" | "tasks"
-  | "supervisor" | "compute" | "memory" | "observability" | "system";
+  | "browser" | "code" | "tasks"
+  | "supervisor" | "memory" | "observability" | "system";
+type LegacyPageAlias = "command" | "agents" | "compute";
+type PageInput = PageKey | LegacyPageAlias;
+
+function normalizePageInput(page: PageInput): PageKey {
+  return page === "command" || page === "agents" || page === "compute" ? "browser" : page;
+}
 
 // R97 native swarm convergence: COMMAND/AGENTS/COMPUTE were daemon/API-agent
 // surfaces. They are intentionally absent from production navigation.
@@ -63,7 +69,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
   { key: "supervise", label: "Supervisor", page: "supervisor", hint: "objectives, orchestration and recovery" },
 ];
 
-export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
+export type PaletteMode = "all" | "actions" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
 export type ContextDrawerDock = "bottom" | "right";
@@ -113,7 +119,7 @@ interface Me2State {
   booted: boolean;
 
   init: () => void;
-  setPage: (p: PageKey) => void;
+  setPage: (p: PageInput) => void;
   setWorkspace: (w: WorkspaceKey) => void;
   setPalette: (open: boolean) => void;
   setDialog: (d: DialogKind) => void;
@@ -648,7 +654,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     // R97 compatibility fence: historical deep links into daemon/API-agent
     // surfaces never resurrect those control planes. They converge to the
     // canonical native Browser fleet workspace.
-    const nextPage: PageKey = (p === "command" || p === "agents" || p === "compute") ? "browser" : p;
+    const nextPage = normalizePageInput(p);
     // Any page transition invalidates in-flight drawer geometry replies.
     // A new RUN/Browser sync below gets a fresh sequence/context token.
     contextDrawerSyncSeq += 1;
