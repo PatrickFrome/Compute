@@ -39,6 +39,7 @@ function persistedActiveState() {
         target_id: OLD_TARGET,
         generation_epoch: 7,
         conversation_url_sha256: 'a'.repeat(64),
+        agent_surface_sha256: 'b'.repeat(64),
         proven_at: '2026-08-30T09:01:00.000Z',
         authority_effect: false,
       },
@@ -71,6 +72,10 @@ test('restart does not trust persisted ACTIVE transport proof without fresh exac
   assert.equal(agent.transport_proof, null);
   assert.equal(agent.tab_id, TAB_ID);
   assert.equal(agent.target_id, OLD_TARGET);
-  assert.equal(agent.generation_epoch, 8);
+  // Restart revokes ACTIVE transport authority even when the logical
+  // tab/target binding survives. Generation is not fabricated upward unless
+  // the physical binding actually changes; the proof itself is what is
+  // cleared and must be freshly re-established.
+  assert.equal(agent.generation_epoch, 7);
   assert.equal(agent.automatic_retry_allowed, false);
 });
