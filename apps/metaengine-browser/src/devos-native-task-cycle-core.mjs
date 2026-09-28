@@ -1166,8 +1166,13 @@ export class DevOsNativeTaskCycle {
       const foregroundState = await this.#getState();
       assertLiveLeaseBinding(lease, foregroundState?.fleet);
 
-      const preReady = readinessOrThrow({ frame: pre, lease, agent, selected_tab_id: selectedTabId(foregroundState), phase: 'PRE_TYPE' });
       const preConversation = conversationUrl(pre?.url);
+      if (!preConversation) {
+        const error = new Error('devos_dispatch_requires_preexisting_agent_conversation');
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
+      const preReady = readinessOrThrow({ frame: pre, lease, agent, selected_tab_id: selectedTabId(foregroundState), phase: 'PRE_TYPE' });
 
       await journal?.beginExecution(effectBinding, {
         phase: 'BEFORE_SEMANTIC_TYPE',
@@ -1284,7 +1289,7 @@ export class DevOsNativeTaskCycle {
           state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
           tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
           proof, server: body, prompt_included: false, page_data_authority: false,
-          conversation_bootstrap: flush?.state || null,
+          conversation_bootstrap: 'PREEXISTING_AGENT_SESSION',
           selected_tab_mutation: false, viewport_geometry_required: false,
           click_issued: clickIssued, submit_path: 'ENTER_KEY_EVENT_DRIVEN_READBACK', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
         };
