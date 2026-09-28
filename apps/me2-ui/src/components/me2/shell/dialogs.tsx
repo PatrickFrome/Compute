@@ -1,101 +1,21 @@
 "use client";
-// ── GLOBAL DIALOGS: НОВАЯ ЗАДАЧА · EVENTS_SEARCH · BUDGET · RESET · TASK SHEET ──
+// ── GLOBAL DIALOGS: EVENTS_SEARCH · BUDGET · RESET · read-only TASK SHEET ──
 // Все оверлеи — Global UI (доступны из любой Page, §2 дизайн-дока).
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useMe2, createTaskFromForm } from "@/components/me2/store";
-import { eventsSearch, environmentReset, taskAction, age, hhmmss, EVENT_STYLE, type Task, type Event } from "@/lib/me2-bus";
+import { useMe2 } from "@/components/me2/store";
+import { eventsSearch, environmentReset, age, hhmmss, EVENT_STYLE, type Event } from "@/lib/me2-bus";
 import {
-  Rocket, Clock, Search, Gauge, Trash2, X, RotateCcw, Archive, CheckCircle2,
+  Search, Gauge, Trash2, CheckCircle2,
   AlertTriangle, Activity, Globe2,
 } from "lucide-react";
-
-// ── НОВАЯ ЗАДАЧА ────────────────────────────────────────────────────────────────
-function NewTaskDialog() {
-  const dialog = useMe2((s) => s.dialog);
-  const setDialog = useMe2((s) => s.setDialog);
-  const busy = useMe2((s) => s.busyAction);
-  const setBusy = useMe2((s) => s.setBusy);
-  const [fTitle, setFTitle] = useState("");
-  const [fSpec, setFSpec] = useState("");
-  const [fRole, setFRole] = useState("ANY");
-  const [fSteps, setFSteps] = useState("6");
-  const [fDelay, setFDelay] = useState("0");
-
-  const create = async () => {
-    setBusy(true);
-    const ok = await createTaskFromForm({ title: fTitle, spec: fSpec, role: fRole, steps: fSteps, delay: fDelay });
-    setBusy(false);
-    if (ok) {
-      setDialog(null);
-      setFTitle(""); setFSpec(""); setFDelay("0");
-    }
-  };
-
-  return (
-    <Dialog open={dialog === "newTask"} onOpenChange={(o) => { if (!o) setDialog(null); }}>
-      <DialogContent className="border-zinc-800 bg-zinc-950 sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm tracking-widest"><Rocket className="h-4 w-4 text-emerald-400" /> НОВАЯ ЗАДАЧА</DialogTitle>
-          <DialogDescription className="text-xs text-zinc-500">через command bus · полоса MUTATION · бюджет 24/60s</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 py-1">
-          <div className="space-y-1">
-            <Label htmlFor="t-title" className="text-xs text-zinc-400">Заголовок</Label>
-            <Input id="t-title" value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="короткое имя задачи" className="border-zinc-800 bg-zinc-900 text-sm" />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="t-spec" className="text-xs text-zinc-400">Спецификация <span className="text-rose-500">*</span></Label>
-            <Textarea id="t-spec" value={fSpec} onChange={(e) => setFSpec(e.target.value)} placeholder="что именно нужно сделать; агент получает это как задание" rows={5} className="border-zinc-800 bg-zinc-900 font-mono text-xs" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs text-zinc-400">Роль</Label>
-              <Select value={fRole} onValueChange={setFRole}>
-                <SelectTrigger className="border-zinc-800 bg-zinc-900 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent className="border-zinc-800 bg-zinc-950">
-                  <SelectItem value="ANY">любая</SelectItem>
-                  <SelectItem value="IMPLEMENTER">IMPLEMENTER</SelectItem>
-                  <SelectItem value="RESEARCHER">RESEARCHER</SelectItem>
-                  <SelectItem value="OPERATOR">OPERATOR</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="t-steps" className="text-xs text-zinc-400">Макс. шагов</Label>
-              <Input id="t-steps" type="number" min={1} max={24} value={fSteps} onChange={(e) => setFSteps(e.target.value)} className="border-zinc-800 bg-zinc-900 text-sm" />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="t-delay" className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <Clock className="h-3 w-3 text-lime-500" /> Отложенный запуск (сек, 0 = сразу)
-            </Label>
-            <Input id="t-delay" type="number" min={0} max={3600} value={fDelay} onChange={(e) => setFDelay(e.target.value)} className="border-zinc-800 bg-zinc-900 text-sm" />
-            {Number(fDelay) > 0 && (
-              <p className="text-[10px] text-lime-500/80">задача появится в очереди через {Number(fDelay)}s — отменить можно в OBSERVABILITY → COMMAND BUS до ETA</p>
-            )}
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" size="sm" className="border-zinc-700" onClick={() => setDialog(null)}>отмена</Button>
-          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={() => void create()} disabled={busy || !fSpec.trim()}>
-            {Number(fDelay) > 0 ? <Clock className="mr-1 h-3.5 w-3.5" /> : <Rocket className="mr-1 h-3.5 w-3.5" />}
-            {Number(fDelay) > 0 ? `запланировать через ${Number(fDelay)}s` : "поставить в очередь"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── EVENTS_SEARCH ───────────────────────────────────────────────────────────────
 function EventsSearchDialog() {
@@ -310,7 +230,6 @@ function TaskSheet() {
   const stream = useMe2((s) => s.stream);
   const closeTask = useMe2((s) => s.closeTask);
   const openTask = useMe2((s) => s.openTask);
-  const busy = useMe2((s) => s.busyAction);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!detail) return;
@@ -376,23 +295,6 @@ function TaskSheet() {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2 border-t border-zinc-800 p-3">
-              {(detail.status === "READY" || detail.status === "RUNNING") && (
-                <Button variant="destructive" size="sm" className="flex-1" onClick={() => { void taskAction("TASK_CANCEL", detail.id); }}>
-                  <X className="mr-1 h-3.5 w-3.5" /> отменить (CONTROL)
-                </Button>
-              )}
-              {(detail.status === "FAILED" || detail.status === "CANCELLED") && (
-                <>
-                  <Button size="sm" className="flex-1 bg-amber-600 text-black hover:bg-amber-500" onClick={() => { void taskAction("TASK_RETRY", detail.id); }} disabled={busy}>
-                    <RotateCcw className="mr-1 h-3.5 w-3.5" /> повторить (MUTATION)
-                  </Button>
-                </>
-              )}
-              {(detail.status === "COMPLETED" || detail.status === "FAILED" || detail.status === "CANCELLED") && (
-                <Button variant="outline" size="sm" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800" onClick={() => { void taskAction("TASK_ARCHIVE", detail.id); }} disabled={busy}>
-                  <Archive className="mr-1 h-3.5 w-3.5" /> в архив (MUTATION)
-                </Button>
-              )}
               <Button variant="ghost" size="sm" className="border-zinc-800 text-zinc-400" onClick={() => openTask(detail.id)} title="обновить хронику">
                 обновить
               </Button>
@@ -407,7 +309,6 @@ function TaskSheet() {
 export function GlobalDialogs() {
   return (
     <>
-      <NewTaskDialog />
       <EventsSearchDialog />
       <BudgetDialog />
       <OpenSiteDialog />
