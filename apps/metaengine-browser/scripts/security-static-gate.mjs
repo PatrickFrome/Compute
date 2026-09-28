@@ -26,17 +26,17 @@ const PRODUCTION_ESCAPE_RULES = Object.freeze([
   // authenticated z.ai Web UI. Managed/private model inference clients are
   // forbidden from the packaged Browser graph so a UI failure can never
   // silently fall back to an API/SDK path.
-  Object.freeze({ id: 'MODEL_API_OPENAI_ENDPOINT', pattern: /https?:\\/\\/api\\.openai\\.com/i }),
-  Object.freeze({ id: 'MODEL_API_ZAI_ENDPOINT', pattern: /https?:\\/\\/api\\.z\\.ai/i }),
-  Object.freeze({ id: 'MODEL_API_ANTHROPIC_ENDPOINT', pattern: /https?:\\/\\/api\\.anthropic\\.com/i }),
-  Object.freeze({ id: 'MODEL_API_VERCEL_GATEWAY_ENDPOINT', pattern: /https?:\\/\\/ai-gateway\\.vercel\\.sh/i }),
-  Object.freeze({ id: 'MODEL_API_OPENAI_SECRET', pattern: /\\bOPENAI_API_KEY\\b/ }),
-  Object.freeze({ id: 'MODEL_API_ANTHROPIC_SECRET', pattern: /\\bANTHROPIC_API_KEY\\b/ }),
-  Object.freeze({ id: 'MODEL_API_ZAI_SECRET', pattern: /\\b(?:ZAI|GLM)_API_KEY\\b/ }),
-  Object.freeze({ id: 'MODEL_API_OPENAI_SDK', pattern: /(?:from\\s*['"]openai['"]|require\\(\\s*['"]openai['"]\\s*\\))/ }),
-  Object.freeze({ id: 'MODEL_API_ANTHROPIC_SDK', pattern: /(?:from\\s*['"]@anthropic-ai\\/sdk['"]|require\\(\\s*['"]@anthropic-ai\\/sdk['"]\\s*\\))/ }),
-  Object.freeze({ id: 'MODEL_API_RESPONSES_PATH', pattern: /['"]\\/v1\\/responses['"]/ }),
-  Object.freeze({ id: 'MODEL_API_CHAT_COMPLETIONS_PATH', pattern: /['"]\\/v1\\/chat\\/completions['"]/ }),
+  Object.freeze({ id: 'MODEL_API_OPENAI_ENDPOINT', pattern: /https?:\/\/api\.openai\.com/i }),
+  Object.freeze({ id: 'MODEL_API_ZAI_ENDPOINT', pattern: /https?:\/\/api\.z\.ai/i }),
+  Object.freeze({ id: 'MODEL_API_ANTHROPIC_ENDPOINT', pattern: /https?:\/\/api\.anthropic\.com/i }),
+  Object.freeze({ id: 'MODEL_API_VERCEL_GATEWAY_ENDPOINT', pattern: /https?:\/\/ai-gateway\.vercel\.sh/i }),
+  Object.freeze({ id: 'MODEL_API_OPENAI_SECRET', pattern: /\bOPENAI_API_KEY\b/ }),
+  Object.freeze({ id: 'MODEL_API_ANTHROPIC_SECRET', pattern: /\bANTHROPIC_API_KEY\b/ }),
+  Object.freeze({ id: 'MODEL_API_ZAI_SECRET', pattern: /\b(?:ZAI|GLM)_API_KEY\b/ }),
+  Object.freeze({ id: 'MODEL_API_OPENAI_SDK', pattern: /(?:from\s*['"]openai['"]|require\(\s*['"]openai['"]\s*\))/ }),
+  Object.freeze({ id: 'MODEL_API_ANTHROPIC_SDK', pattern: /(?:from\s*['"]@anthropic-ai\/sdk['"]|require\(\s*['"]@anthropic-ai\/sdk['"]\s*\))/ }),
+  Object.freeze({ id: 'MODEL_API_RESPONSES_PATH', pattern: /['"]\/v1\/responses['"]/ }),
+  Object.freeze({ id: 'MODEL_API_CHAT_COMPLETIONS_PATH', pattern: /['"]\/v1\/chat\/completions['"]/ }),
 ]);
 
 const EFFECT_POOR_BOUNDARIES = Object.freeze([
