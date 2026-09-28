@@ -456,6 +456,8 @@ export class DevOsNativeTaskCycle {
       elastic_max_retire_per_cycle: ELASTIC_FLEET_CONTRACT.max_retire_per_cycle,
       durable_effect_delivery_journal: this.#inner.snapshot()?.durable_effect_delivery_journal === true,
       bound_unverified_dispatch_allowed: false,
+      leased_dispatch_requires_preexisting_agent_conversation: true,
+      pre_admission_agent_bootstrap_owner: 'DEVOS_NATIVE_TASK_CYCLE_WRAPPER',
       authority_effect: this.#inner.snapshot()?.authority_effect === true,
     };
   }
