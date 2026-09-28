@@ -42,7 +42,6 @@ const me2Command = await readFile(new URL('../../me2-ui/src/components/me2/pages
 const me2RunPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url), 'utf8');
 const me2BrowserStage = await readFile(new URL('../../me2-ui/src/components/me2/stages/browser-stage.tsx', import.meta.url), 'utf8');
 const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
-const me2AgentChatFeed = await readFile(new URL('../../me2-ui/src/hooks/use-agentchat-sessions.ts', import.meta.url), 'utf8');
 const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
 const me2TasksPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
 const me2Dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
@@ -301,12 +300,10 @@ test('R85 persistent chrome is compact and cannot directly fire emergency flush'
   assert.match(me2Palette, /setConfirmFlush\(true\)/);
 });
 
-test('R95C COMMAND is mission control and RUN owns the compact Browser stage', () => {
-  assert.match(me2Command, /data-testid="page-command"/);
-  assert.match(me2Command, /data-testid="agent-sidebar"/);
-  assert.match(me2Command, /data-testid="mission-objective-card"/);
-  assert.match(me2Command, /data-testid="mission-active-work"/);
-  assert.doesNotMatch(me2Command, /BrowserStage/);
+test('R102 retired COMMAND is inert while the native Browser page owns the compact Agent stage', () => {
+  assert.match(me2Command, /data-testid="retired-command-page"/);
+  assert.match(me2Command, /data-authority-effect="false"/);
+  assert.doesNotMatch(me2Command, /BrowserStage|sendCommand|me2Fetch|agentChatOp|useAgentChatSessions/);
   assert.match(me2RunPage, /data-testid="page-browser"/);
   assert.match(me2RunPage, /<BrowserStage compact defaultCastOn \/>/);
   assert.match(me2Topbar, /data-testid="topbar"/);
@@ -339,19 +336,14 @@ test('R85 agent tab binding is exact-session-only and rejects similar-title fall
   assert.equal(duplicate.kind, 'ambiguous');
   assert.equal(duplicate.matches.length, 2);
 
-  // R93 moved COMMAND off daemon tab census entirely. Keep the pure R85
-  // resolver regression above as a historical fail-closed contract, but the
-  // primary renderer now consumes only Browser's canonical session->tab binding.
-  assert.match(me2Command, /selectPrimaryAgentSession\(s\.id\)/);
-  assert.doesNotMatch(me2Command, /resolveExactAgentTab/);
-  assert.doesNotMatch(me2Command, /loadBrowserTabs/);
-  assert.doesNotMatch(me2Command, /BROWSER_SELECT_TAB/);
+  // The pure resolver remains a historical fail-closed contract, but the
+  // retired COMMAND module cannot consume or mutate Browser session identity.
+  assert.doesNotMatch(me2Command, /selectPrimaryAgentSession|resolveExactAgentTab|loadBrowserTabs|BROWSER_SELECT_TAB/);
 });
 
-test('R85 semantic workbench avoids nested interactive agent rows', () => {
-  assert.doesNotMatch(me2Command, /role="button"\s+tabIndex=\{0\}[\s\S]{0,1200}<button/);
-  assert.match(me2Command, /type="button"\s+aria-current=\{chatId === s\.id\}/);
-  assert.match(me2Command, /aria-label=\{\`Открыть вкладку z\.ai агента/);
+test('R102 retired COMMAND cannot recreate an interactive Agent authority surface', () => {
+  assert.match(me2Command, /data-testid="retired-command-page"/);
+  assert.doesNotMatch(me2Command, /aria-current=|selectPrimaryAgentSession|sendCommand|agentChatOp|useAgentChatSessions/);
 });
 
 test('R85 Browser tabs use sibling controls instead of nested interactive semantics', () => {
@@ -412,12 +404,9 @@ test('R97 attention and observability are advanced-only and keep zero effect aut
   assert.match(me2Observability, /prev\.event\.type === event\.type/);
 });
 
-test('R85 agent chat feed is shared and background-aware', () => {
-  assert.match(me2AgentChatFeed, /useSyncExternalStore/);
-  assert.match(me2AgentChatFeed, /document\.visibilityState === "visible"/);
-  assert.match(me2AgentChatFeed, /inFlight/);
-  assert.match(me2Command, /useAgentChatSessions/);
-  assert.doesNotMatch(me2Command, /setInterval\([^\n]*agentchat/);
+test('R102 retired COMMAND consumes no daemon AgentChat feed', () => {
+  assert.match(me2Command, /data-authority-effect="false"/);
+  assert.doesNotMatch(me2Command, /useAgentChatSessions|agentChatOp|\/agentchat|WebSocket|me2Fetch/);
 });
 
 test('R85 unavailable legacy sandbox plane is fail-close and collapsed by default', () => {
@@ -492,8 +481,7 @@ test('R85 workspace switch restores workspace-scoped layout preferences', () => 
   assert.match(store, /commandRailPreferredOpen: layoutPreference\.commandRailOpen/);
   assert.match(store, /setCommandRailPreference/);
   assert.match(store, /me2\.command\.agent-rail\.v2:/);
-  assert.match(me2Command, /commandRailPreferredOpen/);
-  assert.match(me2Command, /storeCommandRailPreference\(open\)/);
+  assert.doesNotMatch(me2Command, /commandRailPreferredOpen|storeCommandRailPreference|setPrimaryCommandRail/);
 });
 
 test('R97 retains workspace reset capability without a persistent topbar control', () => {
@@ -636,14 +624,10 @@ test('R85 command rail bridge is presentation-only and reconciles effective geom
   assert.match(railHandler, /update_authority:\s*false/);
   assert.match(railHandler, /release_authority:\s*false/);
   assert.match(railHandler, /authority_effect:\s*false/);
-  assert.match(me2Command, /commandRailPreferredOpen/);
-  assert.match(me2Command, /storeCommandRailPreference/);
-  assert.match(me2Command, /setPrimaryCommandRail/);
-  assert.match(me2Command, /effective_open/);
-  assert.match(me2Command, /window\.addEventListener\("resize", onResize\)/);
-  assert.match(me2Command, /COMMAND_RAIL_WEB_MIN_WIDTH = 984/);
-  assert.match(me2Command, /aria-disabled=\{railConstrained\}/);
-  assert.doesNotMatch(me2Command, /window\.innerWidth < 768/);
+  assert.doesNotMatch(
+    me2Command,
+    /commandRailPreferredOpen|storeCommandRailPreference|setPrimaryCommandRail|effective_open|COMMAND_RAIL_WEB_MIN_WIDTH/,
+  );
 });
 
 test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
