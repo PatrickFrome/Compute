@@ -54,6 +54,13 @@ export function workflowStageForPage(page: PageKey) {
   return WORKFLOW_STAGES.find((stage) => stage.pages.includes(page)) ?? WORKFLOW_STAGES[0];
 }
 
+export function normalizePageKey(value: unknown): PageKey {
+  const raw = String(value ?? "").trim();
+  if (raw === "command" || raw === "agents" || raw === "compute") return "browser";
+  const match = PAGES.find((item) => item.key === raw);
+  return match?.key ?? "browser";
+}
+
 // ── Workspaces (пресеты рабочих контекстов) ─────────────────────────────────────
 export type WorkspaceKey = "development" | "browser-ops" | "debugging" | "monitoring" | "supervise";
 export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint: string }[] = [
@@ -649,7 +656,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     // R97 compatibility fence: historical deep links into daemon/API-agent
     // surfaces never resurrect those control planes. They converge to the
     // canonical native Browser fleet workspace.
-    const nextPage: PageKey = (p === "command" || p === "agents" || p === "compute") ? "browser" : p;
+    const nextPage = normalizePageKey(p);
     // Any page transition invalidates in-flight drawer geometry replies.
     // A new RUN/Browser sync below gets a fresh sequence/context token.
     contextDrawerSyncSeq += 1;
