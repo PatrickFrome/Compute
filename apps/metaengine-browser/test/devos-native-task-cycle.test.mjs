@@ -58,7 +58,7 @@ const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789ab
 const supervisorTab = 'tab_supervisor';
 
 function response(status, body) { return { status, ok: status >= 200 && status < 300, async json(){ return structuredClone(body); } }; }
-function frame({ url = 'https://chat.z.ai/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
+function frame({ url = conversationUrl, stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
