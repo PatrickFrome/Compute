@@ -1253,6 +1253,7 @@ export class DevOsNativeTaskCycle {
       const proof = {
         prompt_sha256: promptHash,
         conversation_url_sha256: sha256(normalizedUrl),
+        agent_surface_sha256: preReady.agent_origin_proof.agent_surface_sha256,
         effect_state: effectState,
       };
       this.#dispatchEffectCounters.dispatches += 1;
