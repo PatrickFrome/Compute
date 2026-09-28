@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { evaluateFleetSubmitReadiness } from '../src/fleet-submit-readiness.mjs';
 
 
 function semref(id) {
   return { schema:'metaengine.native-browser.semantic-ref.v1', semantic_ref_id:`semref_${String(id).padEnd(64,'0').slice(0,64)}` };
 }
+
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+const AGENT_CONVERSATION = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
 
 function glmAgentFrame({ model = 'GLM-5.3-Flash', tab_id = 'tab-fleet-1', target_id = 'webcontents:17' } = {}) {
   const target = (name, backend_node_id) => ({ role:'button', name, backend_node_id, semantic_ref:semref(name) });
@@ -89,6 +93,59 @@ test('D-C2: GLM lane readiness is TAB-SCOPED — a foreground mismatch never fai
   assert.equal(readiness.agent_surface.stage, 'AGENT_HOME');
   assert.equal(readiness.model_proof.model, 'GLM-5.3-Flash');
   assert.equal(readiness.viewport_rendered, false);
+});
+
+test('GLM lane admits a conversation only when exact durable Agent-origin proof matches current URL and binding', () => {
+  const base = glmAgentFrame();
+  const readiness = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    expected_agent_generation_epoch:7,
+    agent_session_proof:{
+      schema:'metaengine.browser.fleet-transport-proof.v1',
+      tab_id:EXPECTED.expected_tab_id,
+      target_id:EXPECTED.expected_target_id,
+      generation_epoch:7,
+      conversation_url_sha256:sha256(AGENT_CONVERSATION),
+      agent_surface_sha256:'d'.repeat(64),
+      proven_at:'2026-09-27T18:00:00.000Z',
+      authority_effect:false,
+    },
+    frame:{
+      ...base,
+      url:AGENT_CONVERSATION,
+      semantic_targets:[{ role:'textbox', name:'Send a Message', backend_node_id:3, semantic_ref:semref('agent-session-composer') }],
+    },
+  });
+  assert.equal(readiness.ready,true);
+  assert.equal(readiness.agent_surface.stage,'AGENT_SESSION');
+  assert.equal(readiness.agent_surface.conversation_url_sha256,sha256(AGENT_CONVERSATION));
+  assert.equal(readiness.model_proof.model,'GLM-5.3-Flash');
+});
+
+test('GLM conversation with missing, stale or mismatched Agent-origin proof remains fenced as normal Chat', () => {
+  const base = glmAgentFrame();
+  const frame = {
+    ...base,
+    url:AGENT_CONVERSATION,
+    semantic_targets:[{ role:'textbox', name:'Send a Message', backend_node_id:3, semantic_ref:semref('chat-only-composer') }],
+  };
+  const noProof = evaluateFleetSubmitReadiness({ ...EXPECTED, platform:'GLM_ZAI', phase:'PRE_TYPE', expected_agent_generation_epoch:7, frame });
+  assert.equal(noProof.ready,false);
+  assert.equal(noProof.reason,'AGENT_SURFACE_NOT_PROVEN');
+  const mismatch = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI', phase:'PRE_TYPE', expected_agent_generation_epoch:7, frame,
+    agent_session_proof:{
+      schema:'metaengine.browser.fleet-transport-proof.v1', tab_id:EXPECTED.expected_tab_id,
+      target_id:EXPECTED.expected_target_id, generation_epoch:7,
+      conversation_url_sha256:'e'.repeat(64), agent_surface_sha256:'d'.repeat(64),
+      proven_at:'2026-09-27T18:00:00.000Z', authority_effect:false,
+    },
+  });
+  assert.equal(mismatch.ready,false);
+  assert.equal(mismatch.reason,'AGENT_SURFACE_NOT_PROVEN');
 });
 
 test('D-C2: GLM lane still fails closed when the CAPTUREd frame tab drifts from the lease', () => {
