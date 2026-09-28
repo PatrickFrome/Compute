@@ -274,10 +274,16 @@ function journalBinding(lease, promptSha256) {
 function proofFromJournal(entry) {
   const promptSha = String(entry?.prompt_sha256 || '').toLowerCase();
   const conversationSha = String(entry?.evidence?.conversation_url_sha256 || '').toLowerCase();
+  const agentSurfaceSha = String(entry?.evidence?.agent_surface_sha256 || '').toLowerCase();
   const effectState = String(entry?.evidence?.effect_state || '').toUpperCase();
-  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha)) return null;
-  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(effectState)) return null;
-  return { prompt_sha256: promptSha, conversation_url_sha256: conversationSha, effect_state: effectState };
+  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha) || !HASH_RE.test(agentSurfaceSha)) return null;
+  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(effectState)) return null;
+  return {
+    prompt_sha256: promptSha,
+    conversation_url_sha256: conversationSha,
+    agent_surface_sha256: agentSurfaceSha,
+    effect_state: effectState,
+  };
 }
 
 function safePreEffectCandidate(entry) {
@@ -1246,9 +1252,16 @@ export class DevOsNativeTaskCycle {
         throw error;
       }
 
+      const agentSurfaceSha = String(preReady?.agent_session_proof?.agent_surface_sha256 || '').toLowerCase();
+      if (!HASH_RE.test(agentSurfaceSha)) {
+        const error = new Error('devos_agent_session_provenance_missing_before_receipt');
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
       const proof = {
         prompt_sha256: promptHash,
         conversation_url_sha256: sha256(normalizedUrl),
+        agent_surface_sha256: agentSurfaceSha,
         effect_state: effectState,
       };
       this.#dispatchEffectCounters.dispatches += 1;
@@ -1256,6 +1269,7 @@ export class DevOsNativeTaskCycle {
       this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'PROVEN', effect_state: effectState, task_id: lease.task_id, agent_id: lease.agent_id });
       await journal?.markDeliveryPending(effectBinding, {
         conversation_url_sha256: proof.conversation_url_sha256,
+        agent_surface_sha256: proof.agent_surface_sha256,
         effect_state: proof.effect_state,
         browser_effect_proven: true,
         physical_effect_attempted: true,
