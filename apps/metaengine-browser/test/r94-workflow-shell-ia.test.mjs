@@ -6,8 +6,8 @@ const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx'
 const pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell/pagebar.tsx', import.meta.url), 'utf8');
 const topbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url), 'utf8');
 
-test('R94 primary shell navigation is seven workflow stages, not ten architecture modules', () => {
-  for (const label of ['COMMAND', 'PLAN', 'BUILD', 'RUN', 'FLEET', 'OBSERVE', 'SYSTEM']) {
+test('R98 primary shell navigation exposes six retained workflow stages around the native Agent fleet', () => {
+  for (const label of ['FLEET', 'PLAN', 'BUILD', 'SUPERVISE', 'OBSERVE', 'SYSTEM']) {
     assert.match(store, new RegExp(`label: "${label}"`));
   }
   assert.match(store, /WorkflowStageKey = "command" \| "plan" \| "build" \| "run" \| "fleet" \| "observe" \| "system"/);
@@ -16,14 +16,15 @@ test('R94 primary shell navigation is seven workflow stages, not ten architectur
   assert.doesNotMatch(pagebar, /PAGES\.map\(\(p\)/);
 });
 
-test('R94 stages preserve every legacy module page through explicit grouped ownership', () => {
-  assert.match(store, /key: "command"[\s\S]{0,180}pages: \["command"\]/);
+test('R98 stages retain only converged product pages and do not resurrect daemon/API-agent surfaces', () => {
+  assert.match(store, /key: "run"[\s\S]{0,180}pages: \["browser"\]/);
   assert.match(store, /key: "plan"[\s\S]{0,180}pages: \["tasks"\]/);
   assert.match(store, /key: "build"[\s\S]{0,180}pages: \["code"\]/);
-  assert.match(store, /key: "run"[\s\S]{0,180}pages: \["browser"\]/);
-  assert.match(store, /key: "fleet"[\s\S]{0,220}pages: \["agents", "supervisor"\]/);
+  assert.match(store, /key: "fleet"[\s\S]{0,220}pages: \["supervisor"\]/);
   assert.match(store, /key: "observe"[\s\S]{0,220}pages: \["observability", "memory"\]/);
-  assert.match(store, /key: "system"[\s\S]{0,220}pages: \["system", "compute"\]/);
+  assert.match(store, /key: "system"[\s\S]{0,220}pages: \["system"\]/);
+  assert.match(store, /historical deep links into daemon\/API-agent/);
+  assert.match(store, /\(p === "command" \|\| p === "agents" \|\| p === "compute"\) \? "browser" : p/);
   assert.match(pagebar, /stage\.pages\.map\(\(modulePage\)/);
 });
 
