@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 import { registerFleetRuntime, clearFleetRuntime } from '../src/fleet-runtime-bridge.mjs';
 
@@ -21,6 +22,7 @@ const mkLease = (n, tabId) => ({
 });
 
 const conversationUrl = (n) => `https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789ab${n}`;
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
 function frame({ url = 'https://chat.z.ai/', tabId, targetId, composerValueLength = null } = {}) {
   return {
@@ -33,6 +35,7 @@ function frame({ url = 'https://chat.z.ai/', tabId, targetId, composerValueLengt
     semantic_targets: [
       { role: 'textbox', name: null, value_length: composerValueLength ?? undefined, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 },
     ],
+    interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'GLM-5.3-Flash' }] },
     authority_effect: false,
   };
 }
@@ -49,15 +52,19 @@ function fleetOf(leases, proofs = new Map()) {
       tab_id: lease.tab_id,
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
-      transport_proof: proofs.get(lease.agent_id) || {
-        schema: 'metaengine.browser.fleet-transport-proof.v1',
-        tab_id: lease.tab_id,
-        target_id: lease.target_id,
-        generation_epoch: lease.agent_generation_epoch,
-        conversation_url_sha256: 'a'.repeat(64),
-        proven_at: '2026-08-31T18:00:00.000Z',
-        authority_effect: false,
-      },
+      transport_proof: proofs.get(lease.agent_id) || (() => {
+        const suffix = Number(String(lease.target_id || '').match(/(\d)$/)?.[1] || 1);
+        return {
+          schema: 'metaengine.browser.fleet-transport-proof.v1',
+          tab_id: lease.tab_id,
+          target_id: lease.target_id,
+          generation_epoch: lease.agent_generation_epoch,
+          conversation_url_sha256: sha256(conversationUrl(suffix)),
+          agent_surface_sha256: 'c'.repeat(64),
+          proven_at: '2026-08-31T18:00:00.000Z',
+          authority_effect: false,
+        };
+      })(),
       automatic_retry_allowed: false,
       authority_effect: false,
     })),
