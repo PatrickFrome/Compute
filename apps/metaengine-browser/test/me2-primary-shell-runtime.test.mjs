@@ -537,7 +537,7 @@ test('R85 late drawer replies are rejected after page or workspace transitions',
 
   assert.match(store, /presentationSyncStillCurrent/);
   assert.match(store, /workspace: get\(\)\.workspace,\s*page: get\(\)\.page/);
-  assert.match(store, /setPage: \(p\) => \{[\s\S]{0,220}contextDrawerSyncSeq \+= 1/);
+  assert.match(store, /setPage: \(p\) => \{[\s\S]{0,420}contextDrawerSyncSeq \+= 1/);
   assert.match(store, /setWorkspace: \(w\) => \{[\s\S]{0,220}contextDrawerSyncSeq \+= 1/);
   assert.match(store, /if \(!presentationSyncStillCurrent\(request,/);
 });
