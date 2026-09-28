@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { DevOsNativeTaskCycle, assertLiveLeaseBinding, planBacklogCapacity, renderDevosTaskPrompt } from '../src/devos-native-task-cycle.mjs';
 
 const lease = {
@@ -20,8 +21,7 @@ const fleetTransportProof = {
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
-  conversation_url_sha256: 'a'.repeat(64),
-  agent_surface_sha256: 'd'.repeat(64),
+  conversation_url_sha256: crypto.createHash('sha256').update('https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc').digest('hex'),
   agent_surface_sha256: 'b'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
@@ -59,7 +59,7 @@ const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789ab
 const supervisorTab = 'tab_supervisor';
 
 function response(status, body) { return { status, ok: status >= 200 && status < 300, async json(){ return structuredClone(body); } }; }
-function frame({ url = 'https://chat.z.ai/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
+function frame({ url = conversationUrl, stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
@@ -185,7 +185,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   assert.equal(first.second_scheduler_loop, false);
 });
 
-test('proven submit with delayed SPA navigation completes via the bounded conversation readback (D-S3)', async () => {
+test('proven submit on an existing Agent session preserves exact conversation binding (D-S3)', async () => {
   let selected = supervisorTab;
   let captureCount = 0;
   const commands = [];
@@ -200,12 +200,10 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      // Busy probe (2 samples) + pre-capture + the FIRST post-submit capture
-      // still show the root URL (the SPA has not navigated yet); the next
-      // post-submit capture shows the conversation. The dispatcher must wait
-      // and re-capture instead of declaring the proven effect ambiguous.
-      if (captureCount <= 4) return frame({ sendVisible: true });
-      return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
+      // R98: the scheduler receives only an already-created canonical Agent
+      // session. Task submit remains bound to that exact conversation; initial
+      // Agent-session creation/navigation is owned by the promotion wrapper.
+      return frame({ url: conversationUrl, stopActive: captureCount >= 2, sendVisible: captureCount < 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
       return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
@@ -215,10 +213,10 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
   const result = await cycle.cycle();
   assert.equal(result.dispatch.state, 'RUNNING');
-  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
+  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
   const semanticTypes = commands.filter((row) => row === 'SEMANTIC_TYPE').length;
   assert.equal(semanticTypes, 1, 'exactly one submit — the readback never re-submits');
-  assert.ok(captureCount >= 5, 'the bounded readback re-captured until the conversation URL appeared');
+  assert.ok(captureCount >= 2, 'the exact conversation is re-read after the submit');
 });
 
 test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independent submit)', async () => {
@@ -301,7 +299,8 @@ test('user-selected tab after Send is not overwritten by restoration', async () 
       selected = 'tab_user_override';
       return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
     }
-    if (command.action === 'SEMANTIC_TYPE' || command.action === 'TYPED_CLICK') return { authority_effect: true };
+    if (command.action === 'SEMANTIC_TYPE') return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
