@@ -10,6 +10,7 @@ import {
   resolveAgentPlatformNavControl,
   resolveAgentPlatformSelectedModel,
 } from './browser-agent-platform.mjs';
+import { digestAgentSurfaceProof } from './agent-origin-proof.mjs';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
   GLM_ROOT_CONVERSATION_SEED,
@@ -42,24 +43,6 @@ const HASH_RE = /^[a-f0-9]{64}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
-
-function agentSurfaceDigest(proof) {
-  if (!proof || proof.schema !== 'metaengine.browser.agent-platform-surface-proof.v1' || proof.stage !== 'AGENT_HOME') {
-    throw new Error('devos_agent_surface_proof_invalid');
-  }
-  const material = {
-    schema: proof.schema,
-    stage: proof.stage,
-    target_id: String(proof.target_id || '').toLowerCase(),
-    process_incarnation_id: String(proof.process_incarnation_id || ''),
-    state_revision_id: String(proof.state_revision_id || ''),
-    template_names: [...(proof.template_names || [])].map(String).sort(),
-  };
-  if (!material.target_id || !material.process_incarnation_id || !material.state_revision_id || material.template_names.length < 2) {
-    throw new Error('devos_agent_surface_proof_incomplete');
-  }
-  return sha256(JSON.stringify(material));
-}
 
 function semanticActivationPayload(tabId, control) {
   if (!control?.semantic_ref || !control?.role) throw new Error('devos_agent_semantic_control_invalid');
@@ -325,6 +308,7 @@ export class DevOsNativeTaskCycle {
         const payload = request?.payload || {};
         let agent = exactFleetAgent(await this.#getState(), payload);
         const expectedHash = String(payload?.proof?.conversation_url_sha256 || '').toLowerCase();
+        const expectedAgentSurfaceHash = String(payload?.proof?.agent_surface_sha256 || '').toLowerCase();
         let frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
         let normalizedUrl = conversationUrl(frame?.url);
 
@@ -342,6 +326,10 @@ export class DevOsNativeTaskCycle {
 
         const fleetProof = exactTransportProof(agent);
         if (!fleetProof) throw new Error('devos_transport_active_agent_proof_invalid');
+        if (!HASH_RE.test(expectedAgentSurfaceHash)
+            || expectedAgentSurfaceHash !== String(fleetProof.agent_surface_sha256 || '').toLowerCase()) {
+          throw new Error('devos_transport_active_agent_surface_proof_mismatch');
+        }
         const proofState = 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED';
 
         this.#lastFleetTransportProof = {
@@ -571,7 +559,7 @@ export class DevOsNativeTaskCycle {
         }
 
         if (agentSurface) {
-          agentSurfaceSha256 = agentSurfaceDigest(agentSurface);
+          agentSurfaceSha256 = digestAgentSurfaceProof(agentSurface);
           let modelProof = resolveAgentPlatformSelectedModel(frame);
 
           // Step 2: the selected model is a separate UI fact. Page title
@@ -649,7 +637,7 @@ export class DevOsNativeTaskCycle {
                     authority_effect: false,
                   };
                 } else {
-                  agentSurfaceSha256 = agentSurfaceDigest(agentSurface);
+                  agentSurfaceSha256 = digestAgentSurfaceProof(agentSurface);
                 }
               }
             }
@@ -714,7 +702,7 @@ export class DevOsNativeTaskCycle {
                 authority_effect: false,
               };
             } else {
-              agentSurfaceSha256 = agentSurfaceDigest(agentSurface);
+              agentSurfaceSha256 = digestAgentSurfaceProof(agentSurface);
 
               // Step 4: create the durable Agent session with a tiny seed only
               // after Agent mode + model + clean input have all been proven.
@@ -759,6 +747,7 @@ export class DevOsNativeTaskCycle {
                   frame,
                   expected_transport_url_sha256: expectedHash,
                   expected_agent_surface_sha256: agentSurfaceSha256,
+                  expected_agent_surface_proof: agentSurface,
                 });
                 if (!['PROVEN', 'UPGRADED_CONVERSATION'].includes(String(localProof?.state || ''))) {
                   throw new Error('devos_agent_session_transport_proof_invalid');
