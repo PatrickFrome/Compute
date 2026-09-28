@@ -7,16 +7,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  GitBranch, ListChecks, Plus,
+  GitBranch, ListChecks,
 } from "lucide-react";
 import {
-  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, taskAction,
+  BRANCH_COLOR, BRANCH_TABS, age, hhmmss,
   type BranchTabKey, type Task,
 } from "@/lib/me2-bus";
 import { useMe2 } from "@/components/me2/store";
 import { useTemporaryPeekList } from "@/hooks/use-temporary-peek";
 import { PageHeader, Sec, StatusBadge } from "@/components/me2/ui/primitives";
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 
 // ── типы (порт legacy L55-56) ───────────────────────────────────────────────────
@@ -74,10 +73,9 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
  *  Рейка таймлайна, каждая задача — ветвь с точкой статуса; retry-линии (parent_id → merge-дуга
  *  к родителю); hover-tooltip через portal (fixed, не обрезается скролл-контейнером); окно 60
  *  ветвей (старшие скрыты за toggle); ↻ retry остаётся отдельным task-plane действием. */
-function BranchGraph({ tasks, onOpen, onRetry, selectedId, onSelect }: {
+function BranchGraph({ tasks, onOpen, selectedId, onSelect }: {
   tasks: Task[];
   onOpen: (t: Task) => void;
-  onRetry: (t: Task) => void;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
 }) {
@@ -215,30 +213,6 @@ function BranchGraph({ tasks, onOpen, onRetry, selectedId, onSelect }: {
               <text x={STEPS_X} y={y + 3.6} fontSize={9} textAnchor="end" className="branch-dot fill-zinc-500 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
                 {t.steps}/{t.max_steps}
               </text>
-              {(t.status === "FAILED" || t.status === "CANCELLED") && (
-                <>
-                  <g
-                    className="branch-retry cursor-pointer"
-                    onClick={(e) => { e.stopPropagation(); onRetry(t); }}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" && e.key !== " ") return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onRetry(t);
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    aria-keyshortcuts="Enter Space"
-                    aria-label={`Повторить задачу ${t.title}`}
-                  >
-                    <title>{"Повторить задачу через task scheduler"}</title>
-                    <circle cx={STEPS_X - 34} cy={y} r={7.5} fill="transparent" className="hover:fill-amber-500/20" />
-                    <text x={STEPS_X - 34} y={y + 3.4} fontSize={9.5} textAnchor="middle" className="fill-amber-500/70 font-mono hover:fill-amber-300" style={{ pointerEvents: "none" }}>
-                      ↻
-                    </text>
-                  </g>
-                </>
-              )}
             </g>
           );
         })}
@@ -338,7 +312,6 @@ export function TasksPage() {
   const snap = useMe2((s) => s.snap);
   const nowMs = useMe2((s) => s.nowMs);
   const openTask = useMe2((s) => s.openTask);
-  const setDialog = useMe2((s) => s.setDialog);
 
   // вкладка-фильтр ветвей; Linear/Blender-style view preference survives page switches.
   const [branchTab, setBranchTab] = useState<BranchTabKey>("ALL");
@@ -354,9 +327,6 @@ export function TasksPage() {
     if (!branchViewReady) return;
     try { localStorage.setItem(TASKS_BRANCH_VIEW_LS, branchTab); } catch { /* private mode */ }
   }, [branchTab, branchViewReady]);
-
-  // retry ↻ на ветви — TASK_RETRY через шину
-  const retryBranch = useCallback(async (t: Task) => { await taskAction("TASK_RETRY", t.id); }, []);
 
   // ── панель ВЕТКИ: данные + счётчики вкладок (порт legacy L2124-2139) ──────────
   const branchData = useMemo(() => [...(snap?.tasks ?? []), ...(snap?.archived ?? [])], [snap]);
@@ -456,7 +426,6 @@ export function TasksPage() {
                 <BranchGraph
                   tasks={branchTasks}
                   onOpen={(t) => openTask(t.id)}
-                  onRetry={(t) => void retryBranch(t)}
                   selectedId={effectivePeekTaskId}
                   onSelect={setPeekTaskId}
                 />
@@ -472,11 +441,7 @@ export function TasksPage() {
             title={`ОЧЕРЕДЬ ЗАДАЧ (${queueTasks.length})`}
             icon={ListChecks}
             tone="emerald"
-            right={
-              <Button size="sm" className="h-7 gap-1 bg-emerald-600 text-[11px] hover:bg-emerald-500" onClick={() => setDialog("newTask")}>
-                <Plus className="h-3 w-3" aria-hidden /> задача
-              </Button>
-            }
+            right={<span className="font-mono text-[9px] text-zinc-600">read-only projection</span>}
           >
             {queueTasks.length === 0 && (
               <p className="p-4 text-center text-xs text-zinc-500">очередь пуста</p>
