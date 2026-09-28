@@ -179,3 +179,23 @@ test('R103 Browser launch cannot be promoted to the historical full daemon by en
   assert.match(verify, /ME2_DAEMON_BOOT_MODE:\s*'full'/);
   assert.match(verify, /hostile_boot_mode_override_rejected:\s*true/);
 });
+
+
+test('R103 Browser probe performs no SQL-mirror or token bootstrap effects', () => {
+  const daemon = source('apps/me2-daemon/index.ts');
+
+  for (const pathName of [
+    '/sqlmirror/ui-token',
+    '/sqlmirror/ui-token/verify',
+    '/sqlmirror/feed',
+    '/sqlmirror/rls-audit',
+    '/sqlmirror/rpc-reconcile',
+  ]) {
+    assert.equal(daemon.includes('"' + pathName + '"'), true, 'probe must classify effectful GET ' + pathName);
+  }
+
+  assert.match(daemon, /if \(!PROBE_MODE && process\.env\.ME2_SQL_MIRROR === undefined/);
+  assert.match(daemon, /const sqlMirror = PROBE_MODE[\s\S]{0,420}ME2_BROWSER_PROBE_READ_ONLY[\s\S]{0,240}: new SqlMirror\(db\)/);
+  assert.match(daemon, /if \(!PROBE_MODE\) \{[\s\S]{0,220}sqlMirror\.start\(\)[\s\S]{0,260}gotrueToken\(\)/);
+  assert.doesNotMatch(daemon, /const sqlMirror = new SqlMirror\(db\);\s*sqlMirror\.start\(\)/);
+});
