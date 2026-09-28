@@ -125,6 +125,18 @@ export function evaluateFleetSubmitReadiness({
       expectedTarget,
       expectedGeneration: expected_agent_generation_epoch,
     });
+    // A caller that supplies a durable Agent-session proof is asking to
+    // dispatch into that exact existing Agent conversation. In that mode the
+    // current frame MUST reconcile to the proof; seeing Agent Home controls on
+    // some root surface is not an acceptable substitute for the bound session.
+    if (agent_session_proof != null && !agentConversation) {
+      return Object.freeze({
+        ready: false,
+        reason: 'AGENT_SESSION_PROVENANCE_NOT_PROVEN',
+        foreground,
+        authority_effect: false,
+      });
+    }
     if (!agentSurface && !agentConversation) {
       let conversationLike = false;
       try {
