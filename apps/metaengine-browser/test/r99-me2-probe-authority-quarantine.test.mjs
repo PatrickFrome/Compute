@@ -85,3 +85,38 @@ test('R99 packaged daemon manifest and installed smoke require the same probe po
     assert.equal(verify.includes(marker), true, 'installed verifier missing: ' + marker);
   }
 });
+
+
+test('R103 Browser launch cannot be promoted to the historical full daemon by environment override', async () => {
+  const host = source('apps/metaengine-browser/src/me2/me2-daemon-host.mjs');
+  const entry = source('apps/me2-daemon/browser-probe-entry.ts');
+  const build = source('apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1');
+  const verify = source('apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs');
+
+  assert.match(host, /ME2_BOOT_MODE:\s*'probe'/);
+  assert.doesNotMatch(host, /ME2_DAEMON_BOOT_MODE\s*\|\|/);
+  assert.match(host, /browser-probe-entry\.ts/);
+  assert.match(host, /SOURCE_BUN_PROBE_ONLY/);
+  assert.doesNotMatch(host, /args:\s*\['index\.ts'\]/);
+
+  const oldSourceOnly = new Set(['/root/index.ts']);
+  const launch = (await import('../src/me2/me2-daemon-host.mjs')).resolveMe2DaemonLaunch({
+    resourcesPath: '/no-resources',
+    cwd: '/root',
+    env: { ME2_DAEMON_DIR: '/root', ME2_DAEMON_BIN: 'bun' },
+    exists: (p) => oldSourceOnly.has(String(p).replaceAll('\\\\', '/')),
+  });
+  assert.equal(launch, null, 'legacy full source entrypoint must fail closed');
+
+  assert.match(entry, /process\.env\.ME2_HOSTED_BY_BROWSER\s*=\s*'1'/);
+  assert.match(entry, /process\.env\.ME2_BOOT_MODE\s*=\s*'probe'/);
+  assert.match(entry, /await import\('\.\/index'\)/);
+
+  assert.match(build, /build --compile --target=bun-windows-x64 browser-probe-entry\.ts --outfile/);
+  assert.match(build, /probe_only_entrypoint = 'browser-probe-entry\.ts'/);
+  assert.match(build, /browser_host_mode_override_allowed = \$false/);
+
+  assert.match(verify, /ME2_BOOT_MODE:\s*'full'/);
+  assert.match(verify, /ME2_DAEMON_BOOT_MODE:\s*'full'/);
+  assert.match(verify, /hostile_boot_mode_override_rejected:\s*true/);
+});
