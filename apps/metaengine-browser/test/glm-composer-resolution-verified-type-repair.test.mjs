@@ -272,7 +272,7 @@ function fakeZaiTyped({ appendMode = false, deleteClears = true, submitWorks = t
         return {};
       }
       if (method === 'Input.dispatchKeyEvent') {
-        if (params.key === 'Delete' && params.type === 'rawKeyDown' && deleteClears) composerValue = '';
+        if (params.key === 'Backspace' && params.type === 'rawKeyDown' && deleteClears) composerValue = '';
         if (params.key === 'Enter' && params.type === 'rawKeyDown' && submitWorks) composerValue = '';
         if (params.key === 'Enter' && params.type === 'keyUp' && submitWorks) {
           // A real surface re-renders after submit; the outcome latch is
@@ -330,7 +330,7 @@ test('D-K2: healthy replace verifies on the first attempt and submits', async ()
   assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 1, 'exactly one insertText in the atomic gesture');
 });
 
-test('D-K2/D-K6: selection-drop append is cleared by the atomic Ctrl+A+Delete gesture and submits', async () => {
+test('D-K2/D-K6: stale draft is cleared by the exact editor-command clear before one insert and submit', async () => {
   const h = fakeZaiTyped({ appendMode: true, deleteClears: true });
   const composer = await composerRefOf(h);
   const result = await executeSemanticCommand(h.webContents, {
@@ -346,7 +346,7 @@ test('D-K2/D-K6: selection-drop append is cleared by the atomic Ctrl+A+Delete ge
     },
   });
   assert.equal(result.replace_verified, true, 'the atomic clear-and-type must verify');
-  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Delete' && p.type === 'rawKeyDown'), 'Delete is dispatched inside the single gesture');
+  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Backspace' && p.commands?.includes('DeleteBackward') && p.type === 'rawKeyDown'), 'DeleteBackward editor command is dispatched before insert');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter' && p.type === 'rawKeyDown'));
 });
@@ -367,9 +367,9 @@ test('D-K2/D-K6: an unprovable replace fails closed BEFORE Enter — no corrupte
     },
   }), /native_semantic_type_replace_unverified/);
   assert.ok(!h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter'), 'Enter must never dispatch when the replace is unproven');
-  // exactly ONE insertText — the D-K6 rule: no re-type after a mutated attempt
+  // The new prompt is never inserted until the old value is positively read back as empty.
   const inserts = h.calls.filter(([m]) => m === 'Input.insertText');
-  assert.equal(inserts.length, 1, 'a failed replace must not re-type (double-append hazard)');
+  assert.equal(inserts.length, 0, 'failed clear must stop before inserting any new prompt bytes');
 });
 
 test('D-K2/D-K6: non-submit type reports replace_verified instead of failing', async () => {
@@ -388,11 +388,12 @@ test('D-K2/D-K6: non-submit type reports replace_verified instead of failing', a
     },
   });
   assert.equal(result.replace_verified, false);
-  // Single append (no retry): base + probe.
-  const expectedValue = 'STALE DRAFT: previous unsent task prompt' + 'probe';
+  // A failed clear is observation-only even on the non-submit path: no prompt
+  // bytes are inserted into a stale draft.
+  const expectedValue = 'STALE DRAFT: previous unsent task prompt';
   assert.equal(result.value_length_after, expectedValue.length);
   assert.equal(result.value_sha256_after, sha256(expectedValue));
-  assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 1, 'exactly one insertText — no re-type');
+  assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 0, 'unproven clear never inserts');
 });
 
 test('D-K2: replace_existing=false keeps append semantics with replace_verified null', async () => {
