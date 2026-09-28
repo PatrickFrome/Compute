@@ -12343,3 +12343,49 @@ Stage Summary:
 - НЕ РАБОТАЕТ: Supabase PostgREST→DB (503↔hang PGRST002, >4.5ч) — командная очередь live-браузера недостижима.
 - НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокированы каналом.
 - Next: owner — рестарт PostgREST upstream; после восстановления — dispatch-батарея 13 действий; интеграция роя в me2-daemon :8556 (bun 8556 жив с 12:14 — иммунитет к reaper доказан ps).
+
+---
+Task ID: EVOLVE-ROUND-23
+Agent: self-evolve v1.48 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-DATES] все timestampы панели в Europe/Moscow + относительное время (N мин назад) с title-абсолютом
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 88%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.48
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-DATES] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-DATES' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 23 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: 416839-EV-DATES
+Agent: Super Z (cron SELF-EVOLVE tick, engine v1.49->v1.50)
+Task: SELF-EVOLVE tick — evolve + реализация [EV-DATES] (все timestamp'ы панели в Europe/Moscow + относительное время (N мин назад) с title-абсолютом), верификация через gateway :81 (agent-browser)
+
+Work Log:
+- engine: evolve round=23 (client :81 HTTP 200, lint 0/0, score 88%) → пик EV-DATES; аудит «уже реализовано?»: fmtTime давал только toLocaleTimeString (локальная TZ браузера, без Moscow-пина, без относительного времени, без title); страница / рендерит только SwarmConsole → зона правки = components/swarm/console.tsx (page.tsx заморожен, не тронут)
+- реализация: fmtMoscowAbsolute (Intl ru-RU, timeZone Europe/Moscow, «dd.MM.yyyy, HH:MM:SS (Europe/Moscow)»), fmtRelative («только что»/<45с, «N мин назад», «N ч M мин назад», старше 24ч → Moscow-дата), компонент Ts (title=абсолют, относительный текст, self-тайтик 30с через requestAnimationFrame+interval — первый setNow в rAF, т.к. lint-правило react-hooks/set-state-in-effect запрещает синхронный setState в effect); заменены все 4 usage-сайта (лента сообщений, уроки, сообщения-панель, предложения)
+- lint: 1 ошибка set-state-in-effect → fix rAF → 0/0
+- верификация через :81: one-shot рой → ready-phase (население 14, поколения 4, циклы 784, LIVE); вкладка «Память»: «34 мин назад»/«1 ч 3 мин назад» рендерятся; JS-eval DOM: 129 span'ов с title=«28.09.2026, 23:30:46 (Europe/Moscow)», математика относительного времени сходится (20:30 UTC + 34 мин ≈ текущие 21:04 UTC); скриншоты download/ev-dates-{verify,memory-tab}.png; reconnect-бейдж корректно появился при гашении роя (one-shot граница)
+- движок: self-update implemented-EV-DATES → v1.50; BACKLOG +EV-FEED-FILTER (фильтр ленты по kind/агенту — при верификации лента 584 сообщения без фильтра нечитаема); bash -n OK; зеркала /tmp/context-vault-mirror + /home/sync/me2-context-backups phoenix-sealed/ пересинхронизированы 2/2
+
+Stage Summary:
+- EV-DATES закрыт: консоль показывает относительное время с абсолютом Europe/Moscow в title, self-обновление 30с; page.tsx цел; lint 0/0; engine v1.50, tasks_done=14; следующий кандидат — EV-AUTORETRY/EV-FEED-FILTER
+
+---
+Task ID: BROWSER-TEST-20260929-0500
+Agent: METAENGINE (supervisor, Job 419203 re-fire 05:00)
+Task: 6-й повторный цикл 419203 — канал Supabase + локальная плоскость роя.
+
+Work Log:
+- Канал (reprobe-0500.py): P1/P2 401 (edge+auth живы), P3 real-JWT → 503 PGRST002 fast-fail 1.31s — PostgREST→DB вниз ~5ч (осцилляция 503↔hang продолжается).
+- Локальная плоскость (one-shot): swarm UP ~2s; батарея M01–M19 → 18/19 PASS (6-й цикл; первый не-идеальный: M05 FAIL).
+- M05 FAIL-анализ: LLM-координация 0 ответов за 3мин — 484× API 429 «Too many requests» за прогон (шторм x5 к 04:30, upstream-квота glm), все think-циклы получали 429; это внешнее троттлирование LLM API, НЕ регресс механик роя: 0 фаталов/крэшей, Δциклов 84→98 за 60с (новый рекорд), spawn/mute/kill/память/предложения — все PASS.
+- Динамика: roster=14 стабилен; lessons=53, episodes=16, предложения=60; рождение sw_jx4i2nnk-наследника gen=1; WS+gateway :81 → 200.
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик (все локальные), рекорд циклов 98/60с, антихрупкость под 429-штормом x5 (484 ошибки — 0 потерь), транспорт WS/gateway.
+- ДЕГРАДАЦИЯ (внешняя): M05 LLM-координация — upstream 429-квота исчерпана в окно теста; механика сама по себе рабочая (4 предыдущих цикла PASS, 30 ответов/прогон); восстановится при снятии квоты.
+- НЕ РАБОТАЕТ: Supabase PostgREST→DB (503 PGRST002, ~5ч) — командная очередь live-браузера недостижима.
+- НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокированы каналом.
+- Next: owner — рестарт PostgREST; LLM-квота — ожидание окна/снятия лимита; после — dispatch-батарея 13 действий; интеграция роя в me2-daemon :8556.
