@@ -10,13 +10,10 @@
  *   • lifecycle-строки — в stdout-шину (schema-контракт final-runtime).
  *
  * Запуск: final-runtime-entry.mjs → startMe2Integration({ app }) после main-entry.
- * R41: main.mjs аддитивно регистрирует capability вкладок через me2-fleet-tabs-host.
  */
 import { join } from 'node:path';
 import { startMe2DaemonHost, stopMe2DaemonHost, me2DaemonStatus } from './me2-daemon-host.mjs';
-import { startMe2MissionControl, stopMe2MissionControl, me2MissionControlStatus } from './me2-mission-control.mjs';
 import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
-import { me2FleetTabsHostStatus } from './me2-fleet-tabs-host.mjs';
 import { startMe2UiHost, stopMe2UiHost, stopMe2UiHostAndWait, me2UiHostStatus } from './me2-ui-host.mjs';
 import { startMe2UiGateway, stopMe2UiGateway, me2UiGatewayStatus } from './me2-ui-gateway.mjs';
 import { me2SocketStatus } from './me2-socket-client.mjs';
@@ -69,6 +66,11 @@ export async function me2ContractHandshake() {
       && probe?.browser_actuation_authority === false
       && probe?.command_mutation_enabled === false
       && probe?.token_mutation_enabled === false
+      && probe?.persistent_state_write_enabled === false
+      && probe?.model_execution_guard === 'BROWSER_PROBE_HARD_GUARD_V1'
+      && probe?.provider_sdk_static_import_allowed === false
+      && probe?.durable_state_authority === false
+      && probe?.state_storage === 'EPHEMERAL_MEMORY_ONLY'
       && probe?.authority_effect === false;
     contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && uiOk && probeSafe;
     contractState.browser_probe = probeSafe ? structuredClone(probe) : null;
@@ -96,8 +98,7 @@ export function me2IntegrationStatus() {
     ui_gateway: me2UiGatewayStatus(),
     daemon: me2DaemonStatus(),
     fleet_bridge: { state: 'REMOVED_NATIVE_BROWSER_AUTHORITY', authority_effect: false },
-    tabs_host: me2FleetTabsHostStatus(),
-    mission_control: me2MissionControlStatus(),
+    mission_control: { state: 'REMOVED_NATIVE_BROWSER_FLEET_AUTHORITY', scheduler_authority: false, browser_command_authority: false, authority_effect: false },
     brain_adapter: me2BrainAdapterStatus(),
     supervisor_mesh_bridge: { state: 'REMOVED_NATIVE_BROWSER_AUTHORITY', authority_effect: false },
   };
@@ -135,12 +136,7 @@ async function startMe2IntegrationOnce({ app } = {}) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'UI_GATEWAY_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_AGENTCHAT_FLEET_BRIDGE_REMOVED', replacement: 'NATIVE_BROWSER_FLEET', authority_effect: false });
-  // R41: браузер сам открывает Mission Control (role='SUPERVISOR') и вкладки чат-агентов (role='FLEET')
-  try {
-    startMe2MissionControl();
-  } catch (e) {
-    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'MISSION_CONTROL_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
-  }
+  emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_MISSION_CONTROL_REMOVED', replacement: 'NATIVE_BROWSER_FLEET_AND_SUPERVISOR', authority_effect: false });
   // R42a: память brain ⇄ mem-economy (чтение checkpoint'а мозга, sidecar блока памяти ME2)
   try {
     startMe2BrainAdapter({ userData });
@@ -154,7 +150,6 @@ async function startMe2IntegrationOnce({ app } = {}) {
 
     const stopNonUiPlanes = () => {
       stopMe2BrainAdapter();
-      stopMe2MissionControl();
       stopMe2UiGateway();
       stopMe2DaemonHost({ killChild: true });
     };
