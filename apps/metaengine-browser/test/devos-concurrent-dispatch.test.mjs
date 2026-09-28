@@ -34,6 +34,7 @@ function frame({ url = 'https://chat.z.ai/', tabId, targetId, composerValueLengt
     semantic_targets: [
       { role: 'textbox', name: null, value_length: composerValueLength ?? undefined, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 },
     ],
+    interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'GLM-5.3-Flash' }] },
     authority_effect: false,
   };
 }
