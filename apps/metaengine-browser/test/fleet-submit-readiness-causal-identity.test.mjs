@@ -1,10 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { evaluateFleetSubmitReadiness } from '../src/fleet-submit-readiness.mjs';
 
 
 function semref(id) {
   return { schema:'metaengine.native-browser.semantic-ref.v1', semantic_ref_id:`semref_${String(id).padEnd(64,'0').slice(0,64)}` };
+}
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+
+function agentConversationProof({
+  tab_id = 'tab-fleet-1',
+  target_id = 'webcontents:17',
+  generation_epoch = 9,
+  url = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555',
+} = {}) {
+  return {
+    schema:'metaengine.browser.fleet-transport-proof.v1',
+    tab_id,
+    target_id,
+    generation_epoch,
+    conversation_url_sha256:sha256(url),
+    agent_surface_sha256:'d'.repeat(64),
+    proven_at:'2026-09-28T00:00:00.000Z',
+    authority_effect:false,
+  };
 }
 
 function glmAgentFrame({ model = 'GLM-5.3-Flash', tab_id = 'tab-fleet-1', target_id = 'webcontents:17' } = {}) {
@@ -139,6 +159,63 @@ test('GLM lane rejects an ordinary z.ai Chat composer without Agent surface proo
   });
   assert.equal(readiness.ready,false);
   assert.equal(readiness.reason,'AGENT_SURFACE_NOT_PROVEN');
+});
+
+test('R98: GLM conversation requires exact prior Agent-session provenance', () => {
+  const url = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
+  const frame = {
+    ...glmAgentFrame(),
+    url,
+    semantic_targets:[{ role:'textbox', name:'Send a Message', backend_node_id:3, semantic_ref:semref('conversation-composer') }],
+  };
+  const withoutProof = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    expected_agent_generation_epoch:9,
+    frame,
+  });
+  assert.equal(withoutProof.ready,false);
+  assert.equal(withoutProof.reason,'AGENT_SESSION_PROVENANCE_NOT_PROVEN');
+
+  const withProof = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    expected_agent_generation_epoch:9,
+    agent_session_proof:agentConversationProof({url}),
+    frame,
+  });
+  assert.equal(withProof.ready,true);
+  assert.equal(withProof.reason,'READY_FOR_AGENT_TASK_ENTER_SUBMIT');
+  assert.equal(withProof.agent_surface,null);
+  assert.equal(withProof.agent_session_proof.agent_surface_sha256,'d'.repeat(64));
+});
+
+test('R98: Agent conversation proof is fenced by exact target, generation and URL digest', () => {
+  const url = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
+  const frame = {
+    ...glmAgentFrame(),
+    url,
+    semantic_targets:[{ role:'textbox', name:'Send a Message', backend_node_id:3, semantic_ref:semref('conversation-composer-2') }],
+  };
+  for (const proof of [
+    agentConversationProof({url,target_id:'webcontents:18'}),
+    agentConversationProof({url,generation_epoch:10}),
+    {...agentConversationProof({url}),conversation_url_sha256:'e'.repeat(64)},
+    {...agentConversationProof({url}),agent_surface_sha256:null},
+  ]) {
+    const readiness = evaluateFleetSubmitReadiness({
+      ...EXPECTED,
+      platform:'GLM_ZAI',
+      phase:'PRE_TYPE',
+      expected_agent_generation_epoch:9,
+      agent_session_proof:proof,
+      frame,
+    });
+    assert.equal(readiness.ready,false);
+    assert.equal(readiness.reason,'AGENT_SESSION_PROVENANCE_NOT_PROVEN');
+  }
 });
 
 test('GLM lane rejects Agent surface when selected model is GLM-5.2', () => {
