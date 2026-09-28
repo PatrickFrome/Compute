@@ -291,7 +291,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'CONVERSATION');
     assert.equal(snapshot.fleet_transport_promotion.write_ahead_barrier_persisted, true);
     assert.equal(snapshot.dispatch.state, 'RUNNING');
-    assert.equal(snapshot.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
+    assert.equal(snapshot.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED');
     assert.equal(markRunningObservedCanonicalProof, true, 'canonical proof must exist before DB RUNNING receipt');
     assert.equal(state.fleet.agents[0].transport_proof.transport_stage, undefined);
     assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
