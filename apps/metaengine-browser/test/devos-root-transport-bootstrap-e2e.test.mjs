@@ -24,7 +24,6 @@ function proof(stage, url, agentSurfaceSha256 = null) {
     tab_id: TAB_ID,
     target_id: TARGET_ID,
     generation_epoch: 7,
-    ...(stage === 'CONVERSATION' ? { conversation_url: url } : {}),
     conversation_url_sha256: sha256(url),
     ...(stage === 'CONVERSATION' ? { agent_surface_sha256: agentSurfaceSha256 } : {}),
     proven_at: new Date().toISOString(),
