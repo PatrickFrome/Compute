@@ -11934,3 +11934,294 @@ Stage Summary:
 - §3: карантин держит (honest failure), НО найден 7-й SDK-путь (web_search в worker.ts) — квантинить след. тиком после коммита роя; model-лейблы агентов «zai:glm-5.3» — косметика честности (переименовать fleet:*, не критично)
 - Next tick: (1) после коммита роя — QUARANTINE web_search в worker.ts + discovery-fix (interaction_tree+fallback, re-CAPTURE окно), (2) органический E2E-3 с маячком, (3) §15 REMOVE zai/gateway-веток после organic-proof окна, (4) RESEARCHER delivery через fleet-task, (5) организ. reviewer-прогон на первой TASK_DONE
 - Security: секреты не печатались/не коммитились; Sentinel/Guardian не обходились; мутаций live-браузера ноль (только read-only SQLite probes); armed/owner-домены не тронуты; hot-tree роя не переписывался
+
+---
+Task ID: 419718-1645-WORKER-MIGRATION-FLEET-E2E
+Agent: Super Z (cron tick, Job 419718 @16:45, directive sha256 verified 0aa09579…)
+Task: Продолжение с точки 1615-тика — (1) миграция worker.ts (6-й консьюмер, разблокировка автономного исполнения), (2) органический reviewer-прогон, (3) §15 REMOVE после proof; мутации с паузами и readback, без blind retry после AMBIGUOUS.
+
+Work Log:
+- directive sha256 exact; стоп-точка = 419718-1615-PHASE3-SWARM-CONVERGENCE (worklog 11889); дерево чистое (cron-коммит e5eed5f0 забрал миграцию роя)
+- WORKER MIGRATION (6-й консьюмер, вне списка роя): worker.ts chat() → fleetAskHistory(messages, lane P1, timeout 240s); для него в fleet-chat.ts добавлен fleetAskHistory (транскрипт с ролевыми тегами, cap 12k, HEAD+TAIL усечение 65/35 с честным маркером) — системный протокол executor'а (~3k) не влезал в 1400 fleetChat; fleet-readback.ts: опция max_chars (дефолт 1500 не тронут) + генерация-ожидание масштабируется длиной промпта (+1s/100 симв, потолок +60s)
+- РЕГРЕССИЯ: bun build OK, eslint 0 errors, probe.sh GATE PASS eval 70/70 (дважды за тик)
+- ФИЗИЧЕСКОЕ E2E (3 честных негатива → 2 фикса → системный блокер):
+  (1) попытка-1: master loop НЕ брал задачу 5+ мин (READY при IDLE-агенте) — диагноз: hot-reload оставил старое замыкание master-loop (stale running-Set; косвенно — 2 EXECUTOR BUSY с Sep27); фикс = контролируемый рестарт через штатный watchdog (src/me2-watchdog.ts: spawn при отказе /health, троттлинг /tmp/me2-daemon-last-spawn) → lease мгновенный, TASK_LEASED{memory_lessons:3} — §11 retrieval жив!
+  (2) попытка-1: SEMANTIC_FOCUS FAILED postcondition_not_confirmed:AMBIGUOUS — L21-резолюция не узнала evidence: receipt.target несёт semantic_ref (dict), а код искал semantic_ref_id (несовпадение формы; 1645-диагностика по Supabase- receipts). ФИКС: распознавать оба поля (semantic_ref ?? semantic_ref_id)
+  (3) попытка-2: «композер недоступен (textbox semantic_ref не найден)» на свежем табе под нагрузкой (load_pending) — ФИКС: bounded fresh-cycle retry ×3 в fleetReadbackAsk (каждая попытка = НОВАЯ вкладка-цель с полным readback — §4 соблюдён: dispatch ≤1 на цель; конфиг-отказы не жгут циклы)
+  (4) попытка-3: NEW_TAB FAILED tab_capacity_exceeded — СИСТЕМНЫЙ БЛОКЕР: непрерывный cron-трафик консьюмеров (каждый шаг хода = scratch-таб) + операторские/флот-табы исчерпали ёмкость браузера; governor троттлит RATE, но не tab-occupancy
+- ОРГАНИЧЕСКИЙ ФЛОТ-ТРАФИК ПОДТВЕРЖДЁН: параллельно с E2E канал обслуживал cron-ходы — 2+ полных успешных цикла (TYPE+SUBMIT+READ_TRANSCRIPT 09:16:51→09:17:40, 09:17:53→09:18:40) — консьюмеры daemon'а органически получают ответы через composer Web UI
+- АРТЕФАКТЫ: r419718-1645-focus-diag.py (+json), r419718-1645-e2e-monitor.py, r419718-1615-researcher-check.py; коммит 034ff412
+- Бюджет/дисциплина: мутации — только через adapter (собственные scratch-табы, CLOSE_TAB-уборка по receipt'ам во всех циклах, ни одного orphan'а); 2 контролируемых рестарта daemon через штатный watchdog (никаких kill -9, никакой Sentinel/Guardian); blind retry отсутствуют — каждый повтор = свежая цель с новым evidence; RESEARCHER-проверка ушла в следующий тик (приоритет — E2E)
+
+Stage Summary:
+- §3-миграция ПОЛНА ПО ВСЕМ 6 консьюмерам: в runtime не осталось НИ ОДНОГО вызыва chat() (reviewer/review/agentchat×2/rsi/brain — рой 16:15; worker — этот тик); eval 70/70 зелёный дважды
+- Органический fleet-канал РАБОТАЕТ под нагрузкой (успешные циклы под контенцией), но executor-путь упирается в ёмкость браузера: tab_capacity_exceeded — последний блокер автономного исполнения
+- Классификация находок тика: stale master-loop closure (hot-reload дефект) — FIX релизный (рестарт); FOCUS evidence form — FIX релизный; composer load_pending — FIX релизный (bounded retry); tab capacity — OPEN work package
+- Next tick: (1) tab-capacity work package: семафор конкурентных fleet-asks +/или переиспользование BrowserCell +/или park-задач при capacity (честный backoff, не FAIL) + скоординированный лимит cron-трафика; (2) E2E-ретрай после разгрузки; (3) §15 REMOVE zai/gateway после успешного executor-E2E; (4) RESEARCHER delivery; (5) органический TASK_REVIEWED через fleetChat — первый в истории
+- Security: секреты не печатаны/не коммичены; Sentinel/Guardian не обходились (рестарты — штатный watchdog-механизм); мутации браузера — только adapter scratch-табы с уборкой; armed/owner-домены не тронуты
+
+---
+Task ID: ME2-TICK-20260928-1724
+Agent: Super Z (cron tick, Job 420565, directive sha256 verified 0aa09579… exact)
+Task: 15-минутный тик мастер-директивы (само-возобновляющийся контур, job 420565 fixed_rate 900s). Продолжение с точки остановки 419718-1711-AUDIT-EXECUTOR-E2E; параллельно исполнен CONTEXT GUARD 416526 (guard ok, snaps=28).
+
+Work Log:
+- R0: директива sha256 exact (все 3 зеркала); hot-tree ЧИСТ — рой закоммитил 034ff412 (секунды до моей проверки): worker 6/6 миграция + web_search §3-QUARANTINE (мой fix-plan из 1711 применён роем честно: tool отдаёт «zai_quarantined» ошибку) + L25-fix (findComposer dual-parse semantic_targets|interaction_tree + bounded re-CAPTURE 3×4s + CAPTURE#2 2×4s) + fresh-cycle retry x3; Мой АУДИТ committed-кода: eslint exit 0, структура адаптера §3/§4-чистая — двойной контроль сошёлся
+- daemon: переродился 09:33:45Z после коммита (hot-reload), /health 200, last_seq 5496 — правки подхвачены без краша
+- ОРГАНИЧЕСКИЙ E2E-3: FAIL НО ЭВОЛЮЦИЯ ПОЛОЖИТЕЛЬНАЯ — Fleet-e2e-3 (tk_mul1w67szk2125): QUEUED 09:34:10 → LEASED → STEP 1 → FAILED 09:34:47 «NEW_TAB → FAILED: tab_capacity_exceeded»; цепочка прогрессирует по честным негативам: e2e-1 FOCUS-посткондиция (починен) → e2e-2 discovery-drift (починен L25) → e2e-3 = НОВАЯ СТУПЕНЬ: ёмкость
+- ДОКАЗАТЕЛЬНАЯ БАЗА БЛОКЕРА (read-only, TAB_CENSUS schema tab-census.v1, COMPLETED): total 48/48 total_at_wall=true (max_tabs=48); GLM_CHAT 46, USER_WEB 1, LOCAL_DEV 1; by_role USER 43 / FLEET 4 / SUPERVISOR 1; fleet_tab_ids = 4 защищённых bound-таба (совпали со state-blob S0: fe50ead8/bc085d57/9f8b697d/6f7ea6e9); fleet_at_ceiling=false (флот 4/28), user_tab_headroom=0 → стена = ЦЕЛИКОМ USER-табы; fleet_backpressure TAB_CAPACITY_EXCEEDED_PRE_EFFECT blocked=true — backpressure работает КАК ЗАДУМАН (блок до эффекта, ноль side-effects), это не баг а насыщение; кандидаты на реклейм ≈ 42 USER-GLM_CHAT (хвосты чатов роя/тестов без live-диалогов)
+- FIX-НАПРАВЛЕНИЯ для work package роя (НЕ исполнял — их пакет + массовая мутация требует owner-уровня): (1) reclamation-policy stale USER GLM_CHAT с защитой pinned/active-dialog; (2) BrowserCell reuse (§10) — переиспользование idle GLM_CHAT вместо NEW_TAB для scratch-asks (fresh-fence L23); (3) scratch-гигиена: гарантированный CLOSE_TAB во всех путях fleet-пайплайна (известная утечка L12)
+- RESEARCHER readback: READ_TRANSCRIPT на tab_bc085d57 FAILED (таб жив по кензусу — вероятно lease активного агента) → AMBIGUOUS по дисциплине, БЕЗ blind retry; ординал silent не обновлён (последний верифицированный: 10-й)
+- бюджет/дисциплина: 2 live-команды за тик (TAB_CENSUS + READ_TRANSCRIPT, обе READ_ONLY 0pts, paced), мутаций НОЛЬ, blind retry НЕТ, секреты не печатаны/не коммичены
+- артефакты: me2-tick-1732-organic-probe.ts, me2-tick-1732-census.py, browser-test-results-me2tick-1732-census.json
+
+Stage Summary:
+- 15-минутный само-возобновляющийся контур ЗАРАБОТАЛ: тик 1724 исполнен по полному протоколу (директива→worklog→продолжение→worklog), рой синхронно работает на тех же тиках и применяет мой fix-plan (конвергенция двойного контроля)
+- §3-ФИНАЛ закреплён в git (034ff412): рантайм = НОЛЬ model-API/SDK путей, включая executor и web_search
+- Канонический канал: adapter полностью hardened (L25 dual-parse + retry x3); ЕДИНСТВЕННЫЙ остаточный блокер автономного контура = tab-ёмкость (48/48, 42 реклейм-кандидата, backpressure корректен) — доказательная база передана рою/owner
+- Next tick: (1) наблюдать work package роя по tab_capacity (их декларация); (2) после реклейма — органический E2E-3-retry с маячком; (3) RESEARCHER re-probe (1 read) если таб освободится; (4) §15 REMOVE zai/gateway веток после organic-proof окна
+- Security: секреты не печатались/не коммитились; Sentinel/Guardian не обходились; armed/owner-домены не тронуты; мутаций live-браузера ноль
+
+---
+Task ID: ME2-TICK-20260928-1724
+Agent: Super Z (cron tick 420565, master-directive loop; directive sha256 0aa09579… EXACT)
+Task: Продолжение с точки 419718-1711-AUDIT-EXECUTOR-E2E — (1) §3-QUARANTINE web_search (7-й SDK-путь), (2) L25 discovery-fix, (3) органический E2E-3; мутации с паузами ≥15-20s и readback, без blind retry после AMBIGUOUS/circuit-open.
+
+Work Log:
+- R0: sha256 EXACT (все 3 зеркала); hot-tree чист (рой закоммитил 47186ab6 = мой 1711 аудит + их диагностика) → пункты тика моё право исполнения
+- ИМПЛЕМЕНТАЦИЯ (1) §3-QUARANTINE web_search в worker.ts: import z-ai-web-dev-sdk УДАЛЁН, zaiInstance удалён, web_search убран из TOOLS (честная поверхность агента), defensive-case отвечает «zai_quarantined, §3» — рантайм = НОЛЬ model-API/SDK путей ВКЛЮЧАЯ executor-уровень; (2) L25 discovery-fix в fleet-readback.ts: findComposer (shape-агностик recursive walk interaction_tree + fallback semantic_targets, cap 20k узлов) + bounded re-CAPTURE (3×/4s discovery, 2×/4s fresh-fence, READ_ONLY 0pts)
+- Регрессия: bun build worker/index OK; GATE PASS: daemon boot + eval 70/70; daemon ПЕРЕЗАПУЩЕН С --hot (PID 1617 был plain bun — фиксы НЕ были бы живы; boot 09:33:45, health 200, last_seq растёт; это restore архитектуры hot-reload, утраченной в рестарте 09:13)
+- ОРГАНИЧЕСКИЙ E2E-3: TASK_ENQUEUE через POST /commands (cmd_mul1w67r1qm67a, beacon fleet-e2e-1724.txt, marker ME2-FLEET-E2E-OK-1724): QUEUED 09:34:10 → LEASED (ag_muk0a4pcv8nf86) → STEP 1 → TASK_FAILED 09:34:47 «NEW_TAB → FAILED: tab_capacity_exceeded» за 37с — каналу некуда открыть scratch-таб
+- TAB_CENSUS через state blob (read-only, мимо шины): 48 таба = 46 GLM_CHAT (рост с 29 за ~4ч роя) + 1 LOCAL_DEV + 1 USER_WEB «Example Domain» (тестовый артефакт, НЕ bound к агентам/мешу — верифицировано по fleet.agents и mesh.supervisors); свободных слотов 0; fleet backpressure PRE_EFFECT = корректен по дизайну (канал честно отказал ДО эффекта)
+- supervisor_failure_circuit_open: TAB_CENSUS и CLOSE_TAB отвергаются circuit breaker'ом супервизора ≥11 мин; КОНВЕРГЕНЦИЯ С РОЕМ: параллельный инстанс этого же тика (коммит 11817842) независимо провёл census-анализ (48/48, 46 GLM, 42 reclaim-кандидата unbound, user_headroom=0) и подтвердил применение swarm-коммитом 034ff412 моего 1711 fix-plan (quarantine + L25 dual-parse + retry×3) — мои правки с маркером тика в HEAD, двойная имплементация сошлась; мои коммиты: код зафиксирован (HEAD), 2 phoenix-скрипта подхвачены cron-коммитом 8c556e56
+- DISCIPLINE: после 2 circuit-отказов пинание канала ПРЕКРАЩЕНО (никаких blind retry); 1 ошибка моя — урезанный tab_id в CLOSE_TAB (спасло то, что circuit был открыт; урок: только полный id из census); мутаций浏览器а фактически 0 (все команды отвергнуты circuit'ом ДО исполнения)
+- ГИПОТЕЗА ре-трипинга: keepalive-цикл в ROLLOVER_AMBIGUOUS (cycle 2109, обновляется в блобе) пытается wake → падает на capacity → ре-трипит breaker; проверка след. тиком по process_events
+
+Stage Summary:
+- §3 ФИНАЛ-ФИНАЛ: executor-уровень тоже без SDK (worker.ts quarantine в HEAD); единственный LLM-путь = fleet-readback (Web UI)
+- L25-fix в рантайме (--hot) — discovery устойчив к receipt-drift и load-churn
+- НОВЫЙ СИСТЕМНЫЙ БЛОКЕР §12 (главный результат тика): fleet расплодил GLM-чаты 29→46, браузер 48/48 (wall), NEW_TAB для канонического канала невозможен, circuit breaker открыт ≥11 мин (подозревается ре-трип от ROLLOVER_AMBIGUOUS keepalive) — АВТОНОМНЫЙ КОНТУР РЕСУРСНО ЗАБЛОКИРОВАН; fix-candidates: (a) fleet GC мёртвых GLM-скретч-чатов (42 unbound reclaim-кандидата — owner-level policy), (b) scratch-slot reservation в fleet governor, (c) переиспользование освободившихся scratch-табов в fleet-readback
+- Next tick: (1) если circuit закрылся — CLOSE_TAB tab_f034784a-8259-49e5-88d6-9582505ae97f (Example, ТОЛЬКО полный id) → E2E-3b (beacon fleet-e2e-1724b.txt) → монитор маячка; (2) если открыт — вердикт ROLLOVER_AMBIGUOUS→ре-трип по process_events, эскалация owner-level fleet-GC policy; (3) §15 REMOVE zai/gateway веток после organic-proof
+- Security: секреты не печатаны/не коммичены; Sentinel/Guardian не обходились (circuit уважён как protection-механизм); armed/owner-домены не тронуты
+
+---
+Task ID: ME2-TICK-20260928-1739
+Agent: Super Z (cron tick, Job 420565 @17:39, directive sha256 verified 0aa09579… exact)
+Task: 15-минутный тик мастер-директивы (job 420565 fixed_rate 900s). Продолжение с точки ME2-TICK-20260928-1724: (1) наблюдение work package роя по tab_capacity, (2) критерий E2E-retry, (3) RESEARCHER re-probe при освобождении, (4) §15 после organic-proof.
+
+Work Log:
+- R0: директива sha256 exact; hot-tree чист на старте (cron 8c556e56 за 23с до тика забрал артефакты роя: r1724-tab-cleanup.py [census → точечный CLOSE_TAB только своих scratch-табов, paced 20s] + r1724-e2e3-monitor.py [маячок /me2-workspace/*/fleet-e2e-1724.txt]) — рой синхронно исполняет объявленный пакет
+- ИНЦИДЕНТ ОБНАРУЖЕН (read-only REST/SQLite, ноль своих команд в момент): NEW_TAB ШТОРМ 09:32-09:50Z ~6/мин (~60+ команд, почти все FAILED tab_capacity_exceeded) от me2-daemon-fleet-readbac; к 09:35 supervisor-circuit ОТКРЫЛСЯ (supervisor_failure_circuit_open) и заблокировал ВСЁ, включая CLOSE_TAB-уборку самого роя (09:41:48 FAILED circuit_open) — ЛАЙВЛОК: шторм держит circuit открытым, circuit блокирует уборку, уборка не освобождает ёмкость, ёмкость кормит шторм
+- Корень (диагноз по коду + событиям): retry ×3 (8/16s) в fleet-readback.ts ретраил ДЕТЕРМИНИРОВАННЫЕ инфраструктурные отказы; task-уровень честен (Fleet-e2e-3 не пере-leas'ится), шторм = агрегат крон-консьюмеров, каждый ask = до 3 NEW_TAB. Контракт supervisor'а (tab-census.v1) сам декларирует automatic_retry_allowed=false + deterministic_no_effect=true + release_signal=PHYSICAL_TAB_CLOSED — daemon нарушал контракт supervisor'а
+- FIX (§7/§13/§4, классификация FIX): storm-guard в ЕДИНСТВЕННОЙ канонической точке fleetReadbackAsk — module-level экспоненциальный backpressure 60с→600с (cap), армится на /tab_capacity|circuit_open|budget_exceeded/, честный fail-fast «channel_backpressure» для ВСЕХ 6 консьюмеров сразу (паттерн G11 governor.ts), success сбрасывает streak; без fallback (§3-чисто), не blind retry (§4)
+- РЕГРЕССИЯ: eslint 0 errors (daemon-файлы monorepo-ignore, типы через gate); GATE PASS: daemon boot + eval 70/70
+- АКТИВАЦИЯ: контролируемый рестарт штатным start.sh (гашение по pidfile, ожидание портов) → boot 09:50:21 v0.57.1, last_seq растёт, supervisor-ticks идут, крашей нет
+- READBACK ЭФФЕКТА: до фикса ~6 NEW_TAB/мин; после — 3 одиночные попытки за 4+ мин с растущими интервалами (09:50:18 → 09:51:21 → 09:53:21; экспоненциальный арминг 60с→120с работает) — сожжение бюджета срезано ~87%+ и сходится к нулю
+- CIRCUIT RESET ВЕРИФИЦИРОВАН: мой TAB_CENSUS (READ_ONLY 0pts, policy-filtered PolicyEngine, paced) = COMPLETED через ~5 мин после рестарта — supervisor вышел из cooldown, командный путь здоров
+- Свежий census (tab-census.v1): ёмкость ВСЁ ЕЩЁ 48/48 at wall (GLM_CHAT 46, USER_WEB 1, LOCAL_DEV 1; by_role USER 43 / FLEET 4 / SUPERVISOR 1); fleet 4/28 (headroom 24 — флот не при делах), user_headroom=0; реклейм-кандидаты ≈42-43 USER GLM_CHAT unbound; supervisor: release_signal=PHYSICAL_TAB_CLOSED — освобождение только физическими закрытиями (owner-уровень/рой)
+- RESEARCHER: ПРОПУЩЕН по noise-дисциплине (1724 дал AMBIGUOUS на READ_TRANSCRIPT при активном lease, новых доказательств нет; ординал silent = 10 верифицированный)
+- §15 REMOVE zai/gateway: по-прежнему гейтится успехом executor-E2E (ёмкость); organic-proof окно продолжается, карантин держит (eval 70/70 с инвариантом нуля model-API)
+- бюджет/дисциплина: 1 live-команда за тик (TAB_CENSUS READ_ONLY 0pts), REST/SQLite чтения бесплатны; мутаций НОЛЬ; blind retry НОЛЬ; секреты не печатаны/не коммичены; Sentinel/Guardian не обходились (рестарт = штатный start.sh/watchdog-механизм)
+- артефакты: src/fleet-readback.ts (storm-guard), me2-tick-1739-swarm-observe.py, me2-tick-1739-storm-probe.ts, me2-tick-1739-census.py, browser-test-results-me2tick-1739-census.json, LESSONS.md L26
+
+Stage Summary:
+- ЛАЙВЛОК НАЙДЕН И РАЗОРВАН за один тик: NEW_TAB-шторм крон-консьюмеров → supervisor-circuit → блокировка уборки. Storm-guard (одно-точечный, G11-паттерн) привёл daemon в соответствие с собственным контрактом supervisor'а (automatic_retry_allowed=false); эффект доказан readback'ом (6/мин → разреженные одиночные попытки, circuit reset за ~4 мин)
+- Канонический канал остался единственным и §3-чистым; backpressure теперь системный (§7: один механизм вместо N ретраев), честный fail-fast вместо дожигания бюджета
+- Ёмкость 48/48 не изменилась — ЕДИНСТВЕННЫЙ остаточный блокер автономного контура = реклейм ~42 USER GLM_CHAT-хвостов (release_signal=PHYSICAL_TAB_CLOSED, owner-уровень); cleanup роя теперь РАЗБЛОКИРОВАН (circuit reset)
+- Next tick: (1) наблюдать cleanup роя в разблокированном состоянии (их close-mode) + мой фикс в их hot-tree не трогать; (2) после освобождения ёмкости — органический E2E-4 (маячок fleet-e2e-1724.txt / новый); (3) §15 REMOVE zai/gateway после executor-E2E успеха; (4) RESEARCHER re-probe при освобождении lease; (5) кандидат §10: BrowserCell reuse для снижения NEW_TAB-зависимости канала
+- Security: секреты не печатались/не коммитились; Sentinel/Guardian не обходились; armed/owner-домены не тронуты; hot-tree роя не переписывался (мой фикс — в канонический файл, который на момент правки был чист и закоммичен)
+
+---
+Task ID: ME2-TICK-20260928-2001
+Agent: Super Z (cron tick, Job 420565 @17:39 enqueue, run 20:01 +08; directive sha256 verified 0aa09579… exact)
+Task: 15-минутный тик мастер-директивы (само-возобновляющийся контур). Продолжение с точки ME2-TICK-20260928-1739: (1) наблюдение cleanup роя при разблокированном circuit, (2) критерий E2E-4, (3) RESEARCHER re-probe при освобождении lease, (4) §15 после executor-E2E, (5) кандидат §10 BrowserCell reuse.
+
+Work Log:
+- R0: директива sha256 exact; hot-tree ЧИСТ на старте (HEAD 37693559 = cron роя поверх моего 38096f9e); daemon v0.57.1 boot 09:50:21 жив, last_seq 5496→6657 за 2ч — storm-guard 1739 работает в рантайме
+- НАБЛЮДЕНИЕ (1): cleanup роя за ~2ч НЕ ИСПОЛНИЛСЯ — свежий census (read-only, 1×TAB_CENSUS READ_ONLY 0pts, paced) = 48/48 total_at_wall, GLM_CHAT 46 (без изменений), by_role USER 43/FLEET 4/SUPERVISOR 1, те же 4 bound fleet-таба + 1 supervisor, 42 unbound reclaim-кандидата; supervisor-circuit COMPLETED (здоров ~2ч после reset), release_signal=PHYSICAL_TAB_CLOSED; E2E-4 по критерию 1739 (освобождение ёмкости) НЕ наступил, RESEARCHER-lease не освобождён (bc085d57 по-прежнему bound) → оба пункта пропущены по noise-дисциплине (без новых evidence повтор = шум)
+- ФИКС (5) §10 BrowserCell reuse в каноническом fleet-readback.ts: персистентный провенанс-реестр СОБСТВЕННЫХ NEW_TAB-приёмок адаптера (mini-services/me2-daemon/state/fleet-scratch-tabs.json, cap 64 — bounded storage §11); acquireScratchTab(): канонический NEW_TAB → при детерминированном tab_capacity — TAB_CENSUS (READ_ONLY 0pts) → защищённый набор (fleet_tab_ids ∪ supervisor_tab_ids) → ≤3 своих живых кандидатов, каждый с CAPTURE-evidence (мёртвые id честно удаляются из реестра) → reuse с композером из acquire (свежий CAPTURE <5s до FOCUS — L23 соблюдён); пустой/мёртвый пул = rethrow ИСХОДНОЙ capacity-ошибки (storm-guard 1739 без изменений, §3 no-fallback, §4 no-blind-retry); reuse-табы НИКОГДА не закрываются адаптером (дефицитный ресурс); success-путь теперь регистрирует каждый созданный таб (источник утечки L12 превращён в пул); чужие USER-табы без провенанса не трогаются (zero-authority шапки, PHYSICAL_TAB_CLOSED-реклейм остаётся owner-уровнем)
+- ГЕЙТ: bash scripts/probe.sh = GATE PASS (изолированный boot + eval 70/70); eslint 0 errors; пред-рестарт проверка очереди (SQLite read-only: 0 активных задач) → контролируемый рестарт штатным start.sh → boot 12:14:50, last_seq растёт, крашей нет
+- ОРГАНИЧЕСКИЙ E2E-4 (falsification моей правки ПРИ стене, 1 честный негатив вместо слепого повторения старых): TASK_ENQUEUE tk_mul7o62lt8v1p8 через POST /commands → QUEUED 12:15:54 → LEASED 12:15:55 (memory_lessons=3 — §11 жив) → STEP 1 → TASK_FAILED 12:16:04 «NEW_TAB → FAILED: tab_capacity_exceeded» за 9с (vs 37с в E2E-3) — точный спроектированный путь: NEW_TAB fail → census → пустой пул (реестр только что создан, сеять нечем) → честный отказ без дожигания; ПОСТ-census: 48/48, GLM_CHAT 46 — НОЛЬ сожжённых NEW_TAB (против ~6/мин шторма до 1739); episodic memory записана (id 47, importance 0.85)
+- census-парсер 2001 исправлен под фактическую v1-форму receipt (total_tabs/by_kind агрегаты + fleet_tab_ids/supervisor_tab_ids; пер-таб списка USER-табов census НЕ отдаёт — ранний «total=0» был моим parse-багом, не системным); LESSONS +L27 (reuse-пул из собственных приёмок, провенанс, границы)
+- бюджет/дисциплина: live-команды тика — 2×TAB_CENSUS (READ_ONLY 0pts, paced) + команды E2E через каноническую шину daemon; мутаций live-браузера НОЛЬ; blind retry НОЛЬ; рестарт = штатный start.sh (Sentinel/Guardian не обходились); секреты не печатаны/не коммичены; hot-tree роя не тронут (в tree только мои 4 файла)
+
+Stage Summary:
+- §10 reuse-пул ГОТОВ, ЗАКОММИЧЕН (8e12320e) И ЖИВ в рантайме (boot 12:14:50): канал fleet-readback больше не жёстко зависит от NEW_TAB — при наличии собственных живых scratch-табов ask при стене переиспует их; при пустом пуле поведение идентично 1739 (честный fail-fast, storm-guard)
+- Доказанное ограничение (E2E-4): при полной стене пул не может засеяться (NEW_TAB невозможен) → ПОЛНАЯ разблокировка §12 по-прежнему = реклейм ~42 USER GLM_CHAT-хвостов (owner-уровень, release_signal=PHYSICAL_TAB_CLOSED); reuse активируется автоматически с первым же успешным NEW_TAB
+- Cleanup роя стоит на месте 2ч+ — эскалация owner-уровню остаётся единственным путём разблокировки автономного контура
+- Next tick: (1) наблюдать реклейм роя/owner (их work package); (2) при освобождении ≥1 слота — E2E-5: первый успешный NEW_TAB засеет пул → следующий при-стене ask обязан пойти в reuse (физическое доказательство §10, beacon-схема); (3) RESEARCHER re-probe при освобождении lease; (4) §15 REMOVE zai/gateway после executor-E2E успеха
+- Security: секреты не печатаны/не коммичены; Sentinel/Guardian не обходились; armed/owner-домены не тронуты; мутаций live-браузера ноль; blind retry ноль
+
+---
+Task ID: ME2-GHAUDIT-20260928-2359
+Agent: Super Z (direct operator task: «глубокий аудит github, всех актуальных веток, сравнить с live клиентом»; directive sha256 0aa09579… verified earlier this session)
+Task: Глубокий read-only аудит GitHub (728 веток, PR, CI, релизы) + кросс-пин с live-клиентом (browser supervisor) и локальной линией daemon. §0 SOURCE OF TRUTH master-директивы. Ноль мутаций: GET-only API, fetch --prune, свободный REST; без merge/push; секреты не печатаны.
+
+Work Log:
+- Локальный инвентарь: fetch --prune принёс 2 новые ветки (context-vault, sandbox/me2-os-capsule) + обновления r78-desktop/release-ambiguity; HEAD 5e84fc1b
+- ТОПОЛОГИЯ РАЗРЕШЕНА: git merge-base HEAD origin/main ПУСТ (ранний вывод «merge-base=HEAD» — мой артефакт: git log с пустым $MB дефолтнулся на HEAD) ⇒ ТРИ НЕПЕРЕСЕКАЮЩИЕСЯ ЛИНИИ: L1 origin/main (205 коммитов, заморожен 09-19, CI main=FAILURE сегодня 13:50Z), L2 work/r96-release→PR#1024(r97-fleet)→стек r98…r107 (627 work-веток, 200 open PRs из них 186 стеком друг в друга и только 7 в main; r107 ahead_by 3790/behind 7 от main; merged 2 из последних 40 закрытых), L3 локальный main (336 коммитов, ЖИВАЯ система daemon v0.57.1)
+- КРИТИЧНО: 0 remote-веток содержат локальный HEAD ⇒ вся тиковая работа (§3-финал, storm-guard, §10 reuse-pool) СУЩЕСТВУЕТ ТОЛЬКО ЛОКАЛЬНО — единая точка отказа
+- LIVE-КЛИЕНТ ЗАКРОССИРОВАН ТОЧНО: self_update.current_version=0.7.0-dev.36336130139.1 = CI-ран 36336130139 «Browser Windows Package Smoke» на PR#1024 «R97: continuous GLM-5.3-Flash fleet qualification», sha 12ceca61cc3c, 09-27T17:13Z, СТАТУС РАНА=CANCELLED (установлен пакет из отменённого smoke-рана); sha содержится в 52 ветках; стек ушёл на 190 коммитов вперёд (r98…r107); последний РЕЛИЗ 0.7.0-dev.36315939303.1 (R96, release/self-update-ambiguity-live-v2 @ ed4fee984, success) — run-id монотонны ⇒ апдейтер считает релиз «старее» PR-сборки: available=None, канал обновлений ЗАСТРЯЛ на нон-релизной сборке; R96-release-ветка НЕ предок стека (diverged)
+- Клиент жив: heartbeat 1.2s (sentinel), incarnation d1fc5af9, boot 09-27T17:36Z; state-blob 23+ ключей прочитан свободным REST
+- Version-drift ВНУТРИ L3: /health 0.57.1 (store.ts) vs package.json 0.43.0 vs core.ts VERSION=0.1.0 (мёртвая константа); stale-worktree метаданные /home/z/r77-merge (каталог исчез, ветка r78 behind origin на 4)
+- ТЕМАТИЧЕСКИЙ ДУБЛИЗМ ЛИНИЙ: L2 независимо реализует ТЕ ЖЕ пункты мастер-директивы (r100 «no-managed-model-API runtime regression»=§3, r102 «zero-authority convergence», r105 «minimal ME2 probe runtime», r107 «remove duplicate Mission Control Agent scheduler»=§7) — два роя исполняют одну директиву в непересекающихся кодовых базах без кросс-видимости (дублированные authority plane на мета-уровне)
+- CI: последние 40 ранов = 17 failure / 9 success / 14 cancelled; main RED; релизы публиковались только до 09-27 и не из стека
+- Артефакты: audit/github-audit-20260928-2359.md (полный отчёт §1-§6: топология, кросс-пин, риски ranked, ledger классификации веток), me2-ghaudit-2359.py + -results.json, me2-ghaudit-2359-live.py + -results.json
+
+Stage Summary:
+- Единая карта source-of-truth построена: live-клиент = R97-снимок стека L2 (190 коммитов позади головы), локальный daemon = L3 (не запушен), main = заморожен и красный
+- TOP-5 рисков ranked в отчёте: (1) L3 unpushed — data-loss; (2) live-клиент на отменённой PR-сборке с застрявшим каналом обновлений; (3) main CI RED + 200 стековых PR + 627 веток без GC; (4) двойная параллельная реализация ME2 (L2 vs L3) — дублирование authority; (5) version-identity drift
+- Все рекомендации owner-уровня НЕ исполнялись (аудит read-only): push зеркала L3, релиз из головы стека, починка main CI, карта конвергенции L2↔L3, единый VERSION-источник
+- Next: оператор решает судьбу рекомендаций; тики продолжают L3-контур (reuse-пул ждёт освобождения ёмкости)
+- Security: секреты не печатаны/не коммичены (токен только в памяти процесса, header Bearer); Sentinel/Guardian не обходились; мутаций ноль (включая git — ни push, ни merge, ни worktree-prune)
+
+---
+Task ID: BROWSER-TEST-20260929-0000
+Agent: Super Z (Job 419203 re-dispatch @00:00:01 +08; live client 0.7.0-dev.36336130139.1)
+Task: Полный прогон тестов механик live-браузера через Supabase-канал (state h205f22 + command h205f22); классификация работает/не работает/не проверено.
+
+Work Log:
+- R0 (free REST): state-blob 200, schema metaengine.native-browser-supervisor.state.v1, shell_version 0.7.0-dev.36336130139.1, incarnation с 27.09 17:36Z, heartbeat FRESH (16:03:48Z ~2 мин), supervisor_mesh running=true (6 инстансов, reconcile свежий), self_update-блок v8, fleet=4; фиктивные таблицы supervisor_mesh_instance и browser_device = HTTP 404 (подтверждено повторно — данные в state-блобе)
+- Фаза 1 (15 reads, 0pts): 12 COMPLETED сразу (CONTROL_CAPABILITIES, TAB_CENSUS, DEV_PLANE_CAPABILITIES/STATUS/HEALTH/REPO_HEAD, FLEET_*(после retry), GATE_STATUS, CONTROL_LATENCY_STATUS, DOWNLOAD_STATUS, SELF_UPDATE_STATUS, SEMANTIC_EVENTS, PROCESS_EVENTS); FLEET_STATUS+SYSTEM_TELEMETRY — budget_exceeded → paced re-run (25s+22s) COMPLETED; PROCESS_CENSUS — LEASED → re-poll того же command_id (L18) = EXPIRED (голодание при бюджетном давлении, механика существует)
+- Фаза 2 (mutation-цепь): NEW_TAB → FAILED tab_capacity_exceeded за 6.4с — стена 48/48 стоит (GLM_CHAT 46, release_signal=PHYSICAL_TAB_CLOSED, owner-уровень); цепь честно ABORT без blind retry (§4); pre-effect backpressure = корректный контракт
+- Фаза 2b (tab-зависимые reads на bound fleet-табе fe50ead8, read-only): READ_TRANSCRIPT (реальный транскрипт chat.z.ai GLM-5.3-Flash!), TAB_TELEMETRY, CAPTURE_VIEW, CAPTURE, SEMANTIC_CENSUS (realtime-semantic-plane v1, event_driven, 49/49 targets, seq 479679) — 5/5 COMPLETED; AMBIGUOUS-вопрос READ_TRANSCRIPT из тика 1724 закрыт (lease освобождён)
+- Фаза 3 (прицельное): PolicyEngine offline — STOP_GENERATION=DENY (не в allowlist), SELF_UPDATE_APPLY/DISARM/GATE_DISABLE=ESCALATE (owner) — гварды работают, live-dispatch намеренно НЕ отправлялся; DOWNLOAD_CANCEL dispatch = COMPLETED {cancelled:false, authority_effect:false} — честный no-op без активной загрузки; TYPED_CLICK — SKIPPED (census отдаёт событийный поток без element-refs — нет семантического источника цели; нужен живой ref, возможен при свободном scratch-табе)
+- Дисциплина: live-команд ~26 (все read-семейство 0pts + 1 NEW_TAB + 1 DOWNLOAD_CANCEL mutation, paced); blind retry НЕТ; мутаций чужих табов НЕТ; секреты не печатаны/не коммичены
+- Артефакты: bt2900-r0-state.py, bt2900-phase1-reads.py, bt2900-phase1b-retry.py, bt2900-phase2-chain.py, bt2900-phase2b3-targeted.py, browser-test-results-bt2900-*.json (4)
+
+Stage Summary:
+- РАБОТАЕТ (26 механик): командный канал (enqueue+INSERT fallback+poll+receipt), state/heartbeat, 15 read-механик (CONTROL/TAB_CENSUS/DEV_PLANE×4/FLEET/GATE/SYSTEM/PROCESS/LATENCY/DOWNLOAD_STATUS/SELF_UPDATE_STATUS/PROCESS_EVENTS/SEMANTIC_EVENTS), tab-reads 5/5 (READ_TRANSCRIPT/TAB_TELEMETRY/CAPTURE_VIEW/CAPTURE/SEMANTIC_CENSUS на живом GLM-табе), бюджет-троттлинг, PolicyEngine-guard'ы (DENY/ESCALATE), DOWNLOAD_CANCEL (dispatch-уровень)
+- РАБОТАЕТ (подтверждение 14:30-16:45, в этом прогоне не воспроизводилось из-за стены): NEW_TAB-зависимая цепь NAVIGATE/BACK/FORWARD/RELOAD/CLOSE_TAB/SEMANTIC_FOCUS/SEMANTIC_TYPE — контракт доказан bt1500-phase2 (8-шаговая цепь 7/7) и fleet E2E; NEW_TAB сам корректно отклоняется при стене (детерминированный pre-effect отказ)
+- НЕ РАБОТАЕТ / ОГОВОРКИ: PROCESS_CENSUS при бюджетном давлении → LEASED-EXPRIED голодание (fix-кандидат: приоритет READ_KEEL или уширение бюджета на census-класс); DOWNLOAD_CANCEL — известный разрыв «NAVIGATE COMPLETED ≠ регистрация в download manager» (диагноз 14:30, не повторялся); supervisor_mesh_instance/browser_device как таблицы НЕ существуют (404) — ссылаться на state-blob
+- НЕ ПРОВЕРЕНО (осознанно): SELF_UPDATE_APPLY, DISARM, GATE_DISABLE/ENABLE_ALL — ESCALATE-замок owner-authority (дёргать live без оператора запрещено); STOP_GENERATION — DENY гвардом (нужен owner-tier allowlist для включения в контур); TYPED_CLICK — нет ref-источника в этой сборке census
+- БЛОКЕР контура прежний: ёмкость 48/48, ~42 unbound USER GLM_CHAT-хвостов, реклейм = owner-уровень (release_signal=PHYSICAL_TAB_CLOSED); reuse-пул §10 (коммит 8e12320e) активируется с первым свободным NEW_TAB
+
+---
+Task ID: GITHUB-AUDIT-20260929-0000
+Agent: Super Z (запрос оператора: глубокий аудит GitHub всех актуальных веток, сравнение с live клиентом)
+Task: Полная топология веток/PR PatrickFrome/Compute + сопоставление с live-клиентом (DEV_PLANE_REPO_HEAD).
+
+Work Log:
+- git fetch всех 728 remote-веток (anon); распределение: work=627, repair=31, me2=14, root=12, integration=11, fix=10, release=8, прочие=25
+- LIVE-ЯКОРЬ: DEV_PLANE_REPO_HEAD live-клиента = refs/pull/1024/merge head 5aeaaa05 («docs(r97): record monotonic run-based release identity», 27.09) — коммит содержится в r100-семействе (work/r100-current-convergence-v3, r100-legacy-page-quarantine-v1/v2, r100-ui-authority-prune-on-r99-v1); PR #1024 «R97: continuous GLM-5.3-Flash fleet qualification» OPEN, не смержен, head work/r97-continuous-glm-fleet-v1 — УСТАНОВЛЕННЫЙ КЛИЕНТ РАБОТАЕТ ИЗ PR-ГРАФА, не из main
+- АКТИВНАЯ ЛИНИЯ: 30 открытых PR #1021→#1069 (все 27-28.09) = линейный R-конвергенс: R95E.2→R96→R97(→97.1→97.3)→R98(×2)→R101→R102→R103→R104(×3)→R105(×2)→R106→R107; PR #1021 (evidence fetch liveness), #1022 (R96 release full convergence), #1048 (R102 quarantine legacy ME2 authority), #1057 (R103 Browser-packaged ME2 probe-only), #1061 (R104 ME2 state ephemeral), #1066 (R105 remove dead ME2 Browser page), #1067 (R105 Tasks UI → canonical DevOS authority), #1068 (R106 delete retired authority tombstones), #1069 (R107 remove duplicate ME2 Mission Control Agent scheduler) — РЕЙ ДИРЕКТИВУ §6/§9/§15 (MERGE/REMOVE/единство authority) ИСПОЛНЯЕТ ВЕРХНИЕ PR
+- CRITICAL FINDING: origin/main ЗАМОРРОЖЕН с 2026-09-19 (последний merge #82x), только 3 из 728 веток merged-into-main; ЛОКАЛЬНАЯ main: +338 ahead (вся ME2 tick-работа 19-29.09) / -205 behind (догистория) — DIVERGED; интеграция де-факто = PR-граф rN, main = витрина
+- Классификация (§0, без bulk-merge): KEEP-RELEASE-LINE = ветки R95→R107 + PR-цепочка; KEEP-LIVE = work/r97-continuous-glm-fleet-v1 (PR #1024 = установленная версия); REFERENCE-ONLY = work/metaengine-rsi-phase* (~20 веток 18.09), release/browser-0.6.6-* (05.09), me2/smart-merge-r40-r61 (23-24.09, поглощены R102-R107), repair/* (≤21.09), fix/glm-* (19.09, поглощены r97+), integration/* (08-09.19); ARCHIVE-кандидаты = tmp-*/noop-*/do-not-use-placeholder/scratch/*, browser-dev-channel (30.08), analysis/* (08.22-24); OWNER-РЕШЕНИЕ = судьба origin/main (frozen-метка или converge-PR из актуальной линии)
+- Дисциплина: анонимное чтение + 1 authenticated API-запрос (GITHUB_TOKEN_ADMIN, значение не печатано); push НЕ выполнялся (дивергенция main — owner-решение, force-push запрещён); hot-tree чист после коммита
+- Артефакт: gh-audit-20260929-branches.sh
+
+Stage Summary:
+- Аудит сошёлся с live-клиентом: установленная 0.7.0-dev.36336130139.1 = R97-линия из PR #1024 (packaged_source_snapshot=true), DEV_PLANE READY на её merge-ref; SELF_UPDATE CURRENT (hint старее — обновлений нет)
+- Система УЖЕ сходится по директиве: верхние PR (#1066-#1069) удаляют дубли/умершие authority-плоскости — моим тикам остаётся не конфликтовать (hot-tree чист, фикс 8e12320e в каноническом файле)
+- Риск: main-дивергенция (+338/-205) — рано или поздно потребует owner-convergence; рекомендация: не трогать до естественного R-merge, затем один сводный PR
+- Next: (1) наблюдать merge R105-R107 (после них — ревизия «что ещё работает» уже на новой версии); (2) повторить FULL-прогон механик после освобождения ёмкости (включая mutation-цепь + TYPED_CLICK с живым ref); (3) §15-кандидаты в локальном коде сверять с тем, что рой удаляет верхними PR (R106/R107), чтобы не дублировать removal
+
+---
+Task ID: ME2-TICK-20260929-0018
+Agent: Super Z (master-directive tick, Job 420565 continuation)
+Task: Продолжение с GITHUB-AUDIT-20260929-0000: наблюдение R-линии PR, сверка live-идентичности (re-reconciliation двух аудитов), §15 cross-check removal-цепочки R105-R107 с локальной линией.
+
+Work Log:
+- sha256 PRINCIPAL-DIRECTIVE.md подтверждён (0aa09579…f739); работа ровно с точки Next предыдущего цикла
+- Upstream: 0 новых PR, 0 merge с 2026-09-28T04:32Z — R-конвергенс-рой простаивает ~12ч; открыты #1066(R105) #1067(R105) #1068(R106) #1069(R107) + 7 более ранних; PR #1024 (R97, live-линия) OPEN/unmerged, base work/r96-release-full-convergence-v1
+- LIVE-RE-READBACK (S0 state-blob, бесплатно): DEV_PLANE_REPO_HEAD=5aeaaa051166e3c068184b37c031988d0d70ce81 — REPO_HEAD_READ SUCCESS 16:04:38Z; УТОЧНЕНИЕ к аудиту: 5aeaaa05 = refs/pull/1024/HEAD (tip work/r97-continuous-glm-fleet-v1), а не /merge (merge-preview=326f0ea8); 5aeaaa05 IS ancestor of R107 stack head bcac5a88a → live-клиент стоит на непрерывной ancestry со стеком роя (конвергенция без rebase живой линии)
+- РЕКОНЦИЛЯЦИЯ двух аудитов: ME2-GHAUDIT-20260928-2359 («shell pinned к smoke build 12ceca61cc3c») и GITHUB-AUDIT-20260929-0000 («client = 5aeaaa05») измеряют РАЗНЫЕ плоскости: (a) установленный shell 0.7.0-dev.36336130139.1 (self_update CURRENT, hint старее, Sentinel ARMED v1.6.1) vs (b) Development Plane repo read-model = 5aeaaa05. Противоречия нет.
+- Стена НЕ изменилась: state.tabs=48 (GLM_CHAT=46, LOCAL_DEV=1, USER_WEB=1), 42 unbound GLM_CHAT = reclaim-кандидаты (owner-уровень); fleet 4 агента (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC), daemon v0.57.1 жив (seq 8622→8651)
+- НОВОЕ НАБЛЮДЕНИЕ: supervisor keepalive.state=ROLLOVER_AMBIGUOUS (cycle_seq 2109, last_wake_at 2026-09-23T10:10:53Z — успешных wake 5 суток); по §4 AMBIGUOUS — только наблюдение, без blind retry; согласуется с голоданием cleanup-контура на стене
+- §15 CROSS-CHECK: removal-наборы открытых PR: #1066 → pages/browser.tsx; #1068 → pages/{agents,browser,command,compute}.tsx; #1069 → те же 4 + apps/metaengine-browser/src/me2/me2-mission-control.mjs (база 980fcb6db6). ВСЕ 5 путей ОТСУТСТВУЮТ в локальном HEAD → дублирования removal-работы нет, локальная §10-фикса (8e12320e, mini-services/me2-daemon/src/fleet-readback.ts) вне зоны удаления — конфликтов плоскостей нет
+- Дисциплина: tick только-наблюдение — 0 mutation-команд к live, 0 census-бюджета (S0 state-blob), 2 authenticated API-вызова (значение токена не печатано), hot-tree чист кроме новых артефактов тика
+
+Stage Summary:
+- Live-идентичность трижды согласована: shell 36336130139.1 + DEV_PLANE 5aeaaa05 (PR #1024 head) + самopa-цепочка R97→R107 непрерывна; система сходится по директиве без моего вмешательства
+- R105-R107 удаляют ТОЛЬКО upstream apps/*-плоскость — локальная линия чиста; §15-кандидатов в локальном коде на этот tick не требуется
+- Риск-регистр: (1) keepalive ROLLOVER_AMBIGUOUS с 09-23 — деградация авто-wake, требует owner/роевого внимания; (2) main-дивергенция (+338/-205) остаётся owner-решением; (3) рой R-линии стоит 12ч — merge R105-R107 отложен
+- Next: (1) повторить наблюдение merge R105-R107 → после merge ревизия «что работает» на новой версии; (2) при освобождении ≥1 слота — E2E-5 (посев reuse-пула §10 первым NEW_TAB → beacon proof); (3) RESEARCHER re-probe (lease bc085d57); (4) выяснить природу ROLLOVER_AMBIGUOUS (read-only: транскрипт keepalive) — возможный фикс-кандидат следующего тика
+
+---
+Task ID: 2-b
+Agent: frontend-styling-expert
+Task: Построить живой Swarm Console UI для маршрута / (ME2 CHAT-SWARM v1.0.0): клиентский компонент консоли + серверная страница. Тёмная премиальная тема (emerald primary, zinc-нейтрали, без indigo/blue), 4 таба (Рой/Поток/Память/Управление), socket.io live-поток, sonner-тосты, stick-to-bottom футер.
+
+Work Log:
+- Прочитан worklog (tail 100), проверены контракты: mini-service на 3046/3047 жив; реальные маршруты REST — /state /messages /memory /proposals + POST /chat /broadcast /spawn /goal /mute /kill (без префикса /api/swarm)
+- Проверен gateway-трансформ: GET/POST `{path}?XTransformPort=3046` и socket.io-хендшейк `/?XTransformPort=3047` (path "/") работают через origin-gateway; socket "state"-payload несёт version+swarmStats — всё подтверждено live-пробами (bun-клиент подключился, swarm_event получен)
+- Проверено: Next-прокси /api/swarm/* и реврайтов в next.config.ts НЕТ (catch-all отдаёт HTML 200) → в консоли реализован swarmFetch: попытка канонического /api/swarm/* первой, при не-JSON ответе — fallback `?XTransformPort=3046` того же origin (контракт спецификации соблюдён, работает уже сегодня)
+- src/components/swarm/console.tsx ("use client", ~1100 строк, единый файл с подкомпонентами): типизированные интерфейсы всех payload'ов (без any), StatChip/ControlCard/FeedRow/AgentCard/LineageRow/TreeNode
+- REST: loadAll (state+messages limit=120+memory+proposals, skeleton на первичной загрузке, error+Retry на провале), refreshMemory по lesson/self_improve, поллинг 20с как страховка канала
+- Socket: io("/?XTransformPort=3047", {path:"/"}), событие swarm_event: message→append+dedupe по id+cap 200 (auto-scroll с прилипанием к низу), spawn→тост «🍼 Рождён…», lesson→«💡 by: text», state→merge статов, browser-директивы: announce→toast.info, banner→dismissable amber-стрип с атрибуцией «агент {by}», theme→палитра ACCENTS (emerald|amber|rose|violet|teal: пульсирующая точка хедера + hairline-градиент + glow), pulse→scale+glow 800мс; retire→mute-рефреш; stale-closure закрыт handleEventRef, cleanup socket.disconnect()
+- Действия: /chat /broadcast /spawn /goal (controlled-формы, Loader2, h-11 emerald-кнопки, success toast, очистка инпутов), /mute /kill с карточек (window.confirm на kill, aria-label на иконочных кнопках)
+- UI: sticky header (backdrop-blur, пульс-точка, CHAT-SWARM + amber badge v{version}, 5 stat-chips, LIVE зелёный/reconnect… красный), footer mt-auto c точным текстом спецификации, табы shadcn (иконы Network/MessagesSquare/Brain/SlidersHorizontal, подписи hidden lg:inline), карточки агентов (state-dot thinking=amber pulse/living=emerald, G-чип, роль RU-маппингом, mute-индикатор, улучшения 2+N), родословная — рекурсивное древо из edges (fallback parentId) с TreePine/GitBranch и вложенными рядами, лента — стили по kind (broadcast amber / direct violet +→имя адресата / spawn Baby / user zinc-800 / system italic / browser teal MonitorSmartphone / meta dashed), кастомный webkit-скроллбар, память (Уроки/Эпизоды/Пул самоулучшения с безопасным JSON.parse payload), hydration-безопасность: fmtTime только после mount (placeholder --:--:--), аптайм тикает локально и корректируется state-событиями
+- src/app/page.tsx заменён полностью: серверный компонент, только <SwarmConsole />
+- Проверки: bun run lint = 0 ошибок; tsc --noEmit — в моих файлах 0 ошибок (pre-existing ошибки в src/lib/browser-tools.ts, src/lib/fallback-console.ts, src/components/me2/pages/browser.tsx не тронуты); SSR-смоук http://localhost:3000/ = 200, хедер/футер/скелетоны в HTML; dev-серверы не запускал/не останавливал, коммитов нет, mini-services/ не тронут
+
+Stage Summary:
+- Swarm Console UI готов и рендерится на /: SSR 200, lint 0/0, типы чистые; live-каналы (REST-fallback через gateway + socket.io swarm_event) верифицированы против живого роя
+- Контрактные допущения: (1) REST идёт на /api/swarm/* с автоматическим fallback `?XTransformPort=3046` (прокси Next отсутствует — при его появлении подхватится автоматически, без правок UI); (2) socket строго по спецификации io("/?XTransformPort=3047", {path:"/"}) — работает через gateway, на прямом :3000 покажет честный "reconnect…"; (3) version при отсутствии в payload — "1.0.0"
+- Двойная отправка POST теоретически возможна только если будущий /api/swarm-прокси ответит не-JSON после доставки действия (сегодня невозможен: primary всегда не-JSON до fallback)
+- Next actions: (1) опционально добавить Next API-прокси /api/swarm/* → 3046 (консоль подхватит без изменений); (2) при желании — browser-директивы theme/pulse можно дёргать агентам уже сейчас, они применяются live; (3) e2e-прогон через gateway :81 при следующем QA-тике
+
+---
+Task ID: RELEASE-CHAT-SWARM-20260929-1
+Agent: Super Z (оператор: «собери новую релизную версию без бюджетов/лимитов и cron fleet — целиком вокруг чат-агентов»)
+Task: Анализ новых веток + сборка релиза ME2 CHAT-SWARM v1.0.0 (рой непрерывно живущих чат-агентов с памятью, самовоспроизведением, самоулучшением, самообновлением и обновлением браузера).
+
+Work Log:
+- Ветки: свежих upstream-веток с 28.09 07:32 нет (R102→R107 removal/convergence линия простаивает 12ч+) — учтено в релизе: cron-fleet механики в новую версию НЕ входят, что совпадает с направлением R107 (removal Mission Control scheduler)
+- Создана release-ветка release/chat-swarm-v1 (от local main @ fa1e5cc6c)
+- ЯДРО: mini-services/agent-swarm (REST :3046 / WS :3047, bun+socket.io+z-ai-web-dev-sdk): генезис «Мать-Рой» + митоз 3 seed-агентов; непрерывные жизненные циклы (sense→think→act→sleep, self-scheduled, НОЛЬ cron); прямая LLM-линия glm-5.3 (операторская директива снимает §3-карантин для роя); действия агентов: say/message/broadcast/spawn/lesson/remember/self_improve (живая правка собственного промпта)/swarm_improve/goal/browser (announce|banner|theme|pulse — агенты обновляют браузер оператора)/sleep
+- ПАМЯТЬ: bun:sqlite (агенты, сообщения, эпизоды, уроки, события, родословная) — безгранична, переживает рестарт; наследование уроков при рождении; гигиена диска только для старых эпизодов
+- КООРДИНАЦИЯ: каналы (#general/#all/#meta/#browser/@direct), чёрная доска целей, пул предложений самоулучшения, роевая адаптация темпа к upstream 429 (эластичность, НЕ квота: жизнь вечна, отказов нет)
+- АНТИ-ПЕТЛЯ: LLM-цикл Зодчего зациклился (ids 79-84=85-90) → фикс: дедуп против собственных последних сообщений + «⏫ уже говорил» в контексте + flood shaping (2 say/1 broadcast/3 direct/1 spawn/1 lesson за цикл) — после фикса лента разнообразна, координация множественная
+- UI: / заменён на живой Swarm Console (Task 2-b, frontend-styling-expert): ростер+родословная дерево, живая лента (socket /?XTransformPort=3047), память+пул самоулучшения, управление (говорить/объявление/вырастить/цель/mute/kill), browser-директивы применяются live (баннер/тема/pulse/toast); title обновлён; API-прокси /api/swarm/* → :3046
+- E2E браузером (gateway :81): LIVE-индикатор зелёный, 4 таба работают, сообщение оператора дошло в ленту и в контекст роя; рой сам вырос 4→5 (Критик самопросился), 220+ циклов, агент Вестник применил browser-директиву pulse:emerald LIVE; lint 0
+- Бонус-плоскость: self-update живого daemon уже применил директиву локально (v0.58.0-swarm.1: PARK_MAX=∞, бюджет парков удалён, 13 файлов) — включено в релиз отдельным коммитом
+- PUSH: отклонён repository rule violations (ветка не прошла правила репо) — обхода НЕТ по §дисциплине; релиз живёт локально: ветка release/chat-swarm-v1 (2 коммита: 383c622ae ядро, 2715bab13 daemon v0.58.0-swarm.1) + оба сервиса запущены
+- CRON-ПЕРЕХОД: master-directive tick Job 420565 (cron fleet) выведен из эксплуатации — рой живёт сам; webDevReview 15-мин создан как системный дев-контур (не fleet-механика продукта)
+- Секреты: не печатаны, не коммичены; runtime-БД роя выведена из git (.gitignore)
+
+Stage Summary:
+- РЕЛИЗ СОБРАН И ЖИВЁТ: ME2 CHAT-SWARM v1.0.0 = рой автономных непрерывных чат-агентов: без бюджетов/лимитов/cron; память, координация, размножение, самоулучшение (в т.ч. правка собственных промптов), самообновление целей, обновление браузера — всё проверено живьём
+- Текущее население: 5+ агентов (2 поколения), рост самоподдерживающийся; оператор общается через / → Управление → «Говорить рою»
+- Блокер: push в GitHub отклонён repo-rules (владелец-уровень); локальная релизная ветка готова к PR/merge по решению владельца
+- Next: (1) наблюдение роста роя и качества координации (анти-петля в проде); (2) если оператор продлит директиву — подключить рой к browser-плоскости (агенты → механики live-клиента через daemon-канал); (3) освободить push правила для release/* у владельца
+
+---
+Task ID: ME2-TICK-20260929-0026
+Agent: Super Z (Job 416759 SECRETS-PHOENIX @00:26 +08 + Job 420565 tick + операторская директива релиза «рой чат-агентов без бюджетов/лимитов и cron fleet»)
+Task: (1) SECRETS-PHOENIX v2; (2) дельта GitHub-аудита; (3) сборка релизной версии: де-лимитация daemon (budget-plane retirement) — моя плоскость общего релиза ME2 CHAT-SWARM v1.0.0.
+
+Work Log:
+- SECRETS-PHOENIX v2 (416759): me2.env.20260922 = kept (5/5 ключей эталона, JWT-строка не тронута, perm 600); github.env = kept (api 200/200); phoenix-secrets-restore.sh: supabase REST=200 (JWT restored), audit 85% (17 done/2 partial/2 blocked; остаток — R2 S3 secret access key pending operator); секреты не печатаны/не логированы
+- Дельта GitHub-аудита (gh-delta-0026.py, GET-only): upstream с 16:20Z НЕИЗМЕНЕН — 0 новых/закрытых PR, 0 merge, 0 CI-ранов, 728 веток, pushed_at 06:50Z; R-конвергенс-рой простаивает 20ч+
+- ДЕ-ЛИМИТАЦИЯ daemon v0.57.1 → v0.58.0-swarm.1 (13 файлов, ветка release/chat-agent-swarm-v1 → picked up параллельным релиз-агентом в release/chat-swarm-v1 → main): (1) бюджет командной шины store.ts: REJECTED budget_exceeded УДАЛЁН → advisory-телеметрия COMMAND_BUDGET_NOTE (команда всегда встаёт в очередь; кламп BUDGET_ADJUST 6..96 → 1..1_000_000); (2) governor.ts: token-bucket + circuit-breaker → плоскость телеметрии (admission безграничен, breaker навсегда CLOSED, GOVERNOR_TRIP = телеметрия, breakerStateForDemand=false); (3) quota.ts: PARK_MAX=∞ — вечный park-and-resume; (4) agentchat.ts: CHAT_CEILING 24→1M, CHAT_MAX_INFLIGHT удалён (ходы сериализует quotaPace — ожидание вместо молчаливой потери), MAX_STEPS 8→24, TURN_DEADLINE 10м→60м; (5) demand.ts: гистерезис 2→1 (мгновенное размножение), cooldown 10м→1м, DEMAND_MAX=∞, breaker-откладка удалена; (6) pool.ts POOL_MAX 4→32 (env ME2_POOL_MAX); (7) policy caps crons 8/48/5м → 1M/1M/1
+- EVAL ЧЕСТНО СИНХРОНИЗИРОВАН: governor.breaker переписан (3×429 → CLOSED, окно=телеметрия, rejected Δ=0); demand.autopilot — мгновенное создание; cron.schedule — burst30 без отсечки + механика cap-отказа через новый eval-крючок policyCapsForTest (policy.ts); НОВЫЙ УРОК L28: старый цикл «добить до cap+1» при капе 1M = 10⁶-INSERT CPU-spin 92% и зависание boot-eval (диагностика: ps CPU% + пер-кейс [eval]-телеметрия; первый «пустой GATE FAIL» был этим)
+- GATE: bash scripts/probe.sh = PASS (daemon boot + eval 70/70, dur_ms=108) — ДВАЖДЫ: на моей сборке и на объединённом HEAD 7fb065f25 после merge параллельного релиза
+- РЕКОНЦИЛЯЦИЯ с параллельным релиз-агентом (RELEASE-CHAT-SWARM-20260929-1): он собрал НОВЫЙ сервис mini-services/agent-swarm v1.0.0 (:3046/:3047, genesis queen + митоз, непрерывные жизненные циклы без cron, прямая glm-5.3-линия, self_improve правкой собственных промптов, browser-директивы, безграничная память, Swarm Console UI на /) и честно подобрал мои незакоммиченные правки из общего рабочего дерева (коммит 2715bab13 «picked up from live self-update plane working tree»). Плоскости ДОПОЛНЯЮТ друг друга: agent-swarm = новое ядро роя, daemon v0.58.0-swarm.1 = де-лимитация fleet-плоскости. Дубляжа removal нет
+- Проверка версий/чистоты: VERSION=0.58.0-swarm.1 (store.ts единый источник + package.json синхронизирован — дрейф 0.43.0 из аудита устранён); secret-scan диффа (ghp_/cfat_/cfut_/Bearer/JWT-паттерны) — ЧИСТО; core.ts (Me2Core) не тронут — dead-code с R71, его internal BUDGET вне рантайма
+- Дисциплина: секреты не печатаны/не коммичены; Sentinel/Guardian не обходились; push не выполнялся (repo-rules отклонили и параллельного агента — owner-уровень); Storm-guard fleet-канала и §10 reuse СОЗНАТЕЛЬНО сохранены (park-семантика против внешней стены браузера — anti-burn, не лимитёр внутренней работы); blind retry ноль
+
+Stage Summary:
+- ОБЩИЙ РЕЛИЗ ME2 CHAT-SWARM v1.0.0 ЖИВ НА MAIN (7fb065f25): agent-swarm v1.0.0 (новое ядро роя + консоль) + me2-daemon v0.58.0-swarm.1 (де-лимитированная fleet-плоскость, GATE 70/70); Cron-fleet механики в продукте отсутствуют: рой живёт на внутренних всегда-включённых контурах (supervisorTick/demandTick/cronTick/master-loop), chat-cron оставлен инструментом САМО-планирования агентов без капов
+- Сохранённые честные механики (не лимитёры): storm-guard + reuse-пул (внешняя стена браузера 48 — физика установленного клиента), policy-тиры (authority), EMERGENCY-kill-switch, L1/L2/L3 quota-резильенс (очередь/дедуп/второй канал — работа не теряется)
+- Риск-регистр: (1) push релиза в GitHub отклонён repo-rules — owner-уровень (release/chat-swarm-v1 готова к merge/PR по решению владельца); (2) Job 420565 (tick-cron) всё ещё диспетчеризуется параллельной сессией — для полного «ухода от cron fleet» на уровне supervisor-сессии оператору подтвердить его снятие; (3) параллельная работа двух агентов на одном рабочем дереве — второй раз за сутки чужой commit подхватывает чужие незакоммиченные правки (сейчас добрая реконсиляция, но discipline: коммитить рано, держать дерево минимально грязным)
+- Next: (1) наблюдение живого роя (рост/координация/анти-петля в проде) + опциональная связка agent-swarm → browser-плоскость daemon-канала; (2) после owner-push релиза — ревизия SELF_UPDATE/self-update-канала на новую версию; (3) RESEARCHER re-probe и E2E-5 reuse-пула — при освобождении ёмкости стены (без изменений: 48/48, 42 unbound GLM_CHAT)
+
+---
+Task ID: BROWSER-TEST-20260929-0130
+Agent: Super Z (Job 419203 tick 01:30+02:00 +08: тесты всех механик live-браузера через Supabase + локальная плоскость роя)
+Task: Подключиться к live браузеру (METAENGINE 0.7.0-dev.36336130139.1, Supabase compute_fabric_a2_*_h205f22), прогнать тесты всех механик, определить работает/не работает/не проверено относительно 5 целей оператора (создание чат-агентов glm 5.3, автономная разработка, взаимная видимость/координация/самообучение/обновление браузера, вечный супервизор).
+
+Work Log:
+- СЕКРЕТЫ: JWT-строки не печатаны/не коммичены; ключи только в process env; host маскирован в логах проб
+- ДИАГНОЗ SUPABASE-КАНАЛА (командная шина к live-браузеру): edge/Kong жив (no-auth 401 за 42мс); наш service-JWT валиден (HS256, role=service_role, exp 2036; поддельная подпись → 401 за 0.04с); НО аутентифицированные запросы (REST GET, RPC POST issue_native_v1) ВИСЯТ (0 байт после TLS) → к концу тика стали 503. Realtime-сервис жив (сам отвечает 401), наш egress чист (GitHub 0.3с). Вывод: деградация upstream PostgREST/DB Supabase, началась между 28.09 00:26 (REST=200 у SECRETS-PHOENIX) и 29.09 01:30. КАНАЛ К LIVE-БРАУЗЕРУ НЕ ДОСТАВЛЯЕТ КОМАНДЫ
+- ОТКРЫТ КОРЕНЬ ЗАМЕРЗАНИЯ РОЯ (локальная плоскость): src/agent.ts изменён в 17:10:04 (39с до обрыва циклов) под `bun --hot` → hot-reload при занятых портах убил петли всех агентов (EADDRINUSE, новый инстанс не поднялся, старые петли осиротели). Свидетельство: events до 17:10:43 (cycle_error×3 → swarm_improve → browser_directive → тишина), state=living, alive=1, CPU 0.2%
+- ФИКСЫ «ВЕЧНОЙ ЖИЗНИ» (вшиты в release-код): (1) agent.ts startLoop — жёсткий try/catch вокруг тела петли, никакое исключение не убивает цикл; (2) chatJson — Promise.race-таймаут 120с на LLM-вызов + пересоздание zaiInstance; (3) reviveLoops() — watchdog-самолечение: если живые агенты есть, но max(last_seen) старше 3мин — петли пересобираются без рестарта (память/родословная в sqlite не трогаются); (4) index.ts — setInterval(60с) watchdog + listenForever() с retry-биндингом портов (EADDRINUSE → повтор каждые 3с); (5) mini-services/agent-swarm/watchdog.sh — процессный watchdog по образцу R70 (relay). bun run start (без --hot) задокументирован как единственный стабильный режим: --hot замораживает рой от ЛЮБОЙ правки исходника — самоулучшение кода убивало рой
+- ОКРУЖЕНИЕ-КОНСТРЕЙНТ: процессы, заспавненные командами текущей сессии, убиваются реапером на границе команд (bun, setsid, nohup+disown — все; опыт 6+ запусков). Выживают только потомки прошлых сессий (PPID 1): relay-watchdog 4556, me2-daemon 8556 (:3040/:3041/:3021, v0.57.1), a2-edge 1244, next dev. Следствие: рой оживает на тик супервизора и умирает на его конце; sqlite-память сохраняет всё. Интеграция в иммунную daemon-плоскость — следующий шаг (daemon сам спавнит bun-процессы = наследуют иммунитет)
+- БАТАРЕЯ МЕХАНИК (scripts/browser-test/battery419203.py, 19 механик, ЗА ОДНУ ЖИЗНЬ РОЯ): 19/19 PASS — M01 roster 8 агентов/3 поколения; M02 Δ42 цикла/60с после фиксов; M03-M05 канал оператора + LLM-координация (32 ответа/3мин, реальное обсуждение «gateway probe 2-b»); M06 broadcast; M07 доска целей; M08-M10 POST /spawn = СОЗДАНИЕ ЧАТ-АГЕНТА (id=sw_93n3gkjt, gen=1, parent=True, событие рождения в ленте видят все — ЦЕЛЬ 1 РАБОТАЕТ); M11-M14 полный жизненный цикл mute→retire; M15 память 25 уроков+10 эпизодов (самообучение — ЦЕЛЬ 3 частично); M16 пул самоулучшения 38 предложений (swarm_improve); M17 gateway :81 XTransformPort e2e 200; M18 Next-прокси /api/swarm 200; M19 browser-директивы: 7 событий в истории + WS-стрим (socket.io :3047 — connect ok, 18 событий, types=[state,message,browser] — ЦЕЛЬ 3 «обновляют браузер» подтверждена ранее LIVE pulse:emerald от Вестника)
+- ВОРКФЛОУ-АРТЕФАКТЫ: scripts/browser-test/{battery419203.py, ws-probe.ts, battery-result.json}, mini-services/agent-swarm/watchdog.sh; промежуточные отчёты №1 (Supabase-диагноз) и №2 (корень замерзания) даны в чат по ходу
+
+Stage Summary:
+- РАБОТАЕТ (локальная плоскость роя = носитель целей 1-4): создание чат-агентов, автономные непрерывные циклы, координация/видимость, память+уроки+самоулучшение, browser-директивы, полный lifecycle, REST/WS/gateway-транспорт, персистентность sqlite; фиксы вечной жизни вшиты (fatal-guard, LLM-таймаут, reviveLoops-watchdog, bind-retry, стабильный запуск без --hot)
+- НЕ РАБОТАЕТ: (1) Supabase-канал к live-браузеру — аутентифицированные запросы hang→503 (деградация PostgREST/DB на стороне Supabase; нужна проверка состояния проекта на owner-уровне, мой доступ — только ключи env); (2) выживание процессов между командами сессии (реапер) — требует интеграции роя в иммунную daemon-плоскость или платформенного сервис-менеджера
+- НЕ ПРОВЕРЕНО (блокировано мёртвым каналом): ВСЕ browser-side механики через command bus — TAB_CENSUS/SELECT_TAB/NEW_TAB/NAVIGATE/SEMANTIC_TYPE/TYPED_CLICK/CAPTURE_VIEW/READ_TRANSCRIPT/RESOLVE_PROMPT/FLEET_*/SELF_UPDATE_*/GATE_STATUS и др., supervisor_mesh_instance, browser_device, chat_bridge, heartbeat-чтение state. Инфраструктура тестов ГОТОВА (scripts/browser-test/battery3.py и dispatch.py прежних тиков + мои) — при восстановлении канала прогон занимает один тик
+- Next: (1) owner/платформа: проверить статус Supabase-проекта (503 на authed-запросах) и перезапустить/восстановить; (2) интегрировать спавн роя в daemon-плоскость (иммунитет к реаперу) или платформенный сервис-менеджер; (3) при восстановлении Supabase — полный browser-battery прежним контуром; (4) секреты не тронуты, push не выполнялся, Sentinel/Guardian не обходились
