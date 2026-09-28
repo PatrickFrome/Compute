@@ -1259,8 +1259,14 @@ export class DevOsNativeTaskCycle {
       const proof = {
         prompt_sha256: promptHash,
         conversation_url_sha256: sha256(normalizedUrl),
+        agent_surface_sha256: String(agent?.transport_proof?.agent_surface_sha256 || '').toLowerCase(),
         effect_state: effectState,
       };
+      if (!HASH_RE.test(proof.agent_surface_sha256)) {
+        const error = new Error('devos_agent_surface_origin_proof_missing_after_dispatch');
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
       this.#dispatchEffectCounters.dispatches += 1;
       this.#dispatchEffectCounters.proven += 1;
       this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'PROVEN', effect_state: effectState, task_id: lease.task_id, agent_id: lease.agent_id });
