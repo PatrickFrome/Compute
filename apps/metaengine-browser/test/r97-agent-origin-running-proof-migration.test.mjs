@@ -27,7 +27,7 @@ test('R97 running proof preserves exact lease fences and one existing transition
     /event_type|TASK_TRANSPORT_PROVEN/i,
   ]) assert.match(sql, required);
   assert.doesNotMatch(sql, /insert\s+into\s+destruktion_meta\.devos_fleet_task_h205f22/i);
-  assert.doesNotMatch(sql, /pg_notify|realtime\.send|setInterval|retry/i);
+  assert.doesNotMatch(sql, /pg_notify|realtime\.send|setInterval|devos_fleet_lease_v1|devos_fleet_enqueue_v1/i);
 });
 
 test('R97 running proof remains service-role-only and zero Browser authority', () => {
