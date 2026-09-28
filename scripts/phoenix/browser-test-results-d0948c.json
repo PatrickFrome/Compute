@@ -1,0 +1,39 @@
+[
+ {
+  "id": "TR3-DELAYED",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "bba22102-2510-4368-9d97-6c9f41341266",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 4335,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "text": "GLM-5.3-Flash\nZCode\nNew Chat\nAI PPT\nAPI\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:4",
+   "captured_at": "2026-09-28T01:56:48.073Z",
+   "total_chars": 1991,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "TR3-ANALYSIS",
+  "action": "DELAYED-REPLY-CHECK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "len": 1991,
+  "marker_count": 1,
+  "ackmark_count": 1,
+  "reply_arrived": false
+ }
+]
