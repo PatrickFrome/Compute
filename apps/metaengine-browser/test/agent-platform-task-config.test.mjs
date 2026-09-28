@@ -42,6 +42,21 @@ test('R97: ordinary z.ai Chat root is not an Agent task surface', () => {
   assert.equal(resolveAgentHomeControls(frame).ready, false);
 });
 
+test('R98: a z.ai conversation URL alone never proves an Agent task surface', () => {
+  const frame = {
+    ...frameWithTargets([
+      ['textbox', 'Send a Message'],
+    ]),
+    url: 'https://chat.z.ai/c/4d04c632-e541-4ee7-87af-4c0e2cd6874d',
+  };
+  const surface = classifyAgentPlatformTaskSurface(frame);
+  assert.equal(surface.stage, 'CONVERSATION');
+  assert.equal(surface.proven, false);
+  assert.equal(surface.reason, 'AGENT_SESSION_PROVENANCE_REQUIRED');
+  assert.equal(surface.url_only_authority, false);
+  assert.equal(resolveAgentHomeControls(frame).ready, false);
+});
+
 test('R97: Agent home requires exact Agent + New Task + model + Full-Stack evidence', () => {
   const frame = frameWithTargets([
     ['button', 'Agent'],
@@ -230,6 +245,8 @@ test('task-config snapshot requires the Agent New Task flow and never aliases Ch
   assert.equal(snap.database_visibility, 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED');
   assert.equal(snap.task_creation_surface, 'AGENT_HOME_NEW_TASK_FLOW');
   assert.equal(snap.ordinary_root_is_task_surface, false);
+  assert.equal(snap.conversation_url_is_agent_proof, false);
+  assert.equal(snap.conversation_requires_agent_session_provenance, true);
   assert.equal(snap.agent_home_proof, 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS');
   assert.equal(snap.task_config_surface_state, 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION');
   assert.equal(snap.composer_ignores_synthetic_editing_keys, null);
