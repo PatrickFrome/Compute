@@ -116,9 +116,14 @@ export function resolveMe2DaemonLaunch({
       if (exists(packaged)) {
         return Object.freeze({ dir, bin: packaged, args: [], mode: 'PACKAGED_STANDALONE' });
       }
-      if (exists(join(dir, 'index.ts'))) {
-        return Object.freeze({ dir, bin: env.ME2_DAEMON_BIN || 'bun', args: ['index.ts'], mode: 'SOURCE_BUN' });
+      const probeEntry = join(dir, 'browser-probe-entry.ts');
+      if (exists(probeEntry)) {
+        return Object.freeze({ dir, bin: env.ME2_DAEMON_BIN || 'bun', args: ['browser-probe-entry.ts'], mode: 'SOURCE_BUN_PROBE_ONLY' });
       }
+      // Fail closed: Browser never launches the historical full daemon source
+      // entrypoint. Older source trees without the probe-only entrypoint are
+      // unavailable rather than silently widening Browser authority.
+      if (exists(join(dir, 'index.ts'))) return null;
     } catch { /* следующий кандидат */ }
   }
   return null;
@@ -129,10 +134,10 @@ function spawnDaemon(launch) {
   const childEnv = {
     ...process.env,
     ME2_HOSTED_BY_BROWSER: '1',
-    // R85: the Browser remains the sole scheduler/authority owner. The packaged
-    // legacy daemon boots as a bounded service plane until R86 explicitly
-    // converges task authority; operators can opt into another mode explicitly.
-    ME2_BOOT_MODE: process.env.ME2_DAEMON_BOOT_MODE || 'probe',
+    // R103: Browser composition is permanently probe-only. Inherited shell or
+    // operator environment cannot promote the child into the historical full
+    // daemon because that would recreate model/scheduler/AgentChat authority.
+    ME2_BOOT_MODE: 'probe',
   };
   if (!childEnv.ME2_DATA_DIR && daemonDataDir) childEnv.ME2_DATA_DIR = daemonDataDir;
   child = spawn(launch.bin, launch.args, {
