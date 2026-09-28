@@ -1011,7 +1011,7 @@ export class DevOsNativeTaskCycle {
       assertLiveLeaseBinding(lease, foregroundState?.fleet);
       const liveAgent = (foregroundState?.fleet?.agents || [])
         .find((row) => String(row?.agent_id || '').toLowerCase() === lease.agent_id) || null;
-      this.#assertCanonicalAgentConversation(lease, liveAgent, pre);
+      const canonicalAgentConversation = this.#assertCanonicalAgentConversation(lease, liveAgent, pre);
 
       const preReady = readinessOrThrow({
         frame: pre,
@@ -1129,7 +1129,7 @@ export class DevOsNativeTaskCycle {
           state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
           tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
           proof, server: body, prompt_included: false, page_data_authority: false,
-          conversation_bootstrap: flush?.state || null,
+          conversation_bootstrap: canonicalAgentConversation.state,
           selected_tab_mutation: false, viewport_geometry_required: false,
           click_issued: clickIssued, submit_path: 'ENTER_KEY_EVENT_DRIVEN_READBACK', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
         };
