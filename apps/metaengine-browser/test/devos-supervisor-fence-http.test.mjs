@@ -48,7 +48,7 @@ test('stale mark-running fence is a deterministic fail-closed 409',async()=>{
     req:{method:'POST'},
     path:'/v1/devos/mark-running',
     clientId:'device',
-    body:{...binding,proof:{prompt_sha256:'a'.repeat(64),conversation_url_sha256:'b'.repeat(64),agent_surface_sha256:'c'.repeat(64),effect_state:'PROVEN_GENERATING'}},
+    body:{...binding,proof:{prompt_sha256:'a'.repeat(64),conversation_url_sha256:'b'.repeat(64),effect_state:'PROVEN_GENERATING'}},
   });
   assert.equal(response.status,409);
   assert.equal((await bodyOf(response)).automatic_retry_allowed,false);
