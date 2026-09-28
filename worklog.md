@@ -11456,3 +11456,45 @@ Stage Summary:
 - R28 first two deliverables EXIST and PASS smoke: policy-engine MVP + C3 reviewer skeleton (mandate v3 trust ladder T0/T1/T2 operational locally).
 - Next tick: (1) deliver FULL SYSTEM_TELEMETRY receipt to RESEARCHER (their scope=full re-request; digest-only was consumed); (2) wire policy engine into dispatch scripts (evaluate() before each mutating enqueue; ledger to Supabase later); (3) collect RESEARCHER's 3 CRITIC-gate checks + PASS/FAIL table; (4) divergence-merge plan 83/222 remains open; (5) TYPED_CLICK RPC v3 validator bug filed to dev-plane backlog (mechanic works via INSERT).
 - Security: no secrets in briefs/transcripts; rotation still operator-pending.
+
+---
+Task ID: 419718-1231-FULLTELEMETRY-R28
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718 @12:31)
+Task: Directive-verified continuation (sha 0aa0957922d0f9d6, 681 lines intact). Pending from 1216: (1) deliver FULL SYSTEM_TELEMETRY receipt to RESEARCHER (scope=full re-request); (2) wire policy engine into dispatch scripts; (3) collect RESEARCHER 3 CRITIC-gate checks.
+
+Work Log:
+- FULL delivery (dispatch-toolresult-full-1231.py): fresh SYSTEM_TELEMETRY pulled COMPLETED (compact 5242 chars, SECRET_RE redaction pass applied: sk-/ghp_/eyJ/AKIA/PEM patterns -> [REDACTED]); CAPTURE+SEMANTIC_FOCUS COMPLETED; SEMANTIC_TYPE FAILED postcondition_not_confirmed:AMBIGUOUS -> NO blind retry per protocol; readback via readback-trfull-1231.py (raw-structure dump): marker TOOLRESULT-FULL-1231 TRUE in transcript, nonce mt419718-1231-r1 TRUE, transcript 35802 -> 40426 chars -> delivery CONFIRMED (AMBIGUOUS = postcondition artifact again, 3rd occurrence pattern).
+- Transcript state: RESEARCHER ack CONNECTED-TOOLRESULT-1215 present; their TOOL_REQUEST_V1 (adac6557-systel-01, scope=full, "result consumed next generation") is last agent message -> re-issued after/around FULL landing; agent next generation should consume FULL body. Their 3 CRITIC-gate checks NOT yet delivered (nothing after their TOOL_REQUEST except page footer; CRITIC keyword in transcript is from our own briefs only).
+- R28 policy engine IN PRODUCTION: both scripts gate every enqueue through PolicyEngine.evaluate() (Decision verdict/trust_tier/conditions logged; READ_TRANSCRIPT -> ALLOW T0 'read-only allowlist'; ledger_sha 39635b02db852269; JSONL ledger /tmp/me2-policy-ledger.jsonl). PROCESS SLIP fix: all side effects inside main() with __name__ guard (importlib re-exec hazard from 1215 closed).
+- Extractor calibration note: READ_TRANSCRIPT result is {url, text(40152), title, total_chars, has_more, schema=metaengine.native-browser.transcript.v1, process_incarnation_id, ...} — flat str-field scan is the reliable marker search (items/messages/transcript keys do NOT exist; prior 1215 extraction used different shape).
+- Artifacts: browser-test-results-trfull-1231.json (dispatch, 12 records), browser-test-results-trfull-1231-readback.json (verdict), scripts/phoenix/dispatch-toolresult-full-1231.py, scripts/phoenix/readback-trfull-1231.py.
+
+Stage Summary:
+- RESEARCHER now holds: digest (1215) + FULL SYSTEM_TELEMETRY body (1231) — scope=full satisfied on our side; ball in RESEARCHER court for ACK + 3 CRITIC-gate checks.
+- Policy engine wired and battle-tested in dispatch path (T0 allowlist enforcement live); remaining R28: ledger -> Supabase mirror, then C3 reviewer integration.
+- Next tick: (1) readback RESEARCHER reply: ACK of FULL-1231 + their 3 CRITIC-gate checks -> persist PASS/FAIL table; (2) if no reply, gentle re-ping with marker TOOLRESULT-FULL-1231 reminder (no duplicate brief); (3) divergence-merge plan 83/222 open; (4) TYPED_CLICK RPC v3 validator bug -> dev-plane backlog (INSERT workaround proven).
+- Security: no secrets in briefs/transcripts (redaction pass on telemetry); rotation still operator-pending.
+
+---
+Task ID: BROWSER-TEST-20260928-1240
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419203 @12:39)
+Task: Operator re-arm of 419203. Full 48-action VERDICT already complete (12:15 run) -> this tick = verification + gap-closure sweep: BACK/FORWARD effect-proof, TYPED_CLICK RPC re-probe, GATE_ENABLE_ALL probe, DOWNLOAD_STATUS/CANCEL, goal-1 chain re-proof, leftover-tab cleanup.
+
+Work Log:
+- Liveness: state row (order=last_seen_at desc) armed=True sup_mode=CONTROL heartbeat_age=3s. NOTE: unordered limit=1 read returns stale row (armed=False/OFF trap) — always order by last_seen_at.
+- Runner mt-419203-verify.py v2 (policy-engine gated, incremental JSON dump, __main__ guard). v1 crashed after POLICY DENY BACK: poll(None) HTTP 400 — fixed (None-guard); RECORDS survive crash now.
+- R28 POLICY FINDING+FIX: BACK/FORWARD absent from ALL policy tiers ("action not in any allowlist tier") -> added to T0_MUTATION_SUPERVISED (same class as NAVIGATE/RELOAD). Engine MVP aligns with verified verdict table. GATE_ENABLE_ALL (T2) probed under owner mandate Job 419203 via ESCALATE-PROCEED annotation in ledger (audit trail kept).
+- V2 NAV: NAVIGATE (v1) + BACK + FORWARD all COMPLETED with EFFECT-PROOF: BACK -> CAPTURE url=https://chat.z.ai/, FORWARD -> CAPTURE url=https://example.com/. Earlier "FLAKY postcondition AMBIGUOUS" = reporting artifact; mechanics WORK.
+- V3 TYPED_CLICK RPC: NEW BEHAVIOR — native_semantic_ref_invalid (fabricated ref correctly rejected by native layer) instead of supervisor_typed_click_payload_fields_invalid. RPC validator now ACCEPTS {role, tab_id, semantic_ref:object, accessible_name} shape -> upstream validator fixed/changed between 12:15-12:40. Re-probe with REAL semantic_ref from CAPTURE queued next tick; INSERT channel remains proven fallback.
+- V4 GATE_ENABLE_ALL {reason}: FAILED owner_gate_override_id_invalid — same correct owner-override typed-contract as GATE_ENABLE (no overrides exist). Channel alive, needs override_id to test further.
+- V5 DOWNLOAD_STATUS COMPLETED (0 downloads) -> DOWNLOAD_CANCEL SKIPPED (prerequisite: active download impossible while DOWNLOAD_FILE broken). Stays UNTESTED.
+- V6 goal-1 chain RE-PROVEN (3rd time today, cleanest): NEW_TAB -> CAPTURE -> SEMANTIC_FOCUS -> SEMANTIC_TYPE (COMPLETED first shot, no AMBIGUOUS) -> conversation https://chat.z.ai/c/d7dc7126 + MECH-OK in transcript -> CLOSE_TAB cleanup COMPLETED.
+- Census V0b/V7: 5 tabs start (4 fleet + own nav_tab), fleet tabs (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC) intact throughout; 11:55 leftover tabs already gone (12:15 cleanup). Own tabs all closed by end.
+- Artifacts: browser-test-results-mt419203-verify.json (23 records); scripts/phoenix/mt-419203-verify.py; policy_engine_mvp.py edit (BACK/FORWARD).
+
+Stage Summary:
+- VERDICT DELTA vs 12:15 table: BACK FLAKY->WORKS (effect-proven), FORWARD FLAKY->WORKS (effect-proven), NAVIGATE FLAKY->WORKS (effect-proven transitively), TYPED_CLICK RPC path REPAIRED upstream (fields accepted; native correctly rejects fabricated refs; re-probe with real ref pending), GATE_ENABLE_ALL UNTESTED->TYPED-REJECT-CONFIRMED (owner_gate_override_id_invalid, needs override), DOWNLOAD_CANCEL remains UNTESTED (blocked by DOWNLOAD_FILE broken).
+- Goal-1 chain (agent creation) WORKS E2E x3 today. Fleet 4/4 intact. Stop-generation/SCROLL semantics unchanged from 12:15 verdict (STOP_GENERATION BROKEN, SCROLL WORKS {delta_x,delta_y}).
+- R28 policy engine: battle-tested in dispatch+sweep paths; allowlist gap closed; ESCALATE-PROCEED owner-mandate mechanism proven auditable.
+- Next tick: (1) TYPED_CLICK via RPC with REAL semantic_ref (CAPTURE -> pick real element) -> if COMPLETED, RPC path fully restored; (2) RESEARCHER reply collection (FULL telemetry ACK + 3 CRITIC-gate checks); (3) SELF_UPDATE_STATUS version check (possible browser update 12:15->12:40 — validator behavior changed); (4) DOWNLOAD_FILE re-probe when recipe confirmed stable.
+- Security: no secrets printed/committed; secrets redaction held.
