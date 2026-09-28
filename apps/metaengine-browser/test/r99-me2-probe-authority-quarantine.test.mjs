@@ -31,6 +31,7 @@ test('R99 Browser-hosted ME2 probe cannot seed or expose mutation/model REST aut
   for (const pathName of ['/providers','/llm','/glm','/agents','/agentchat','/pool','/governor','/demand','/tokens']) {
     assert.equal(daemon.includes('"' + pathName + '"'), true, 'probe must classify ' + pathName);
   }
+  assert.match(daemon, /meta: \{ \.\.\.\(state\?\.meta \|\| \{\}\), version: VERSION \}/);
   for (const marker of [
     'ME2_BROWSER_PROBE_READ_ONLY',
     'ME2_BROWSER_PROBE_AGENTCHAT_DISABLED',
