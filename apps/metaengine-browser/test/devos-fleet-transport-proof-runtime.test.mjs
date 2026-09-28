@@ -131,7 +131,7 @@ test('ACTIVE exact fleet proof is revalidated before DB mark-running and late pr
   const out = await cycle.cycle();
   assert.equal(out.dispatch.state, 'RUNNING');
   assert.deepEqual(h.order, ['db-running']);
-  assert.equal(out.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
+  assert.equal(out.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED');
   assert.equal(out.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(out.bound_unverified_dispatch_allowed, false);
   assert.equal(h.selected(), supervisorTab);
