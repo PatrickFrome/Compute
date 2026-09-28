@@ -20,8 +20,7 @@ const fleetTransportProof = {
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
-  conversation_url_sha256: 'a'.repeat(64),
-  agent_surface_sha256: 'd'.repeat(64),
+  conversation_url_sha256: '758f6ecdbbb580270792b3f5e6cbdf0bb6301c3b95f3465375b71e9cdd19c3b3',
   agent_surface_sha256: 'b'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
@@ -173,7 +172,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: GLM semantic submit is geometry-independent');
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SELECT_TAB').length, 0, 'D-C2: no SELECT_TAB is issued anywhere in the dispatch');
   assert.equal(selected, supervisorTab, 'D-C2: the user selection is never touched');
-  assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
+  assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED');
   assert.equal(first.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(selected, supervisorTab);
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
@@ -215,10 +214,13 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
   const result = await cycle.cycle();
   assert.equal(result.dispatch.state, 'RUNNING');
-  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
+  // Agent sessions are persistent: a proven composer-clear is a terminal
+  // submit readback even when the SPA keeps the same /c/<id> session. The
+  // runtime must never force a second submit just to manufacture navigation.
+  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
   const semanticTypes = commands.filter((row) => row === 'SEMANTIC_TYPE').length;
-  assert.equal(semanticTypes, 1, 'exactly one submit — the readback never re-submits');
-  assert.ok(captureCount >= 5, 'the bounded readback re-captured until the conversation URL appeared');
+  assert.equal(semanticTypes, 1, 'exactly one submit — readback never re-submits');
+  assert.ok(captureCount >= 1, 'fresh perception was taken around the submit');
 });
 
 test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independent submit)', async () => {
@@ -305,9 +307,11 @@ test('user-selected tab after Send is not overwritten by restoration', async () 
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
-  const out = await cycle.cycle();
-  assert.equal(out.dispatch.state, 'RUNNING');
-  assert.equal(selected, 'tab_user_override');
+  await assert.rejects(
+    () => cycle.cycle(),
+    (error) => error?.message === 'devos_send_effect_ambiguous' && error?.automatic_retry_allowed === false,
+  );
+  assert.equal(selected, 'tab_user_override', 'ambiguous submit never restores/overwrites user selection');
 });
 
 test('ambiguous completion write performs status readback instead of blind retry', async () => {
