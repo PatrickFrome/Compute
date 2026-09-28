@@ -7,7 +7,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import {
-  getSocket, setBusHandlers, startHeartbeat, me2Fetch, toastBus, sendCommand,
+  getSocket, setBusHandlers, startHeartbeat, me2Fetch, toastBus,
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
@@ -71,7 +71,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
 ];
 
 export type PaletteMode = "all" | "actions" | "tasks" | "pages";
-export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
+export type DialogKind = "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
 export type ContextDrawerDock = "bottom" | "right";
 export type PeekKind = "task" | "agent";
@@ -809,25 +809,3 @@ export function useActivity(): number[] {
   }, [events, nowMs]);
 }
 
-/** Порождить задачу из диалога (legacy-контракт). */
-export async function createTaskFromForm(f: { title: string; spec: string; role: string; steps: string; delay: string }): Promise<boolean> {
-  const payload: Record<string, unknown> = {
-    title: f.title.trim(),
-    spec: f.spec,
-    role: f.role === "ANY" ? null : f.role,
-    max_steps: Math.max(1, Math.min(24, Number(f.steps) || 6)),
-  };
-  const delaySec = Math.max(0, Number(f.delay) || 0);
-  const res = delaySec > 0
-    ? await sendCommand("TASK_SCHEDULE", { ...payload, delay_sec: delaySec }, { quiet: true })
-    : await sendCommand("TASK_ENQUEUE", payload, { quiet: true });
-  if (res) {
-    toastBus({
-      title: delaySec > 0 ? `TASK_SCHEDULE ✓ (+${delaySec}s)` : "TASK_ENQUEUE ✓",
-      description: `«${f.title.trim() || "без имени"}» — в очереди задач (TASKS)`,
-    });
-    return true;
-  }
-  toastBus({ title: "TASK_ENQUEUE ✗", description: "не удалось поставить задачу", variant: "destructive" });
-  return false;
-}
