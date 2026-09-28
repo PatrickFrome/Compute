@@ -73,7 +73,7 @@ test('cycle observes up to four running tasks per heartbeat, isolating per-task 
       tab_id: tabId, target_id: `webcontents:${i + 1}`, generation_epoch: 1,
       transport_proof: {
         schema: 'metaengine.browser.fleet-transport-proof.v1', tab_id: tabId, target_id: `webcontents:${i + 1}`,
-        generation_epoch: 1, conversation_url_sha256: 'a'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
+        generation_epoch: 1, conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', conversation_url_sha256: 'a'.repeat(64), agent_surface_sha256: 'c'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
       },
       created_at: '2026-09-03T10:00:00.000Z', updated_at: '2026-09-03T10:00:00.000Z',
     };
@@ -134,7 +134,7 @@ test('cycle rethrows only when every observed running task fails (single-task er
     generation_epoch: 1,
     transport_proof: {
       schema: 'metaengine.browser.fleet-transport-proof.v1', tab_id: 'tab_s1', target_id: 'webcontents:1',
-      generation_epoch: 1, conversation_url_sha256: 'a'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
+      generation_epoch: 1, conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', conversation_url_sha256: 'a'.repeat(64), agent_surface_sha256: 'c'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
     },
     created_at: '2026-09-03T10:00:00.000Z', updated_at: '2026-09-03T10:00:00.000Z',
   }];
