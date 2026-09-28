@@ -63,9 +63,10 @@ const state = (selected) => ({
 const frame = ({ sent = false } = {}) => ({
   tab_id: lease.tab_id,
   target_id: lease.target_id,
-  url: sent ? conversationUrl : 'https://chat.z.ai/',
+  url: conversationUrl,
   viewport: { width: 1200, height: 700 },
-  semantic_targets: sent ? [composer, stop] : [composer, send],
+  semantic_targets: sent ? [composer, stop] : [composer],
+  interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'GLM-5.3-Flash' }] },
   authority_effect: false,
 });
 const journalBinding = () => ({
