@@ -16,7 +16,7 @@ function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => structuredClone(body) };
 }
 
-function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSucceeds = true } = {}) {
+function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSucceeds = true, resetThrows = false } = {}) {
   const calls = [];
   let surfaceState = tabUrl === ROOT ? 'CHAT_ROOT' : 'CONVERSATION';
   let submitCount = 0;
@@ -147,6 +147,7 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
     if (command.action === 'NAVIGATE') {
       assert.equal(command.payload.tab_id, TAB_ID);
       assert.equal(command.payload.url, ROOT);
+      if (resetThrows) throw new Error('navigation_receipt_lost');
       surfaceState = 'CHAT_ROOT';
       state.tabs[0].url = ROOT;
       return { ok: true, tab_id: TAB_ID, url: ROOT, authority_effect: true };
@@ -253,6 +254,25 @@ test('restored bare conversation is reset to canonical root and rebuilt as a pro
       h.calls.filter((row) => row[1] === 'TYPED_CLICK').map((row) => row[2]),
       ['Agent', 'New Task'],
     );
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('ambiguous restart reset is write-ahead fenced and never blindly navigated again', async () => {
+  const h = harness({ resetThrows: true });
+  try {
+    const first = await h.cycle.cycle();
+    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'PROVISIONING_AMBIGUOUS');
+    assert.equal(h.state.fleet.agents[0].ambiguous_reason, 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING');
+    assert.equal(first.fleet_transport_promotion.state, 'LOCAL_PRECONVERSATION_BOOTSTRAP_AMBIGUOUS');
+    assert.equal(first.fleet_transport_promotion.write_ahead_barrier_persisted, true);
+    assert.equal(first.fleet_transport_promotion.release_state, 'CONFIRMED');
+    assert.equal(h.calls.filter((row) => row[1] === 'NAVIGATE').length, 1);
+
+    await h.cycle.cycle();
+    assert.equal(h.calls.filter((row) => row[1] === 'NAVIGATE').length, 1, 'ambiguous navigation must never be replayed');
+    assert.equal(h.calls.filter((row) => row[1] === '/v1/devos/promotion-lease').length, 1);
   } finally {
     h.cleanup();
   }
