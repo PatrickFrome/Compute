@@ -11134,3 +11134,22 @@ Work Log:
 Stage Summary:
 - Restore: no action needed (both files already valid) — kept, not recreated. Script executed OK. Supabase unblocked (REST 200, JWT present).
 - Remaining blocker (non-secret): full-audit.sh lost in reset — audit passthrough skipped; needs re-creation from sealed source or rebuild.
+
+---
+Task ID: BROWSER-TEST-20260928-0900
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419203)
+Task: Tick 09:00 — baseline mechanics re-verify (read-only sweep) + title monitoring of 4 agent sessions (self-learning readback).
+
+Work Log:
+- Runner: scripts/phoenix/bmt-m0900.py (+b/b). Import fix: module file has hyphens -> importlib.spec_from_file_location (regular import impossible).
+- Baseline sweep 5/5 COMPLETED: CONTROL_CAPABILITIES v2.5.0-dev.1 (48 implemented, capability_revision sha256:e7e47b90...), TAB_CENSUS 18/48 tabs (fleet=4, supervisor=1, user headroom 30, fleet_backpressure present), FLEET_STATUS 4 ACTIVE / LOST=0 (v1.5.0, TRANSPORT_PROOF_REQUIRED), GATE_STATUS 15 registered gates / 0 overrides / wildcard_disabled, SELF_UPDATE_STATUS state=CURRENT (0.7.0-dev.36336130139.1, automatic_install=true, trusted_channel=dev).
+- Title monitor via CAPTURE on agent-space tab (tab_6924b587): 12 sidebar titles; all 3 known agent-session titles present and stable ("3000-Word Computing History Essay" /c/94fd04de, "Key Features of Swarm Task Boards" /c/b86be1da, "Top Risks & Missing Requirement for Swarm Task-Board" /c/cfefd09f) -> session persistence + auto-title readback reproduced 2nd time independently.
+- Zero NEW titles since 08:30 -> created agents did single-shot replies; no autonomous continuation (expected: briefs one-shot, swarm re-prompt loop not yet wired).
+- Schema fact: TAB_CENSUS receipt contains NO per-tab URL list (aggregates + fleet_tab_ids/supervisor_tab_ids only) -> session-tab enumeration must go through sidebar CAPTURE readback; first task-board session title (/c/36ce7b45) not yet isolated in sidebar list.
+- State-drift fact: PLANNER fleet tab (tab_fe50ead8) CAPTURE shows url=https://chat.z.ai/ (home, 0 text blocks) while its transport_proof conversation_url was /c/4d04c632... -> fleet tab navigated away from conversation; transport proof is stale for that tab (CAPTURE itself worked).
+
+Stage Summary:
+- Verdicts unchanged: 23 mechanics work / 15 not working / next-revision class unverified. This tick adds no new working/broken mechanics; 5/5 baseline re-verified green.
+- New registry notes: (1) TAB_CENSUS URL-less schema (aggregates only); (2) fleet-tab state drift home<->conversation observed (transport proof staleness) - candidate lesson for FLEET_RECONCILE timing.
+- Session persistence of 3 agent-created conversations confirmed with stable auto-titles; self-learning lesson: single-shot briefs produce no autonomous continuation - swarm loop needs scheduled re-prompt to close §12 autonomy gap.
+- Artifacts: browser-test-results-m0900.json, browser-test-results-m0900-title.json, browser-test-results-m0900-tabs.json (empty, schema proof).
