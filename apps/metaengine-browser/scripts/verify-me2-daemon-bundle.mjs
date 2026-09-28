@@ -83,6 +83,16 @@ async function smoke(exe, manifest) {
     const stateVersion = state?.capabilities?.version ?? state?.meta?.version ?? null;
     assert.equal(String(stateVersion), String(manifest.daemon_version), 'daemon state version must match package manifest');
     assert.equal(String(state?.meta?.version), String(manifest.daemon_version), 'daemon state meta version must match package manifest');
+    assert.equal(state?.browser_probe?.boot_mode, 'probe');
+    assert.equal(state?.browser_probe?.read_only, true);
+    assert.equal(state?.browser_probe?.model_execution_enabled, false);
+    assert.equal(state?.browser_probe?.provider_api_enabled, false);
+    assert.equal(state?.browser_probe?.agentchat_mutation_enabled, false);
+    assert.equal(state?.browser_probe?.scheduler_authority, false);
+    assert.equal(state?.browser_probe?.browser_actuation_authority, false);
+    assert.equal(state?.browser_probe?.command_mutation_enabled, false);
+    assert.equal(state?.browser_probe?.token_mutation_enabled, false);
+    assert.equal(state?.browser_probe?.authority_effect, false);
     return {
       runtime_smoke: 'PASS',
       health_version: String(health.version),
@@ -110,6 +120,12 @@ assert.match(String(manifest.daemon_version), /^\d+\.\d+\.\d+(?:[-+].+)?$/);
 assert.equal(manifest.runtime_embedded, true);
 assert.equal(manifest.external_bun_required, false);
 assert.equal(manifest.default_browser_host_boot_mode, 'probe');
+assert.equal(manifest.browser_probe_read_only, true);
+assert.equal(manifest.model_execution_enabled, false);
+assert.equal(manifest.provider_api_enabled, false);
+assert.equal(manifest.agentchat_mutation_enabled, false);
+assert.equal(manifest.command_mutation_enabled, false);
+assert.equal(manifest.token_mutation_enabled, false);
 assert.equal(manifest.scheduler_authority, false);
 assert.equal(manifest.browser_actuation_authority, false);
 assert.equal(manifest.authority_effect, false);
@@ -129,6 +145,12 @@ const proof = {
   runtime_embedded: true,
   external_bun_required: false,
   package_manifest_verified: true,
+  browser_probe_read_only: true,
+  model_execution_enabled: false,
+  provider_api_enabled: false,
+  agentchat_mutation_enabled: false,
+  command_mutation_enabled: false,
+  token_mutation_enabled: false,
   smoke_child_external_runtime_path_sanitized: args.smoke && process.platform === 'win32',
   ...(args.smoke ? await smoke(exe, manifest) : { runtime_smoke: 'NOT_REQUESTED' }),
   authority_effect: false,
