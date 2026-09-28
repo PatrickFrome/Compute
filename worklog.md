@@ -11118,3 +11118,19 @@ Stage Summary:
 - Текущее состояние DoD (§20): agent-creation ✅, geometry-free ✅ (semantic path канонизирован), инвентаризация ✅, canonical-path фиксация ✅; НЗ: thread-readback, Brain-routing, release-плечо — все три ждут доработку клиента/operator
 - След. тик: титульный мониторинг 4 сессий + по возможности result-extraction через новые CAPTURE-поля; приоритет remains operator-asks
 - Артефакты: ARCHITECTURE-MAP-20260928.md (+2 зеркала)
+
+---
+Task ID: SECRETS-PHOENIX-416759
+Agent: Super Z (GLM, IM cron-agent-loop)
+Task: SECRETS-PHOENIX v2 — verify/restore sealed secrets (me2.env.20260922, .a2/.github.env), run phoenix-secrets-restore.sh, statuses only.
+
+Work Log:
+- Inspected /tmp/my-project/.a2-backup/me2.env.20260922 (key NAMES only, no values): present, mode 600, all 5 reference keys (SUPABASE_URL, CF_API_TOKEN, CF_ACCOUNT_ID, CF_R2_ACCESS_KEY_ID, CF_AI_WORKER_TOKEN) present -> kept unchanged. SUPABASE_SERVICE_ROLE_JWT line present -> untouched per directive.
+- Inspected /home/z/.a2/.github.env: present, mode 600, GITHUB_TOKEN_ADMIN present; api.github.com probe -> HTTP 200 -> kept.
+- Read scripts/phoenix/phoenix-secrets-restore.sh in full BEFORE execution: status-only output, no value printing, no exfil endpoints, no git ops — safe.
+- Executed it: me2.env kept (keys complete) | github.env api=200 | supabase REST=200 (JWT restored) | audit passthrough skipped (full-audit.sh lost in 2026-09-28 sandbox reset).
+- Compliance: no secret values printed/logged, no git commits, nothing copied to /home/z/context-vault/repo/.
+
+Stage Summary:
+- Restore: no action needed (both files already valid) — kept, not recreated. Script executed OK. Supabase unblocked (REST 200, JWT present).
+- Remaining blocker (non-secret): full-audit.sh lost in reset — audit passthrough skipped; needs re-creation from sealed source or rebuild.
