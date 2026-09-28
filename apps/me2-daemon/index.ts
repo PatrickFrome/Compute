@@ -88,25 +88,45 @@ import {
 // LLM-приводы (worker/GLM-проба/demand/cron/supervisor-тики/selfupdate) отключены —
 // gate в CI проверяет здоровье без сетевых зависимостей и без расхода квот.
 const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe";
+const PROBE_BLOCKED_GET_PATHS = new Set([
+  "/providers", "/llm", "/glm", "/agents", "/agentchat", "/pool",
+  "/governor", "/demand", "/tokens",
+]);
+const PROBE_POLICY = Object.freeze({
+  boot_mode: "probe",
+  read_only: true,
+  model_execution_enabled: false,
+  provider_api_enabled: false,
+  agentchat_mutation_enabled: false,
+  scheduler_authority: false,
+  browser_actuation_authority: false,
+  command_mutation_enabled: false,
+  token_mutation_enabled: false,
+  authority_effect: false,
+});
 const WS_PORT = ports.WS_PORT;
 const REST_PORT = ports.REST_PORT;
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
-setMeta("boot", BOOT_TS);
-setMeta("version", VERSION);
+if (!PROBE_MODE) {
+  setMeta("boot", BOOT_TS);
+  setMeta("version", VERSION);
+}
 
-// R51 (фаза C): boot-запись памяти — persistence-пруф с первой секунды инкарнации
-// (eval memory.rows не должен зависеть от того, «повезёт» ли с ранними событиями на девственной DB).
-try {
-  memWrite({
-    kind: "episodic",
-    key: `incarnation:${BOOT_TS}`,
-    content: `daemon v${VERSION} инкарнация начата (seq=${lastSeq()}, ws:${WS_PORT} rest:${REST_PORT})`,
-    tags: ["boot", "incarnation"],
-    importance: 0.4,
-  });
-} catch (e) { console.log(`[memory] boot row skipped: ${String(e).slice(0, 80)}`); }
+// R99: Browser-hosted probe mode is read-only; it must not write a boot
+// memory row before the Browser has even completed its contract handshake.
+if (!PROBE_MODE) {
+  try {
+    memWrite({
+      kind: "episodic",
+      key: `incarnation:${BOOT_TS}`,
+      content: `daemon v${VERSION} инкарнация начата (seq=${lastSeq()}, ws:${WS_PORT} rest:${REST_PORT})`,
+      tags: ["boot", "incarnation"],
+      importance: 0.4,
+    });
+  } catch (e) { console.log(`[memory] boot row skipped: ${String(e).slice(0, 80)}`); }
+}
 
 // ── seed (однократно) ─────────────────────────────────────────────
 function seed() {
@@ -140,19 +160,23 @@ function seed() {
   setMeta("seeded", "1");
   console.log("[seed] agents: 2, tasks: 3");
 }
-seed();
+if (!PROBE_MODE) seed();
 // R47: vault токенов — bootstrap/миграция из /home/z/.a2 в SQLite при каждой инкарнации
 // (идемпотентно: существующие значения в БД никогда не перезаписываются файлом)
-try {
-  const tk = tokensEnsure();
-  console.log(`[tokens] vault: ${tk.present} в БД, seed=${tk.seeded.length ? tk.seeded.join(",") : "—"}, нет=${tk.missing.length}`);
-} catch (e) { console.log(`[tokens] vault bootstrap failed: ${String(e).slice(0, 120)}`); }
+if (!PROBE_MODE) {
+  try {
+    const tk = tokensEnsure();
+    console.log(`[tokens] vault: ${tk.present} в БД, seed=${tk.seeded.length ? tk.seeded.join(",") : "—"}, нет=${tk.missing.length}`);
+  } catch (e) { console.log(`[tokens] vault bootstrap failed: ${String(e).slice(0, 120)}`); }
+}
 // R29: директива оператора «все агенты всегда на последней GLM» — при каждой инкарнации
 // флот приводится к каноническому тегу; живая probe бэкенда — async (урок R25: сеть вне boot-пути).
-try {
-  const up = upgradeAgents();
-  console.log(`[glm] canonical=${agentTag()} upgraded=${up.upgraded} already=${up.already}`);
-} catch (e) { console.log(`[glm] upgrade failed: ${String(e).slice(0, 120)}`); }
+if (!PROBE_MODE) {
+  try {
+    const up = upgradeAgents();
+    console.log(`[glm] canonical=${agentTag()} upgraded=${up.upgraded} already=${up.already}`);
+  } catch (e) { console.log(`[glm] upgrade failed: ${String(e).slice(0, 120)}`); }
+}
 if (!PROBE_MODE) setTimeout(() => { void glmProbe().catch(() => { /* R38: проба не роняет процесс */ }); }, 3_000);
 
 // ── REST API (:3041) ──────────────────────────────────────────────
@@ -174,7 +198,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
   // R69.1: капчу публичного origin из живого трафика — Host, с которым платформенный
   // preview-прокси стучится через Caddy (x-forwarded-host / host). Нужно для боевого
   // URL GitHub-webhook без ручного ввода оператора. Список кандидатов (кап 20) в meta.
-  try {
+  if (!PROBE_MODE) try {
     const hh = String(req.headers.host ?? "");
     const xfh = String(req.headers["x-forwarded-host"] ?? "");
     const cand = ((xfh || hh).split(",")[0] ?? "").trim();
@@ -187,14 +211,42 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
 
+  if (PROBE_MODE) {
+    const method = String(req.method || "GET").toUpperCase();
+    if (method !== "GET" || PROBE_BLOCKED_GET_PATHS.has(path)) {
+      return json(res, 403, {
+        ok: false,
+        error: "ME2_BROWSER_PROBE_READ_ONLY",
+        path,
+        method,
+        ...PROBE_POLICY,
+      });
+    }
+  }
+
   try {
     if (path === "/health") {
       return json(res, 200, {
         ok: true, service: "me2-daemon", version: VERSION, boot: BOOT_TS,
         last_seq: lastSeq(), actions: knownActions().length, ts: nowIso(),
+        browser_probe: PROBE_MODE ? PROBE_POLICY : null,
       });
     }
-    if (path === "/state" && req.method === "GET") return json(res, 200, withContract(snapshot()));
+    if (path === "/state" && req.method === "GET") {
+      const state = withContract(snapshot());
+      // Browser probe mode is read-only, so boot/version metadata is projected
+      // from the immutable package/runtime constant instead of being written
+      // into SQLite via setMeta(). This keeps package attestation exact without
+      // widening the probe authority surface.
+      const probeState = PROBE_MODE
+        ? {
+            ...state,
+            meta: { ...(state?.meta || {}), version: VERSION },
+            browser_probe: PROBE_POLICY,
+          }
+        : state;
+      return json(res, 200, probeState);
+    }
     // ── R49 (фаза A): GET /ui — самодостаточная Mission Control (0 сборки, 0 зависимостей).
     // Читает read-only REST того же origin; операции — socket agentchat:op (REST-операций нет).
     if (path === "/ui" && req.method === "GET") {
@@ -1092,6 +1144,7 @@ io.on("connection", (socket) => {
 
   // heartbeat консоли → workers
   socket.on("heartbeat", (p: { role?: string; state?: string } = {}, ack?: (r: unknown) => void) => {
+    if (PROBE_MODE) { ack?.({ ok: false, error: "ME2_BROWSER_PROBE_READ_ONLY", ...PROBE_POLICY }); return; }
     const w = upsertWorker({
       id: `wk_console_${socket.id.slice(0, 8)}`,
       role: String(p.role ?? "console"),
@@ -1103,6 +1156,7 @@ io.on("connection", (socket) => {
 
   // команды через WS (request/response семантика)
   socket.on("command", async (p: { action: string; payload?: Record<string, unknown>; idempotency_key?: string; lane?: string; run_after?: number }, ack?: (r: unknown) => void) => {
+    if (PROBE_MODE) { ack?.({ ok: false, error: "ME2_BROWSER_PROBE_READ_ONLY", ...PROBE_POLICY }); return; }
     try {
       const r = enqueueCommand({
         action: String(p?.action ?? ""),
@@ -1127,6 +1181,7 @@ io.on("connection", (socket) => {
   // Семантика и валидация 1:1 как у снятого REST-семейства (busy/closed/ceiling/not_permitted),
   // события и hash-chain — без изменений (это тот же agentchat-механизм, сменился только транспорт).
   socket.on("agentchat:op", (p: Record<string, unknown> = {}, ack?: (r: unknown) => void) => {
+    if (PROBE_MODE) { ack?.({ ok: false, error: "ME2_BROWSER_PROBE_AGENTCHAT_DISABLED", ...PROBE_POLICY }); return; }
     const op = String(p.op ?? "");
     try {
       if (op === "create") {
@@ -1201,6 +1256,7 @@ io.on("connection", (socket) => {
   // Единый транспорт UI/Electron наряду с REST /tokens; значения НИКОГДА не возвращаются —
   // только маскированный список. Каждая мутация — TOKENS_SET/TOKENS_DELETED в hash-chain.
   socket.on("tokens:op", (p: Record<string, unknown> = {}, ack?: (r: unknown) => void) => {
+    if (PROBE_MODE) { ack?.({ ok: false, error: "ME2_BROWSER_PROBE_TOKENS_DISABLED", ...PROBE_POLICY }); return; }
     const op = String(p.op ?? "");
     try {
       if (op === "list") { ack?.({ ok: true, tokens: tokenList(), status: tokensStatus() }); return; }
@@ -1225,19 +1281,20 @@ io.on("connection", (socket) => {
 setInterval(() => {
   try { io.emit("snapshot", snapshot()); } catch { /* console может быть offline */ }
 }, 2000);
-setInterval(() => {
-  try { void drainCommands(8).catch((e) => { console.error(`[drain] rejection: ${String(e).slice(0, 160)}`); }); } catch (e) { console.error(`[drain] ${String(e)}`); }
-}, 1000);
-setInterval(() => {
-  try { reapStaleWorkers(); } catch { /* noop */ }
-  try { watchdogStaleTasks(); } catch { /* noop */ }
-}, 30_000);
-// R19: self-node в fleet (liveness-проекция, урок CP-W1) + GC LOST-нод раз в час
-fleetSelfTick(VERSION);
-setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_000);
-// R23: Outcome River (деградации freshness = исходы) + reliability-ordered retirement
-setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
-setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
+if (!PROBE_MODE) {
+  setInterval(() => {
+    try { void drainCommands(8).catch((e) => { console.error(`[drain] rejection: ${String(e).slice(0, 160)}`); }); } catch (e) { console.error(`[drain] ${String(e)}`); }
+  }, 1000);
+  setInterval(() => {
+    try { reapStaleWorkers(); } catch { /* noop */ }
+    try { watchdogStaleTasks(); } catch { /* noop */ }
+  }, 30_000);
+  // R19/R23 legacy daemon fleet projection has no Browser authority.
+  fleetSelfTick(VERSION);
+  setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_000);
+  setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
+  setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
+}
 // R67: P0-e ingress (pull) — поллер GitHub Actions: новые завершённые runs → CI_RUN_* в event-log
 if (!PROBE_MODE) {
   ciTick(); // первый прогрев сразу после бута (async, event-loop не блокирует)
@@ -1246,9 +1303,11 @@ if (!PROBE_MODE) {
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
 // R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
-setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
-// R31 D4: расписание гигиены БД (PASSIVE-checkpoint каждые 10м) + немедленный первый прогон
-try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
+if (!PROBE_MODE) setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
+// R31 D4: legacy daemon DB maintenance mutates SQLite; Browser probe stays read-only.
+if (!PROBE_MODE) {
+  try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
+}
 
 // E3 (R34): страж инкарнации — второй экземпляр daemon'а не имеет права мутировать общую SQLite.
 // Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear зомби-lease)
@@ -1278,27 +1337,27 @@ try {
   console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — boot-мутации пула отключены`);
 }
 // восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
-if (poolBootAllowed) {
+if (poolBootAllowed && !PROBE_MODE) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
-  if (!PROBE_MODE) { try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); } }
+  try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
   try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
-  // G2: вечно-живущий супервизор флота — гарантия при boot + тик каждые 60с (перерождение + автономные ходы)
+  // Legacy daemon supervisor is isolated from Browser production authority.
   try { const se = supervisorEnsure(); console.log(`[agentchat] supervisor ${se.created ? "created" : "alive"} (${se.id})`); } catch (e) { console.error(`[agentchat] supervisorEnsure failed: ${String(e)}`); }
-  if (!PROBE_MODE) setInterval(() => {
+  setInterval(() => {
     try {
       const r = agentChatSupervisorTick();
       if (r.kicked.length) console.log(`[agentchat] supervisor tick: kicked=${r.kicked.join(",")} supervisors=${r.supervisors}`);
     } catch (e) { console.error(`[agentchat] supervisor tick failed: ${String(e)}`); }
   }, SUPERVISOR_TICK_MS);
   // G10: автопилот спроса — демон сам создаёт чат-агентов под живой спрос (гистерезис 2 тика, cooldown, caps)
-  if (!PROBE_MODE) setInterval(() => {
+  setInterval(() => {
     try {
       const d = demandTick();
       if (d.action !== "idle") console.log(`[demand] ${d.action} signal=${d.signal} role=${d.role} sid=${d.session_id} — ${d.detail}`);
     } catch (e) { console.error(`[demand] tick failed: ${String(e).slice(0, 160)}`); }
   }, DEMAND_TICK_MS);
   // G7 (R44): cron-планировщик из чатов — будим чаты по их расписаниям (overdue догоняет первым тиком)
-  if (!PROBE_MODE) setInterval(() => {
+  setInterval(() => {
     try {
       const r = cronTick();
       if (r.fired) console.log(`[cron] fired=${r.fired} postponed=${r.postponed}`);
@@ -1307,10 +1366,12 @@ if (poolBootAllowed) {
 }
 
 if (!PROBE_MODE) startMasterLoop();
-initEvidence();
+if (!PROBE_MODE) initEvidence();
 // boot-span: телеметрия холодного старта (M7-проверка «ring живой» перестаёт быть ложной после рестарта)
 try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-daemon" }, BOOT_T0); } catch { /* телеметрия не ломает старт */ }
-try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
+if (!PROBE_MODE) {
+  try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
+}
 // ── R52 (фаза D, H6): SQL-контур — зеркало hash-chain событий в Supabase SQL (operator-gated) ──
 // ME2_SQL_MIRROR=1 включает; без таблицы (миграция sql/0001 у оператора) — честный WARMUP, без штормов.
 // R56: гейт оператора обязан держаться на ЛЮБОМ пути бута (start.sh / ui-host-респавн / Electron PID-1).
