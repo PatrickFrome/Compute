@@ -82,7 +82,12 @@ function fakeTaskSurface({
         // submit — three live dispatches proved Enter submits from the root
         // task surface.
         if (params.key === 'Enter' && params.type === 'rawKeyDown') {
-          if (submitWorks) composerValue = '';
+          if (submitWorks) {
+            composerValue = '';
+            if (currentUrl === 'https://chat.z.ai/' || currentUrl === 'https://chat.z.ai') {
+              currentUrl = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
+            }
+          }
           enterCount += 1;
           return {};
         }
@@ -159,7 +164,8 @@ test('root task surface: focused key-atomic replaces an oversized account-synced
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
   assert.equal(result.replace_gesture, 'CDP_EDIT_COMMAND_CLEAR');
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
+  assert.equal(result.new_conversation_observed, true);
   assert.equal(result.value_length_before, 'POISONED DRAFT x 26763 chars'.length);
   assert.equal(result.value_length_after, 'D-M3 TASK PROMPT'.length);
   assert.equal(h.counts().tripleClicks, 0);
@@ -179,7 +185,8 @@ test('root task surface: an empty composer inserts directly without geometry', a
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
   assert.equal(result.replace_gesture, 'EMPTY_COMPOSER_INSERT');
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
+  assert.equal(result.new_conversation_observed, true);
   assert.equal(h.counts().insertCount, 1);
   assert.equal(h.counts().tripleClicks, 0);
 });
