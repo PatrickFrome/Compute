@@ -115,7 +115,7 @@ function tabCensusFromState(state = {}) {
   const fleetTabs = tabs.filter((row) => String(row?.role || 'USER').toUpperCase() === 'FLEET').length;
   return { by_role: { FLEET: fleetTabs, USER: tabs.length - fleetTabs }, fleet_tab_ceiling: FLEET_TAB_CEILING };
 }
-function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
+function readinessOrThrow({ frame, lease, agent, selected_tab_id, phase }) {
   const readiness = evaluateFleetSubmitReadiness({
     frame,
     expected_tab_id: lease.tab_id,
@@ -123,6 +123,8 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
     expected_target_id: lease.target_id,
     observed_target_id: lease.target_id,
     selected_tab_id,
+    expected_agent_generation_epoch: lease.agent_generation_epoch,
+    agent_session_proof: agent?.transport_proof || null,
     phase,
     platform: AGENT_PLATFORM_ID,
   });
@@ -1158,7 +1160,7 @@ export class DevOsNativeTaskCycle {
       const foregroundState = await this.#getState();
       assertLiveLeaseBinding(lease, foregroundState?.fleet);
 
-      const preReady = readinessOrThrow({ frame: pre, lease, selected_tab_id: selectedTabId(foregroundState), phase: 'PRE_TYPE' });
+      const preReady = readinessOrThrow({ frame: pre, lease, agent, selected_tab_id: selectedTabId(foregroundState), phase: 'PRE_TYPE' });
       const preConversation = conversationUrl(pre?.url);
 
       await journal?.beginExecution(effectBinding, {
