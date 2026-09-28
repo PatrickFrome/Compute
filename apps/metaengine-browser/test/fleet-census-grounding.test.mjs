@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { planElasticFleetCapacity, ELASTIC_FLEET_CONTRACT } from '../src/fleet-elastic-governor.mjs';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
+
+const AGENT_CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const AGENT_CONVERSATION_SHA256 = crypto.createHash('sha256').update(AGENT_CONVERSATION).digest('hex');
 
 function agent(id, state, { created_at = '2026-09-03T10:00:00.000Z', tab_id = null } = {}) {
   return { agent_id: id, role: 'IMPLEMENTER', lifecycle_state: state, tab_id, target_id: tab_id ? 'webcontents:1' : null, generation_epoch: 1, created_at, updated_at: created_at };
@@ -73,7 +77,7 @@ test('cycle observes up to four running tasks per heartbeat, isolating per-task 
       tab_id: tabId, target_id: `webcontents:${i + 1}`, generation_epoch: 1,
       transport_proof: {
         schema: 'metaengine.browser.fleet-transport-proof.v1', tab_id: tabId, target_id: `webcontents:${i + 1}`,
-        generation_epoch: 1, conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', conversation_url_sha256: 'a'.repeat(64), agent_surface_sha256: 'c'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
+        generation_epoch: 1, conversation_url: AGENT_CONVERSATION, conversation_url_sha256: AGENT_CONVERSATION_SHA256, agent_surface_sha256: 'c'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
       },
       created_at: '2026-09-03T10:00:00.000Z', updated_at: '2026-09-03T10:00:00.000Z',
     };
@@ -85,7 +89,7 @@ test('cycle observes up to four running tasks per heartbeat, isolating per-task 
       task_id: uuid(i + 1), agent_id: `agent_r${i + 1}rrrrrrrr`, tab_id: `tab_r${i + 1}`,
       target_id: `webcontents:${i + 1}`, agent_generation_epoch: 1, lease_generation: 1,
       role: 'IMPLEMENTER', base_sha: baseSha, automatic_retry_allowed: false,
-      conversation_url_sha256: 'a'.repeat(64),
+      conversation_url_sha256: AGENT_CONVERSATION_SHA256,
     });
   }
   const cycle = new DevOsNativeTaskCycle({
@@ -134,7 +138,7 @@ test('cycle rethrows only when every observed running task fails (single-task er
     generation_epoch: 1,
     transport_proof: {
       schema: 'metaengine.browser.fleet-transport-proof.v1', tab_id: 'tab_s1', target_id: 'webcontents:1',
-      generation_epoch: 1, conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', conversation_url_sha256: 'a'.repeat(64), agent_surface_sha256: 'c'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
+      generation_epoch: 1, conversation_url: AGENT_CONVERSATION, conversation_url_sha256: AGENT_CONVERSATION_SHA256, agent_surface_sha256: 'c'.repeat(64), proven_at: '2026-09-03T18:00:00.000Z', authority_effect: false,
     },
     created_at: '2026-09-03T10:00:00.000Z', updated_at: '2026-09-03T10:00:00.000Z',
   }];
@@ -142,7 +146,7 @@ test('cycle rethrows only when every observed running task fails (single-task er
     task_id: '09f2e414-5c31-4fc7-87a3-f5de1315cb71', agent_id: 'agent_s1rrrrrrrr', tab_id: 'tab_s1', target_id: 'webcontents:1',
     agent_generation_epoch: 1, lease_generation: 1, role: 'IMPLEMENTER',
     base_sha: '724612235eb7ceb4534c13d126425b274d876394', automatic_retry_allowed: false,
-    conversation_url_sha256: 'a'.repeat(64),
+    conversation_url_sha256: AGENT_CONVERSATION_SHA256,
   }];
   const cycle = new DevOsNativeTaskCycle({
     getState: async () => ({ fleet: fleetSnapshot(agents) }),
