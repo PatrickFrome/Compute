@@ -280,18 +280,18 @@ test('R97: CAPTURE exposes exact AX focus readback without geometry', async () =
 // back to a bounded SEND-control click when the event-driven latch misses it.
 // ---------------------------------------------------------------------------
 
-test('D-P2: source contract — Enter first, bounded click fallback, fail-closed re-resolution', () => {
+test('D-P2: source contract — Enter first, bounded geometry-free activation fallback, fail-closed re-resolution', () => {
   const enter = source.indexOf("type:'rawKeyDown', key:'Enter'");
   const latchWait = source.indexOf('await outcomeLatch.wait()', enter);
   const fallback = source.indexOf('D-P2 (2026-09-18)', latchWait);
   const fallbackResolve = source.indexOf('const fallbackSends = exactChatGptControls(fallbackTree?.nodes || [], \'SEND\')', fallback);
   const fallbackThrow = source.indexOf("native_semantic_send_target_not_found'", fallbackResolve);
-  const fallbackClick = source.indexOf('await clickBackendNode(dbg, fallbackSends[0].backend_node_id', fallbackThrow);
+  const fallbackClick = source.indexOf('await activateBackendNode(dbg, fallbackSends[0].backend_node_id', fallbackThrow);
   assert.ok(enter >= 0, 'Enter dispatch retained');
   assert.ok(latchWait > enter, 'first latch wait follows Enter');
   assert.ok(fallbackResolve > latchWait, 'fallback re-resolves the SEND control only after the latch missed');
   assert.ok(fallbackThrow > fallbackResolve, 'fallback re-resolution fails closed when the control is gone');
-  assert.ok(fallbackClick > fallbackThrow, 'bounded click fallback is last resort');
+  assert.ok(fallbackClick > fallbackThrow, 'bounded backend-node activation fallback is last resort');
 });
 
 test('D-P2: source contract — fallback preserves every runtime fence', () => {
@@ -301,4 +301,5 @@ test('D-P2: source contract — fallback preserves every runtime fence', () => {
   assert.match(section, /requireCurrentSemanticRef\(webContents, dbg, liveRef\)/);
   assert.match(section, /assertCurrentEffectRuntime\(webContents, dbg, effectBinding\)/);
   assert.match(section, /fallbackLatch\.close\(\)/);
+  assert.doesNotMatch(section, /Input\.dispatchMouseEvent|DOM\.getBoxModel/);
 });
