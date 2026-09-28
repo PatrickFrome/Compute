@@ -1110,16 +1110,13 @@ export class DevOsNativeTaskCycle {
   async #dispatchLease(rawLease, fleetSnapshot) {
     const lease = assertLiveLeaseBinding(rawLease, fleetSnapshot);
     const agent = (fleetSnapshot?.agents || []).find((row) => String(row?.agent_id || '').toLowerCase() === lease.agent_id) || null;
-    // D-C2/D-C3: ONE capture opens the dispatch — it serves both the flush
-    // decision (poisoned root composer?) and the PRE_TYPE readiness binding,
-    // so the clean-composer path keeps the exact capture budget of the old
-    // flow. A successful flush re-captures once: the surface moved to the
-    // fresh conversation and the real dispatch must bind against it.
-    let pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    const flush = await this.#ensureProvenConversation(lease, agent, pre);
-    if (flush?.conversation_url && !conversationUrl(pre?.url)) {
-      pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    }
+    // R98 convergence: scheduler leases are admitted only after the wrapper
+    // has created and durably proven a real z.ai Agent conversation. Leased
+    // dispatch never bootstraps, flushes, or repairs a root Chat surface.
+    // Any transport drift is a pre-effect failure and must return to the
+    // pre-admission promotion/reconciliation owner instead of creating a
+    // competing execution path inside the task dispatcher.
+    const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
     const telemetryDigest = await this.#telemetryDigest(lease);
     const contextBriefing = await this.#contextBriefingFor(lease, fleetSnapshot);
     // Agent Toolbelt: the protocol rides every dispatch (isolated sessions
