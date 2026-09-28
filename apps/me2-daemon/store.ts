@@ -14,15 +14,20 @@ import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// R51 (фаза C): ME2_DATA_DIR позволяет поднять изолированный инстанс (gate-probe CI,
-// песочницы) без конфликтов с production-каталогом. По умолчанию — как раньше.
+// R104: Browser-hosted probe must never create or mutate the historical ME2
+// durable state. Its compatibility/readback graph gets an isolated in-memory
+// SQLite image so legacy import-time schema initializers remain harmless and
+// cannot become a second task/agent/memory authority. The full standalone
+// daemon keeps the historical file-backed store outside Browser composition.
+export const BROWSER_PROBE_MODE = process.env.ME2_HOSTED_BY_BROWSER === "1"
+  && process.env.ME2_BOOT_MODE === "probe";
 const HERE = process.env.ME2_DATA_DIR || join(dirname(fileURLToPath(import.meta.url)), "data");
-mkdirSync(HERE, { recursive: true });
+if (!BROWSER_PROBE_MODE) mkdirSync(HERE, { recursive: true });
 
 /** Версия daemon'а — единый источник (R49): health, /state.capabilities, eval, UI. */
 export const VERSION = "0.57.1";
 
-export const DB_FILE = join(HERE, "me2.db");
+export const DB_FILE = BROWSER_PROBE_MODE ? ":memory:" : join(HERE, "me2.db");
 export const db = new Database(DB_FILE);
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA synchronous = NORMAL;");
