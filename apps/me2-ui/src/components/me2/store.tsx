@@ -31,9 +31,9 @@ export const PAGES: { key: PageKey; label: string; num: string }[] = [
 ];
 
 // R94 shell IA: workflow stages are the primary navigation vocabulary.
-// Existing module pages remain first-class destinations (palette/deep links) but
-// are grouped under the stage that matches the operator's real work.
-export type WorkflowStageKey = "command" | "plan" | "build" | "run" | "fleet" | "observe" | "system";
+// Retained advanced module pages stay reachable through grouped stages/search;
+// retired daemon/API-agent pages are compatibility-fenced to the Browser fleet.
+export type WorkflowStageKey = "plan" | "build" | "run" | "fleet" | "observe" | "system";
 export const WORKFLOW_STAGES: Array<{
   key: WorkflowStageKey;
   label: string;
