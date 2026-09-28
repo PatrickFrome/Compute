@@ -24,13 +24,12 @@ const SAFE_PROBE = Object.freeze({
   authority_effect: false,
 });
 
-test('R99 Browser-hosted ME2 probe cannot seed or expose mutation/model REST authority', () => {
+test('R99 Browser-hosted ME2 probe exposes only health/state reads', () => {
   const daemon = source('apps/me2-daemon/index.ts');
   assert.match(daemon, /if \(!PROBE_MODE\) seed\(\)/);
-  assert.match(daemon, /method !== "GET" \|\| PROBE_BLOCKED_GET_PATHS\.has\(path\)/);
-  for (const pathName of ['/providers','/llm','/glm','/agents','/agentchat','/pool','/governor','/demand','/tokens']) {
-    assert.equal(daemon.includes('"' + pathName + '"'), true, 'probe must classify ' + pathName);
-  }
+  assert.match(daemon, /const PROBE_ALLOWED_GET_PATHS = new Set\(\["\/health", "\/state"\]\)/);
+  assert.match(daemon, /method !== "GET" \|\| !PROBE_ALLOWED_GET_PATHS\.has\(path\)/);
+  assert.equal(daemon.includes('allowed_get_paths: [...PROBE_ALLOWED_GET_PATHS]'), true);
   for (const marker of [
     'ME2_BROWSER_PROBE_READ_ONLY',
     'ME2_BROWSER_PROBE_AGENTCHAT_DISABLED',
@@ -41,6 +40,12 @@ test('R99 Browser-hosted ME2 probe cannot seed or expose mutation/model REST aut
     'command_mutation_enabled: false',
     'token_mutation_enabled: false',
   ]) assert.equal(daemon.includes(marker), true, 'missing probe marker: ' + marker);
+
+  // New read endpoints fail closed by default instead of inheriting probe
+  // reachability. This specifically fences lazy GET side effects such as
+  // browser observation collector startup.
+  assert.equal(daemon.includes('if (path === "/browser/obsv" && req.method === "GET")'), true);
+  assert.equal(daemon.includes('if (path === "/browser/sense" && req.method === "GET")'), true);
 });
 
 test('R99 Browser probe disables duplicate daemon background authorities', () => {
