@@ -79,8 +79,8 @@ test('bounded attempts interleave idle roles instead of spending all slots on on
 test('mark-running passes all lease fences and proof to DB RPC',async()=>{
   let args;
   const route=createDevosSupervisorRoutes({workspaceId,rpc:async(name,a)=>{if(name==='devos_fleet_mark_running_v1'){args=a;return{state:'RUNNING'};}}});
-  const r=await route({req:{method:'POST'},path:'/v1/devos/mark-running',clientId:'device',body:{task_id:taskId,agent_id:agent.agent_id,lease_generation:1,tab_id:agent.tab_id,target_id:agent.target_id,agent_generation_epoch:7,proof:{prompt_sha256:'a'.repeat(64),conversation_url_sha256:'b'.repeat(64),effect_state:'PROVEN_GENERATING'}}});
-  assert.equal(r.status,200);assert.equal(args.p_target,'webcontents:10');assert.equal(args.p_epoch,7);assert.equal(args.p_generation,1);
+  const r=await route({req:{method:'POST'},path:'/v1/devos/mark-running',clientId:'device',body:{task_id:taskId,agent_id:agent.agent_id,lease_generation:1,tab_id:agent.tab_id,target_id:agent.target_id,agent_generation_epoch:7,proof:{prompt_sha256:'a'.repeat(64),conversation_url_sha256:'b'.repeat(64),agent_surface_sha256:'c'.repeat(64),effect_state:'PROVEN_GENERATING'}}});
+  assert.equal(r.status,200);assert.equal(args.p_target,'webcontents:10');assert.equal(args.p_epoch,7);assert.equal(args.p_generation,1);assert.equal(args.p_proof.agent_surface_sha256,'c'.repeat(64));
 });
 
 test('status readback proves terminal completion from durable event without a second write',async()=>{
