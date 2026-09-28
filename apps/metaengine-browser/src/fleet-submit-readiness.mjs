@@ -133,8 +133,13 @@ export function evaluateFleetSubmitReadiness({
       expected_target_id: expectedTarget,
       expected_generation_epoch: expected_agent_generation_epoch,
     });
-    if (!agentSurface && !agentOrigin) {
-      return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
+    // A visible Agent Home is discovery/bootstrap evidence, not task-dispatch
+    // authority. Normal work starts only after the wrapper has created a real
+    // Agent session and persisted its exact origin proof against this current
+    // conversation URL. This keeps "Agent UI is visible" distinct from
+    // "this conversation is a canonical METAENGINE Agent session".
+    if (!agentOrigin) {
+      return Object.freeze({ ready: false, reason: 'AGENT_ORIGIN_PROOF_NOT_DURABLE', foreground, authority_effect: false });
     }
     const modelProof = resolveAgentPlatformSelectedModel(frame);
     if (!modelProof) {
