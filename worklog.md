@@ -11240,3 +11240,20 @@ Stage Summary:
 - VERDICT CHANGES: (1) reply-readback: WORKS for fleet agents via READ_TRANSCRIPT (fleet-tab surface); still blocked on agent-space tab surface. (2) proof-minting: NO supervisor path (CAPTURE/SELECT_TAB disproved) — proofs client-internal, operator-ask. (3) Fleet autonomy loop is BY DESIGN: agents hold TOOL_REQUEST_V1 protocol + lease generations + target branches — the missing piece is task-message delivery INTO fleet agents (fleet-tab dispatch anomaly from 0930 blocks the feedback half of TOOL_RESULT_V1 loop).
 - STRATEGIC: the system already has an agent tasking/tool-result protocol; convergence path = restore fleet-tab task-message delivery (operator fix or find delivery channel), NOT build a new protocol in agent-space sessions.
 - Next tick: full transcript archaeology of all 4 fleet tabs (map each agent's seed brief, generation, last tool requests) via READ_TRANSCRIPT; check whether TOOL_RESULT_V1 blocks ever appeared (did the client ever answer agent tool requests?).
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0945
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718)
+Task: Directive tick 09:45 — transcript archaeology of all 4 fleet tabs + TOOL_RESULT_V1 investigation (per 0934 plan). Directive sha256 re-verified OK.
+
+Work Log:
+- READ_TRANSCRIPT x4 (read-only): PLANNER 1898 chars / RESEARCHER 6774 / IMPLEMENTER 281 / fleet-CRITIC 9556.
+- RESEARCHER + CRITIC threads contain full seed briefs: role, lease_generation=1, target_branch (researcher-g180 / researcher-g179), TOOL PROTOCOL TOOL_REQUEST_V1 (actions CAPTURE|READ_TRANSCRIPT|TAB_TELEMETRY|SYSTEM_TELEMETRY|SCROLL|SEMANTIC_FOCUS, max 4/reply, results as TOOL_RESULT_V1 in NEXT_TASK_MESSAGE), AGENT ACCESS CAPSULE v1.
+- CORRECTION of preliminary read: TOOL_RESULT_V1 string occurrences = seed-brief PROTOCOL TEXT, not actual answered results (context extraction proved it) -> the client-answered-tool-requests loop is NOT confirmed. TOOL_REQ counts likewise dominated by protocol text; actual agent-issued tool requests unconfirmed.
+- KEY FIND (PLANNER tail): PLANNER tab transcript contains "AGENT TASK: build a swarm task-board HTML page listing goals, agents, statuses..." (original seed) AND "PLANNER TASK (supervisor dispatch): decompose swarm task-board v1 into 3 concrete subtasks..." = the EXACT brief dispatched in 0930 echo-run whose readback showed url-still-home. -> dispatch text IS in PLANNER tab text plane (sidebar-title-like). Revision: fleet-tab dispatch likely created a thread in background WITHOUT url navigation; earlier "NOT WORKING" verdict downgraded to "delivery probable, navigation absent, confirmation pending".
+- IMPLEMENTER thread nearly empty (281 chars) — seed minimal/never visible.
+
+Stage Summary:
+- Revised mechanic map for fleet agents: (1) READ_TRANSCRIPT on fleet tabs = full dialogue visibility (thought process + briefs + sidebar titles) — the ONLY working perception channel into fleet agents; (2) dispatch delivery probable (background thread, no nav); (3) tool-feedback loop unconfirmed (no evidence client ever answered TOOL_REQUEST_V1).
+- Convergence implication: §12 loop for fleet = deliver task (probable works) -> agent thinks+replies (works, GLM-5.3-Flash active) -> supervisor reads reply (works via READ_TRANSCRIPT) -> deliver TOOL_RESULT/next task (probable) — the loop may be CLOSEABLE end-to-end without client fix, pending confirmation that background threads actually spawn and replies arrive.
+- Next tick: (1) confirm background-thread creation: dispatch a marker brief to PLANNER tab, wait, READ_TRANSCRIPT for marker + auto-title; (2) if confirmed, run first full E2E loop: task -> reply-readback -> follow-up task with result feedback.
