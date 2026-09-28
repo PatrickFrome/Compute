@@ -17,7 +17,10 @@ test('R101 DB receipt rejects Chat-only proof and persists Agent-surface digest 
   assert.match(migration, /'PROVEN_COMPOSER_CLEARED'/);
   assert.match(migration, /'TASK_TRANSPORT_PROVEN'/);
   assert.match(migration, /'agent_surface_sha256',\s*p_proof->>'agent_surface_sha256'/);
+  assert.match(migration, /'agent_origin_contract',\s*'ZAI_AGENT_SURFACE_CAUSAL_V1'/);
   assert.match(migration, /raise exception 'transport_not_proven'/);
+  assert.match(migration, /revoke\s+all[\s\S]*from\s+public,\s*anon,\s*authenticated/i);
+  assert.match(migration, /grant\s+execute[\s\S]*to\s+service_role/i);
 });
 
 test('R101 DB change preserves the existing lease/generation/target fencing', () => {
