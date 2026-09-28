@@ -13,10 +13,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMe2, createTaskFromForm } from "@/components/me2/store";
-import { agentChatOp } from "@/lib/me2-socket";
 import { eventsSearch, environmentReset, taskAction, age, hhmmss, EVENT_STYLE, type Task, type Event } from "@/lib/me2-bus";
 import {
-  Rocket, Clock, Search, Gauge, Trash2, X, RotateCcw, Archive, Brain, CheckCircle2,
+  Rocket, Clock, Search, Gauge, Trash2, X, RotateCcw, Archive, CheckCircle2,
   AlertTriangle, Activity, Globe2,
 } from "lucide-react";
 
@@ -311,35 +310,7 @@ function TaskSheet() {
   const stream = useMe2((s) => s.stream);
   const closeTask = useMe2((s) => s.closeTask);
   const openTask = useMe2((s) => s.openTask);
-  const setPage = useMe2((s) => s.setPage);
   const busy = useMe2((s) => s.busyAction);
-  const { toast } = useToast();
-  const [reflectingId, setReflectingId] = useState<string | null>(null);
-
-  const reflect = async (t: Task) => {
-    setReflectingId(t.id);
-    try {
-      const list = await fetch("/agentchat?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()) as { sessions?: Array<{ id: string; role: string; status: string; title: string }> };
-      const sup = list.sessions?.find((s) => s.role === "SUPERVISOR" && s.status === "ACTIVE");
-      if (!sup) {
-        toast({ title: "флот недоступен", description: "нет активного супервизора — создайте чат-агента", variant: "destructive" });
-        return;
-      }
-      const r = await agentChatOp({ op: "send", id: sup.id, text: `Разбери провал задачи ${t.id} «${t.title}» (статус ${t.status}). Диагноз и урок — reply; фиксацию исхода — report_outcome (outcome-proof).` });
-      if (r.ok) {
-        toast({ title: "провал передан флоту ✓", description: `супервизор «${sup.title}» координирует разбор` });
-        window.dispatchEvent(new CustomEvent("me2:select-chat", { detail: sup.id }));
-        setPage("command");
-      } else {
-        toast({ title: "передача флоту ✗", description: r.error ?? "ошибка", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "передача флоту ✗", description: "daemon недоступен", variant: "destructive" });
-    } finally {
-      setReflectingId(null);
-    }
-  };
-
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!detail) return;
@@ -414,14 +385,6 @@ function TaskSheet() {
                 <>
                   <Button size="sm" className="flex-1 bg-amber-600 text-black hover:bg-amber-500" onClick={() => { void taskAction("TASK_RETRY", detail.id); }} disabled={busy}>
                     <RotateCcw className="mr-1 h-3.5 w-3.5" /> повторить (MUTATION)
-                  </Button>
-                  <Button
-                    variant="outline" size="sm" className="flex-1 border-violet-800 text-violet-300 hover:bg-violet-950/60"
-                    onClick={() => void reflect(detail)} disabled={busy || reflectingId === detail.id}
-                    title="провал уходит живому супервизору чат-флота на разбор"
-                  >
-                    <Brain className={`mr-1 h-3.5 w-3.5 ${reflectingId === detail.id ? "animate-pulse" : ""}`} />
-                    во флот (разбор)
                   </Button>
                 </>
               )}
