@@ -311,6 +311,7 @@ export class DevOsNativeTaskCycle {
         const payload = request?.payload || {};
         let agent = exactFleetAgent(await this.#getState(), payload);
         const expectedHash = String(payload?.proof?.conversation_url_sha256 || '').toLowerCase();
+        const expectedAgentSurfaceHash = String(payload?.proof?.agent_surface_sha256 || '').toLowerCase();
         let frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
         let normalizedUrl = conversationUrl(frame?.url);
 
@@ -328,6 +329,10 @@ export class DevOsNativeTaskCycle {
 
         const fleetProof = exactTransportProof(agent);
         if (!fleetProof) throw new Error('devos_transport_active_agent_proof_invalid');
+        if (!HASH_RE.test(expectedAgentSurfaceHash)
+            || expectedAgentSurfaceHash !== String(fleetProof.agent_surface_sha256 || '').toLowerCase()) {
+          throw new Error('devos_transport_active_agent_surface_proof_mismatch');
+        }
         const proofState = 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED';
 
         this.#lastFleetTransportProof = {
