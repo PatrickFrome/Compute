@@ -266,10 +266,16 @@ function journalBinding(lease, promptSha256) {
 function proofFromJournal(entry) {
   const promptSha = String(entry?.prompt_sha256 || '').toLowerCase();
   const conversationSha = String(entry?.evidence?.conversation_url_sha256 || '').toLowerCase();
+  const agentSurfaceSha = String(entry?.evidence?.agent_surface_sha256 || '').toLowerCase();
   const effectState = String(entry?.evidence?.effect_state || '').toUpperCase();
-  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha)) return null;
-  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(effectState)) return null;
-  return { prompt_sha256: promptSha, conversation_url_sha256: conversationSha, effect_state: effectState };
+  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha) || !HASH_RE.test(agentSurfaceSha)) return null;
+  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(effectState)) return null;
+  return {
+    prompt_sha256: promptSha,
+    conversation_url_sha256: conversationSha,
+    agent_surface_sha256: agentSurfaceSha,
+    effect_state: effectState,
+  };
 }
 
 function safePreEffectCandidate(entry) {
