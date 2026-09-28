@@ -192,6 +192,19 @@ test('R98: GLM conversation requires exact prior Agent-session provenance', () =
   assert.equal(withProof.agent_session_proof.agent_surface_sha256,'d'.repeat(64));
 });
 
+test('R98: supplied Agent-session proof cannot be substituted by an Agent Home root frame', () => {
+  const readiness = evaluateFleetSubmitReadiness({
+    ...EXPECTED,
+    platform:'GLM_ZAI',
+    phase:'PRE_TYPE',
+    expected_agent_generation_epoch:9,
+    agent_session_proof:agentConversationProof(),
+    frame:glmAgentFrame(),
+  });
+  assert.equal(readiness.ready,false);
+  assert.equal(readiness.reason,'AGENT_SESSION_PROVENANCE_NOT_PROVEN');
+});
+
 test('R98: Agent conversation proof is fenced by exact target, generation and URL digest', () => {
   const url = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
   const frame = {
