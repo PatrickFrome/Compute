@@ -11831,3 +11831,25 @@ Stage Summary:
 - RESEARCHER: 8-й silent, tool-request pending — ожидание фазы 3 consumption; ping не дублировался
 - Next tick: (1) фаза 3 — consumer migration (первый консьюмер: reviewer или eval; regression eval 70/70 + E2E), (2) §11 executor-retrieval доводка, (3) effect-plane fix verify на build bump (фаза 5 prereq), (4) daemon boot для интеграционного прогона fleetReadbackAsk
 - Security: секреты не печатались/не коммитились, Sentinel/Guardian не обходились (owner-ESCALATE уважён), mutations — только собственный scratch-таб, armed-состояние не менялось
+
+---
+Task ID: 419718-1530-PHASE3-CONSUMER-MIGRATION
+Agent: Super Z (cron tick, Job 419718 @15:30, directive sha256 verified 0aa09579…)
+Task: Продолжение с точки остановки 1515-тика — фаза 3 §3-миграции: миграция первого консьюмера (reviewer) на fleet-readback adapter + физический E2E adapter v2 + §11 executor-retrieval доводка; мутации с паузами и readback, без blind retry после AMBIGUOUS.
+
+Work Log:
+- infrastructure-факт: me2-daemon ЖИВ (PID 1252, bun --hot, :3041 HTTP 200, boot Sep27, v0.57.1, 47 actions) — hot-reload доставляет правки в живой рантайм; прошлые заметки «daemon не running» относились к другому PID
+- adapter v2 (fleet-readback.ts): динамический маркер ME2REPLY:<djb2-8hex> + reply-зона изоляция (транскрипт реверс-хронологичен: reply между маркер-строкой и промпт-строкой); флаттен промпта (L20); evidence-based AMBIGUOUS-resolution (L21): TYPE — value_sha256_after==sha256(текст)+replace_verified ИЛИ before>0→after=0 (submit очистил), FOCUS — semantic_ref_id достигнут (гейт = TYPE); атомарный SEMANTIC_TYPE(submit_after_type=true) вместо пары TYPE+PRESS_KEY (L22 — receipt PRESS_KEY без evidence: target:null); свежий CAPTURE#2 непосредственно перед TYPE (L23 — фенс при активном флоте живёт секунды); reads без pacing (READ_ONLY 0pts)
+- физический E2E (scripts/e2e-fleet-readback.ts, 5 прогонов = 4 честных негатива → анализ → fix → PASS): попытки 1-2 — SEMANTIC_TYPE FAILED postcondition_not_confirmed (receipt-диагностика: value_length_before 202/484 = ЧУЖОЙ draft в свежем табе — флот сам тайтс брифы, L12; sha-совпадение доказывало мой typing) → L21-резолюция; попытка 3 — PRESS_KEY без evidence → L22-атомарный submit; попытка 4 — native_semantic_ref_stale → L23 fresh-fence; ИТОГ: E2E-PASS attempt 1: 6 команд, 132.7s, standalone_reply=true, reply_isolated=true, reply=«verdict:demo / channel:fleet-readback» (ровно запрошенные строки)
+- reviewer мигрирован (первый консьюмер фазы 3, 1/5): chat() → fleetReadbackAsk(prompt, timeout 45s); JSON-экстракция: сначала изолированная reply-зона, fallback — ПОСЛЕДНИЙ JSON транскрипта (промпт содержит пример JSON); отказ канала = FleetChannelError → TASK_REVIEW_FAILED событие + ERROR-span с channel_code, ревью остаётся непроставленным (park-and-resume, LLM-ошибки не роняют шину — прежние квоты 1/задача, ≤2 in-flight сохранены); bun build OK; полный in-daemon путь сработает органически на следующем TASK_DONE (hot-reload активен)
+- §11 executor-retrieval (worker.ts): memBlockEconomy(`worker:<agent>`, 3, 900) блок уроков в КАЖДУЮ задачу (раньше только parentMemory на ретраях) → память влияет на executor-уровень; «РЕЛЕВАНТНЫЕ УРОКИ ПАМЯТИ (не повторяй зафиксированные провалы)» + TASK_LEASED{memory_lessons}; try/catch не ломает исполнение
+- регрессия: bun run lint 0/0 (eslint exit 0); bun run check → GATE PASS: daemon boot + eval 70/70 (изолированный контур)
+- LESSONS: L20 (multiline не корень), L21 (evidence-based AMBIGUOUS-resolution), L22 (атомарный submit), L23 (fresh-fence при fleet-churn)
+- артефакты: src/fleet-readback.ts v2, scripts/e2e-fleet-readback.ts, src/reviewer.ts (мигрирован), worker.ts (§11), LESSONS.md L20-L23
+
+Stage Summary:
+- Фаза 3 ОТКРЫТА: первый консьюмер (reviewer) переведён на §3-комплаентный fleet-readback канал; adapter v2 физически доказан E2E (reply-протокол + изоляция + evidence-resolution); регрессии зелёные (lint 0/0, eval 70/70)
+- Диагностическая ценность: флот-гонка за композеры свежих табов задокументирована (L20/L23) — «свежий таб» при активном планировщике КОНТЕСТОВАН; устойчивость канала достигнута evidence-гейтами + park-and-resume, не борьбой за фенсы
+- §11 закрыт на executor-уровне: цепочка execution→outcome→critique→lesson→retrieval теперь дотянута до worker'а (память влияет на планировщик, чат и исполнителя)
+- Next tick: (1) наблюдение первого органического reviewer-прогона через fleet-канал (spans: me2.channel_code, TASK_REVIEWED/FAILED события), (2) миграция оставшихся 4 консьюмеров (agentchat/eval/rsi + review-путь), (3) RESEARCHER consumption проверка (tool-request pending), (4) effect-plane fix verify на build bump (фаза 5)
+- Security: секреты не печатались/не коммитились; Sentinel/Guardian не обходились; mutations — scratch-табы адаптера с уборкой; armed/owner-домены не тронуты
