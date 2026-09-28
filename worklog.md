@@ -11118,3 +11118,74 @@ Stage Summary:
 - Текущее состояние DoD (§20): agent-creation ✅, geometry-free ✅ (semantic path канонизирован), инвентаризация ✅, canonical-path фиксация ✅; НЗ: thread-readback, Brain-routing, release-плечо — все три ждут доработку клиента/operator
 - След. тик: титульный мониторинг 4 сессий + по возможности result-extraction через новые CAPTURE-поля; приоритет remains operator-asks
 - Артефакты: ARCHITECTURE-MAP-20260928.md (+2 зеркала)
+
+---
+Task ID: SECRETS-PHOENIX-416759
+Agent: Super Z (GLM, IM cron-agent-loop)
+Task: SECRETS-PHOENIX v2 — verify/restore sealed secrets (me2.env.20260922, .a2/.github.env), run phoenix-secrets-restore.sh, statuses only.
+
+Work Log:
+- Inspected /tmp/my-project/.a2-backup/me2.env.20260922 (key NAMES only, no values): present, mode 600, all 5 reference keys (SUPABASE_URL, CF_API_TOKEN, CF_ACCOUNT_ID, CF_R2_ACCESS_KEY_ID, CF_AI_WORKER_TOKEN) present -> kept unchanged. SUPABASE_SERVICE_ROLE_JWT line present -> untouched per directive.
+- Inspected /home/z/.a2/.github.env: present, mode 600, GITHUB_TOKEN_ADMIN present; api.github.com probe -> HTTP 200 -> kept.
+- Read scripts/phoenix/phoenix-secrets-restore.sh in full BEFORE execution: status-only output, no value printing, no exfil endpoints, no git ops — safe.
+- Executed it: me2.env kept (keys complete) | github.env api=200 | supabase REST=200 (JWT restored) | audit passthrough skipped (full-audit.sh lost in 2026-09-28 sandbox reset).
+- Compliance: no secret values printed/logged, no git commits, nothing copied to /home/z/context-vault/repo/.
+
+Stage Summary:
+- Restore: no action needed (both files already valid) — kept, not recreated. Script executed OK. Supabase unblocked (REST 200, JWT present).
+- Remaining blocker (non-secret): full-audit.sh lost in reset — audit passthrough skipped; needs re-creation from sealed source or rebuild.
+
+---
+Task ID: BROWSER-TEST-20260928-0900
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419203)
+Task: Tick 09:00 — baseline mechanics re-verify (read-only sweep) + title monitoring of 4 agent sessions (self-learning readback).
+
+Work Log:
+- Runner: scripts/phoenix/bmt-m0900.py (+b/b). Import fix: module file has hyphens -> importlib.spec_from_file_location (regular import impossible).
+- Baseline sweep 5/5 COMPLETED: CONTROL_CAPABILITIES v2.5.0-dev.1 (48 implemented, capability_revision sha256:e7e47b90...), TAB_CENSUS 18/48 tabs (fleet=4, supervisor=1, user headroom 30, fleet_backpressure present), FLEET_STATUS 4 ACTIVE / LOST=0 (v1.5.0, TRANSPORT_PROOF_REQUIRED), GATE_STATUS 15 registered gates / 0 overrides / wildcard_disabled, SELF_UPDATE_STATUS state=CURRENT (0.7.0-dev.36336130139.1, automatic_install=true, trusted_channel=dev).
+- Title monitor via CAPTURE on agent-space tab (tab_6924b587): 12 sidebar titles; all 3 known agent-session titles present and stable ("3000-Word Computing History Essay" /c/94fd04de, "Key Features of Swarm Task Boards" /c/b86be1da, "Top Risks & Missing Requirement for Swarm Task-Board" /c/cfefd09f) -> session persistence + auto-title readback reproduced 2nd time independently.
+- Zero NEW titles since 08:30 -> created agents did single-shot replies; no autonomous continuation (expected: briefs one-shot, swarm re-prompt loop not yet wired).
+- Schema fact: TAB_CENSUS receipt contains NO per-tab URL list (aggregates + fleet_tab_ids/supervisor_tab_ids only) -> session-tab enumeration must go through sidebar CAPTURE readback; first task-board session title (/c/36ce7b45) not yet isolated in sidebar list.
+- State-drift fact: PLANNER fleet tab (tab_fe50ead8) CAPTURE shows url=https://chat.z.ai/ (home, 0 text blocks) while its transport_proof conversation_url was /c/4d04c632... -> fleet tab navigated away from conversation; transport proof is stale for that tab (CAPTURE itself worked).
+
+Stage Summary:
+- Verdicts unchanged: 23 mechanics work / 15 not working / next-revision class unverified. This tick adds no new working/broken mechanics; 5/5 baseline re-verified green.
+- New registry notes: (1) TAB_CENSUS URL-less schema (aggregates only); (2) fleet-tab state drift home<->conversation observed (transport proof staleness) - candidate lesson for FLEET_RECONCILE timing.
+- Session persistence of 3 agent-created conversations confirmed with stable auto-titles; self-learning lesson: single-shot briefs produce no autonomous continuation - swarm loop needs scheduled re-prompt to close §12 autonomy gap.
+- Artifacts: browser-test-results-m0900.json, browser-test-results-m0900-title.json, browser-test-results-m0900-tabs.json (empty, schema proof).
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0907
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718)
+Task: Directive tick 09:07 — thread re-prompt experiment (§12 autonomy ingredient) + 1st-session title isolation. Directive sha256 re-verified OK.
+
+Work Log:
+- Re-prompt E2E on EXISTING critic thread /c/cfefd09f (agent-space tab already on it, no NAVIGATE needed): baseline CAPTURE (on_target=True, 0 text blocks — thread body outside semantic tree, consistent with known thread-scope gap) -> SEMANTIC_TYPE(submit=True, replace=False) CONTINUATION brief -> effect=AMBIGUOUS_AFTER_ENTER (no blind retry per discipline).
+- Indirect readback #1: READ_TRANSCRIPT (sidebar single mode) — transcript text (903 chars) ENDS WITH the CONTINUATION brief -> delivery into thread PROVEN (text plane echo).
+- Indirect readback #2: CAPTURE draft-check — textbox shows placeholder "Send a Message" (len 14) -> draft EMPTY -> Enter consumed the draft -> message actually SENT. 28 anonymous buttons on page (stop-button class, unnamed).
+- Reply-readback: transcript len unchanged 903 after 75s — assistant replies live outside text plane (original critic reply was also never in transcript; its auto-title was the only visible effect). Verdict: re-prompt PARTIAL-PROVEN (delivery+submit ✅, reply-readback ❌ = same thread-scope client gap as stop-button/model-popover).
+- Title isolation: TYPED_CLICK on unmapped title "项目状态评估与开发计划" -> post-click url /c/579ed13b-1316-4eff... = supervisor's OWN live chat session (matches IM chat_id 579ed13b) — sidebar includes supervisor conversation. /c/36ce7b45 (1st task-board session, 07:55) title remains unmapped: below sidebar fold, SCROLL broken -> operator-blocked (or WEBMCP thread-list, also blocked).
+- Mutation discipline held: 20s pace before TYPED_CLICK/SEMANTIC_TYPE, readback after every action, no blind retries.
+
+Stage Summary:
+- NEW PROVEN primitive: in-place thread re-prompting (SEMANTIC_TYPE submit into existing conversation, no new conversation spawned, no url change, draft consumed) — swarm can re-task existing agents; closes the delivery half of §12 autonomy gap. Reply-visibility still needs the ONE client fix (semantic-plane thread-scope).
+- Title map updated: 项目状态评估与开发计划=supervisor chat; essay/research/critic titles stable; supervisor session title visible in agent sidebar.
+- Registry additions: (1) transcript text plane = sidebar + user inputs only, assistant replies excluded; (2) anonymous-button census 28 on agent page (stop-button detector candidate: presence of unnamed button during generation).
+- Next tick: scheduled re-prompt loop (periodic CONTINUATION briefs = de-facto swarm autonomy) + FLEET_RECONCILE drift check (PLANNER tab at home, transport proof stale).
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0915
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718)
+Task: Directive tick 09:15 — fleet drift check + reconcile + re-prompt loop #2 (de-facto swarm autonomy, repeat-run). Directive sha256 re-verified OK.
+
+Work Log:
+- FLEET drift check (FLEET_STATUS): all 4 agents ACTIVE, but transport proofs fleet-wide STALE: PLANNER proven_at 2026-09-27T20:10Z (~13h), RESEARCHER/IMPLEMENTER proven_at 17:38Z (~16h) and BOTH have EMPTY conversation_url in transport_proof; fleet-CRITIC 19:20Z with /c/1c569d09. Proof is only minted on real transport action, not refreshed by status/reconcile.
+- FLEET_RECONCILE target=4 COMPLETED (6.5s, no error); post-reconcile FLEET_STATUS: 4/4 ACTIVE. Reconcile preserves fleet but does NOT refresh transport proofs (confirmed drift semantics).
+- Re-prompt loop #2 (repeat-run of 0907 primitive): agent-space tab was on supervisor chat /c/579ed13b -> CAPTURE -> TYPED_CLICK sidebar title "Top Risks &..." COMPLETED -> readback url=/c/cfefd09f (on_critic=True) -> SEMANTIC_TYPE "CONTINUATION TASK 2 (P0/P1/P2 checklist brief)" submit=True -> effect=AMBIGUOUS_AFTER_ENTER (expected) -> readback draft=EMPTY(placeholder) delivered=True same_thread=True.
+- Mutation discipline: 20s gaps before both mutating commands, readback after every action, no retries.
+
+Stage Summary:
+- NEW PROVEN primitives: (1) thread-switching via sidebar TYPED_CLICK with url readback — any agent thread reachable on demand without NAVIGATE; (2) re-prompt recipe REPEATABLE (2nd independent delivery + draft consumption). Combined with 0907: swarm can navigate-to-agent + re-task in-place = full delivery loop for continuous development.
+- Registry lessons: (1) transport_proof staleness is fleet-wide (2/4 agents missing conversation_url) — readiness contract TRANSPORT_PROOF_REQUIRED means fleet-wide NOT transport-ready; a real SEMANTIC_TYPE/CAPTURE per agent would mint fresh proofs; (2) FLEET_RECONCILE != proof refresh.
+- Reply-readback still blocked by thread-scope client gap (unchanged).
+- Next tick: mint fresh transport proofs per fleet agent (targeted CAPTURE/READ_TRANSCRIPT on each fleet tab), then supervisor-side task dispatch experiment (brief PLANNER via its own thread).
