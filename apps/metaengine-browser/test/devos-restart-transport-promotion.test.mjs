@@ -144,6 +144,13 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
   const executeCommand = async (command) => {
     calls.push(['command', command.action, command.payload?.accessible_name || command.payload?.key || null]);
     if (command.action === 'CAPTURE') return frame();
+    if (command.action === 'NAVIGATE') {
+      assert.equal(command.payload.tab_id, TAB_ID);
+      assert.equal(command.payload.url, ROOT);
+      surfaceState = 'CHAT_ROOT';
+      state.tabs[0].url = ROOT;
+      return { ok: true, tab_id: TAB_ID, url: ROOT, authority_effect: true };
+    }
     if (command.action === 'TYPED_CLICK') {
       if (surfaceState === 'CHAT_ROOT' && command.payload.accessible_name === 'Agent') {
         surfaceState = 'AGENT_HOME';
@@ -230,16 +237,22 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
   return { cycle, state, calls, getSurfaceState: () => surfaceState, cleanup: () => clearFleetRuntime(fleetRuntime) };
 }
 
-test('restored bare conversation stays fenced without durable Agent-origin proof', async () => {
+test('restored bare conversation is reset to canonical root and rebuilt as a proven Agent session', async () => {
   const h = harness();
   try {
     const snapshot = await h.cycle.cycle();
-    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
-    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_CONVERSATION_AGENT_ORIGIN_UNPROVEN');
-    assert.equal(snapshot.fleet_transport_promotion.reason, 'AGENT_SURFACE_ORIGIN_PROOF_REQUIRED');
+    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'ACTIVE');
+    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE_AGENT_SESSION');
+    assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'CONVERSATION');
     assert.equal(snapshot.fleet_transport_promotion.release_state, 'CONFIRMED');
-    assert.equal(h.calls.filter((row) => row[1] === 'CAPTURE').length, 1);
-    assert.equal(h.calls.some((row) => row[1] === 'SEMANTIC_TYPE'), false);
+    assert.equal(snapshot.fleet_transport_promotion.bootstrap_effect_state, 'PROVEN_NEW_CONVERSATION');
+    assert.match(snapshot.fleet_transport_promotion.agent_surface_sha256, /^[a-f0-9]{64}$/);
+    assert.equal(h.calls.filter((row) => row[1] === 'NAVIGATE').length, 1, 'unproven conversation is reset exactly once');
+    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'only the canonical Agent seed is submitted');
+    assert.deepEqual(
+      h.calls.filter((row) => row[1] === 'TYPED_CLICK').map((row) => row[2]),
+      ['Agent', 'New Task'],
+    );
   } finally {
     h.cleanup();
   }
