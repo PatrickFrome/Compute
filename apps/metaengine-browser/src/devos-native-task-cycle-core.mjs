@@ -4,14 +4,11 @@ import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
   isAgentPlatformConversationUrl,
-  resolveAgentPlatformComposer,
-  classifyAgentPlatformSurface,
 } from './browser-agent-platform.mjs';
 import { renderAgentContextBriefing } from './agent-context-token.mjs';
 import { parseAgentToolRequests, renderAgentToolProtocol, renderAgentToolResults } from './agent-tool-protocol.mjs';
 import { parseAgentResultClaim, renderAgentResultProtocol } from './agent-result-protocol.mjs';
 import { AgentToolbelt } from './agent-toolbelt-core.mjs';
-import { markFleetTransportProvenFromNativeFrame } from './fleet-runtime-bridge.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
 import { deriveFleetExperienceSignal } from './fleet-experience-signal.mjs';
 import { FLEET_TAB_CEILING } from './tab-registry.mjs';
@@ -49,14 +46,6 @@ function runningObservationBudget(liveAgents) {
 function fleetLeaseDispatchConcurrency(liveAgents) {
   return runningObservationBudget(liveAgents);
 }
-// D-C3: a poisoned root-task composer draft beyond this size is not
-// submittable (live-proven boundary 2026-09-19: a 31,395-char draft submitted
-// successfully, a 34,193-char draft was silently refused — the site exposes
-// no error surface for the refusal). Flushing is skipped above the bound so
-// the dispatch fails with the precise reason instead of appending another
-// prompt to a dead draft.
-const GLM_ROOT_DRAFT_FLUSH_MAX_CHARS = 32000;
-const GLM_ROOT_DRAFT_FLUSH_MARKER = '[METAENGINE FLEET BOOTSTRAP FLUSH v1 - prior accumulated briefs are historical; operate on the next verified task block]';
 // R97 convergence: the bootstrap message is permitted only AFTER z.ai Agent
 // mode, the exact target model and a clean New Task composer are proven. It
 // creates the durable Agent session transport; ordinary Chat-root bootstrap is
@@ -324,9 +313,6 @@ export class DevOsNativeTaskCycle {
   // DISTINCT tabs run in parallel; effects on the SAME tab serialize in
   // submission order through a promise chain.
   #tabGates = new Map();
-  // D-C3: one flush attempt per (agent, epoch) — a refused flush must not
-  // append markers on every heartbeat.
-  #flushGuard = new Set();
   // Root-surface dispatch-effect telemetry (2026-09-21 observability): the
   // last bootstrap/dispatch outcome and bounded counters ride the cycle
   // snapshot → supervisor_lifecycle.devos_runtime → cloud state, so the
@@ -893,161 +879,6 @@ export class DevOsNativeTaskCycle {
   // the 2s command latch alone can miss the async SPA navigation). Returns
   // the submitted observation, the last captured frame and the normalized
   // conversation URL (null when the submit provably produced no effect).
-  async #submitRootBootstrap(lease, composer, text, { replace = false } = {}) {
-    const submitted = await this.#executeCommand({
-      action: 'SEMANTIC_TYPE', platform: AGENT_PLATFORM_ID,
-      payload: {
-        tab_id: lease.tab_id,
-        role: composer.role,
-        accessible_name: composer.accessible_name,
-        semantic_ref: composer.semantic_ref,
-        text,
-        replace_existing: replace === true,
-        submit_after_type: true,
-      },
-    });
-    let post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    let normalizedUrl = conversationUrl(post?.url);
-    for (let attempt = 0; attempt < 6 && !normalizedUrl; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-      normalizedUrl = conversationUrl(post?.url);
-    }
-    return { submitted, post, normalizedUrl };
-  }
-
-  // Prove the conversation upgrade for a root bootstrap outcome (seed or
-  // flush): marks the fleet transport proof from the captured frame and
-  // returns the bootstrap state string for the dispatch telemetry.
-  async #proveRootBootstrapConversation(lease, post, normalizedUrl, provenState, unprovenState) {
-    const upgraded = await markFleetTransportProvenFromNativeFrame({
-      binding: {
-        agent_id: lease.agent_id,
-        tab_id: lease.tab_id,
-        target_id: lease.target_id,
-        agent_generation_epoch: Number(lease.agent_generation_epoch ?? lease.generation_epoch ?? 1),
-      },
-      frame: post,
-      expected_conversation_url_sha256: sha256(normalizedUrl),
-    }).catch(() => null);
-    return upgraded?.state === 'UPGRADED_CONVERSATION' ? provenState : unprovenState;
-  }
-
-  async #ensureProvenConversation(lease, agent, pre) {
-    const proof = agent?.transport_proof || null;
-    const provenConversation = proof?.conversation_url ? conversationUrl(proof.conversation_url) : null;
-    const stage = classifyAgentPlatformSurface(pre?.url)?.stage || null;
-    if (provenConversation) return { state: 'PROVEN_CONVERSATION_PRESENT', conversation_url: provenConversation };
-    if (stage !== 'PRECONVERSATION_ROOT') return { state: 'NOT_AT_ROOT', conversation_url: null };
-    const composer = resolveAgentPlatformComposer(pre);
-    // Live captures ALWAYS set value_length for text inputs (0 = empty).
-    // An ABSENT length (null/undefined — mocked or opaque frames) is treated
-    // as unknown: keep the historical clean-composer passthrough, fail-closed.
-    const rawDraftLength = composer?.value_length;
-    const draftLength = (rawDraftLength === null || rawDraftLength === undefined)
-      ? null
-      : (Number.isFinite(Number(rawDraftLength)) ? Number(rawDraftLength) : null);
-    const guardKey = `${lease.agent_id}:${Number(lease.agent_generation_epoch ?? lease.generation_epoch ?? 1)}`;
-    if (!composer || draftLength == null) return { state: 'CLEAN_ROOT_COMPOSER', conversation_url: null };
-    if (draftLength <= 0) {
-      // LIVE 2026-09-21 (B0/A1/C10 triple-AMBIGUOUS): the root composer
-      // silently refuses Enter on oversized drafts, so the first full-size
-      // dispatch could never create the conversation — the prompt stayed as
-      // a poisoned draft and every later generation hit the flush guard.
-      // Fix: prove the conversation FIRST with the tiny deterministic seed,
-      // then let the real dispatch run against the conversation surface
-      // where the verified replace is proven. One bootstrap attempt per
-      // (agent, epoch) — a refused seed must not loop on every heartbeat.
-      if (this.#flushGuard.has(guardKey)) return { state: 'SEED_ALREADY_ATTEMPTED', conversation_url: null };
-      this.#flushGuard.add(guardKey);
-      this.#dispatchEffectCounters.seed_attempts += 1;
-      this.#noteDispatchEffect({ stage: 'SEED', state: 'SEED_ATTEMPTED', task_id: lease.task_id, agent_id: lease.agent_id });
-      let boot;
-      try {
-        boot = await this.#submitRootBootstrap(lease, composer, GLM_ROOT_CONVERSATION_SEED, { replace: true });
-      } catch (error) {
-        this.#noteDispatchEffect({ stage: 'SEED', state: 'SEED_TYPE_FAILED', reason: clip(error?.message || error, 160), task_id: lease.task_id, agent_id: lease.agent_id });
-        throw error;
-      }
-      if (!boot.normalizedUrl) {
-        this.#noteDispatchEffect({ stage: 'SEED', state: 'SEED_SUBMIT_REFUSED', effect_state: boot.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
-        const error = new Error('devos_seed_submit_refused');
-        error.automatic_retry_allowed = false;
-        throw error;
-      }
-      this.#dispatchEffectCounters.seed_proven += 1;
-      const seedState = await this.#proveRootBootstrapConversation(lease, boot.post, boot.normalizedUrl, 'SEED_CONVERSATION_PROVEN', 'SEED_CONVERSATION_UNPROVEN');
-      this.#noteDispatchEffect({ stage: 'SEED', state: seedState, effect_state: boot.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
-      return { state: seedState, conversation_url: boot.normalizedUrl, seed_effect_state: boot.submitted?.effect_state || null };
-    }
-    if (this.#flushGuard.has(guardKey)) return { state: 'FLUSH_ALREADY_ATTEMPTED', conversation_url: null };
-    if (draftLength > GLM_ROOT_DRAFT_FLUSH_MAX_CHARS) {
-      // LIVE 2026-09-21: a draft over the flush limit used to be a permanent
-      // dead end (over_flush_limit, fail-closed forever). The CLICK_SELECT
-      // gesture is live-proven to replace a poisoned root draft WHOLESALE
-      // (D-M3), so replace the oversized garbage with the SHORT seed and
-      // submit that — the submitted text is tiny, which removes the oversize
-      // refusal risk entirely. If even the verified replace fails (typed
-      // BEFORE Enter, no effect), fall back to the historical over_flush_limit
-      // fail-closed error so the task stays honestly ambiguous.
-      this.#flushGuard.add(guardKey);
-      this.#noteDispatchEffect({ stage: 'SEED', state: 'OVER_LIMIT_REPLACE_SEED_ATTEMPTED', composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
-      let boot = null;
-      try {
-        boot = await this.#submitRootBootstrap(lease, composer, GLM_ROOT_CONVERSATION_SEED, { replace: true });
-      } catch {
-        boot = null;
-      }
-      if (!boot?.normalizedUrl) {
-        this.#dispatchEffectCounters.flush_over_limit += 1;
-        this.#noteDispatchEffect({ stage: 'SEED', state: 'OVER_LIMIT_REPLACE_SEED_FAILED', composer_chars_before: draftLength, effect_state: boot?.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
-        // B-SH1 (live 2026-09-21): a replace-seed failure used to leave the
-        // poisoned tab alive forever — the same 37921-char draft dead-ended
-        // every later lease (flush_over_limit=5 live) and the per-(agent,
-        // epoch) guard blocked re-attempts. Proof-based self-healing, same
-        // discipline as the supervisor's #closeFailedBootstrapTab: re-capture
-        // FIRST and close only a STILL-poisoned (or composer-unresolvable)
-        // tab — a draft that provably cleared (or a surface that moved on)
-        // is preserved. The elastic governor re-provisions the closed
-        // agent's tab on the next reconcile, so the heal is self-completing.
-        let recheck = null;
-        try { recheck = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } }); } catch { recheck = null; }
-        const recheckComposer = resolveAgentPlatformComposer(recheck);
-        const recheckRawLength = recheckComposer?.value_length;
-        const recheckLength = (recheckRawLength === null || recheckRawLength === undefined)
-          ? null
-          : (Number.isFinite(Number(recheckRawLength)) ? Number(recheckRawLength) : null);
-        const stillPoisoned = recheckLength === null || recheckLength > GLM_ROOT_DRAFT_FLUSH_MAX_CHARS;
-        if (stillPoisoned) {
-          await this.#executeCommand({ action: 'CLOSE_TAB', platform: null, payload: { tab_id: lease.tab_id } }).catch(() => {});
-          this.#noteDispatchEffect({ stage: 'SEED', state: 'POISONED_AGENT_TAB_CLOSED', composer_chars_before: draftLength, recheck_chars: recheckLength, task_id: lease.task_id, agent_id: lease.agent_id });
-        } else {
-          this.#noteDispatchEffect({ stage: 'SEED', state: 'POISONED_AGENT_TAB_PRESERVED_DRAFT_CLEARED', composer_chars_before: draftLength, recheck_chars: recheckLength, task_id: lease.task_id, agent_id: lease.agent_id });
-        }
-        const error = new Error(`fleet_task_root_draft_over_flush_limit:${draftLength}`);
-        error.automatic_retry_allowed = false;
-        throw error;
-      }
-      this.#dispatchEffectCounters.seed_proven += 1;
-      const replaceState = await this.#proveRootBootstrapConversation(lease, boot.post, boot.normalizedUrl, 'SEED_CONVERSATION_PROVEN', 'SEED_CONVERSATION_UNPROVEN');
-      this.#noteDispatchEffect({ stage: 'SEED', state: replaceState, effect_state: boot.submitted?.effect_state || null, composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
-      return { state: replaceState, conversation_url: boot.normalizedUrl, seed_effect_state: boot.submitted?.effect_state || null };
-    }
-    this.#flushGuard.add(guardKey);
-    const boot = await this.#submitRootBootstrap(lease, composer, `\n${GLM_ROOT_DRAFT_FLUSH_MARKER}`, { replace: false });
-    if (!boot.normalizedUrl) {
-      this.#noteDispatchEffect({ stage: 'FLUSH', state: 'FLUSH_SUBMIT_REFUSED', effect_state: boot.submitted?.effect_state || null, composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
-      return { state: 'FLUSH_SUBMIT_REFUSED', conversation_url: null, effect_state: boot.submitted?.effect_state || null };
-    }
-    const flushState = await this.#proveRootBootstrapConversation(lease, boot.post, boot.normalizedUrl, 'FLUSHED_CONVERSATION_PROVEN', 'FLUSHED_CONVERSATION_UNPROVEN');
-    this.#noteDispatchEffect({ stage: 'FLUSH', state: flushState, effect_state: boot.submitted?.effect_state || null, composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
-    return {
-      state: flushState,
-      conversation_url: boot.normalizedUrl,
-      flush_effect_state: boot.submitted?.effect_state || null,
-    };
-  }
-
   // Bounded dispatch-effect telemetry note: replaces the last record and
   // stamps the wall clock. Payload fields are clipped scalars only — no
   // prompt text ever rides the observability plane. composer_chars_before
@@ -1110,17 +941,12 @@ export class DevOsNativeTaskCycle {
 
   async #dispatchLease(rawLease, fleetSnapshot) {
     const lease = assertLiveLeaseBinding(rawLease, fleetSnapshot);
-    const agent = (fleetSnapshot?.agents || []).find((row) => String(row?.agent_id || '').toLowerCase() === lease.agent_id) || null;
-    // D-C2/D-C3: ONE capture opens the dispatch — it serves both the flush
-    // decision (poisoned root composer?) and the PRE_TYPE readiness binding,
-    // so the clean-composer path keeps the exact capture budget of the old
-    // flow. A successful flush re-captures once: the surface moved to the
-    // fresh conversation and the real dispatch must bind against it.
-    let pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    const flush = await this.#ensureProvenConversation(lease, agent, pre);
-    if (flush?.conversation_url && !conversationUrl(pre?.url)) {
-      pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    }
+    // R98 convergence: the scheduler is NOT an Agent/bootstrap owner. A task
+    // lease is runnable only after the wrapper has created a real z.ai Agent
+    // session and persisted exact Agent-origin transport proof. The scheduler
+    // therefore starts from one fresh capture of that canonical conversation;
+    // root/dirty-draft recovery belongs exclusively to promotion/bootstrap.
+    const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
     const telemetryDigest = await this.#telemetryDigest(lease);
     const contextBriefing = await this.#contextBriefingFor(lease, fleetSnapshot);
     // Agent Toolbelt: the protocol rides every dispatch (isolated sessions
@@ -1282,7 +1108,7 @@ export class DevOsNativeTaskCycle {
           state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
           tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
           proof, server: body, prompt_included: false, page_data_authority: false,
-          conversation_bootstrap: flush?.state || null,
+          conversation_bootstrap: 'PREEXISTING_ACTIVE_AGENT_SESSION',
           selected_tab_mutation: false, viewport_geometry_required: false,
           click_issued: clickIssued, submit_path: 'ENTER_KEY_EVENT_DRIVEN_READBACK', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
         };
