@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
-import { registerFleetRuntime, clearFleetRuntime } from '../src/fleet-runtime-bridge.mjs';
 
-// D-C2/D-C3 contract tests: multiply-and-simultaneous command execution plus
-// the poisoned-draft flush bootstrap. All surfaces are GLM (chat.z.ai).
+// R98/D-C2 contract tests: multiply-and-simultaneous task execution is
+// permitted only for ACTIVE z.ai Agent sessions. Root bootstrap belongs to
+// the promotion lease path and is explicitly fenced from task dispatch.
 
 const mkLease = (n, tabId) => ({
   task_id: `09f2e414-5c31-4fc7-87a3-f5de1315cb8${n}`,
@@ -49,15 +50,21 @@ function fleetOf(leases, proofs = new Map()) {
       tab_id: lease.tab_id,
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
-      transport_proof: proofs.get(lease.agent_id) || {
-        schema: 'metaengine.browser.fleet-transport-proof.v1',
-        tab_id: lease.tab_id,
-        target_id: lease.target_id,
-        generation_epoch: lease.agent_generation_epoch,
-        conversation_url_sha256: 'a'.repeat(64),
-        proven_at: '2026-08-31T18:00:00.000Z',
-        authority_effect: false,
-      },
+      transport_proof: proofs.get(lease.agent_id) || (() => {
+        const suffix = String(lease.target_id || '').replace(/\D/g, '').slice(-1) || '1';
+        const url = conversationUrl(suffix);
+        return {
+          schema: 'metaengine.browser.fleet-transport-proof.v1',
+          tab_id: lease.tab_id,
+          target_id: lease.target_id,
+          generation_epoch: lease.agent_generation_epoch,
+          conversation_url: url,
+          conversation_url_sha256: crypto.createHash('sha256').update(url).digest('hex'),
+          agent_surface_sha256: 'c'.repeat(64),
+          proven_at: '2026-09-28T00:00:00.000Z',
+          authority_effect: false,
+        };
+      })(),
       automatic_retry_allowed: false,
       authority_effect: false,
     })),
@@ -142,126 +149,39 @@ test('D-C2: same-tab leases serialize through the tab gate; one flaky lease neve
   assert.equal(maxActiveOnTab, 1, 'same-tab effects never overlapped');
 });
 
-test('D-C3: poisoned root draft is flushed into a proven conversation BEFORE the lease effect', async () => {
+test('R98: PRECONVERSATION_ROOT cannot enter task dispatch; promotion owns Agent bootstrap', async () => {
   const lease = mkLease(3, 'tab_c7f6229c-cd7a-4629-a45c-e6575b0a23b9');
-  const fleet = fleetOf([lease]);
-  // Mock the fleet runtime bridge so the flush's transport-proof upgrade is
-  // exercised end-to-end (markTransportProven → UPGRADED_CONVERSATION).
-  const upgradedAgents = new Map();
-  // The flush test's agent carries a root-stage proof (the poisoned-draft
-  // precondition): the upgrade path requires PRECONVERSATION_ROOT to promote.
-  const flushFleet = structuredClone(fleet);
-  flushFleet.agents[0].transport_proof.transport_stage = 'PRECONVERSATION_ROOT';
-  registerFleetRuntime({
-    snapshot: () => ({ agents: [upgradedAgents.get(lease.agent_id) || flushFleet.agents[0]] }),
-    markTransportProven: async ({ agent_id, conversation_url }) => {
-      const base = structuredClone(flushFleet.agents[0]);
-      base.transport_proof = {
-        ...base.transport_proof,
-        transport_stage: 'CONVERSATION',
-        conversation_url,
+  const rootProof = {
+    schema: 'metaengine.browser.fleet-transport-proof.v1',
+    transport_stage: 'PRECONVERSATION_ROOT',
+    tab_id: lease.tab_id,
+    target_id: lease.target_id,
+    generation_epoch: lease.agent_generation_epoch,
+    conversation_url: 'https://chat.z.ai/',
+    conversation_url_sha256: crypto.createHash('sha256').update('https://chat.z.ai/').digest('hex'),
+    proven_at: '2026-09-28T00:00:00.000Z',
+    authority_effect: false,
+  };
+  const fleet = fleetOf([lease], new Map([[lease.agent_id, rootProof]]));
+  const effects = [];
+  const cycle = new DevOsNativeTaskCycle({
+    getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }),
+    executeCommand: async (command) => {
+      effects.push(command.action);
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      throw new Error(`unexpected_physical_effect:${command.action}`);
+    },
+    signedRequest: async (path) => {
+      if (path === '/v1/devos/cycle') return {
+        status: 200, ok: true,
+        async json() { return { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] }; },
       };
-      upgradedAgents.set(agent_id, base);
-      return { agents: [base] };
+      throw new Error(`unexpected:${path}`);
     },
   });
-  try {
-  const sequence = [];
-  let flushed = false;
-  const signedRequest = async (path) => {
-    if (path === '/v1/devos/cycle') return { status: 200, ok: true, async json() { return { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] }; } };
-    if (path === '/v1/devos/mark-running') return { status: 200, ok: true, async json() { return { state: 'RUNNING' }; } };
-    throw new Error(`unexpected:${path}`);
-  };
-  const executeCommand = async (command) => {
-    if (command.action === 'FLEET_RECONCILE') return fleet;
-    if (command.action === 'CAPTURE') {
-      sequence.push(['capture', flushed]);
-      // Root with a poisoned 31k draft until the flush lands, then the fresh conversation.
-      return flushed
-        ? frame({ url: conversationUrl(3), tabId: lease.tab_id, targetId: lease.target_id, composerValueLength: 0 })
-        : frame({ url: 'https://chat.z.ai/', tabId: lease.tab_id, targetId: lease.target_id, composerValueLength: 31384 });
-    }
-    if (command.action === 'SEMANTIC_TYPE') {
-      const payload = command.payload || {};
-      if (payload.submit_after_type === true && payload.replace_existing === false) {
-        assert.match(payload.text, /METAENGINE FLEET BOOTSTRAP FLUSH v1/);
-        flushed = true;
-        sequence.push(['flush', payload.text.length]);
-        return { effect_state: 'PROVEN_NEW_CONVERSATION', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
-      }
-      sequence.push(['task_type', payload.text.slice(0, 40)]);
-      return { effect_state: 'PROVEN_NEW_CONVERSATION', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
-    }
-    throw new Error(`unexpected_action:${command.action}`);
-  };
-  const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }), executeCommand, signedRequest });
-  const out = await cycle.cycle();
-  assert.equal(out.dispatch.state, 'RUNNING');
-  assert.equal(out.dispatch.conversation_bootstrap, 'FLUSHED_CONVERSATION_PROVEN');
-  const flushIndex = sequence.findIndex((row) => row[0] === 'flush');
-  const taskIndex = sequence.findIndex((row) => row[0] === 'task_type');
-  assert.ok(flushIndex >= 0, 'the flush fired');
-  assert.ok(taskIndex > flushIndex, 'the real task typed only after the flush created the conversation');
-  } finally {
-    clearFleetRuntime();
-  }
-});
-
-test('D-C3: an over-limit draft attempts the verified seed replace and still fails with the precise reason when it cannot be proven (no blind append)', async () => {
-  const lease = mkLease(4, 'tab_c05a46b6-5fbd-4b36-97e2-d7dbbfe94d14');
-  const fleet = fleetOf([lease]);
-  const types = [];
-  const signedRequest = async (path) => {
-    if (path === '/v1/devos/cycle') return { status: 200, ok: true, async json() { return { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] }; } };
-    throw new Error(`unexpected:${path}`);
-  };
-  const executeCommand = async (command) => {
-    if (command.action === 'FLEET_RECONCILE') return fleet;
-    if (command.action === 'CAPTURE') return frame({ url: 'https://chat.z.ai/', tabId: lease.tab_id, targetId: lease.target_id, composerValueLength: 34064 });
-    if (command.action === 'SEMANTIC_TYPE') { types.push(command.payload); return { effect_state: 'AMBIGUOUS_AFTER_ENTER', automatic_retry_allowed: false, authority_effect: true }; }
-    throw new Error(`unexpected_action:${command.action}`);
-  };
-  const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }), executeCommand, signedRequest });
-  await assert.rejects(() => cycle.cycle(), /fleet_task_root_draft_over_flush_limit:34064/);
-  assert.equal(types.length, 1, 'exactly one verified-replace attempt: the SHORT seed replaces the dead draft wholesale');
-  assert.equal(types[0].replace_existing, true, 'the seed replace never appends to the poisoned draft');
-  assert.ok(types[0].text.length < 1000, 'the submitted text is tiny — no oversized garbage can ever be sent');
-});
-
-test('D-C3: a refused flush (Enter refused by the site) degrades to the normal root dispatch path', async () => {
-  const lease = mkLease(5, 'tab_0c5f2143-02ba-4775-9520-6b937dd5ddc2');
-  const fleet = fleetOf([lease]);
-  const types = [];
-  let conversation = null;
-  const signedRequest = async (path) => {
-    if (path === '/v1/devos/cycle') return { status: 200, ok: true, async json() { return { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] }; } };
-    if (path === '/v1/devos/mark-running') return { status: 200, ok: true, async json() { return { state: 'RUNNING' }; } };
-    throw new Error(`unexpected:${path}`);
-  };
-  const executeCommand = async (command) => {
-    if (command.action === 'FLEET_RECONCILE') return fleet;
-    if (command.action === 'CAPTURE') {
-      return conversation
-        ? frame({ url: conversation, tabId: lease.tab_id, targetId: lease.target_id, composerValueLength: 0 })
-        : frame({ url: 'https://chat.z.ai/', tabId: lease.tab_id, targetId: lease.target_id, composerValueLength: 800 });
-    }
-    if (command.action === 'SEMANTIC_TYPE') {
-      types.push(command.payload.replace_existing);
-      // Flush submit refused; the REAL dispatch then submits normally and the
-      // surface moves to the fresh conversation.
-      if (command.payload.replace_existing === false) {
-        return { effect_state: 'AMBIGUOUS_AFTER_ENTER', composer_cleared: false, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
-      }
-      conversation = conversationUrl(5);
-      return { effect_state: 'PROVEN_NEW_CONVERSATION', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
-    }
-    throw new Error(`unexpected_action:${command.action}`);
-  };
-  const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }), executeCommand, signedRequest });
-  const out = await cycle.cycle();
-  assert.equal(out.dispatch.state, 'RUNNING');
-  assert.deepEqual(types, [false, true], 'flush attempted first, then the real task dispatch proceeded');
+  await assert.rejects(() => cycle.cycle(), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  assert.deepEqual(effects, ['FLEET_RECONCILE']);
+  assert.equal(cycle.snapshot().bound_unverified_dispatch_allowed, false);
 });
 
 test('D-C1: every dispatched prompt carries the per-agent isolated-context briefing', async () => {
