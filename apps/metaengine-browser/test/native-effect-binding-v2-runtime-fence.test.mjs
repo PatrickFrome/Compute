@@ -114,7 +114,9 @@ test('v2 effect binding seals one exact hot CDP observation and executes while u
     const result = await executeSemanticCommand(webContents, { ...command, effect_binding: binding });
     assert.equal(result.action, 'SCROLL');
     assert.equal(result.authority_effect, true);
-    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 1);
+    assert.equal(result.mouse_geometry_required, false);
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent').length, 0);
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchKeyEvent' && row.params.key === 'PageDown').length, 2);
   } finally {
     releasePersistentBrowserDebugger(webContents);
     clearNativeEffectRuntimeObservationsForTest();
@@ -157,7 +159,7 @@ test('document generation change after seal rejects the mutation before input di
       executeSemanticCommand(webContents, { ...command, effect_binding: binding }),
       /native_effect_runtime_(document_generation|binding_generation)_mismatch/,
     );
-    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 0);
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchKeyEvent' && row.params.key === 'PageDown').length, 0);
   } finally {
     releasePersistentBrowserDebugger(webContents);
     clearNativeEffectRuntimeObservationsForTest();
