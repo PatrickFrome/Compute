@@ -5,13 +5,17 @@
  *   gateway:<model>     — Vercel AI Gateway (OpenAI-совместимый; ключ из Supabase RPC)
  * Пустой суффикс = дефолт провайдера.
  */
-import ZAI from "z-ai-web-dev-sdk";
 import { emit } from "./store";
 import { governorAdmit, governorReport429, governorReportSuccess, type Lane } from "./src/governor";
 import { tokenGet, tokenSet, onTokenChange } from "./src/tokens";
 import { quotaPace, quotaCacheKey, quotaCacheGet, quotaCachePut, quotaFailover } from "./src/quota";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+const BROWSER_PROBE_MODE = process.env.ME2_HOSTED_BY_BROWSER === "1" && process.env.ME2_BOOT_MODE === "probe";
+function assertProviderExecutionAllowed(): void {
+  if (BROWSER_PROBE_MODE) throw new Error("ME2_BROWSER_PROBE_MODEL_EXECUTION_DISABLED");
+}
 
 // ── R14: устойчивость к 429 (живой инцидент R13: 2 ретрая + авто-рефлексия = 3 параллельных
 // LLM-потока → провайдер ответил 429, задача упала). Ресёрч 2026 (r14-429.json): пер-аккаунтный
@@ -69,6 +73,7 @@ onTokenChange((name) => {
 });
 
 async function loadGatewayKey(): Promise<string | null> {
+  assertProviderExecutionAllowed();
   if (gatewayKey) return gatewayKey;
   // 1) vault БД — первоисточник (после первой добычи здесь всегда лежит)
   const fromDb = tokenGet("VERCEL_AI_GATEWAY_API_KEY");
@@ -101,13 +106,18 @@ async function loadGatewayKey(): Promise<string | null> {
   return gatewayKey;
 }
 
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
+let zaiInstance: any = null;
 async function zai() {
-  if (!zaiInstance) zaiInstance = await ZAI.create();
+  assertProviderExecutionAllowed();
+  if (!zaiInstance) {
+    const { default: ZAI } = await import("z-ai-web-dev-sdk");
+    zaiInstance = await ZAI.create();
+  }
   return zaiInstance;
 }
 
 export async function listProviders(): Promise<Record<string, { ready: boolean; note: string }>> {
+  assertProviderExecutionAllowed();
   const key = await loadGatewayKey();
   return {
     zai: { ready: true, note: "z-ai-web-dev-sdk (native)" },
@@ -128,6 +138,7 @@ let gwTlsCheckedAt = 0;
 let gwTlsInflight: Promise<boolean | null> | null = null;
 
 export async function gatewayTlsProbe(force = false): Promise<boolean | null> {
+  assertProviderExecutionAllowed();
   if (!force && gwTlsCheckedAt && Date.now() - gwTlsCheckedAt < GW_PROBE_TTL_MS) return gwTlsOk;
   if (gwTlsInflight) return gwTlsInflight;
   gwTlsInflight = (async () => {
@@ -184,6 +195,7 @@ export function providerChain(model: string, gatewayAlive = true): ProviderChoic
  *  а не хоронит её. opts.lane: P0 | P1 (default) | P2. opts.cache: дедуп детерминированных
  *  промптов (temperature=0 — ревью/классификация). */
 export async function chat(model: string, messages: ChatMessage[], opts: { temperature?: number; lane?: Lane; cache?: boolean } = {}): Promise<string> {
+  assertProviderExecutionAllowed();
   const lane = opts.lane ?? "P1";
   const adm = await governorAdmit(lane);
   if (!adm.ok) throw new Error(`${adm.reason}: LLM-вызов отклонён Governor (lane ${lane})`);
