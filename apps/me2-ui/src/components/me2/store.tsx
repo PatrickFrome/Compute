@@ -15,8 +15,14 @@ import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
-  | "command" | "agents" | "browser" | "code" | "tasks"
-  | "supervisor" | "compute" | "memory" | "observability" | "system";
+  | "browser" | "code" | "tasks"
+  | "supervisor" | "memory" | "observability" | "system";
+
+// Historical deep-link values are accepted only at the routing boundary so an
+// old hash/event can converge safely to Browser. They are not valid persisted
+// page state and therefore cannot re-enter the product authority type graph.
+type LegacyPageKey = "command" | "agents" | "compute";
+type PageRouteKey = PageKey | LegacyPageKey;
 
 // R97 native swarm convergence: COMMAND/AGENTS/COMPUTE were daemon/API-agent
 // surfaces. They are intentionally absent from production navigation.
@@ -63,7 +69,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
   { key: "supervise", label: "Supervisor", page: "supervisor", hint: "objectives, orchestration and recovery" },
 ];
 
-export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
+export type PaletteMode = "all" | "actions" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
 export type ContextDrawerDock = "bottom" | "right";
@@ -113,7 +119,7 @@ interface Me2State {
   booted: boolean;
 
   init: () => void;
-  setPage: (p: PageKey) => void;
+  setPage: (p: PageRouteKey) => void;
   setWorkspace: (w: WorkspaceKey) => void;
   setPalette: (open: boolean) => void;
   setDialog: (d: DialogKind) => void;
@@ -645,9 +651,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   setPage: (p) => {
-    // R97 compatibility fence: historical deep links into daemon/API-agent
-    // surfaces never resurrect those control planes. They converge to the
-    // canonical native Browser fleet workspace.
+    // R100 input-only compatibility fence: historical deep links can arrive
+    // from persisted hashes/native events, but legacy daemon/API-agent pages
+    // are not members of PageKey and can never become stored navigation state.
     const nextPage: PageKey = (p === "command" || p === "agents" || p === "compute") ? "browser" : p;
     // Any page transition invalidates in-flight drawer geometry replies.
     // A new RUN/Browser sync below gets a fresh sequence/context token.
