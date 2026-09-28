@@ -12243,3 +12243,51 @@ Stage Summary:
 - НЕ РАБОТАЕТ: канал Supabase (REST+RPC → 503 PGRST002, сторона upstream, длится >1ч) → вся live-browser командная очередь недостижима.
 - НЕ ПРОВЕРЕНО: end-to-end roundtrip команд браузера (TAB_CENSUS/SELECT_TAB/NEW_TAB/NAVIGATE/SEMANTIC_TYPE/TYPED_CLICK/CAPTURE_VIEW/READ_TRANSCRIPT/RESOLVE_PROMPT/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — заблокировано каналом; поведение browser-клиента на устройствах.
 - Next: owner восстанавливает Supabase upstream → прогнать dispatch-батарею 13-действий по живому браузеру; интеграция роя в me2-daemon плоскость (иммунитет к reaper); цель 4 (супервизор вечно-жив) локально — да (guard+watchdog), сквозная с браузером — после восстановления канала.
+
+---
+Task ID: BROWSER-TEST-20260929-0300
+Agent: METAENGINE (supervisor, Job 419203 re-fire 03:00)
+Task: Повторный цикл 419203 — live-браузер через Supabase + локальная плоскость роя.
+
+Work Log:
+- Канал: P3 real-JWT REST теперь hang→timeout 20s (был 503/2.4s в 02:34); RPC issue_native_v1 → 503 PGRST002 (10.6s). PostgREST→DB по-прежнему вниз; НО Storage восстановился (HB 02:52: sb=9ok/0fail) — upstream частично реабилитируется.
+- Локальная плоскость (one-shot): swarm UP 2s; батарея 19/19 PASS за 2м12с; roster=11; Δ15 циклов/60с; LLM-координация живая (33 ответа); spawn sw_2xfluwg1 gen=1 с родословной; mute/kill/архив ok; память 34 урока/12 эпизодов (было 30 — рой учился между прогонами); swarm_improve 49 предложений (было 43); gateway :81 и Next :3000 → 200; WS [state] ok.
+- Стресс: 30× LLM-429 в логе за прогон — fatal-guard удержал все циклы, 0 потерь (2-е подтверждение антихрупкости).
+
+Stage Summary:
+- РАБОТАЕТ: 19/19 локальных механик (цели 1,2,3,5); механики вечной жизни под 429-стрессом; межпрогонное самообучение роя (уроки 30→34, предложения 43→49).
+- НЕ РАБОТАЕТ: Supabase PostgREST→DB (REST+RPC 503/hang PGRST002) — командная очередь браузера недостижима; Storage при этом жив.
+- НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокировано каналом 3-й час.
+- Next: owner — рестарт PostgREST/DB upstream; после восстановления — dispatch-батарея 13 действий; интеграция роя в me2-daemon (иммунитет).
+
+---
+Task ID: EVOLVE-ROUND-22
+Agent: self-evolve v1.46 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-PWA] PWA-мета Mission Control: manifest (name/theme_color/icons), theme-color zinc-950, apple-touch-icon, offline-fallback статуса демона
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 88%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.46
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-PWA] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-PWA' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 22 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: 416839-EV-PWA
+Agent: Super Z (cron SELF-EVOLVE tick, engine v1.47->v1.48)
+Task: SELF-EVOLVE tick — evolve + реализация [EV-PWA] (PWA-мета Mission Control: manifest name/theme_color/icons, theme-color zinc-950, apple-touch-icon, offline-fallback статуса демона), верификация через gateway :81 (agent-browser, raw :3000 не использовался для верификации)
+
+Work Log:
+- engine: evolve round=22 (client :81 HTTP 200, lint 0/0, score 88%) → пик EV-PWA; аудит «уже реализовано?»: manifest/themeColor/apple-touch отсутствуют в src/app и public; offline-fallback частично существовал (error-phase + reconnect-бейдж)
+- реализация (маршрут / только, page.tsx НЕ тронут — фриз соблюдён): src/app/layout.tsx — metadata.manifest=/manifest.webmanifest, applicationName, appleWebApp (capable/black-translucent/ME2 MC), icons.apple, export const viewport themeColor=#09090b (zinc-950); public/manifest.webmanifest (name ME2 Mission Control, standalone, zinc-950, 3 иконки); public/icons/{icon-192,icon-512,icon-512-maskable,apple-touch-icon}.png (генерация scripts/gen-pwa-icons.py, Pillow, zinc-950+emerald swarm-glyph, maskable 80% safe-zone)
+- БАГ-ОХОТА (главное открытие раунда): при живой верификации :81 обнаружен pre-existing краш клиента «Application error» — swarm down → прокси /api/swarm/* отдаёт 502 c JSON content-type → loadAll ставил мусор в swarm-state → рендер падал на swarm.lineage.nodes (TypeError reading 'nodes') БЕЗ error boundary → мёртвая страница вместо offline-fallback. Диагностика: git-stash дискриминатор (правка layout ни при чём), ErrorBoundary-ловушка в console.tsx (первый import был type-only → ReferenceError Component, поймал dev overlay Next 16.1.3; чинено), затем оригинальный краш пойман boundary
+- fix (UI-слой /, page.tsx цел): ConsoleErrorBoundary (class, getDerivedStateFromError + fallback Ghost/диагностика/Перезагрузить) вокруг SwarmConsoleInner; loadAll валидирует /state payload (!sRes.ok || !Array.isArray(s.agents) → throw → чистый error-phase); lineage-доступы optional-chained (2 места)
+- верификация через gateway :81: swarm DOWN → offline-fallback рендерится («Рой не отвечает» + Ghost + Повторить), манифест/иконки 200 через :81; swarm UP (one-shot) → ready-phase: население 11, поколения 4, циклы 425, LIVE, manifest link + theme-color #09090b в DOM; скриншоты download/ev-pwa-{ready-verify,recovered-verify,ready-live}.png; lint после всех правок 0/0
+- движок: self-update implemented-EV-PWA → v1.48, tasks_done=13; BACKLOG +EV-AUTORETRY (авто-retry error-phase с backoff 5/10/20s cap 60s + бейдж — найдено при верификации: рой ожил, консоль ждала ручного «Повторить»); bash -n OK; зеркала /tmp/context-vault-mirror + /home/sync/me2-context-backups пересинхронизированы 2/2
+
+Stage Summary:
+- EV-PWA закрыт (durable в evolve.state implemented CSV): Mission Control теперь PWA-мета-полный (manifest+zinc-950+apple-touch-icon) и краш-устойчивый (boundary+валидация+offline-fallback вместо мёртвой страницы)
+- pre-existing клиентский краш роя-offline обнаружен и исправлен — до этого консоль НИКОГДА не переживала выключенный рой (v1.0.0 release был верифицирован только REST-батареей, не браузером)
+- фризы соблюдены: page.tsx 0 правок; секреты не печатаны/не коммичены; force-push отсутствовал; чужие hot-tree правки не тронуты (git status: только worklog.md + мои файлы)
+- next tick: [EV-AUTORETRY] авто-восстановление error-phase (кандидат закрытия следующего раунда)
