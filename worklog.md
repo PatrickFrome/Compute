@@ -11853,3 +11853,58 @@ Stage Summary:
 - §11 закрыт на executor-уровне: цепочка execution→outcome→critique→lesson→retrieval теперь дотянута до worker'а (память влияет на планировщик, чат и исполнителя)
 - Next tick: (1) наблюдение первого органического reviewer-прогона через fleet-канал (spans: me2.channel_code, TASK_REVIEWED/FAILED события), (2) миграция оставшихся 4 консьюмеров (agentchat/eval/rsi + review-путь), (3) RESEARCHER consumption проверка (tool-request pending), (4) effect-plane fix verify на build bump (фаза 5)
 - Security: секреты не печатались/не коммитились; Sentinel/Guardian не обходились; mutations — scratch-табы адаптера с уборкой; armed/owner-домены не тронуты
+
+---
+Task ID: 419718-1615-PHASE3-COMPLETE-ZAI-QUARANTINE
+Agent: Super Z (cron tick, Job 419718 @16:15, directive sha256 verified 0aa09579… exact)
+Task: Продолжение с точки остановки 1530-тика — (1) наблюдение органического reviewer-прогона; (2) миграция оставшихся консьюмеров; (3) RESEARCHER consumption; (4) effect-plane fix verify на build bump; мутации с паузами ≥15-20s и readback, без blind retry после AMBIGUOUS.
+
+Work Log:
+- R0 директива: sha256 = 0aa0957922d0f9d6…f739 EXACT — исполнение дословно; стоп-точка по worklog = 419718-1530 (фаза 3 открыта, reviewer 1/5).
+- Органический reviewer-прогон: НЕ состоялся (0 REVIEW/CHANNEL-событий с 15:30 в daemon-базе; последние TASK_REVIEWED = Sep 27 16:01, ещё до миграции) — очередь TASK_DONE пуста, ожидание легитимно; интеграционный прогон уйдёт органически на следующем TASK_DONE (hot-reload активен).
+- BONUS-РАССЛЕДОВАНИЕ целостности: подозрение на коррупцию reviewer.ts:132 (render-артефакт «matchesatches») ОПРОВЕРГНУТО hex/хэш-верификацией (байт 5b = [ на месте; git hash-object file == blob; md5 line совпал) — ЛОЖНАЯ ТРЕВОГА инструментария отображения; providers.ts:194 «k(primary)» — тот же класс артефакта (hex: [mk(primary)] корректен). Урок L24: bracket-тяжёлый код верифицировать hex/хэшем, не текстовым рендером (grep/sed-вывод искажает [X-последовательности).
+- §3 КРИТИЧЕСКОЕ ОБНАРУЖЕНИЕ: ветка zai в chatOnce = ЖИВОЙ SDK model-API путь (z.chat.completions.create через z-ai-web-dev-sdk) — прямой violation директивы §3 (z.ai API — первая строка запрещённого списка); scan-1408 пометил product-surface clean, т.к. глядел паттерны gateway/fetch, а SDK-вызов был «нативным» дефолтом.
+- ФАЗА 3 ЗАВЕРШЕНА (миграция 4 файлов / 5 точек вызова на fleet-readback):
+  - NEW src/fleet-chat.ts — адаптер chat()-сигнатуры: governorAdmit(lane) та же дисциплина P0>P1>P2; messages[] → однострочный промпт (L20); TTL-кэш дедупа 32×30мин (v0.57.0 L2 сохранён — дедуп не жжёт browser-бюджет); ответ = изолированная reply-зона (L19), fallback — весь транскрипт; отказ = честный FleetChannelError наверх, НЕТ zai/gateway fallback.
+  - rsi.ts:77 → fleetChat(P2, 75s); catch оставлен (шаблон-фоллбек — НЕ model-API), но отказ канала теперь ВИДЕН в evidence.channel (§3-честность, не тихий провал).
+  - brain.ts:55 (brainThink) → fleetChat(P2, 75s) — planner-путь §11 теперь на каноническом канале.
+  - review.ts:175 (llmClassify) → fleetChat(P2); race-таймаут 500ms→90s (fleet-канал стеночно ~45-90с, E2E 132с worst; быстрый путь — rule-движок не тронут; fail-closed к оператору сохранён).
+  - agentchat.ts:676 (компакция P2) + :716 (turn-цикл P0/P1) → fleetChat; TURN_DEADLINE_MS 150s→600s (8 шагов × ~45-90с реалистичны; ход фоновый).
+- ZAI-QUARANTINE (4 уровня, симметрично gateway-карантину 14:15): ZAI_QUARANTINED=true; zai() → throw zai_quarantined ДО ZAI.create() (SDK никогда не инстанцируется); chatOnce zai-ветка → throw ДО SDK-вызова; providerChain → [] (ноль исполнимых model-API провайдеров); listProviders → zai/gateway ready:false + fleet: ready:true CANONICAL (честный /providers-эндпоинт). §15 TODO(remove): физическое удаление веток после organic-proof периода.
+- eval llm.failover_chain переписан ЧЕСТНО на §3-финал-инвариант (critical): providerChain любой модели = ПУСТАЯ цепочка + gatewayReady()=false; старое ожидание (zai-primary/gateway-alt) противоречил бы новому карантину — инвариант «ноль model-API путей» закреплён контрактом.
+- РЕГРЕССИЯ: bun run lint — 0 ошибок (daemon-файлы в monorepo-ignore, проверка типами через gate); bun run check → GATE PASS: daemon boot + eval 70/70 (изолированный контур). Hot-reload живого daemon'а (PID 1244/1252) подхватил правки — /health 200 после, краша нет.
+- Build pin: UNCHANGED (0.7.0-dev.36336130139.1, CURRENT) → effect-plane re-probe корректно пропущен (5 no-effect proofs стоят).
+- RESEARCHER: SILENT 10-й подряд (34786 chars = baseline; READ_TRANSCRIPT read-only, БЕЗ re-ping — noise-дисциплина); tool-request TOOL_REQUEST_V1 остаётся pending — consumption решится, когда консьюмер-владелец запроса (eval-бейзлайн) перейдёт на fleet-канал.
+- Live-browser мутации: НОЛЬ за тик (2 read-команды: SELF_UPDATE_STATUS, READ_TRANSCRIPT — оба COMPLETED, paced 2s, policy-фильтр через policy_engine_mvp).
+- Артефакты: src/fleet-chat.ts, providers.ts (карантин), src/{review,agentchat,rsi,brain,eval}.ts, r419718-1615-organic-check.ts, r419718-1615-reads.py, browser-test-results-r419718-1615-reads.json; коммит 4c5b9e43 (main, branch-local).
+
+Stage Summary:
+- §3 ФИНАЛ ДОСТИГНУТ на уровне кода: рантайм daemon имеет НОЛЬ исполнимых model-API путей — zai-SDK и gateway оба throw-only; канонический канал = fleet-readback (реальный Web UI), физически доказан E2E (15:30) + contract (15:15); все 5 консьюмеров migrated (5/5).
+- §14 контрактная база обновлена: eval 70/70 закрепляет «ноль model-API» инвариант (бывший failover-тест честно переписан под новую архитектуру, не подогнан).
+- §2/фаза-5 roadmap: z.ai Agent-creation E2E по-прежнему заблокирован TYPED_CLICK effect-plane (ждёт build bump); после фикса — создать Agent-сессию через sidebar «Agent» (кнопка локализована 14:00).
+- Next tick: (1) наблюдение первого органического fleet-канал прогона (TASK_DONE→reviewer или TASK_LEASED→worker с memory_lessons); (2) §15 физическое удаление zai/gateway веток ПОСЛЕ organic-proof окна (контрольный период без channel_code-ошибок); (3) RESEARCHER consumption при появлении потребителя; (4) effect-plane re-probe на build bump; (5) L24 зафиксировать в LESSONS.md.
+- Security: секреты не печатаны/не коммичены; Sentinel/Guardian не обходились; мутаций live-браузера ноль; armed/owner-домены не тронуты.
+
+---
+Task ID: 419718-1615-PHASE3-SWARM-CONVERGENCE
+Agent: Super Z (cron tick, Job 419718 @16:15, directive sha256 verified 0aa09579…)
+Task: Продолжение с точки остановки 1530-тика — (1) наблюдение первого органического reviewer-прогона, (2) миграция оставшихся консьюмеров, (3) RESEARCHER consumption проверка; мутации с паузами ≥15-20s и readback, без blind retry после AMBIGUOUS.
+
+Work Log:
+- контекст-guard: vault цел (26 снапов, guard ok), PRINCIPAL-DIRECTIVE sha256 точное совпадение во всех 3 зеркалах — дословное исполнение
+- КЛЮЧЕВОЕ СОБЫТИЕ ТИКА: обнаружена ПАРАЛЛЕЛЬНАЯ РАБОТА РОЯ над тем же тиком (fleet-агент, скрипт r419718-1615-organic-check.ts, файлы 08:34-08:39 UTC) — по hot-tree правилу мои правки файлов ОТМЕНЕНЫ, переключение на аудит/верификацию/дополняющие задачи (координация, не дублирование)
+- рой закрыл фазу 3 §3-миграции ПОЛНОСТЬЮ: новый src/fleet-chat.ts (адаптер chat()-сигнатуры над fleetReadbackAsk: governor-admit полос P0>P1>P2, TTL-кэш дедупа 32×30мин, L20-плоскость, reply-зона); мигрированы ВСЕ оставшиеся консьюмеры — review.ts (classifier), agentchat.ts (compact+turn), rsi.ts, brain.ts (brainThink); providers.ts = §3-ФИНАЛ: ZAI_QUARANTINED=true + GATEWAY_QUARANTINED=true (обе ветки мертвы, environ-override запрещён, chatOnce throw)
+- МОЙ АУДИТ миграции роя (без единой правки их файлов): bunx eslint 0 errors (exit 0); bash scripts/probe.sh → GATE PASS: daemon boot + eval 70/70 (изолированный контур); daemon жив после hot-reload (v0.57.1, last_seq 4818+, health ok)
+- органическая проба (read-only скрипт роя, исполнен мной): 0 REVIEW/CHANNEL событий с 15:30, 0 TASK_DONE за сутки — органический reviewer-прогон пока не состоялся; путь ФИЗИЧЕСКИ подключён (worker.ts:389 reviewTask при lease), но пул задач пуст
+- ГЭП 6-го консьюмера: worker.ts (executor пул-агентов, chat @ :361) НЕ мигрирован роем (вне их списка 5) — при закварантиненном zai задачи пул-исполнителей честно падают на chat() throw до миграции worker; это следующий критический шаг фазы (автономный контур исполнения стоит, координаторный контур жив)
+- RESEARCHER consumption (read-only 1 команда, paced 20s, READ_TRANSCRIPT tab_bc085d57): COMPLETED 5440ms, transcript 34786 симв = ИДЕНТИЧЕН тику 1515 → 9-й consecutive silent, TOOL_REQUEST_V1 (adac6557-systel-01) всё ещё pending; потребление ждёт fleet-task доставки (отдельный механизм от консьюмер-миграции daemon'а)
+- бюджет/дисциплина: 1 live-команда за тик (READ_ONLY 0pts), пауза 20s перед командой, readback получен, blind retry отсутствуют; секреты не печатаны/не коммичены
+- коммиты: СОЗНАТЕЛЬНО не делал — hot-tree роя активен (их cron-коммит подхватит миграцию + мой worklog/artefact); мой артефакт: r419718-1615-researcher-check.py + browser-test-results-r419718-1615-researcher.json
+
+Stage Summary:
+- Фаза 3 §3-миграции ЗАКРЫТА РОЕМ (5/5 консьюмеров на fleet-канале, оба model-API пути закварантинены) и НЕЗАВИСИМО верифицирована мной (lint 0/0 + GATE 70/70) — двойной контроль сойдёлся
+- §3-ФИНАЛ достигнут: единственный канонический LLM-путь рантайма = fleet-readback (реальный Web UI composer), никаких silent fallback
+- Остаток фазы: worker.ts (executor) — 6-й консьюмер вне исходного списка; до его миграции пул-исполнение честно fail-closed; после — органический TASK_DONE→reviewer пройдёт через fleet-канал end-to-end
+- RESEARCHER: 9 silent — доставка fleet-task исследователю остаётся открытым пунктом (не блокируется консьюмер-миграцией)
+- Next tick: (1) миграция worker.ts на fleetChat (разблокирует автономное исполнение задач), (2) органический reviewer-прогон после первой TASK_DONE, (3) §15 REMOVE zai/gateway-веток после regression+physical proof, (4) RESEARCHER delivery через fleet-task, (5) effect-plane fix verify (фаза 5, Agent-surface)
+- Security: секреты не печатались/не коммитились; Sentinel/Guardian не обходились; мутаций live-браузера ноль (1 read); armed/owner-домены не тронуты
