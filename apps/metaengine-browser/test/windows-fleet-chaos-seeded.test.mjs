@@ -234,7 +234,7 @@ test('cross-layer placement and DevOS exact binding fail closed independently', 
   driftedFleet.agents[0].transport_proof.generation_epoch = 4;
   assert.throws(
     () => assertLiveLeaseBinding(lease, driftedFleet),
-    /devos_agent_state_invalid:ADMISSION_FENCED|devos_target_binding_mismatch|devos_generation_binding_mismatch/,
+    /devos_target_binding_mismatch|devos_generation_binding_mismatch/,
   );
 
   pool.registerNode(node(0, 2));
