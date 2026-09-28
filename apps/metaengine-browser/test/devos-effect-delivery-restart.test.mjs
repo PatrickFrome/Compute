@@ -40,6 +40,7 @@ const fleet = {
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
       conversation_url_sha256: conversationHash,
+      agent_surface_sha256: 'd'.repeat(64),
       proven_at: '2026-09-01T00:00:00.000Z',
       authority_effect: false,
     },
@@ -59,11 +60,15 @@ const state = (selected) => ({
   tabs: [{ tab_id: supervisorTab, selected: selected === supervisorTab }, { tab_id: lease.tab_id, selected: selected === lease.tab_id }],
 });
 const frame = ({ sent = false } = {}) => ({
+  schema: 'metaengine.native-browser.perception.v1',
   tab_id: lease.tab_id,
   target_id: lease.target_id,
-  url: sent ? conversationUrl : 'https://chat.z.ai/',
+  process_incarnation_id: 'restart-test-process-incarnation',
+  state_revision_id: 'rev_' + 'd'.repeat(64),
+  url: conversationUrl,
   viewport: { width: 1200, height: 700 },
   semantic_targets: sent ? [composer, stop] : [composer, send],
+  interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
   authority_effect: false,
 });
 const journalBinding = () => ({
