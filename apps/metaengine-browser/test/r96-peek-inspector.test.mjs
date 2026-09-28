@@ -16,8 +16,13 @@ test('R96 Peek state is ephemeral presentation-only state and dies on navigation
   assert.match(store, /peekTarget: PeekTarget \| null/);
   assert.match(store, /setPeekTarget: \(target: PeekTarget \| null\)/);
   assert.match(store, /setPeekTarget: \(target\) => set\(\{ peekTarget: target \}\)/);
-  assert.match(store, /page: p,[\s\S]{0,120}peekTarget: null/);
-  assert.match(store, /workspace: w,[\s\S]{0,120}peekTarget: null/);
+  const setPageStart = store.indexOf('setPage: (p) => {');
+  const setWorkspaceStart = store.indexOf('setWorkspace: (w) => {', setPageStart);
+  const setPaletteStart = store.indexOf('setPalette: (open) =>', setWorkspaceStart);
+  const setPageBlock = store.slice(setPageStart, setWorkspaceStart);
+  const setWorkspaceBlock = store.slice(setWorkspaceStart, setPaletteStart);
+  assert.match(setPageBlock, /page: nextPage,[\s\S]{0,120}peekTarget: null/);
+  assert.match(setWorkspaceBlock, /workspace: w,[\s\S]{0,120}peekTarget: null/);
   assert.doesNotMatch(store, /peekTarget[\s\S]{0,80}localStorage/);
 });
 
