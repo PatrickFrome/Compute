@@ -86,7 +86,7 @@ test('R93 canonical ME2 session selection uses Browser-owned session->tab bindin
   }
 });
 
-test('R93 primary renderer exposes only the narrow bound-session presentation intent', async () => {
+test('R103 primary renderer keeps the narrow bound-session host intent while retired COMMAND cannot consume it', async () => {
   const preload = await fs.readFile(path.join(browserRoot, 'src', 'preload-shell.cjs'), 'utf8');
   const main = await fs.readFile(path.join(browserRoot, 'src', 'main.mjs'), 'utf8');
   const command = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx'), 'utf8');
@@ -95,10 +95,11 @@ test('R93 primary renderer exposes only the narrow bound-session presentation in
   assert.match(preload, /metaengine:shell:primary-agent-session-select/);
   assert.match(main, /me2MissionSelectSession/);
   assert.match(main, /primary-agent-session-select/);
-  assert.match(command, /selectPrimaryAgentSession/);
-  assert.doesNotMatch(command, /BROWSER_SELECT_TAB/);
-  assert.doesNotMatch(command, /loadBrowserTabs/);
-  assert.doesNotMatch(command, /resolveExactAgentTab/);
+  assert.match(command, /data-testid="retired-command-page"/);
+  assert.match(command, /data-authority-effect="false"/);
+  assert.doesNotMatch(command, /selectPrimaryAgentSession/);
+  assert.doesNotMatch(command, /BROWSER_SELECT_TAB|loadBrowserTabs|resolveExactAgentTab/);
+  assert.doesNotMatch(command, /onClick=|ipcRenderer|me2Fetch\(|fetch\(|WebSocket/);
 });
 
 test('R93 shared agent list polling has a bounded request lifetime', async () => {
