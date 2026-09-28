@@ -102,6 +102,9 @@ const PROBE_POLICY = Object.freeze({
   browser_actuation_authority: false,
   command_mutation_enabled: false,
   token_mutation_enabled: false,
+  persistent_state_write_enabled: false,
+  durable_state_authority: false,
+  state_storage: "EPHEMERAL_MEMORY_ONLY",
   authority_effect: false,
 });
 const WS_PORT = ports.WS_PORT;
