@@ -112,7 +112,11 @@ async function startMe2IntegrationOnce({ app } = {}) {
     userData = app && typeof app.getPath === 'function' ? app.getPath('userData') : null;
   } catch { /* до ready пути могут быть недоступны — адаптеры честно DEGRADED */ }
   try {
-    await startMe2DaemonHost({ dataDir: userData ? join(userData, 'me2-daemon') : null });
+    await startMe2DaemonHost({
+      dataDir: userData ? join(userData, 'me2-daemon') : null,
+      packaged: app?.isPackaged === true,
+      resourcesPath: process.resourcesPath || '',
+    });
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_HOST_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
