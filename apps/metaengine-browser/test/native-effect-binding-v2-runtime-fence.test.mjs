@@ -94,7 +94,7 @@ function bindingFromFrame(command, frame, options = {}) {
   });
 }
 
-test('v2 effect binding seals one exact hot CDP observation and executes while unchanged', async () => {
+test('v2 effect binding seals one exact hot CDP observation and executes geometry-free while unchanged', async () => {
   clearNativeEffectRuntimeObservationsForTest();
   const { webContents, commands } = fakeWebContents();
   try {
@@ -114,7 +114,11 @@ test('v2 effect binding seals one exact hot CDP observation and executes while u
     const result = await executeSemanticCommand(webContents, { ...command, effect_binding: binding });
     assert.equal(result.action, 'SCROLL');
     assert.equal(result.authority_effect, true);
-    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 1);
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent').length, 0);
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchKeyEvent' && row.params.key === 'PageDown' && row.params.type === 'rawKeyDown').length, 1);
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchKeyEvent' && row.params.key === 'PageDown' && row.params.type === 'keyUp').length, 1);
+    assert.equal(result.mouse_geometry_required, false);
+    assert.equal(result.viewport_geometry_required, false);
   } finally {
     releasePersistentBrowserDebugger(webContents);
     clearNativeEffectRuntimeObservationsForTest();
