@@ -60,25 +60,39 @@ function isConversationUrl(value) {
   return isAgentPlatformConversationUrl(value);
 }
 
-// D-M4 (live 2026-09-19): an agent with a proven transport conversation is
-// dispatched IN that conversation. The root agent-task composer defeats
-// programmatic text control on the live surface (editing keys ignored, mouse
-// selection defeated, account-synced draft that accumulates on every failed
-// replace - observed as a 28k-char poisoned draft blocking all task
-// delivery), while the CONVERSATION composer is proven to work end-to-end
-// with the key-atomic verified replace (the supervisor wake lane runs on it
-// continuously). If the agent tab is not currently on its proven
-// conversation, ONE bounded navigation returns it before any typing.
-// First dispatches (no proof yet) keep the root flow - a freshly
-// provisioned tab has a clean composer.
-function provenConversationUrlOf(agent) {
-  const url = String(agent?.transport_proof?.conversation_url || '').trim();
+// R98 Agent-origin admission: task delivery is legal only after the existing
+// promotion path has proved z.ai Agent mode, created a real Agent task/session,
+// and persisted that origin into the fleet transport proof. A bare /c/<id> URL
+// is shared with ordinary Chat and therefore carries no Agent authority.
+//
+// This low-level dispatcher used to accept BOUND_UNVERIFIED workers and could
+// bootstrap them directly from the ordinary root. That was a second Agent
+// creation path and violated the canonical product contract. Bootstrap now
+// belongs exclusively to DevOsNativeTaskCycle promotion:
+//   BOUND_UNVERIFIED -> AGENT_HOME proof -> New Task -> conversation -> ACTIVE.
+// The dispatcher consumes ACTIVE Agent-origin sessions only.
+function exactAgentOriginProof(agent) {
+  if (String(agent?.lifecycle_state || '') !== 'ACTIVE') return null;
+  const proof = agent?.transport_proof;
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1' || proof.authority_effect !== false) return null;
+  if (String(proof.tab_id || '') !== String(agent?.tab_id || '')) return null;
+  if (String(proof.target_id || '').toLowerCase() !== String(agent?.target_id || '').toLowerCase()) return null;
+  if (Number(proof.generation_epoch) !== Number(agent?.generation_epoch)) return null;
+  if (!/^[a-f0-9]{64}$/.test(String(proof.conversation_url_sha256 || '').toLowerCase())) return null;
+  if (!/^[a-f0-9]{64}$/.test(String(proof.agent_surface_sha256 || '').toLowerCase())) return null;
+  const url = String(proof.conversation_url || '').trim();
   if (!url) return null;
   try {
-    return normalizeAgentPlatformConversationUrl(url);
+    const normalized = normalizeAgentPlatformConversationUrl(url);
+    if (sha256(normalized) !== String(proof.conversation_url_sha256 || '').toLowerCase()) return null;
+    return Object.freeze({ proof, conversation_url: normalized });
   } catch {
     return null;
   }
+}
+
+function provenConversationUrlOf(agent) {
+  return exactAgentOriginProof(agent)?.conversation_url || null;
 }
 
 function isAtConversationUrl(webContents, conversationUrl) {
@@ -120,7 +134,9 @@ export async function dispatchFleetTask({
   const task = normalizePayload(payload);
   const agent = fleet.snapshot().agents.find((row) => row.agent_id === task.agent_id);
   if (!agent) throw new Error('fleet_task_agent_not_found');
-  if (!['BOUND_UNVERIFIED','ACTIVE'].includes(String(agent.lifecycle_state))) throw new Error(`fleet_task_agent_state_invalid:${agent.lifecycle_state}`);
+  if (String(agent.lifecycle_state) !== 'ACTIVE') throw new Error(`fleet_task_agent_state_invalid:${agent.lifecycle_state}`);
+  const agentOrigin = exactAgentOriginProof(agent);
+  if (!agentOrigin) throw new Error('fleet_task_agent_origin_proof_invalid');
   if (Number(agent.generation_epoch) !== task.generation_epoch) throw new Error('fleet_task_generation_binding_mismatch');
   const tabId = String(agent.tab_id || '');
   const targetId = String(agent.target_id || '').toLowerCase();
