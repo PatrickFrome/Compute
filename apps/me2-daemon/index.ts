@@ -234,7 +234,16 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     }
     if (path === "/state" && req.method === "GET") {
       const state = withContract(snapshot());
-      return json(res, 200, PROBE_MODE ? { ...state, browser_probe: PROBE_POLICY } : state);
+      // Probe mode is read-only: expose package identity from the immutable
+      // runtime constant instead of writing boot/version metadata into SQLite.
+      const probeState = PROBE_MODE
+        ? {
+            ...state,
+            meta: { ...(state?.meta || {}), version: VERSION },
+            browser_probe: PROBE_POLICY,
+          }
+        : state;
+      return json(res, 200, probeState);
     }
     // ── R49 (фаза A): GET /ui — самодостаточная Mission Control (0 сборки, 0 зависимостей).
     // Читает read-only REST того же origin; операции — socket agentchat:op (REST-операций нет).
