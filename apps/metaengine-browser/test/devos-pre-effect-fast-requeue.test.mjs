@@ -1,6 +1,10 @@
 import test from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
+
+const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const CONVERSATION_SHA256 = crypto.createHash('sha256').update(CONVERSATION).digest('hex');
 
 const lease = {
   task_id: '09f2e414-5c31-4fc7-87a3-f5de1315cb81',
@@ -38,8 +42,8 @@ const fleet = {
       tab_id: lease.tab_id,
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
-      conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      conversation_url_sha256: 'a'.repeat(64),
+      conversation_url: CONVERSATION,
+      conversation_url_sha256: CONVERSATION_SHA256,
       agent_surface_sha256: 'c'.repeat(64),
       proven_at: '2026-09-02T18:00:00.000Z',
       authority_effect: false,
@@ -73,9 +77,10 @@ function frame({ targetId = lease.target_id, viewport = { width: 1200, height: 6
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
     target_id: targetId,
-    url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    url: CONVERSATION,
     viewport,
     semantic_targets: composerMissing ? [send] : [composer, send],
+    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
     authority_effect: false,
   };
 }
