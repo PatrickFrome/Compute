@@ -37,8 +37,9 @@ function response(status, body) {
   return { status, ok: status >= 200 && status < 300, async json() { return structuredClone(body); } };
 }
 
-function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.target_id } = {}) {
+function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.target_id, proofAfterSubmit = null } = {}) {
   let selectedTab = supervisorTab;
+  let currentProof = proof ? structuredClone(proof) : null;
   const order = [];
   const commands = [];
   const snapshot = () => ({
@@ -52,7 +53,7 @@ function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.
       tab_id: lease.tab_id,
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
-      transport_proof: proof ? structuredClone(proof) : null,
+      transport_proof: currentProof ? structuredClone(currentProof) : null,
       automatic_retry_allowed: false,
       authority_effect: false,
     }],
@@ -84,6 +85,7 @@ function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.
     }
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.payload.submit_after_type, true);
+      if (proofAfterSubmit) currentProof = structuredClone(proofAfterSubmit);
       return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') return { authority_effect: true };
@@ -138,6 +140,16 @@ test('ACTIVE exact fleet proof is revalidated before DB mark-running and late pr
   assert.equal(out.bound_unverified_dispatch_allowed, false);
   assert.equal(h.selected(), supervisorTab);
   clearFleetRuntime(h.runtime);
+});
+
+test('mark-running rejects Agent-origin digest drift after the physical task effect', async () => {
+  const driftedAfterSubmit = structuredClone(fleetProof);
+  driftedAfterSubmit.agent_surface_sha256 = 'd'.repeat(64);
+  const h = harness({ proofAfterSubmit: driftedAfterSubmit });
+  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
+  await assert.rejects(() => cycle.cycle(), /devos_transport_active_agent_surface_proof_mismatch/);
+  assert.deepEqual(h.order, [], 'DB RUNNING must not be written after Agent-origin proof drift');
+  assert.equal(cycle.snapshot().dispatch_effect.last?.state, 'PROVEN');
 });
 
 test('ACTIVE with missing or drifted transport proof is fenced before Browser effect', async () => {
