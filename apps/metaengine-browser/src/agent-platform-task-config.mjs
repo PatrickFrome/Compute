@@ -38,7 +38,19 @@ export function classifyAgentPlatformTaskSurface(frame) {
   const transport = classifyAgentPlatformSurface(frame?.url);
   if (!transport) return Object.freeze({ stage: 'NOT_AGENT_PLATFORM', proven: false, authority_effect: false });
   if (transport.stage === 'CONVERSATION') {
-    return Object.freeze({ stage: 'CONVERSATION', proven: true, authority_effect: false });
+    // A /c/<id> URL proves only that z.ai has a conversation transport. Both
+    // ordinary Chat and Agent sessions use the same URL shape, so admitting it
+    // as an Agent task surface would collapse the product boundary back to
+    // "conversation == agent". Canonical Agent-session admission belongs to
+    // the fleet transport proof, which is bound to prior AGENT_HOME semantic
+    // evidence (agent_surface_sha256) and the exact tab/target/generation.
+    return Object.freeze({
+      stage: 'CONVERSATION',
+      proven: false,
+      reason: 'AGENT_SESSION_PROVENANCE_REQUIRED',
+      url_only_authority: false,
+      authority_effect: false,
+    });
   }
   if (transport.stage !== 'PRECONVERSATION_ROOT') {
     return Object.freeze({ stage: 'OTHER', proven: false, authority_effect: false });
@@ -232,6 +244,8 @@ export function agentPlatformTaskConfigSnapshot() {
     platform: 'GLM_ZAI',
     task_creation_surface: 'AGENT_HOME_NEW_TASK_FLOW',
     ordinary_root_is_task_surface: false,
+    conversation_url_is_agent_proof: false,
+    conversation_requires_agent_session_provenance: true,
     agent_home_proof: 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS',
     agent_home_controls: AGENT_HOME_CONTROLS,
     task_config_surface_state: 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION',
