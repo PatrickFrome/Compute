@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 import { clearFleetRuntime, registerFleetRuntime } from '../src/fleet-runtime-bridge.mjs';
@@ -26,7 +27,7 @@ const fleetProof = {
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
-  conversation_url_sha256: 'b'.repeat(64),
+  conversation_url_sha256: crypto.createHash('sha256').update(conversation).digest('hex'),
   agent_surface_sha256: 'c'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
@@ -94,9 +95,10 @@ function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.
         tab_id: lease.tab_id,
         target_id: post ? postTarget : lease.target_id,
         process_incarnation_id: 'browser-process-incarnation-001',
-        url: post ? conversation : 'https://chat.z.ai/',
+        url: conversation,
         viewport: { width: 1200, height: 640 },
         semantic_targets: post ? [composer, stop] : [composer, send],
+        interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
         authority_effect: false,
       };
     }
@@ -131,7 +133,7 @@ test('ACTIVE exact fleet proof is revalidated before DB mark-running and late pr
   const out = await cycle.cycle();
   assert.equal(out.dispatch.state, 'RUNNING');
   assert.deepEqual(h.order, ['db-running']);
-  assert.equal(out.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
+  assert.equal(out.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED');
   assert.equal(out.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(out.bound_unverified_dispatch_allowed, false);
   assert.equal(h.selected(), supervisorTab);
