@@ -22,6 +22,8 @@ const SAFE_PROBE = Object.freeze({
   command_mutation_enabled: false,
   token_mutation_enabled: false,
   persistent_state_write_enabled: false,
+  model_execution_guard: 'BROWSER_PROBE_HARD_GUARD_V1',
+  provider_sdk_static_import_allowed: false,
   durable_state_authority: false,
   state_storage: 'EPHEMERAL_MEMORY_ONLY',
   authority_effect: false,
@@ -138,4 +140,26 @@ test('R104 Browser probe state is ephemeral and cannot become a parallel durable
   assert.match(daemon, /state_storage: "EPHEMERAL_MEMORY_ONLY"/);
   assert.match(verify, /Browser probe must not create durable ME2 SQLite state/);
   assert.match(verify, /durable_state_file_created: false/);
+});
+
+
+test('R104 Browser probe hard-fences every legacy model execution root before network use', () => {
+  const providers = source('apps/me2-daemon/providers.ts');
+  const worker = source('apps/me2-daemon/worker.ts');
+  const glm = source('apps/me2-daemon/src/glm.ts');
+  const daemon = source('apps/me2-daemon/index.ts');
+
+  assert.doesNotMatch(providers, /^import ZAI from "z-ai-web-dev-sdk";/m);
+  assert.doesNotMatch(worker, /^import ZAI from "z-ai-web-dev-sdk";/m);
+  assert.doesNotMatch(glm, /^import ZAI from "z-ai-web-dev-sdk";/m);
+  assert.match(providers, /ME2_BROWSER_PROBE_MODEL_EXECUTION_DISABLED/);
+  assert.match(providers, /async function zai\(\)[\s\S]{0,120}assertProviderExecutionAllowed\(\)/);
+  assert.match(providers, /export async function gatewayTlsProbe[\s\S]{0,140}assertProviderExecutionAllowed\(\)/);
+  assert.match(providers, /export async function chat[\s\S]{0,180}assertProviderExecutionAllowed\(\)/);
+  assert.match(worker, /ME2_BROWSER_PROBE_WORKER_EXECUTION_DISABLED/);
+  assert.match(worker, /export function startMasterLoop[\s\S]{0,120}assertWorkerExecutionAllowed\(\)/);
+  assert.match(glm, /ME2_BROWSER_PROBE_GLM_EXECUTION_DISABLED/);
+  assert.match(glm, /export async function glmProbe[\s\S]{0,160}assertGlmExecutionAllowed\(\)/);
+  assert.match(daemon, /model_execution_guard: "BROWSER_PROBE_HARD_GUARD_V1"/);
+  assert.match(daemon, /provider_sdk_static_import_allowed: false/);
 });
