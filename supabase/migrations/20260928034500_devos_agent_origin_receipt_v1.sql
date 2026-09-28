@@ -69,7 +69,8 @@ begin
       'prompt_sha256', p_proof->>'prompt_sha256',
       'conversation_url_sha256', p_proof->>'conversation_url_sha256',
       'agent_surface_sha256', p_proof->>'agent_surface_sha256',
-      'effect_state', p_proof->>'effect_state'
+      'effect_state', p_proof->>'effect_state',
+      'agent_origin_contract', 'ZAI_AGENT_SURFACE_CAUSAL_V1'
     ),
     v_task.idempotency_key || ':transport:' || v_task.lease_generation
   );
@@ -78,10 +79,17 @@ begin
     'task_id', p_task,
     'state', 'RUNNING',
     'agent_surface_sha256', p_proof->>'agent_surface_sha256',
+    'agent_origin_proven', true,
+    'automatic_retry_allowed', false,
     'authority_effect', false
   );
 end
 $function$;
+
+revoke all on function public.devos_fleet_mark_running_v1(uuid,text,bigint,text,text,bigint,jsonb)
+from public, anon, authenticated;
+grant execute on function public.devos_fleet_mark_running_v1(uuid,text,bigint,text,text,bigint,jsonb)
+to service_role;
 
 comment on function public.devos_fleet_mark_running_v1(uuid,text,bigint,text,text,bigint,jsonb)
 is 'Marks an exact leased DevOS task RUNNING only with conversation + Agent-surface provenance; no retry authority.';
