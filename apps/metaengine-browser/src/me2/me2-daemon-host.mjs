@@ -32,6 +32,14 @@ let healthTimer = null;
 let stopped = false;
 let daemonDataDir = null;
 let lastLaunchMode = null;
+// R103.1 launch provenance: packaged Browser process effects may target only
+// the executable shipped under process.resourcesPath. Environment/cwd source
+// overrides are development conveniences and are never consulted by a
+// packaged incarnation.
+let daemonLaunchPolicy = Object.freeze({
+  packaged: false,
+  resourcesPath: '',
+});
 
 function emitRow(row, { error = false } = {}) {
   const text = JSON.stringify(row);
@@ -63,6 +71,10 @@ export function me2DaemonStatus() {
     launch_mode: lastLaunchMode,
     child_pid: child?.pid ?? null,
     required_boot_mode: 'probe',
+    launch_policy: daemonLaunchPolicy.packaged ? 'PACKAGED_RESOURCES_ONLY' : 'DEVELOPMENT_PROBE_SOURCE_ONLY',
+    packaged_launch: daemonLaunchPolicy.packaged,
+    launch_resources_path_bound: Boolean(daemonLaunchPolicy.resourcesPath),
+    environment_launch_override_allowed: false,
     unsafe_external_daemon_adoption_allowed: false,
     stopped,
   };
@@ -79,6 +91,9 @@ function browserProbeContract(state) {
     && probe?.browser_actuation_authority === false
     && probe?.command_mutation_enabled === false
     && probe?.token_mutation_enabled === false
+    && probe?.persistent_state_write_enabled === false
+    && probe?.durable_state_authority === false
+    && probe?.state_storage === 'EPHEMERAL_MEMORY_ONLY'
     && probe?.authority_effect === false;
   return safe ? probe : null;
 }
@@ -101,28 +116,51 @@ export async function me2HealthProbe(timeout_ms = 4000) {
 export function resolveMe2DaemonLaunch({
   resourcesPath = process.resourcesPath || '',
   cwd = process.cwd(),
-  env = process.env,
   exists = existsSync,
+  packaged = false,
 } = {}) {
+  const trustedResourcesDir = join(String(resourcesPath || ''), 'me2-daemon');
+
+  if (packaged === true) {
+    // Physical process authority in a packaged Browser is provenance-bound to
+    // one path under Electron's resources root. ME2_DAEMON_DIR, ME2_DAEMON_BIN
+    // and cwd are deliberately ignored: health readback happens AFTER spawn
+    // and cannot retroactively make an arbitrary process launch safe.
+    const packagedExe = join(trustedResourcesDir, 'me2-daemon.exe');
+    try {
+      if (!exists(packagedExe)) return null;
+      return Object.freeze({
+        dir: trustedResourcesDir,
+        bin: packagedExe,
+        args: [],
+        mode: 'PACKAGED_STANDALONE',
+        launch_provenance: 'ELECTRON_RESOURCES_PATH',
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  // Development-only source discovery. The executable primitive is fixed to
+  // bun and the dedicated probe entrypoint is mandatory; environment variables
+  // can no longer substitute an arbitrary executable or directory.
   const candidates = [
-    env.ME2_DAEMON_DIR,
-    join(resourcesPath, 'me2-daemon'),
+    trustedResourcesDir,
     join(cwd, 'me2-daemon'),
     join(cwd, '..', 'me2-daemon'),
   ].filter(Boolean);
   for (const dir of candidates) {
     try {
-      const packaged = join(dir, 'me2-daemon.exe');
-      if (exists(packaged)) {
-        return Object.freeze({ dir, bin: packaged, args: [], mode: 'PACKAGED_STANDALONE' });
-      }
       const probeEntry = join(dir, 'browser-probe-entry.ts');
       if (exists(probeEntry)) {
-        return Object.freeze({ dir, bin: env.ME2_DAEMON_BIN || 'bun', args: ['browser-probe-entry.ts'], mode: 'SOURCE_BUN_PROBE_ONLY' });
+        return Object.freeze({
+          dir,
+          bin: 'bun',
+          args: ['browser-probe-entry.ts'],
+          mode: 'SOURCE_BUN_PROBE_ONLY',
+          launch_provenance: 'DEVELOPMENT_SOURCE_PROBE_ENTRY',
+        });
       }
-      // Fail closed: Browser never launches the historical full daemon source
-      // entrypoint. Older source trees without the probe-only entrypoint are
-      // unavailable rather than silently widening Browser authority.
       if (exists(join(dir, 'index.ts'))) return null;
     } catch { /* следующий кандидат */ }
   }
@@ -185,7 +223,10 @@ function scheduleRestart() {
   restarts += 1;
   setTimeout(() => {
     if (stopped) return;
-    const launch = resolveMe2DaemonLaunch();
+    const launch = resolveMe2DaemonLaunch({
+      resourcesPath: daemonLaunchPolicy.resourcesPath,
+      packaged: daemonLaunchPolicy.packaged,
+    });
     if (!launch) {
       state = 'DEGRADED';
       lastError = 'me2_daemon_launch_not_found';
@@ -211,9 +252,17 @@ export async function waitForMe2DaemonReady({ attempts = 60, intervalMs = 250, p
 }
 
 /** Старт хоста: если daemon уже жив (внешняя инкарнация) — усыновляем, не спавним. */
-export async function startMe2DaemonHost({ dataDir = null } = {}) {
+export async function startMe2DaemonHost({
+  dataDir = null,
+  packaged = false,
+  resourcesPath = process.resourcesPath || '',
+} = {}) {
   stopped = false;
   daemonDataDir = dataDir ? String(dataDir) : null;
+  daemonLaunchPolicy = Object.freeze({
+    packaged: packaged === true,
+    resourcesPath: String(resourcesPath || ''),
+  });
   const pre = await me2HealthProbe(2500);
   if (pre.ok) {
     state = 'ADOPTED';
@@ -221,7 +270,10 @@ export async function startMe2DaemonHost({ dataDir = null } = {}) {
     lastHealthOkAt = new Date().toISOString();
     emitRow(row({ event: 'DAEMON_ADOPTED', last_seq: pre.last_seq }));
   } else {
-    const launch = resolveMe2DaemonLaunch();
+    const launch = resolveMe2DaemonLaunch({
+      resourcesPath: daemonLaunchPolicy.resourcesPath,
+      packaged: daemonLaunchPolicy.packaged,
+    });
     if (!launch) {
       state = 'DEGRADED';
       lastError = 'me2_daemon_launch_not_found';
