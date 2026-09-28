@@ -1104,15 +1104,20 @@ export class DevOsNativeTaskCycle {
   async #dispatchLease(rawLease, fleetSnapshot) {
     const lease = assertLiveLeaseBinding(rawLease, fleetSnapshot);
     const agent = (fleetSnapshot?.agents || []).find((row) => String(row?.agent_id || '').toLowerCase() === lease.agent_id) || null;
-    // D-C2/D-C3: ONE capture opens the dispatch — it serves both the flush
-    // decision (poisoned root composer?) and the PRE_TYPE readiness binding,
-    // so the clean-composer path keeps the exact capture budget of the old
-    // flow. A successful flush re-captures once: the surface moved to the
-    // fresh conversation and the real dispatch must bind against it.
-    let pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    const flush = await this.#ensureProvenConversation(lease, agent, pre);
-    if (flush?.conversation_url && !conversationUrl(pre?.url)) {
-      pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
+    // Task leases target an already ACTIVE real z.ai Agent session. Root
+    // bootstrap/dirty-draft recovery belongs exclusively to the promotion
+    // lease path before scheduler admission. Never try to "repair" an ACTIVE
+    // lease by submitting a seed on whatever page is currently visible: that
+    // would recreate the legacy Chat fallback and could mutate the wrong SPA
+    // state before causal identity is revalidated.
+    const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
+    const preConversation = conversationUrl(pre?.url);
+    const expectedConversationSha = String(agent?.transport_proof?.conversation_url_sha256 || '').toLowerCase();
+    if (!preConversation || !HASH_RE.test(expectedConversationSha) || sha256(preConversation) !== expectedConversationSha) {
+      const error = new Error('devos_agent_session_conversation_drift');
+      error.automatic_retry_allowed = false;
+      error.physical_effect_attempted = false;
+      throw error;
     }
     const telemetryDigest = await this.#telemetryDigest(lease);
     const contextBriefing = await this.#contextBriefingFor(lease, fleetSnapshot);
@@ -1167,7 +1172,6 @@ export class DevOsNativeTaskCycle {
         phase: 'PRE_TYPE',
         agent_session_proof: agent?.transport_proof || null,
       });
-      const preConversation = conversationUrl(pre?.url);
 
       await journal?.beginExecution(effectBinding, {
         phase: 'BEFORE_SEMANTIC_TYPE',
