@@ -104,10 +104,7 @@ function tabCensusFromState(state = {}) {
   const fleetTabs = tabs.filter((row) => String(row?.role || 'USER').toUpperCase() === 'FLEET').length;
   return { by_role: { FLEET: fleetTabs, USER: tabs.length - fleetTabs }, fleet_tab_ceiling: FLEET_TAB_CEILING };
 }
-function readinessOrThrow({ frame, lease, selected_tab_id, phase, fleet_snapshot }) {
-  const boundAgent = (fleet_snapshot?.agents || []).find(
-    (row) => String(row?.agent_id || '').toLowerCase() === String(lease?.agent_id || '').toLowerCase(),
-  ) || null;
+function readinessOrThrow({ frame, lease, agent, selected_tab_id, phase }) {
   const readiness = evaluateFleetSubmitReadiness({
     frame,
     expected_tab_id: lease.tab_id,
@@ -115,10 +112,11 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase, fleet_snapshot
     expected_target_id: lease.target_id,
     observed_target_id: lease.target_id,
     selected_tab_id,
+    agent_transport_proof: agent?.transport_proof || null,
+    agent_lifecycle_state: agent?.lifecycle_state || null,
     expected_agent_generation_epoch: lease.agent_generation_epoch,
     phase,
     platform: AGENT_PLATFORM_ID,
-    agent_origin_proof: boundAgent?.transport_proof || null,
   });
   if (!readiness.ready) {
     const error = new Error(`devos_submit_not_ready:${phase}:${readiness.reason}`);
@@ -266,10 +264,16 @@ function journalBinding(lease, promptSha256) {
 function proofFromJournal(entry) {
   const promptSha = String(entry?.prompt_sha256 || '').toLowerCase();
   const conversationSha = String(entry?.evidence?.conversation_url_sha256 || '').toLowerCase();
+  const agentSurfaceSha = String(entry?.evidence?.agent_surface_sha256 || '').toLowerCase();
   const effectState = String(entry?.evidence?.effect_state || '').toUpperCase();
-  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha)) return null;
-  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(effectState)) return null;
-  return { prompt_sha256: promptSha, conversation_url_sha256: conversationSha, effect_state: effectState };
+  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha) || !HASH_RE.test(agentSurfaceSha)) return null;
+  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(effectState)) return null;
+  return {
+    prompt_sha256: promptSha,
+    conversation_url_sha256: conversationSha,
+    agent_surface_sha256: agentSurfaceSha,
+    effect_state: effectState,
+  };
 }
 
 function safePreEffectCandidate(entry) {
@@ -870,31 +874,32 @@ export class DevOsNativeTaskCycle {
   // close, or otherwise bootstrap an ordinary z.ai Chat root.
   #assertCanonicalAgentConversation(lease, agent, frame) {
     const proof = agent?.transport_proof;
+    if (String(agent?.lifecycle_state || '') !== 'ACTIVE') throw new Error('devos_agent_origin_lifecycle_not_active');
     if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1' || proof.authority_effect !== false) {
       throw new Error('devos_agent_origin_proof_invalid');
     }
+    if (String(proof.transport_stage || 'CONVERSATION') !== 'CONVERSATION') throw new Error('devos_agent_origin_stage_invalid');
     if (String(proof.tab_id || '') !== String(lease.tab_id || '')) throw new Error('devos_agent_origin_tab_mismatch');
     if (String(proof.target_id || '').toLowerCase() !== String(lease.target_id || '').toLowerCase()) throw new Error('devos_agent_origin_target_mismatch');
     if (Number(proof.generation_epoch) !== Number(lease.agent_generation_epoch)) throw new Error('devos_agent_origin_generation_mismatch');
-    if (!HASH_RE.test(String(proof.agent_surface_sha256 || '').toLowerCase())) throw new Error('devos_agent_surface_proof_missing');
-    if (!HASH_RE.test(String(proof.conversation_url_sha256 || '').toLowerCase())) throw new Error('devos_agent_conversation_hash_missing');
+    const agentSurfaceSha = String(proof.agent_surface_sha256 || '').toLowerCase();
+    const conversationSha = String(proof.conversation_url_sha256 || '').toLowerCase();
+    if (!HASH_RE.test(agentSurfaceSha)) throw new Error('devos_agent_surface_proof_missing');
+    if (!HASH_RE.test(conversationSha)) throw new Error('devos_agent_conversation_hash_missing');
+    if (!Number.isFinite(Date.parse(String(proof.proven_at || '')))) throw new Error('devos_agent_origin_proven_at_invalid');
 
-    const proofConversation = conversationUrl(proof.conversation_url);
     const frameConversation = conversationUrl(frame?.url);
-    if (!proofConversation || sha256(proofConversation) !== String(proof.conversation_url_sha256 || '').toLowerCase()) {
-      throw new Error('devos_agent_conversation_proof_invalid');
-    }
     if (!frameConversation) throw new Error('devos_agent_conversation_not_proven');
-    if (frameConversation !== proofConversation) throw new Error('devos_agent_conversation_drift');
+    if (sha256(frameConversation) !== conversationSha) throw new Error('devos_agent_conversation_drift');
 
     return Object.freeze({
       state: 'PROVEN_AGENT_CONVERSATION_PRESENT',
-      conversation_url: proofConversation,
-      conversation_url_sha256: String(proof.conversation_url_sha256).toLowerCase(),
-      agent_surface_sha256: String(proof.agent_surface_sha256).toLowerCase(),
+      conversation_url_sha256: conversationSha,
+      agent_surface_sha256: agentSurfaceSha,
       authority_effect: false,
     });
   }
+
 
   // Bounded dispatch-effect telemetry note: replaces the last record and
   // stamps the wall clock. Payload fields are clipped scalars only — no
@@ -1016,9 +1021,9 @@ export class DevOsNativeTaskCycle {
       const preReady = readinessOrThrow({
         frame: pre,
         lease,
+        agent: liveAgent,
         selected_tab_id: selectedTabId(foregroundState),
         phase: 'PRE_TYPE',
-        fleet_snapshot: foregroundState?.fleet,
       });
       const preConversation = conversationUrl(pre?.url);
 
@@ -1105,9 +1110,16 @@ export class DevOsNativeTaskCycle {
         throw error;
       }
 
+      const agentSurfaceSha = String(preReady?.agent_origin_proof?.agent_surface_sha256 || '').toLowerCase();
+      if (!HASH_RE.test(agentSurfaceSha)) {
+        const error = new Error('devos_agent_session_provenance_missing_before_receipt');
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
       const proof = {
         prompt_sha256: promptHash,
         conversation_url_sha256: sha256(normalizedUrl),
+        agent_surface_sha256: agentSurfaceSha,
         effect_state: effectState,
       };
       this.#dispatchEffectCounters.dispatches += 1;
@@ -1115,6 +1127,7 @@ export class DevOsNativeTaskCycle {
       this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'PROVEN', effect_state: effectState, task_id: lease.task_id, agent_id: lease.agent_id });
       await journal?.markDeliveryPending(effectBinding, {
         conversation_url_sha256: proof.conversation_url_sha256,
+        agent_surface_sha256: proof.agent_surface_sha256,
         effect_state: proof.effect_state,
         browser_effect_proven: true,
         physical_effect_attempted: true,
