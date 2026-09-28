@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { createRemoteBrowserPoolV1, RemoteBrowserPoolError } from '../../../coordination/browser-shared/remote-browser-pool-v1.mjs';
 import { assertLiveLeaseBinding } from '../src/devos-native-task-cycle.mjs';
 
 const SEED = Number(process.env.METAENGINE_CHAOS_SEED || 20260831) >>> 0;
+const CROSS_LAYER_CONVERSATION = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const STEPS = Math.max(1000, Number(process.env.METAENGINE_CHAOS_STEPS || 6000));
 const NODE_COUNT = 32;
 const NODE_CAPACITY = 12;
@@ -218,7 +221,8 @@ test('cross-layer placement and DevOS exact binding fail closed independently', 
         tab_id: lease.tab_id,
         target_id: lease.target_id,
         generation_epoch: lease.agent_generation_epoch,
-        conversation_url_sha256: 'b'.repeat(64),
+        conversation_url: CROSS_LAYER_CONVERSATION,
+        conversation_url_sha256: sha256(CROSS_LAYER_CONVERSATION),
         agent_surface_sha256: 'c'.repeat(64),
         proven_at: '2026-08-31T19:00:00.000Z',
         authority_effect: false,
