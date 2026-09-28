@@ -17,9 +17,10 @@ test('packaged standalone daemon is preferred and needs no external Bun', () => 
   const sourceIndex = path.join(resourcesPath, 'me2-daemon', 'index.ts');
   const existing = new Set([packagedExe, sourceIndex]);
   const launch = resolveMe2DaemonLaunch({
+    packaged: true,
     resourcesPath,
-    cwd: path.join(path.sep, 'irrelevant'),
-    env: {},
+    cwd: path.join(path.sep, 'hostile-cwd'),
+    env: { ME2_DAEMON_DIR: path.join(path.sep, 'hostile-daemon'), ME2_DAEMON_BIN: 'hostile-executor' },
     exists: (candidate) => existing.has(candidate),
   });
   assert.deepEqual(launch, {
@@ -27,6 +28,7 @@ test('packaged standalone daemon is preferred and needs no external Bun', () => 
     bin: packagedExe,
     args: [],
     mode: 'PACKAGED_STANDALONE',
+    launch_provenance: 'ELECTRON_RESOURCES_PATH',
   });
 });
 
@@ -86,22 +88,25 @@ test('source checkout uses only the probe-only Bun entrypoint and rejects legacy
   const probeEntry = path.join(sourceDir, 'browser-probe-entry.ts');
 
   const launch = resolveMe2DaemonLaunch({
+    packaged: false,
     resourcesPath: '',
     cwd,
-    env: { ME2_DAEMON_BIN: 'bun-custom' },
+    env: { ME2_DAEMON_DIR: '/hostile', ME2_DAEMON_BIN: 'bun-custom' },
     exists: (candidate) => candidate === sourceIndex || candidate === probeEntry,
   });
   assert.deepEqual(launch, {
     dir: sourceDir,
-    bin: 'bun-custom',
+    bin: 'bun',
     args: ['browser-probe-entry.ts'],
     mode: 'SOURCE_BUN_PROBE_ONLY',
+    launch_provenance: 'DEVELOPMENT_SOURCE_PROBE_ENTRY',
   });
 
   const legacyOnly = resolveMe2DaemonLaunch({
+    packaged: false,
     resourcesPath: '',
     cwd,
-    env: { ME2_DAEMON_BIN: 'bun-custom' },
+    env: { ME2_DAEMON_DIR: '/hostile', ME2_DAEMON_BIN: 'bun-custom' },
     exists: (candidate) => candidate === sourceIndex,
   });
   assert.equal(legacyOnly, null, 'Browser must fail closed instead of launching the historical full daemon');
@@ -182,7 +187,9 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(host, /mode:\s*'SOURCE_BUN_PROBE_ONLY'/);
 
   const integration = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-integration-entry.mjs'), 'utf8');
-  assert.match(integration, /startMe2DaemonHost\(\{ dataDir:/);
+  assert.match(integration, /startMe2DaemonHost\(\{/);
+  assert.match(integration, /packaged:\s*app\?\.isPackaged\s*===\s*true/);
+  assert.match(integration, /resourcesPath:\s*process\.resourcesPath/);
   assert.match(integration, /stopMe2UiHost\(\{ killChild: true \}\)/);
   assert.match(integration, /stopMe2UiHostAndWait\(\{ graceMs: 2500, forceMs: 2500 \}\)/);
   assert.match(integration, /app\.on\('before-quit'/);
