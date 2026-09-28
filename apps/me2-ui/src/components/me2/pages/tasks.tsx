@@ -1,7 +1,7 @@
 "use client";
-// ── ME2 PAGE: TASKS (R74) — порт legacy «ВЕТКИ·ЗАДАЧИ» + «ОЧЕРЕДЬ ЗАДАЧ» + «METRICS·РЕТРАИ» ──
+// ── METAENGINE TASKS — durable task graph + queue projection ──────────────────
 // Источник: docs/legacy-mission-control.tsx.txt (BranchGraph L409-684, вкладки L2636-2717,
-// очередь L2728-2760, retry-metrics L1318-1328/2607-2620). Клик по ветви/задаче → Task Sheet
+// очередь L2728-2760). Клик по ветви/задаче → Task Sheet
 // (глобальный оверлей стора). Стиль: zinc+emerald плотный, font-mono для данных.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -465,7 +465,7 @@ export function TasksPage() {
           </Sec>
         </div>
 
-        {/* ── право: ОЧЕРЕДЬ + METRICS; Mirror живёт в OBSERVABILITY/Attention ── */}
+        {/* ── право: ОЧЕРЕДЬ; evidence/metrics живут в OBSERVABILITY ── */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll lg:flex-[1]">
           <Sec
             id="tasks-queue"
@@ -479,7 +479,7 @@ export function TasksPage() {
             }
           >
             {queueTasks.length === 0 && (
-              <p className="p-4 text-center text-xs text-zinc-500">очередь пуста — нажмите N</p>
+              <p className="p-4 text-center text-xs text-zinc-500">очередь пуста</p>
             )}
             <div className="space-y-1.5">
               {queueTasks.map((t) => {
