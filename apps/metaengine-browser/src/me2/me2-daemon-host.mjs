@@ -86,11 +86,16 @@ function browserProbeContract(state) {
     && probe?.read_only === true
     && probe?.model_execution_enabled === false
     && probe?.provider_api_enabled === false
+    && probe?.provider_network_enabled === false
     && probe?.agentchat_mutation_enabled === false
     && probe?.scheduler_authority === false
     && probe?.browser_actuation_authority === false
     && probe?.command_mutation_enabled === false
     && probe?.token_mutation_enabled === false
+    && probe?.filesystem_mutation_enabled === false
+    && probe?.sql_mutation_enabled === false
+    && probe?.legacy_daemon_module_loaded === false
+    && probe?.socket_mutation_surface_enabled === false
     && probe?.authority_effect === false;
   return safe ? probe : null;
 }
