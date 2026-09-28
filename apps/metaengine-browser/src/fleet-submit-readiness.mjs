@@ -1,11 +1,8 @@
 import crypto from 'node:crypto';
-import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
-  isAgentPlatformConversationUrl,
-  normalizeAgentPlatformConversationUrl,
   normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformComposer,
   resolveAgentPlatformSelectedModel,
@@ -14,8 +11,6 @@ import {
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
 const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
-const HASH_RE = /^[a-f0-9]{64}$/;
-const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const HASH_RE = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
@@ -76,7 +71,6 @@ export function evaluateFleetSubmitReadiness({
   agent_origin_proof = null,
   phase = 'PRE_CLICK',
   platform = 'CHATGPT',
-  agent_origin_proof = null,
 } = {}) {
   const expectedTab = String(expected_tab_id || '');
   const frameTab = String(frame?.tab_id || '');
