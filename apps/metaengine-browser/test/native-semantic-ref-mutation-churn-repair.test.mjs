@@ -34,7 +34,10 @@ function fakeChurningZai({
   composerBox = STANDARD_BOX,
 } = {}) {
   let attached = false;
-  let url = 'https://chat.z.ai/';
+  // These tests exercise in-session semantic-ref churn, not Agent-session
+  // bootstrap. Keep the fixture on an already-proven conversation so a
+  // successful Enter may be proven by composer-clear readback alone.
+  let url = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
   let composerValue = '';
   let axReads = 0;
   let enterCount = 0;
