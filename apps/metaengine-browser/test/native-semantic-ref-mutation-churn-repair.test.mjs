@@ -34,7 +34,7 @@ function fakeChurningZai({
   composerBox = STANDARD_BOX,
 } = {}) {
   let attached = false;
-  let url = 'https://chat.z.ai/';
+  let url = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   let composerValue = '';
   let axReads = 0;
   let enterCount = 0;
