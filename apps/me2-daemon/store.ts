@@ -499,7 +499,11 @@ export function snapshot() {
       commandsRejected: commands.filter((c) => c.status === "REJECTED").length,
       workersOnline: workers.filter((w) => w.state !== "OFFLINE").length,
     },
-    meta: { version: getMeta("version") ?? "?", boot: getMeta("boot") ?? "?" },
+    // VERSION is source identity, not mutable runtime state. Probe mode is
+    // intentionally read-only and therefore never writes meta.version; an
+    // empty/isolated probe DB must still report the exact packaged daemon
+    // version without manufacturing a SQLite write.
+    meta: { version: getMeta("version") ?? VERSION, boot: getMeta("boot") ?? "?" },
   };
 }
 export function lastSeq(): number {
