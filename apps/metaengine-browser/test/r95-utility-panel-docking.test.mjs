@@ -166,7 +166,8 @@ test('R95C native Utility sync runs only on RUN and waits for the primary-page a
   const setPageStart = store.indexOf('setPage: (p) => {');
   const setPageEnd = store.indexOf('setWorkspace: (w) => {', setPageStart);
   const setPageBlock = store.slice(setPageStart, setPageEnd);
-  assert.match(setPageBlock, /if \(nextPage === "browser"\)/);\n  assert.match(setPageBlock, /const nextPage: PageKey = \(p === "command" \|\| p === "agents" \|\| p === "compute"\) \? "browser" : p/);
+  assert.match(setPageBlock, /if \(nextPage === "browser"\)/);
+  assert.match(setPageBlock, /const nextPage: PageKey = \(p === "command" \|\| p === "agents" \|\| p === "compute"\) \? "browser" : p/);
   assert.match(setPageBlock, /primaryPageAck\.then\(reconcileRunGeometry\)/);
   assert.match(setPageBlock, /if \(get\(\)\.page === "browser"\) get\(\)\.syncContextDrawer\(\)/);
   assert.doesNotMatch(store, /if \(request\.page !== "command"\)/);
