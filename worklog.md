@@ -12441,3 +12441,48 @@ Stage Summary:
 - НЕ РАБОТАЕТ: Supabase PostgREST→DB (503 PGRST002, ~7ч) — live-браузерная командная очередь недостижима.
 - НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокированы каналом.
 - Next: owner — рестарт PostgREST + LLM-квота; после — dispatch-батарея 13 действий; выживание инстанса усиливает аргумент интеграции роя в me2-daemon :8556.
+
+---
+Task ID: BROWSER-TEST-20260929-0700
+Agent: METAENGINE (supervisor, Job 419203 re-fire 07:00)
+Task: 10-й повторный цикл 419203 — канал Supabase + локальная плоскость роя.
+
+Work Log:
+- Канал (reprobe-0700.py): P1/P2 401 (edge+auth живы), P3 real-JWT → 503 PGRST002 3.53s — PostgREST→DB вниз ~7.5ч.
+- ВЕЧНАЯ-ЖИЗНЬ ЧАСОВОЙ ДЛИТЕЛЬНОСТИ: survivor-инстанс 0600 жив >1ч после границы команды; cycles 4315→6979 (Δ2664/30мин, темп ~89/60с удержан); счётчик 429 в его логе 6158→11932 (шторм продолжается), 0 фаталов за весь период.
+- Батарея M01–M19 против survivor: 18/19 PASS; M05 FAIL (LLM-429 квота, 5-й цикл подряд); roster=14, Δциклов 97/60с; память 53/16; WS connect+[state] ok; spawn-директивы 5 в ленте.
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик; вечная-жизнь подтверждена на горизонте 1+ час (6979 циклов, 11932×429, 0 смертей) — это уже не тестовое окно, а реальный непрерывный живой процесс; транспорт WS/gateway/Next.
+- ДЕГРАДАЦИЯ (внешняя, 5-й цикл): M05 LLM-координация — upstream-квота glm.
+- НЕ РАБОТАЕТ: Supabase PostgREST→DB (503 PGRST002, ~7.5ч) — live-браузерная командная очередь недостижима.
+- НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокированы каналом.
+- Next: owner — рестарт PostgREST + LLM-квота; survivor продолжает жить как стационарный рой — кандидат на роль моста до интеграции в me2-daemon :8556.
+
+---
+Task ID: EVOLVE-ROUND-24
+Agent: self-evolve v1.50 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-PERF] мемоизация/факторизация тяжёлых компонентов без смены поведения
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.50
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-PERF] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-PERF' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 24 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: 416839-EV-PERF
+Agent: Super Z (cron SELF-EVOLVE tick, engine v1.51->v1.52)
+Task: SELF-EVOLVE tick — evolve round 24 + реализация [EV-PERF] мемоизация/факторизация тяжёлых компонентов без смены поведения
+
+Work Log:
+- engine: evolve round=24 (client :81 HTTP 200, lint 0/0, score 83%) → пик EV-PERF; зона = components/swarm/console.tsx (page.tsx заморожен, не тронут)
+- диагностика: uptimeLive тикает 1×/сек (setInterval 1000ms) → ВЕСЬ дерево консоли (лента до 200 строк, 14 AgentCard, уроки, предложения, родословная) перерисовывался ежесекундно; agentNames/lineageRoots уже были useMemo
+- реализация (поведение не изменено): memo() на Ts (внутренний 30с-тайтик сохранён), StatChip, FeedRow (до 200 строк), LineageRow (рекурсивные строки), AgentCard; стабильные колбэки handleToggleMute/handleKill через useCallback (inline-стрелки в call-site ломали бы memo)
+- lint: 0/0; верификация через gateway :81 (agent-browser, НЕ raw :3000): страница LIVE (население 14, циклы 7923→8418 у survivor-инстанса), карточки 14; табы Radix реагируют на pointerdown (нативный click() их не переключает — тонкость верификации); вкладка Поток: 120 Ts-спанов title=«28.09.2026, 22:30:54 (Europe/Moscow)» + относительное «3 ч 43 мин назад» — EV-DATES полностью сохранён; скриншот download/ev-perf-feed.png
+- движок: self-update implemented-EV-PERF → v1.52; BACKLOG +EV-VIRT-SCROLL (виртуализация ленты — следующая ступень перф-работы после мемоизации); bash -n OK; зеркала phoenix-sealed/ синхронизированы 2/2
+
+Stage Summary:
+- EV-PERF закрыт: 1Гц-перерисовки тяжёлых поддеревьев устранены (memo × 5 компонентов + стабильные колбэки), поведение идентично (EV-DATES-верификация сквозь :81 чистая); page.tsx цел; engine v1.52; следующий кандидат — EV-VIRT-SCROLL
