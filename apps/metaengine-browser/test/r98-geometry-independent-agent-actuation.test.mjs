@@ -32,15 +32,13 @@ test('R98 native semantic actuation contains no mouse-coordinate dispatch path',
   assert.match(native, /viewport_geometry_required:\s*false/);
 });
 
-test('R98 fleet and DevOS task dispatch advertise geometry-independent effects only', () => {
-  const fleet = source('fleet-task-dispatcher.mjs');
+test('R100 canonical DevOS task dispatch is the only fleet effect path and stays geometry-independent', () => {
+  const removedDispatcher = path.join(SRC, 'fleet-task-dispatcher.mjs');
   const cycle = source('devos-native-task-cycle-core.mjs');
 
-  assert.match(fleet, /mouse_geometry_required:\s*false/);
-  assert.match(fleet, /viewport_geometry_required:\s*false/);
+  assert.equal(fs.existsSync(removedDispatcher), false, 'duplicate fleet dispatcher authority must stay removed');
   assert.match(cycle, /mouse_geometry_required:\s*false/);
   assert.match(cycle, /viewport_geometry_required:\s*false/);
-
-  assert.equal(fleet.includes('Input.dispatchMouseEvent'), false);
   assert.equal(cycle.includes('Input.dispatchMouseEvent'), false);
+  assert.equal(cycle.includes('DOM.getBoxModel'), false);
 });
