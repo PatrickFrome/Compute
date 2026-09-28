@@ -36,10 +36,21 @@ function harness({
       agents: [{
         agent_id: AGENT_ID,
         role: 'IMPLEMENTER',
-        lifecycle_state: 'BOUND_UNVERIFIED',
+        lifecycle_state: 'ACTIVE',
         generation_epoch: 4,
         tab_id: TAB_ID,
         target_id: TARGET_ID,
+        transport_proof: {
+          schema: 'metaengine.browser.fleet-transport-proof.v1',
+          tab_id: TAB_ID,
+          target_id: TARGET_ID,
+          generation_epoch: 4,
+          conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          conversation_url_sha256: crypto.createHash('sha256').update('https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee').digest('hex'),
+          agent_surface_sha256: 'c'.repeat(64),
+          proven_at: '2026-09-28T00:00:00.000Z',
+          authority_effect: false,
+        },
       }],
     }),
     onTabClosed: async (tabId, reason) => {
@@ -206,8 +217,14 @@ function conversationHarness({
         target_id: TARGET_ID,
         transport_proof: proofUrl ? {
           schema: 'metaengine.browser.fleet-transport-proof.v1',
+          tab_id: TAB_ID,
+          target_id: TARGET_ID,
+          generation_epoch: 4,
           conversation_url: proofUrl,
           conversation_url_sha256: crypto.createHash('sha256').update(proofUrl, 'utf8').digest('hex'),
+          agent_surface_sha256: 'c'.repeat(64),
+          proven_at: '2026-09-28T00:00:00.000Z',
+          authority_effect: false,
         } : null,
       }],
     }),
@@ -297,7 +314,7 @@ test('D-M4: a failed conversation navigation fails the dispatch before any typin
   assert.equal(h.getMarked(), null);
 });
 
-test('D-M4: an unproven agent keeps the root flow (no navigation, no proof URL)', async () => {
+test('R98: BOUND_UNVERIFIED agent cannot bypass Agent bootstrap through task dispatch', async () => {
   const h = conversationHarness({ currentUrl: 'https://chat.z.ai/', proofUrl: null });
   h.deps.fleet.snapshot = () => ({
     agents: [{
@@ -310,14 +327,22 @@ test('D-M4: an unproven agent keeps the root flow (no navigation, no proof URL)'
       transport_proof: null,
     }],
   });
-  let captureCount = 0;
-  h.deps.captureSemanticFrame = async () => {
-    captureCount += 1;
-    return captureCount <= 3
-      ? frame({ url: 'https://chat.z.ai/' })
-      : frame({ url: CONVERSATION, stop: true });
-  };
-  await dispatchFleetTask({ payload: payload(), ...h.deps });
+  await assert.rejects(
+    () => dispatchFleetTask({ payload: payload(), ...h.deps }),
+    /fleet_task_agent_state_invalid:BOUND_UNVERIFIED/,
+  );
   assert.deepEqual(h.loadUrls, []);
-  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 1);
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 0);
+});
+
+test('R98: ACTIVE conversation without durable Agent-surface hash is fenced before effect', async () => {
+  const h = conversationHarness({ currentUrl: CONVERSATION });
+  const snapshot = h.deps.fleet.snapshot();
+  delete snapshot.agents[0].transport_proof.agent_surface_sha256;
+  h.deps.fleet.snapshot = () => structuredClone(snapshot);
+  await assert.rejects(
+    () => dispatchFleetTask({ payload: payload(), ...h.deps }),
+    /fleet_task_agent_origin_proof_invalid/,
+  );
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 0);
 });
