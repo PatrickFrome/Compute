@@ -9,14 +9,13 @@ import {
   useMe2, type PageKey, type WorkflowStageKey,
 } from "@/components/me2/store";
 import {
-  LayoutDashboard, Map, Hammer, Play, Users, Activity, Settings2,
+  Map, Hammer, Play, Users, Activity, Settings2,
   ChevronDown, Check,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const STAGE_ICONS: Record<WorkflowStageKey, LucideIcon> = {
-  command: LayoutDashboard,
   plan: Map,
   build: Hammer,
   run: Play,
@@ -69,12 +68,12 @@ export function PageBar() {
               <button
                 role="tab"
                 aria-selected={active}
-                aria-label={`${stage.label} · Alt+${stage.num} · ${stage.hint}`}
+                aria-label={`${stage.label} · ${stage.hint}`}
                 data-testid={`workflow-stage-${stage.key}`}
                 data-workflow-stage={stage.key}
                 className="group relative flex min-w-10 items-center justify-center gap-1.5 px-2 text-[10px] font-semibold tracking-[0.06em] transition-colors lg:px-3"
                 onClick={() => { setPage(stage.primaryPage); setStageMenuOpen(null); }}
-                title={`${stage.label} · Alt+${stage.num} · ${stage.hint}`}
+                title={`${stage.label} · ${stage.hint}`}
               >
                 <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-cyan-300" : "text-zinc-500 group-hover:text-zinc-300"}`} aria-hidden />
                 <span className={`hidden xl:inline ${active ? "text-zinc-100" : "text-zinc-500 group-hover:text-zinc-300"}`}>{stage.label}</span>
@@ -119,7 +118,7 @@ export function PageBar() {
       </div>
 
       <div className="flex shrink-0 items-center pl-2">
-        <span className="hidden font-mono text-[8px] text-zinc-700 xl:inline">Alt+1…7</span>
+        <span className="hidden font-mono text-[8px] text-zinc-700 xl:inline">6 stages</span>
       </div>
     </nav>
   );
