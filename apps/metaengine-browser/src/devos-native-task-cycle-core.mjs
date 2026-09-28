@@ -1241,10 +1241,19 @@ export class DevOsNativeTaskCycle {
         post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
         normalizedUrl = conversationUrl(post?.url);
       }
-      const newConversationObserved = (!preConversation && Boolean(normalizedUrl)) || submitted?.new_conversation_observed === true;
-      const effectState = ['PROVEN_COMPOSER_CLEARED','PROVEN_NEW_CONVERSATION','PROVEN_GENERATING'].includes(submitState)
-        ? (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : submitState)
-        : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
+      // The native SEMANTIC_TYPE receipt is not allowed to manufacture a
+      // "new conversation" claim. Compare the independently captured URL.
+      // Agent workers normally keep one persistent /c/<id> session across
+      // multiple tasks, so a proven submit on the same exact session is
+      // normalized to the existing durable server vocabulary
+      // PROVEN_CONVERSATION (not the UI-local PROVEN_COMPOSER_CLEARED).
+      const newConversationObserved = Boolean(normalizedUrl)
+        && (!preConversation || normalizedUrl !== preConversation);
+      const effectState = newConversationObserved
+        ? 'PROVEN_NEW_CONVERSATION'
+        : (submitState === 'PROVEN_GENERATING'
+          ? 'PROVEN_GENERATING'
+          : (submitProven && normalizedUrl ? 'PROVEN_CONVERSATION' : null));
       if (!effectState || !normalizedUrl) {
         this.#dispatchEffectCounters.dispatches += 1;
         this.#dispatchEffectCounters.ambiguous += 1;
