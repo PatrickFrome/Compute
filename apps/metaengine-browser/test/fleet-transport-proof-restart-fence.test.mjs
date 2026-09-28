@@ -39,6 +39,7 @@ function persistedActiveState() {
         target_id: OLD_TARGET,
         generation_epoch: 7,
         conversation_url_sha256: 'a'.repeat(64),
+        agent_surface_sha256: 'b'.repeat(64),
         proven_at: '2026-08-30T09:01:00.000Z',
         authority_effect: false,
       },
