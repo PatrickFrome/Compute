@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { me2HealthProbe } from '../src/me2/me2-daemon-host.mjs';
+import { me2HealthProbe, resolveMe2DaemonLaunch } from '../src/me2/me2-daemon-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BROWSER_ROOT = path.resolve(HERE, '..');
@@ -87,14 +87,73 @@ test('R99 packaged daemon manifest and installed smoke require the same probe po
 });
 
 
+test('R103.1 packaged Browser ignores hostile ME2 executable and directory overrides before spawn', () => {
+  const resourcesPath = path.join(path.sep, 'trusted', 'resources');
+  const trustedDir = path.join(resourcesPath, 'me2-daemon');
+  const trustedExe = path.join(trustedDir, 'me2-daemon.exe');
+  const hostileDir = path.join(path.sep, 'hostile', 'daemon');
+  const hostileExe = path.join(hostileDir, 'me2-daemon.exe');
+  const existing = new Set([trustedExe, hostileExe]);
+
+  const launch = resolveMe2DaemonLaunch({
+    packaged: true,
+    resourcesPath,
+    cwd: hostileDir,
+    env: { ME2_DAEMON_DIR: hostileDir, ME2_DAEMON_BIN: hostileExe },
+    exists: (candidate) => existing.has(candidate),
+  });
+
+  assert.equal(launch?.mode, 'PACKAGED_STANDALONE');
+  assert.equal(launch?.dir, trustedDir);
+  assert.equal(launch?.bin, trustedExe);
+  assert.equal(launch?.launch_provenance, 'ELECTRON_RESOURCES_PATH');
+
+  const noTrustedArtifact = resolveMe2DaemonLaunch({
+    packaged: true,
+    resourcesPath,
+    cwd: hostileDir,
+    env: { ME2_DAEMON_DIR: hostileDir, ME2_DAEMON_BIN: hostileExe },
+    exists: (candidate) => candidate === hostileExe,
+  });
+  assert.equal(noTrustedArtifact, null, 'hostile external executable cannot substitute for a missing packaged artifact');
+});
+
+test('R103.1 development launch fixes the executable to bun and requires browser-probe-entry', () => {
+  const cwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
+  const sourceDir = path.resolve(cwd, '..', 'me2-daemon');
+  const probeEntry = path.join(sourceDir, 'browser-probe-entry.ts');
+  const hostileDir = path.join(path.sep, 'hostile', 'daemon');
+
+  const launch = resolveMe2DaemonLaunch({
+    packaged: false,
+    resourcesPath: path.join(path.sep, 'missing', 'resources'),
+    cwd,
+    env: { ME2_DAEMON_DIR: hostileDir, ME2_DAEMON_BIN: 'hostile-executor' },
+    exists: (candidate) => candidate === probeEntry || candidate === path.join(hostileDir, 'browser-probe-entry.ts'),
+  });
+
+  assert.equal(launch?.mode, 'SOURCE_BUN_PROBE_ONLY');
+  assert.equal(launch?.dir, sourceDir);
+  assert.equal(launch?.bin, 'bun');
+  assert.deepEqual(launch?.args, ['browser-probe-entry.ts']);
+  assert.equal(launch?.launch_provenance, 'DEVELOPMENT_SOURCE_PROBE_ENTRY');
+});
+
 test('R103 Browser launch cannot be promoted to the historical full daemon by environment override', async () => {
   const host = source('apps/metaengine-browser/src/me2/me2-daemon-host.mjs');
+  const integration = source('apps/metaengine-browser/src/me2/me2-integration-entry.mjs');
   const entry = source('apps/me2-daemon/browser-probe-entry.ts');
   const build = source('apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1');
   const verify = source('apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs');
 
   assert.match(host, /ME2_BOOT_MODE:\s*'probe'/);
   assert.doesNotMatch(host, /ME2_DAEMON_BOOT_MODE\s*\|\|/);
+  assert.match(host, /launch_provenance:\s*'ELECTRON_RESOURCES_PATH'/);
+  assert.match(host, /environment_launch_override_allowed:\s*false/);
+  assert.doesNotMatch(host, /env\.ME2_DAEMON_DIR/);
+  assert.doesNotMatch(host, /env\.ME2_DAEMON_BIN/);
+  assert.match(integration, /packaged:\s*app\?\.isPackaged\s*===\s*true/);
+  assert.match(integration, /resourcesPath:\s*process\.resourcesPath/);
   assert.match(host, /browser-probe-entry\.ts/);
   assert.match(host, /SOURCE_BUN_PROBE_ONLY/);
   assert.doesNotMatch(host, /args:\s*\['index\.ts'\]/);
