@@ -139,12 +139,25 @@ test('GLM lane rejects an ordinary z.ai Chat composer without Agent surface proo
   assert.equal(readiness.reason,'AGENT_ORIGIN_PROOF_NOT_DURABLE');
 });
 
-test('GLM lane rejects Agent surface when selected model is GLM-5.2', () => {
+test('GLM lane rejects model drift after exact durable Agent-origin proof', () => {
+  const url = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
   const readiness = evaluateFleetSubmitReadiness({
     ...EXPECTED,
     platform:'GLM_ZAI',
     phase:'PRE_TYPE',
-    frame:glmAgentFrame({model:'GLM-5.2'}),
+    frame:{ ...glmAgentFrame({model:'GLM-5.2'}), url },
+    agent_transport_proof:{
+      schema:'metaengine.browser.fleet-transport-proof.v1',
+      tab_id:EXPECTED.expected_tab_id,
+      target_id:EXPECTED.expected_target_id,
+      generation_epoch:7,
+      conversation_url_sha256:sha256(url),
+      agent_surface_sha256:'d'.repeat(64),
+      proven_at:'2026-09-28T00:00:00.000Z',
+      authority_effect:false,
+    },
+    agent_lifecycle_state:'ACTIVE',
+    expected_agent_generation_epoch:7,
   });
   assert.equal(readiness.ready,false);
   assert.equal(readiness.reason,'AGENT_MODEL_MISMATCH');
