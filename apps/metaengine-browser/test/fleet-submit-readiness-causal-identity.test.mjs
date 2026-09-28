@@ -75,7 +75,7 @@ test('D-C2: ChatGPT lane still fails closed on foreground mismatch with TAB_NOT_
   assert.equal(readiness.authority_effect, false);
 });
 
-test('D-C2: GLM lane readiness is TAB-SCOPED — a foreground mismatch never fails the submit gate', () => {
+test('D-C2: Agent Home is bootstrap evidence only and cannot authorize a task before durable session creation', () => {
   const readiness = evaluateFleetSubmitReadiness({
     ...EXPECTED,
     platform: 'GLM_ZAI',
@@ -84,14 +84,9 @@ test('D-C2: GLM lane readiness is TAB-SCOPED — a foreground mismatch never fai
     frame: glmAgentFrame(),
   });
 
-  // Semantic addressing is geometry-independent and dispatch is tab-scoped.
-  // The surface must additionally prove z.ai Agent mode and the exact required
-  // model; an ordinary Chat composer is no longer task-admitted.
-  assert.equal(readiness.ready, true);
-  assert.equal(readiness.reason, 'READY_FOR_AGENT_TASK_ENTER_SUBMIT');
-  assert.equal(readiness.agent_surface.stage, 'AGENT_HOME');
-  assert.equal(readiness.model_proof.model, 'GLM-5.3-Flash');
-  assert.equal(readiness.viewport_rendered, false);
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.reason, 'AGENT_ORIGIN_PROOF_NOT_DURABLE');
+  assert.equal(readiness.authority_effect, false);
 });
 
 test('D-C2: GLM lane still fails closed when the CAPTUREd frame tab drifts from the lease', () => {
@@ -141,7 +136,7 @@ test('GLM lane rejects an ordinary z.ai Chat composer without Agent surface proo
     },
   });
   assert.equal(readiness.ready,false);
-  assert.equal(readiness.reason,'AGENT_SURFACE_NOT_PROVEN');
+  assert.equal(readiness.reason,'AGENT_ORIGIN_PROOF_NOT_DURABLE');
 });
 
 test('GLM lane rejects Agent surface when selected model is GLM-5.2', () => {
@@ -228,6 +223,6 @@ test('GLM conversation readiness rejects stale or mismatched durable Agent-origi
       expected_agent_generation_epoch:7,
     });
     assert.equal(readiness.ready,false);
-    assert.equal(readiness.reason,'AGENT_SURFACE_NOT_PROVEN');
+    assert.equal(readiness.reason,'AGENT_ORIGIN_PROOF_NOT_DURABLE');
   }
 });
