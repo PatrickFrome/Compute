@@ -1,7 +1,9 @@
+import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
+  normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformComposer,
   resolveAgentPlatformSelectedModel,
@@ -10,6 +12,42 @@ import {
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
 const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
+const HASH_RE = /^[a-f0-9]{64}$/;
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+
+function exactAgentConversationProof({
+  frame,
+  proof,
+  expectedTab,
+  expectedTarget,
+  expectedGeneration,
+} = {}) {
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1') return null;
+  if (proof.authority_effect !== false || proof.automatic_retry_allowed === true) return null;
+  if (String(proof.transport_stage || 'CONVERSATION') !== 'CONVERSATION') return null;
+  if (String(proof.tab_id || '') !== expectedTab) return null;
+  if (String(proof.target_id || '').toLowerCase() !== expectedTarget) return null;
+  if (!Number.isSafeInteger(Number(expectedGeneration)) || Number(proof.generation_epoch) !== Number(expectedGeneration)) return null;
+  const surfaceDigest = String(proof.agent_surface_sha256 || '').toLowerCase();
+  if (!HASH_RE.test(surfaceDigest)) return null;
+  let conversation = null;
+  try {
+    conversation = normalizeAgentPlatformConversationUrl(frame?.url);
+  } catch {
+    return null;
+  }
+  if (String(proof.conversation_url_sha256 || '').toLowerCase() !== sha256(conversation)) return null;
+  return Object.freeze({
+    schema: proof.schema,
+    transport_stage: 'CONVERSATION',
+    tab_id: expectedTab,
+    target_id: expectedTarget,
+    generation_epoch: Number(expectedGeneration),
+    conversation_url_sha256: sha256(conversation),
+    agent_surface_sha256: surfaceDigest,
+    authority_effect: false,
+  });
+}
 
 function exact(frame, role, names) {
   const rows = (frame?.semantic_targets || []).filter((row) => {
@@ -27,6 +65,8 @@ export function evaluateFleetSubmitReadiness({
   expected_target_id,
   observed_target_id,
   selected_tab_id,
+  expected_agent_generation_epoch = null,
+  agent_session_proof = null,
   phase = 'PRE_CLICK',
   platform = 'CHATGPT',
 } = {}) {
@@ -78,8 +118,27 @@ export function evaluateFleetSubmitReadiness({
   // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
     const agentSurface = resolveAgentPlatformAgentSurface(frame);
-    if (!agentSurface) {
-      return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
+    const agentConversation = exactAgentConversationProof({
+      frame,
+      proof: agent_session_proof,
+      expectedTab,
+      expectedTarget,
+      expectedGeneration: expected_agent_generation_epoch,
+    });
+    if (!agentSurface && !agentConversation) {
+      let conversationLike = false;
+      try {
+        normalizeAgentPlatformConversationUrl(frame?.url);
+        conversationLike = true;
+      } catch {
+        conversationLike = false;
+      }
+      return Object.freeze({
+        ready: false,
+        reason: conversationLike ? 'AGENT_SESSION_PROVENANCE_NOT_PROVEN' : 'AGENT_SURFACE_NOT_PROVEN',
+        foreground,
+        authority_effect: false,
+      });
     }
     const modelProof = resolveAgentPlatformSelectedModel(frame);
     if (!modelProof) {
@@ -105,6 +164,7 @@ export function evaluateFleetSubmitReadiness({
       phase: readinessPhase,
       platform: AGENT_PLATFORM_ID,
       agent_surface: agentSurface,
+      agent_session_proof: agentConversation,
       model_proof: modelProof,
       composer,
       send_control: null,
