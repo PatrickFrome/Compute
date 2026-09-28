@@ -30,24 +30,23 @@ export const PAGES: { key: PageKey; label: string; num: string }[] = [
   { key: "system", label: "SYSTEM", num: "7" },
 ];
 
-// R94 shell IA: workflow stages are the primary navigation vocabulary.
-// Existing module pages remain first-class destinations (palette/deep links) but
-// are grouped under the stage that matches the operator's real work.
-export type WorkflowStageKey = "command" | "plan" | "build" | "run" | "fleet" | "observe" | "system";
+// R102 shell IA: workflow stages describe retained product work only.
+// Retired daemon/API-agent routes normalize to Browser before they can become
+// page state; they therefore cannot re-enter the stage authority type.
+export type WorkflowStageKey = "plan" | "build" | "run" | "fleet" | "observe" | "system";
 export const WORKFLOW_STAGES: Array<{
   key: WorkflowStageKey;
   label: string;
-  num: string;
   primaryPage: PageKey;
   pages: readonly PageKey[];
   hint: string;
 }> = [
-  { key: "run", label: "FLEET", num: "1", primaryPage: "browser", pages: ["browser"], hint: "native z.ai Agent fleet and selected Browser surface" },
-  { key: "plan", label: "PLAN", num: "2", primaryPage: "tasks", pages: ["tasks"], hint: "tasks, dependencies, execution plan" },
-  { key: "build", label: "BUILD", num: "3", primaryPage: "code", pages: ["code"], hint: "code, diffs, tests, terminal" },
-  { key: "fleet", label: "SUPERVISE", num: "4", primaryPage: "supervisor", pages: ["supervisor"], hint: "objectives, coordination, recovery and approvals" },
-  { key: "observe", label: "OBSERVE", num: "5", primaryPage: "observability", pages: ["observability", "memory"], hint: "events, traces, memory and outcomes" },
-  { key: "system", label: "SYSTEM", num: "6", primaryPage: "system", pages: ["system"], hint: "runtime, releases and settings" },
+  { key: "run", label: "FLEET", primaryPage: "browser", pages: ["browser"], hint: "native z.ai Agent fleet and selected Browser surface" },
+  { key: "plan", label: "PLAN", primaryPage: "tasks", pages: ["tasks"], hint: "tasks, dependencies, execution plan" },
+  { key: "build", label: "BUILD", primaryPage: "code", pages: ["code"], hint: "code, diffs, tests, terminal" },
+  { key: "fleet", label: "SUPERVISE", primaryPage: "supervisor", pages: ["supervisor"], hint: "objectives, coordination, recovery and approvals" },
+  { key: "observe", label: "OBSERVE", primaryPage: "observability", pages: ["observability", "memory"], hint: "events, traces, memory and outcomes" },
+  { key: "system", label: "SYSTEM", primaryPage: "system", pages: ["system"], hint: "runtime, releases and settings" },
 ];
 
 export function workflowStageForPage(page: PageKey) {
