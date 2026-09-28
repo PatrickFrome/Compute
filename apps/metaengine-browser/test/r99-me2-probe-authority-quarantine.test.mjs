@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { me2HealthProbe } from '../src/me2/me2-daemon-host.mjs';
+import { me2HealthProbe, resolveMe2DaemonLaunch } from '../src/me2/me2-daemon-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BROWSER_ROOT = path.resolve(HERE, '..');
@@ -139,4 +139,73 @@ test('R103 Browser probe performs no SQL-mirror or token bootstrap effects', () 
   assert.match(daemon, /const sqlMirror = PROBE_MODE[\s\S]{0,420}ME2_BROWSER_PROBE_READ_ONLY[\s\S]{0,240}: new SqlMirror\(db\)/);
   assert.match(daemon, /if \(!PROBE_MODE\) \{[\s\S]{0,220}sqlMirror\.start\(\)[\s\S]{0,260}gotrueToken\(\)/);
   assert.doesNotMatch(daemon, /const sqlMirror = new SqlMirror\(db\);\s*sqlMirror\.start\(\)/);
+});
+
+
+test('R105 packaged Browser ignores hostile ME2 executable and directory overrides before spawn', () => {
+  const resourcesPath = path.join(path.sep, 'trusted', 'resources');
+  const trustedDir = path.join(resourcesPath, 'me2-daemon');
+  const trustedExe = path.join(trustedDir, 'me2-daemon.exe');
+  const hostileDir = path.join(path.sep, 'hostile', 'daemon');
+  const hostileExe = path.join(hostileDir, 'me2-daemon.exe');
+  const existing = new Set([trustedExe, hostileExe]);
+
+  const launch = resolveMe2DaemonLaunch({
+    packaged: true,
+    resourcesPath,
+    cwd: hostileDir,
+    env: { ME2_DAEMON_DIR: hostileDir, ME2_DAEMON_BIN: hostileExe },
+    exists: (candidate) => existing.has(candidate),
+  });
+  assert.equal(launch?.mode, 'PACKAGED_STANDALONE');
+  assert.equal(launch?.dir, trustedDir);
+  assert.equal(launch?.bin, trustedExe);
+  assert.equal(launch?.launch_provenance, 'ELECTRON_RESOURCES_PATH');
+
+  const noTrustedArtifact = resolveMe2DaemonLaunch({
+    packaged: true,
+    resourcesPath,
+    cwd: hostileDir,
+    env: { ME2_DAEMON_DIR: hostileDir, ME2_DAEMON_BIN: hostileExe },
+    exists: (candidate) => candidate === hostileExe,
+  });
+  assert.equal(noTrustedArtifact, null);
+});
+
+test('R105 development Browser launch is fixed to bun plus browser-probe-entry', () => {
+  const cwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
+  const sourceDir = path.resolve(cwd, '..', 'me2-daemon');
+  const probeEntry = path.join(sourceDir, 'browser-probe-entry.ts');
+  const hostileDir = path.join(path.sep, 'hostile', 'daemon');
+
+  const launch = resolveMe2DaemonLaunch({
+    packaged: false,
+    resourcesPath: path.join(path.sep, 'missing', 'resources'),
+    cwd,
+    env: { ME2_DAEMON_DIR: hostileDir, ME2_DAEMON_BIN: 'hostile-executor' },
+    exists: (candidate) => candidate === probeEntry || candidate === path.join(hostileDir, 'browser-probe-entry.ts'),
+  });
+  assert.equal(launch?.mode, 'SOURCE_BUN_PROBE_ONLY');
+  assert.equal(launch?.dir, sourceDir);
+  assert.equal(launch?.bin, 'bun');
+  assert.deepEqual(launch?.args, ['browser-probe-entry.ts']);
+  assert.equal(launch?.launch_provenance, 'DEVELOPMENT_SOURCE_PROBE_ENTRY');
+});
+
+test('R105 Browser probe storage is ephemeral and cannot become a parallel durable truth', () => {
+  const store = source('apps/me2-daemon/store.ts');
+  const daemon = source('apps/me2-daemon/index.ts');
+  const host = source('apps/metaengine-browser/src/me2/me2-daemon-host.mjs');
+  const verify = source('apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs');
+
+  assert.match(store, /BROWSER_PROBE_MODE = process\.env\.ME2_HOSTED_BY_BROWSER === "1"/);
+  assert.match(store, /DB_FILE = BROWSER_PROBE_MODE \? ":memory:" : join\(HERE, "me2\.db"\)/);
+  assert.match(store, /if \(!BROWSER_PROBE_MODE\) mkdirSync/);
+  assert.match(daemon, /persistent_state_write_enabled: false/);
+  assert.match(daemon, /durable_state_authority: false/);
+  assert.match(daemon, /state_storage: "EPHEMERAL_MEMORY_ONLY"/);
+  assert.match(host, /probe\?\.persistent_state_write_enabled === false/);
+  assert.match(host, /probe\?\.durable_state_authority === false/);
+  assert.match(host, /probe\?\.state_storage === 'EPHEMERAL_MEMORY_ONLY'/);
+  assert.match(verify, /Browser probe must not create durable ME2 SQLite state/);
 });
