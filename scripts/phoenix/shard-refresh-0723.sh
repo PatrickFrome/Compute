@@ -30,7 +30,7 @@ IDX=$(grep -a '^Task ID:' $WL | tail -15)
   echo '3) full copies: Supabase me2-evidence/context-vault/latest/ ; ossfs /home/sync/me2-context-backups/latest/ ; vault /home/z/context-vault/latest/';
   echo '4) phoenix scripts: /home/z/my-project/scripts/phoenix/ and vault/latest (heartbeat/restore/snapshot/guard/secrets-restore)';
   echo '5) PRINCIPAL-DIRECTIVE.md: scripts/phoenix/ + vault/latest + sync/latest (sha256=0aa0957922d0f9d65296e4038b160887eaf85fd517cf8650ca365e75e556f739)';
-  echo '6) PHX-HEARTBEAT=Job 416629, Guard=416526, PAT-watcher=413338, COMPACTOR=416631, SECRETS=416759';
+  echo '6) PHX-HEARTBEAT=Job 417373 (бывш. 416629), Guard=416526, PAT-watcher=413338, COMPACTOR=416631, SECRETS=416759, DIRECTIVE-15m=419718, BROWSER-TEST=419203';
   echo '<<<CTX-END>>>'; } > $B.tmp && mv $B.tmp $B
 
 # ---- verify ----
