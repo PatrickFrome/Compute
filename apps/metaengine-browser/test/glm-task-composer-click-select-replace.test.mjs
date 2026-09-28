@@ -2,17 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
 
-// R-DRAFT-FOCUS contract (live 2026-09-21): the chat.z.ai composer regressed to
-// a line-selecting triple-click (a 48286-char draft selected exactly 201 chars
-// — one line), so CLICK_SELECT can only PARTIALLY replace an oversized draft.
-// Meanwhile Ctrl+A+Delete through CDP key events DO select-all+clear the whole
-// textarea when the element is FOCUSED — the historical D-M3 "ignored keys"
-// were keys landing on <body> because the gesture never focused the composer.
-// The replace is therefore KEY_ATOMIC-first on EVERY surface (DOM.focus →
-// Ctrl+A → Delete → insertText), with CLICK_SELECT (triple-click + insertText)
-// as the fallback. A gesture that neither verifies nor provably no-ops stops
-// the sequence so no double-append can occur. A preexisting exact match needs
-// no gesture (resume path).
+// R98 canonical replace contract: semantic identity is backend-node based and
+// replacement is geometry-free. The old draft must be independently proven
+// empty after DOM.focus + SelectAll + DeleteBackward before Input.insertText is
+// allowed. There is no coordinate/triple-click fallback. A preexisting exact
+// match needs no editing gesture (resume path).
 
 function ax(role, name, id, value = null) {
   const node = {
@@ -94,7 +88,7 @@ function fakeTaskSurface({
         }
         if (!keysHonored) return {};
         if (params.key === 'a' && params.modifiers === 2 && params.type === 'rawKeyDown') composerValue = '';
-        if (params.key === 'Delete' && params.type === 'rawKeyDown' && composerValue === '') composerValue = '';
+        if (params.key === 'Backspace' && params.type === 'rawKeyDown' && keysHonored) composerValue = '';
         return {};
       }
       if (method === 'Input.dispatchKeyEvent.enter') return {};
@@ -164,7 +158,7 @@ test('root task surface: focused key-atomic replaces an oversized account-synced
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
+  assert.equal(result.replace_gesture, 'CDP_EDIT_COMMAND_CLEAR');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.equal(result.value_length_before, 'POISONED DRAFT x 26763 chars'.length);
   assert.equal(result.value_length_after, 'D-M3 TASK PROMPT'.length);
@@ -175,27 +169,24 @@ test('root task surface: focused key-atomic replaces an oversized account-synced
   // keys are dispatched — unfocused keys landed on <body> and were the real
   // D-M3 no-op mechanism.
   const focusCalls = h.calls.filter(([m, p]) => m === 'DOM.focus' && p?.backendNodeId != null);
-  assert.ok(focusCalls.length >= 1, 'DOM.focus on the composer expected before KEY_ATOMIC');
+  assert.ok(focusCalls.length >= 1, 'DOM.focus on the composer expected before editor-command clear');
 });
 
-test('root task surface: an empty composer types through the key-atomic path without clicks', async () => {
+test('root task surface: an empty composer inserts directly without geometry', async () => {
   const h = fakeTaskSurface({ initialDraft: '' });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
+  assert.equal(result.replace_gesture, 'EMPTY_COMPOSER_INSERT');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.equal(h.counts().insertCount, 1);
   assert.equal(h.counts().tripleClicks, 0);
 });
 
-test('root task surface: ignored keys mutate the draft and fail fast before click-select', async () => {
-  // keysHonored=false models the unfocused/editor-ignores-keys regression;
-  // insertText then appends -> readback differs from both the text and the
-  // before-value -> fail fast, no second gesture. (R-DRAFT-FOCUS: KEY_ATOMIC
-  // now runs first on the root too, so the append damage is bounded to a
-  // single prompt and CLICK_SELECT is never reached after a mutation.)
+test('root task surface: an unproven clear fails before any prompt insertion', async () => {
+  // keysHonored=false models an editor that ignores the clear gesture. The
+  // independent empty readback must fail before Input.insertText or Enter.
   const h = fakeTaskSurface({ initialDraft: 'OLD', clickSelectWorks: false });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
@@ -203,14 +194,13 @@ test('root task surface: ignored keys mutate the draft and fail fast before clic
     () => dispatchTask(h, composer.semantic_ref),
     /native_semantic_type_replace_unverified/,
   );
-  // Exactly ONE insertText ran - the append damage is bounded to a single
-  // prompt, never two.
-  assert.equal(h.counts().insertCount, 1);
+  assert.equal(h.counts().insertCount, 0);
   assert.equal(h.counts().enterCount, 0);
-  assert.equal(h.state().composerValue, 'OLDD-M3 TASK PROMPT');
+  assert.equal(h.counts().tripleClicks, 0);
+  assert.equal(h.state().composerValue, 'OLD');
 });
 
-test('conversation surface: the proven key-atomic gesture stays first', async () => {
+test('conversation surface: the proven clear-before-insert gesture stays geometry-free', async () => {
   const h = fakeTaskSurface({
     url: 'https://chat.z.ai/c/11111111-2222-3333-4444-555555555555',
     keysHonored: true,
@@ -220,15 +210,12 @@ test('conversation surface: the proven key-atomic gesture stays first', async ()
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
+  assert.equal(result.replace_gesture, 'CDP_EDIT_COMMAND_CLEAR');
   assert.equal(h.counts().tripleClicks, 0);
   assert.equal(h.counts().enterCount, 1);
 });
 
-test('conversation surface: click-select rescues when keys are a provable no-op', async () => {
-  // keysHonored=false but URL is a conversation: KEY_ATOMIC runs first, keys
-  // are ignored, insertText appends -> readback differs from before-value ->
-  // fail fast WITHOUT the click gesture (bounded damage).
+test('conversation surface: ignored clear fails closed with no coordinate fallback', async () => {
   const h = fakeTaskSurface({
     url: 'https://chat.z.ai/c/11111111-2222-3333-4444-555555555555',
     keysHonored: false,
@@ -240,7 +227,9 @@ test('conversation surface: click-select rescues when keys are a provable no-op'
     () => dispatchTask(h, composer.semantic_ref),
     /native_semantic_type_replace_unverified/,
   );
-  assert.equal(h.counts().insertCount, 1);
+  assert.equal(h.counts().insertCount, 0);
+  assert.equal(h.counts().tripleClicks, 0);
+  assert.equal(h.calls.some(([m]) => m === 'Input.dispatchMouseEvent'), false);
 });
 
 test('preexisting exact match verifies without any gesture (resume path)', async () => {
