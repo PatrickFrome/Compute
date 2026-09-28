@@ -1,0 +1,274 @@
+[
+ {
+  "id": "F1-FLEET",
+  "action": "FLEET_STATUS",
+  "command_id": "ab5d39f9-f65a-41d5-b5ba-bd30d59ca909",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 4472,
+  "result_summary": {
+   "agents": "<list:4>",
+   "counts": "<dict:LOST,ACTIVE,RETIRED,REGISTERED,PROVISIONING>",
+   "policy": "<dict:elastic,profile,max_agents,warm_agents,adopt_existing>",
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "owner_override_ambiguous_compensating_fanout": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "F1-ANALYSIS",
+  "action": "FLEET-BASELINE",
+  "status": "COMPLETED",
+  "channel": "local",
+  "before": {
+   "PLANNER": {
+    "proven_at": "2026-09-27T20:10:50.774Z",
+    "conv": "https://chat.z.ai/c/4d04c632-e541-4ee7-87af-4c0e2cd6874",
+    "epoch": 28
+   },
+   "RESEARCHER": {
+    "proven_at": "2026-09-27T17:38:20.294Z",
+    "conv": "",
+    "epoch": 28
+   },
+   "IMPLEMENTER": {
+    "proven_at": "2026-09-27T17:38:48.811Z",
+    "conv": "",
+    "epoch": 28
+   },
+   "CRITIC": {
+    "proven_at": "2026-09-27T19:20:20.816Z",
+    "conv": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375",
+    "epoch": 28
+   }
+  },
+  "tab_map": {
+   "PLANNER": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+   "RESEARCHER": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+   "IMPLEMENTER": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+   "CRITIC": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+  }
+ },
+ {
+  "id": "CAP-PLANNER",
+  "action": "CAPTURE",
+  "command_id": "d6e711ff-9b32-4972-be12-a6c391a07289",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3347,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:4",
+   "captured_at": "2026-09-28T01:29:39.560Z",
+   "text_excerpt": "GLM-5.3-Flash\nZCode\nNew Chat\nAI PPT\nAPI\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:33>",
+   "state_revision_id": "rev_7c871fcb535b76e0e5fb725daa8b828077874bc70c01adc61a016c31895f794a",
+   "semantic_refs_issued": 33,
+   "runtime_main_frame_id": "FC228C0EA717B8BC48103FFC74DD2A91",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_0ee3a4e7053648049b5d9b15c54baa66",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 4,
+   "runtime_document_generation": 6,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-4301538209410149264.-8897064157824403858",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "CAP-RESEARCHER",
+  "action": "CAPTURE",
+  "command_id": "5508e0b9-6d52-42ec-b781-98b777b5f203",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 6603,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:5",
+   "captured_at": "2026-09-28T01:29:47.912Z",
+   "text_excerpt": "GLM-5.3-Flash\nThought Process\nThis response is generated based on system protocol simulation. Regarding your query \"META",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:5>",
+   "state_revision_id": "rev_9acd2e5a3779c3a7630e81d966130e12e5e7028782a7dafbde46194595d94190",
+   "semantic_refs_issued": 5,
+   "runtime_main_frame_id": "2813D99530F0FF9BB1BEFBAB0C125B43",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_ad1c30b2bc8f4132af31c1456500bd5e",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 2,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-8495871151874312211.-2188432373245558826",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "CAP-IMPLEMENTER",
+  "action": "CAPTURE",
+  "command_id": "fd712862-6b8d-48cc-bb5c-6de41ce77e36",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3297,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:6",
+   "captured_at": "2026-09-28T01:29:56.796Z",
+   "text_excerpt": "GLM-5.3-Flash\nZCode\nAPI\nWhat can I build for you?\nW\nW\nh\nh\na\na\nt\nt\nc\nc\na\na\nn\nn\nI\nI\nb\nb\nu\nu\ni\ni\nl\nl\nd\nd\nf\nf\no\no\nr\nr\ny\ny\no\n",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:9>",
+   "state_revision_id": "rev_3f47e39724303471bcb4a167d066c7188dca3fda6bcca040eb65977b1b9426bd",
+   "semantic_refs_issued": 9,
+   "runtime_main_frame_id": "8284E975819D2D193FD5A3A03C6E4BB4",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_d5e0ccded2ee4814a564436e9b73e725",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-1022137056228514510.-4481348185736180811",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "CAP-CRITIC",
+  "action": "CAPTURE",
+  "command_id": "e4056630-4368-4eaa-b417-d818ed17fcd5",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 5118,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375c",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:7",
+   "captured_at": "2026-09-28T01:30:05.621Z",
+   "text_excerpt": "GLM-5.3-Flash\nShare\nThought Process\nTOKEN_ACK b1e68f049d81d9340f14f4baa0abfa19990bbb970ac5369c7d794781ed684e08\nREADY\nage",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:6>",
+   "state_revision_id": "rev_896048059dcd7c2a9eaa3c220849b5de7a8655b4553a1adf8f44848555bc65ed",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "6AC80A643AA1AC990CDDA4E2AD3A374F",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_20bcfe182fc6447ba075f1d9058db40b",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 6,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-8811176259389430438.-3615471931702899092",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "CAP-ANALYSIS",
+  "action": "PER-TAB-CAPTURE",
+  "status": "COMPLETED",
+  "channel": "local",
+  "captures": {
+   "PLANNER": {
+    "capture_status": "COMPLETED",
+    "url": "https://chat.z.ai/"
+   },
+   "RESEARCHER": {
+    "capture_status": "COMPLETED",
+    "url": "https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f"
+   },
+   "IMPLEMENTER": {
+    "capture_status": "COMPLETED",
+    "url": "https://chat.z.ai/"
+   },
+   "CRITIC": {
+    "capture_status": "COMPLETED",
+    "url": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375c"
+   }
+  }
+ },
+ {
+  "id": "F2-FLEET",
+  "action": "FLEET_STATUS",
+  "command_id": "1f6953b0-2e2b-48c5-b041-a14d17758222",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3674,
+  "result_summary": {
+   "agents": "<list:4>",
+   "counts": "<dict:LOST,ACTIVE,RETIRED,REGISTERED,PROVISIONING>",
+   "policy": "<dict:elastic,profile,max_agents,warm_agents,adopt_existing>",
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "owner_override_ambiguous_compensating_fanout": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "F2-ANALYSIS",
+  "action": "PROOF-REFRESH-CHECK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "after": {
+   "PLANNER": {
+    "proven_at": "2026-09-27T20:10:50.774Z",
+    "conv": "https://chat.z.ai/c/4d04c632-e541-4ee7-87af-4c0e2cd6874"
+   },
+   "RESEARCHER": {
+    "proven_at": "2026-09-27T17:38:20.294Z",
+    "conv": ""
+   },
+   "IMPLEMENTER": {
+    "proven_at": "2026-09-27T17:38:48.811Z",
+    "conv": ""
+   },
+   "CRITIC": {
+    "proven_at": "2026-09-27T19:20:20.816Z",
+    "conv": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375"
+   }
+  },
+  "proofs_refreshed": 0,
+  "verdict": "proof-not-refreshed-by-CAPTURE"
+ }
+]
