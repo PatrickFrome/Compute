@@ -1,0 +1,48 @@
+[
+ {
+  "id": "R6-DRAFT",
+  "action": "CAPTURE",
+  "command_id": "97acc3f3-bac9-46e4-b827-dd64fcf0a628",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3775,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/cfefd09f-db29-4eed-a906-5e5a0bbca383",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:196",
+   "captured_at": "2026-09-28T01:12:08.413Z",
+   "text_excerpt": "New Task\nAI PPT\nGLM-5.2\nChat\nAgent\npaprika1\nTop Risks & Missing Requirement for Swarm Task-Board\nKey Features of Swarm T",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:23>",
+   "state_revision_id": "rev_d4aa0508bc14b7f24cf59e3b7765c1d1ac143321a2577091328fcfb3ec3f73ea",
+   "semantic_refs_issued": 23,
+   "runtime_main_frame_id": "EDC730734E579736064586B6B45AEA76",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_99ff754056704b1facc41cde9c433b62",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 18,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-7176398497001797586.7801295529085023620",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "R6-ANALYSIS",
+  "action": "DRAFT-CHECK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "n_textboxes": 1,
+  "draft_state": "HAS_TEXT",
+  "draft_preview": "Send a Message",
+  "n_anon_buttons": 28
+ }
+]

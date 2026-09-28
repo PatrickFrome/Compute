@@ -1,0 +1,38 @@
+[
+ {
+  "id": "R7-TRANSCRIPT2",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "dcf1c88b-f97e-442e-bf30-f0c2786ff607",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 4104,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/cfefd09f-db29-4eed-a906-5e5a0bbca383",
+   "text": "New Task\nAI PPT\nGLM-5.2\nChat\nAgent\npaprika1\nTop Risks & Missing Requirement for Swarm Task-Board\nKey Features of Swarm T",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:196",
+   "captured_at": "2026-09-28T01:13:54.829Z",
+   "total_chars": 903,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "R7-ANALYSIS",
+  "action": "REPLY-EVIDENCE",
+  "status": "COMPLETED",
+  "channel": "local",
+  "transcript_len": 903,
+  "chars_after_continuation_marker": 161,
+  "reply_evidence": false
+ }
+]

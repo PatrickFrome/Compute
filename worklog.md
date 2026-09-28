@@ -11153,3 +11153,22 @@ Stage Summary:
 - New registry notes: (1) TAB_CENSUS URL-less schema (aggregates only); (2) fleet-tab state drift home<->conversation observed (transport proof staleness) - candidate lesson for FLEET_RECONCILE timing.
 - Session persistence of 3 agent-created conversations confirmed with stable auto-titles; self-learning lesson: single-shot briefs produce no autonomous continuation - swarm loop needs scheduled re-prompt to close §12 autonomy gap.
 - Artifacts: browser-test-results-m0900.json, browser-test-results-m0900-title.json, browser-test-results-m0900-tabs.json (empty, schema proof).
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0907
+Agent: Super Z (GLM, IM cron-agent-loop, Job 419718)
+Task: Directive tick 09:07 — thread re-prompt experiment (§12 autonomy ingredient) + 1st-session title isolation. Directive sha256 re-verified OK.
+
+Work Log:
+- Re-prompt E2E on EXISTING critic thread /c/cfefd09f (agent-space tab already on it, no NAVIGATE needed): baseline CAPTURE (on_target=True, 0 text blocks — thread body outside semantic tree, consistent with known thread-scope gap) -> SEMANTIC_TYPE(submit=True, replace=False) CONTINUATION brief -> effect=AMBIGUOUS_AFTER_ENTER (no blind retry per discipline).
+- Indirect readback #1: READ_TRANSCRIPT (sidebar single mode) — transcript text (903 chars) ENDS WITH the CONTINUATION brief -> delivery into thread PROVEN (text plane echo).
+- Indirect readback #2: CAPTURE draft-check — textbox shows placeholder "Send a Message" (len 14) -> draft EMPTY -> Enter consumed the draft -> message actually SENT. 28 anonymous buttons on page (stop-button class, unnamed).
+- Reply-readback: transcript len unchanged 903 after 75s — assistant replies live outside text plane (original critic reply was also never in transcript; its auto-title was the only visible effect). Verdict: re-prompt PARTIAL-PROVEN (delivery+submit ✅, reply-readback ❌ = same thread-scope client gap as stop-button/model-popover).
+- Title isolation: TYPED_CLICK on unmapped title "项目状态评估与开发计划" -> post-click url /c/579ed13b-1316-4eff... = supervisor's OWN live chat session (matches IM chat_id 579ed13b) — sidebar includes supervisor conversation. /c/36ce7b45 (1st task-board session, 07:55) title remains unmapped: below sidebar fold, SCROLL broken -> operator-blocked (or WEBMCP thread-list, also blocked).
+- Mutation discipline held: 20s pace before TYPED_CLICK/SEMANTIC_TYPE, readback after every action, no blind retries.
+
+Stage Summary:
+- NEW PROVEN primitive: in-place thread re-prompting (SEMANTIC_TYPE submit into existing conversation, no new conversation spawned, no url change, draft consumed) — swarm can re-task existing agents; closes the delivery half of §12 autonomy gap. Reply-visibility still needs the ONE client fix (semantic-plane thread-scope).
+- Title map updated: 项目状态评估与开发计划=supervisor chat; essay/research/critic titles stable; supervisor session title visible in agent sidebar.
+- Registry additions: (1) transcript text plane = sidebar + user inputs only, assistant replies excluded; (2) anonymous-button census 28 on agent page (stop-button detector candidate: presence of unnamed button during generation).
+- Next tick: scheduled re-prompt loop (periodic CONTINUATION briefs = de-facto swarm autonomy) + FLEET_RECONCILE drift check (PLANNER tab at home, transport proof stale).
