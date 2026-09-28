@@ -20,6 +20,7 @@ const proof = {
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   generation_epoch: 7,
+  transport_stage: 'PRECONVERSATION_ROOT',
   conversation_url_sha256: 'a'.repeat(64),
   proven_at: '2026-09-18T16:00:00.000Z',
   authority_effect: false,
@@ -70,44 +71,25 @@ function state(selected) {
   };
 }
 
-test('root dispatch proves the composer, submits once through Enter and proves the conversation', async () => {
+test('R98 direct root task materialization is fenced before any composer effect', async () => {
   const calls = [];
-  let selected = supervisorTab;
-  let captures = 0;
   const cycle = new DevOsNativeTaskCycle({
-    getState: async () => state(selected),
+    getState: async () => state(supervisorTab),
     executeCommand: async (command) => {
       calls.push(command.action);
       if (command.action === 'FLEET_RECONCILE') return fleet;
-      if (command.action === 'SELECT_TAB') {
-        selected = command.payload.tab_id;
-        return { tab_id: selected, authority_effect: false };
-      }
-      if (command.action === 'CAPTURE') {
-        captures += 1;
-        if (captures === 1) return frame({ sendVisible: false });
-        return frame({ sendVisible: false, conversation: true });
-      }
-      if (command.action === 'SEMANTIC_TYPE') {
-        assert.equal(command.payload.submit_after_type, true);
-        return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
-      }
-      if (command.action === 'TYPED_CLICK') return { authority_effect: true };
-      throw new Error('unexpected_action');
+      throw new Error(`unexpected_effect:${command.action}`);
     },
     signedRequest: async (path) => {
+      if (path === '/v1/devos/promotion-lease') return response(404, { error: 'not_ready' });
       if (path === '/v1/devos/cycle') {
         return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] });
       }
-      if (path === '/v1/devos/mark-running') return response(200, { state: 'RUNNING' });
-      throw new Error('unexpected_request');
+      throw new Error(`unexpected_request:${path}`);
     },
   });
 
-  const result = await cycle.cycle();
-  assert.equal(result.dispatch.state, 'RUNNING');
-  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
-  assert.equal(calls.filter((x) => x === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(calls.filter((x) => x === 'TYPED_CLICK').length, 0);
-  assert.equal(selected, supervisorTab);
+  await assert.rejects(() => cycle.cycle(), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  assert.deepEqual(calls, ['FLEET_RECONCILE']);
+  assert.equal(cycle.snapshot().bound_unverified_dispatch_allowed, false);
 });
