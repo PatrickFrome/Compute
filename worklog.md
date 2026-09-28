@@ -12225,3 +12225,21 @@ Stage Summary:
 - НЕ РАБОТАЕТ: (1) Supabase-канал к live-браузеру — аутентифицированные запросы hang→503 (деградация PostgREST/DB на стороне Supabase; нужна проверка состояния проекта на owner-уровне, мой доступ — только ключи env); (2) выживание процессов между командами сессии (реапер) — требует интеграции роя в иммунную daemon-плоскость или платформенного сервис-менеджера
 - НЕ ПРОВЕРЕНО (блокировано мёртвым каналом): ВСЕ browser-side механики через command bus — TAB_CENSUS/SELECT_TAB/NEW_TAB/NAVIGATE/SEMANTIC_TYPE/TYPED_CLICK/CAPTURE_VIEW/READ_TRANSCRIPT/RESOLVE_PROMPT/FLEET_*/SELF_UPDATE_*/GATE_STATUS и др., supervisor_mesh_instance, browser_device, chat_bridge, heartbeat-чтение state. Инфраструктура тестов ГОТОВА (scripts/browser-test/battery3.py и dispatch.py прежних тиков + мои) — при восстановлении канала прогон занимает один тик
 - Next: (1) owner/платформа: проверить статус Supabase-проекта (503 на authed-запросах) и перезапустить/восстановить; (2) интегрировать спавн роя в daemon-плоскость (иммунитет к реаперу) или платформенный сервис-менеджер; (3) при восстановлении Supabase — полный browser-battery прежним контуром; (4) секреты не тронуты, push не выполнялся, Sentinel/Guardian не обходились
+
+---
+Task ID: BROWSER-TEST-20260929-0230
+Agent: METAENGINE (supervisor, Job 419203 re-fire 02:30)
+Task: Повторная активация 419203 — live-браузер через Supabase, тест всех механик, классификация работает/не работает/не проверено.
+
+Work Log:
+- Канал-проба (reprobe-0230.py): P1 no-auth 401/0.04s (edge жив), P2 fake-JWT 401/0.04s (auth жив), P3 real-JWT 503/2.4s PGRST002 "Could not query the database for the schema cache" → PostgREST не достаёт до БД, upstream-деградация Supabase (не наши ключи; JWT валиден).
+- Окно восстановления (retry-0230.py): 6/6 REST-попыток → 503 за ~90с; RPC h205f22_a2_browser_supervisor_issue_native_v1 → 503 PGRST002. Канал полностью вниз. Корроборация: HB 02:22 sb=0ok/9fail (все Storage-аплоады упали).
+- Локальная плоскость (режим «одна команда = одна жизнь роя», reaper-ограничение): bun src/index.ts + battery419203.py одной командой; swarm UP за 2s.
+- Батарея M01–M19: 19/19 PASS за 2м11с (battery-result.json, лог /tmp/battery-0230.log). roster=10 агентов; Δциклов 14/60с (fatal-guard+watchdog держат); POST /chat,/broadcast,/goal,/spawn,/mute,/kill = 200; новорождённый sw_rt31bp9i gen=1 с родословной + событие рождения; память lessons=30/episodes=12; swarm_improve предложений=43; gateway :81 (XTransformPort) 200; Next :3000/api/swarm 200; browser-директив в ленте=5; WS :3047 connect ok, события [state].
+- Стресс-наблюдение: LLM API 429 (Too many requests) в логах роя — циклы НЕ умерли, fatal-guard отработал → антихрупкость подтверждена.
+
+Stage Summary:
+- РАБОТАЕТ: все 19 локальных механик роя (цели 1,2,3 частично, 5 — REST/WS/gateway/прокси/память/самоулучшение); WS-плоскость; вечно-жизнь механики (fatal-guard, reviveLoops, listenForever) — под нагрузкой 429.
+- НЕ РАБОТАЕТ: канал Supabase (REST+RPC → 503 PGRST002, сторона upstream, длится >1ч) → вся live-browser командная очередь недостижима.
+- НЕ ПРОВЕРЕНО: end-to-end roundtrip команд браузера (TAB_CENSUS/SELECT_TAB/NEW_TAB/NAVIGATE/SEMANTIC_TYPE/TYPED_CLICK/CAPTURE_VIEW/READ_TRANSCRIPT/RESOLVE_PROMPT/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — заблокировано каналом; поведение browser-клиента на устройствах.
+- Next: owner восстанавливает Supabase upstream → прогнать dispatch-батарею 13-действий по живому браузеру; интеграция роя в me2-daemon плоскость (иммунитет к reaper); цель 4 (супервизор вечно-жив) локально — да (guard+watchdog), сквозная с браузером — после восстановления канала.
