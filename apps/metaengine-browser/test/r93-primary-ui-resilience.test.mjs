@@ -86,17 +86,9 @@ test('R93 canonical ME2 session selection uses Browser-owned session->tab bindin
   }
 });
 
-test('R102 retired Command renderer cannot consume the old bound-session presentation intent', async () => {
-  const command = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx'), 'utf8');
-
-  assert.match(command, /data-testid="retired-command-page"/);
-  assert.match(command, /data-authority-effect="false"/);
-  assert.match(command, /legacy daemon Command surface is retired/i);
-  assert.doesNotMatch(command, /selectPrimaryAgentSession/);
-  assert.doesNotMatch(command, /BROWSER_SELECT_TAB/);
-  assert.doesNotMatch(command, /loadBrowserTabs/);
-  assert.doesNotMatch(command, /resolveExactAgentTab/);
-  assert.doesNotMatch(command, /me2MissionSelectSession/);
+test('R106 retired Command renderer file cannot re-enter the product', async () => {
+  const commandPath = path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx');
+  await assert.rejects(fs.readFile(commandPath, 'utf8'), { code: 'ENOENT' });
 });
 
 test('R93 shared agent list polling has a bounded request lifetime', async () => {
