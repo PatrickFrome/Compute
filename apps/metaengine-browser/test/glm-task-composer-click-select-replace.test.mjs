@@ -248,7 +248,7 @@ test('preexisting exact match verifies without any gesture (resume path)', async
   assert.equal(result.replace_gesture, 'PREEXISTING_MATCH');
   assert.equal(h.counts().insertCount, 0);
   assert.equal(h.counts().enterCount, 1);
-  assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  assert.equal(result.effect_state, 'PROVEN_NEW_CONVERSATION');
 });
 
 test('replace_gesture is null on the unverified legacy lane', async () => {
