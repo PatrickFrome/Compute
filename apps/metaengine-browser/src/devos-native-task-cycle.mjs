@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {
   AGENT_PLATFORM_ID,
+  AGENT_PLATFORM_HOME_URL,
   AGENT_PLATFORM_MODEL,
   classifyAgentPlatformSurface,
   resolveAgentPlatformAgentSurface,
@@ -497,21 +498,40 @@ export class DevOsNativeTaskCycle {
       if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_transport_promotion_target_drift');
 
       if (transport.stage === 'CONVERSATION') {
-        // A bare /c/<id> proves only a conversation URL. It does NOT prove
-        // that this session originated from z.ai Agent mode. Old Chat workers
-        // and restart-demoted tabs therefore stay fenced until a durable
-        // Agent-origin proof can be reconciled.
-        result = {
-          state: 'LOCAL_CONVERSATION_AGENT_ORIGIN_UNPROVEN',
-          ...binding,
-          lease_id: lease.lease_id,
-          transport_stage: 'CONVERSATION',
-          conversation_url_sha256: sha256(transport.url),
-          reason: 'AGENT_SURFACE_ORIGIN_PROOF_REQUIRED',
-          automatic_retry_allowed: false,
-          authority_effect: false,
-        };
-      } else if (transport.stage === 'PRECONVERSATION_ROOT') {
+        // R98 restart recovery: a bare /c/<id> still has ZERO Agent-origin
+        // authority, but leaving the BOUND_UNVERIFIED worker on that URL
+        // creates a permanent promotion livelock. Under the existing exact
+        // promotion lease, reset only this Browser-owned tab to the canonical
+        // authenticated root, then prove the root by fresh CAPTURE. No model
+        // message is sent and the old conversation is never task-admitted.
+        bootstrapEffectState = 'UNPROVEN_CONVERSATION_RESET_DISPATCHED';
+        await this.#executeCommand({
+          action: 'NAVIGATE',
+          platform: null,
+          payload: { tab_id: binding.tab_id, url: AGENT_PLATFORM_HOME_URL },
+        });
+        frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+        transport = transportUrl(frame?.url);
+        if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
+          throw new Error('devos_agent_reset_target_drift');
+        }
+        if (transport?.stage !== 'PRECONVERSATION_ROOT') {
+          result = {
+            state: 'LOCAL_CONVERSATION_RESET_AMBIGUOUS',
+            ...binding,
+            lease_id: lease.lease_id,
+            transport_stage: transport?.stage || 'OTHER',
+            bootstrap_effect_state: bootstrapEffectState,
+            reason: 'UNPROVEN_CONVERSATION_RESET_POSTCONDITION_NOT_PROVEN',
+            automatic_retry_allowed: false,
+            authority_effect: false,
+          };
+        } else {
+          bootstrapEffectState = 'UNPROVEN_CONVERSATION_RESET_PROVEN';
+        }
+      }
+
+      if (transport.stage === 'PRECONVERSATION_ROOT' && result.state === 'LEASE_NOT_ACQUIRED') {
         let agentSurface = resolveAgentPlatformAgentSurface(frame);
         let agentSurfaceSha256 = null;
 
@@ -784,12 +804,12 @@ export class DevOsNativeTaskCycle {
             }
           }
         }
-      } else {
+      } else if (result.state === 'LEASE_NOT_ACQUIRED') {
         result = {
           state: 'LOCAL_TRANSPORT_UNSUPPORTED',
           ...binding,
           lease_id: lease.lease_id,
-          transport_stage: transport.stage,
+          transport_stage: transport?.stage || 'OTHER',
           automatic_retry_allowed: false,
           authority_effect: false,
         };
