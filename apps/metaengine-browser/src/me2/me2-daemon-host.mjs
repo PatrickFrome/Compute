@@ -62,17 +62,37 @@ export function me2DaemonStatus() {
     last_health_ok_at: lastHealthOkAt,
     launch_mode: lastLaunchMode,
     child_pid: child?.pid ?? null,
+    required_boot_mode: 'probe',
+    unsafe_external_daemon_adoption_allowed: false,
     stopped,
   };
 }
 
-/** Здоровье daemon'а: GET /state отвечает ok:true → жив (hash-chain last_seq как бонус). */
+function browserProbeContract(state) {
+  const probe = state?.browser_probe;
+  const safe = probe?.boot_mode === 'probe'
+    && probe?.read_only === true
+    && probe?.model_execution_enabled === false
+    && probe?.provider_api_enabled === false
+    && probe?.agentchat_mutation_enabled === false
+    && probe?.scheduler_authority === false
+    && probe?.browser_actuation_authority === false
+    && probe?.command_mutation_enabled === false
+    && probe?.token_mutation_enabled === false
+    && probe?.authority_effect === false;
+  return safe ? probe : null;
+}
+
+/** Browser host accepts only an explicitly read-only probe incarnation. */
 export async function me2HealthProbe(timeout_ms = 4000) {
   try {
     const r = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(timeout_ms) });
     if (!r.ok) return { ok: false, reason: `http_${r.status}` };
     const j = await r.json();
-    return { ok: j?.ok === true, reason: j?.ok === true ? 'ok' : 'bad_payload', last_seq: j?.last_seq ?? null };
+    const probe = browserProbeContract(j);
+    if (j?.ok !== true) return { ok: false, reason: 'bad_payload', last_seq: j?.last_seq ?? null };
+    if (!probe) return { ok: false, reason: 'unsafe_browser_probe_contract', last_seq: j?.last_seq ?? null };
+    return { ok: true, reason: 'ok', last_seq: j?.last_seq ?? null, browser_probe: probe };
   } catch (e) {
     return { ok: false, reason: String(e?.message || e).slice(0, 120) };
   }
