@@ -237,25 +237,28 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
   return { cycle, state, calls, getSurfaceState: () => surfaceState, cleanup: () => clearFleetRuntime(fleetRuntime) };
 }
 
-test('restored bare conversation is reset under promotion lease before Agent session re-proof', async () => {
+test('restored bare conversation stays fenced when Agent origin cannot be proven', async () => {
   const h = harness();
   try {
     const snapshot = await h.cycle.cycle();
-    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'ACTIVE');
-    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE_AGENT_SESSION');
-    assert.equal(snapshot.fleet_transport_promotion.release_state, 'CONFIRMED');
-    assert.match(h.state.fleet.agents[0].transport_proof.agent_surface_sha256, /^[a-f0-9]{64}$/);
-    assert.equal(h.state.fleet.agents[0].transport_proof.conversation_url, CONVERSATION);
+    const agent = h.state.fleet.agents[0];
 
-    const navigateIndex = h.calls.findIndex((row) => row[1] === 'NAVIGATE');
-    const agentIndex = h.calls.findIndex((row) => row[1] === 'TYPED_CLICK' && row[2] === 'Agent');
-    const newTaskIndex = h.calls.findIndex((row) => row[1] === 'TYPED_CLICK' && row[2] === 'New Task');
-    const seedIndex = h.calls.findIndex((row) => row[1] === 'SEMANTIC_TYPE');
-    const schedulerIndex = h.calls.findIndex((row) => row[1] === '/v1/devos/cycle');
-    assert.ok(navigateIndex >= 0 && agentIndex > navigateIndex && newTaskIndex > agentIndex && seedIndex > newTaskIndex);
-    assert.ok(schedulerIndex > seedIndex, 'scheduler may observe the worker only after canonical Agent-session promotion');
-    assert.equal(h.calls.filter((row) => row[1] === 'NAVIGATE').length, 1);
-    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1);
+    // A /c/<id> URL is not evidence that this session came from z.ai Agent
+    // mode. Restart recovery therefore must not destroy or navigate the page
+    // merely to manufacture a fresh origin proof. Keep it BOUND_UNVERIFIED and
+    // require an independently proven Agent-home bootstrap on a safe root
+    // surface in a later promotion episode.
+    assert.equal(agent.lifecycle_state, 'BOUND_UNVERIFIED');
+    assert.equal(agent.transport_proof, null);
+    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_CONVERSATION_AGENT_ORIGIN_UNPROVEN');
+    assert.equal(snapshot.fleet_transport_promotion.reason, 'AGENT_SURFACE_ORIGIN_PROOF_REQUIRED');
+    assert.equal(snapshot.fleet_transport_promotion.release_state, 'CONFIRMED');
+    assert.equal(snapshot.fleet_transport_promotion.automatic_retry_allowed, false);
+
+    assert.equal(h.calls.filter((row) => row[1] === 'NAVIGATE').length, 0);
+    assert.equal(h.calls.filter((row) => row[1] === 'TYPED_CLICK').length, 0);
+    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 0);
+    assert.equal(h.calls.some((row) => row[1] === '/v1/devos/cycle'), true, 'scheduler cycle may continue but sees this worker admission-fenced');
   } finally {
     h.cleanup();
   }
