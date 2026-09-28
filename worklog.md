@@ -12486,3 +12486,20 @@ Work Log:
 
 Stage Summary:
 - EV-PERF закрыт: 1Гц-перерисовки тяжёлых поддеревьев устранены (memo × 5 компонентов + стабильные колбэки), поведение идентично (EV-DATES-верификация сквозь :81 чистая); page.tsx цел; engine v1.52; следующий кандидат — EV-VIRT-SCROLL
+
+---
+Task ID: BROWSER-TEST-20260929-0730
+Agent: METAENGINE (supervisor, Job 419203 re-fire 07:30)
+Task: 11-й повторный цикл 419203 — канал Supabase + локальная плоскость роя.
+
+Work Log:
+- Канал (reprobe-0730.py): P1/P2 401 (edge+auth живы), P3 real-JWT → 503 PGRST002 1.73s — PostgREST→DB вниз ~8ч.
+- ВЕЧНАЯ-ЖИЗНЬ 2.5ч+: survivor-инстанс 0600 жив, cycles 8418→9900 (порог 10k пройден в цикле), 429-счётчик 17262 cumulative, 0 фаталов; темп Δ96/60с удержан.
+- Батарея M01–M19 против survivor: 18/19 PASS; M05 FAIL (LLM-429 квота glm, 6-й цикл подряд); roster=14; WS connect+[state] ok.
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик; вечная-жизнь на горизонте 2.5ч+/10k циклов при 17k+ ошибок 429 (0 смертей) — рой функционирует как постоянный процесс; транспорт WS/gateway/Next.
+- ДЕГРАДАЦИЯ (внешняя, 6-й цикл): M05 LLM-координация — upstream-квота glm.
+- НЕ РАБОТАЕТ: Supabase PostgREST→DB (503 PGRST002, ~8ч) — live-браузерная командная очередь недостижима.
+- НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокированы каналом.
+- Next: owner — рестарт PostgREST + LLM-квота; после — dispatch-батарея 13 действий; survivor = де-факто стационарный рой до интеграции в me2-daemon :8556.
