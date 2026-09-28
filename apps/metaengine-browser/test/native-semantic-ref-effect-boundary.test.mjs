@@ -43,7 +43,9 @@ class FakeDebugger extends EventEmitter {
     if (method === 'Accessibility.getFullAXTree') return { nodes: structuredClone(this.nodes) };
     if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1200, clientHeight: 800 } };
     if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
-    if (method === 'DOM.getBoxModel') return { model: { border: [0, 0, 20, 0, 20, 20, 0, 20] } };
+    if (method === 'DOM.resolveNode') return { object: { objectId: `node-${Number(params?.backendNodeId || 0)}` } };
+    if (method === 'Runtime.callFunctionOn') return { result: { value: true } };
+    if (method === 'Runtime.releaseObject') return {};
     return {};
   }
 }
@@ -93,8 +95,13 @@ test('trusted capture issues a complete SemanticRef and fresh ref reaches one ph
 
     const result = await executeSemanticCommand(webContents, clickCommand(send.semantic_ref));
     assert.equal(result.target.backend_node_id, 41);
-    assert.equal(dbg.commands.filter((row) => row.method === 'DOM.getBoxModel').length, 1);
-    assert.equal(dbg.commands.filter((row) => row.method === 'Input.dispatchMouseEvent').length, 3);
+    assert.equal(result.activation.method, 'DOM_CLICK');
+    assert.equal(result.activation.backend_node_id, 41);
+    assert.equal(result.activation.mouse_geometry_required, false);
+    assert.equal(dbg.commands.filter((row) => row.method === 'DOM.resolveNode').length, 1);
+    assert.equal(dbg.commands.filter((row) => row.method === 'Runtime.callFunctionOn').length, 1);
+    assert.equal(dbg.commands.filter((row) => row.method === 'DOM.getBoxModel').length, 0);
+    assert.equal(dbg.commands.filter((row) => row.method === 'Input.dispatchMouseEvent').length, 0);
   } finally {
     releasePersistentBrowserDebugger(webContents);
     clearNativeEffectRuntimeObservationsForTest();
