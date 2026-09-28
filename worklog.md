@@ -11257,3 +11257,21 @@ Stage Summary:
 - Revised mechanic map for fleet agents: (1) READ_TRANSCRIPT on fleet tabs = full dialogue visibility (thought process + briefs + sidebar titles) — the ONLY working perception channel into fleet agents; (2) dispatch delivery probable (background thread, no nav); (3) tool-feedback loop unconfirmed (no evidence client ever answered TOOL_REQUEST_V1).
 - Convergence implication: §12 loop for fleet = deliver task (probable works) -> agent thinks+replies (works, GLM-5.3-Flash active) -> supervisor reads reply (works via READ_TRANSCRIPT) -> deliver TOOL_RESULT/next task (probable) — the loop may be CLOSEABLE end-to-end without client fix, pending confirmation that background threads actually spawn and replies arrive.
 - Next tick: (1) confirm background-thread creation: dispatch a marker brief to PLANNER tab, wait, READ_TRANSCRIPT for marker + auto-title; (2) if confirmed, run first full E2E loop: task -> reply-readback -> follow-up task with result feedback.
+
+---
+Task ID: DIRECTIVE-LOOP-20260928-0948
+Agent: Super Z (GLM, IM cron-agent-loop, echo-continuation)
+Task: Marker dispatch E2E to fleet PLANNER — confirm background thread creation + reply arrival (per 0945 plan).
+
+Work Log:
+- Baseline READ_TRANSCRIPT PLANNER: len=1898, no marker.
+- Marker dispatch: CAPTURE (home, textbox present) -> SEMANTIC_TYPE "PLANNER DISPATCH X7K2-0948 (supervisor): reply with the single word ACKMARK..." -> receipt FAILED postcondition_not_confirmed:AMBIGUOUS (fleet-surface receipt postcondition unreliable) BUT delivery happened anyway.
+- +80s readback: transcript len 1898->1991, marker_brief_visible=True (X7K2-0948 count=1) -> DELIVERY CONFIRMED (2nd independent fleet-tab delivery after 0930 brief). ACKMARK count=1 = brief echo only, no reply.
+- Delayed recheck ~4min: len unchanged 1991, still marker-only, transcript ends right after brief text -> NO assistant reply arrived.
+- PLANNER transport proof unchanged even after real delivery (proven_at still 27.09T20:10Z) -> proof minting has NO supervisor-triggered path at all (3rd disproved candidate: CAPTURE, SELECT_TAB, SEMANTIC_TYPE-delivery).
+
+Stage Summary:
+- CONFIRMED: background delivery of task text into fleet PLANNER surface works (marker evidence). 
+- NOT CONFIRMED: background thread EXECUTION — no assistant reply within ~4 min, unlike agent-space threads (titles within ~75s). Hypotheses: (a) fleet-tab background threads don't start generation until opened; (b) reply invisible to transcript plane; (c) marker text is a dangling draft/title echo without a real thread.
+- Receipt semantics: fleet-tab SEMANTIC_TYPE may report FAILED/AMBIGUOUS while delivery succeeds — readbacks must rely on transcript, not receipts.
+- Next tick: discrimination test — TYPED_CLICK the marker sidebar entry on PLANNER tab (opens the thread if real: readback url/title/reply; opening may trigger generation). If thread real + reply appears after open -> fleet loop = deliver-then-open-to-run; document as the fleet tasking recipe.
