@@ -266,10 +266,16 @@ function journalBinding(lease, promptSha256) {
 function proofFromJournal(entry) {
   const promptSha = String(entry?.prompt_sha256 || '').toLowerCase();
   const conversationSha = String(entry?.evidence?.conversation_url_sha256 || '').toLowerCase();
+  const agentSurfaceSha = String(entry?.evidence?.agent_surface_sha256 || '').toLowerCase();
   const effectState = String(entry?.evidence?.effect_state || '').toUpperCase();
-  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha)) return null;
-  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(effectState)) return null;
-  return { prompt_sha256: promptSha, conversation_url_sha256: conversationSha, effect_state: effectState };
+  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha) || !HASH_RE.test(agentSurfaceSha)) return null;
+  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(effectState)) return null;
+  return {
+    prompt_sha256: promptSha,
+    conversation_url_sha256: conversationSha,
+    agent_surface_sha256: agentSurfaceSha,
+    effect_state: effectState,
+  };
 }
 
 function safePreEffectCandidate(entry) {
@@ -963,7 +969,7 @@ export class DevOsNativeTaskCycle {
     // already completed by the promotion-lease path; the scheduler has no
     // root-bootstrap fallback.
     const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-    this.#assertCanonicalAgentConversation(lease, agent, pre);
+    const initialAgentOrigin = this.#assertCanonicalAgentConversation(lease, agent, pre);
     const telemetryDigest = await this.#telemetryDigest(lease);
     const contextBriefing = await this.#contextBriefingFor(lease, fleetSnapshot);
     // Agent Toolbelt: the protocol rides every dispatch (isolated sessions
@@ -1108,6 +1114,7 @@ export class DevOsNativeTaskCycle {
       const proof = {
         prompt_sha256: promptHash,
         conversation_url_sha256: sha256(normalizedUrl),
+        agent_surface_sha256: String(preReady?.agent_origin_proof?.agent_surface_sha256 || initialAgentOrigin.agent_surface_sha256).toLowerCase(),
         effect_state: effectState,
       };
       this.#dispatchEffectCounters.dispatches += 1;
@@ -1115,6 +1122,7 @@ export class DevOsNativeTaskCycle {
       this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'PROVEN', effect_state: effectState, task_id: lease.task_id, agent_id: lease.agent_id });
       await journal?.markDeliveryPending(effectBinding, {
         conversation_url_sha256: proof.conversation_url_sha256,
+        agent_surface_sha256: proof.agent_surface_sha256,
         effect_state: proof.effect_state,
         browser_effect_proven: true,
         physical_effect_attempted: true,
@@ -1129,7 +1137,7 @@ export class DevOsNativeTaskCycle {
           state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
           tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
           proof, server: body, prompt_included: false, page_data_authority: false,
-          conversation_bootstrap: flush?.state || null,
+          conversation_bootstrap: 'PREEXISTING_ACTIVE_AGENT_SESSION',
           selected_tab_mutation: false, viewport_geometry_required: false,
           click_issued: clickIssued, submit_path: 'ENTER_KEY_EVENT_DRIVEN_READBACK', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
         };
