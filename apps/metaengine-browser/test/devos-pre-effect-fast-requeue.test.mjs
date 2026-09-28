@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 
 const lease = {
@@ -21,6 +22,9 @@ const lease = {
   },
 };
 
+const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationHash = crypto.createHash('sha256').update(conversationUrl, 'utf8').digest('hex');
+
 const fleet = {
   schema: 'metaengine.browser.fleet-snapshot.v1',
   readiness_contract: 'TRANSPORT_PROOF_REQUIRED',
@@ -35,11 +39,11 @@ const fleet = {
     generation_epoch: lease.agent_generation_epoch,
     transport_proof: {
       schema: 'metaengine.browser.fleet-transport-proof.v1',
-      transport_stage: 'PRECONVERSATION_ROOT',
       tab_id: lease.tab_id,
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
-      conversation_url_sha256: 'a'.repeat(64),
+      conversation_url_sha256: conversationHash,
+      agent_surface_sha256: 'b'.repeat(64),
       proven_at: '2026-09-02T18:00:00.000Z',
       authority_effect: false,
     },
@@ -48,7 +52,7 @@ const fleet = {
   }],
 };
 
-const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
+const composer = { role: 'textbox', name: 'Describe your task', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const supervisorTab = 'tab_supervisor';
 
@@ -72,9 +76,10 @@ function frame({ targetId = lease.target_id, viewport = { width: 1200, height: 6
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
     target_id: targetId,
-    url: 'https://chatgpt.com/',
+    url: conversationUrl,
     viewport,
     semantic_targets: composerMissing ? [send] : [composer, send],
+    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
     authority_effect: false,
   };
 }
