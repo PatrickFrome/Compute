@@ -59,11 +59,23 @@ export async function me2ContractHandshake() {
     contractState.capabilities = j?.capabilities ?? null;
     const ops = Array.isArray(j?.capabilities?.ops) ? j.capabilities.ops : [];
     const uiOk = j?.capabilities?.ui === '/ui';
-    contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && uiOk;
+    const probe = j?.browser_probe || null;
+    const probeSafe = probe?.boot_mode === 'probe'
+      && probe?.read_only === true
+      && probe?.model_execution_enabled === false
+      && probe?.provider_api_enabled === false
+      && probe?.agentchat_mutation_enabled === false
+      && probe?.scheduler_authority === false
+      && probe?.browser_actuation_authority === false
+      && probe?.command_mutation_enabled === false
+      && probe?.token_mutation_enabled === false
+      && probe?.authority_effect === false;
+    contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && uiOk && probeSafe;
+    contractState.browser_probe = probeSafe ? structuredClone(probe) : null;
     if (contractState.ok) {
-      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.capabilities?.version ?? j?.meta?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null, agentchat_authority: false });
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.capabilities?.version ?? j?.meta?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null, browser_probe: contractState.browser_probe, agentchat_authority: false });
     } else {
-      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, ui: uiOk, verdict: 'DEGRADED — local DevOS/UI contract unavailable' }, { error: true });
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, ui: uiOk, probe_safe: probeSafe, verdict: 'DEGRADED — local DevOS/UI contract unavailable or unsafe daemon authority' }, { error: true });
     }
   } catch (e) {
     contractState.error = String(e?.message || e).slice(0, 140);
