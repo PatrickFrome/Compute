@@ -38,7 +38,17 @@ export function classifyAgentPlatformTaskSurface(frame) {
   const transport = classifyAgentPlatformSurface(frame?.url);
   if (!transport) return Object.freeze({ stage: 'NOT_AGENT_PLATFORM', proven: false, authority_effect: false });
   if (transport.stage === 'CONVERSATION') {
-    return Object.freeze({ stage: 'CONVERSATION', proven: true, authority_effect: false });
+    // A /c/<id> URL is shared by ordinary Chat and Agent-created sessions.
+    // URL reachability alone therefore carries ZERO Agent-origin authority.
+    // Admission must come from the durable fleet transport proof that binds
+    // the conversation to a previously proven AGENT_HOME capture.
+    return Object.freeze({
+      stage: 'CONVERSATION_ORIGIN_UNPROVEN',
+      proven: false,
+      url_only_authority: false,
+      requires_durable_agent_origin_proof: true,
+      authority_effect: false,
+    });
   }
   if (transport.stage !== 'PRECONVERSATION_ROOT') {
     return Object.freeze({ stage: 'OTHER', proven: false, authority_effect: false });
@@ -232,6 +242,8 @@ export function agentPlatformTaskConfigSnapshot() {
     platform: 'GLM_ZAI',
     task_creation_surface: 'AGENT_HOME_NEW_TASK_FLOW',
     ordinary_root_is_task_surface: false,
+    conversation_url_is_agent_surface_authority: false,
+    conversation_origin_requires_durable_agent_surface_proof: true,
     agent_home_proof: 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS',
     agent_home_controls: AGENT_HOME_CONTROLS,
     task_config_surface_state: 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION',
