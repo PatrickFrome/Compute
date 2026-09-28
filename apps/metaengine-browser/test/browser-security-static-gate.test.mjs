@@ -45,6 +45,33 @@ test('production renderer escape hatch is a real failing violation', async () =>
   ]);
 });
 
+test('production Browser graph rejects managed model API and SDK fallback paths', async () => {
+  const cases = [
+    ["export const endpoint = 'https://api.openai.com/v1/responses';\n", 'MODEL_API_OPENAI_ENDPOINT'],
+    ["export const endpoint = 'https://api.z.ai/v1/chat/completions';\n", 'MODEL_API_ZAI_ENDPOINT'],
+    ["export const endpoint = 'https://api.anthropic.com/v1/messages';\n", 'MODEL_API_ANTHROPIC_ENDPOINT'],
+    ["export const endpoint = 'https://ai-gateway.vercel.sh/v1';\n", 'MODEL_API_VERCEL_GATEWAY_ENDPOINT'],
+    ["export const key = process.env.OPENAI_API_KEY;\n", 'MODEL_API_OPENAI_SECRET'],
+    ["import OpenAI from 'openai';\n", 'MODEL_API_OPENAI_SDK'],
+    ["import Anthropic from '@anthropic-ai/sdk';\n", 'MODEL_API_ANTHROPIC_SDK'],
+  ];
+  for (const [source, expectedRule] of cases) {
+    const root = await fixture({ 'src/agent-runtime.mjs': source });
+    const result = await scanSecurityStaticGate({ rootDir: root });
+    assert.equal(result.ok, false, expectedRule);
+    assert.equal(result.violations.some((row) => row.rule === expectedRule), true, JSON.stringify(result.violations));
+  }
+});
+
+test('ordinary z.ai Web UI identifiers and advisory transport labels remain allowed', async () => {
+  const root = await fixture({
+    'src/agent-runtime.mjs': "export const platform = 'GLM_ZAI'; export const url = 'https://chat.z.ai/';\n",
+    'src/advisory.mjs': "export const transport = 'OPENAI_COMPAT_HTTP';\n",
+  });
+  const result = await scanSecurityStaticGate({ rootDir: root });
+  assert.equal(result.ok, true, JSON.stringify(result.violations));
+});
+
 test('test-only diagnostic JavaScript evaluation does not redefine the production boundary', async () => {
   const root = await fixture({
     'test/diagnostic.test.mjs': "contents.executeJavaScript('document.fonts.ready')\n",
