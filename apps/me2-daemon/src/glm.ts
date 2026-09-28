@@ -19,7 +19,6 @@
  *
  * REST: GET /glm, POST /glm {op:probe|upgrade|set_latest} — вне шины (47/47). Механика ME25.
  */
-import ZAI from "z-ai-web-dev-sdk";
 import { db, emit, setMeta, getMeta, nowIso } from "../store";
 import { listAgents, setAgentModel } from "../store";
 import { recordSpan } from "./otel";
@@ -28,6 +27,10 @@ import { recordSpan } from "./otel";
  *  через POST /glm {op:set_latest} или обновлением ресурсёрча в новых раундах. */
 const GLM_LATEST_DEFAULT = "glm-5.3";
 const AGENT_TAG_PREFIX = "zai:";
+const BROWSER_PROBE_MODE = process.env.ME2_HOSTED_BY_BROWSER === "1" && process.env.ME2_BOOT_MODE === "probe";
+function assertGlmExecutionAllowed(): void {
+  if (BROWSER_PROBE_MODE) throw new Error("ME2_BROWSER_PROBE_GLM_EXECUTION_DISABLED");
+}
 
 export function canonicalGlm(): string {
   return getMeta("glm_canonical") ?? GLM_LATEST_DEFAULT;
@@ -58,9 +61,11 @@ export interface GlmProbeRow {
 /** Живая проба: канонический тег → фактический api.model бэкенда. Сеть — только async
  *  (урок R25), вызывается из boot-таймера/REST, никогда из шины. */
 export async function glmProbe(): Promise<GlmProbeRow & { note: string }> {
+  assertGlmExecutionAllowed();
   const tag = agentTag();
   let row: GlmProbeRow;
   try {
+    const { default: ZAI } = await import("z-ai-web-dev-sdk");
     const z = await ZAI.create();
     const resp = (await z.chat.completions.create({
       messages: [{ role: "user", content: "reply OK" }],
