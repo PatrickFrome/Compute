@@ -42,8 +42,9 @@ test('R96 hold-Space controller closes on release and keeps Arrow navigation ins
 test('R96 Peek requires explicit row focus before Space can capture page navigation', () => {
   assert.match(tasks, /const effectivePeekTaskId = peekTaskId && peekTaskIds\.includes\(peekTaskId\)[\s\S]{0,80}\? peekTaskId[\s\S]{0,40}: null;/);
   assert.doesNotMatch(tasks, /effectivePeekTaskId[\s\S]{0,120}peekTaskIds\[0\]/);
-  assert.match(agents, /const effectivePeekAgentId = peekAgentId && peekAgentIds\.includes\(peekAgentId\)[\s\S]{0,80}\? peekAgentId[\s\S]{0,40}: null;/);
-  assert.doesNotMatch(agents, /effectivePeekAgentId[\s\S]{0,120}peekAgentIds\[0\]/);
+  assert.match(agents, /data-testid="retired-agents-page"/);
+  assert.match(agents, /data-authority-effect="false"/);
+  assert.doesNotMatch(agents, /effectivePeekAgentId|useTemporaryPeekList|openAgentChat|agentChatOp|sendCommand/);
 });
 
 test('R96 Peek never steals native Space activation from unrelated controls', () => {
@@ -104,10 +105,8 @@ test('R96 task surfaces separate Enter activation from temporary Space preview',
   assert.match(tasks, /onFocus=\{\(\) => setPeekTaskId\(t\.id\)\}/);
 });
 
-test('R96 agent registry previews with Space without opening chat', () => {
-  assert.match(agents, /useTemporaryPeekList\(\{[\s\S]{0,220}kind: "agent"/);
-  assert.match(agents, /data-peek-kind="agent"/);
-  assert.match(agents, /onFocus=\{\(\) => setPeekAgentId\(a\.id\)\}/);
-  assert.match(agents, /if \(e\.key === "Enter"\) openAgentChat\(a\)/);
-  assert.match(agents, /else if \(e\.key === " "\) e\.preventDefault\(\)/);
+test('R102 retired Agents page exposes no AgentChat or Peek mutation surface', () => {
+  assert.match(agents, /data-testid="retired-agents-page"/);
+  assert.match(agents, /data-authority-effect="false"/);
+  assert.doesNotMatch(agents, /useTemporaryPeekList|data-peek-kind|openAgentChat|agentChatOp|sendCommand|me2Fetch/);
 });
