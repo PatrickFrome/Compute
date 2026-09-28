@@ -286,12 +286,12 @@ test('D-P2: source contract — Enter first, bounded click fallback, fail-closed
   const fallback = source.indexOf('D-P2 (2026-09-18)', latchWait);
   const fallbackResolve = source.indexOf('const fallbackSends = exactChatGptControls(fallbackTree?.nodes || [], \'SEND\')', fallback);
   const fallbackThrow = source.indexOf("native_semantic_send_target_not_found'", fallbackResolve);
-  const fallbackClick = source.indexOf('await clickBackendNode(dbg, fallbackSends[0].backend_node_id', fallbackThrow);
+  const fallbackClick = source.indexOf('await activateBackendNode(dbg, fallbackSends[0].backend_node_id', fallbackThrow);
   assert.ok(enter >= 0, 'Enter dispatch retained');
   assert.ok(latchWait > enter, 'first latch wait follows Enter');
   assert.ok(fallbackResolve > latchWait, 'fallback re-resolves the SEND control only after the latch missed');
   assert.ok(fallbackThrow > fallbackResolve, 'fallback re-resolution fails closed when the control is gone');
-  assert.ok(fallbackClick > fallbackThrow, 'bounded click fallback is last resort');
+  assert.ok(fallbackClick > fallbackThrow, 'bounded exact backend-node activation is last resort');
 });
 
 test('D-P2: source contract — fallback preserves every runtime fence', () => {
