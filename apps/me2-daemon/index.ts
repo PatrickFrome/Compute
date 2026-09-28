@@ -88,10 +88,11 @@ import {
 // LLM-приводы (worker/GLM-проба/demand/cron/supervisor-тики/selfupdate) отключены —
 // gate в CI проверяет здоровье без сетевых зависимостей и без расхода квот.
 const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe";
-const PROBE_BLOCKED_GET_PATHS = new Set([
-  "/providers", "/llm", "/glm", "/agents", "/agentchat", "/pool",
-  "/governor", "/demand", "/tokens",
-]);
+// Browser-hosted ME2 is compatibility/health evidence only. A blocklist is
+// unsafe here because new GET routes can have hidden side effects (for example
+// lazy collector start) and would become reachable by default. Keep an exact
+// allowlist instead: Browser host + package verifier require only health/state.
+const PROBE_ALLOWED_GET_PATHS = new Set(["/health", "/state"]);
 const PROBE_POLICY = Object.freeze({
   boot_mode: "probe",
   read_only: true,
@@ -213,12 +214,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
   if (PROBE_MODE) {
     const method = String(req.method || "GET").toUpperCase();
-    if (method !== "GET" || PROBE_BLOCKED_GET_PATHS.has(path)) {
+    if (method !== "GET" || !PROBE_ALLOWED_GET_PATHS.has(path)) {
       return json(res, 403, {
         ok: false,
         error: "ME2_BROWSER_PROBE_READ_ONLY",
         path,
         method,
+        allowed_get_paths: [...PROBE_ALLOWED_GET_PATHS],
         ...PROBE_POLICY,
       });
     }
