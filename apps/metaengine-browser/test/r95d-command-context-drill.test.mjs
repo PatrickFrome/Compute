@@ -10,7 +10,8 @@ const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx'
 
 test('R106 retired COMMAND page is absent rather than a compatibility authority surface', () => {
   assert.equal(fs.existsSync(commandUrl), false);
-  assert.doesNotMatch(store, /"command"\s*\|/);
+  const pageType = store.slice(store.indexOf('export type PageKey'), store.indexOf('// R97 native swarm convergence'));
+  assert.equal(pageType.includes('"command"'), false);
 });
 
 test('R106 exact task drill remains on TASKS and OBSERVE after COMMAND removal', () => {
