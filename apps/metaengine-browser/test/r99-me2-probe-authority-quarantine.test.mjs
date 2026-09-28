@@ -21,6 +21,11 @@ const SAFE_PROBE = Object.freeze({
   browser_actuation_authority: false,
   command_mutation_enabled: false,
   token_mutation_enabled: false,
+  persistent_state_write_enabled: false,
+  model_execution_guard: 'BROWSER_PROBE_HARD_GUARD_V1',
+  provider_sdk_static_import_allowed: false,
+  durable_state_authority: false,
+  state_storage: 'EPHEMERAL_MEMORY_ONLY',
   authority_effect: false,
 });
 
@@ -198,4 +203,41 @@ test('R103 Browser probe performs no SQL-mirror or token bootstrap effects', () 
   assert.match(daemon, /const sqlMirror = PROBE_MODE[\s\S]{0,420}ME2_BROWSER_PROBE_READ_ONLY[\s\S]{0,240}: new SqlMirror\(db\)/);
   assert.match(daemon, /if \(!PROBE_MODE\) \{[\s\S]{0,220}sqlMirror\.start\(\)[\s\S]{0,260}gotrueToken\(\)/);
   assert.doesNotMatch(daemon, /const sqlMirror = new SqlMirror\(db\);\s*sqlMirror\.start\(\)/);
+});
+
+
+test('R104 Browser probe state is ephemeral and cannot become a parallel durable truth', () => {
+  const store = source('apps/me2-daemon/store.ts');
+  const daemon = source('apps/me2-daemon/index.ts');
+  const verify = source('apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs');
+
+  assert.match(store, /BROWSER_PROBE_MODE = process\.env\.ME2_HOSTED_BY_BROWSER === "1"/);
+  assert.match(store, /DB_FILE = BROWSER_PROBE_MODE \? ":memory:" : join\(HERE, "me2\.db"\)/);
+  assert.match(store, /if \(!BROWSER_PROBE_MODE\) mkdirSync/);
+  assert.match(daemon, /persistent_state_write_enabled: false/);
+  assert.match(daemon, /durable_state_authority: false/);
+  assert.match(daemon, /state_storage: "EPHEMERAL_MEMORY_ONLY"/);
+  assert.match(verify, /Browser probe must not create durable ME2 SQLite state/);
+  assert.match(verify, /durable_state_file_created: false/);
+});
+
+test('R104 Browser probe hard-fences every legacy model execution root before network use', () => {
+  const providers = source('apps/me2-daemon/providers.ts');
+  const worker = source('apps/me2-daemon/worker.ts');
+  const glm = source('apps/me2-daemon/src/glm.ts');
+  const daemon = source('apps/me2-daemon/index.ts');
+
+  assert.doesNotMatch(providers, /^import ZAI from "z-ai-web-dev-sdk";/m);
+  assert.doesNotMatch(worker, /^import ZAI from "z-ai-web-dev-sdk";/m);
+  assert.doesNotMatch(glm, /^import ZAI from "z-ai-web-dev-sdk";/m);
+  assert.match(providers, /ME2_BROWSER_PROBE_MODEL_EXECUTION_DISABLED/);
+  assert.match(providers, /async function zai\(\)[\s\S]{0,120}assertProviderExecutionAllowed\(\)/);
+  assert.match(providers, /export async function gatewayTlsProbe[\s\S]{0,140}assertProviderExecutionAllowed\(\)/);
+  assert.match(providers, /export async function chat[\s\S]{0,180}assertProviderExecutionAllowed\(\)/);
+  assert.match(worker, /ME2_BROWSER_PROBE_WORKER_EXECUTION_DISABLED/);
+  assert.match(worker, /export function startMasterLoop[\s\S]{0,120}assertWorkerExecutionAllowed\(\)/);
+  assert.match(glm, /ME2_BROWSER_PROBE_GLM_EXECUTION_DISABLED/);
+  assert.match(glm, /export async function glmProbe[\s\S]{0,160}assertGlmExecutionAllowed\(\)/);
+  assert.match(daemon, /model_execution_guard: "BROWSER_PROBE_HARD_GUARD_V1"/);
+  assert.match(daemon, /provider_sdk_static_import_allowed: false/);
 });
