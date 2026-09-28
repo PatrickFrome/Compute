@@ -272,7 +272,7 @@ function fakeZaiTyped({ appendMode = false, deleteClears = true, submitWorks = t
         return {};
       }
       if (method === 'Input.dispatchKeyEvent') {
-        if (params.key === 'Delete' && params.type === 'rawKeyDown' && deleteClears) composerValue = '';
+        if (params.key === 'Backspace' && params.type === 'rawKeyDown' && deleteClears && (params.commands || []).includes('DeleteBackward')) composerValue = '';
         if (params.key === 'Enter' && params.type === 'rawKeyDown' && submitWorks) composerValue = '';
         if (params.key === 'Enter' && params.type === 'keyUp' && submitWorks) {
           // A real surface re-renders after submit; the outcome latch is
@@ -346,7 +346,7 @@ test('D-K2/D-K6: selection-drop append is cleared by the atomic Ctrl+A+Delete ge
     },
   });
   assert.equal(result.replace_verified, true, 'the atomic clear-and-type must verify');
-  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Delete' && p.type === 'rawKeyDown'), 'Delete is dispatched inside the single gesture');
+  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Backspace' && p.type === 'rawKeyDown' && (p.commands || []).includes('DeleteBackward')), 'DeleteBackward editor command is dispatched inside the clear gesture');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter' && p.type === 'rawKeyDown'));
 });
@@ -367,9 +367,10 @@ test('D-K2/D-K6: an unprovable replace fails closed BEFORE Enter — no corrupte
     },
   }), /native_semantic_type_replace_unverified/);
   assert.ok(!h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter'), 'Enter must never dispatch when the replace is unproven');
-  // exactly ONE insertText — the D-K6 rule: no re-type after a mutated attempt
+  // R97/R98: clear is independently read back BEFORE any new text is inserted.
+  // A failed clear therefore produces zero inserts and zero submit effects.
   const inserts = h.calls.filter(([m]) => m === 'Input.insertText');
-  assert.equal(inserts.length, 1, 'a failed replace must not re-type (double-append hazard)');
+  assert.equal(inserts.length, 0, 'an unproven clear must stop before first insert');
 });
 
 test('D-K2/D-K6: non-submit type reports replace_verified instead of failing', async () => {
@@ -388,11 +389,12 @@ test('D-K2/D-K6: non-submit type reports replace_verified instead of failing', a
     },
   });
   assert.equal(result.replace_verified, false);
-  // Single append (no retry): base + probe.
-  const expectedValue = 'STALE DRAFT: previous unsent task prompt' + 'probe';
+  // A non-submit replace still obeys clear-before-insert. If the old value
+  // cannot be proven empty, the draft remains untouched and no probe is added.
+  const expectedValue = 'STALE DRAFT: previous unsent task prompt';
   assert.equal(result.value_length_after, expectedValue.length);
   assert.equal(result.value_sha256_after, sha256(expectedValue));
-  assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 1, 'exactly one insertText — no re-type');
+  assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 0, 'unproven clear blocks even non-submit replacement insertion');
 });
 
 test('D-K2: replace_existing=false keeps append semantics with replace_verified null', async () => {
