@@ -2,7 +2,6 @@ name: A1 Legacy GPT Coordination Worker — Quarantined
 
 on:
   pull_request:
-    branches: [main]
     paths:
       - 'coordination/gpt-worker/**'
       - '.github/workflows/a1-gpt-coordination-worker.yml'
