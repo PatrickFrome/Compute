@@ -1,23 +1,21 @@
 "use client";
-// ── ME2 PAGE: TASKS (R74) — порт legacy «ВЕТКИ·ЗАДАЧИ» + «ОЧЕРЕДЬ ЗАДАЧ» + «METRICS·РЕТРАИ» ──
+// ── METAENGINE TASKS — durable task graph + queue projection ──────────────────
 // Источник: docs/legacy-mission-control.tsx.txt (BranchGraph L409-684, вкладки L2636-2717,
-// очередь L2728-2760, retry-metrics L1318-1328/2607-2620). Клик по ветви/задаче → Task Sheet
+// очередь L2728-2760). Клик по ветви/задаче → Task Sheet
 // (глобальный оверлей стора). Стиль: zinc+emerald плотный, font-mono для данных.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Activity, GitBranch, ListChecks, Plus,
+  GitBranch, ListChecks, Plus,
 } from "lucide-react";
 import {
-  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, me2Fetch, taskAction,
+  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, taskAction,
   type BranchTabKey, type Task,
 } from "@/lib/me2-bus";
-import { agentChatOp } from "@/lib/me2-socket";
 import { useMe2 } from "@/components/me2/store";
 import { useTemporaryPeekList } from "@/hooks/use-temporary-peek";
-import { Chip, PageHeader, Sec, StatusBadge } from "@/components/me2/ui/primitives";
-import { useToast } from "@/hooks/use-toast";
+import { PageHeader, Sec, StatusBadge } from "@/components/me2/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 
@@ -26,12 +24,6 @@ type Reflection = {
   v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string;
   llm?: { lesson?: string; fix?: string; model?: string; source?: string; at?: string };
   signals?: { loop_top?: number; tool_calls?: number; distinct?: number; writes?: number; tool_errors?: number; parse_fails?: number };
-};
-type RetryMetrics = {
-  retries: number;
-  with_lesson: { n: number; completed: number; rate: number | null };
-  without_lesson: { n: number; completed: number; rate: number | null };
-  ab?: { treatment: { n: number; completed: number; rate: number | null }; control: { n: number; completed: number; rate: number | null }; control_crossover: number };
 };
 const TASKS_BRANCH_VIEW_LS = "me2.tasks.branch-view.v1";
 const CAUSE_RU: Record<string, string> = {
@@ -81,13 +73,11 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
 /** Git-подобный граф ветвей — полный порт legacy L404-684.
  *  Рейка таймлайна, каждая задача — ветвь с точкой статуса; retry-линии (parent_id → merge-дуга
  *  к родителю); hover-tooltip через portal (fixed, не обрезается скролл-контейнером); окно 60
- *  ветвей (старшие скрыты за toggle); ↻ retry и ✦ LLM-рефлексия на FAILED/CANCELLED строках. */
-function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selectedId, onSelect }: {
+ *  ветвей (старшие скрыты за toggle); ↻ retry остаётся отдельным task-plane действием. */
+function BranchGraph({ tasks, onOpen, onRetry, selectedId, onSelect }: {
   tasks: Task[];
   onOpen: (t: Task) => void;
   onRetry: (t: Task) => void;
-  onReflect?: (t: Task) => void;
-  reflectingId?: string | null;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
 }) {
@@ -241,41 +231,12 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selected
                     aria-keyshortcuts="Enter Space"
                     aria-label={`Повторить задачу ${t.title}`}
                   >
-                    <title>{"Повторить (TASK_RETRY: +2 шага, рефлексия родителя в контексте)"}</title>
+                    <title>{"Повторить задачу через task scheduler"}</title>
                     <circle cx={STEPS_X - 34} cy={y} r={7.5} fill="transparent" className="hover:fill-amber-500/20" />
                     <text x={STEPS_X - 34} y={y + 3.4} fontSize={9.5} textAnchor="middle" className="fill-amber-500/70 font-mono hover:fill-amber-300" style={{ pointerEvents: "none" }}>
                       ↻
                     </text>
                   </g>
-                  {onReflect ? (
-                    <g
-                      className="branch-reflect cursor-pointer"
-                      onClick={(e) => { e.stopPropagation(); onReflect(t); }}
-                      onKeyDown={(e) => {
-                        if (e.key !== "Enter" && e.key !== " ") return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onReflect(t);
-                      }}
-                      role="button"
-                      tabIndex={0}
-                      aria-keyshortcuts="Enter Space"
-                      aria-label={`Сгенерировать LLM-рефлексию для задачи ${t.title}`}
-                    >
-                      <title>{"LLM-рефлексия (tier-2): вербальный урок провала — через супервизора флота (R44)"}</title>
-                      <circle cx={STEPS_X - 50} cy={y} r={7.5} fill="transparent" className="hover:fill-violet-500/20" />
-                      <text
-                        x={STEPS_X - 50}
-                        y={y + 3.6}
-                        fontSize={9.5}
-                        textAnchor="middle"
-                        className={`font-mono ${reflectingId === t.id ? "fill-violet-300" : "fill-violet-500/70 hover:fill-violet-300"}`}
-                        style={{ pointerEvents: "none" }}
-                      >
-                        {reflectingId === t.id ? "◌" : "✦"}
-                      </text>
-                    </g>
-                  ) : null}
                 </>
               )}
             </g>
@@ -374,11 +335,9 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selected
 
 // ── PAGE ────────────────────────────────────────────────────────────────────────
 export function TasksPage() {
-  const { toast } = useToast();
   const snap = useMe2((s) => s.snap);
   const nowMs = useMe2((s) => s.nowMs);
   const openTask = useMe2((s) => s.openTask);
-  const setChatId = useMe2((s) => s.setChatId);
   const setDialog = useMe2((s) => s.setDialog);
 
   // вкладка-фильтр ветвей; Linear/Blender-style view preference survives page switches.
@@ -395,43 +354,6 @@ export function TasksPage() {
     if (!branchViewReady) return;
     try { localStorage.setItem(TASKS_BRANCH_VIEW_LS, branchTab); } catch { /* private mode */ }
   }, [branchTab, branchViewReady]);
-
-  // R11 legacy: pass-rate ретраев с LLM-уроком vs без — /metrics, поллинг 20s
-  const [retryMetrics, setRetryMetrics] = useState<RetryMetrics | null>(null);
-  useEffect(() => {
-    let dead = false;
-    const load = () => me2Fetch<RetryMetrics & { ok: boolean }>("/metrics?XTransformPort=3041")
-      .then((d) => { if (!dead && d?.ok) setRetryMetrics(d); })
-      .catch(() => { /* daemon недоступен — чип просто скрыт */ });
-    void load();
-    const iv = setInterval(load, 20_000);
-    return () => { dead = true; clearInterval(iv); };
-  }, []);
-
-  // R44 legacy: провал уходит живому супервизору чат-флота (op:"send" через socket ack)
-  const [reflectingId, setReflectingId] = useState<string | null>(null);
-  const reflectTask = useCallback(async (t: Task) => {
-    setReflectingId(t.id);
-    try {
-      const list = await me2Fetch<{ sessions?: Array<{ id: string; role: string; status: string; title: string }> }>("/agentchat?XTransformPort=3041");
-      const sup = list?.sessions?.find((s) => s.role === "SUPERVISOR" && s.status === "ACTIVE");
-      if (!sup) {
-        toast({ title: "флот недоступен", description: "нет активного супервизора — создайте чат-агента", variant: "destructive" });
-        return;
-      }
-      const r = await agentChatOp({ op: "send", id: sup.id, text: `Разбери провал задачи ${t.id} «${t.title}» (статус ${t.status}). Диагноз и урок — reply; фиксацию исхода — report_outcome (outcome-proof).` });
-      if (r.ok) {
-        toast({ title: "провал передан флоту ✓", description: `супервизор «${sup.title}» координирует разбор` });
-        setChatId(sup.id);
-      } else {
-        toast({ title: "передача флоту ✗", description: r.error ?? "ошибка", variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "передача флоту ✗", description: "daemon недоступен", variant: "destructive" });
-    } finally {
-      setReflectingId(null);
-    }
-  }, [setChatId, toast]);
 
   // retry ↻ на ветви — TASK_RETRY через шину
   const retryBranch = useCallback(async (t: Task) => { await taskAction("TASK_RETRY", t.id); }, []);
@@ -481,27 +403,11 @@ export function TasksPage() {
     return null;
   }, [nowMs]);
 
-  const retryChip = retryMetrics && retryMetrics.retries > 0 && (
-    <span
-      className="hidden font-mono text-[9px] text-zinc-500 sm:inline"
-      title="Pass-rate ретраев: завершено с LLM-уроком (violet) vs без — живое измерение Reflexion-эффекта (/metrics). A/B — рандомизированные группы авто-рефлексии: treatment получает авто-урок, control — нет (intent-to-treat); crossover — контрольные, получившие ручной урок"
-    >
-      ↳ <span className="text-violet-400">{retryMetrics.with_lesson.completed}/{retryMetrics.with_lesson.n}</span> с уроком · <span className="text-zinc-400">{retryMetrics.without_lesson.completed}/{retryMetrics.without_lesson.n}</span> без
-      {retryMetrics.ab && (retryMetrics.ab.treatment.n > 0 || retryMetrics.ab.control.n > 0) ? (
-        <>
-          {" "}· A/B <span className="text-fuchsia-400">T {retryMetrics.ab.treatment.completed}/{retryMetrics.ab.treatment.n}</span> · <span className="text-zinc-500">C {retryMetrics.ab.control.completed}/{retryMetrics.ab.control.n}</span>
-          {retryMetrics.ab.control_crossover > 0 ? <span className="text-amber-400/80"> · x{retryMetrics.ab.control_crossover}</span> : null}
-        </>
-      ) : null}
-    </span>
-  );
-
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-tasks" data-panel-tasks>
       <PageHeader
         title="TASKS"
-        sub="ветки · очередь · метрики ретраев"
-        actions={retryChip}
+        sub="ветки · очередь · durable outcomes"
       />
       <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
         {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + task-фильтры; Browser живёт на COMMAND/BROWSER) ── */}
@@ -551,8 +457,6 @@ export function TasksPage() {
                   tasks={branchTasks}
                   onOpen={(t) => openTask(t.id)}
                   onRetry={(t) => void retryBranch(t)}
-                  onReflect={(t) => void reflectTask(t)}
-                  reflectingId={reflectingId}
                   selectedId={effectivePeekTaskId}
                   onSelect={setPeekTaskId}
                 />
@@ -561,7 +465,7 @@ export function TasksPage() {
           </Sec>
         </div>
 
-        {/* ── право: ОЧЕРЕДЬ + METRICS; Mirror живёт в OBSERVABILITY/Attention ── */}
+        {/* ── право: ОЧЕРЕДЬ; evidence/metrics живут в OBSERVABILITY ── */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll lg:flex-[1]">
           <Sec
             id="tasks-queue"
@@ -575,7 +479,7 @@ export function TasksPage() {
             }
           >
             {queueTasks.length === 0 && (
-              <p className="p-4 text-center text-xs text-zinc-500">очередь пуста — нажмите N</p>
+              <p className="p-4 text-center text-xs text-zinc-500">очередь пуста</p>
             )}
             <div className="space-y-1.5">
               {queueTasks.map((t) => {
@@ -618,37 +522,6 @@ export function TasksPage() {
                 );
               })}
             </div>
-          </Sec>
-
-          <Sec id="tasks-metrics" title="METRICS · РЕТРАИ" icon={Activity} tone="violet">
-            {!retryMetrics ? (
-              <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка /metrics…</div>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                <Chip label="ретраев" value={retryMetrics.retries} tone="amber" title="всего TASK_RETRY-ветвей в выборке /metrics" />
-                <Chip
-                  label="с уроком"
-                  value={`${retryMetrics.with_lesson.completed}/${retryMetrics.with_lesson.n}${retryMetrics.with_lesson.rate !== null ? ` · ${Math.round(retryMetrics.with_lesson.rate * 100)}%` : ""}`}
-                  tone="violet"
-                  title="ретраи, завершённые с LLM-уроком (авто-рефлексия) — pass-rate Reflexion-эффекта"
-                />
-                <Chip
-                  label="без урока"
-                  value={`${retryMetrics.without_lesson.completed}/${retryMetrics.without_lesson.n}${retryMetrics.without_lesson.rate !== null ? ` · ${Math.round(retryMetrics.without_lesson.rate * 100)}%` : ""}`}
-                  tone="zinc"
-                  title="ретраи без LLM-урока — контрольная группа Reflexion-эффекта"
-                />
-                {retryMetrics.ab && (
-                  <>
-                    <Chip label="A/B T" value={`${retryMetrics.ab.treatment.completed}/${retryMetrics.ab.treatment.n}`} tone="fuchsia" title="treatment: рандомизированная группа авто-рефлексии (intent-to-treat)" />
-                    <Chip label="A/B C" value={`${retryMetrics.ab.control.completed}/${retryMetrics.ab.control.n}`} tone="zinc" title="control: группа без авто-урока" />
-                    {retryMetrics.ab.control_crossover > 0 && (
-                      <Chip label="crossover" value={`x${retryMetrics.ab.control_crossover}`} tone="amber" title="контрольные, получившие ручной урок" />
-                    )}
-                  </>
-                )}
-              </div>
-            )}
           </Sec>
         </div>
       </div>
