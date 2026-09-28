@@ -167,7 +167,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   const cycle = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
   const first = await cycle.cycle();
   assert.equal(first.dispatch.state, 'RUNNING');
-  assert.equal(first.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
+  assert.equal(first.dispatch.proof.effect_state, 'PROVEN_CONVERSATION');
   assert.equal(first.dispatch.selected_tab_mutation, false, 'D-C2: dispatch is tab-scoped, never foreground-scoped');
   assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: GLM semantic submit is geometry-independent');
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SELECT_TAB').length, 0, 'D-C2: no SELECT_TAB is issued anywhere in the dispatch');
@@ -184,7 +184,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   assert.equal(first.second_scheduler_loop, false);
 });
 
-test('proven submit with delayed SPA navigation completes via the bounded conversation readback (D-S3)', async () => {
+test('proven submit on persistent Agent session completes without requiring SPA navigation (D-S3)', async () => {
   let selected = supervisorTab;
   let captureCount = 0;
   const commands = [];
@@ -199,12 +199,11 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      // Busy probe (2 samples) + pre-capture + the FIRST post-submit capture
-      // still show the root URL (the SPA has not navigated yet); the next
-      // post-submit capture shows the conversation. The dispatcher must wait
-      // and re-capture instead of declaring the proven effect ambiguous.
+      // The Agent worker intentionally stays on its canonical /c/<id> session.
+      // Independent CAPTURE readback must therefore prove the same session,
+      // rather than requiring a synthetic navigation to a fresh conversation.
       if (captureCount <= 4) return frame({ sendVisible: true });
-      return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
+      return frame({ stopActive: true, sendVisible: false });
     }
     if (command.action === 'SEMANTIC_TYPE') {
       return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
@@ -214,10 +213,10 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
   const result = await cycle.cycle();
   assert.equal(result.dispatch.state, 'RUNNING');
-  // Agent sessions are persistent: a proven composer-clear is a terminal
-  // submit readback even when the SPA keeps the same /c/<id> session. The
-  // runtime must never force a second submit just to manufacture navigation.
-  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
+  // Agent sessions are persistent: the local composer-clear receipt is
+  // normalized to the durable server vocabulary only after independent
+  // readback confirms the same causally bound /c/<id> session.
+  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_CONVERSATION');
   const semanticTypes = commands.filter((row) => row === 'SEMANTIC_TYPE').length;
   assert.equal(semanticTypes, 1, 'exactly one submit — readback never re-submits');
   assert.ok(captureCount >= 1, 'fresh perception was taken around the submit');
