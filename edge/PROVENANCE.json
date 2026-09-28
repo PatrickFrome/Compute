@@ -1,0 +1,129 @@
+{
+  "schema": "metaengine.r83.edge.provenance.v1",
+  "generated_at": "2026-09-26T08:32:44.448Z",
+  "source": "Cloudflare Workers scripts API (live content endpoint, multipart)",
+  "captured_by": "ME2 daemon edge.ts snapshotWorker() — hash-chained EDGE_SNAPSHOT events",
+  "live_verified_at": "2026-09-26T08:00Z",
+  "digest_contract": {
+    "normalization": "parse multipart → sort modules by name → sha256 of `#module {name}\\n{body}` concatenation (single trailing newline stripped per body) — random boundary/module-order defeated, 3-fetch stable",
+    "fabric_live_sha256": "9c55419e37b04d41",
+    "aop1_live_sha256": "29b36254b0b4cb4f"
+  },
+  "workers": {
+    "metaengine-fabric-worker-h205f21r4": {
+      "live_sha256": "9c55419e37b04d41",
+      "live_bytes": 16944,
+      "version": 15,
+      "versions_total": 10,
+      "modified_on": "2026-08-20T02:48:38.952989Z",
+      "compatibility_date": "2026-08-19",
+      "observability_enabled": false,
+      "source_character": "ORIGINAL_MODULES",
+      "repo_prefix": "edge/fabric-worker-h205f21r4/",
+      "entry": "src/index.js (exports FabricWorkflow + default {fetch, queue})",
+      "modules": [
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/gateway.js",
+          "bytes": 2191,
+          "lines": 57,
+          "sha256_12": "f0ee408178ad"
+        },
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/handlers.js",
+          "bytes": 1240,
+          "lines": 29,
+          "sha256_12": "038abdc6ba71"
+        },
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/index.js",
+          "bytes": 493,
+          "lines": 20,
+          "sha256_12": "85b1773a70cb"
+        },
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/workflow.js",
+          "bytes": 3726,
+          "lines": 86,
+          "sha256_12": "d0d6628b819c"
+        },
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/ai.js",
+          "bytes": 2351,
+          "lines": 59,
+          "sha256_12": "94aee92d79e6"
+        },
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/auth.js",
+          "bytes": 590,
+          "lines": 16,
+          "sha256_12": "51cdf4b0531d"
+        },
+        {
+          "path": "edge/fabric-worker-h205f21r4/src/core.mjs",
+          "bytes": 5457,
+          "lines": 122,
+          "sha256_12": "77146e96b3c3"
+        }
+      ]
+    },
+    "metaengine-h205f22-aop1": {
+      "live_sha256": "29b36254b0b4cb4f",
+      "live_bytes": 95380,
+      "version": 64,
+      "versions_total": 10,
+      "modified_on": "2026-08-24T10:37:20.722214Z",
+      "compatibility_date": "2026-08-21",
+      "observability_enabled": true,
+      "source_character": "ESBUILD_BUNDLE (single module index.js; original per-module source lost before this import)",
+      "repo_prefix": "edge/metaengine-h205f22-aop1/",
+      "deployable": "bundle/index.js (verbatim live bytes — wrangler main)",
+      "recovered": [
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-index.ts",
+          "marker": "src/index.ts",
+          "lines": 2,
+          "note": "entry module (esbuild emits it last; first occurrence is the hoisted import block)"
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-supabase.ts",
+          "marker": "src/supabase.ts",
+          "lines": 93
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-github.ts",
+          "marker": "src/github.ts",
+          "lines": 308
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-executor.ts",
+          "marker": "src/executor.ts",
+          "lines": 221
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-duel_microstep.ts",
+          "marker": "src/duel_microstep.ts",
+          "lines": 666
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-peer_relay_v4.ts",
+          "marker": "src/peer_relay_v4.ts",
+          "lines": 370
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-duel_db_wake.ts",
+          "marker": "src/duel_db_wake.ts",
+          "lines": 37
+        },
+        {
+          "file": "edge/metaengine-h205f22-aop1/recovered/src-index.ts",
+          "marker": "src/index.ts",
+          "lines": 253,
+          "note": "entry module (esbuild emits it last; first occurrence is the hoisted import block)"
+        }
+      ],
+      "bundle_sha256_12": "f5cdc8505afc"
+    }
+  },
+  "secrets_policy": "no secret values in repo; live secret_text bindings are listed in wrangler.jsonc secrets_hint and must be re-provisioned via `wrangler secret put` before any deploy",
+  "deploy_policy": "IMPORT ONLY — this PR does NOT deploy anything; promotion requires operator review + digest re-verification + CF token rotation (chat-export token)"
+}
