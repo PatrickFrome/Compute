@@ -61,6 +61,19 @@ test('R97: Agent home requires exact Agent + New Task + model + Full-Stack evide
   assert.equal(controls.authority_effect, false);
 });
 
+test('R98: conversation URL alone never proves Agent origin', () => {
+  const frame = frameWithTargets([
+    ['textbox', 'Send a Message'],
+  ]);
+  frame.url = 'https://chat.z.ai/c/11111111-2222-3333-4444-555555555555';
+  const surface = classifyAgentPlatformTaskSurface(frame);
+  assert.equal(surface.stage, 'CONVERSATION_ORIGIN_UNPROVEN');
+  assert.equal(surface.proven, false);
+  assert.equal(surface.url_only_authority, false);
+  assert.equal(surface.requires_durable_agent_origin_proof, true);
+  assert.equal(resolveAgentHomeControls(frame).ready, false);
+});
+
 test('R97: partial Agent-looking surface is not admitted', () => {
   const frame = frameWithTargets([
     ['button', 'Agent'],
@@ -230,6 +243,8 @@ test('task-config snapshot requires the Agent New Task flow and never aliases Ch
   assert.equal(snap.database_visibility, 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED');
   assert.equal(snap.task_creation_surface, 'AGENT_HOME_NEW_TASK_FLOW');
   assert.equal(snap.ordinary_root_is_task_surface, false);
+  assert.equal(snap.conversation_url_is_agent_surface_authority, false);
+  assert.equal(snap.conversation_origin_requires_durable_agent_surface_proof, true);
   assert.equal(snap.agent_home_proof, 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS');
   assert.equal(snap.task_config_surface_state, 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION');
   assert.equal(snap.composer_ignores_synthetic_editing_keys, null);
