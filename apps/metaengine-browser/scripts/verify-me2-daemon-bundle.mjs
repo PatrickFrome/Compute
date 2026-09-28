@@ -31,6 +31,11 @@ async function fetchJson(url) {
   return response.json();
 }
 
+async function fetchStatus(url, options = {}) {
+  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(1500) });
+  return response.status;
+}
+
 async function smoke(exe, manifest) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-me2-daemon-smoke-'));
   const offset = process.pid % 1000;
@@ -93,12 +98,20 @@ async function smoke(exe, manifest) {
     assert.equal(state?.browser_probe?.command_mutation_enabled, false);
     assert.equal(state?.browser_probe?.token_mutation_enabled, false);
     assert.equal(state?.browser_probe?.authority_effect, false);
+    // Probe mode is an exact allowlist, not a mutation-only blocklist. A new
+    // GET endpoint must not become Browser-reachable by default, including GET
+    // routes that lazily start collectors.
+    assert.equal(await fetchStatus(`http://127.0.0.1:${restPort}/browser/obsv`), 403);
+    assert.equal(await fetchStatus(`http://127.0.0.1:${restPort}/providers`), 403);
+    assert.equal(await fetchStatus(`http://127.0.0.1:${restPort}/state`, { method: 'POST' }), 403);
     return {
       runtime_smoke: 'PASS',
       health_version: String(health.version),
       state_version: String(stateVersion),
       state_contract: String(state.contract),
       boot_mode: 'probe',
+      allowed_get_paths: ['/health', '/state'],
+      blocked_get_side_effect_probe: true,
       external_bun_used: false,
       external_runtime_path_sanitized: process.platform === 'win32',
     };
