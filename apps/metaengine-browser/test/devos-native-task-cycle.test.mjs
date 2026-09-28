@@ -20,8 +20,8 @@ const fleetTransportProof = {
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
-  conversation_url_sha256: 'a'.repeat(64),
-  agent_surface_sha256: 'd'.repeat(64),
+  conversation_url: 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc',
+  conversation_url_sha256: '758f6ecdbbb580270792b3f5e6cbdf0bb6301c3b95f3465375b71e9cdd19c3b3',
   agent_surface_sha256: 'b'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
@@ -155,12 +155,11 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true, tab_id: selected }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount < 2) return frame();
-      return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
+      return frame({ url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
     }
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.payload.submit_after_type, true);
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
@@ -168,7 +167,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   const cycle = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
   const first = await cycle.cycle();
   assert.equal(first.dispatch.state, 'RUNNING');
-  assert.equal(first.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
+  assert.equal(first.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.equal(first.dispatch.selected_tab_mutation, false, 'D-C2: dispatch is tab-scoped, never foreground-scoped');
   assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: GLM semantic submit is geometry-independent');
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SELECT_TAB').length, 0, 'D-C2: no SELECT_TAB is issued anywhere in the dispatch');
@@ -185,7 +184,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   assert.equal(first.second_scheduler_loop, false);
 });
 
-test('proven submit with delayed SPA navigation completes via the bounded conversation readback (D-S3)', async () => {
+test('proven Agent-session submit stays in the canonical conversation without re-submit (R98)', async () => {
   let selected = supervisorTab;
   let captureCount = 0;
   const commands = [];
@@ -200,12 +199,7 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      // Busy probe (2 samples) + pre-capture + the FIRST post-submit capture
-      // still show the root URL (the SPA has not navigated yet); the next
-      // post-submit capture shows the conversation. The dispatcher must wait
-      // and re-capture instead of declaring the proven effect ambiguous.
-      if (captureCount <= 4) return frame({ sendVisible: true });
-      return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
+      return frame({ url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
     }
     if (command.action === 'SEMANTIC_TYPE') {
       return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
@@ -215,10 +209,10 @@ test('proven submit with delayed SPA navigation completes via the bounded conver
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
   const result = await cycle.cycle();
   assert.equal(result.dispatch.state, 'RUNNING');
-  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
+  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
   const semanticTypes = commands.filter((row) => row === 'SEMANTIC_TYPE').length;
-  assert.equal(semanticTypes, 1, 'exactly one submit — the readback never re-submits');
-  assert.ok(captureCount >= 5, 'the bounded readback re-captured until the conversation URL appeared');
+  assert.equal(semanticTypes, 1, 'exactly one task submit is allowed');
+  assert.ok(captureCount >= 2, 'the task effect receives a post-submit readback');
 });
 
 test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independent submit)', async () => {
@@ -236,12 +230,11 @@ test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independen
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      // Unrendered fleet tab: 0x0 viewport, live composer ref, root surface.
-      if (captureCount < 2) return frame({ viewport: { width: 0, height: 0 }, sendVisible: false });
-      return frame({ viewport: { width: 0, height: 0 }, url: conversationUrl, stopActive: true, sendVisible: false });
+      // Unrendered fleet tab: 0x0 viewport, exact proven Agent conversation.
+      return frame({ viewport: { width: 0, height: 0 }, url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     throw new Error(`unexpected_action:${command.action}`);
   };
@@ -297,11 +290,13 @@ test('user-selected tab after Send is not overwritten by restoration', async () 
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount < 2) return frame();
-      selected = 'tab_user_override';
-      return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
+      if (captureCount > 1) selected = 'tab_user_override';
+      return frame({ url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
     }
-    if (command.action === 'SEMANTIC_TYPE' || command.action === 'TYPED_CLICK') return { authority_effect: true };
+    if (command.action === 'SEMANTIC_TYPE') {
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
