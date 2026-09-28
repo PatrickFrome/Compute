@@ -79,19 +79,32 @@ test('R85 Browser owns packaged ME2 UI lifecycle and never adopts a healthy port
   assert.equal(decideMe2UiInitialAction({ healthOk: true, allowExternalAdopt: true }), 'ADOPT');
 });
 
-test('source checkout remains an explicit Bun fallback only', () => {
+test('source checkout uses only the probe-only Bun entrypoint and rejects legacy index.ts', () => {
   const cwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
   const sourceDir = path.join(cwd, '..', 'me2-daemon');
   const sourceIndex = path.join(sourceDir, 'index.ts');
+  const probeEntry = path.join(sourceDir, 'browser-probe-entry.ts');
+
   const launch = resolveMe2DaemonLaunch({
+    resourcesPath: '',
+    cwd,
+    env: { ME2_DAEMON_BIN: 'bun-custom' },
+    exists: (candidate) => candidate === sourceIndex || candidate === probeEntry,
+  });
+  assert.deepEqual(launch, {
+    dir: sourceDir,
+    bin: 'bun-custom',
+    args: ['browser-probe-entry.ts'],
+    mode: 'SOURCE_BUN_PROBE_ONLY',
+  });
+
+  const legacyOnly = resolveMe2DaemonLaunch({
     resourcesPath: '',
     cwd,
     env: { ME2_DAEMON_BIN: 'bun-custom' },
     exists: (candidate) => candidate === sourceIndex,
   });
-  assert.equal(launch.mode, 'SOURCE_BUN');
-  assert.equal(launch.bin, 'bun-custom');
-  assert.deepEqual(launch.args, ['index.ts']);
+  assert.equal(legacyOnly, null, 'Browser must fail closed instead of launching the historical full daemon');
 });
 
 test('UI routing requires live ownership and readiness; shutdown revokes external adoption too', () => {
@@ -162,8 +175,11 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(daemonEntry, /join\(tmpdir\(\), \"me2-daemon\.lock\"\)/);
   assert.doesNotMatch(daemonEntry, /[\"']\/tmp\/me2-daemon\.lock[\"']/);
   const host = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-daemon-host.mjs'), 'utf8');
-  assert.match(host, /ME2_BOOT_MODE:\s*process\.env\.ME2_DAEMON_BOOT_MODE \|\| 'probe'/);
+  assert.match(host, /ME2_BOOT_MODE:\s*'probe'/);
+  assert.doesNotMatch(host, /ME2_DAEMON_BOOT_MODE\s*\|\|/);
+  assert.match(host, /browser-probe-entry\.ts/);
   assert.match(host, /mode:\s*'PACKAGED_STANDALONE'/);
+  assert.match(host, /mode:\s*'SOURCE_BUN_PROBE_ONLY'/);
 
   const integration = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-integration-entry.mjs'), 'utf8');
   assert.match(integration, /startMe2DaemonHost\(\{ dataDir:/);
