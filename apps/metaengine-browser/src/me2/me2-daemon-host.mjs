@@ -91,6 +91,11 @@ function browserProbeContract(state) {
     && probe?.browser_actuation_authority === false
     && probe?.command_mutation_enabled === false
     && probe?.token_mutation_enabled === false
+    && probe?.persistent_state_write_enabled === false
+    && probe?.model_execution_guard === 'BROWSER_PROBE_HARD_GUARD_V1'
+    && probe?.provider_sdk_static_import_allowed === false
+    && probe?.durable_state_authority === false
+    && probe?.state_storage === 'EPHEMERAL_MEMORY_ONLY'
     && probe?.authority_effect === false;
   return safe ? probe : null;
 }
