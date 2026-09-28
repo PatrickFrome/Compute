@@ -1108,6 +1108,7 @@ export class DevOsNativeTaskCycle {
       const proof = {
         prompt_sha256: promptHash,
         conversation_url_sha256: sha256(normalizedUrl),
+        agent_surface_sha256: preReady.agent_origin_proof.agent_surface_sha256,
         effect_state: effectState,
       };
       this.#dispatchEffectCounters.dispatches += 1;
@@ -1115,6 +1116,7 @@ export class DevOsNativeTaskCycle {
       this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'PROVEN', effect_state: effectState, task_id: lease.task_id, agent_id: lease.agent_id });
       await journal?.markDeliveryPending(effectBinding, {
         conversation_url_sha256: proof.conversation_url_sha256,
+        agent_surface_sha256: proof.agent_surface_sha256,
         effect_state: proof.effect_state,
         browser_effect_proven: true,
         physical_effect_attempted: true,
