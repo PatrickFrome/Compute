@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
   isAgentPlatformConversationUrl,
   normalizeAgentPlatformConversationUrl,
-  resolveAgentPlatformAgentSurface,
+  normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformComposer,
   resolveAgentPlatformSelectedModel,
 } from './browser-agent-platform.mjs';
@@ -13,6 +14,8 @@ import {
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
 const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
+const HASH_RE = /^[a-f0-9]{64}$/;
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const HASH_RE = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
@@ -25,6 +28,43 @@ function exact(frame, role, names) {
   return rows.length === 1 ? structuredClone(rows[0]) : null;
 }
 
+function exactAgentOriginProof({
+  proof,
+  expectedTab,
+  expectedTarget,
+  expectedGeneration,
+  frameUrl,
+} = {}) {
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1' || proof.authority_effect !== false) return null;
+  if (String(proof.tab_id || '') !== expectedTab) return null;
+  if (String(proof.target_id || '').toLowerCase() !== expectedTarget) return null;
+  if (Number(proof.generation_epoch) !== Number(expectedGeneration)) return null;
+  const agentSurfaceSha256 = String(proof.agent_surface_sha256 || '').toLowerCase();
+  const conversationSha256 = String(proof.conversation_url_sha256 || '').toLowerCase();
+  if (!HASH_RE.test(agentSurfaceSha256) || !HASH_RE.test(conversationSha256)) return null;
+
+  let proofUrl = null;
+  let currentUrl = null;
+  try {
+    proofUrl = normalizeAgentPlatformConversationUrl(proof.conversation_url);
+    currentUrl = normalizeAgentPlatformConversationUrl(frameUrl);
+  } catch {
+    return null;
+  }
+  if (proofUrl !== currentUrl || sha256(proofUrl) !== conversationSha256) return null;
+
+  return Object.freeze({
+    schema: 'metaengine.browser.agent-origin-readiness-proof.v1',
+    conversation_url: proofUrl,
+    conversation_url_sha256: conversationSha256,
+    agent_surface_sha256: agentSurfaceSha256,
+    tab_id: expectedTab,
+    target_id: expectedTarget,
+    generation_epoch: Number(expectedGeneration),
+    authority_effect: false,
+  });
+}
+
 export function evaluateFleetSubmitReadiness({
   frame,
   expected_tab_id,
@@ -32,6 +72,8 @@ export function evaluateFleetSubmitReadiness({
   expected_target_id,
   observed_target_id,
   selected_tab_id,
+  expected_agent_generation_epoch = null,
+  agent_origin_proof = null,
   phase = 'PRE_CLICK',
   platform = 'CHATGPT',
   agent_origin_proof = null,
@@ -83,59 +125,19 @@ export function evaluateFleetSubmitReadiness({
   // (semantic addressing is geometry-independent by design). The viewport is
   // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
-    // R98: a task may run in a /c/<id> frame only when the current exact
-    // tab/target is backed by the durable proof created by the Agent-home
-    // promotion path. The URL by itself has zero Agent authority.
-    if (isAgentPlatformConversationUrl(frame?.url)) {
-      const proof = agent_origin_proof;
-      if (!proof
-          || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1'
-          || proof.authority_effect !== false
-          || String(proof.tab_id || '') !== expectedTab
-          || String(proof.target_id || '').toLowerCase() !== expectedTarget
-          || !HASH_RE.test(String(proof.conversation_url_sha256 || '').toLowerCase())
-          || !HASH_RE.test(String(proof.agent_surface_sha256 || '').toLowerCase())) {
-        return Object.freeze({ ready: false, reason: 'AGENT_ORIGIN_PROOF_INVALID', foreground, authority_effect: false });
-      }
-      let normalizedConversation = null;
-      try { normalizedConversation = normalizeAgentPlatformConversationUrl(frame.url); } catch {}
-      if (!normalizedConversation || sha256(normalizedConversation) !== String(proof.conversation_url_sha256).toLowerCase()) {
-        return Object.freeze({ ready: false, reason: 'AGENT_SESSION_CONVERSATION_MISMATCH', foreground, authority_effect: false });
-      }
-      const composer = resolveAgentPlatformComposer(frame);
-      if (!composer) {
-        return Object.freeze({ ready: false, reason: 'AGENT_SESSION_COMPOSER_NOT_UNIQUE', foreground, authority_effect: false });
-      }
-      return Object.freeze({
-        ready: true,
-        reason: 'READY_FOR_PROVEN_AGENT_SESSION_ENTER_SUBMIT',
-        phase: readinessPhase,
-        platform: AGENT_PLATFORM_ID,
-        agent_surface: null,
-        model_proof: null,
-        durable_agent_origin_proof: Object.freeze({
-          conversation_url_sha256: String(proof.conversation_url_sha256).toLowerCase(),
-          agent_surface_sha256: String(proof.agent_surface_sha256).toLowerCase(),
-        }),
-        composer,
-        send_control: null,
-        viewport: Object.freeze({ width, height }),
-        viewport_rendered: width > 0 && height > 0,
-        submit_strategy: 'PROVEN_AGENT_SESSION_TYPE_WITH_ENTER_READBACK',
-        send_required_before_type: false,
-        send_required_before_click: false,
-        named_send_control_exists: false,
-        automatic_retry_allowed: false,
-        page_data_authority: false,
-        authority_effect: false,
-      });
-    }
-
-    // Promotion-time readiness remains semantic and must positively prove the
-    // Agent home + required model + exact Agent task composer.
-    const agentSurface = resolveAgentPlatformAgentSurface(frame);
-    if (!agentSurface) {
-      return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
+    // R98: AGENT_HOME is a provisioning proof, not a property of every
+    // conversation frame. Once promotion created the real z.ai Agent session,
+    // task readiness consumes the durable origin proof that binds this exact
+    // /c/<id> conversation to that previously proven Agent surface.
+    const originProof = exactAgentOriginProof({
+      proof: agent_origin_proof,
+      expectedTab,
+      expectedTarget,
+      expectedGeneration: expected_agent_generation_epoch,
+      frameUrl: frame?.url,
+    });
+    if (!originProof) {
+      return Object.freeze({ ready: false, reason: 'AGENT_ORIGIN_PROOF_INVALID', foreground, authority_effect: false });
     }
     const modelProof = resolveAgentPlatformSelectedModel(frame);
     if (!modelProof) {
@@ -160,7 +162,7 @@ export function evaluateFleetSubmitReadiness({
       reason: 'READY_FOR_AGENT_TASK_ENTER_SUBMIT',
       phase: readinessPhase,
       platform: AGENT_PLATFORM_ID,
-      agent_surface: agentSurface,
+      agent_origin_proof: originProof,
       model_proof: modelProof,
       composer,
       send_control: null,
