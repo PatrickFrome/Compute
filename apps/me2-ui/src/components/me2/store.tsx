@@ -15,8 +15,8 @@ import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
-  | "command" | "agents" | "browser" | "code" | "tasks"
-  | "supervisor" | "compute" | "memory" | "observability" | "system";
+  | "browser" | "code" | "tasks"
+  | "supervisor" | "memory" | "observability" | "system";
 
 // R97 native swarm convergence: COMMAND/AGENTS/COMPUTE were daemon/API-agent
 // surfaces. They are intentionally absent from production navigation.
@@ -64,7 +64,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
   { key: "supervise", label: "Supervisor", page: "supervisor", hint: "objectives, orchestration and recovery" },
 ];
 
-export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
+export type PaletteMode = "all" | "actions" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
 export type ContextDrawerDock = "bottom" | "right";
