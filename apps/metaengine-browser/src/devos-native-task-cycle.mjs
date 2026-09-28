@@ -151,7 +151,9 @@ function exactTransportProof(agent) {
   if (String(proof.tab_id || '') !== String(agent.tab_id || '')) return null;
   if (String(proof.target_id || '').toLowerCase() !== String(agent.target_id || '').toLowerCase()) return null;
   if (Number(proof.generation_epoch) !== Number(agent.generation_epoch)) return null;
-  if (!HASH_RE.test(String(proof.conversation_url_sha256 || '').toLowerCase())) return null;
+  const normalizedConversation = conversationUrl(proof.conversation_url);
+  const conversationHash = String(proof.conversation_url_sha256 || '').toLowerCase();
+  if (!normalizedConversation || !HASH_RE.test(conversationHash) || sha256(normalizedConversation) !== conversationHash) return null;
   if (!HASH_RE.test(String(proof.agent_surface_sha256 || '').toLowerCase())) return null;
   const provenAt = Date.parse(String(proof.proven_at || ''));
   if (!Number.isFinite(provenAt)) return null;
