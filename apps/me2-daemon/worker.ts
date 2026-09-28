@@ -6,7 +6,6 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, normalize, dirname } from "node:path";
-import ZAI from "z-ai-web-dev-sdk";
 import {
   listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
@@ -49,7 +48,11 @@ function fleetStep(
     step: payload.step, kind, tool: payload.tool ?? null, preview: payload.preview.slice(0, 140),
   }, agentId, task.id);
 }
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
+const BROWSER_PROBE_MODE = process.env.ME2_HOSTED_BY_BROWSER === "1" && process.env.ME2_BOOT_MODE === "probe";
+function assertWorkerExecutionAllowed(): void {
+  if (BROWSER_PROBE_MODE) throw new Error("ME2_BROWSER_PROBE_WORKER_EXECUTION_DISABLED");
+}
+let zaiInstance: any = null;
 
 type ToolDef = { name: string; description: string; args: Record<string, string> };
 const TOOLS: ToolDef[] = [
@@ -112,7 +115,11 @@ async function execTool(name: string, args: Record<string, unknown>, taskId: str
       case "shell":
         return await runShell(cwd, String(args.command ?? ""));
       case "web_search": {
-        if (!zaiInstance) zaiInstance = await ZAI.create();
+        assertWorkerExecutionAllowed();
+        if (!zaiInstance) {
+          const { default: ZAI } = await import("z-ai-web-dev-sdk");
+          zaiInstance = await ZAI.create();
+        }
         const results = (await zaiInstance.functions.invoke("web_search", {
           query: String(args.query ?? "").slice(0, 400), num: 5,
         })) as Array<{ name?: string; snippet?: string; url?: string }>;
@@ -468,6 +475,7 @@ export function watchdogStaleTasks(): { reaped: number; ids: string[] } {
 
 /** Master loop: lease READY-задач на свободных агентов. */
 export function startMasterLoop(intervalMs = 400) {
+  assertWorkerExecutionAllowed();
   if (timer) return;
   timer = setInterval(() => {
     try {
