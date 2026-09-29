@@ -12541,3 +12541,47 @@ Stage Summary:
 - НЕ РАБОТАЕТ: M05 (glm-429, 8-й цикл подряд, внешняя квота); Supabase PostgREST→DB (503 ~9.5ч) — live-браузерная очередь недостижима.
 - НЕ ПРОВЕРЕНО: end-to-end dispatch директив через Supabase — блокировано каналом.
 - Next: owner — PostgREST + glm-квота; после — dispatch-батарея 13 действий.
+
+---
+Task ID: BROWSER-TEST-20260929-0900
+Agent: METAENGINE (supervisor, Job 419203, 14-й повторный цикл)
+Task: Повторный цикл 419203 — канал Supabase + локальная плоскость роя (30 мин после 13-го цикла).
+
+Work Log:
+- Канал (reprobe-0900.py): P1/P2 401, P3 real-JWT → 503 PGRST002 2.42с — PostgREST→DB вниз ~10ч без изменений.
+- Батарея M01–M19 → 18/19 PASS (3-й цикл подряд идентично); FAIL M05 (LLM-координация, glm-429 upstream).
+- Рой: 14/14 living, cycles 15777→18691 (Δ97/60с), uptime 3ч+, msgs 620, lessons=53, proposals=60.
+- Spawn-механика: sw_itn94cqo рождён gen=1 → полный ЖЦ до retire; воспроизводимость 100% (14/14 циклов).
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик стабильно (3 цикла подряд); рой автономен 3ч+, темп ~97 циклов/60с.
+- НЕ РАБОТАЕТ: M05 (glm-429, 9-й цикл подряд); Supabase PostgREST→DB (503 ~10ч).
+- НЕ ПРОВЕРЕНО: end-to-end dispatch директив через Supabase — блокировано каналом.
+- Next: owner — PostgREST + glm-квота; после — dispatch-батарея 13 действий.
+
+---
+Task ID: EVOLVE-ROUND-25
+Agent: self-evolve v1.52 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-VIRT-SCROLL] виртуализация ленты Поток (окно видимости ~30 строк из 200): DOM-узлы монтируются только для видимого диапазона, скролл-якорь и автоприлипание к низу сохраняются; продолжение EV-PERF 2026-09-29: мемоизация сняла 1Гц-перерисовки, но 200 строк всё равно монтируются целиком при каждом переключении таба
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.52
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-VIRT-SCROLL] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-VIRT-SCROLL' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 25 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-25-IMPL
+Agent: self-evolve v1.54 (Job 416839, реализация EV-VIRT-SCROLL)
+Task: Реализация [EV-VIRT-SCROLL] — виртуализация ленты «Поток» (окно ~30 строк из 200) в зоне / route (src/components/swarm/console.tsx), поведение без изменений.
+
+Work Log:
+- реализация: новый компонент FeedList (владелец refs ленты + окна vis=30): рендер только хвоста messages (slice), шаг расширения +30 при скролле вверх (порог 96px), восстановление скролл-якоря через feedAnchorRef (scrollTop += ΔscrollHeight при неактивном прилипании), автоприлипание к низу сохранено (эффект на [messages]); FeedList размонтируется вместе с табом (Radix) → каждое переключение на «Поток» начинает с компактного окна — главная цель задачи
+- удалено из родителя: feedRef/feedStickRef/onFeedScroll/stick-эффект (переехали в FeedList); ключи строк стабильны: `${m.id}-${feedStart+j}` (индекс полного массива)
+- верификация через gateway :81 (agent-browser, НЕ raw :3000): страница LIVE (население 14, циклы 19470); таб «Поток»: header 120/200, смонтировано rows=30 (было 120) — окно работает; автоприлипание stickGap=0; скролл к верху → окно расширилось 30→90, вид остался на старейших строках (topGap=0); обратный скролл вниз → прилипание восстановлено (stickGap=0); EV-DATES не тронут (относительное «3 ч 7 мин назад» в ленте на месте); скриншот download/ev-virt-scroll-feed.png
+- lint: 0/0; движок: self-update implemented-EV-VIRT-SCROLL → v1.54; BACKLOG +EV-LIST-MEMO (мемоизация списков Память/Управление — следующий шаг перф-трека); bash -n OK; dry-run round=26 next_task=EV-LIST-MEMO; зеркала phoenix-sealed/ синхронизированы 2/2 (18422B)
+
+Stage Summary:
+- EV-VIRT-SCROLL закрыт: лента монтирует 30 DOM-строк вместо 120 при каждом открытии таба (−75% узлов), расширение по требованию с якорем, прилипание идентично; page.tsx цел (5 строк); engine v1.54; следующий кандидат — EV-LIST-MEMO
