@@ -1,6 +1,7 @@
 export const CLIENT_GOAL_SCHEMA = 'metaengine.client.goal-submission.v1';
 export const CLIENT_AGENT_SELECTION_SCHEMA = 'metaengine.client.agent-selection.v1';
 export const CLIENT_GOAL_PROGRESS_SCHEMA = 'metaengine.client.goal-progress.v1';
+export const CLIENT_GOAL_EXECUTION_PROOF_SCHEMA = 'metaengine.client.goal-execution-proof.v1';
 export const CLIENT_GOAL_MAX_CHARS = 480;
 
 const AGENT_ID_RE = /^agent_[a-z0-9-]{8,64}$/;
@@ -168,7 +169,7 @@ export function normalizeClientGoalProgressReadback(value, expectedRequestId, ex
   }
 
   const state = String(row.task_state || '');
-  const terminalStates = new Set(['COMPLETED', 'FAILED', 'AMBIGUOUS', 'FENCED']);
+  const terminalStates = new Set(['BLOCKED', 'COMPLETED', 'FAILED', 'AMBIGUOUS', 'FENCED']);
   if (
     row.roadmap_id !== 'metaengine-client-v1'
     || typeof row.workspace_id !== 'string' || !UUID_RE.test(row.workspace_id)
@@ -179,7 +180,7 @@ export function normalizeClientGoalProgressReadback(value, expectedRequestId, ex
     || typeof row.point_id !== 'string' || !POINT_RE.test(row.point_id)
     || typeof row.task_id !== 'string' || !UUID_RE.test(row.task_id)
     || typeof row.task_spec_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.task_spec_sha256)
-    || !['READY','LEASED','RUNNING','RESULT_READY','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(state)
+    || !['READY','LEASED','RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(state)
     || typeof row.terminal !== 'boolean'
     || row.terminal !== terminalStates.has(state)
     || row.survives_plan_retirement !== true
@@ -229,6 +230,203 @@ export function normalizeClientGoalProgressReadback(value, expectedRequestId, ex
     reconciliation_required: false,
     task_payload_exposed: false,
     result_summary_exposed: false,
+    scheduler_identity_exposed: false,
+    automatic_retry_allowed: false,
+    scheduler_authority: false,
+    browser_actuation_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+}
+
+export function normalizeClientGoalExecutionProofReadback(value, expectedRequestId, expectedReceipt = null) {
+  const requestId = normalizeClientGoalRequestId(expectedRequestId);
+  const row = object(value);
+  if (
+    !row
+    || row.schema !== 'metaengine.client-v1.goal-execution-proof.v1'
+    || String(row.request_id || '').toLowerCase() !== requestId
+    || typeof row.found !== 'boolean'
+    || row.task_payload_returned !== false
+    || row.result_summary_returned !== false
+    || row.page_content_returned !== false
+    || row.model_output_returned !== false
+    || row.scheduler_identity_returned !== false
+    || row.automatic_retry_allowed !== false
+    || row.scheduler_authority !== false
+    || row.browser_authority !== false
+    || row.release_authority !== false
+    || row.authority_effect !== false
+  ) throw new Error('client_goal_execution_proof_readback_invalid');
+
+  if (row.found === false) {
+    if (row.user_goal_to_agent_readback !== false || row.user_goal_to_result_readback !== false) {
+      throw new Error('client_goal_execution_proof_absent_invalid');
+    }
+    return Object.freeze({
+      schema: CLIENT_GOAL_EXECUTION_PROOF_SCHEMA,
+      request_id: requestId,
+      found: false,
+      user_goal_to_agent_readback: false,
+      user_goal_to_result_readback: false,
+      automatic_retry_allowed: false,
+      scheduler_authority: false,
+      browser_actuation_authority: false,
+      release_authority: false,
+      authority_effect: false,
+    });
+  }
+
+  const state = String(row.task_state || '');
+  const terminalStates = new Set(['BLOCKED', 'COMPLETED', 'FAILED', 'AMBIGUOUS', 'FENCED']);
+  if (
+    row.roadmap_id !== 'metaengine-client-v1'
+    || typeof row.workspace_id !== 'string' || !UUID_RE.test(row.workspace_id)
+    || !positiveInteger(row.plan_generation)
+    || !positiveInteger(row.alignment_epoch)
+    || typeof row.baseline_sha !== 'string' || !/^[0-9a-f]{40}$/.test(row.baseline_sha)
+    || typeof row.plan_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.plan_sha256)
+    || typeof row.point_id !== 'string' || !POINT_RE.test(row.point_id)
+    || typeof row.task_id !== 'string' || !UUID_RE.test(row.task_id)
+    || typeof row.task_spec_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.task_spec_sha256)
+    || !['READY','LEASED','RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(state)
+    || typeof row.terminal !== 'boolean'
+    || row.terminal !== terminalStates.has(state)
+    || row.survives_plan_retirement !== true
+    || !Number.isSafeInteger(row.lease_generation) || row.lease_generation < 0
+  ) throw new Error('client_goal_execution_proof_binding_invalid');
+
+  if (expectedReceipt) {
+    const expected = object(expectedReceipt);
+    if (
+      !expected
+      || expected.request_id !== requestId
+      || row.workspace_id !== expected.workspace_id
+      || row.roadmap_id !== expected.roadmap_id
+      || row.plan_generation !== expected.plan_generation
+      || row.alignment_epoch !== expected.alignment_epoch
+      || row.baseline_sha !== expected.baseline_sha
+      || row.plan_sha256 !== expected.plan_sha256
+      || row.task_id !== expected.task_id
+      || row.task_spec_sha256 !== expected.task_spec_sha256
+      || !Array.isArray(expected.point_ids) || row.point_id !== expected.point_ids[0]
+    ) throw new Error('client_goal_execution_proof_receipt_drift');
+  }
+
+  const origin = object(row.agent_origin_proof);
+  const result = object(row.result_proof);
+  if (
+    !origin || !result
+    || typeof origin.proven !== 'boolean'
+    || origin.agent_identity_returned !== false
+    || origin.tab_identity_returned !== false
+    || origin.target_identity_returned !== false
+    || origin.authority_effect !== false
+    || typeof result.available !== 'boolean'
+    || typeof result.claim_valid !== 'boolean'
+    || typeof result.origin_bound !== 'boolean'
+    || typeof result.accepted !== 'boolean'
+    || result.result_summary_returned !== false
+    || result.model_output_returned !== false
+    || result.page_content_returned !== false
+    || result.authority_effect !== false
+  ) throw new Error('client_goal_execution_proof_membrane_invalid');
+
+  if (origin.proven === true) {
+    if (
+      origin.contract !== 'ZAI_AGENT_SURFACE_CAUSAL_V1'
+      || typeof origin.conversation_url_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(origin.conversation_url_sha256)
+      || typeof origin.agent_surface_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(origin.agent_surface_sha256)
+      || typeof origin.prompt_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(origin.prompt_sha256)
+      || !['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(String(origin.effect_state || ''))
+      || origin.lease_generation !== row.lease_generation
+    ) throw new Error('client_goal_execution_proof_agent_origin_invalid');
+  }
+
+  if (result.available === true && (
+    typeof result.result_summary_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(result.result_summary_sha256)
+    || typeof result.result_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(result.result_sha256)
+  )) throw new Error('client_goal_execution_proof_result_digest_invalid');
+
+  if (result.claim_valid === true && (
+    result.claim_schema !== 'metaengine.agent-result-claim.v1'
+    || typeof result.claim_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(result.claim_sha256)
+    || !['READY','BLOCKED','FAILED','ACCEPT','REJECT'].includes(String(result.claim_disposition || ''))
+  )) throw new Error('client_goal_execution_proof_result_claim_invalid');
+
+  if (result.origin_bound === true && (
+    origin.proven !== true
+    || result.conversation_url_sha256 !== origin.conversation_url_sha256
+  )) throw new Error('client_goal_execution_proof_result_origin_invalid');
+
+  if (result.accepted === true && (
+    result.claim_valid !== true
+    || result.origin_bound !== true
+    || !['RESULT_READY','COMPLETED'].includes(state)
+  )) throw new Error('client_goal_execution_proof_result_acceptance_invalid');
+
+  if (
+    row.user_goal_to_agent_readback !== origin.proven
+    || row.user_goal_to_result_readback !== result.accepted
+  ) throw new Error('client_goal_execution_proof_summary_invalid');
+
+  for (const forbidden of ['agent_id','tab_id','target_id','result_summary','model_output','page_content']) {
+    if (Object.hasOwn(row, forbidden)) throw new Error('client_goal_execution_proof_forbidden_field');
+  }
+
+  return Object.freeze({
+    schema: CLIENT_GOAL_EXECUTION_PROOF_SCHEMA,
+    request_id: requestId,
+    found: true,
+    workspace_id: row.workspace_id,
+    roadmap_id: row.roadmap_id,
+    plan_generation: row.plan_generation,
+    alignment_epoch: row.alignment_epoch,
+    baseline_sha: row.baseline_sha,
+    plan_sha256: row.plan_sha256,
+    point_id: row.point_id,
+    task_id: row.task_id,
+    task_spec_sha256: row.task_spec_sha256,
+    task_state: state,
+    terminal: row.terminal,
+    lease_generation: row.lease_generation,
+    survives_plan_retirement: true,
+    agent_origin_proof: Object.freeze({
+      proven: origin.proven,
+      contract: origin.proven ? origin.contract : null,
+      conversation_url_sha256: origin.proven ? origin.conversation_url_sha256 : null,
+      agent_surface_sha256: origin.proven ? origin.agent_surface_sha256 : null,
+      prompt_sha256: origin.proven ? origin.prompt_sha256 : null,
+      effect_state: origin.proven ? origin.effect_state : null,
+      lease_generation: origin.proven ? origin.lease_generation : null,
+      proven_at: origin.proven ? (origin.proven_at ?? null) : null,
+      agent_identity_exposed: false,
+      tab_identity_exposed: false,
+      target_identity_exposed: false,
+      authority_effect: false,
+    }),
+    result_proof: Object.freeze({
+      available: result.available,
+      result_summary_sha256: result.available ? result.result_summary_sha256 : null,
+      result_sha256: result.available ? result.result_sha256 : null,
+      claim_valid: result.claim_valid,
+      claim_schema: result.claim_valid ? result.claim_schema : null,
+      claim_sha256: result.claim_valid ? result.claim_sha256 : null,
+      claim_disposition: result.claim_valid ? result.claim_disposition : null,
+      conversation_url_sha256: result.claim_valid ? (result.conversation_url_sha256 ?? null) : null,
+      origin_bound: result.origin_bound,
+      accepted: result.accepted,
+      result_summary_exposed: false,
+      model_output_exposed: false,
+      page_content_exposed: false,
+      authority_effect: false,
+    }),
+    user_goal_to_agent_readback: row.user_goal_to_agent_readback,
+    user_goal_to_result_readback: row.user_goal_to_result_readback,
+    task_payload_exposed: false,
+    result_summary_exposed: false,
+    page_content_exposed: false,
+    model_output_exposed: false,
     scheduler_identity_exposed: false,
     automatic_retry_allowed: false,
     scheduler_authority: false,
