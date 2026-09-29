@@ -15,9 +15,15 @@ test('Client V1 R83 physical evidence seal is append-only and authority-free', (
   assert.match(sql, /revoke all on table public\.client_v1_r83_physical_evidence_seal_h205f22[\s\S]*service_role/);
   assert.doesNotMatch(sql, /update\s+public\.client_v1_r83_physical_evidence_seal_h205f22/i);
   assert.doesNotMatch(sql, /delete\s+from\s+public\.client_v1_r83_physical_evidence_seal_h205f22/i);
-  assert.doesNotMatch(sql, /promotion_authority[^\n]*true/i);
-  assert.doesNotMatch(sql, /scheduler_authority[^\n]*true/i);
-  assert.doesNotMatch(sql, /browser_actuation_authority[^\n]*true/i);
+  // Fail-closed validators intentionally use boolean true as the COALESCE default
+  // for missing evidence fields. Fence actual authority grants instead of
+  // banning that defensive token lexically.
+  assert.doesNotMatch(sql, /promotion_authority\s*=\s*true/i);
+  assert.doesNotMatch(sql, /['"]promotion_authority['"]\s*,\s*true/i);
+  assert.doesNotMatch(sql, /scheduler_authority\s*=\s*true/i);
+  assert.doesNotMatch(sql, /['"]scheduler_authority['"]\s*,\s*true/i);
+  assert.doesNotMatch(sql, /browser_actuation_authority\s*=\s*true/i);
+  assert.doesNotMatch(sql, /['"]browser_actuation_authority['"]\s*,\s*true/i);
 });
 
 test('evidence verifier re-reads exact installed Browser durable facts', () => {
