@@ -1,0 +1,121 @@
+{
+  "schema": "metaengine.client-v1.roadmap.v1",
+  "captured_at": "2026-09-29",
+  "recovery_baseline": {
+    "line": "work/r109-release-candidate-convergence-v1",
+    "sha": "ff95e9c886fac35b9302ec5c04a4c6bf7b8e8551",
+    "package_version": "0.7.0-dev.36516587173.1",
+    "immutable": true
+  },
+  "loop": [
+    "IMPLEMENT",
+    "VERIFY",
+    "RESEARCH",
+    "CHECKPOINT"
+  ],
+  "authority": {
+    "agent_lifecycle": "NATIVE_BROWSER_FLEET",
+    "orchestration": "NATIVE_BROWSER_SUPERVISOR",
+    "task_lease": "DEVOS",
+    "browser_effect": "NATIVE_BROWSER_CONTROL",
+    "effect_reconciliation": "EFFECT_JOURNAL_TERMINAL_AMBIGUOUS",
+    "recovery": "GUARDIAN_SENTINEL",
+    "distributed_state": "SUPABASE_EDGE",
+    "code_ci_release": "GITHUB",
+    "updater": "BROWSER_SINGLE_UPDATE_CHAIN",
+    "inference": "AUTHENTICATED_ZAI_AGENT_WEB_UI",
+    "memory": "ONE_BROWSER_OWNED_PRIMARY_MEMORY_PLANE"
+  },
+  "forbidden_parallel_authority": [
+    "SECOND_SCHEDULER",
+    "SECOND_BROWSER_EFFECT_PLANE",
+    "SECOND_TASK_DB",
+    "SECOND_UPDATER",
+    "MODEL_API_FALLBACK",
+    "AGENTCHAT_AUTHORITY",
+    "MISSION_CONTROL_SCHEDULER",
+    "BLIND_RETRY_LOOP"
+  ],
+  "stages": [
+    {
+      "id": "C0",
+      "name": "STOP_THE_LINE_TRUTH_FREEZE",
+      "exit": "ONE_RELEASE_LINE_NO_COMPETING_AUTHORITIES"
+    },
+    {
+      "id": "C1",
+      "name": "CANONICAL_PRODUCT_AUTHORITY",
+      "exit": "ONE_OWNER_PER_RUNTIME_DOMAIN"
+    },
+    {
+      "id": "C2",
+      "name": "EDGE_SOURCE_CONVERGENCE",
+      "exit": "R83_GREEN_EXACT_EDGE_SOURCE_EQUIVALENCE"
+    },
+    {
+      "id": "C3",
+      "name": "FRESH_DISTRIBUTED_RECONCILIATION",
+      "exit": "GITHUB_EDGE_DB_RUNTIME_RECONCILED"
+    },
+    {
+      "id": "C4",
+      "name": "POSITIVE_USER_GOAL_CONTROL_PATH",
+      "exit": "USER_GOAL_TO_DEVOS_AGENT_READBACK"
+    },
+    {
+      "id": "C5",
+      "name": "REAL_AGENT_USEFUL_WORK_E2E",
+      "exit": "REAL_GOAL_USEFUL_VERIFIED_WORK_SURVIVES_RESTART"
+    },
+    {
+      "id": "C6",
+      "name": "BUILD_ONCE_PHYSICAL_RELEASE_QUALIFICATION",
+      "exit": "TESTED_ARTIFACT_EQUALS_RELEASED_ARTIFACT"
+    },
+    {
+      "id": "C7",
+      "name": "STABLE_BASELINE",
+      "exit": "IMMUTABLE_NON_PRERELEASE_CLIENT_V1"
+    },
+    {
+      "id": "C8",
+      "name": "REPOSITORY_RESET",
+      "exit": "PR_AND_BRANCH_ENTROPY_BOUNDED"
+    },
+    {
+      "id": "C9",
+      "name": "RUNTIME_SIMPLIFICATION",
+      "exit": "NO_LOCALHOST_UI_PROBE_DEPENDENCY"
+    },
+    {
+      "id": "C10",
+      "name": "CORE_DECOMPOSITION",
+      "exit": "BOUNDED_CONTROLLERS_ONE_AUTHORITY_GRAPH"
+    },
+    {
+      "id": "C11",
+      "name": "AGENT_ROBUSTNESS",
+      "exit": "100_REAL_TASKS_NO_MANUAL_REPAIR_NO_BLIND_RETRY"
+    },
+    {
+      "id": "C12",
+      "name": "LEARNING_CLOSURE",
+      "exit": "LESSON_CHANGES_FUTURE_DECISION_AND_OUTCOME"
+    },
+    {
+      "id": "C13",
+      "name": "MULTI_AGENT_DEVELOPMENT",
+      "exit": "2_TO_8_REAL_AGENTS_ONE_DEVOS_AUTHORITY"
+    },
+    {
+      "id": "C14",
+      "name": "SCALE_RSI_COMPUTE_FABRIC",
+      "exit": "SCALE_WITHOUT_CORRECTNESS_MODEL_CHANGE"
+    }
+  ],
+  "current_blocker": {
+    "id": "R83_EDGE_CANARY_QUALIFICATION",
+    "status": "RED",
+    "reason": "DEPLOYED_EDGE_SOURCE_DRIFT"
+  }
+}
