@@ -279,6 +279,12 @@ Deno.serve(async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
   const url=new URL(req.url);
   const path=routedServicePath(url.pathname);
+  if (
+    (url.pathname.includes('/health') && path!=='/health')
+    || (url.pathname.includes('/v1/device/enrollment/request') && path!=='/v1/device/enrollment/request')
+  ) {
+    console.warn('native_supervisor_route_mismatch',JSON.stringify({method:req.method,pathname:url.pathname,routed_path:path}));
+  }
   try{
     if(req.method==='GET'&&path==='/health')return json(200,await health());
     const bodyText=req.method==='GET'?'':await req.text();
