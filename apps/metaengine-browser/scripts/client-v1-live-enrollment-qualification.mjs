@@ -139,15 +139,107 @@ try {
     throw new Error(`qualification_signed_status_http_${statusResponse.status}:${statusBody?.reason || statusBody?.error || 'unknown'}`);
   }
 
+  const wakeReadyPayload = {
+    state: {
+      shell_version: version,
+      supervisor_mode: 'CONTROL',
+      armed: true,
+      operator_mode: 'CONTROL',
+      qualification: {
+        schema: 'metaengine.client-v1.live-qualification.v1',
+        qualification_run_id: runId,
+        source_head: sourceHead,
+        phase: 'WAITING_FOR_POSTGRES_WAKE',
+        wake_wait_started_at: new Date().toISOString(),
+        authority_effect: false,
+      },
+    },
+    last_command_id: null,
+    last_command_status: null,
+  };
+  const wakeReadyResponse = await signedRequest('/v1/state', { payload: wakeReadyPayload });
+  const wakeReadyBody = await wakeReadyResponse.json().catch(() => ({}));
+  if (wakeReadyResponse.status !== 202 || wakeReadyBody?.accepted !== true) {
+    throw new Error(`qualification_wake_ready_state_http_${wakeReadyResponse.status}`);
+  }
+
   console.log(JSON.stringify({
-    schema: 'metaengine.client-v1.live-qualification.result.v1',
+    schema: 'metaengine.client-v1.live-qualification.command-wait.v1',
+    qualification_run_id: runId,
+    source_head: sourceHead,
+    device_id: enrolled.device_id,
+    phase: 'WAITING_FOR_POSTGRES_WAKE',
+    authority_effect: false,
+  }));
+
+  const waitResponse = await signedRequest('/v1/commands/wait-batch', {
+    payload: {
+      supervisor_mode: 'CONTROL',
+      wait_ms: 15000,
+      max_batch: 1,
+      max_tab_mutations: 1,
+    },
+  });
+  const waitBody = await waitResponse.json().catch(() => ({}));
+  if (waitResponse.status !== 200) {
+    throw new Error(`qualification_wait_batch_http_${waitResponse.status}:${waitBody?.error || 'unknown'}`);
+  }
+  if (waitBody?.wake_reason !== 'POSTGRES_NOTIFY') {
+    throw new Error(`qualification_postgres_notify_not_proven:${String(waitBody?.wake_reason || 'NONE')}`);
+  }
+  const commands = Array.isArray(waitBody?.commands) ? waitBody.commands : [];
+  if (commands.length !== 1 || commands[0]?.action !== 'POLL' || !commands[0]?.command_id) {
+    throw new Error(`qualification_poll_command_invalid:${JSON.stringify(commands)}`);
+  }
+  if (waitBody?.transport_delivery_is_authority !== false || waitBody?.authority_effect !== false) {
+    throw new Error('qualification_wake_authority_contract_invalid');
+  }
+
+  const command = commands[0];
+  const receipt = {
+    schema: 'metaengine.client-v1.live-qualification.command-receipt.v1',
+    command_id: command.command_id,
+    qualification_run_id: runId,
+    source_head: sourceHead,
+    effect_outcome: 'NO_EFFECT_PROVEN',
+    authority_effect: false,
+  };
+  const completeResponse = await signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, {
+    payload: { ok: true, receipt },
+  });
+  const completeBody = await completeResponse.json().catch(() => ({}));
+  if (completeResponse.status !== 200 || completeBody?.accepted !== true || completeBody?.status !== 'COMPLETED') {
+    throw new Error(`qualification_command_complete_http_${completeResponse.status}:${JSON.stringify(completeBody)}`);
+  }
+  if (completeBody?.authority_effect !== false) throw new Error('qualification_command_completion_authority_invalid');
+
+  const receiptResponse = await signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/receipt`, { method: 'GET' });
+  const receiptBody = await receiptResponse.json().catch(() => ({}));
+  if (
+    receiptResponse.status !== 200
+    || receiptBody?.found !== true
+    || receiptBody?.terminal !== true
+    || receiptBody?.status !== 'COMPLETED'
+    || receiptBody?.receipt?.command_id !== command.command_id
+    || receiptBody?.receipt?.authority_effect !== false
+    || receiptBody?.authority_effect !== false
+  ) {
+    throw new Error(`qualification_receipt_readback_invalid:${JSON.stringify(receiptBody)}`);
+  }
+
+  console.log(JSON.stringify({
+    schema: 'metaengine.client-v1.live-qualification.result.v2',
     qualification_run_id: runId,
     source_head: sourceHead,
     request_id: requestBody.request_id,
     device_id: enrolled.device_id,
+    command_id: command.command_id,
     signed_state_accepted: true,
     signed_status_http: statusResponse.status,
     runtime_control_observed: Boolean(stateBody?.runtime_control),
+    postgres_notify_wake_proven: true,
+    wake_reason: waitBody.wake_reason,
+    receipt_terminal_readback_proven: true,
     authority_effect: false,
   }));
 } finally {
