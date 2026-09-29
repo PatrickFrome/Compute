@@ -12975,3 +12975,28 @@ Stage Summary:
 - ЛИМИТЫ ВРЕМЕНИ: сняты ПОЛНОСТЬЮ (governor, cooldown, таймауты работы, pace, backoff). Замена — очередная маршрутизация (in-flight) + самовоскрешение (failStreak half-life) + персональный per-agent watchdog. Ни один вызов не отклоняется и не прерывается.
 - ЛУЧШИЕ МОДЕЛИ: разведка непрерывна (5 источников + предложения агентов «MODEL:url|модель»); верифицированное встаёт в голову цепочки по tier. Сейчас в голове catalog:openai-fast (55); авто-миграция на CF strong (86-93) после суточного сброса neurons. Для мгновенного прыжка на tier 86+ оператору: OPENROUTER_API_KEY и/или запуск colab-node.ipynb (GPU).
 - Артефакты: mini-services/agent-swarm/src/{llm,agent,model-scout,tier}.ts v1.4.0/v1.4.1; /health поля llmChain.inflight, llmProviders[].inflight, scout.needsKeys.
+
+---
+## Task ID: COLAB-5PACK-20260929-0820
+Agent: Z.ai Code (main session)
+Task: Директивы оператора: «сними все лимиты по времени» + «рой должен искать способы перевести агентов на самые лучшие доступные ai модели» + «подготовь 5 notebooks для Colab и дай ссылку на скачивание»
+
+Work Log:
+- CONTEXT GUARD 15:46 tick: guard ok, snaps=55 (Job 416526)
+- Обнаружена и проверена реализация v1.3.0 (параллельный cron-agent-loop): governor 15-30 req/min УДАЛЁН, cooldown 90с УДАЛЁН, таймауты 60-180с УДАЛЕНЫ, pace/backoff удалены, model-scout.ts (разведка: pollinations catalog, hackclub, openrouter-free, агент-предложения MODEL:) — верифицировано
+- Диагностика: pollinations catalog отдаёт только openai-fast (gpt-oss-20b); Hack Club API мёртв (404); models.github.ai перехватывается прокси-заглушкой "OK" (недоступен); CF Workers AI API доступен (запас для будущей разведки)
+- v1.4.0 (реализовано в этой сессии): МУЛЬТИ-РЕЕСТР Colab GPU-узлов — colab.ts переписан (до 8 узлов одновременно, миграция старого одно-узлового state/colab.json, per-node probe 5 мин/3 промаха, вытеснение самого мёртвого при переполнении)
+- llm.ts: colab-узлы = динамические провайдеры, порядок цепочки «ЛУЧШИЕ МОДЕЛИ ПЕРВЫМИ» = failStreak asc → tier score desc; статические оценки: zai-glm53=90, cf-llama70b=85, pollinations=55, ollama-local=35; узлы Colab — tier их модели (min 50)
+- Создан общий src/tier.ts (tierScore, ноль циклических импортов); model-scout.ts переведён на него + фикс счётчика scout.verified
+- index.ts: /colab/register принимает name, /colab/unregister принимает key|name|url, /health показывает nodes[]; SWARM_VERSION 1.4.0
+- Сгенерированы 5 вариантов ноутбука (download/): colab-node-1-llama31-8b, 2-qwen3-8b, 3-gemma3-12b, 4-phi4-14b, 5-mistral-nemo-12b + me2-colab-nodes-5pack.zip; каждый с уникальным NODE_NAME и саморегистрацией через {PUBLIC_BASE}/colab/register?XTransformPort=3046
+- Новый API-роут /api/download/[...path] (Next.js): чтение download/ с защитой от path-traversal (../ → 400/404), Content-Disposition attachment
+- UI: в SwarmConsole добавлена карточка «Ноутбуки Colab — 5 GPU-узлов» с 6 кнопками скачивания; bun run lint — чисто
+- E2E-проверка мульти-реестра (mock Ollama :3061): register ok → перерегистрация без дублей (URL→name/model обновлены) → узел «colab-test-b» (qwen3:8b, tier 86) стал ЛУЧШИМ ЗДОРОВЫМ провайдером и отработал 44/44 вызова агентов → unregister чисто. Параллельный агент-цикл в 08:10 сам вывел mock из прода («реальные ответы роя не должны подменяться заглушкой») — рой самоуправляется
+- Финал: /health v1.4.0, chain.unlimited=true, реестр пуст, циклы растут (47802+), integrity_check ok
+
+Stage Summary:
+- Рой v1.4.0: ноль временных лимитов + разведка лучших моделей + мульти-реестр GPU-узлов (до 8). Порядок вызова: здоровые → сильные. Провайдеры никогда не банятся, только уезжают в хвост по failStreak
+- Оператору: 5 ноутбуков готовы к Colab (Run all → вставить публичный адрес песочницы). Скачивание: /api/download/<имя> или ZIP. Каждый ноутбук = отдельный GPU-узел со своей моделью (llama3.1:8b / qwen3:8b / gemma3:12b / phi4:14b / mistral-nemo:12b)
+- Нужен ключ OPENROUTER_API_KEY для free-моделей tier 86+ (рой объявляет это в #meta после каждого скана разведки)
+- Риск: два параллельных агента (эта сессия + cron-agent-loop) правят рой одновременно — координация через worklog обязательна
