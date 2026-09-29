@@ -939,6 +939,19 @@ export class NativeSupervisorClient {
     return body;
   }
 
+  async clientGoalExecutionProof({ request_id } = {}) {
+    const payload = { request_id: String(request_id ?? '') };
+    const response = await this.#signedRequest('/v1/meta/client-goal-execution-proof', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(`native_supervisor_client_goal_execution_proof_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+      error.http_status = response.status;
+      error.request_id = payload.request_id;
+      throw error;
+    }
+    return body;
+  }
+
   setControlState({ mode, armed } = {}) {
     if (mode !== undefined && String(mode).trim().toUpperCase() !== 'CONTROL') {
       const error = new Error(ALWAYS_ON_CONTROL_ERROR);
