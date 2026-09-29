@@ -12658,3 +12658,53 @@ Stage Summary:
 - НЕ РАБОТАЕТ: M05 (glm-429); Supabase PostgREST→DB (503 ~12ч).
 - НЕ ПРОВЕРЕНО: end-to-end dispatch через Supabase.
 - Next: владелец — PostgREST + glm-квота; затем dispatch-батарея.
+
+---
+Task ID: GH-SB-AUDIT-20260929-1055 (desktop release selection)
+Agent: cron-agent-loop (по запросу оператора)
+Task: Полный аудит веток GitHub (729) + чекпоинтов Supabase → выбор базы релизной версии десктоп-клиента.
+
+Work Log:
+- GitHub: 729 веток; upstream main заморожен с 2026-09-18 (pushed_at 09-29 — только служебные). Desktop-группа: 6 веток; release-группа: 32; swarm-группа: 32.
+- Desktop-линия me2/r78-desktop-from-scratch: ОРФАН-история (3225 коммитов, нет общего предка с upstream main) — сознательный «from scratch» ребилд. Remote-голова b8ed647eb (R81-DESKTOP-GUARDIAN, 2026-09-27, v0.8.3-dev.0.1, suite 113/113, gate green 3 прогона R79+R80+R81). Локально было R79 (8cf09ad71, 09-25) → выполнен fast-forward до R81.
+- Кандидаты-соперники: me2/r77-mission-control-in-installer (09-25, предок/суперсет R78); work/r81-browser-release-convergence-v1 (09-26, upstream-линия, PR#986 r84-primary-shell целится в НЕЁ, не в main); work/desktop-web-conversation-integration-v1 (09-26, gateway-shutdown при выходе десктопа).
+- Supabase чекпоинты: все 4 таблицы (state/command/mesh/device) → 503 PGRST002 (~12ч) + Storage fail → облачные чекпоинты НЕДОСТУПНЫ. Локальные зеркала живы: ossfs versioned (12 чекпоинтов, последний 20260928-185242), latest/ (полные документы), vault git (снапы непрерывно), phoenix-sealed.
+- Локальные плоскости для бандла: agent-swarm v1.0.0 (:3046/:3047) + daemon v0.58.0-swarm.1 (GATE 70/70) — коммиты 383c622ae/2715bab13 на main 7fb065f25; swarm-консоль (EV-VIRT-SCROLL v1.54) пакуется в Mission Control через pack-me2-ui.
+
+Stage Summary:
+- ВЫБОР БАЗЫ РЕЛИЗА ДЕСКТОПА: me2/r78-desktop-from-scratch @ b8ed647eb (R81, v0.8.3-dev.0.1) — единственная ветка с полным зелёным гейтом (113/113 × 3 прогона) и живым супервизор-контуром (guardian-parity).
+- В бандл: agent-swarm v1.0.0 + daemon v0.58.0-swarm.1 (де-лимитированная fleet-плоскость) + swarm-консоль (виртуализированная лента).
+- Отклонены: r77-ветка (суперсед R78), r81-convergence+PR#986 (след. волна, merge после базы), conversation-integration (черри-пик кандидата).
+- Блокер не блокирует релиз-выбор: чекпоинты Supabase недостижимы, но офлайн-зеркала полны.
+
+---
+Task ID: BRANCH-CHECKPOINT-AUDIT-20260929-1105
+Agent: cron-agent-loop (по прямому запросу оператора)
+Task: Полный аудит веток GitHub (729) и чекпоинтов Supabase → выбор состава релизной версии десктоп-клиента.
+
+Work Log:
+- GitHub (PAT, API OK): 729 веток. Группы: work/* 628 (R-линия до r108), repair 31, me2 14, integration 11, fix 10, release 8+32 с 'release' в имени.
+- Remote main ЗАМРОЖЕН на 85767548a (2026-09-18, 11 дней); 0 merge из R-линии; последний push — work/r108-final-authority-convergence-v1 (сегодня 02:37Z, «native Browser Brain sole memory authority», пустые push-ивенты 0 commits — keepalive-паттерн).
+- Локальный main: AHEAD of origin/main на 424 коммита; содержит релиз ME2 CHAT-SWARM (383c622ae+2715bab13+7fb065f25) — на GitHub ОТСУТСТВУЕТ (compare 404, push отклонён repo-rules).
+- Десктоп-линия: me2/r78-desktop-from-scratch (локальный = remote tip b8ed647eb, 09-27 01:45Z): @me2/desktop v0.8.3-dev.0.1, Electron PID-1, R78 zero-based rebuild (legacy RSI 382 файлов отброшен), R81 guardian-parity, suite 113/113, gate green 3 прогона подряд (R79+R80+R81). Merge-base с origin/main = 2026-08-25.
+- Старые browser-релизы: release/metaengine-browser-final-candidate-e089d (09-07), release/browser-0.6.6-dev.15.1 (09-05) — legacy RSI-линия.
+- Supabase чекпоинты: REST-таблицы 503 PGRST002 (~12ч), Storage теперь 429 too_many_connections (пул БД исчерпан) → облачные чекпоинты НЕЧИТАЕМЫ. Эффективная цепочка — локальные зеркала: vault snapshots 48, versioned (последний 20260928-185242), vault-тары 09-26, phoenix-sealed, bundles, ossfs latest/.
+- Локальная копия /home/z/me2-desktop отсутствует (env-reset) — десктоп существует только в ветке git.
+
+Stage Summary:
+- ВЕРДИКТ по составу релиза десктоп-клиента: БАЗА = me2/r78-desktop-from-scratch (R81 tip b8ed647eb, v0.8.3-dev.0.1, gate 113/113×3); ИНТЕГРИРОВАТЬ из локального main — рой-бэкенд (agent-swarm v1.0.0 :3046/:3047 + daemon v0.58.0-swarm.1) через контракт daemon-host; НЕ ВКЛЮЧАТЬ — legacy RSI-релизы (e089d, 0.6.6-dev.*), R-линию r95–r108 (нет merge/ревью), 628 work/*.
+- Supabase-чекпоинты в релиз не тянутся (503/429) — сборка только из локального git + зеркал.
+- Известные риски: (1) локальный main на 424 коммита впереди и не запушен — единственный носитель рой-бэкенда; (2) daemon-host контракта :3041 (apps/me2-daemon) vs swarm :3046 — нужна проверка совместимости контрактов при интеграции.
+
+---
+Task ID: BROWSER-TEST-20260929-1100 (цикл 18)
+Agent: cron-agent-loop (Job 419203)
+Task: Цикл 18 (11:00) — репроб канала Supabase + батарея M01–M19.
+
+Work Log:
+- Канал: 503 PGRST002 → DEGRADED (~12.5ч); Storage дополнительно 429 too_many_connections.
+- Батарея → 18/19 PASS (7-й цикл подряд); FAIL M05 (glm-429).
+- Рой: 14/14 living, 4 поколения, Δ97 циклов/60с.
+
+Stage Summary:
+- Без изменений: РАБОТАЕТ 18/19; НЕ РАБОТАЕТ M05 + Supabase (REST 503, Storage 429); НЕ ПРОВЕРЕНО dispatch.
