@@ -56,7 +56,10 @@ type ClientGoalSubmission = {
   plan_generation: number;
   point_ids: string[];
   node_count: number;
-  task_admission_state: "PENDING_CANONICAL_SCHEDULER_ADMISSION";
+  task_id: string;
+  task_ids: string[];
+  task_admission_state: "ADMITTED";
+  atomic_plan_and_admission: true;
   exact_activation_readback: true;
   operator_initiated: true;
   automatic_retry_allowed: false;
@@ -217,7 +220,7 @@ function GoalComposer() {
         {error
           ? `ERROR · ${error}`
           : receipt
-            ? `${receipt.objective_id} · ${receipt.task_admission_state}`
+            ? `${receipt.objective_id} · task ${receipt.task_id.slice(0, 8)} · ${receipt.task_admission_state}`
             : "typed Native Supervisor path"}
       </span>
     </section>
