@@ -120,7 +120,7 @@ test('R103.2 packaged Browser ignores hostile ME2 executable and directory overr
 
 test('R103.2 development launch fixes executable to bun and requires browser-probe-entry', () => {
   const cwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
-  const sourceDir = path.resolve(cwd, '..', 'me2-daemon');
+  const sourceDir = path.join(cwd, '..', 'me2-daemon');
   const probeEntry = path.join(sourceDir, 'browser-probe-entry.ts');
   const hostileDir = path.join(path.sep, 'hostile', 'daemon');
 
