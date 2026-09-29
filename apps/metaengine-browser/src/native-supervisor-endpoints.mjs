@@ -16,7 +16,7 @@
 // value (no silent mid-run fallback to the pinned default), and the swap is
 // refusal-free for importers because `export let` bindings stay live across
 // the re-export chain (client-base → client-core-base request builders).
-const DEFAULT_NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+const DEFAULT_NATIVE_SUPERVISOR_BASE = 'https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 
 export const NATIVE_SUPERVISOR_DEFAULT_BASE = DEFAULT_NATIVE_SUPERVISOR_BASE;
 
