@@ -3,7 +3,7 @@ const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set([
   'SUBMITTING','ADMITTED','RECONCILE_REQUIRED',
-  'READY','LEASED','RUNNING','RESULT_READY',
+  'READY','LEASED','RUNNING','RESULT_READY','BLOCKED',
   'COMPLETED','FAILED','AMBIGUOUS','FENCED',
 ]);
 
@@ -46,6 +46,9 @@ function normalizeEntry(value) {
       : null,
     progress: value.progress && typeof value.progress === 'object' && !Array.isArray(value.progress)
       ? Object.freeze(clone(value.progress))
+      : null,
+    execution_proof: value.execution_proof && typeof value.execution_proof === 'object' && !Array.isArray(value.execution_proof)
+      ? Object.freeze(clone(value.execution_proof))
       : null,
     last_error: value.last_error == null ? null : String(value.last_error).slice(0, 240),
     created_at: String(value.created_at || nowIso()),
@@ -158,6 +161,7 @@ export class ClientGoalJournal {
       state: 'SUBMITTING',
       receipt: null,
       progress: null,
+      execution_proof: null,
       last_error: null,
       created_at: observed,
       updated_at: observed,
@@ -196,6 +200,24 @@ export class ClientGoalJournal {
       state,
       progress: clone(progress),
       last_error: progress.found === true ? null : existing.last_error,
+      updated_at: nowIso(),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  async recordExecutionProof(proof) {
+    const id = requestId(proof?.request_id);
+    const existing = this.get(id);
+    if (!existing) throw new Error('client_goal_journal_request_missing');
+    if (
+      proof?.schema !== 'metaengine.client.goal-execution-proof.v1'
+      || proof?.authority_effect !== false
+      || proof?.automatic_retry_allowed !== false
+    ) throw new Error('client_goal_journal_execution_proof_invalid');
+    return this.#replace({
+      ...existing,
+      execution_proof: clone(proof),
       updated_at: nowIso(),
       automatic_retry_allowed: false,
       authority_effect: false,
