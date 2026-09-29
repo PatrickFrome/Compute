@@ -241,13 +241,21 @@ const selectPrimaryChatActor = (actorId) => ipcRenderer.invoke(
   'metaengine:shell:primary-chat-actor-select',
   String(actorId ?? ''),
 );
+const submitClientGoal = (goal) => ipcRenderer.invoke(
+  'metaengine:client:submit-goal',
+  String(goal ?? ''),
+);
+const selectClientAgent = (agentId) => ipcRenderer.invoke(
+  'metaengine:client:select-agent',
+  String(agentId ?? ''),
+);
 
 if (isPrimaryMe2PresentationDocument()) {
-  // R84 capability fence: the Browser-owned loopback ME2 renderer is a
-  // presentation surface, not the legacy trusted Browser control shell. Do not
-  // leak metaengineShell.command, snapshot, DevOS focus or the cognitive port
-  // API into the ME2 origin. The only bridge it needs is page→native-surface
-  // composition, which is validated again in main.mjs.
+  // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
+  // the legacy generic shell command bridge. Client V1 adds a separate narrow
+  // typed product-control bridge below: user intent -> dedicated IPC -> Native
+  // Supervisor -> signed Edge/DB readback. No arbitrary command name/payload is
+  // accepted by that bridge.
   contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
     setPrimaryPage,
     setPrimaryOverlay,
@@ -260,6 +268,18 @@ if (isPrimaryMe2PresentationDocument()) {
     scheduler_authority: false,
     update_authority: false,
     release_authority: false,
+    authority_effect: false,
+  }));
+  contextBridge.exposeInMainWorld('metaengineClient', Object.freeze({
+    submitGoal: submitClientGoal,
+    selectAgent: selectClientAgent,
+    typed_positive_api: true,
+    generic_command_exposed: false,
+    scheduler_authority: false,
+    browser_actuation_authority: false,
+    update_authority: false,
+    release_authority: false,
+    automatic_retry_allowed: false,
     authority_effect: false,
   }));
 } else {
