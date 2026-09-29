@@ -16,6 +16,7 @@ test('R108 BranchGraph rows remain keyboard reachable after task mutations retir
   assert.match(tasks, /else if \(e\.key === " "\) e\.preventDefault\(\)/);
 });
 
+// Historical retry lineage may still be rendered as read-only evidence; retired mutation commands/handlers may not reappear.
 test('R108 retired retry and reflection controls cannot regain task mutation authority', () => {
   assert.doesNotMatch(tasks, /className="branch-(?:retry|reflect) cursor-pointer"/);
   assert.doesNotMatch(tasks, /onRetry\(|onReflect\(|TASK_RETRY|agentChatOp|branch-reflect/);
