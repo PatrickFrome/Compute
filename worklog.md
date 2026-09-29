@@ -12524,3 +12524,20 @@ Stage Summary:
 - НЕ РАБОТАЕТ: M05 LLM-координация (внешняя glm-квота 429, 7-й цикл); Supabase PostgREST→DB (503 PGRST002 ~9ч, все 4 таблицы) — канал live-браузера METAENGINE.
 - НЕ ПРОВЕРЕНО: end-to-end dispatch директив через Supabase (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS), флот-реестр supervisor_mesh_instance в облаке, приём команд live-браузером — блокировано каналом.
 - Next: owner — поднять PostgREST + glm-квоту; после восстановления — dispatch-батарея 13 действий по командной очереди; для цели «glm 5.3 flash» добавить конфигурируемую модель в src/agent.ts.
+
+---
+Task ID: BROWSER-TEST-20260929-0830
+Agent: METAENGINE (supervisor, Job 419203, 13-й повторный цикл)
+Task: Повторный цикл 419203 — канал Supabase + локальная плоскость роя (30 мин после 12-го цикла).
+
+Work Log:
+- Канал (reprobe-0830.py): P1/P2 401 (edge+auth живы), P3 real-JWT → 503 PGRST002 2.89с — PostgREST→DB вниз ~9.5ч без изменений.
+- Батарея M01–M19 против survivor :3046 → 18/19 PASS (идентично 12-му циклу); FAIL M05 (LLM-координация: 0 ответов за 3мин, корень — 429 glm upstream, подтверждён в agent-swarm.log).
+- Рой: 14/14 living, 4 поколения, cycles 13436→15777 (Δ~98/60с стабилен), uptime 2.5ч, messages 611→616, lessons=53, proposals=60.
+- Spawn-механика (цель 1): M08 рождение sw_rohu7lkz gen=1 с parent_id → M14 полный ЖЦ до retire — воспроизводимо в каждом цикле.
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик (стабильно 2 цикла подряд); рой автономен, темп ~98 циклов/60с, 0 смертей при внешней LLM-квоте.
+- НЕ РАБОТАЕТ: M05 (glm-429, 8-й цикл подряд, внешняя квота); Supabase PostgREST→DB (503 ~9.5ч) — live-браузерная очередь недостижима.
+- НЕ ПРОВЕРЕНО: end-to-end dispatch директив через Supabase — блокировано каналом.
+- Next: owner — PostgREST + glm-квота; после — dispatch-батарея 13 действий.
