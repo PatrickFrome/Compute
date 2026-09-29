@@ -86,7 +86,10 @@ jobs:
           if (m.live_evidence?.result_receipt_readback?.completed !== true) throw new Error('receipt_live_evidence_missing');
           if (m.live_evidence?.result_receipt_readback?.authority_effect !== false) throw new Error('receipt_authority_effect');
           if (m.live_evidence?.installed_electron_signed_e2e?.completed !== false) throw new Error('installed_electron_gate_must_remain_open');
-          if (m.live_evidence?.rollback_drill?.completed !== false) throw new Error('rollback_gate_must_remain_open');
+          if (m.live_evidence?.rollback_drill?.completed !== true) throw new Error('rollback_drill_live_evidence_missing');
+          if (m.live_evidence?.rollback_drill?.restore_runtime_ready !== true) throw new Error('rollback_restore_not_ready');
+          if (m.live_evidence?.rollback_drill?.restore_capability_state !== 'ATTESTED') throw new Error('rollback_restore_not_attested');
+          if (m.live_evidence?.rollback_drill?.authority_effect !== false) throw new Error('rollback_authority_effect');
           if (m.promotion_authorized !== false || m.authority_effect !== false) throw new Error('promotion_must_remain_fail_closed');
           const required = new Set([
             'createDbInspectRoutes',
