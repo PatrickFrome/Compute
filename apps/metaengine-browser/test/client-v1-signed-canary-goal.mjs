@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 const PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 const CANONICAL_SERVICE = '/a2-browser-native-supervisor-v1';
 const base = String(process.env.METAENGINE_CLIENT_V1_CANARY_BASE || '').replace(/\/+$/, '');
-const sourceHead = String(process.env.GITHUB_SHA || '').trim().toLowerCase();
+const sourceHead = String(process.env.METAENGINE_CLIENT_V1_SOURCE_HEAD || '').trim().toLowerCase();
 const runId = String(process.env.GITHUB_RUN_ID || '').trim();
 const runAttempt = String(process.env.GITHUB_RUN_ATTEMPT || '').trim();
 const evidencePath = String(process.env.METAENGINE_CLIENT_V1_CANARY_EVIDENCE || '').trim();
