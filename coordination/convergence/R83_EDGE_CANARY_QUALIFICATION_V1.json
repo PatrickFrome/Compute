@@ -5,16 +5,16 @@
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 12,
-    "ezbr_sha256": "f23410092cabfc14f94fca5b831268d1ee581060424f0276061873cd04ba4a1b",
-    "source_pin": "7beb7e718a5cae0a4353302d449e5a4f0dec1fd9"
+    "deployed_version": 13,
+    "ezbr_sha256": "7849c573918fff9646d2b335ec3f6d712a454b1c8fd13d5df3531e36ab1f75a3",
+    "source_pin": "f3d193fbaaf682fb31e28ac6438c2cfae568c6b5"
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",
     "function_id": "b94f0619-675a-40fc-b340-0299b0250b9a",
-    "deployed_version": 4,
-    "ezbr_sha256": "b6a280c00204e35ff0b24d118451d8b8cc7e43119b4f8624b477ba6625b07a5d",
-    "source_pin": "d0caf994fffb22a863a68d99255e181d1a3acbd3"
+    "deployed_version": 6,
+    "ezbr_sha256": "5b3b6bb3fde3b991461e4806e4a8b25114f922c736642302844e835c0c01fa96",
+    "source_pin": "d4a95a62ac84de64e4f5dcc25e11dee0cb4198b0"
   },
   "required_capabilities": [
     "createDbInspectRoutes",
@@ -42,57 +42,16 @@
   "promotion_authorized": false,
   "authority_effect": false,
   "live_evidence": {
-    "edge_health": {
-      "completed": true,
-      "stable_http": 200,
-      "canary_http": 200,
-      "runtime_ready": true,
-      "authority_effect": false
-    },
-    "signed_device_transport": {
-      "completed": true,
-      "workflow_run_id": "36559917708",
-      "source_head": "bea6543d05abec85420fc554ee450b06d3acc2dc",
-      "enrollment_request_id": "0a3980d1-5d64-4b94-9c56-fe68930587d2",
-      "device_id": "31210bbe-f5ba-4a32-af17-4297a49872cf",
-      "signed_state_http": 202,
-      "signed_status_http": 200,
-      "authority_effect": false
-    },
-    "bounded_durable_lease": {
-      "completed": true,
-      "workflow_run_id": "36559917708",
-      "command_id": "0906d8a8-e70b-49e1-a2f9-1637bd3fb0f9",
-      "action": "POLL",
-      "command_lane": "READ_ONLY",
-      "transport_mode": "BOUNDED_DB_POLL",
-      "terminal_status": "COMPLETED",
-      "authority_effect": false
-    },
-    "result_receipt_readback": {
-      "completed": true,
-      "command_id": "0906d8a8-e70b-49e1-a2f9-1637bd3fb0f9",
-      "http_status": 200,
-      "effect_outcome": "NO_EFFECT_PROVEN",
-      "authority_effect": false
-    },
-    "installed_electron_signed_e2e": {
-      "completed": false
-    },
-    "rollback_drill": {
-      "completed": true,
-      "canary_rollback_version": 9,
-      "rollback_source_pin": "d0caf994fffb22a863a68d99255e181d1a3acbd3",
-      "rollback_ezbr_sha256": "b6a280c00204e35ff0b24d118451d8b8cc7e43119b4f8624b477ba6625b07a5d",
-      "rollback_health_http": 200,
-      "restore_canary_version": 10,
-      "restore_source_pin": "3063871fe9a8a16cc879e630dc7a40105e835512",
-      "restore_ezbr_sha256": "9810286554c7eae7d2a039f72defbc0e50d80a906cdfa8945d8a8741f6c6aa9f",
-      "restore_health_http": 200,
-      "restore_runtime_ready": true,
-      "restore_capability_state": "ATTESTED",
-      "restore_capability_reason": "EXACT_DB_SOURCE_MATCH",
-      "authority_effect": false
-    }
+    "mode": "EXTERNAL_SHA_BOUND",
+    "recorded_in_source_manifest": false,
+    "completed": false,
+    "authority_effect": false
+  },
+  "evidence_policy": {
+    "mode": "EXTERNAL_SHA_BOUND",
+    "build_once_test_exact_artifact": true,
+    "live_evidence_must_bind_exact_source_sha": true,
+    "source_manifest_mutation_after_live_evidence": false,
+    "authority_effect": false
   }
 }
