@@ -1,0 +1,41 @@
+{
+  "schema": "metaengine.client-v1.experiment-quarantine.v1",
+  "captured_at": "2026-09-29",
+  "source_candidate": "ff95e9c886fac35b9302ec5c04a4c6bf7b8e8551",
+  "observed_open_prs": 326,
+  "rsi_experiment_prs": 222,
+  "rsi_experiment_drafts": 221,
+  "classification": "EXPERIMENT_LAB",
+  "release_authority": false,
+  "client_v1_dependency": false,
+  "admission_stage": "C12_C14_ONLY_AFTER_STABLE_BASELINE",
+  "branch_patterns": [
+    "work/metaengine-rsi*",
+    "work/rsi/*",
+    "work/browser-final-*-rsi*",
+    "work/same-point-duel-*-rsi*"
+  ],
+  "allowed_before_c7": [
+    "read-only research",
+    "isolated experiments",
+    "synthetic evaluation",
+    "reference documentation"
+  ],
+  "forbidden_before_c7": [
+    "Client V1 release authority",
+    "production scheduler authority",
+    "production Browser effect authority",
+    "production updater authority",
+    "new durable product state authority",
+    "blocking Client V1 qualification"
+  ],
+  "promotion_requirements": [
+    "C7 stable baseline exists",
+    "explicit Client V1 consumer",
+    "bounded semantic slice",
+    "positive physical capability test",
+    "no second authority plane",
+    "exact-head qualification"
+  ],
+  "authority_effect": false
+}
