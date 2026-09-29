@@ -544,7 +544,7 @@ async function submitClientGoal(rawInput) {
     throw new Error('client_goal_native_supervisor_unavailable');
   }
   const intent = normalizeClientGoalIntent(rawInput);
-  const activation = await nativeSupervisor.metaObjectiveSet({ objective: intent.goal });
+  const activation = await nativeSupervisor.metaObjectiveSet({ roadmap_id: 'metaengine-client-v1', objective: intent.goal });
   const readback = normalizeClientGoalActivationReadback(activation, intent.goal);
   await publishSnapshot().catch(() => {});
   return readback;
