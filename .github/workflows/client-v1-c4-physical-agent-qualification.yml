@@ -1,0 +1,68 @@
+name: Client V1 C4 Physical Agent Qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  physical-agent-readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact qualification head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact qualification head and deployed-source equivalence contract
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          MANIFEST=coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json
+          PIN="$(node -p "require('./' + process.argv[1]).candidate.source_pin" "$MANIFEST")"
+          test -n "$PIN"
+          git cat-file -e "$PIN^{commit}"
+          git merge-base --is-ancestor "$PIN" HEAD
+          git diff --exit-code "$PIN" HEAD --             apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1             supabase/migrations
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Prove physical qualification contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test             apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs             apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs             apps/metaengine-browser/test/client-v1-goal-journal.test.mjs             apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs
+          node --check apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
+
+      - name: Request signed enrollment and prove one physical Agent-origin goal
+        shell: bash
+        env:
+          METAENGINE_CLIENT_V1_CANARY_BASE: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary
+          METAENGINE_CLIENT_V1_SOURCE_HEAD: ${{ github.sha }}
+          METAENGINE_CLIENT_V1_APPROVAL_TIMEOUT_MS: '600000'
+          METAENGINE_CLIENT_V1_REQUIRE_PHYSICAL_AGENT: '1'
+          METAENGINE_CLIENT_V1_AGENT_PROOF_TIMEOUT_MS: '480000'
+          METAENGINE_CLIENT_V1_AGENT_PROOF_POLL_MS: '2000'
+          METAENGINE_CLIENT_V1_CANARY_EVIDENCE: ${{ runner.temp }}/client-v1-c4-physical-agent-qualification.json
+        run: |
+          set -euo pipefail
+          node apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
+
+      - name: Upload physical C4 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-v1-c4-physical-agent-qualification-${{ github.sha }}
+          path: ${{ runner.temp }}/client-v1-c4-physical-agent-qualification.json
+          if-no-files-found: warn
+          retention-days: 30

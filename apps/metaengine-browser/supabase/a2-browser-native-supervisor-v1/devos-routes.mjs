@@ -257,6 +257,12 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
     if(!clientId)return json(401,{error:'device_auth_required'});
     const workspaceReadback=await workspaceObservation({req,path,clientId});
     if(workspaceReadback)return workspaceReadback;
+    if(req?.method==='POST'&&path==='/v1/devos/environment-state'){
+      const fields=body&&typeof body==='object'&&!Array.isArray(body)?Object.keys(body):[];
+      if(fields.length)return json(400,{error:'devos_environment_state_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});
+      const state=await readDevosRuntimeControl({rpc,workspaceId});
+      return json(state.authoritative===true?200:503,state);
+    }
     // T2-5 Unified Work Graph item 1: operator-gated admission resume. The
     // environment fence (continuous_service_allowed=false) holds the whole
     // DevOS task cycle fail-closed; the designed exit is an operator-CONFIRMED

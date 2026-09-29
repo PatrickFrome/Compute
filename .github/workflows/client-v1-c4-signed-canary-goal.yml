@@ -13,6 +13,7 @@ on:
       - 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx'
       - 'apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-goal-journal.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs'
@@ -60,7 +61,7 @@ jobs:
           METAENGINE_CLIENT_V1_CANARY_EVIDENCE: ${{ runner.temp }}/client-v1-c4-signed-canary-goal.json
         run: |
           set -euo pipefail
-          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
+          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
           node --check apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
           node apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
 
