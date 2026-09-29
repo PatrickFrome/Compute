@@ -5,16 +5,16 @@
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 7,
-    "ezbr_sha256": "b6a280c00204e35ff0b24d118451d8b8cc7e43119b4f8624b477ba6625b07a5d",
-    "source_pin": "d0caf994fffb22a863a68d99255e181d1a3acbd3"
+    "deployed_version": 8,
+    "ezbr_sha256": "9810286554c7eae7d2a039f72defbc0e50d80a906cdfa8945d8a8741f6c6aa9f",
+    "source_pin": "3063871fe9a8a16cc879e630dc7a40105e835512"
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",
     "function_id": "b94f0619-675a-40fc-b340-0299b0250b9a",
-    "deployed_version": 1,
-    "ezbr_sha256": "30e21275f1ca319c4b853d9ed0c70ad789938a6d925b26d59df17a4467f35006",
-    "source_pin": "13026826606b9514851121b8dd54b50a2bde8bad"
+    "deployed_version": 4,
+    "ezbr_sha256": "b6a280c00204e35ff0b24d118451d8b8cc7e43119b4f8624b477ba6625b07a5d",
+    "source_pin": "d0caf994fffb22a863a68d99255e181d1a3acbd3"
   },
   "required_capabilities": [
     "createDbInspectRoutes",
