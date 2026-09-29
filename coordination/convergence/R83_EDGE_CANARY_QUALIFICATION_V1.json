@@ -5,9 +5,9 @@
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 20,
-    "ezbr_sha256": "76261c0aa46f712e957ffed95be492a6e273b3c2fcc0b62d347d1c96a6f491f9",
-    "source_pin": "59e426951ec2e6674ea387842d1a3dbc8b74a1b7"
+    "deployed_version": 21,
+    "ezbr_sha256": "2fe43cc51e166f46d2d0ed5d22bdad2eb562953831c96a685eaae30e54cb973d",
+    "source_pin": "42c47251d75e804b6799d584fe26f2b2faf5a272"
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",

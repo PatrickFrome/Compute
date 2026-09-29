@@ -77,9 +77,35 @@ type ClientGoalProgress = {
   request_id: string;
   found: boolean;
   task_id?: string;
-  task_state?: "READY" | "LEASED" | "RUNNING" | "RESULT_READY" | "COMPLETED" | "FAILED" | "AMBIGUOUS" | "FENCED";
+  task_state?: "READY" | "LEASED" | "RUNNING" | "RESULT_READY" | "BLOCKED" | "COMPLETED" | "FAILED" | "AMBIGUOUS" | "FENCED";
   terminal: boolean;
   reconciliation_required: boolean;
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
+
+type ClientGoalExecutionProof = {
+  schema: "metaengine.client.goal-execution-proof.v1";
+  request_id: string;
+  found: boolean;
+  task_id?: string;
+  task_state?: ClientGoalProgress["task_state"];
+  user_goal_to_agent_readback: boolean;
+  user_goal_to_result_readback: boolean;
+  agent_origin_proof?: {
+    proven: boolean;
+    contract?: "ZAI_AGENT_SURFACE_CAUSAL_V1" | null;
+    conversation_url_sha256?: string | null;
+    agent_surface_sha256?: string | null;
+    effect_state?: string | null;
+  };
+  result_proof?: {
+    available: boolean;
+    claim_valid: boolean;
+    origin_bound: boolean;
+    accepted: boolean;
+    claim_disposition?: string | null;
+  };
   automatic_retry_allowed: false;
   authority_effect: false;
 };
@@ -91,6 +117,7 @@ type ClientGoalJournalEntry = {
   state: string;
   receipt: ClientGoalSubmission | null;
   progress: ClientGoalProgress | null;
+  execution_proof: ClientGoalExecutionProof | null;
   last_error: string | null;
   automatic_retry_allowed: false;
   authority_effect: false;
@@ -281,17 +308,38 @@ function GoalComposer() {
       >
         {pending ? "Submitting…" : "Run"}
       </button>
-      <span className="min-w-0 max-w-[320px] truncate font-mono text-[9px] text-zinc-500" data-testid="client-goal-readback">
+      <span className="min-w-0 max-w-[380px] truncate font-mono text-[9px] text-zinc-500" data-testid="client-goal-readback">
         {error
           ? `ERROR · ${error}`
-          : journalEntry?.progress?.found === true
-            ? `task ${journalEntry.progress.task_id?.slice(0, 8)} · ${journalEntry.progress.task_state} · ${journalEntry.progress.terminal ? "terminal" : "in progress"}`
-            : journalEntry?.state === "RECONCILE_REQUIRED"
-              ? `request ${journalEntry.request_id.slice(0, 8)} · reconciliation required`
-              : receipt
-                ? `${receipt.objective_id} · task ${receipt.task_id.slice(0, 8)} · ADMITTED ≠ completed`
-                : "typed Native Supervisor path"}
+          : journalEntry?.execution_proof?.user_goal_to_result_readback === true
+            ? `task ${journalEntry.execution_proof.task_id?.slice(0, 8)} · RESULT PROVEN · Agent origin bound`
+            : journalEntry?.execution_proof?.user_goal_to_agent_readback === true
+              ? `task ${journalEntry.execution_proof.task_id?.slice(0, 8)} · ${journalEntry.execution_proof.task_state} · Agent proven`
+              : journalEntry?.progress?.found === true
+                ? `task ${journalEntry.progress.task_id?.slice(0, 8)} · ${journalEntry.progress.task_state} · ${journalEntry.progress.terminal ? "terminal" : "in progress"}`
+                : journalEntry?.state === "RECONCILE_REQUIRED"
+                  ? `request ${journalEntry.request_id.slice(0, 8)} · reconciliation required`
+                  : receipt
+                    ? `${receipt.objective_id} · task ${receipt.task_id.slice(0, 8)} · ADMITTED ≠ completed`
+                    : "typed Native Supervisor path"}
       </span>
+      {journalEntry?.execution_proof ? (
+        <span
+          data-testid="client-goal-execution-proof"
+          className="shrink-0 font-mono text-[8px] text-zinc-600"
+          title={journalEntry.execution_proof.user_goal_to_result_readback
+            ? "Exact Client request is bound to z.ai Agent-origin transport and an accepted typed result claim"
+            : journalEntry.execution_proof.user_goal_to_agent_readback
+              ? "Exact Client request is bound to z.ai Agent-origin transport; accepted result proof is pending"
+              : "No Agent-origin proof is available for this exact Client request yet"}
+        >
+          {journalEntry.execution_proof.user_goal_to_result_readback
+            ? "AGENT+RESULT"
+            : journalEntry.execution_proof.user_goal_to_agent_readback
+              ? "AGENT"
+              : "NO AGENT PROOF"}
+        </span>
+      ) : null}
       {(receipt?.request_id || journalEntry?.request_id) ? (
         <button
           type="button"

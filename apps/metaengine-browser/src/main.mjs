@@ -54,6 +54,7 @@ import {
   normalizeClientAgentId,
   normalizeClientAgentSelectionReadback,
   normalizeClientGoalIntent,
+  normalizeClientGoalExecutionProofReadback,
   normalizeClientGoalProgressReadback,
   normalizeClientGoalSubmissionReadback,
   normalizeClientGoalRequestId,
@@ -577,6 +578,18 @@ async function reconcileClientGoal(rawRequestId, expectedReceipt = null) {
   const raw = await nativeSupervisor.clientGoalProgress({ request_id: requestId });
   const progress = normalizeClientGoalProgressReadback(raw, requestId, expectedReceipt);
   await journal.recordProgress(progress);
+
+  // C4.4 proof is a read-only augmentation. Progress remains durable even if
+  // the proof route is temporarily unavailable; no task/Browser effect is
+  // retried or inferred from the failure.
+  if (typeof nativeSupervisor.clientGoalExecutionProof === 'function') {
+    try {
+      const rawProof = await nativeSupervisor.clientGoalExecutionProof({ request_id: requestId });
+      const proof = normalizeClientGoalExecutionProofReadback(rawProof, requestId, expectedReceipt);
+      await journal.recordExecutionProof(proof);
+    } catch {}
+  }
+
   await publishSnapshot().catch(() => {});
   return progress;
 }
@@ -616,7 +629,7 @@ async function latestClientGoal() {
   const journal = await ensureClientGoalJournal();
   let latest = journal.latest();
   if (!latest) return null;
-  if (!['COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(String(latest.state || ''))) {
+  if (!['BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(String(latest.state || ''))) {
     try {
       await reconcileClientGoal(latest.request_id, latest.receipt || null);
       latest = journal.latest();

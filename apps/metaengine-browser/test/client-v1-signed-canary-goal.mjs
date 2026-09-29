@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import {
+  normalizeClientGoalExecutionProofReadback,
   normalizeClientGoalProgressReadback,
   normalizeClientGoalSubmissionReadback,
 } from '../src/client-control-contract.mjs';
@@ -216,6 +217,27 @@ assert.equal(progress.plan_generation, clientReadback.plan_generation);
 assert.equal(progress.automatic_retry_allowed, false);
 assert.equal(progress.authority_effect, false);
 
+const executionProofResponse = await devicePost('/v1/meta/client-goal-execution-proof', {
+  request_id: goalRequestId,
+}, deviceId);
+if (executionProofResponse.response.status !== 200) {
+  throw new Error(`canary_goal_execution_proof_http_${executionProofResponse.response.status}:${JSON.stringify(executionProofResponse.body)}`);
+}
+const executionProof = normalizeClientGoalExecutionProofReadback(
+  executionProofResponse.body,
+  goalRequestId,
+  clientReadback,
+);
+assert.equal(executionProof.found, true);
+assert.equal(executionProof.request_id, goalRequestId);
+assert.equal(executionProof.task_id, clientReadback.task_id);
+assert.equal(executionProof.plan_generation, clientReadback.plan_generation);
+assert.equal(executionProof.automatic_retry_allowed, false);
+assert.equal(executionProof.scheduler_authority, false);
+assert.equal(executionProof.browser_actuation_authority, false);
+assert.equal(executionProof.release_authority, false);
+assert.equal(executionProof.authority_effect, false);
+
 const evidence = {
   schema: 'metaengine.client-v1.signed-canary-goal-evidence.v1',
   source_head: sourceHead,
@@ -236,6 +258,13 @@ const evidence = {
   progress_readback_validated: true,
   progress_task_state: progress.task_state,
   progress_terminal: progress.terminal,
+  execution_proof_validated: true,
+  user_goal_to_agent_readback: executionProof.user_goal_to_agent_readback,
+  user_goal_to_result_readback: executionProof.user_goal_to_result_readback,
+  agent_origin_contract: executionProof.agent_origin_proof?.contract || null,
+  agent_origin_conversation_url_sha256: executionProof.agent_origin_proof?.conversation_url_sha256 || null,
+  result_claim_sha256: executionProof.result_proof?.claim_sha256 || null,
+  result_origin_bound: executionProof.result_proof?.origin_bound || false,
   roadmap_id: out.roadmap_id,
   plan_generation: out.plan_generation,
   point_id: out.point_ids[0],
