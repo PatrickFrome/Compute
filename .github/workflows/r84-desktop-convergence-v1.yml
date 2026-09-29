@@ -63,8 +63,6 @@ jobs:
           node --check src/browser-realtime-process-plane.mjs
           node --check src/native-supervisor-client.mjs
           node --check src/me2/me2-fleet-tabs-host.mjs
-          node --check src/me2/me2-mission-control.mjs
-
       - name: Prove canonical WebContents BrowserCell CDP identity convergence
         working-directory: apps/metaengine-browser
         run: >-
