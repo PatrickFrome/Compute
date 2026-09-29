@@ -32,12 +32,55 @@
   },
   "live_qualification": {
     "signed_health_required": true,
-    "signed_e2e_required": true,
-    "postgres_notify_readback_required": true,
+    "installed_electron_signed_e2e_required": true,
+    "bounded_durable_lease_readback_required": true,
     "result_receipt_readback_required": true,
+    "postgres_notify_accelerator_required": false,
     "rollback_drill_required": true,
     "completed": false
   },
   "promotion_authorized": false,
-  "authority_effect": false
+  "authority_effect": false,
+  "live_evidence": {
+    "edge_health": {
+      "completed": true,
+      "stable_http": 200,
+      "canary_http": 200,
+      "runtime_ready": true,
+      "authority_effect": false
+    },
+    "signed_device_transport": {
+      "completed": true,
+      "workflow_run_id": "36559917708",
+      "source_head": "bea6543d05abec85420fc554ee450b06d3acc2dc",
+      "enrollment_request_id": "0a3980d1-5d64-4b94-9c56-fe68930587d2",
+      "device_id": "31210bbe-f5ba-4a32-af17-4297a49872cf",
+      "signed_state_http": 202,
+      "signed_status_http": 200,
+      "authority_effect": false
+    },
+    "bounded_durable_lease": {
+      "completed": true,
+      "workflow_run_id": "36559917708",
+      "command_id": "0906d8a8-e70b-49e1-a2f9-1637bd3fb0f9",
+      "action": "POLL",
+      "command_lane": "READ_ONLY",
+      "transport_mode": "BOUNDED_DB_POLL",
+      "terminal_status": "COMPLETED",
+      "authority_effect": false
+    },
+    "result_receipt_readback": {
+      "completed": true,
+      "command_id": "0906d8a8-e70b-49e1-a2f9-1637bd3fb0f9",
+      "http_status": 200,
+      "effect_outcome": "NO_EFFECT_PROVEN",
+      "authority_effect": false
+    },
+    "installed_electron_signed_e2e": {
+      "completed": false
+    },
+    "rollback_drill": {
+      "completed": false
+    }
+  }
 }
