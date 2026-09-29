@@ -3,6 +3,8 @@ name: Client V1 C4 Signed Canary Goal Qualification
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/client-control-contract.mjs'
+      - 'apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs'
       - '.github/workflows/client-v1-c4-signed-canary-goal.yml'
   workflow_dispatch:
@@ -44,6 +46,7 @@ jobs:
           METAENGINE_CLIENT_V1_CANARY_EVIDENCE: ${{ runner.temp }}/client-v1-c4-signed-canary-goal.json
         run: |
           set -euo pipefail
+          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
           node --check apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
           node apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
 

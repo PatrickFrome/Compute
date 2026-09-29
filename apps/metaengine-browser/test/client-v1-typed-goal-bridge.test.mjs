@@ -17,7 +17,14 @@ const me2Shell = await readFile(new URL('../../me2-ui/src/components/me2/shell/m
 function activation(goal = 'Ship a useful browser task') {
   return {
     schema: 'metaengine.meta-orchestrator.objective-activation.v1',
-    activation: { schema: 'metaengine.meta-orchestrator.plan-state.v1' },
+    activation: {
+      schema: 'metaengine.meta-orchestrator.plan-state.v1',
+      workspace_id: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+      roadmap_id: 'metaengine-client-v1', plan_generation: 17, alignment_epoch: 3,
+      baseline_sha: 'a'.repeat(40), plan_sha256: 'b'.repeat(64), state: 'ACTIVE',
+      automatic_retry_allowed: false, scheduler_authority: false, browser_authority: false,
+      release_authority: false, authority_effect: false,
+    },
     objective: goal,
     roadmap_id: 'metaengine-client-v1',
     plan_generation: 17,
@@ -28,6 +35,12 @@ function activation(goal = 'Ship a useful browser task') {
     atomic_plan_and_admission: true,
     admission: {
       schema: 'metaengine.meta-orchestrator.task-admission.v1',
+      workspace_id: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+      roadmap_id: 'metaengine-client-v1', plan_generation: 17, alignment_epoch: 3,
+      task_spec_sha256: 'c'.repeat(64), task_payload_returned: false,
+      scheduler_identity_returned: false, task_content_authority: false,
+      automatic_retry_allowed: false, scheduler_authority: false, browser_authority: false,
+      release_authority: false,
       task_id: '98903ffd-dc3f-4a3e-ab09-55931c5100a9',
       point_id: 'obj.ship-a-useful-browser-task.v1',
       authority_effect: false,
