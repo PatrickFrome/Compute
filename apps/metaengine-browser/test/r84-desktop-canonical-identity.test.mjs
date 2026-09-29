@@ -8,7 +8,7 @@ import {
   me2FleetTabsResolveIdentity,
   me2FleetTabsSetHost,
 } from '../src/me2/me2-fleet-tabs-host.mjs';
-import { me2NativeConversationUrl } from '../src/me2/me2-mission-control.mjs';
+import { normalizeAgentPlatformConversationUrl } from '../src/browser-agent-platform.mjs';
 
 function registry() {
   const tabId = 'tab_11111111-1111-4111-8111-111111111111';
@@ -85,33 +85,24 @@ test('R84 ME2 tab host projects canonical Browser identity without creating auth
   assert.equal(typeof me2FleetTabsGetHost().resolveIdentity, 'function');
 });
 
-test('R84 Browser root wires Mission Control to existing exact WebContents/CDP identity', async () => {
+test('R108 Browser root keeps canonical exact identity while ME2 Agent lifecycle authority is absent', async () => {
   const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
-  const mission = await fs.readFile(new URL('../src/me2/me2-mission-control.mjs', import.meta.url), 'utf8');
 
   assert.match(main, /ExactBrowserTabViewMap, resolveExactWebContentsTabBinding/);
+  assert.match(main, /function canonicalTabRuntimeIdentity\(tabId\)/);
   assert.match(main, /nativeSupervisor\?\.runtimeBinding\?\.\(id\)/);
   assert.match(main, /browsercell_identity:\s*cellId/);
   assert.match(main, /browsercell_identity_source:\s*cellId \? 'BROWSER_RUNTIME_BINDING_INDEX' : null/);
   assert.match(main, /target_id:\s*runtimeTargetId/);
   assert.match(main, /identity_lookup_complexity:\s*'O\(1\)'/);
+  assert.match(main, /function primaryChatFleetRoster\(\)/);
+  assert.match(main, /function selectPrimaryChatActor\(actorId\)/);
+  assert.doesNotMatch(main, /me2Mission|me2FleetTabsSetHost|primary-agent-session-select/);
   assert.doesNotMatch(main, /runtimeRows\.find/);
   assert.doesNotMatch(main, /semanticRows\.find/);
-  assert.doesNotMatch(main, /target_id:\s*runtime\?\.target_id \|\| semantic\?\.target_id \|\|/);
-  assert.match(main, /resolveIdentity:\s*\(tabId\) => canonicalTabRuntimeIdentity\(tabId\)/);
-  assert.match(main, /closeTab:\s*\(tabId\) => closeTab\(tabId\)/);
-  assert.match(main, /webcontents_target_fallback:\s*false/);
   assert.doesNotMatch(main, /target_id:\s*runtimeTargetId\s*\|\|/);
-
-  assert.match(mission, /me2FleetTabsResolveIdentity/);
-  assert.match(mission, /runtime_identity:\s*nativeIdentity/);
-  assert.match(mission, /await host\.closeTab\(known\.tab_id\)/);
-  assert.match(mission, /conversation_url_required/);
-  assert.match(mission, /g\.ui_route_authorized === true/);
-  assert.doesNotMatch(mission, /#chat=\$\{encodeURIComponent\(session\.id\)\}/);
-  assert.match(mission, /AGENT_TAB_ADOPTED/);
+  assert.match(main, /webcontents_target_fallback:\s*false/);
 });
-
 test('R84 identity projection never fabricates BrowserCell or CDP target when Brain binding is absent', () => {
   const tabId = 'tab_22222222-2222-4222-8222-222222222222';
   const rows = new Map([[tabId, { tab_id: tabId, role: 'FLEET', url: 'https://chat.z.ai/c/no-brain-binding' }]]);
@@ -172,18 +163,15 @@ test('R84 desktop gateway semantic port closes upgraded sockets under Browser li
 });
 
 
-test('R84 native conversation binding requires exact provider conversation_url, never daemon session id', () => {
-  assert.equal(me2NativeConversationUrl({ id: 'api-session-123' }), null);
-  assert.equal(me2NativeConversationUrl({
-    id: 'api-session-123',
-    conversation_url: 'http://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-  }), null);
-  assert.equal(me2NativeConversationUrl({
-    id: 'api-session-123',
-    conversation_url: 'https://example.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-  }), null);
-  assert.equal(me2NativeConversationUrl({
-    id: 'api-session-123',
-    conversation_url: 'https://chat.z.ai/c/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/',
-  }), 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+test('R108 canonical z.ai conversation normalization remains strict and is not Agent proof', () => {
+  assert.equal(normalizeAgentPlatformConversationUrl('api-session-123'), null);
+  assert.equal(normalizeAgentPlatformConversationUrl(
+    'http://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  ), null);
+  assert.equal(normalizeAgentPlatformConversationUrl(
+    'https://example.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  ), null);
+  assert.equal(normalizeAgentPlatformConversationUrl(
+    'https://chat.z.ai/c/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/',
+  ), 'https://chat.z.ai/c/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/');
 });
