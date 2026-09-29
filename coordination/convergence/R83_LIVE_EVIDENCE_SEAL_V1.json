@@ -1,0 +1,122 @@
+{
+  "schema": "metaengine.r83.live-evidence-seal.v1",
+  "captured_at": "2026-09-29",
+  "subject": {
+    "repository": "PatrickFrome/Compute",
+    "source_head": "00d7c814213a97ac17504d5c598818bd99c588cb",
+    "package_version": "0.7.0-dev.36516587173.1",
+    "installer_sha256": "0214578fa908d703f613506ebc3519149e7c1d8a63bb6ebe452da7d5c4796486"
+  },
+  "github": {
+    "required_runs": [
+      {
+        "name": "Browser Windows Package Smoke",
+        "run_id": 36561974797
+      },
+      {
+        "name": "METAENGINE Browser Windows Autonomous Soak V1",
+        "run_id": 36561974828
+      },
+      {
+        "name": "METAENGINE Browser Final Runtime Activation V1",
+        "run_id": 36561974812
+      },
+      {
+        "name": "Browser Windows Installed Chat Qualification",
+        "run_id": 36561974745
+      },
+      {
+        "name": "METAENGINE Browser Critical Audit V1",
+        "run_id": 36561974813
+      },
+      {
+        "name": "METAENGINE Browser Shell V1",
+        "run_id": 36561974883
+      },
+      {
+        "name": "METAENGINE Browser Self Update E2E",
+        "run_id": 36561974779
+      },
+      {
+        "name": "R83 Edge Canary Qualification V1",
+        "run_id": 36561974817
+      },
+      {
+        "name": "Client V1 Supabase Edge Live Probe",
+        "run_id": 36561969735
+      },
+      {
+        "name": "Client V1 Installed Electron Live Qualification",
+        "run_id": 36561969764,
+        "run_attempt": 2
+      }
+    ]
+  },
+  "installed_electron": {
+    "run_id": 36561969764,
+    "run_attempt": 2,
+    "artifact_id": 11031216291,
+    "artifact_name": "metaengine-client-v1-installed-electron-live-00d7c814213a97ac17504d5c598818bd99c588cb",
+    "producer_run_id": 36561974797,
+    "producer_run_number": 2962,
+    "producer_run_attempt": 1,
+    "enrollment_request_id": "e7dcb6b6-37ee-4dd8-8fcc-eaf58732207a",
+    "client_id": "5147c320-78bc-4d57-a069-d7f3ac77c7fc",
+    "device_id": "778e4811-eba8-4ccf-83f6-1552a6626f10",
+    "key_fingerprint_sha256": "80f0ccfccdaf22e8a9ba346b448c250f8120042d17a8caba82bbeeaccfcd6e5a",
+    "private_key_exported": false,
+    "signed_transport_ready": true,
+    "command": {
+      "command_id": "d89881a8-8330-4c49-8dbe-bcf428ef0825",
+      "action": "POLL",
+      "lane": "READ_ONLY",
+      "terminal_status": "COMPLETED",
+      "leased_by": "5147c320-78bc-4d57-a069-d7f3ac77c7fc",
+      "source_head": "00d7c814213a97ac17504d5c598818bd99c588cb",
+      "authority_effect": false
+    },
+    "authority_effect": false
+  },
+  "edge": {
+    "project_ref": "jhriwwsryeqsvvvufkok",
+    "stable": {
+      "slug": "a2-browser-native-supervisor-v1",
+      "function_id": "b94f0619-675a-40fc-b340-0299b0250b9a",
+      "deployed_version": 8,
+      "ezbr_sha256": "3ce87ea81481dbf8fd6afee819bed3bd3b41528e7b5c6842a2d7b7be38ccf829",
+      "source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb",
+      "health_probe_run_id": 36561969735,
+      "health_probe_attempt": 2
+    },
+    "canary": {
+      "slug": "a2-browser-native-supervisor-v14-canary",
+      "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
+      "deployed_version": 16,
+      "ezbr_sha256": "3ce87ea81481dbf8fd6afee819bed3bd3b41528e7b5c6842a2d7b7be38ccf829",
+      "source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb",
+      "health_probe_run_id": 36561969735,
+      "health_probe_attempt": 4
+    },
+    "rollback_drill": {
+      "rollback_version": 15,
+      "rollback_source_pin": "d0caf994fffb22a863a68d99255e181d1a3acbd3",
+      "rollback_ezbr_sha256": "b6a280c00204e35ff0b24d118451d8b8cc7e43119b4f8624b477ba6625b07a5d",
+      "rollback_health_probe_run_id": 36561969735,
+      "rollback_health_probe_attempt": 3,
+      "restore_version": 16,
+      "restore_source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb",
+      "restore_ezbr_sha256": "3ce87ea81481dbf8fd6afee819bed3bd3b41528e7b5c6842a2d7b7be38ccf829",
+      "restore_health_probe_run_id": 36561969735,
+      "restore_health_probe_attempt": 4,
+      "authority_effect": false
+    },
+    "authority_effect": false
+  },
+  "policy": {
+    "evidence_is_execution_authority": false,
+    "evidence_is_promotion_authority": false,
+    "promotion_authorized": false,
+    "automatic_retry_allowed": false,
+    "authority_effect": false
+  }
+}
