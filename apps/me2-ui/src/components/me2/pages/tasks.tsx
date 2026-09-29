@@ -88,7 +88,7 @@ function BranchGraph({ tasks, onOpen, selectedId, onSelect }: {
     [tasks, showAll],
   );
   const h = Math.max(40, displayed.length * ROW_H + 26);
-  // merge-линии: дочерняя задача (parent_id) тянется дугой к родителю (TASK_RETRY lineage)
+  // merge-линии: дочерняя задача (parent_id) тянется дугой к родителю (historical retry lineage)
   const links = useMemo(() => {
     const idx = new Map(displayed.map((t, i) => [t.id, i] as const));
     const out: { fromY: number; toY: number }[] = [];
