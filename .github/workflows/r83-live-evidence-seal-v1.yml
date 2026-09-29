@@ -1,0 +1,122 @@
+name: R83 Live Evidence Seal V1
+
+on:
+  pull_request:
+    paths:
+      - coordination/convergence/R83_LIVE_EVIDENCE_SEAL_V1.json
+      - apps/metaengine-browser/scripts/verify-r83-live-evidence-seal.mjs
+      - apps/metaengine-browser/test/r83-live-evidence-seal.test.mjs
+      - .github/workflows/r83-live-evidence-seal-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-evidence-subject:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      EVIDENCE: coordination/convergence/R83_LIVE_EVIDENCE_SEAL_V1.json
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout evidence verifier head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Prove evidence branch cannot mutate the qualified artifact subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBJECT="$(node -p "require('./' + process.argv[1]).subject.source_head" "$EVIDENCE")"
+          test "$SUBJECT" = "00d7c814213a97ac17504d5c598818bd99c588cb"
+          git cat-file -e "$SUBJECT^{commit}"
+          mapfile -t changed < <(git diff --name-only "$SUBJECT" HEAD)
+          test "${#changed[@]}" -gt 0
+          for path in "${changed[@]}"; do
+            case "$path" in
+              coordination/convergence/R83_LIVE_EVIDENCE_SEAL_V1.json|              apps/metaengine-browser/scripts/verify-r83-live-evidence-seal.mjs|              apps/metaengine-browser/test/r83-live-evidence-seal.test.mjs|              .github/workflows/r83-live-evidence-seal-v1.yml) ;;
+              *) echo "artifact_subject_drift:$path" >&2; exit 1 ;;
+            esac
+          done
+
+      - name: Run static evidence-seal regression
+        working-directory: apps/metaengine-browser
+        run: node --test test/r83-live-evidence-seal.test.mjs
+
+      - name: Read back exact GitHub runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r83-seal"
+          jq -n '{}' > "$RUNNER_TEMP/r83-seal/github-runs.json"
+          node --input-type=module <<'NODE' > "$RUNNER_TEMP/r83-seal/run-ids.txt"
+          import fs from 'node:fs';
+          const e=JSON.parse(fs.readFileSync(process.env.EVIDENCE,'utf8'));
+          for(const row of e.github.required_runs) console.log(row.run_id);
+          NODE
+          while IFS= read -r run_id; do
+            test -n "$run_id"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "$RUNNER_TEMP/r83-seal/run-${run_id}.json"
+            jq --arg id "$run_id" --slurpfile run "$RUNNER_TEMP/r83-seal/run-${run_id}.json" '. + {($id): $run[0]}'               "$RUNNER_TEMP/r83-seal/github-runs.json" > "$RUNNER_TEMP/r83-seal/github-runs.next.json"
+            mv "$RUNNER_TEMP/r83-seal/github-runs.next.json" "$RUNNER_TEMP/r83-seal/github-runs.json"
+          done < "$RUNNER_TEMP/r83-seal/run-ids.txt"
+
+      - name: Download exact installed-Electron proof artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_ID="$(node -p "require('./' + process.argv[1]).installed_electron.artifact_id" "$EVIDENCE")"
+          EXPECTED_NAME="$(node -p "require('./' + process.argv[1]).installed_electron.artifact_name" "$EVIDENCE")"
+          INSTALLED_RUN="$(node -p "require('./' + process.argv[1]).installed_electron.run_id" "$EVIDENCE")"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}" > "$RUNNER_TEMP/r83-seal/artifact-meta.json"
+          test "$(jq -r .name "$RUNNER_TEMP/r83-seal/artifact-meta.json")" = "$EXPECTED_NAME"
+          test "$(jq -r .expired "$RUNNER_TEMP/r83-seal/artifact-meta.json")" = "false"
+          test "$(jq -r .workflow_run.id "$RUNNER_TEMP/r83-seal/artifact-meta.json")" = "$INSTALLED_RUN"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/r83-seal/installed.zip"
+          mkdir -p "$RUNNER_TEMP/r83-seal/installed"
+          unzip -q "$RUNNER_TEMP/r83-seal/installed.zip" -d "$RUNNER_TEMP/r83-seal/installed"
+          test -f "$RUNNER_TEMP/r83-seal/installed/installed-electron-live-proof.json"
+
+      - name: Verify exact subject, runs, installer proof, and non-authority policy
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-r83-live-evidence-seal.mjs             --evidence ../../coordination/convergence/R83_LIVE_EVIDENCE_SEAL_V1.json             --installed-proof "$RUNNER_TEMP/r83-seal/installed/installed-electron-live-proof.json"             --github-runs "$RUNNER_TEMP/r83-seal/github-runs.json"             | tee "$RUNNER_TEMP/r83-seal/verification.json"
+          test "$(jq -r .verified "$RUNNER_TEMP/r83-seal/verification.json")" = "true"
+          test "$(jq -r .promotion_authority "$RUNNER_TEMP/r83-seal/verification.json")" = "false"
+          test "$(jq -r .authority_effect "$RUNNER_TEMP/r83-seal/verification.json")" = "false"
+
+      - name: Re-probe live stable and canary health
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1"
+          curl --fail --silent --show-error --max-time 20 "$BASE/a2-browser-native-supervisor-v1/health" > "$RUNNER_TEMP/r83-seal/stable-health.json"
+          curl --fail --silent --show-error --max-time 20 "$BASE/a2-browser-native-supervisor-v14-canary/health" > "$RUNNER_TEMP/r83-seal/canary-health.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          for(const name of ['stable-health.json','canary-health.json']){
+            const v=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/r83-seal/'+name,'utf8'));
+            if(v.ok!==true) throw new Error(name+':not_ok');
+            if(v.authority_effect!==false) throw new Error(name+':authority_effect');
+            if(v.capability_health?.state!=='ATTESTED') throw new Error(name+':capability_not_attested');
+            if(v.capability_health?.reason!=='EXACT_DB_SOURCE_MATCH') throw new Error(name+':capability_source_mismatch');
+            if(v.capability_health?.readiness_eligible!==true) throw new Error(name+':not_readiness_eligible');
+          }
+          NODE
+
+      - name: Prove verifier produced no authority mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
