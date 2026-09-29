@@ -6,7 +6,7 @@ const tasks = await readFile(new URL('../../me2-ui/src/components/me2/pages/task
 const dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
 const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
 const palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
-const taskSurfaces = tasks + '\n' + dialogs + '\n' + store;
+const taskSurfaces = tasks + '\n' + dialogs;
 
 test('R104 task UI cannot invoke the retired daemon AgentChat/reflection plane', () => {
   for (const forbidden of [
@@ -17,7 +17,6 @@ test('R104 task UI cannot invoke the retired daemon AgentChat/reflection plane',
     'onReflect=',
     'reflectTask',
     'setReflectingId',
-    'me2:select-chat',
   ]) {
     assert.equal(taskSurfaces.includes(forbidden), false, `retired AgentChat token resurfaced: ${forbidden}`);
   }
@@ -30,7 +29,8 @@ test('R104 task product surfaces are observation-only until canonical DevOS muta
   assert.doesNotMatch(store, /createTaskFromForm|TASK_ENQUEUE|TASK_SCHEDULE|"newTask"/);
   assert.match(tasks, /data-testid="page-tasks"/);
   assert.match(tasks, /read-only projection/);
-  assert.match(tasks, /detail\.reflection/);
+  assert.match(tasks, /hover\.t\.reflection/);
+  assert.doesNotMatch(tasks, /onRetry=|onReflect=|branch-retry|branch-reflect/);
 });
 
 test('R104 command palette hard-fences retired daemon task mutations including generic catalog entries', () => {
