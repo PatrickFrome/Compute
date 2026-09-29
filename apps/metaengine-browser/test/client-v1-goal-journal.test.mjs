@@ -75,6 +75,36 @@ test('progress survives without a submission response and can become terminal', 
   assert.equal(completed.state, 'COMPLETED');
 });
 
+test('execution proof survives restart and BLOCKED is terminal journal state', async () => {
+  const store = storage();
+  const first = new ClientGoalJournal({ loadState: store.loadState, saveState: store.saveState });
+  await first.load();
+  await first.begin({ request_id: requestId, goal: 'Ship durable proof' });
+  await first.recordProgress({
+    schema: 'metaengine.client.goal-progress.v1',
+    request_id: requestId,
+    found: true,
+    task_state: 'BLOCKED',
+  });
+  const proof = await first.recordExecutionProof({
+    schema: 'metaengine.client.goal-execution-proof.v1',
+    request_id: requestId,
+    found: true,
+    user_goal_to_agent_readback: true,
+    user_goal_to_result_readback: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  assert.equal(proof.state, 'BLOCKED');
+  assert.equal(proof.execution_proof.user_goal_to_agent_readback, true);
+
+  const second = new ClientGoalJournal({ loadState: store.loadState, saveState: store.saveState });
+  await second.load();
+  assert.equal(second.latest().state, 'BLOCKED');
+  assert.equal(second.latest().execution_proof.request_id, requestId);
+  assert.equal(second.latest().execution_proof.user_goal_to_result_readback, false);
+});
+
 test('request id reuse with different goal fails closed', async () => {
   const store = storage();
   const journal = new ClientGoalJournal({ loadState: store.loadState, saveState: store.saveState });
