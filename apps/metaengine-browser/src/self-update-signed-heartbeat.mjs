@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { recordAcceptedSignedSupervisorHeartbeat } from './self-update-successor-qualification.mjs';
 
-export const NATIVE_SUPERVISOR_HOST = 'xpeibufgzjknrhbhpffp.supabase.co';
+export const NATIVE_SUPERVISOR_HOST = 'jhriwwsryeqsvvvufkok.supabase.co';
 export const NATIVE_SUPERVISOR_STATE_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/state';
 export const NATIVE_SUPERVISOR_HEARTBEAT_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/heartbeat';
 export const NATIVE_SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
