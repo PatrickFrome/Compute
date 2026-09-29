@@ -124,8 +124,9 @@ test('typed agent selection requires exact Native Browser binding readback', () 
 test('main process owns dedicated typed IPC routes and Native Supervisor goal transport', () => {
   assert.match(main, /ipcMain\.handle\('metaengine:client:submit-goal'/);
   assert.match(main, /ipcMain\.handle\('metaengine:client:select-agent'/);
-  assert.match(main, /nativeSupervisor\.metaObjectiveSet\(\{ roadmap_id: 'metaengine-client-v1', objective: intent\.goal \}\)/);
-  assert.match(main, /normalizeClientGoalActivationReadback\(activation, intent\.goal\)/);
+  assert.match(main, /nativeSupervisor\.clientGoalSubmit\(\{ request_id: requestId, objective: intent\.goal \}\)/);
+  assert.match(main, /normalizeClientGoalSubmissionReadback\(raw, intent\.goal, requestId\)/);
+  assert.match(main, /nativeSupervisor\.clientGoalProgress\(\{ request_id: requestId \}\)/);
   assert.match(main, /selectPrimaryChatActor\(\`agent:\$\{agentId\}\`\)/);
   assert.match(main, /normalizeClientAgentSelectionReadback\(selected, agentId\)/);
 });
@@ -137,6 +138,8 @@ test('primary preload exposes one narrow typed product bridge, not generic comma
   const typedBlock = preload.slice(start, preload.indexOf('}));', start) + 4);
   assert.match(typedBlock, /submitGoal: submitClientGoal/);
   assert.match(typedBlock, /selectAgent: selectClientAgent/);
+  assert.match(typedBlock, /latestGoal: latestClientGoal/);
+  assert.match(typedBlock, /goalStatus: clientGoalStatus/);
   assert.match(typedBlock, /typed_positive_api: true/);
   assert.match(typedBlock, /generic_command_exposed: false/);
   assert.match(preload, /'metaengine:client:submit-goal'/);

@@ -50,6 +50,9 @@ type PrimaryShellBridge = {
 
 type ClientGoalSubmission = {
   schema: "metaengine.client.goal-submission.v1";
+  request_id: string;
+  request_replayed: boolean;
+  exact_request_correlation: true;
   goal: string;
   objective_id: string;
   roadmap_id: string;
@@ -69,6 +72,30 @@ type ClientGoalSubmission = {
   authority_effect: false;
 };
 
+type ClientGoalProgress = {
+  schema: "metaengine.client.goal-progress.v1";
+  request_id: string;
+  found: boolean;
+  task_id?: string;
+  task_state?: "READY" | "LEASED" | "RUNNING" | "RESULT_READY" | "COMPLETED" | "FAILED" | "AMBIGUOUS" | "FENCED";
+  terminal: boolean;
+  reconciliation_required: boolean;
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
+
+type ClientGoalJournalEntry = {
+  schema: "metaengine.client.goal-journal-entry.v1";
+  request_id: string;
+  goal: string;
+  state: string;
+  receipt: ClientGoalSubmission | null;
+  progress: ClientGoalProgress | null;
+  last_error: string | null;
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
+
 type ClientAgentSelection = {
   schema: "metaengine.client.agent-selection.v1";
   agent_id: string;
@@ -85,6 +112,8 @@ type ClientAgentSelection = {
 
 type ClientControlBridge = {
   submitGoal?: (goal: string) => Promise<ClientGoalSubmission>;
+  latestGoal?: () => Promise<ClientGoalJournalEntry | null>;
+  goalStatus?: (requestId: string) => Promise<ClientGoalProgress>;
   selectAgent?: (agentId: string) => Promise<ClientAgentSelection>;
   typed_positive_api?: boolean;
   generic_command_exposed?: boolean;
@@ -158,7 +187,38 @@ function GoalComposer() {
   const [goal, setGoal] = useState("");
   const [pending, setPending] = useState(false);
   const [receipt, setReceipt] = useState<ClientGoalSubmission | null>(null);
+  const [journalEntry, setJournalEntry] = useState<ClientGoalJournalEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const loadLatest = useCallback(async () => {
+    const bridge = clientControlBridge();
+    if (!bridge?.latestGoal) return;
+    const latest = await bridge.latestGoal().catch(() => null);
+    if (latest?.schema === "metaengine.client.goal-journal-entry.v1") {
+      setJournalEntry(latest);
+      if (latest.receipt?.schema === "metaengine.client.goal-submission.v1") setReceipt(latest.receipt);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLatest();
+  }, [loadLatest]);
+
+  const refreshProgress = useCallback(async () => {
+    const bridge = clientControlBridge();
+    const requestId = receipt?.request_id || journalEntry?.request_id || "";
+    if (!bridge?.goalStatus || !requestId) return;
+    setPending(true);
+    try {
+      await bridge.goalStatus(requestId);
+      await loadLatest();
+      setError(null);
+    } catch (cause) {
+      setError(String((cause as Error)?.message || cause || "goal_status_failed").slice(0, 180));
+    } finally {
+      setPending(false);
+    }
+  }, [journalEntry?.request_id, loadLatest, receipt?.request_id]);
 
   const submit = useCallback(async () => {
     const value = goal.trim();
@@ -177,12 +237,17 @@ function GoalComposer() {
       }
       setReceipt(next);
       setGoal("");
+      await loadLatest();
     } catch (cause) {
       setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
+      // A lost submit response is never retried as an effect. The Browser main
+      // process has already attempted one read-only request_id reconciliation;
+      // load that durable local correlation record instead.
+      await loadLatest();
     } finally {
       setPending(false);
     }
-  }, [goal, pending]);
+  }, [goal, loadLatest, pending]);
 
   return (
     <section
@@ -219,10 +284,25 @@ function GoalComposer() {
       <span className="min-w-0 max-w-[320px] truncate font-mono text-[9px] text-zinc-500" data-testid="client-goal-readback">
         {error
           ? `ERROR · ${error}`
-          : receipt
-            ? `${receipt.objective_id} · task ${receipt.task_id.slice(0, 8)} · ${receipt.task_admission_state}`
-            : "typed Native Supervisor path"}
+          : journalEntry?.progress?.found === true
+            ? `task ${journalEntry.progress.task_id?.slice(0, 8)} · ${journalEntry.progress.task_state} · ${journalEntry.progress.terminal ? "terminal" : "in progress"}`
+            : journalEntry?.state === "RECONCILE_REQUIRED"
+              ? `request ${journalEntry.request_id.slice(0, 8)} · reconciliation required`
+              : receipt
+                ? `${receipt.objective_id} · task ${receipt.task_id.slice(0, 8)} · ADMITTED ≠ completed`
+                : "typed Native Supervisor path"}
       </span>
+      {(receipt?.request_id || journalEntry?.request_id) ? (
+        <button
+          type="button"
+          onClick={() => void refreshProgress()}
+          disabled={pending}
+          data-testid="client-goal-refresh"
+          className="h-8 shrink-0 border border-zinc-800 px-2.5 text-[9px] font-semibold text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-40"
+        >
+          Refresh
+        </button>
+      ) : null}
     </section>
   );
 }

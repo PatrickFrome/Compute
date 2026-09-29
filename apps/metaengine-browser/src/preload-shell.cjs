@@ -249,6 +249,11 @@ const selectClientAgent = (agentId) => ipcRenderer.invoke(
   'metaengine:client:select-agent',
   String(agentId ?? ''),
 );
+const latestClientGoal = () => ipcRenderer.invoke('metaengine:client:latest-goal');
+const clientGoalStatus = (requestId) => ipcRenderer.invoke(
+  'metaengine:client:goal-status',
+  String(requestId ?? ''),
+);
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
@@ -273,6 +278,8 @@ if (isPrimaryMe2PresentationDocument()) {
   contextBridge.exposeInMainWorld('metaengineClient', Object.freeze({
     submitGoal: submitClientGoal,
     selectAgent: selectClientAgent,
+    latestGoal: latestClientGoal,
+    goalStatus: clientGoalStatus,
     typed_positive_api: true,
     generic_command_exposed: false,
     scheduler_authority: false,

@@ -2,6 +2,7 @@ import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTh
 import { AGENT_PLATFORM_HOME_URL, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
@@ -52,9 +53,12 @@ import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './n
 import {
   normalizeClientAgentId,
   normalizeClientAgentSelectionReadback,
-  normalizeClientGoalActivationReadback,
   normalizeClientGoalIntent,
+  normalizeClientGoalProgressReadback,
+  normalizeClientGoalSubmissionReadback,
+  normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
+import { ClientGoalJournal } from './client-goal-journal.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -85,6 +89,7 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+let clientGoalJournal = null;
 
 function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
@@ -270,6 +275,30 @@ function supervisorControlStatePath() {
 
 function devosSessionLayoutStatePath() {
   return path.join(app.getPath('userData'), 'metaengine-devos-session-layout-registry-v1.json');
+}
+
+function clientGoalJournalStatePath() {
+  return path.join(app.getPath('userData'), 'metaengine-client-goal-journal-v1.json');
+}
+
+async function ensureClientGoalJournal() {
+  if (clientGoalJournal) {
+    await clientGoalJournal.load();
+    return clientGoalJournal;
+  }
+  const target = clientGoalJournalStatePath();
+  clientGoalJournal = new ClientGoalJournal({
+    loadState: async () => JSON.parse(await fs.readFile(target, 'utf8')),
+    saveState: async (snapshot) => {
+      const temp = target + '.tmp';
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(temp, JSON.stringify(snapshot, null, 2) + '\n', { mode: 0o600 });
+      await fs.rename(temp, target);
+    },
+    maxEntries: 32,
+  });
+  await clientGoalJournal.load();
+  return clientGoalJournal;
 }
 
 async function initDevOSSessionLayouts() {
@@ -539,15 +568,69 @@ function selectPrimaryChatActor(actorId) {
 }
 
 
+async function reconcileClientGoal(rawRequestId, expectedReceipt = null) {
+  if (!nativeSupervisor || typeof nativeSupervisor.clientGoalProgress !== 'function') {
+    throw new Error('client_goal_progress_native_supervisor_unavailable');
+  }
+  const requestId = normalizeClientGoalRequestId(rawRequestId);
+  const journal = await ensureClientGoalJournal();
+  const raw = await nativeSupervisor.clientGoalProgress({ request_id: requestId });
+  const progress = normalizeClientGoalProgressReadback(raw, requestId, expectedReceipt);
+  await journal.recordProgress(progress);
+  await publishSnapshot().catch(() => {});
+  return progress;
+}
+
 async function submitClientGoal(rawInput) {
-  if (!nativeSupervisor || typeof nativeSupervisor.metaObjectiveSet !== 'function') {
+  if (!nativeSupervisor || typeof nativeSupervisor.clientGoalSubmit !== 'function') {
     throw new Error('client_goal_native_supervisor_unavailable');
   }
   const intent = normalizeClientGoalIntent(rawInput);
-  const activation = await nativeSupervisor.metaObjectiveSet({ roadmap_id: 'metaengine-client-v1', objective: intent.goal });
-  const readback = normalizeClientGoalActivationReadback(activation, intent.goal);
-  await publishSnapshot().catch(() => {});
-  return readback;
+  const requestId = randomUUID().toLowerCase();
+  const journal = await ensureClientGoalJournal();
+
+  // The correlation record is durably written BEFORE the first possible goal
+  // effect. If the response is lost, the same request_id is reconciled read-only;
+  // this function never resubmits the effect automatically.
+  await journal.begin({ request_id: requestId, goal: intent.goal });
+  try {
+    const raw = await nativeSupervisor.clientGoalSubmit({ request_id: requestId, objective: intent.goal });
+    const receipt = normalizeClientGoalSubmissionReadback(raw, intent.goal, requestId);
+    await journal.recordSubmission(receipt);
+    await publishSnapshot().catch(() => {});
+    return receipt;
+  } catch (error) {
+    await journal.markReconcileRequired(requestId, error).catch(() => {});
+    try {
+      await reconcileClientGoal(requestId);
+    } catch {}
+    const ambiguous = new Error(`client_goal_submit_requires_reconciliation:${requestId}`);
+    ambiguous.request_id = requestId;
+    ambiguous.automatic_retry_allowed = false;
+    ambiguous.cause = error;
+    throw ambiguous;
+  }
+}
+
+async function latestClientGoal() {
+  const journal = await ensureClientGoalJournal();
+  let latest = journal.latest();
+  if (!latest) return null;
+  if (!['COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(String(latest.state || ''))) {
+    try {
+      await reconcileClientGoal(latest.request_id, latest.receipt || null);
+      latest = journal.latest();
+    } catch {}
+  }
+  return latest ? structuredClone(latest) : null;
+}
+
+async function refreshClientGoal(rawRequestId) {
+  const requestId = normalizeClientGoalRequestId(rawRequestId);
+  const journal = await ensureClientGoalJournal();
+  const entry = journal.get(requestId);
+  if (!entry) throw new Error('client_goal_request_unknown');
+  return reconcileClientGoal(requestId, entry.receipt || null);
 }
 
 function selectClientAgent(rawAgentId) {
@@ -2207,6 +2290,14 @@ ipcMain.handle('metaengine:client:select-agent', async (event, rawAgentId) => {
   assertShellSender(event);
   return selectClientAgent(rawAgentId);
 });
+ipcMain.handle('metaengine:client:latest-goal', async (event) => {
+  assertShellSender(event);
+  return latestClientGoal();
+});
+ipcMain.handle('metaengine:client:goal-status', async (event, rawRequestId) => {
+  assertShellSender(event);
+  return refreshClientGoal(rawRequestId);
+});
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;
@@ -2264,6 +2355,7 @@ async function startAfterReady() {
   runtimeGenesisState = await ensureRuntimeGenesis({ userDataPath: app.getPath('userData') });
   startupControlState = await loadNativeSupervisorControlState(supervisorControlStatePath());
   await initDevOSSessionLayouts();
+  await ensureClientGoalJournal();
   if (isDevelopmentPlaneSmoke || isSmoke) configureUserSession();
   if (isDevelopmentPlaneSmoke) {
     try {

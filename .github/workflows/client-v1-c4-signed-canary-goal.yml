@@ -4,11 +4,20 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/client-control-contract.mjs'
+      - 'apps/metaengine-browser/src/client-goal-journal.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/src/preload-shell.cjs'
       - 'apps/metaengine-browser/src/meta-objective-compiler.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx'
       - 'apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-goal-journal.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs'
       - 'supabase/migrations/20260929203000_client_v1_plan_generation_watermark_v1.sql'
+      - 'supabase/migrations/20260929211500_client_v1_goal_progress_reconciliation_v1.sql'
       - '.github/workflows/client-v1-c4-signed-canary-goal.yml'
   workflow_dispatch:
 
@@ -49,7 +58,7 @@ jobs:
           METAENGINE_CLIENT_V1_CANARY_EVIDENCE: ${{ runner.temp }}/client-v1-c4-signed-canary-goal.json
         run: |
           set -euo pipefail
-          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
+          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
           node --check apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
           node apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
 
