@@ -10,8 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
 import { sendCommand, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
 import {
-  Zap, Boxes, Download, Gauge, Trash2, Search, Rocket,
-  LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, BrainCircuit,
+  Zap, Boxes, Download, Gauge, Trash2, Search, LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, BrainCircuit,
   Activity, Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -35,12 +34,21 @@ function laneChip(lane: string): string {
   }
 }
 
+const RETIRED_DAEMON_TASK_ACTIONS = new Set([
+  "TASK_ENQUEUE",
+  "TASK_SCHEDULE",
+  "TASK_CANCEL",
+  "TASK_RETRY",
+  "TASK_ARCHIVE",
+]);
+
 export function CommandPalette() {
   const open = useMe2((s) => s.paletteOpen);
   const setOpen = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const setDialog = useMe2((s) => s.setDialog);
   const catalog = useMe2((s) => s.catalog);
+  const visibleCatalog = useMemo(() => catalog.filter((row) => !RETIRED_DAEMON_TASK_ACTIONS.has(row.action)), [catalog]);
   const snap = useMe2((s) => s.snap);
   const openTask = useMe2((s) => s.openTask);
   const [mode, setMode] = useState<"all" | "pages" | "tasks" | "actions">("all");
@@ -64,6 +72,7 @@ export function CommandPalette() {
   }, [snap]);
 
   const runRegistryAction = (meta: ActionMeta) => {
+    if (RETIRED_DAEMON_TASK_ACTIONS.has(meta.action)) return;
     const direct: Record<string, () => void> = {
       PING: () => { void sendCommand("PING", {}, { quiet: true, successMsg: "pong" }); },
       STATE_SNAPSHOT: () => { void sendCommand("STATE_SNAPSHOT", {}, { quiet: true }); },
@@ -73,15 +82,13 @@ export function CommandPalette() {
       FLEET_RECONCILE: () => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); },
       BUDGET_FLUSH: confirmBudgetFlush,
       ENVIRONMENT_RESET: () => setDialog("reset"),
-      TASK_ENQUEUE: () => setDialog("newTask"),
-      TASK_SCHEDULE: () => setDialog("newTask"),
       EVENTS_SEARCH: () => setDialog("eventsSearch"),
       BUDGET_ADJUST: () => setDialog("budget"),
     };
     const fn = direct[meta.action];
     if (fn) {
       fn();
-      if (meta.action !== "ENVIRONMENT_RESET" && meta.action !== "TASK_ENQUEUE" && meta.action !== "TASK_SCHEDULE") setOpen(false);
+      if (meta.action !== "ENVIRONMENT_RESET") setOpen(false);
     } else if (meta.args) {
       // Keep argument entry inside the ME2 semantic overlay instead of falling
       // out to window.prompt, which was invisible to the composition model.
@@ -229,9 +236,6 @@ export function CommandPalette() {
         {/* TASKS */}
         {(mode === "all" || mode === "tasks") && (
           <CommandGroup heading={`Задачи · ${tasks.length}`}>
-            <CommandItem value="new новая задача" onSelect={() => { setDialog("newTask"); setOpen(false); }}>
-              <Rocket className="mr-2 h-4 w-4 text-emerald-400" /> Новая задача… <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
-            </CommandItem>
             {tasks.slice(0, 10).map((t) => (
               <CommandItem key={t.id} value={`task ${t.id} ${t.title}`} onSelect={() => { openTask(t.id); setOpen(false); }}>
                 <ListChecks className="mr-2 h-3.5 w-3.5 text-cyan-400" />
@@ -277,11 +281,11 @@ export function CommandPalette() {
         </>}
 
         {/* РЕЕСТР-47 */}
-        {catalog.length > 0 && (mode === "all" || mode === "actions") && (
+        {visibleCatalog.length > 0 && (mode === "all" || mode === "actions") && (
           <>
             <CommandSeparator />
-            <CommandGroup heading={`Реестр действий шины · ${catalog.length}/47`}>
-              {catalog.map((m) => (
+            <CommandGroup heading={`Реестр действий шины · ${visibleCatalog.length} safe-visible`}>
+              {visibleCatalog.map((m) => (
                 <CommandItem key={m.action} value={`${m.action} ${m.desc} ${m.group}`} onSelect={() => runRegistryAction(m)}>
                   <Badge variant="outline" title={`Authority lane: ${m.lane}`} aria-label={`Authority lane ${m.lane}`} className={`mr-2 h-5 shrink-0 border px-1.5 font-mono text-[8px] ${laneChip(m.lane)}`}>{m.lane.replace("_", " ")}</Badge>
                   <span className="font-mono text-xs">{m.action}</span>
