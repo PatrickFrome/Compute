@@ -10,6 +10,7 @@ on:
       - apps/metaengine-browser/src/native-supervisor-endpoints.mjs
       - apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**
       - apps/metaengine-browser/test/native-supervisor-enrollment-correlation.test.mjs
+      - coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json
   workflow_dispatch:
 
 permissions:
