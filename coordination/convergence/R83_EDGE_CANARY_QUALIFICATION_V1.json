@@ -5,7 +5,7 @@
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 8,
+    "deployed_version": 10,
     "ezbr_sha256": "9810286554c7eae7d2a039f72defbc0e50d80a906cdfa8945d8a8741f6c6aa9f",
     "source_pin": "3063871fe9a8a16cc879e630dc7a40105e835512"
   },
@@ -80,7 +80,19 @@
       "completed": false
     },
     "rollback_drill": {
-      "completed": false
+      "completed": true,
+      "canary_rollback_version": 9,
+      "rollback_source_pin": "d0caf994fffb22a863a68d99255e181d1a3acbd3",
+      "rollback_ezbr_sha256": "b6a280c00204e35ff0b24d118451d8b8cc7e43119b4f8624b477ba6625b07a5d",
+      "rollback_health_http": 200,
+      "restore_canary_version": 10,
+      "restore_source_pin": "3063871fe9a8a16cc879e630dc7a40105e835512",
+      "restore_ezbr_sha256": "9810286554c7eae7d2a039f72defbc0e50d80a906cdfa8945d8a8741f6c6aa9f",
+      "restore_health_http": 200,
+      "restore_runtime_ready": true,
+      "restore_capability_state": "ATTESTED",
+      "restore_capability_reason": "EXACT_DB_SOURCE_MATCH",
+      "authority_effect": false
     }
   }
 }
