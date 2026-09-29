@@ -172,31 +172,99 @@ try {
     authority_effect: false,
   }));
 
-  const waitResponse = await signedRequest('/v1/commands/wait-batch', {
+  // Phase A: prove the serverless-safe path is bounded even with no command.
+  // This phase intentionally has no trusted issuer racing the request.
+  const emptyWaitResponse = await signedRequest('/v1/commands/wait-batch', {
     payload: {
       supervisor_mode: 'CONTROL',
-      wait_ms: 15000,
+      wait_ms: 5000,
       max_batch: 1,
       max_tab_mutations: 1,
     },
   });
-  const waitBody = await waitResponse.json().catch(() => ({}));
-  if (waitResponse.status !== 200) {
-    throw new Error(`qualification_wait_batch_http_${waitResponse.status}:${waitBody?.error || 'unknown'}`);
+  const emptyWaitBody = await emptyWaitResponse.json().catch(() => ({}));
+  if (emptyWaitResponse.status !== 200) {
+    throw new Error(`qualification_empty_wait_http_${emptyWaitResponse.status}:${emptyWaitBody?.error || 'unknown'}`);
   }
-  const wakeReason = String(waitBody?.wake_reason || '');
-  if (!['POSTGRES_NOTIFY', 'DB_POLL_SESSION_WAKE_UNAVAILABLE'].includes(wakeReason)) {
-    throw new Error(`qualification_command_wake_not_proven:${wakeReason || 'NONE'}`);
+  const emptyWakeReason = String(emptyWaitBody?.wake_reason || '');
+  const emptyCommands = Array.isArray(emptyWaitBody?.commands) ? emptyWaitBody.commands : [];
+  if (emptyWakeReason !== 'DB_POLL_SESSION_WAKE_UNAVAILABLE' || emptyCommands.length !== 0) {
+    throw new Error(`qualification_bounded_empty_fallback_invalid:${JSON.stringify(emptyWaitBody)}`);
   }
-  const commands = Array.isArray(waitBody?.commands) ? waitBody.commands : [];
-  if (commands.length !== 1 || commands[0]?.action !== 'POLL' || !commands[0]?.command_id) {
-    throw new Error(`qualification_poll_command_invalid:${JSON.stringify(commands)}`);
-  }
-  if (waitBody?.transport_delivery_is_authority !== false || waitBody?.authority_effect !== false) {
-    throw new Error('qualification_wake_authority_contract_invalid');
+  if (emptyWaitBody?.transport_delivery_is_authority !== false || emptyWaitBody?.authority_effect !== false) {
+    throw new Error('qualification_empty_wait_authority_contract_invalid');
   }
 
-  const command = commands[0];
+  // Publish a signed durable marker only after Phase A completed. The trusted
+  // qualification controller waits for this exact marker before issuing POLL.
+  const commandReadyPayload = {
+    state: {
+      shell_version: version,
+      supervisor_mode: 'CONTROL',
+      armed: true,
+      operator_mode: 'CONTROL',
+      qualification: {
+        schema: 'metaengine.client-v1.live-qualification.v1',
+        qualification_run_id: runId,
+        source_head: sourceHead,
+        phase: 'WAITING_FOR_DURABLE_COMMAND',
+        bounded_empty_wait_proven: true,
+        bounded_empty_wait_reason: emptyWakeReason,
+        authority_effect: false,
+      },
+    },
+    last_command_id: null,
+    last_command_status: null,
+  };
+  const commandReadyResponse = await signedRequest('/v1/state', { payload: commandReadyPayload });
+  const commandReadyBody = await commandReadyResponse.json().catch(() => ({}));
+  if (commandReadyResponse.status !== 202 || commandReadyBody?.accepted !== true) {
+    throw new Error(`qualification_command_ready_state_http_${commandReadyResponse.status}`);
+  }
+
+  console.log(JSON.stringify({
+    schema: 'metaengine.client-v1.live-qualification.command-ready.v1',
+    qualification_run_id: runId,
+    source_head: sourceHead,
+    device_id: enrolled.device_id,
+    phase: 'WAITING_FOR_DURABLE_COMMAND',
+    bounded_empty_wait_proven: true,
+    wake_reason: emptyWakeReason,
+    authority_effect: false,
+  }));
+
+  // Phase B: repeatedly execute the same bounded durable lease path. There is
+  // still no second scheduler: each request is serial and terminal before the
+  // next one starts. The trusted controller may issue POLL at any point after
+  // the durable phase marker above.
+  let command = null;
+  let deliveryWakeReason = null;
+  for (let attempt = 1; attempt <= 4 && !command; attempt += 1) {
+    const waitResponse = await signedRequest('/v1/commands/wait-batch', {
+      payload: {
+        supervisor_mode: 'CONTROL',
+        wait_ms: 10000,
+        max_batch: 1,
+        max_tab_mutations: 1,
+      },
+    });
+    const waitBody = await waitResponse.json().catch(() => ({}));
+    if (waitResponse.status !== 200) {
+      throw new Error(`qualification_wait_batch_http_${waitResponse.status}:${waitBody?.error || 'unknown'}`);
+    }
+    if (waitBody?.transport_delivery_is_authority !== false || waitBody?.authority_effect !== false) {
+      throw new Error('qualification_wake_authority_contract_invalid');
+    }
+    const commands = Array.isArray(waitBody?.commands) ? waitBody.commands : [];
+    if (commands.length === 0) continue;
+    if (commands.length !== 1 || commands[0]?.action !== 'POLL' || !commands[0]?.command_id) {
+      throw new Error(`qualification_poll_command_invalid:${JSON.stringify(commands)}`);
+    }
+    command = commands[0];
+    deliveryWakeReason = String(waitBody?.wake_reason || '');
+  }
+  if (!command) throw new Error('qualification_poll_command_timeout');
+
   const receipt = {
     schema: 'metaengine.client-v1.live-qualification.command-receipt.v1',
     command_id: command.command_id,
@@ -238,9 +306,10 @@ try {
     signed_state_accepted: true,
     signed_status_http: statusResponse.status,
     runtime_control_observed: Boolean(stateBody?.runtime_control),
-    postgres_notify_wake_proven: wakeReason === 'POSTGRES_NOTIFY',
-    bounded_db_poll_fallback_proven: wakeReason === 'DB_POLL_SESSION_WAKE_UNAVAILABLE',
-    wake_reason: wakeReason,
+    bounded_empty_wait_proven: true,
+    bounded_db_poll_fallback_proven: true,
+    postgres_notify_wake_proven: deliveryWakeReason === 'POSTGRES_NOTIFY',
+    delivery_wake_reason: deliveryWakeReason,
     receipt_terminal_readback_proven: true,
     authority_effect: false,
   }));
