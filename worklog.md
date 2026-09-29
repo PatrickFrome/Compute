@@ -13000,3 +13000,21 @@ Stage Summary:
 - Оператору: 5 ноутбуков готовы к Colab (Run all → вставить публичный адрес песочницы). Скачивание: /api/download/<имя> или ZIP. Каждый ноутбук = отдельный GPU-узел со своей моделью (llama3.1:8b / qwen3:8b / gemma3:12b / phi4:14b / mistral-nemo:12b)
 - Нужен ключ OPENROUTER_API_KEY для free-моделей tier 86+ (рой объявляет это в #meta после каждого скана разведки)
 - Риск: два параллельных агента (эта сессия + cron-agent-loop) правят рой одновременно — координация через worklog обязательна
+
+---
+## Task ID: BROWSER-TEST-20260929-1630
+Agent: Super Z (main, Job 419203 tick 16:30)
+Task: Тест всех механик на v1.4.x после снятия лимитов (governor удалён, in-flight routing, multi-colab) — локальный контур + ретест Supabase-канала live-браузера.
+
+Work Log:
+- Локальная батарея bt419203-1630.py (два прогона, второй с исправленной формой API): 13/13 PASS.
+  - M01 /health ver=1.4.0 pop=115; M02 циклы бурстовые 48782→49038 (+256/30с, loup жив — первый замер delta=0 попал в тихое окно очереди); M03 /chat 200; M06 broadcast; M07 /goal; M08 /spawn (sw_it3oa7lb); M13 mute agentId=... 200; M14 kill 200; M15 память lessons=60 episodes=80; M20 scout scans=6 verified=0 dyn=0 (needsKeys OPENROUTER); M21 colab-реестр nodes=0 (мock чист); M17 gateway :81 200; M18 Next-прокси /api/swarm/health 200 (catch-all — без суффикса 404, это норма).
+- API-уроки: mute/kill ждут {"agentId"}, /api/swarm — catch-all [...path]; health: population/cycles в корне.
+- Зачистка: sw_9mgbr9q0 (из первого прогона) убит {"ok":true}; повторный kill sw_it3oa7lb штатно 404 (уже выведен M14).
+- Погода LLM: ollama-local infl ~265 (CPU-очередь, дрейфует), ok_sum 35→39 за 90с (растёт); cf/pollinations начинают отдавать 2xx после 429-окна; zai ещё 429 (самовоскрешение по half-life); mock colab-test-b в статистике — исторические счётчики, в реестре/цепочке отсутствует.
+- Supabase-канал live-браузера: state/command/mesh/device ВСЕ 503 (ретест через 45с — 503). PostgREST-аут Prophet ~17ч — внешний блокер, JWT pending operator.
+
+Stage Summary:
+- РАБОТАЕТ (локальный контур, 13/13): жизненный цикл агентов, чат, broadcast, цели, spawn/mute/kill, память, scout, colab-реестр, gateway :81, Next-прокси. Цели #1/#2/#3/#5 — подтверждены на v1.4.x ПОСЛЕ снятия лимитов (регрессий нет).
+- НЕ РАБОТАЕТ: ничего нового. (Исторический вердикт live-браузера 2026-09-28: DISARM BROKEN, SET_SUPERVISOR_MODE/DEV_PLANE_REPO_HEAD FLAKY — в силе до следующего доступного канала.)
+- НЕ ПРОВЕРЕНО: e2e-канал Supabase (browser_supervisor_state/command/mesh/device) — PostgREST 503 ~17ч; вечноживущий облачный супервизор (цель #4) наблюдаем только локально (watchdog PPID=1 жив).
