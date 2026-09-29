@@ -166,7 +166,7 @@ export function validateR83LiveEvidenceSeal(evidence,{installedProof=null,github
   });
 }
 
-function readJson(path){return JSON.parse(fs.readFileSync(path,'utf8'))}
+function readJson(path){return JSON.parse(fs.readFileSync(path,'utf8').replace(/^\\uFEFF/,''))}
 
 if(import.meta.url===`file://${process.argv[1]}`){
   const args=process.argv.slice(2);
