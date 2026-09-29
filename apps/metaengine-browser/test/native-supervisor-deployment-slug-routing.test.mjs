@@ -7,12 +7,14 @@ const source = await readFile(
   'utf8',
 );
 
-test('native supervisor route extraction is deployment-slug agnostic', () => {
+test('native supervisor route extraction strips stable and canary deployment mounts as exact segments', () => {
   assert.ok(source.includes("const hostedPrefix='/functions/v1/'"));
-  assert.ok(source.includes('const deployed=raw.slice(hostedPrefix.length)'));
-  assert.ok(source.includes("const slash=deployed.indexOf('/')"));
-  assert.ok(source.includes("return slash>=0?(deployed.slice(slash)||'/'):'/'"));
+  assert.ok(source.includes("const firstSlash=raw.indexOf('/',1)"));
+  assert.ok(source.includes("const mount=firstSlash>0?raw.slice(1,firstSlash):raw.slice(1)"));
+  assert.ok(source.includes("const deployedMount=/^a2-browser-native-supervisor-v[0-9]+(?:-[a-z0-9][a-z0-9-]{0,63})?$/"));
+  assert.ok(source.includes("if(deployedMount.test(mount))return firstSlash>0?(raw.slice(firstSlash)||'/'):'/'"));
   assert.ok(source.includes('const path=routedServicePath(url.pathname)'));
+  assert.equal(source.includes('raw.indexOf(SERVICE_MARKER)'), false);
 });
 
 test('canonical signed request identity remains the stable v1 service marker', () => {
