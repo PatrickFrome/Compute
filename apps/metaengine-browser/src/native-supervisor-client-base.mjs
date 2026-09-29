@@ -51,7 +51,22 @@ const PROVEN_EFFECT_STATES = new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATI
 const TERMINAL_EFFECT_OUTCOMES = new Set(['CONFIRMED','NO_EFFECT_PROVEN','AMBIGUOUS']);
 const DEFAULT_BATCH_WAIT_MS = 4000;
 const DEFAULT_MAINTENANCE_INTERVAL_MS = 10000;
+const MAX_LEASE_FAILURE_BACKOFF_MS = 8000;
 const ALWAYS_ON_CONTROL_ERROR = 'FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED';
+
+export function nativeSupervisorLeaseRetryDelayMs({
+  batchTransport = 'UNKNOWN',
+  consecutiveFailures = 0,
+  intervalMs = 2000,
+  maxBackoffMs = MAX_LEASE_FAILURE_BACKOFF_MS,
+} = {}) {
+  const base = Math.max(250, Math.min(5000, Number(intervalMs) || 2000));
+  const failures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0));
+  if (String(batchTransport || '').toUpperCase() === 'SUPPORTED' && failures === 0) return 0;
+  if (failures === 0) return base;
+  const cap = Math.max(base, Math.min(60000, Number(maxBackoffMs) || MAX_LEASE_FAILURE_BACKOFF_MS));
+  return Math.min(cap, base * (2 ** Math.min(16, failures - 1)));
+}
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -889,9 +904,17 @@ export class NativeSupervisorClient {
 
   #schedule() {
     if (!this.#running || this.#timer) return;
-    // A supported wait-batch request is itself the idle wait. Schedule the next
-    // cycle immediately so there is no extra client timer after the held request.
-    const delay = this.#batchTransport === 'SUPPORTED' ? 0 : this.#intervalMs;
+    // A healthy supported wait-batch request is itself the idle wait, so there is
+    // no extra client timer. If the authoritative lease transport fails before
+    // completing its held wait (for example DB/Edge 502/503/504), reuse the same
+    // scheduler timer with bounded exponential cooldown. This prevents a hot
+    // control-plane retry storm without introducing a second scheduler, changing
+    // DB lease authority, or replaying any Browser effect.
+    const delay = nativeSupervisorLeaseRetryDelayMs({
+      batchTransport: this.#batchTransport,
+      consecutiveFailures: this.#leaseConsecutiveFailures,
+      intervalMs: this.#intervalMs,
+    });
     this.#timer = setTimeout(() => {
       this.#timer = null;
       this.cycle().catch(() => {}).finally(() => this.#schedule());
@@ -928,6 +951,11 @@ export class NativeSupervisorClient {
       lease_last_ok_at: this.#leaseLastOkAt,
       lease_consecutive_failures: this.#leaseConsecutiveFailures,
       lease_last_error: this.#leaseLastError,
+      lease_retry_delay_ms: nativeSupervisorLeaseRetryDelayMs({
+        batchTransport: this.#batchTransport,
+        consecutiveFailures: this.#leaseConsecutiveFailures,
+        intervalMs: this.#intervalMs,
+      }),
       batch_transport: this.#batchTransport,
       cycle_running: cycleRunning,
       cycle_started_at: this.#cycleStartedAtMs > 0 ? new Date(this.#cycleStartedAtMs).toISOString() : null,
