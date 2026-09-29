@@ -12756,3 +12756,17 @@ Work Log:
 
 Stage Summary:
 - РАБОТАЕТ 18/19 (M01–M04, M06–M19); НЕ РАБОТАЕТ M05 (glm-429, внешнее) + Supabase-канал (REST 503 PGRST002 ~13ч, Storage 429); НЕ ПРОВЕРЕНО e2e-диспетчирование в браузер (канал деградирован).
+
+---
+Task ID: BROWSER-TEST-20260929-1204 (цикл 20)
+Agent: cron-agent-loop (Job 419203)
+Task: Цикл 20 (12:00) — репроб канала Supabase + батарея M01–M19.
+
+Work Log:
+- Репроб: P1/P2 = 401 (edge жив), P3 = 503 PGRST002 → DEGRADED (~13.5ч).
+- Батарея → 18/19 PASS (9-й цикл подряд); FAIL M05 (glm-429).
+- Рой: 14/14 living, Δ97 циклов/60с; spawn sw_gmf8you4 (серия 19/19); lessons=53, episodes=16, proposals=60.
+- Фоновый ретрай капсулы Supabase (PID 21972) — попытки продолжаются.
+
+Stage Summary:
+- РАБОТАЕТ 18/19; НЕ РАБОТАЕТ M05 (glm-429) + Supabase (REST 503, Storage 429); НЕ ПРОВЕРЕНО e2e-диспетчирование (канал деградирован).
