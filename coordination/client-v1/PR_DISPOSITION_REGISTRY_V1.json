@@ -1,0 +1,202 @@
+{
+  "schema": "metaengine.client-v1.pr-disposition-registry.v1",
+  "captured_at": "2026-09-29",
+  "canonical_candidate": {
+    "pr": 1071,
+    "sha": "ff95e9c886fac35b9302ec5c04a4c6bf7b8e8551",
+    "disposition": "ACTIVE_CANONICAL"
+  },
+  "counters": {
+    "open_prs": 341,
+    "draft_prs": 326,
+    "closed_as_proven_absorbed_this_cycle": 18
+  },
+  "closed_proven_absorbed": [
+    {
+      "pr": 1070,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1065,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1057,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1048,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1043,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1025,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1024,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1022,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1017,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1016,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1004,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1001,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 1000,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 998,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 997,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 994,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 987,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    },
+    {
+      "pr": 986,
+      "disposition": "SUPERSEDED",
+      "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
+    }
+  ],
+  "pending_semantic_review": [
+    {
+      "pr": 1069,
+      "head": "bcac5a88a00506a0a1d5c37101def2ae0f1463c8",
+      "ahead_from_head_to_r109": 67,
+      "unique_commits": 36,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1068,
+      "head": "6faf68f642ba70135da9aae1e1f2f94466ac191f",
+      "ahead_from_head_to_r109": 67,
+      "unique_commits": 30,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1067,
+      "head": "e60083e1f074d66ad7caa43696d4d9a1688761e0",
+      "ahead_from_head_to_r109": 57,
+      "unique_commits": 14,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1066,
+      "head": "579050e1623601d986986fe861159035817f7884",
+      "ahead_from_head_to_r109": 67,
+      "unique_commits": 21,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1061,
+      "head": "5ecafa9505e07b69f5cf12de2f91457d4eb71b0e",
+      "ahead_from_head_to_r109": 67,
+      "unique_commits": 19,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1041,
+      "head": "b68bd6c402b9658f32d6b031b0439291aa2cb422",
+      "ahead_from_head_to_r109": 160,
+      "unique_commits": 45,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1033,
+      "head": "ff0bfe4fa5baf09e0b95a2d940e3d35405a36611",
+      "ahead_from_head_to_r109": 160,
+      "unique_commits": 29,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1028,
+      "head": "5e0f025cfb3b5c9bc59a0d8c3c297c522c7bd064",
+      "ahead_from_head_to_r109": 160,
+      "unique_commits": 42,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 1002,
+      "head": "2252eae400bbf83e1bee63c37ca5b847d25c7682",
+      "ahead_from_head_to_r109": 410,
+      "unique_commits": 2,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 999,
+      "head": "04ee7239d6d2020e1ec3a91a274950fa7b39fda4",
+      "ahead_from_head_to_r109": 410,
+      "unique_commits": 1,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    },
+    {
+      "pr": 982,
+      "head": "ad5e01c6c14a61f77a6cb65679cd79f20f99a669",
+      "ahead_from_head_to_r109": 772,
+      "unique_commits": 1,
+      "disposition": "SELECTIVE_PORT_PENDING",
+      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+    }
+  ],
+  "invariants": {
+    "bulk_merge": false,
+    "branch_delete": false,
+    "force_push": false,
+    "release_candidate_mutation": false
+  }
+}
