@@ -298,7 +298,7 @@ test('R85 persistent chrome is compact and cannot directly fire emergency flush'
   assert.match(me2Palette, /setConfirmFlush\(true\)/);
 });
 
-test('R106 retired COMMAND and daemon Browser pages are absent while native BrowserStage remains', async () => {
+test('R108 retired COMMAND and daemon Browser pages are absent while native selected-agent slot remains', async () => {
   await assert.rejects(
     readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8'),
     { code: 'ENOENT' },
@@ -307,7 +307,9 @@ test('R106 retired COMMAND and daemon Browser pages are absent while native Brow
     readFile(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url), 'utf8'),
     { code: 'ENOENT' },
   );
-  assert.match(me2Shell, /BrowserStage/);
+  assert.match(me2Shell, /data-testid="native-chat-surface-slot"/);
+  assert.match(me2Shell, /PrimaryChatFleetWorkspace/);
+  assert.doesNotMatch(me2Shell, /BrowserStage|pages\/browser/);
   assert.match(me2Topbar, /data-testid="topbar"/);
   assert.match(me2Pagebar, /data-testid="pagebar"/);
   assert.match(me2Statusbar, /data-testid="statusbar"/);
