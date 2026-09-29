@@ -48,6 +48,45 @@ type PrimaryShellBridge = {
   } | null>;
 };
 
+type ClientGoalSubmission = {
+  schema: "metaengine.client.goal-submission.v1";
+  goal: string;
+  objective_id: string;
+  roadmap_id: string;
+  plan_generation: number;
+  point_ids: string[];
+  node_count: number;
+  task_admission_state: "PENDING_CANONICAL_SCHEDULER_ADMISSION";
+  exact_activation_readback: true;
+  operator_initiated: true;
+  automatic_retry_allowed: false;
+  scheduler_authority: false;
+  browser_actuation_authority: false;
+  release_authority: false;
+  authority_effect: false;
+};
+
+type ClientAgentSelection = {
+  schema: "metaengine.client.agent-selection.v1";
+  agent_id: string;
+  actor_id: string;
+  tab_id: string;
+  selection_applied: true;
+  exact_native_binding: true;
+  presentation_only: true;
+  scheduler_authority: false;
+  browser_actuation_authority: false;
+  update_authority: false;
+  authority_effect: false;
+};
+
+type ClientControlBridge = {
+  submitGoal?: (goal: string) => Promise<ClientGoalSubmission>;
+  selectAgent?: (agentId: string) => Promise<ClientAgentSelection>;
+  typed_positive_api?: boolean;
+  generic_command_exposed?: boolean;
+};
+
 const EMPTY_ROSTER: PrimaryChatRoster = {
   schema: "metaengine.browser.primary-chat-fleet-roster.v1",
   actors: [],
@@ -59,6 +98,10 @@ const EMPTY_ROSTER: PrimaryChatRoster = {
 
 function shellBridge(): PrimaryShellBridge | null {
   return (window as Window & { metaengineShell?: PrimaryShellBridge }).metaengineShell ?? null;
+}
+
+function clientControlBridge(): ClientControlBridge | null {
+  return (window as Window & { metaengineClient?: ClientControlBridge }).metaengineClient ?? null;
 }
 
 function usePrimaryChatRoster() {
@@ -108,6 +151,79 @@ function usePrimaryChatRoster() {
   return { roster, state, refresh };
 }
 
+function GoalComposer() {
+  const [goal, setGoal] = useState("");
+  const [pending, setPending] = useState(false);
+  const [receipt, setReceipt] = useState<ClientGoalSubmission | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(async () => {
+    const value = goal.trim();
+    if (!value || pending) return;
+    const bridge = clientControlBridge();
+    if (!bridge?.submitGoal || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
+      setError("Typed Client control bridge unavailable");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const next = await bridge.submitGoal(value);
+      if (next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
+        throw new Error("goal_readback_invalid");
+      }
+      setReceipt(next);
+      setGoal("");
+    } catch (cause) {
+      setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
+    } finally {
+      setPending(false);
+    }
+  }, [goal, pending]);
+
+  return (
+    <section
+      className="flex min-h-[48px] shrink-0 items-center gap-2 border-b border-zinc-800 bg-[#0b0b0d] px-3 py-1.5"
+      data-testid="client-goal-composer"
+      aria-label="Client goal"
+    >
+      <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-400">Goal</span>
+      <input
+        value={goal}
+        onChange={(event) => setGoal(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            void submit();
+          }
+        }}
+        maxLength={480}
+        disabled={pending}
+        placeholder="Describe what METAENGINE should accomplish…"
+        aria-label="User goal"
+        data-testid="client-goal-input"
+        className="h-8 min-w-0 flex-1 border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-800 disabled:opacity-60"
+      />
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={pending || !goal.trim()}
+        data-testid="client-goal-submit"
+        className="h-8 shrink-0 border border-cyan-800/70 bg-cyan-950/30 px-3 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-950/55 disabled:opacity-40"
+      >
+        {pending ? "Submitting…" : "Run"}
+      </button>
+      <span className="min-w-0 max-w-[320px] truncate font-mono text-[9px] text-zinc-500" data-testid="client-goal-readback">
+        {error
+          ? `ERROR · ${error}`
+          : receipt
+            ? `${receipt.objective_id} · ${receipt.task_admission_state}`
+            : "typed Native Supervisor path"}
+      </span>
+    </section>
+  );
+}
+
 function PageOutlet({ page }: { page: PageKey }) {
   switch (page) {
     case "code": return <CodePage />;
@@ -139,9 +255,17 @@ function ChatFleetRail() {
   const selectedActorId = roster.selected_actor_id || localSelection;
 
   const select = useCallback(async (actor: PrimaryChatActor) => {
+    setChatId(actor.actor_id);
+    if (actor.actor_type === "AGENT") {
+      const bridge = clientControlBridge();
+      const agentId = actor.actor_id.startsWith("agent:") ? actor.actor_id.slice("agent:".length) : "";
+      if (!bridge?.selectAgent || !agentId) return;
+      const result = await bridge.selectAgent(agentId).catch(() => null);
+      if (result?.selection_applied === true && result.exact_native_binding === true) await refresh();
+      return;
+    }
     const bridge = shellBridge();
     if (!bridge?.selectPrimaryChatActor) return;
-    setChatId(actor.actor_id);
     const result = await bridge.selectPrimaryChatActor(actor.actor_id).catch(() => null);
     if (result?.selection_applied === true) await refresh();
   }, [refresh, setChatId]);
@@ -283,6 +407,7 @@ export function Me2Shell() {
       data-main-workspace={mainWorkspace ? "chat-fleet" : "advanced"}
     >
       <TopBar />
+      {mainWorkspace ? <GoalComposer /> : null}
       <main
         className={mainWorkspace ? "min-h-0 min-w-0 flex-1 overflow-hidden" : "min-h-0 min-w-0 flex-1 overflow-auto p-1.5"}
         data-testid="page-outlet"
