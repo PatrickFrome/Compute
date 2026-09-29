@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -9,7 +10,6 @@ const shell = await read('../../me2-ui/src/components/me2/shell/me2-shell.tsx');
 const inspector = await read('../../me2-ui/src/components/me2/shell/peek-inspector.tsx');
 const hook = await read('../../me2-ui/src/hooks/use-temporary-peek.ts');
 const tasks = await read('../../me2-ui/src/components/me2/pages/tasks.tsx');
-const agents = await read('../../me2-ui/src/components/me2/pages/agents.tsx');
 
 test('R96 Peek state is ephemeral presentation-only state and dies on navigation', () => {
   assert.match(store, /export type PeekKind = "task" \| "agent"/);
@@ -42,9 +42,8 @@ test('R96 hold-Space controller closes on release and keeps Arrow navigation ins
 test('R96 Peek requires explicit row focus before Space can capture page navigation', () => {
   assert.match(tasks, /const effectivePeekTaskId = peekTaskId && peekTaskIds\.includes\(peekTaskId\)[\s\S]{0,80}\? peekTaskId[\s\S]{0,40}: null;/);
   assert.doesNotMatch(tasks, /effectivePeekTaskId[\s\S]{0,120}peekTaskIds\[0\]/);
-  assert.match(agents, /data-testid="retired-agents-page"/);
-  assert.match(agents, /data-authority-effect="false"/);
-  assert.doesNotMatch(agents, /effectivePeekAgentId|useTemporaryPeekList|openAgentChat|agentChatOp|sendCommand/);
+  assert.equal(fs.existsSync(new URL('../../me2-ui/src/components/me2/pages/agents.tsx', import.meta.url)), false);
+  assert.doesNotMatch(shell, /AgentsPage|pages\/agents|openAgentChat|agentChatOp/);
 });
 
 test('R96 Peek never steals native Space activation from unrelated controls', () => {
@@ -102,11 +101,10 @@ test('R96 task surfaces separate Enter activation from temporary Space preview',
   assert.match(tasks, /data-peek-selected=/);
   assert.match(tasks, /if \(e\.key === "Enter"\)[\s\S]{0,120}onOpen\(t\)/);
   assert.match(tasks, /else if \(e\.key === " "\) e\.preventDefault\(\)/);
-  assert.match(tasks, /onFocus=\{\(\) => setPeekTaskId\(t\.id\)\}/);
+  assert.match(tasks, /onFocus=\{\(e\) => \{ set\(e\); onSelect\?\.\(t\.id\); \}\}/);
 });
 
-test('R102 retired Agents page exposes no AgentChat or Peek mutation surface', () => {
-  assert.match(agents, /data-testid="retired-agents-page"/);
-  assert.match(agents, /data-authority-effect="false"/);
-  assert.doesNotMatch(agents, /useTemporaryPeekList|data-peek-kind|openAgentChat|agentChatOp|sendCommand|me2Fetch/);
+test('R108 retired Agents page is physically absent and cannot expose a mutation surface', () => {
+  assert.equal(fs.existsSync(new URL('../../me2-ui/src/components/me2/pages/agents.tsx', import.meta.url)), false);
+  assert.doesNotMatch(shell, /AgentsPage|pages\/agents|openAgentChat|agentChatOp/);
 });
