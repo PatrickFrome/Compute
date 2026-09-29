@@ -15,6 +15,11 @@ const runId = String(process.env.GITHUB_RUN_ID || '').trim();
 const runAttempt = String(process.env.GITHUB_RUN_ATTEMPT || '').trim();
 const evidencePath = String(process.env.METAENGINE_CLIENT_V1_CANARY_EVIDENCE || '').trim();
 const timeoutMs = Math.max(60_000, Math.min(900_000, Number(process.env.METAENGINE_CLIENT_V1_APPROVAL_TIMEOUT_MS || 600_000)));
+const requirePhysicalAgent = String(process.env.METAENGINE_CLIENT_V1_REQUIRE_PHYSICAL_AGENT || '').trim() === '1';
+const agentProofTimeoutMs = requirePhysicalAgent
+  ? Math.max(30_000, Math.min(900_000, Number(process.env.METAENGINE_CLIENT_V1_AGENT_PROOF_TIMEOUT_MS || 480_000)))
+  : 0;
+const agentProofPollMs = Math.max(1_000, Math.min(10_000, Number(process.env.METAENGINE_CLIENT_V1_AGENT_PROOF_POLL_MS || 2_000)));
 
 assert.match(base, /^https:\/\/[a-z0-9]+\.supabase\.co\/functions\/v1\/a2-browser-native-supervisor-v14-canary$/);
 assert.match(sourceHead, /^[0-9a-f]{40}$/);
@@ -27,6 +32,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const hexSha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const nonce = () => crypto.randomBytes(24).toString('base64url');
 const b64url = (value) => Buffer.from(value).toString('base64url');
+async function writeEvidence(value) {
+  if (evidencePath) await fs.writeFile(evidencePath, JSON.stringify(value, null, 2) + '\n', 'utf8');
+}
 
 const { privateKey, publicKey } = await crypto.webcrypto.subtle.generateKey(
   { name: 'ECDSA', namedCurve: 'P-256' },
@@ -167,6 +175,62 @@ while (Date.now() - started < timeoutMs) {
 }
 if (!deviceId) throw new Error('canary_enrollment_approval_timeout');
 
+let physicalPreflight = null;
+if (requirePhysicalAgent) {
+  const environmentResponse = await devicePost('/v1/devos/environment-state', {}, deviceId);
+  const inputsResponse = await devicePost('/v1/meta/authoritative-inputs', {
+    roadmap_id: 'metaengine-client-v1',
+  }, deviceId);
+
+  physicalPreflight = {
+    schema: 'metaengine.client-v1.c4-physical-preflight.v1',
+    environment_http_status: environmentResponse.response.status,
+    environment_state: environmentResponse.body?.state || null,
+    continuous_service_allowed: environmentResponse.body?.continuous_service_allowed === true,
+    generation_floor: Number.isSafeInteger(Number(environmentResponse.body?.generation_floor))
+      ? Number(environmentResponse.body.generation_floor)
+      : null,
+    capacity_http_status: inputsResponse.response.status,
+    capacity_state: inputsResponse.body?.capacity?.state || null,
+    capacity_source: inputsResponse.body?.capacity?.source || null,
+    available_slots: Number(inputsResponse.body?.capacity?.available_slots || 0),
+    authority_effect: false,
+  };
+
+  if (
+    environmentResponse.response.status !== 200
+    || environmentResponse.body?.continuous_service_allowed !== true
+    || inputsResponse.response.status !== 200
+    || inputsResponse.body?.capacity?.source !== 'DEVOS_SCHEDULER_SNAPSHOT'
+    || inputsResponse.body?.capacity?.state !== 'FRESH'
+    || !Number.isSafeInteger(Number(inputsResponse.body?.capacity?.available_slots))
+    || Number(inputsResponse.body.capacity.available_slots) < 1
+  ) {
+    const evidence = {
+      schema: 'metaengine.client-v1.c4-physical-qualification-evidence.v1',
+      source_head: sourceHead,
+      run_id: runId,
+      run_attempt: runAttempt,
+      client_id: clientId,
+      enrollment_request_id: requestId,
+      device_id: deviceId,
+      state: 'PHYSICAL_PREREQUISITES_NOT_READY',
+      preflight: physicalPreflight,
+      goal_submitted: false,
+      user_goal_to_agent_readback: false,
+      user_goal_to_result_readback: false,
+      automatic_retry_allowed: false,
+      scheduler_authority: false,
+      browser_authority: false,
+      release_authority: false,
+      authority_effect: false,
+      observed_at: new Date().toISOString(),
+    };
+    await writeEvidence(evidence);
+    throw new Error(`c4_physical_prerequisites_not_ready:${JSON.stringify(physicalPreflight)}`);
+  }
+}
+
 const objective = `C4 signed canary qualification ${runId} attempt ${runAttempt}`;
 const goalRequestId = crypto.randomUUID().toLowerCase();
 const goal = await devicePost('/v1/meta/client-goal-submit', {
@@ -209,7 +273,7 @@ const progressResponse = await devicePost('/v1/meta/client-goal-progress', {
 if (progressResponse.response.status !== 200) {
   throw new Error(`canary_goal_progress_http_${progressResponse.response.status}:${JSON.stringify(progressResponse.body)}`);
 }
-const progress = normalizeClientGoalProgressReadback(progressResponse.body, goalRequestId, clientReadback);
+let progress = normalizeClientGoalProgressReadback(progressResponse.body, goalRequestId, clientReadback);
 assert.equal(progress.found, true);
 assert.equal(progress.request_id, goalRequestId);
 assert.equal(progress.task_id, clientReadback.task_id);
@@ -223,7 +287,7 @@ const executionProofResponse = await devicePost('/v1/meta/client-goal-execution-
 if (executionProofResponse.response.status !== 200) {
   throw new Error(`canary_goal_execution_proof_http_${executionProofResponse.response.status}:${JSON.stringify(executionProofResponse.body)}`);
 }
-const executionProof = normalizeClientGoalExecutionProofReadback(
+let executionProof = normalizeClientGoalExecutionProofReadback(
   executionProofResponse.body,
   goalRequestId,
   clientReadback,
@@ -237,6 +301,64 @@ assert.equal(executionProof.scheduler_authority, false);
 assert.equal(executionProof.browser_actuation_authority, false);
 assert.equal(executionProof.release_authority, false);
 assert.equal(executionProof.authority_effect, false);
+
+if (requirePhysicalAgent) {
+  const proofDeadline = Date.now() + agentProofTimeoutMs;
+  while (executionProof.user_goal_to_agent_readback !== true && Date.now() < proofDeadline) {
+    if (progress.terminal === true) break;
+    await sleep(agentProofPollMs);
+
+    const nextProgressResponse = await devicePost('/v1/meta/client-goal-progress', {
+      request_id: goalRequestId,
+    }, deviceId);
+    if (nextProgressResponse.response.status !== 200) {
+      throw new Error(`c4_physical_progress_http_${nextProgressResponse.response.status}:${JSON.stringify(nextProgressResponse.body)}`);
+    }
+    progress = normalizeClientGoalProgressReadback(nextProgressResponse.body, goalRequestId, clientReadback);
+
+    const nextProofResponse = await devicePost('/v1/meta/client-goal-execution-proof', {
+      request_id: goalRequestId,
+    }, deviceId);
+    if (nextProofResponse.response.status !== 200) {
+      throw new Error(`c4_physical_execution_proof_http_${nextProofResponse.response.status}:${JSON.stringify(nextProofResponse.body)}`);
+    }
+    executionProof = normalizeClientGoalExecutionProofReadback(
+      nextProofResponse.body,
+      goalRequestId,
+      clientReadback,
+    );
+  }
+
+  if (executionProof.user_goal_to_agent_readback !== true) {
+    const evidence = {
+      schema: 'metaengine.client-v1.c4-physical-qualification-evidence.v1',
+      source_head: sourceHead,
+      run_id: runId,
+      run_attempt: runAttempt,
+      client_id: clientId,
+      enrollment_request_id: requestId,
+      device_id: deviceId,
+      state: progress.terminal === true ? 'TERMINAL_WITHOUT_AGENT_PROOF' : 'AGENT_PROOF_TIMEOUT',
+      preflight: physicalPreflight,
+      goal_submitted: true,
+      goal_request_id: goalRequestId,
+      task_id: clientReadback.task_id,
+      task_state: progress.task_state,
+      terminal: progress.terminal,
+      user_goal_to_agent_readback: false,
+      user_goal_to_result_readback: executionProof.user_goal_to_result_readback,
+      automatic_retry_allowed: false,
+      physical_effect_replayed: false,
+      scheduler_authority: false,
+      browser_authority: false,
+      release_authority: false,
+      authority_effect: false,
+      observed_at: new Date().toISOString(),
+    };
+    await writeEvidence(evidence);
+    throw new Error(`c4_physical_agent_proof_not_observed:${evidence.state}`);
+  }
+}
 
 const evidence = {
   schema: 'metaengine.client-v1.signed-canary-goal-evidence.v1',
@@ -259,6 +381,8 @@ const evidence = {
   progress_task_state: progress.task_state,
   progress_terminal: progress.terminal,
   execution_proof_validated: true,
+  physical_agent_required: requirePhysicalAgent,
+  physical_preflight: physicalPreflight,
   user_goal_to_agent_readback: executionProof.user_goal_to_agent_readback,
   user_goal_to_result_readback: executionProof.user_goal_to_result_readback,
   agent_origin_contract: executionProof.agent_origin_proof?.contract || null,
@@ -279,5 +403,5 @@ const evidence = {
   authority_effect: false,
   completed_at: new Date().toISOString(),
 };
-if (evidencePath) await fs.writeFile(evidencePath, JSON.stringify(evidence, null, 2) + '\n', 'utf8');
+await writeEvidence(evidence);
 console.log(JSON.stringify(evidence));
