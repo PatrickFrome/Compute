@@ -38,8 +38,6 @@ const me2Topbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/
 const me2Pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell/pagebar.tsx', import.meta.url), 'utf8');
 const me2Statusbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/statusbar.tsx', import.meta.url), 'utf8');
 const me2Palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
-const me2Command = await readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8');
-const me2RunPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url), 'utf8');
 const me2BrowserStage = await readFile(new URL('../../me2-ui/src/components/me2/stages/browser-stage.tsx', import.meta.url), 'utf8');
 const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
 const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
@@ -300,12 +298,16 @@ test('R85 persistent chrome is compact and cannot directly fire emergency flush'
   assert.match(me2Palette, /setConfirmFlush\(true\)/);
 });
 
-test('R102 retired COMMAND is inert while the native Browser page owns the compact Agent stage', () => {
-  assert.match(me2Command, /data-testid="retired-command-page"/);
-  assert.match(me2Command, /data-authority-effect="false"/);
-  assert.doesNotMatch(me2Command, /BrowserStage|sendCommand|me2Fetch|agentChatOp|useAgentChatSessions/);
-  assert.match(me2RunPage, /data-testid="page-browser"/);
-  assert.match(me2RunPage, /<BrowserStage compact defaultCastOn \/>/);
+test('R106 retired COMMAND and daemon Browser pages are absent while native BrowserStage remains', async () => {
+  await assert.rejects(
+    readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8'),
+    { code: 'ENOENT' },
+  );
+  await assert.rejects(
+    readFile(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url), 'utf8'),
+    { code: 'ENOENT' },
+  );
+  assert.match(me2Shell, /BrowserStage/);
   assert.match(me2Topbar, /data-testid="topbar"/);
   assert.match(me2Pagebar, /data-testid="pagebar"/);
   assert.match(me2Statusbar, /data-testid="statusbar"/);
@@ -336,14 +338,17 @@ test('R85 agent tab binding is exact-session-only and rejects similar-title fall
   assert.equal(duplicate.kind, 'ambiguous');
   assert.equal(duplicate.matches.length, 2);
 
-  // The pure resolver remains a historical fail-closed contract, but the
-  // retired COMMAND module cannot consume or mutate Browser session identity.
-  assert.doesNotMatch(me2Command, /selectPrimaryAgentSession|resolveExactAgentTab|loadBrowserTabs|BROWSER_SELECT_TAB/);
+  // The pure resolver remains a historical fail-closed contract; the product
+  // shell does not consume it as Browser/session authority.
+  assert.doesNotMatch(me2Shell, /selectPrimaryAgentSession|resolveExactAgentTab|loadBrowserTabs|BROWSER_SELECT_TAB/);
 });
 
-test('R102 retired COMMAND cannot recreate an interactive Agent authority surface', () => {
-  assert.match(me2Command, /data-testid="retired-command-page"/);
-  assert.doesNotMatch(me2Command, /aria-current=|selectPrimaryAgentSession|sendCommand|agentChatOp|useAgentChatSessions/);
+test('R106 removed COMMAND cannot recreate an interactive Agent authority surface', async () => {
+  await assert.rejects(
+    readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8'),
+    { code: 'ENOENT' },
+  );
+  assert.doesNotMatch(me2Shell, /selectPrimaryAgentSession|agentChatOp|useAgentChatSessions/);
 });
 
 test('R85 Browser tabs use sibling controls instead of nested interactive semantics', () => {
@@ -404,9 +409,8 @@ test('R97 attention and observability are advanced-only and keep zero effect aut
   assert.match(me2Observability, /prev\.event\.type === event\.type/);
 });
 
-test('R102 retired COMMAND consumes no daemon AgentChat feed', () => {
-  assert.match(me2Command, /data-authority-effect="false"/);
-  assert.doesNotMatch(me2Command, /useAgentChatSessions|agentChatOp|\/agentchat|WebSocket|me2Fetch/);
+test('R106 primary shell consumes no retired COMMAND AgentChat feed', () => {
+  assert.doesNotMatch(me2Shell, /useAgentChatSessions|agentChatOp|\/agentchat|WebSocket|me2Fetch/);
 });
 
 test('R85 unavailable legacy sandbox plane is fail-close and collapsed by default', () => {
@@ -481,7 +485,6 @@ test('R85 workspace switch restores workspace-scoped layout preferences', () => 
   assert.match(store, /commandRailPreferredOpen: layoutPreference\.commandRailOpen/);
   assert.match(store, /setCommandRailPreference/);
   assert.match(store, /me2\.command\.agent-rail\.v2:/);
-  assert.doesNotMatch(me2Command, /commandRailPreferredOpen|storeCommandRailPreference|setPrimaryCommandRail/);
 });
 
 test('R97 retains workspace reset capability without a persistent topbar control', () => {
@@ -624,10 +627,6 @@ test('R85 command rail bridge is presentation-only and reconciles effective geom
   assert.match(railHandler, /update_authority:\s*false/);
   assert.match(railHandler, /release_authority:\s*false/);
   assert.match(railHandler, /authority_effect:\s*false/);
-  assert.doesNotMatch(
-    me2Command,
-    /commandRailPreferredOpen|storeCommandRailPreference|setPrimaryCommandRail|effective_open|COMMAND_RAIL_WEB_MIN_WIDTH/,
-  );
 });
 
 test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
