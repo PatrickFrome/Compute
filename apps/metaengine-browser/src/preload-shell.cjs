@@ -236,10 +236,6 @@ const setPrimaryContextDrawer = (open, dock, height, width) => ipcRenderer.invok
   Number.isFinite(Number(height)) ? Number(height) : null,
   Number.isFinite(Number(width)) ? Number(width) : null,
 );
-const selectPrimaryAgentSession = (sessionId) => ipcRenderer.invoke(
-  'metaengine:shell:primary-agent-session-select',
-  String(sessionId ?? ''),
-);
 const primaryChatFleetRoster = () => ipcRenderer.invoke('metaengine:shell:primary-chat-fleet-roster');
 const selectPrimaryChatActor = (actorId) => ipcRenderer.invoke(
   'metaengine:shell:primary-chat-actor-select',
@@ -257,7 +253,6 @@ if (isPrimaryMe2PresentationDocument()) {
     setPrimaryOverlay,
     setPrimaryCommandRail,
     setPrimaryContextDrawer,
-    selectPrimaryAgentSession,
     primaryChatFleetRoster,
     selectPrimaryChatActor,
     presentation_only: true,
