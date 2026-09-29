@@ -1,0 +1,41 @@
+{
+ "ts": "2026-09-28T18:37:22+0000",
+ "rest_attempts": [
+  {
+   "n": 1,
+   "code": 503,
+   "sec": 6.05
+  },
+  {
+   "n": 2,
+   "code": 503,
+   "sec": 2.73
+  },
+  {
+   "n": 3,
+   "code": 503,
+   "sec": 2.54
+  },
+  {
+   "n": 4,
+   "code": 503,
+   "sec": 1.19
+  },
+  {
+   "n": 5,
+   "code": 503,
+   "sec": 10.36
+  },
+  {
+   "n": 6,
+   "code": 503,
+   "sec": 13.7
+  }
+ ],
+ "rest_final": 503,
+ "rpc_probe": {
+  "code": 503,
+  "sec": 2.1,
+  "head": "{\"code\":\"PGRST002\",\"details\":null,\"hint\":null,\"message\":\"Could not query the database for the schema cache. Retrying.\"}"
+ }
+}

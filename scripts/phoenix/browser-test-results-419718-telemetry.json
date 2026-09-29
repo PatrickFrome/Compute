@@ -1,0 +1,318 @@
+{
+ "tabs": {
+  "total": 23,
+  "census": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": {
+    "GLM_CHAT": 22,
+    "LOCAL_DEV": 1
+   },
+   "by_role": {
+    "USER": 18,
+    "FLEET": 4,
+    "SUPERVISOR": 1
+   },
+   "max_tabs": 48,
+   "total_tabs": 23,
+   "fleet_tab_ids": [
+    "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+   ],
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 25,
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": [
+    "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+   ],
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  },
+  "per_tab": [
+   {
+    "url": "https://chat.z.ai/c/e1ec5063-0798-46df-b401-df41813e0000",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_e9559b29-3540-4e39-ba2d-3f7b49b00315",
+    "selected": true,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "http://127.0.0.1:8137/#browser",
+    "kind": "LOCAL_DEV",
+    "role": "SUPERVISOR",
+    "tab_id": "tab_d255519c-a0d3-4f51-8b73-c47929de6d28",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/c/3772a24d-bb45-46f3-b7dc-c12b18eb8976",
+    "kind": "GLM_CHAT",
+    "role": "FLEET",
+    "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f",
+    "kind": "GLM_CHAT",
+    "role": "FLEET",
+    "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/c/a8fd1db5-1c9f-43ef-9b12-e29ea51aec5a",
+    "kind": "GLM_CHAT",
+    "role": "FLEET",
+    "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375c",
+    "kind": "GLM_CHAT",
+    "role": "FLEET",
+    "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_48128c64-52ae-43e0-88be-ed967efd5523",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_22d8857c-da8b-4512-a1d7-4d7466771c31",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_5134aa96-798d-4e03-a296-2279c92ba969",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/c/d9902597-90fa-484b-ab07-79b75faaa4ff",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_ec2c7b50-fafe-45ab-8778-61d020ae3926",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_358ba66c-c448-4efe-895f-6f2c58262d6b",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_7551b657-28fe-4387-ad79-0f1c08035779",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_fe93b91b-5666-4bad-a9f0-8040e97417dd",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/error",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_5d0eb8a8-efe1-4c59-989f-5ebcf2f08bda",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/error",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_b8fa279a-cca1-4a38-959c-2cefef76057f",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/error",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_e2776485-3127-4333-a635-4156130e52ea",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/error",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_647f4c3a-5345-4759-aa48-7798b5786cb0",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/error",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_6bde690e-912d-4989-94ee-49f631a76d04",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_0de6c1a7-7dc1-4a24-b7bf-0c108f58ff82",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_f5c1413a-a433-49a3-804a-0a28bedd7f98",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   },
+   {
+    "url": "https://chat.z.ai/",
+    "kind": "GLM_CHAT",
+    "role": "USER",
+    "tab_id": "tab_267c25f4-751f-47f7-8875-51a0eb9ae5b1",
+    "selected": false,
+    "health_events": null,
+    "console_errors": null,
+    "network_recent": null
+   }
+  ]
+ },
+ "devos": {
+  "idle_last_at": null,
+  "execution_mode": null,
+  "idle_in_flight": false,
+  "admission_state": null,
+  "idle_last_error": null,
+  "actuation_allowed": false
+ },
+ "fleet": {
+  "counts": {
+   "LOST": 0,
+   "ACTIVE": 4,
+   "RETIRED": 0,
+   "REGISTERED": 0,
+   "PROVISIONING": 0,
+   "BOUND_UNVERIFIED": 0,
+   "PROVISIONING_AMBIGUOUS": 0
+  },
+  "desired_agents": 4,
+  "lifecycle_owner": "METAENGINE_BROWSER"
+ },
+ "schema": "metaengine.browser.agent-observation-plane.v1",
+ "control": {
+  "pressure_band": null,
+  "maintenance_in_flight": false,
+  "last_wait_batch_elapsed_ms": null
+ },
+ "version": "1.0.0",
+ "started_at": null,
+ "supervisor": {
+  "last_error": null,
+  "admission_state": null,
+  "keepalive_state": null,
+  "conversation_url": null,
+  "keepalive_cycle_seq": null
+ },
+ "generated_at": "2026-09-28T03:36:14.179Z",
+ "heartbeat_at": null,
+ "shell_version": null,
+ "realtime_plane": {
+  "running": false,
+  "sequence": null,
+  "observed_at": null,
+  "recent_event_types": []
+ },
+ "authority_effect": false,
+ "page_content_exposed": false
+}

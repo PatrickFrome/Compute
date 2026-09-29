@@ -1,0 +1,7 @@
+swarm-secrets.env
+*.secret
+*.token
+.a2-backup/
+briefs/
+agent-access-capsule.json
+agent-connect.sh

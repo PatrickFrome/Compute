@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "Chrome DevTools for coding agents · GitHub",
+    "snippet": "Advanced browser debugging: Analyze network requests , take screenshots and check browser console messages (with source-mapped stack traces).",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.chrome.com",
+    "name": "Chrome DevTools (MCP) for your AI agent | Blog",
+    "snippet": "Sep 23, 2025 — The Chrome DevTools MCP server adds debugging capabilities to your AI agent. For example, the Chrome DevTools MCP server provides a tool called ... Read more",
+    "host_name": "developer.chrome.com",
+    "rank": 1,
+    "date": "Sep 23, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://addyosmani.com",
+    "name": "Give your AI eyes: Introducing Chrome DevTools MCP",
+    "snippet": "Sep 25, 2025 — use MCP tools to scan for console errors or failed network requests. Chrome DevTools MCP lets the agent run a full performance trace and ...",
+    "host_name": "addyosmani.com",
+    "rank": 2,
+    "date": "Sep 25, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.shawnmayzes.com",
+    "name": "Chrome DevTools MCP: AI Agents Can Finally See What",
+    "snippet": "Nov 1, 2025 — Read console logs to catch JavaScript errors ; Analyze network requests to debug API calls and CORS issues; Run performance traces to identify ... Read more",
+    "host_name": "www.shawnmayzes.com",
+    "rank": 3,
+    "date": "Nov 1, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.logrocket.com",
+    "name": "Debugging with Chrome DevTools MCP: Giving AI eyes in",
+    "snippet": "Oct 21, 2025 — Chrome DevTools MCP enables AI agents to perform tasks such as: Inspecting the DOM and CSS; Performance traces; Executing JavaScript; Reading ... Read more",
+    "host_name": "blog.logrocket.com",
+    "rank": 4,
+    "date": "Oct 21, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.datacamp.com",
+    "name": "Chrome DevTools MCP: AI-Powered Browser Automation",
+    "snippet": "Discover Chrome DevTools MCP , the AI-driven way to control Chrome with natural language. Automate navigation, debugging, and testing instantly.",
+    "host_name": "www.datacamp.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

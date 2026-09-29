@@ -1,0 +1,140 @@
+[
+ {
+  "step": "R1-transcript",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "R1-verdict",
+  "total_chars": 34786,
+  "toolreq_count": 6,
+  "reply_zone_chars": 234,
+  "ack_in_zone": false,
+  "gates": [],
+  "verdict": "SILENT",
+  "zone_head": "TOOL_REQUEST_V1\nrequest_id=adac6557-systel-01\naction=SYSTEM_TELEMETRY\ntab_id=tab_bc085d57-4e9d-4395-9e63-90afd921bdfa\npayload_json={\"scope\":\"full\",\"note\":\"fresh digest to anchor eval-roadmap baseline; result consumed next generation\"}"
+ },
+ {
+  "step": "M1-newtab",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M2-navigate",
+  "action": "NAVIGATE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M3-capture-pre",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M3-targets-dump",
+  "url": "https://www.example.com/",
+  "target_count": 1,
+  "targets": [
+   {
+    "name": "Learn more",
+    "role": "link",
+    "frame_id": "2CD4DCE6554D1738A9D8E8912A898267",
+    "semantic_ref": {
+     "schema": "metaengine.native-browser.semantic-ref.v1",
+     "evidence": {
+      "name": "Learn more",
+      "role": "link",
+      "identity_authority": false
+     },
+     "frame_id": "2CD4DCE6554D1738A9D8E8912A898267",
+     "target_id": "webcontents:433",
+     "backend_node_id": 16,
+     "semantic_ref_id": "semref_419a28d86bc2334db414a5ce57568fe1354de6f64f28e3fd5508d66375cde5b1",
+     "authority_effect": false,
+     "stale_by_default": true,
+     "runtime_target_id": "2CD4DCE6554D1738A9D8E8912A898267",
+     "state_revision_id": "rev_ee0c9543639c96fb1c194b055bb8cddd405b011421ad8c9f8067571fbd1c965e",
+     "automatic_retry_allowed": false,
+     "execution_context_unique_id": "-2417674849133578844.-5074145360376939834"
+    },
+    "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+    "backend_node_id": "16"
+   }
+  ]
+ },
+ {
+  "step": "M3-pick",
+  "why": "any-link",
+  "picked": {
+   "name": "Learn more",
+   "role": "link",
+   "frame_id": "2CD4DCE6554D1738A9D8E8912A898267",
+   "semantic_ref": {
+    "schema": "metaengine.native-browser.semantic-ref.v1",
+    "evidence": {
+     "name": "Learn more",
+     "role": "link",
+     "identity_authority": false
+    },
+    "frame_id": "2CD4DCE6554D1738A9D8E8912A898267",
+    "target_id": "webcontents:433",
+    "backend_node_id": 16,
+    "semantic_ref_id": "semref_419a28d86bc2334db414a5ce57568fe1354de6f64f28e3fd5508d66375cde5b1",
+    "authority_effect": false,
+    "stale_by_default": true,
+    "runtime_target_id": "2CD4DCE6554D1738A9D8E8912A898267",
+    "state_revision_id": "rev_ee0c9543639c96fb1c194b055bb8cddd405b011421ad8c9f8067571fbd1c965e",
+    "automatic_retry_allowed": false,
+    "execution_context_unique_id": "-2417674849133578844.-5074145360376939834"
+   },
+   "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+   "backend_node_id": "16"
+  }
+ },
+ {
+  "step": "M4-typed-click",
+  "action": "TYPED_CLICK",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M5-capture-post",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M-verdict",
+  "click_status": "COMPLETED",
+  "url_pre": "https://www.example.com/",
+  "url_post": "https://www.example.com/",
+  "effect_iana": false,
+  "TYPED_CLICK_STATIC_V2": "RPC-OK-NO-EFFECT",
+  "err": null
+ },
+ {
+  "step": "M9-cleanup",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M10-census",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "final",
+  "total_tabs": 30,
+  "fleet": [
+   "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+   "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+   "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+   "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+  ]
+ }
+]

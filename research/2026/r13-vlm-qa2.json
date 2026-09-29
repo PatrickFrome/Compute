@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "{\"readable\":true,\"overlaps\":[],\"truncated\":[],\"contrast_issues\":[],\"notes\":\"Тултип полностью читаем, все блоки (бейдж FAILED, диагноз, сигналы, зелёный урок) видны без перекрытий и обрезки. Контраст амбер/зелёного на тёмном фоне соответствует нормам доступности.\"}",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790085447,
+  "id": "2026092221572563bf6cc1c1474832",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026092221572563bf6cc1c1474832",
+  "usage": {
+    "completion_tokens": 81,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1011,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 1092
+  }
+}

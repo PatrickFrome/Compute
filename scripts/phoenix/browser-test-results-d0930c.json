@@ -1,0 +1,47 @@
+[
+ {
+  "id": "D5-CAP-DELAYED",
+  "action": "CAPTURE",
+  "command_id": "4326cc86-74bb-4243-9def-52269bdfbab2",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3593,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:4",
+   "captured_at": "2026-09-28T01:32:52.249Z",
+   "text_excerpt": "GLM-5.3-Flash\nZCode\nNew Chat\nAI PPT\nAPI\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:33>",
+   "state_revision_id": "rev_7c871fcb535b76e0e5fb725daa8b828077874bc70c01adc61a016c31895f794a",
+   "semantic_refs_issued": 33,
+   "runtime_main_frame_id": "FC228C0EA717B8BC48103FFC74DD2A91",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_d2173b169b774ad4912841770547fc5d",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 4,
+   "runtime_document_generation": 6,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-4301538209410149264.-8897064157824403858",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "D5-ANALYSIS",
+  "action": "DELAYED-READBACK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "url": "https://chat.z.ai/",
+  "conversation_created": false,
+  "buttons_sample": []
+ }
+]

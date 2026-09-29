@@ -1,0 +1,110 @@
+[
+ {
+  "id": "TR",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "4c56bf8e-27e9-4332-a109-15d7c1c4adcf",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 6697,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f",
+   "text": "GLM-5.3-Flash\nResearch Episode — task adac6557, generation 1 (RESEARCHER)\nBaseline anchor request\nSurvey (compact, per a",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:5",
+   "captured_at": "2026-09-28T03:00:16.025Z",
+   "total_chars": 29580,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "RB-RESEARCHER",
+  "action": "READBACK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "len": 29580,
+  "marker_visible": true,
+  "ack_reply": true
+ },
+ {
+  "id": "TR",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "4ec012e6-3050-45e3-b784-a8968c5b7e07",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 9460,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/54093101-09b9-41b2-ae9e-55f7b7df5ec5",
+   "text": "Share\nGLM-5.3-Flash\nThought Process\nI can't reply \"CONNECTED-IMPLEMENTER,\" because doing so would misrepresent what I ca",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:6",
+   "captured_at": "2026-09-28T03:00:25.520Z",
+   "total_chars": 16971,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "RB-IMPLEMENTER",
+  "action": "READBACK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "len": 16971,
+  "marker_visible": false,
+  "ack_reply": false
+ },
+ {
+  "id": "TR",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "756f8695-04ec-4f8a-a9b1-17224484b0f6",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3804,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375c",
+   "text": "GLM-5.3-Flash\nThought Process\nTOKEN_ACK b1e68f049d81d9340f14f4baa0abfa19990bbb970ac5369c7d794781ed684e08\nREADY\nagent=1a3",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:7",
+   "captured_at": "2026-09-28T03:00:32.168Z",
+   "total_chars": 23744,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "RB-CRITIC",
+  "action": "READBACK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "len": 23744,
+  "marker_visible": true,
+  "ack_reply": true
+ }
+]

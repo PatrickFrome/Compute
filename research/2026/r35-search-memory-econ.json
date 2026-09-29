@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://arxiv.org",
+    "name": "Is Progressive Disclosure All You Need for Long-Context",
+    "snippet": "Jul 20, 2026 — 2026 . Externalization in LLM agents : A unified review of memory , skills, protocols and harness engineering . Preprint,",
+    "host_name": "arxiv.org",
+    "rank": 0,
+    "date": "Jul 20, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://pub.towardsai.net",
+    "name": "State of Context Engineering in 2026 | by Kushal Banda",
+    "snippet": "Mar 22, 2026 — LLMs have a finite attention budget. Every token in the context window competes for the attention. progressive disclosure for controlling what ...",
+    "host_name": "pub.towardsai.net",
+    "rank": 1,
+    "date": "Mar 22, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://cruxdigits.nl",
+    "name": "Context Engineering: The 2026 Playbook for AI Agents",
+    "snippet": "Jul 24, 2026 — Context engineering is the discipline of deciding exactly which tokens — system instructions, tool definitions, retrieved documents, ... Read more",
+    "host_name": "cruxdigits.nl",
+    "rank": 2,
+    "date": "Jul 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.heyuan110.com",
+    "name": "Agent Memory vs RAG: Context Engineering for LLM Agents",
+    "snippet": "Feb 21, 2026 — Progressive disclosure : Instead of dumping all retrieved memories ... This progressive approach saves roughly 10x tokens compared to naive RAG ... Read more",
+    "host_name": "www.heyuan110.com",
+    "rank": 3,
+    "date": "Feb 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mindstudio.ai",
+    "name": "Progressive Disclosure in AI Agents: How to Load Context",
+    "snippet": "Apr 15, 2026 — This article covers what progressive disclosure means in an agentic context , why it works, and how to actually implement it across different  ...",
+    "host_name": "www.mindstudio.ai",
+    "rank": 4,
+    "date": "Apr 15, 2026",
+    "favicon": ""
+  }
+]

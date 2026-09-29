@@ -1,0 +1,72 @@
+{
+ "status": "COMPLETED",
+ "result_keys": {
+  "url": [
+   "str",
+   56
+  ],
+  "text": [
+   "str",
+   40152
+  ],
+  "title": [
+   "str",
+   59
+  ],
+  "offset": [
+   "int",
+   null
+  ],
+  "schema": [
+   "str",
+   39
+  ],
+  "tab_id": [
+   "str",
+   40
+  ],
+  "has_more": [
+   "bool",
+   null
+  ],
+  "max_chars": [
+   "int",
+   null
+  ],
+  "target_id": [
+   "str",
+   13
+  ],
+  "captured_at": [
+   "str",
+   24
+  ],
+  "total_chars": [
+   "int",
+   null
+  ],
+  "authority_effect": [
+   "bool",
+   null
+  ],
+  "page_data_authority": [
+   "bool",
+   null
+  ],
+  "semantic_refs_issued": [
+   "int",
+   null
+  ],
+  "process_incarnation_id": [
+   "str",
+   36
+  ]
+ },
+ "total_text_len": 40426,
+ "marker_FULL_1231": true,
+ "nonce_1231": true,
+ "ack_1215": true,
+ "tool_request_pending": true,
+ "critic_signals": true,
+ "tail_1800": "/error\",\"kind\":\"GLM_CHAT\",\"role\":\"USER\",\"tab_id\":\"tab_e2776485-3127-4333-a635-4156130e52ea\",\"selected\":false,\"health_events\":null,\"console_errors\":null,\"network_recent\":null},{\"url\":\"https://chat.z.ai/error\",\"kind\":\"GLM_CHAT\",\"role\":\"USER\",\"tab_id\":\"tab_647f4c3a-5345-4759-aa48-7798b5786cb0\",\"selected\":false,\"health_events\":null,\"console_errors\":null,\"network_recent\":null},{\"url\":\"https://chat.z.ai/error\",\"kind\":\"GLM_CHAT\",\"role\":\"USER\",\"tab_id\":\"tab_6bde690e-912d-4989-94ee-49f631a76d04\",\"selected\":false,\"health_events\":null,\"console_errors\":null,\"network_recent\":null},{\"url\":\"https://chat.z.ai/\",\"kind\":\"GLM_CHAT\",\"role\":\"USER\",\"tab_id\":\"tab_0de6c1a7-7dc1-4a24-b7bf-0c108f58ff82\",\"selected\":false,\"health_events\":null,\"console_errors\":null,\"network_recent\":null},{\"url\":\"https://chat.z.ai/\",\"kind\":\"GLM_CHAT\",\"role\":\"USER\",\"tab_id\":\"tab_43f88b8…[TRUNCATED-full copy in mirror seq chain]\nTASK (bounded):\n1. ACK first line: CONNECTED-TOOLRESULT-FULL-1231 + echo nonce.\n2. Confirm scope=full SATISFIED (or name the exact missing field).\n3. Deliver your 3 measurable CRITIC-gate checks (spoofed request / result replay / prompt injection) if not already delivered after TOOLRESULT-1215 — each: name + objective numeric signal + threshold.\nConstraints: no secrets in replies; do not fabricate tool outputs; mark UNVERIFIABLE rather than guessing.\nTOOL_REQUEST_V1\nrequest_id=adac6557-systel-01\naction=SYSTEM_TELEMETRY\ntab_id=tab_bc085d57-4e9d-4395-9e63-90afd921bdfa\npayload_json={\"scope\":\"full\",\"note\":\"fresh digest to anchor eval-roadmap baseline; result consumed next generation\"}\nZ.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash\nmetaengine.native-browser.transcript.v1\ntab_bc085d57-4e9d-4395-9e63-90afd921bdfa\nwebcontents:5\n2026-09-28T04:38:05.308Z\nd1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+}

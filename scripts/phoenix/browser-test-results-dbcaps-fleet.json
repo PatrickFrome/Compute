@@ -1,0 +1,24 @@
+[
+ {
+  "id": "F1",
+  "action": "FLEET_STATUS",
+  "command_id": "1dd43714-7f60-42bd-8ae7-7912fc2461e9",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3650,
+  "result_summary": {
+   "agents": "<list:4>",
+   "counts": "<dict:LOST,ACTIVE,RETIRED,REGISTERED,PROVISIONING>",
+   "policy": "<dict:elastic,profile,max_agents,warm_agents,adopt_existing>",
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "owner_override_ambiguous_compensating_fanout": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ }
+]

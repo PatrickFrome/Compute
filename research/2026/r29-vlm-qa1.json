@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) **Да**, блок **GLM · REVIEWS** полностью виден. Чипы `canon glm-5.3`, `drift 0` и оранжевый тег `Таг не honoring` на месте.\n2) **Да**, строка **probe** с текстом `'запрошен → бэкенд'` видна под чипами.\n3) **Да**, список антифальшь-ревью виден. Присутствуют бейджи `suspect` (оранжевый) и `empty` (серый), а также временные метки.\n4) **Нет**, обрезок текста, наложений элементов или горизонтального скролла не обнаружено. Верстка адаптирована под ширину 390px корректно.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790128045,
+  "id": "20260923094720abdf539dc2f24527",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260923094720abdf539dc2f24527",
+  "usage": {
+    "completion_tokens": 174,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 368,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 542
+  }
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://daily.dev",
+    "name": "The best AI coding agents in 2026, compared",
+    "snippet": "Aug 8, 2026 — Claude Code often uses 3–4x more tokens than tools like Codex . It also skips the IDE comforts many developers expect. There's no GUI, no ...",
+    "host_name": "daily.dev",
+    "rank": 0,
+    "date": "Aug 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://uvik.net",
+    "name": "Claude Code vs Cursor vs Copilot vs Codex",
+    "snippet": "Sep 3, 2026 — Claude Code wins on output quality and complex multi-file work ; Copilot's distribution wins. put Claude Code's extension at 4.0/5 versus Codex' ...",
+    "host_name": "uvik.net",
+    "rank": 1,
+    "date": "Sep 3, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.superblocks.com",
+    "name": "Claude vs GitHub Copilot 2026: Agent vs Assistant",
+    "snippet": "Claude Code is better than Copilot for autonomous, multi-file work and complex reasoning, hitting 96.0% on SWE-bench Verified. Copilot is better than Claude ... Read more",
+    "host_name": "www.superblocks.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://tech-insider.org",
+    "name": "Codex vs Cursor vs GitHub Copilot 2026 Compared",
+    "snippet": "Jul 24, 2026 — Codex hits 85% on SWE-bench Verified vs Copilot 56% and Cursor 52%. Full 2026 pricing, benchmarks and use-case guide.",
+    "host_name": "tech-insider.org",
+    "rank": 3,
+    "date": "Jul 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://artificialanalysis.ai",
+    "name": "Coding Agents Comparison",
+    "snippet": "Comprehensive comparison of AI coding agents including Cursor, GitHub Copilot , Cline, and more. Claude Code Anthropic. Claude Code , Codex , Devin, and Kiro use ...",
+    "host_name": "artificialanalysis.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://aivy.com.au",
+    "name": "Claude Code vs Codex (2026): Benchmarks, Cost & Verdict",
+    "snippet": "May 28, 2026 — Claude Code vs Codex compared on benchmarks , token cost, context and quotas, now that Codex runs GPT 5.6 Sol with GPT 6 Astra above it.",
+    "host_name": "aivy.com.au",
+    "rank": 5,
+    "date": "May 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.clarista.io",
+    "name": "Claude Code vs Cursor vs Codex vs Copilot, The",
+    "snippet": "The TL;DR: Claude Code wins on raw code quality and autonomy . Cursor wins on developer experience. Copilot wins on cost-at-scale and enterprise familiarity. Read more",
+    "host_name": "www.clarista.io",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  }
+]

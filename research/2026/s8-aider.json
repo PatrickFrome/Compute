@@ -1,0 +1,38 @@
+[
+  {
+    "url": "https://aider.chat",
+    "name": "Building a better repository map with tree sitter",
+    "snippet": "Oct 22, 2023 — Tree-sitter allows aider to build a repo map that better summarizes large code bases. is AI pair programming in your terminal. ly useful for “ ...",
+    "host_name": "aider.chat",
+    "rank": 0,
+    "date": "Oct 22, 2023",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Aider Coding Agent Skill — Lightweight Model-Agnostic",
+    "snippet": "Mar 6, 2026 — Overview Aider is an Apache 2.0-licensed, open-source AI pair programming tool with 41600+ GitHub stars and 5.3M+ PyPI installs.",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "Mar 6, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.iamraghuveer.com",
+    "name": "Aider .aiderignore — Reducing Repo Map Noise and Token",
+    "snippet": "Apr 25, 2026 — Before Aider can answer questions or make edits, it builds a “ repo map ” — a compressed representation of the repository's structure that ...",
+    "host_name": "www.iamraghuveer.com",
+    "rank": 2,
+    "date": "Apr 25, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.deployhq.com",
+    "name": "How to Use Aider in 2026: Setup, Architect Mode & Git",
+    "snippet": "Jun 10, 2026 — Step-by-step guide to set up Aider in 2026. Open-source AI pair programmer that runs in your terminal, edits any Git repo , and commits",
+    "host_name": "www.deployhq.com",
+    "rank": 3,
+    "date": "Jun 10, 2026",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) **Компактная строка** с чипами (метками) и кнопками (контекстными действиями).  \n2) **Обрезка есть** — справа обрезан текст «добавить» (видно «доба...»), слева и снизу кадр полный.  \n3) **Вердикт:** блок корректен, информативен, читаем; рекомендуется восстановить обрезанный текст («добавить») или увеличить ширину контейнера.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790124797,
+  "id": "20260923085309821f6c199d614ce8",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260923085309821f6c199d614ce8",
+  "usage": {
+    "completion_tokens": 110,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 118,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 228
+  }
+}

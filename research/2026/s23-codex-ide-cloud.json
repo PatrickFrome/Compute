@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://learn.chatgpt.com",
+    "name": "Codex IDE extension",
+    "snippet": "Install or enable Codex. Choose your IDE. VS Code and compatible editors use the Codex extension ; Xcode and JetBrains IDEs provide their own integrations. Read more",
+    "host_name": "learn.chatgpt.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://northflank.com",
+    "name": "Claude Code vs OpenAI Codex: which is better in 2026?",
+    "snippet": "Sep 15, 2025 — Compare Claude Code vs OpenAI Codex for 2026. Learn costs, setup, and self-hosting alternatives with Northflank to choose the right AI tool.",
+    "host_name": "northflank.com",
+    "rank": 1,
+    "date": "Sep 15, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://community.openai.com",
+    "name": "Introducing the Codex IDE extension",
+    "snippet": "Aug 28, 2025 — Introducing the Codex IDE extension —pair with Codex inside VS Code (and compatible forks) to build faster, fix bugs, and understand ...",
+    "host_name": "community.openai.com",
+    "rank": 2,
+    "date": "Aug 28, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://marketplace.visualstudio.com",
+    "name": "Codex – OpenAI's coding agent",
+    "snippet": "Codex is OpenAI's coding agent that helps you write, review, and ship code faster. Use it side-by-side in your IDE or delegate larger tasks to the cloud. Read more",
+    "host_name": "marketplace.visualstudio.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://blakecrosley.com",
+    "name": "Claude Code vs Codex CLI 2026: Decision Reference",
+    "snippet": "Feb 27, 2026 — Codex spans five surfaces : CLI, desktop app (macOS multi-tasking across parallel worktrees and floating windows), IDE extension (VS Code, Cursor ... Read more",
+    "host_name": "blakecrosley.com",
+    "rank": 4,
+    "date": "Feb 27, 2026",
+    "favicon": ""
+  }
+]

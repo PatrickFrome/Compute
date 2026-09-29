@@ -1,0 +1,6 @@
+{
+ "marker": "TOOLRESULT-1215",
+ "nonce": "mt419718-1215-r2",
+ "type_status": "FAILED",
+ "type_err": "postcondition_not_confirmed:AMBIGUOUS"
+}

@@ -1,0 +1,28 @@
+[
+ {
+  "id": "SYSTEL-01",
+  "action": "SYSTEM_TELEMETRY",
+  "command_id": "af0552b7-b03e-4b8e-9db1-663fdf6fa818",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3658,
+  "result_summary": {
+   "tabs": "<dict:total,census,per_tab>",
+   "devos": "<dict:idle_last_at,execution_mode,idle_in_flight,admission_state,idle_last_error>",
+   "fleet": "<dict:counts,desired_agents,lifecycle_owner>",
+   "schema": "metaengine.browser.agent-observation-plane.v1",
+   "control": "<dict:pressure_band,maintenance_in_flight,last_wait_batch_elapsed_ms>",
+   "version": "1.0.0",
+   "started_at": null,
+   "supervisor": "<dict:last_error,admission_state,keepalive_state,conversation_url,keepalive_cycle_seq>",
+   "generated_at": "2026-09-28T02:22:28.792Z",
+   "heartbeat_at": null,
+   "shell_version": null,
+   "realtime_plane": "<dict:running,sequence,observed_at,recent_event_types>",
+   "authority_effect": false,
+   "page_content_exposed": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ }
+]

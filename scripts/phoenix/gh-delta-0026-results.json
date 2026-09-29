@@ -1,0 +1,12 @@
+{
+ "repo": {
+  "default_branch": "main",
+  "pushed_at": "2026-09-28T06:50:07Z",
+  "open_issues_count": 371
+ },
+ "open_pr_count_sample": 60,
+ "prs_updated_since": [],
+ "prs_closed_since": [],
+ "branch_count_now": 728,
+ "ci_since": []
+}

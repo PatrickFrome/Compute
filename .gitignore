@@ -1,0 +1,95 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+*.log
+dev.log
+dev.out.log
+test
+prompt
+
+server.log
+# Skills directory
+/skills/
+# --- ME2 sandbox: secrets & runtime artifacts (never push) ---
+.ghtoken
+.a2/
+.a2-creds-*.md
+a2-capsule/01_CREDENTIALS_AND_ENDPOINTS.md
+a2-capsule/worklog-full.md
+hostsrc/
+rsi-work/
+pigsty/
+download/
+upload/
+tool-results/
+me2-workspace/
+mini-services/*/data/
+mini-services/agent-factory/browser-data*/
+db/*.db
+db/*.db-*
+*.sqlite
+
+# секреты-архивы никогда не в репо (push protection R8)
+.a2-backup/
+*.env.*backup*
+
+# CI-generated tauri updater config overlay
+/updater-overlay.json
+
+# ME2 phoenix sealed engines (R8+, утеряно при reset 2026-09-28, восстановлено R19):
+# секреты/литералы и sealed-движки НИКОГДА не в репо
+*.sealed.*
+*.sealed.sh
+
+# MetaEngine Desktop (R46)
+desktop/node_modules/
+desktop/dist/
+desktop/release/
+--set-viewport
+--width
+
+# swarm runtime state
+mini-services/agent-swarm/state/
+agent-swarm.log

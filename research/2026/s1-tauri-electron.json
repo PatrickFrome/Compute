@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://tech-insider.org",
+    "name": "Tauri vs Electron [2026]: 96% Smaller Apps, 1 Winner",
+    "snippet": "Apr 5, 2026 — Tauri apps are 96% smaller and use 75% less RAM than Electron , per benchmarks current through September 2026. roughly 3.7x faster, and idle at ...",
+    "host_name": "tech-insider.org",
+    "rank": 0,
+    "date": "Apr 5, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://rustify.rs",
+    "name": "Tauri vs Electron 2026: 20-50x Smaller, 5x Less RAM",
+    "snippet": "Tauri apps are 20-50x smaller and use about 5x less RAM than Electron . Here is the honest 2026 trade-off on speed, security, and team fit.",
+    "host_name": "rustify.rs",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Tauri might consume more RAM than Electron · Issue #5889",
+    "snippet": "Dec 21, 2022 — The current memory benchmark (https:// tauri . app /v1/references/ benchmarks /) finds Electron to have a ~500 MB memory usage on Linux, being 2x ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "Dec 21, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.levminer.com",
+    "name": "Tauri VS. Electron - Real world application",
+    "snippet": "Aug 22, 2026 — The Tauri app installer is around ~2,5MB (!!!), while the Electron app installer is around ~85MB. Tauri : ~ 2 seconds Electron : ~ 4 seconds 3 .  ...",
+    "host_name": "www.levminer.com",
+    "rank": 3,
+    "date": "Aug 22, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.gethopp.app",
+    "name": "Tauri vs. Electron: performance, bundle size, and the real",
+    "snippet": "Apr 8, 2025 — A breakdown of the choice between Tauri and Electron for cross-platform apps , A benchmark comparing app size, startup time, and memory usage.  ...",
+    "host_name": "www.gethopp.app",
+    "rank": 4,
+    "date": "Apr 8, 2025",
+    "favicon": ""
+  }
+]

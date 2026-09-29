@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) Да, есть.\n2) Да, читаются («передач 2», «last —DEBUGGER»).\n3) Да, есть (выпадающие списки, поля причины и протоколов, кнопка «Передать»).\n4) Да, есть (префикс ⇄, строка next:).\n5) Нет, визуальных дефектов не наблюдается.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790126870,
+  "id": "202609230927450134beb1b52143a7",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609230927450134beb1b52143a7",
+  "usage": {
+    "completion_tokens": 84,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 594,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 678
+  }
+}

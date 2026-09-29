@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) Да, блок **DB·HYG** виден. Тексты видимых чипов: `wal`, `db 1.7MB`, `wal 0.1MB`, `free 0%`, `idx 20`.\n2) Да, кнопка **checkpoint** видна (в виде текста-ссылки).\n3) Да, есть горизонтальная обрезка (текст обрезан справа): в строке под чипами (`last:checkpoint...`) и, возможно, последний чип (`idx 20`) частично перекрыт или обрезан правым краем экрана.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790130930,
+  "id": "202609231035269266352147d546af",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609231035269266352147d546af",
+  "usage": {
+    "completion_tokens": 135,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 503,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 638
+  }
+}

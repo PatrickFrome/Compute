@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://learn.chatgpt.com",
+    "name": "Auto-review",
+    "snippet": "Auto-review replaces manual approval at the sandbox boundary with a separate reviewer agent . The main Codex agent still runs inside the same sandbox , ... Read more",
+    "host_name": "learn.chatgpt.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.openai.com",
+    "name": "Sandbox Agents | OpenAI API",
+    "snippet": "The harness is the control plane around the model: it owns the agent loop, model calls, tool routing, handoffs, approvals , tracing, recovery, and run state. Read more",
+    "host_name": "developers.openai.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.infoq.com",
+    "name": "How OpenAI Built a Secure Windows Sandbox for Codex",
+    "snippet": "Jun 5, 2026 — OpenAI details Codex Windows sandbox architecture , showing how SIDs, ACLs, restricted tokens, and dedicated sandbox accounts enable safe ...",
+    "host_name": "www.infoq.com",
+    "rank": 2,
+    "date": "Jun 5, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://inventivehq.com",
+    "name": "Codex CLI, Claude Code & Gemini CLI Sandbox and",
+    "snippet": "Jun 8, 2026 — Codex CLI's sandbox modes, approval policies, defaults, and flags on this page were re-verified against OpenAI's agent approvals and ... Read more",
+    "host_name": "inventivehq.com",
+    "rank": 3,
+    "date": "Jun 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://agent-safehouse.dev",
+    "name": "OpenAI Codex CLI -- Sandbox Analysis Report",
+    "snippet": "Feb 12, 2026 — Sandbox your LLM coding agents on macOS. Kernel-level enforcement via sandbox -exec — deny-first, composable, zero dependencies.",
+    "host_name": "agent-safehouse.dev",
+    "rank": 4,
+    "date": "Feb 12, 2026",
+    "favicon": ""
+  }
+]

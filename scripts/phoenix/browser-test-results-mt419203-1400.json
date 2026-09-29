@@ -1,0 +1,126 @@
+[
+ {
+  "step": "R1-transcript",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "R1-verdict",
+  "total_chars": 34786,
+  "zone_chars": 234,
+  "ack": false,
+  "verdict": "SILENT"
+ },
+ {
+  "step": "M1-newtab",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M2-capture-pre",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M2-pre",
+  "url": "https://chat.z.ai/",
+  "target_count": 37,
+  "buttons": [
+   "AI PPT",
+   "Chat",
+   "Agent",
+   "Open Settings",
+   "Select a model",
+   "ZCode",
+   "Open User Menu",
+   "MECH-OK-1240: Mechanics Verification Pin",
+   "METAENGINE Unlock Probe",
+   "3000-Word Essay on Computing History",
+   "METAENGINE Research Task V1",
+   "Task-Board Web Page Development",
+   "METAENGINE Supervisor Seed v1",
+   "Shared DB & Repo Setup",
+   "Fleet Brief: Swarm Audit & Growth Plan",
+   "METAENGINE Test Instructions",
+   "METAENGINE FLEET RESEARCH EXECUTE",
+   "METAENGINE FLEET SEED v1: Bootstrap Mess",
+   "METAENGINE FLEET SEED MSG",
+   "METAENGINE FLEET SEED v1 - Bootstrap"
+  ],
+  "roles": [
+   "button",
+   "link",
+   "textbox"
+  ]
+ },
+ {
+  "step": "M2-pick",
+  "name": "Select a model",
+  "ref_keys": [
+   "schema",
+   "evidence",
+   "frame_id",
+   "target_id",
+   "backend_node_id",
+   "semantic_ref_id",
+   "authority_effect",
+   "stale_by_default",
+   "runtime_target_id",
+   "state_revision_id",
+   "automatic_retry_allowed",
+   "execution_context_unique_id"
+  ]
+ },
+ {
+  "step": "M3-typed-click-inapp",
+  "action": "TYPED_CLICK",
+  "status": "FAILED",
+  "error": "native_semantic_ref_stale"
+ },
+ {
+  "step": "M4-capture-post",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M-verdict",
+  "click_status": "FAILED",
+  "url_pre": "https://chat.z.ai/",
+  "url_post": "https://chat.z.ai/",
+  "url_delta": false,
+  "cnt_pre": 37,
+  "cnt_post": 37,
+  "cnt_delta": 0,
+  "new_targets": [],
+  "effect": false,
+  "EFFECT_PLANE_INAPP": "CLICK-FAILED",
+  "err": "native_semantic_ref_stale"
+ },
+ {
+  "step": "M5-escape",
+  "action": "PRESS_KEY",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M8-cleanup",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "M10-census",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "final",
+  "total_tabs": 30,
+  "fleet_n": 4
+ }
+]

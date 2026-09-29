@@ -1,0 +1,26 @@
+{
+ "PLANNER": {
+  "len": 40662,
+  "prev": 2607,
+  "growth": 38055,
+  "ack": true
+ },
+ "RESEARCHER": {
+  "len": 13970,
+  "prev": 11047,
+  "growth": 2923,
+  "ack": true
+ },
+ "IMPLEMENTER": {
+  "len": 0,
+  "prev": 883,
+  "growth": -883,
+  "ack": false
+ },
+ "CRITIC": {
+  "len": 10402,
+  "prev": 9556,
+  "growth": 846,
+  "ack": true
+ }
+}

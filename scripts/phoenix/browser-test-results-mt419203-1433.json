@@ -1,0 +1,544 @@
+[
+ {
+  "step": "M1",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "result": {
+   "url": "https://chat.z.ai/",
+   "kind": "GLM_CHAT",
+   "role": "USER",
+   "title": "Z.ai",
+   "tab_id": "tab_c6170d19-d111-4ac5-a25a-43c2bfda9031",
+   "created_at": "2026-09-28T06:40:36.001Z",
+   "navigation": {
+    "state": "AMBIGUOUS",
+    "reason": "DEADLINE_EXCEEDED",
+    "schema": "metaengine.browser.bounded-navigation.v1",
+    "pre_url": "",
+    "stopped": true,
+    "post_url": "https://chat.z.ai/",
+    "error_code": 0,
+    "duration_ms": 15012,
+    "requested_url": "https://chat.z.ai/",
+    "authority_effect": false,
+    "automatic_retry_allowed": false
+   },
+   "load_pending": false,
+   "effect_outcome": "CONFIRMED",
+   "webcontents_id": 477,
+   "browser_cell_id": "cell:7ab5e168-8793-41f6-a671-2f8712d47f45",
+   "automatic_retry_allowed": false,
+   "browser_cell_generation": 1
+  }
+ },
+ {
+  "step": "M2",
+  "action": "NAVIGATE",
+  "status": "COMPLETED",
+  "result": {
+   "ok": false,
+   "url": "https://chat.z.ai/",
+   "tab_id": "tab_c6170d19-d111-4ac5-a25a-43c2bfda9031",
+   "navigation": {
+    "state": "FAILED",
+    "reason": "LOAD_URL_REJECTED:ERR_FAILED (-2) loading 'https://httpbin.org/drip?duration=30&numbytes=200000&code=200'",
+    "schema": "metaengine.browser.bounded-navigation.v1",
+    "pre_url": "https://chat.z.ai/",
+    "stopped": false,
+    "post_url": "https://chat.z.ai/",
+    "error_code": 0,
+    "duration_ms": 1255,
+    "requested_url": "https://httpbin.org/drip?duration=30&numbytes=200000&code=200",
+    "authority_effect": false,
+    "automatic_retry_allowed": false
+   },
+   "effect_outcome": "AMBIGUOUS",
+   "automatic_retry_allowed": false
+  }
+ },
+ {
+  "step": "A1-status-0",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-1",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-2",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-3",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-4",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-5",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-6",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A1-status-7",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "M3",
+  "action": "NAVIGATE",
+  "status": "COMPLETED",
+  "result": {
+   "ok": false,
+   "url": "https://chat.z.ai/",
+   "tab_id": "tab_c6170d19-d111-4ac5-a25a-43c2bfda9031",
+   "navigation": {
+    "state": "FAILED",
+    "reason": "LOAD_URL_REJECTED:ERR_FAILED (-2) loading 'https://codeload.github.com/git/git/tar.gz/refs/tags/v2.9.0'",
+    "schema": "metaengine.browser.bounded-navigation.v1",
+    "pre_url": "https://chat.z.ai/",
+    "stopped": false,
+    "post_url": "https://chat.z.ai/",
+    "error_code": 0,
+    "duration_ms": 1744,
+    "requested_url": "https://codeload.github.com/git/git/tar.gz/refs/tags/v2.9.0",
+    "authority_effect": false,
+    "automatic_retry_allowed": false
+   },
+   "effect_outcome": "AMBIGUOUS",
+   "automatic_retry_allowed": false
+  }
+ },
+ {
+  "step": "A2-status-0",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-1",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-2",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-3",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-4",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-5",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-6",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "A2-status-7",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "final",
+  "download_cancel_closed": false
+ },
+ {
+  "step": "M9",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "result": {
+   "ok": true
+  }
+ }
+]

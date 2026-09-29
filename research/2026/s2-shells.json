@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "Elanis/web-to-desktop-framework-comparison: An",
+    "snippet": "This repository has been made to create an objective comparison of multiple frameworks that allow us to \"transform\" our web apps to desktop applications .",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://teamdev.com",
+    "name": "Top 7 desktop app frameworks in 2026 | MōBrowser Blog",
+    "snippet": "Jul 27, 2026 — This article describes seven frameworks for building cross-platform desktop apps in 2026, from Electron and MōBrowser to Qt and JavaFX.",
+    "host_name": "teamdev.com",
+    "rank": 1,
+    "date": "Jul 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.pkgpulse.com",
+    "name": "Best Desktop App Frameworks 2026: Electron, Tauri",
+    "snippet": "Jun 15, 2026 — Compare desktop app frameworks in 2026 by footprint, native APIs, updates, app-store distribution, webview constraints, team skill, ...",
+    "host_name": "www.pkgpulse.com",
+    "rank": 2,
+    "date": "Jun 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.capitalcompute.com",
+    "name": "Top Tools and Libraries to Use with Electron in 2026",
+    "snippet": "Neutralino.js / Wails – Lightweight, cross-platform frameworks with smaller sizes than Electron. In 2026, building with Electron is more efficient than ever. ...",
+    "host_name": "www.capitalcompute.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://platform.uno",
+    "name": "5 Best Cross Platform Frameworks for App Dev in 2026",
+    "snippet": "Compare the 5 best cross-platform frameworks in 2026: Flutter, React Native, .NET MAUI, Uno Platform, and Kotlin Multiplatform. Honest pros, cons, and when ...",
+    "host_name": "platform.uno",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://dqdongg.com",
+    "name": "Mainstream UI App Development Frameworks in 2026",
+    "snippet": "May 15, 2026 — A comprehensive analysis of mainstream cross-platform UI development frameworks including Flutter, React Native, KMP, Tauri, Electron, Qt, .",
+    "host_name": "dqdongg.com",
+    "rank": 5,
+    "date": "May 15, 2026",
+    "favicon": ""
+  }
+]

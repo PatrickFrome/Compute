@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "```json\n{\"obsv_visible\":false,\"mobile_overflow\":true,\"overlaps\":false,\"contrast_ok\":true,\"notes\":\"The OBSV block with counters and the timestamped events list are only visible in the desktop screenshot; they are completely absent from the mobile screenshot. The mobile view shows a large CDP preview image that overflows its container horizontally, causing horizontal scrolling. The layout is otherwise clean without overlapping elements, and text contrast is high and readable against the dark background.\"}\n```",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790119322,
+  "id": "20260923072158dbae46bb591941fd",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260923072158dbae46bb591941fd",
+  "usage": {
+    "completion_tokens": 101,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 2177,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 2278
+  }
+}

@@ -1,0 +1,1795 @@
+[
+ {
+  "id": "H1-CAP",
+  "action": "CAPTURE",
+  "command_id": "c85d3e3a-9bc1-48f2-9ba4-3bb19d693524",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 22954,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/cd7efff3-9b1e-4eb4-83c6-66bfcfa40fc6",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:196",
+   "captured_at": "2026-09-27T22:51:17.732Z",
+   "text_excerpt": "GLM-5.3-Flash\nShare\nNew Chat\nAI PPT\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI ",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:30>",
+   "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+   "semantic_refs_issued": 30,
+   "runtime_main_frame_id": "EDC730734E579736064586B6B45AEA76",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_6b9605c411864d41b321f01cdc64c794",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-7176398497001797586.7801295529085023620",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/c/cd7efff3-9b1e-4eb4-83c6-66bfcfa40fc6",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+   "viewport": {
+    "scale": 1,
+    "width": 950.0377197265625,
+    "height": 577.8113403320312,
+    "page_x": 0,
+    "page_y": 0
+   },
+   "target_id": "webcontents:196",
+   "captured_at": "2026-09-27T22:51:17.732Z",
+   "text_excerpt": "GLM-5.3-Flash\nShare\nNew Chat\nAI PPT\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI Agents\nCode faster with ZCode. Automate more with AutoClaw.\nZCode\nAutoClaw\npaprika1\nFleet Brief: Swarm Audit & Growth Plan\nMETAENGINE Unlock Probe\nMETAENGINE Test Instructions\nMETAENGINE FLEET RESEARCH EXECUTE\nMETAENGINE Research Task V1\nMETAENGINE FLEET SEED v1: Bootstrap Message\nMETAENGINE Supervisor Seed v1\nMETAENGINE FLEET SEED MSG\nMETAENGINE FLEET SEED v1 - Bootstrap\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE_SUPERVISOR_WAKE_V1 Coordination\nMinimalist Display Pedestal Design\nMETAENGINE Supervisor Rollover\nMetaengine Fleet Task Execution\nMETAENGINE FLEET Task Execution\nMETAENGINE FLEET EXECUTION\nMETAENGINE FLEET Task Execution\nMETAENGINE_FLEET_TASK_V1\nMETAENGINE FLEET Task Coordination\nPing Test Response\nNew Chat\nThought Process\nPrinciple: fleet size is a function of backlog shape, not ambition. No speculative hires.\nbacklog age distribution, per-agent utilization, handoff failure rate, mechanic/tool usage counts, spawn-to-retire ratio.\n— end brief. Awaiting fleet config for the tailored pass.\nFLEET BRIEF: swarm self-audit — inventory working mechanics, propose deletion list of useless/restrictive mechanics, draft swarm growth plan (backlog-driven). Reply in chat.\nSWARM SELF-AUDIT — baseline report\n(Generic audit against standard swarm patterns. Share your fleet's actual config and I'll re-cut this against real data.)\n1. Working mechanics (keep)\nSingle shared task ledger as source of truth — kills duplicate work and stale state\nRole specialization with explicit handoff contracts (what a downstream agent needs to accept a ticket)\nBacklog as the only intake queue — every objective becomes a tagged item, nothing floats loose in chat\nVerification pass (second agent or rule check) on high-stakes outputs\nTiered memory: per-agent working memory, shared fleet memory, long-term archive\nHuman escalation gate reserved for irreversible/costly actions only\nIdempotent task execution with checkpoints — crashed work resumes, doesn't restart\n2. Deletion list\nHard cuts:\nMandatory consensus voting on low-stakes decisions — pure latency\nFull-fleet broadcasts by default → targeted messaging; broadcast only for state changes affecting everyone\nRe-planning from scratch every cycle → incremental replanning\nVerbose handoffs / restating context between agents → structured payloads only\nEvery-agent-logs-everything memory writes → single writer per event\nTools with zero invocations over the last N cycles → delete\nPersona boilerplate inflating token cost with zero behavior change\nRestrictions to relax:\nAll tasks routed through a coordinator → allow peer-to-peer handoffs for small jobs (removes the bottleneck)\nWhitelist of allowed task types → blocks emergent work; tag-and-track instead\nHuman approval for reversible, cheap actions → auto-execute, log for audit\nFixed roster → spawn-on-demand (see below)\nEveryone-reviews-everything gates → risk-tiered review, sample the low-risk tier\n3. Growth plan (backlog-driven)\nevery item gets skill tags, age, blocker status, and \"who can do this today\"\na skill tag accumulates N items aging past X days, or is blocking other work → that's measured capacity demand\nintake contract, owned backlog tag, utilization target, and a kill criterion (retire if utilization < Y% for Z cycles)\nmeasure throughput and WIP per stage; add capacity only at the actual bottleneck, not everywhere\nmechanics, tools, and agents get audited monthly the same way tasks do — pruning is a permanent function, not a one-time event\nMetrics to start tracking now:\nImmediate actions this cycle:\nExecute top 3 cuts: consensus voting, default broadcasts, verbose handoffs\nAdd skill-tag + age fields to the backlog schema\nWrite down spawn/retire criteria so growth is a rules change, not a vibe\nDeep Think\nMax\nInstrument the backlog first:\nSpawn signal:\nGrowth ladder before any standing agent:\nEvery new agent ships with:\nConstraint math:\nStanding deletion loop:\nReusable prompt template on an existing agent\nPart-time agent spawned per task, retired after\nStanding agent only if (2) fires repeatedly",
+   "authority_effect": false,
+   "interaction_tree": {
+    "schema": "metaengine.native-browser.interaction-tree.v1",
+    "elements": [
+     {
+      "path": "rootwebarea>region",
+      "role": "region",
+      "text": "Notifications alt+T",
+      "visible": null,
+      "selector": "backend_node_id:3236"
+     },
+     {
+      "path": "rootwebarea>button",
+      "role": "button",
+      "text": "Chat Agent New Chat AI PPT Today Fleet Brief: Swarm Audit & Growth Plan More METAENGINE Unlock Probe METAENGINE Test Instructions Yesterday METAENGINE FLEET RES",
+      "visible": null,
+      "selector": "backend_node_id:3269"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:3346"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "AI PPT",
+      "visible": null,
+      "selector": "backend_node_id:3352"
+     },
+     {
+      "path": "button",
+      "role": "button",
+      "text": "Select a model",
+      "visible": null,
+      "selector": "backend_node_id:3949"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "Share",
+      "visible": null,
+      "selector": "backend_node_id:4104"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Chat",
+      "visible": null,
+      "selector": "backend_node_id:3331"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Agent",
+      "visible": null,
+      "selector": "backend_node_id:3336"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open Settings",
+      "visible": null,
+      "selector": "backend_node_id:3382"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "GLM-5.3-Flash",
+      "visible": null,
+      "selector": "backend_node_id:4142"
+     },
+     {
+      "path": "navigation>button>statictext",
+      "role": "statictext",
+      "text": "Share",
+      "visible": null,
+      "selector": "backend_node_id:4143"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:3494"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "AI PPT",
+      "visible": null,
+      "selector": "backend_node_id:3495"
+     },
+     {
+      "path": "button>link",
+      "role": "link",
+      "text": "ZCode",
+      "visible": null,
+      "selector": "backend_node_id:3372"
+     },
+     {
+      "path": "button>link",
+      "role": "link",
+      "text": "AutoClaw",
+      "visible": null,
+      "selector": "backend_node_id:3376"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:3315"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "Chat",
+      "visible": null,
+      "selector": "backend_node_id:3492"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "Agent",
+      "visible": null,
+      "selector": "backend_node_id:3493"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Today",
+      "visible": null,
+      "selector": "backend_node_id:4114"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Fleet Brief: Swarm Audit & Growth Plan More",
+      "visible": null,
+      "selector": "backend_node_id:3684"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Unlock Probe",
+      "visible": null,
+      "selector": "backend_node_id:3693"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Test Instructions",
+      "visible": null,
+      "selector": "backend_node_id:3699"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Yesterday",
+      "visible": null,
+      "selector": "backend_node_id:4118"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET RESEARCH EXECUTE",
+      "visible": null,
+      "selector": "backend_node_id:3706"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Research Task V1",
+      "visible": null,
+      "selector": "backend_node_id:3712"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Previous 7 days",
+      "visible": null,
+      "selector": "backend_node_id:4121"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET SEED v1: Bootstrap Message",
+      "visible": null,
+      "selector": "backend_node_id:3719"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Supervisor Seed v1",
+      "visible": null,
+      "selector": "backend_node_id:3725"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET SEED MSG",
+      "visible": null,
+      "selector": "backend_node_id:3731"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET SEED v1 - Bootstrap",
+      "visible": null,
+      "selector": "backend_node_id:3737"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:3743"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:3749"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:3755"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+      "visible": null,
+      "selector": "backend_node_id:3761"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Previous 30 days",
+      "visible": null,
+      "selector": "backend_node_id:4130"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Minimalist Display Pedestal Design",
+      "visible": null,
+      "selector": "backend_node_id:3768"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Supervisor Rollover",
+      "visible": null,
+      "selector": "backend_node_id:3774"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Metaengine Fleet Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:3780"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:3786"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET EXECUTION",
+      "visible": null,
+      "selector": "backend_node_id:3792"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:3798"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE_FLEET_TASK_V1",
+      "visible": null,
+      "selector": "backend_node_id:3804"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET Task Coordination",
+      "visible": null,
+      "selector": "backend_node_id:3810"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Ping Test Response",
+      "visible": null,
+      "selector": "backend_node_id:3816"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:3822"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "Loading...",
+      "visible": null,
+      "selector": "backend_node_id:4141"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "Meet Your AI Agents",
+      "visible": null,
+      "selector": "backend_node_id:3496"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "Code faster with ZCode. Automate more with AutoClaw.",
+      "visible": null,
+      "selector": "backend_node_id:3497"
+     },
+     {
+      "path": "link>statictext",
+      "role": "statictext",
+      "text": "ZCode",
+      "visible": null,
+      "selector": "backend_node_id:3498"
+     },
+     {
+      "path": "link>statictext",
+      "role": "statictext",
+      "text": "AutoClaw",
+      "visible": null,
+      "selector": "backend_node_id:3499"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:3687"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "paprika1",
+      "visible": null,
+      "selector": "backend_node_id:3500"
+     },
+     {
+      "path": "button",
+      "role": "button",
+      "text": "Thought Process",
+      "visible": null,
+      "selector": "backend_node_id:3970"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Fleet Brief: Swarm Audit & Growth Plan",
+      "visible": null,
+      "selector": "backend_node_id:4115"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Unlock Probe",
+      "visible": null,
+      "selector": "backend_node_id:4116"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Test Instructions",
+      "visible": null,
+      "selector": "backend_node_id:4117"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET RESEARCH EXECUTE",
+      "visible": null,
+      "selector": "backend_node_id:4119"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Research Task V1",
+      "visible": null,
+      "selector": "backend_node_id:4120"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET SEED v1: Bootstrap Message",
+      "visible": null,
+      "selector": "backend_node_id:4122"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Supervisor Seed v1",
+      "visible": null,
+      "selector": "backend_node_id:4123"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET SEED MSG",
+      "visible": null,
+      "selector": "backend_node_id:4124"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET SEED v1 - Bootstrap",
+      "visible": null,
+      "selector": "backend_node_id:4125"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:4126"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:4127"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:4128"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+      "visible": null,
+      "selector": "backend_node_id:4129"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Minimalist Display Pedestal Design",
+      "visible": null,
+      "selector": "backend_node_id:4131"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Supervisor Rollover",
+      "visible": null,
+      "selector": "backend_node_id:4132"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Metaengine Fleet Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:4133"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:4134"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET EXECUTION",
+      "visible": null,
+      "selector": "backend_node_id:4135"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:4136"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE_FLEET_TASK_V1",
+      "visible": null,
+      "selector": "backend_node_id:4137"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET Task Coordination",
+      "visible": null,
+      "selector": "backend_node_id:4138"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Ping Test Response",
+      "visible": null,
+      "selector": "backend_node_id:4139"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:4140"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Thought Process",
+      "visible": null,
+      "selector": "backend_node_id:4197"
+     },
+     {
+      "path": "paragraph>statictext",
+      "role": "statictext",
+      "text": "Principle: fleet size is a function of backlog shape, not ambition. No speculative hires.",
+      "visible": null,
+      "selector": "backend_node_id:4225"
+     },
+     {
+      "path": "paragraph>statictext",
+      "role": "statictext",
+      "text": "backlog age distribution, per-agent utilization, handoff failure rate, mechanic/tool usage counts, spawn-to-retire ratio.",
+      "visible": null,
+      "selector": "backend_node_id:4241"
+     },
+     {
+      "path": "paragraph>statictext",
+      "role": "statictext",
+      "text": "— end brief. Awaiting fleet config for the tailored pass.",
+      "visible": null,
+      "selector": "backend_node_id:4246"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "FLEET BRIEF: swarm self-audit — inventory working mechanics, propose deletion list of useless/restrictive mechanics, draft swarm growth plan (backlog-driven). R",
+      "visible": null,
+      "selector": "backend_node_id:4198"
+     },
+     {
+      "path": "paragraph>strong>statictext",
+      "role": "statictext",
+      "text": "SWARM SELF-AUDIT — baseline report",
+      "visible": null,
+      "selector": "backend_node_id:4199"
+     },
+     {
+      "path": "paragraph>emphasis>statictext",
+      "role": "statictext",
+      "text": "(Generic audit against standard swarm patterns. Share your fleet's actual config and I'll re-cut this against real data.)",
+      "visible": null,
+      "selector": "backend_node_id:4200"
+     },
+     {
+      "path": "paragraph>strong>statictext",
+      "role": "statictext",
+      "text": "1. Working mechanics (keep)",
+      "visible": null,
+      "selector": "backend_node_id:4201"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Single shared task ledger as source of truth — kills duplicate work and stale state",
+      "visible": null,
+      "selector": "backend_node_id:4202"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Role specialization with explicit handoff contracts (what a downstream agent needs to accept a ticket)",
+      "visible": null,
+      "selector": "backend_node_id:4203"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Backlog as the only intake queue — every objective becomes a tagged item, nothing floats loose in chat",
+      "visible": null,
+      "selector": "backend_node_id:4204"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Verification pass (second agent or rule check) on high-stakes outputs",
+      "visible": null,
+      "selector": "backend_node_id:4205"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Tiered memory: per-agent working memory, shared fleet memory, long-term archive",
+      "visible": null,
+      "selector": "backend_node_id:4206"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Human escalation gate reserved for irreversible/costly actions only",
+      "visible": null,
+      "selector": "backend_node_id:4207"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Idempotent task execution with checkpoints — crashed work resumes, doesn't restart",
+      "visible": null,
+      "selector": "backend_node_id:4208"
+     },
+     {
+      "path": "paragraph>strong>statictext",
+      "role": "statictext",
+      "text": "2. Deletion list",
+      "visible": null,
+      "selector": "backend_node_id:4209"
+     },
+     {
+      "path": "paragraph>emphasis>statictext",
+      "role": "statictext",
+      "text": "Hard cuts:",
+      "visible": null,
+      "selector": "backend_node_id:4210"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Mandatory consensus voting on low-stakes decisions — pure latency",
+      "visible": null,
+      "selector": "backend_node_id:4211"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Full-fleet broadcasts by default → targeted messaging; broadcast only for state changes affecting everyone",
+      "visible": null,
+      "selector": "backend_node_id:4212"
+     },
+     {
+      "path": "list>listitem>statictext",
+      "role": "statictext",
+      "text": "Re-planning from scratch every cycle → incremental replanning",
+      "visible": null,
+      "selector": "backend_node_id:4213"
+     }
+    ],
+    "truncated": true,
+    "element_count": 96,
+    "authority_effect": false,
+    "input_values_exposed": false
+   },
+   "semantic_targets": [
+    {
+     "name": "Send a Message",
+     "role": "textbox",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Send a Message",
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 4285,
+      "semantic_ref_id": "semref_ed9dab71caae700135e8c51ee526dc600433a0e4979a14b865a6577211ffb6ea",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "value_length": 0,
+     "value_sha256": null,
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "value_exposed": false,
+     "backend_node_id": 4285
+    },
+    {
+     "name": null,
+     "role": "textbox",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": null,
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 4287,
+      "semantic_ref_id": "semref_bdd1324c2146e96e17397851e5b72b7545bd80a2bee8d3236b30e052059564d1",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "value_length": 0,
+     "value_sha256": null,
+     "selector_mode": "BACKEND_NODE_ID_REQUIRED",
+     "value_exposed": false,
+     "backend_node_id": 4287
+    },
+    {
+     "name": "AI PPT",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "AI PPT",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3352,
+      "semantic_ref_id": "semref_5984b3a35d87daee26f8894ca2313182dda51aea3174e4618ad538491b3c4c0c",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3352
+    },
+    {
+     "name": "Select a model",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Select a model",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3949,
+      "semantic_ref_id": "semref_e712b9a169e97823afee4ba9178756b98a0b2eb9540b76f4e7621a7ec92eaad8",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3949
+    },
+    {
+     "name": "Share",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Share",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 4104,
+      "semantic_ref_id": "semref_98d11051f42726c87e9f9d1ff122f6ca2132d664b776eb7e353a1f960c4facff",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 4104
+    },
+    {
+     "name": "Chat",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Chat",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3331,
+      "semantic_ref_id": "semref_7d352ccc8b66a80692ca86264e694ed8e5cb882709ebd312f88ef3851361605c",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3331
+    },
+    {
+     "name": "Agent",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Agent",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3336,
+      "semantic_ref_id": "semref_db139f052b89cde5b94495f2f5996f07672e91a152645d64249f38496707f3ff",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3336
+    },
+    {
+     "name": "Open Settings",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Open Settings",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3382,
+      "semantic_ref_id": "semref_bcd673c4d7771066bf03419b1f85c4528437b70f611fc41959541941a76a28f2",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3382
+    },
+    {
+     "name": "ZCode",
+     "role": "link",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "ZCode",
+       "role": "link",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3372,
+      "semantic_ref_id": "semref_a6a2d4475435bfd2a0dc6be8b8f7dd79978ad870ee80ffa6b8cd5618e3f17347",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3372
+    },
+    {
+     "name": "AutoClaw",
+     "role": "link",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "AutoClaw",
+       "role": "link",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3376,
+      "semantic_ref_id": "semref_b64fa34030b0f9a0bd2f3cb8431272d9e2edd4ab9b213a9ba1fbc45b64550ef9",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3376
+    },
+    {
+     "name": "Open User Menu",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Open User Menu",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3315,
+      "semantic_ref_id": "semref_17129859de0120f5368ba0078e972b8dadfd010c4aed388fc6029ccb97a755e3",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3315
+    },
+    {
+     "name": "Fleet Brief: Swarm Audit & Growth Plan More",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Fleet Brief: Swarm Audit & Growth Plan More",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3684,
+      "semantic_ref_id": "semref_f52f58c496ebee471f095abd4fcda72016cffb465d164d2677cf8fa84b725cbe",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3684
+    },
+    {
+     "name": "METAENGINE Unlock Probe",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Unlock Probe",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3693,
+      "semantic_ref_id": "semref_b1ef5fcc8db488d05f188185cad5b38fc07680be8afcba34e621ed85251a9760",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3693
+    },
+    {
+     "name": "METAENGINE Test Instructions",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Test Instructions",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3699,
+      "semantic_ref_id": "semref_863f49e0e8a4019863b348649430119de28e824863cbd8542b2d2eab1ee738b0",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3699
+    },
+    {
+     "name": "METAENGINE FLEET RESEARCH EXECUTE",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET RESEARCH EXECUTE",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3706,
+      "semantic_ref_id": "semref_ed1dc231cc278529c4bcb0819e9b706eb80605c7882de798e322823843ec1c05",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3706
+    },
+    {
+     "name": "METAENGINE Research Task V1",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Research Task V1",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3712,
+      "semantic_ref_id": "semref_ddc708c583374d3835cfe497e4c8b3562db492cc329ff04999bf6b9dc98552a0",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3712
+    },
+    {
+     "name": "METAENGINE FLEET SEED v1: Bootstrap Message",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET SEED v1: Bootstrap Message",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3719,
+      "semantic_ref_id": "semref_843801fe29e38798d32bb1e5b717a4c10977adcb052f7ebd077e4258c73df936",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3719
+    },
+    {
+     "name": "METAENGINE Supervisor Seed v1",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Supervisor Seed v1",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3725,
+      "semantic_ref_id": "semref_52cf25516f131eb5ec0bbb5d71a02c26fdf6d7f1ae854f9e47cbe8c1a51d0d7c",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3725
+    },
+    {
+     "name": "METAENGINE FLEET SEED MSG",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET SEED MSG",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3731,
+      "semantic_ref_id": "semref_10bb4bb7bf87760efd67467ba66370dfff70cdaf8f87da31d913c5118e3e7010",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3731
+    },
+    {
+     "name": "METAENGINE FLEET SEED v1 - Bootstrap",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET SEED v1 - Bootstrap",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3737,
+      "semantic_ref_id": "semref_02f6a13383b47d4faa5b770d2f1daf2c95d4c51f4efb77ee2ee0ea64dfbecf75",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3737
+    },
+    {
+     "name": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3761,
+      "semantic_ref_id": "semref_7e5259f25423242578ca09c5b2274c73a21606581e180f4ac46d53c925197113",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3761
+    },
+    {
+     "name": "Minimalist Display Pedestal Design",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Minimalist Display Pedestal Design",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3768,
+      "semantic_ref_id": "semref_b4e198fce902765e15d72e708d6a0e044e8107f845bc616f22ff6071ccc53397",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3768
+    },
+    {
+     "name": "METAENGINE Supervisor Rollover",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Supervisor Rollover",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3774,
+      "semantic_ref_id": "semref_80f11fc654f224b5b45029e2a9396964aecdcf12095acc902d40ee1fb0b41231",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3774
+    },
+    {
+     "name": "Metaengine Fleet Task Execution",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Metaengine Fleet Task Execution",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3780,
+      "semantic_ref_id": "semref_07372c7c9595d51563b864725aee456ea658ad307851d1b0254d73a32ef5994a",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3780
+    },
+    {
+     "name": "METAENGINE FLEET EXECUTION",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET EXECUTION",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3792,
+      "semantic_ref_id": "semref_2686f9d677ae0eeb71c6bb35cb61adf40a33b510783c665e331259abcfbb2c68",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3792
+    },
+    {
+     "name": "METAENGINE_FLEET_TASK_V1",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE_FLEET_TASK_V1",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3804,
+      "semantic_ref_id": "semref_b935a9c3603ae32aabd41012de21fe216ca767499fc2090f8865efb8f6e53368",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3804
+    },
+    {
+     "name": "METAENGINE FLEET Task Coordination",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET Task Coordination",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3810,
+      "semantic_ref_id": "semref_e7afce0dd0388e96b1beecd326ab478e2524ebb9966d05eeac07f9fed9ff1ce6",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3810
+    },
+    {
+     "name": "Ping Test Response",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Ping Test Response",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3816,
+      "semantic_ref_id": "semref_2df9566b58bed76d447763787318fc83cac945649692a145826d6561f4d91e67",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3816
+    },
+    {
+     "name": "Thought Process",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Thought Process",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3970,
+      "semantic_ref_id": "semref_fb4353b67f2199fb46282ce522a6a3b80e78e95ec9faeac53f7bcf0ebd837d56",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3970
+    },
+    {
+     "name": "Chat Menu",
+     "role": "button",
+     "frame_id": "EDC730734E579736064586B6B45AEA76",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Chat Menu",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "EDC730734E579736064586B6B45AEA76",
+      "target_id": "webcontents:196",
+      "backend_node_id": 3543,
+      "semantic_ref_id": "semref_3e750716eaae2f521d0ef3d7634eaef55e0cfdc56a29d659a7141e854c1ccceb",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "EDC730734E579736064586B6B45AEA76",
+      "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-7176398497001797586.7801295529085023620"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 3543
+    }
+   ],
+   "state_revision_id": "rev_5354158a1f441f5f5dc9c2241e4eb22ad0655f25fb24ba921e39463bb353d5e3",
+   "semantic_refs_issued": 30,
+   "runtime_main_frame_id": "EDC730734E579736064586B6B45AEA76",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_6b9605c411864d41b321f01cdc64c794",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-7176398497001797586.7801295529085023620",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  }
+ },
+ {
+  "id": "H2-TRANS",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "f8eb1996-d5cd-46c5-b07a-85ca007bcbba",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3572,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/cd7efff3-9b1e-4eb4-83c6-66bfcfa40fc6",
+   "text": "GLM-5.3-Flash\nShare\nNew Chat\nAI PPT\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI ",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:196",
+   "captured_at": "2026-09-27T22:51:26.086Z",
+   "total_chars": 4229,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/c/cd7efff3-9b1e-4eb4-83c6-66bfcfa40fc6",
+   "text": "GLM-5.3-Flash\nShare\nNew Chat\nAI PPT\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI Agents\nCode faster with ZCode. Automate more with AutoClaw.\nZCode\nAutoClaw\npaprika1\nFleet Brief: Swarm Audit & Growth Plan\nMETAENGINE Unlock Probe\nMETAENGINE Test Instructions\nMETAENGINE FLEET RESEARCH EXECUTE\nMETAENGINE Research Task V1\nMETAENGINE FLEET SEED v1: Bootstrap Message\nMETAENGINE Supervisor Seed v1\nMETAENGINE FLEET SEED MSG\nMETAENGINE FLEET SEED v1 - Bootstrap\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE_SUPERVISOR_WAKE_V1 Coordination\nMinimalist Display Pedestal Design\nMETAENGINE Supervisor Rollover\nMetaengine Fleet Task Execution\nMETAENGINE FLEET Task Execution\nMETAENGINE FLEET EXECUTION\nMETAENGINE FLEET Task Execution\nMETAENGINE_FLEET_TASK_V1\nMETAENGINE FLEET Task Coordination\nPing Test Response\nNew Chat\nThought Process\nPrinciple: fleet size is a function of backlog shape, not ambition. No speculative hires.\nbacklog age distribution, per-agent utilization, handoff failure rate, mechanic/tool usage counts, spawn-to-retire ratio.\n— end brief. Awaiting fleet config for the tailored pass.\nFLEET BRIEF: swarm self-audit — inventory working mechanics, propose deletion list of useless/restrictive mechanics, draft swarm growth plan (backlog-driven). Reply in chat.\nSWARM SELF-AUDIT — baseline report\n(Generic audit against standard swarm patterns. Share your fleet's actual config and I'll re-cut this against real data.)\n1. Working mechanics (keep)\nSingle shared task ledger as source of truth — kills duplicate work and stale state\nRole specialization with explicit handoff contracts (what a downstream agent needs to accept a ticket)\nBacklog as the only intake queue — every objective becomes a tagged item, nothing floats loose in chat\nVerification pass (second agent or rule check) on high-stakes outputs\nTiered memory: per-agent working memory, shared fleet memory, long-term archive\nHuman escalation gate reserved for irreversible/costly actions only\nIdempotent task execution with checkpoints — crashed work resumes, doesn't restart\n2. Deletion list\nHard cuts:\nMandatory consensus voting on low-stakes decisions — pure latency\nFull-fleet broadcasts by default → targeted messaging; broadcast only for state changes affecting everyone\nRe-planning from scratch every cycle → incremental replanning\nVerbose handoffs / restating context between agents → structured payloads only\nEvery-agent-logs-everything memory writes → single writer per event\nTools with zero invocations over the last N cycles → delete\nPersona boilerplate inflating token cost with zero behavior change\nRestrictions to relax:\nAll tasks routed through a coordinator → allow peer-to-peer handoffs for small jobs (removes the bottleneck)\nWhitelist of allowed task types → blocks emergent work; tag-and-track instead\nHuman approval for reversible, cheap actions → auto-execute, log for audit\nFixed roster → spawn-on-demand (see below)\nEveryone-reviews-everything gates → risk-tiered review, sample the low-risk tier\n3. Growth plan (backlog-driven)\nevery item gets skill tags, age, blocker status, and \"who can do this today\"\na skill tag accumulates N items aging past X days, or is blocking other work → that's measured capacity demand\nintake contract, owned backlog tag, utilization target, and a kill criterion (retire if utilization < Y% for Z cycles)\nmeasure throughput and WIP per stage; add capacity only at the actual bottleneck, not everywhere\nmechanics, tools, and agents get audited monthly the same way tasks do — pruning is a permanent function, not a one-time event\nMetrics to start tracking now:\nImmediate actions this cycle:\nExecute top 3 cuts: consensus voting, default broadcasts, verbose handoffs\nAdd skill-tag + age fields to the backlog schema\nWrite down spawn/retire criteria so growth is a rules change, not a vibe\nDeep Think\nMax\nInstrument the backlog first:\nSpawn signal:\nGrowth ladder before any standing agent:\nEvery new agent ships with:\nConstraint math:\nStanding deletion loop:\nReusable prompt template on an existing agent\nPart-time agent spawned per task, retired after\nStanding agent only if (2) fires repeatedly",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_6924b587-8aa4-44ad-af7b-c7e4f814a6c6",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:196",
+   "captured_at": "2026-09-27T22:51:26.086Z",
+   "total_chars": 4229,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  }
+ },
+ {
+  "id": "H3-CENSUS",
+  "action": "TAB_CENSUS",
+  "command_id": "a1bffddf-bf39-4d48-84fe-d383c6102254",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3999,
+  "result_summary": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": "<dict:GLM_CHAT,LOCAL_DEV>",
+   "by_role": "<dict:USER,FLEET,SUPERVISOR>",
+   "max_tabs": 48,
+   "total_tabs": 13,
+   "fleet_tab_ids": "<list:4>",
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 35,
+   "fleet_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": "<list:1>",
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": {
+    "GLM_CHAT": 12,
+    "LOCAL_DEV": 1
+   },
+   "by_role": {
+    "USER": 8,
+    "FLEET": 4,
+    "SUPERVISOR": 1
+   },
+   "max_tabs": 48,
+   "total_tabs": 13,
+   "fleet_tab_ids": [
+    "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+   ],
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 35,
+   "fleet_backpressure": {
+    "reason": null,
+    "blocked": false,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 9,
+     "fleet_tabs": 4,
+     "total_tabs": 13,
+     "total_at_wall": false,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": [
+    "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+   ],
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  }
+ },
+ {
+  "id": "H4-LAT",
+  "action": "CONTROL_LATENCY_STATUS",
+  "command_id": "a216b464-99fa-47c2-9d27-089c0ae43a10",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3523,
+  "result_summary": {
+   "schema": "metaengine.browser.control-latency-status.v1",
+   "fast_lane": "<dict:schema,scheduler,transport,wait_batch_ms,authority_effect>",
+   "authority_effect": false,
+   "process_push_last_at": "2026-09-27T22:51:30.466Z",
+   "semantic_ready_count": 14,
+   "current_command_count": 1,
+   "semantic_target_count": 14,
+   "cdp_attach_per_command": false,
+   "process_event_sequence": 143537,
+   "process_push_in_flight": true,
+   "process_push_scheduled": false,
+   "persistent_cdp_sessions": true,
+   "process_push_last_error": null,
+   "semantic_event_sequence": 142010,
+   "cognitive_delta_transport": "<dict:state,schema,pending,in_flight,scheduled>",
+   "observation_push_timer_ms": 0,
+   "target_zero_polling_delay": true,
+   "observation_push_authority": false,
+   "process_sample_interval_ms": 250,
+   "command_transport_authority": "DB_LEASE_ONLY"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "schema": "metaengine.browser.control-latency-status.v1",
+   "fast_lane": {
+    "schema": "metaengine.native-supervisor.control-fast-lane.v1",
+    "scheduler": {
+     "schema": "metaengine.native-supervisor.command-lanes.v3",
+     "max_batch": 64,
+     "pressure_band": "ORANGE",
+     "authority_effect": false,
+     "read_concurrency": 32,
+     "read_only_parallel": true,
+     "mutation_concurrency": 8,
+     "causal_pending_lookup": "O(1)",
+     "pressure_budget_bound": true,
+     "live_concurrency_tuning": true,
+     "cross_tab_reads_parallel": true,
+     "pressure_budget_revision": 1910,
+     "unknown_actions_exclusive": true,
+     "global_mutations_exclusive": true,
+     "configured_read_concurrency": 32,
+     "causal_dependency_precompute": "O(n)",
+     "repeated_pending_causal_scan": false,
+     "same_tab_mutations_serialized": true,
+     "configured_mutation_concurrency": 16,
+     "implicit_selected_tab_exclusive": true,
+     "process_pressure_budget_register": true,
+     "same_tab_read_after_write_causal": true,
+     "same_tab_write_after_read_causal": true,
+     "immutable_original_order_barriers": true,
+     "pending_scan_bounded_by_max_batch": true,
+     "pressure_register_contains_commands": false,
+     "exact_tab_mutation_execution_required": true,
+     "missing_effect_tab_fails_before_executor": true,
+     "implicit_selected_tab_scheduler_admission": "FENCED_NONEXCLUSIVE",
+     "live_concurrency_tuning_changes_authority": false
+    },
+    "transport": "SUPPORTED",
+    "wait_batch_ms": 4000,
+    "authority_effect": false,
+    "last_batch_count": 1,
+    "batch_fastlane_mode": "POLLING",
+    "heartbeat_in_flight": false,
+    "maintenance_in_flight": false,
+    "maintenance_interval_ms": 10000,
+    "batch_transport_required": true,
+    "batch_fastlane_configured": true,
+    "last_wait_batch_elapsed_ms": 1700,
+    "last_wait_batch_response_at": "2026-09-27T22:51:26.032Z",
+    "last_wait_batch_wake_reason": "IMMEDIATE",
+    "one_steady_state_lease_loop": true,
+    "automatic_effect_retry_allowed": false,
+    "transport_delivery_is_authority": false,
+    "legacy_750ms_fallback_configured": false,
+    "command_lane_precedes_maintenance": true,
+    "legacy_single_lease_fallback_enabled": false,
+    "long_poll_replaces_idle_timer_latency": true,
+    "batch_fastlane_suspends_on_notify_wake": true,
+    "legacy_fallback_suppressed_by_batch_transport": true
+   },
+   "authority_effect": false,
+   "process_push_last_at": "2026-09-27T22:51:30.466Z",
+   "semantic_ready_count": 14,
+   "current_command_count": 1,
+   "semantic_target_count": 14,
+   "cdp_attach_per_command": false,
+   "process_event_sequence": 143537,
+   "process_push_in_flight": true,
+   "process_push_scheduled": false,
+   "persistent_cdp_sessions": true,
+   "process_push_last_error": null,
+   "semantic_event_sequence": 142010,
+   "cognitive_delta_transport": {
+    "state": "RESYNC_REQUIRED",
+    "schema": "metaengine.browser.cognitive-delta-transport.v1",
+    "pending": true,
+    "in_flight": true,
+    "scheduled": false,
+    "stream_id": "d620ffae-3b63-4018-83cb-3785a1c454f2",
+    "batch_size": 128,
+    "dedupe_key": "stream_id+sequence",
+    "last_error": null,
+    "sent_events": 523,
+    "event_driven": true,
+    "resync_count": 5882,
+    "sent_batches": 5,
+    "fallback_edges": 255,
+    "timer_delay_ms": 0,
+    "command_leasing": false,
+    "last_attempt_at": "2026-09-27T17:38:00.715Z",
+    "last_success_at": "2026-09-27T22:51:30.523Z",
+    "authority_effect": false,
+    "control_authority": false,
+    "delivery_is_authority": false,
+    "duplicate_safe_retries": 255,
+    "second_command_scheduler": false,
+    "full_state_fallback_required": true,
+    "acknowledged_through_sequence": 230171,
+    "automatic_effect_retry_allowed": false
+   },
+   "observation_push_timer_ms": 0,
+   "target_zero_polling_delay": true,
+   "observation_push_authority": false,
+   "process_sample_interval_ms": 250,
+   "command_transport_authority": "DB_LEASE_ONLY"
+  }
+ },
+ {
+  "id": "H5-DPH",
+  "action": "DEV_PLANE_HEALTH",
+  "command_id": "165b1cc2-aea1-42d0-9c04-3d3befec7db3",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3562,
+  "result_summary": {
+   "ok": true,
+   "pid": 18460,
+   "process_type": "utility",
+   "uptime_seconds": 18894.54206
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "ok": true,
+   "pid": 18460,
+   "process_type": "utility",
+   "uptime_seconds": 18894.54206
+  }
+ }
+]

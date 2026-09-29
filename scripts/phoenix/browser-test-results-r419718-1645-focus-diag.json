@@ -1,0 +1,124 @@
+[
+  {
+    "time": "09:07:25",
+    "action": "NEW_TAB",
+    "status": "COMPLETED",
+    "error": "",
+    "receipt_keys": [
+      "automatic_retry_allowed",
+      "browser_cell_generation",
+      "browser_cell_id",
+      "created_at",
+      "effect_outcome",
+      "kind",
+      "load_pending",
+      "navigation",
+      "role",
+      "tab_id"
+    ],
+    "target_shape": null,
+    "focus_evidence": null
+  },
+  {
+    "time": "09:08:00",
+    "action": "CAPTURE",
+    "status": "COMPLETED",
+    "error": "",
+    "receipt_keys": [
+      "authority_effect",
+      "captured_at",
+      "interaction_tree",
+      "process_incarnation_id",
+      "runtime_binding_generation",
+      "runtime_binding_observed",
+      "runtime_document_generation",
+      "runtime_execution_context_unique_id",
+      "runtime_main_frame_id",
+      "runtime_observation_id"
+    ],
+    "target_shape": null,
+    "focus_evidence": null
+  },
+  {
+    "time": "09:08:06",
+    "action": "SEMANTIC_FOCUS",
+    "status": "FAILED",
+    "error": "postcondition_not_confirmed:AMBIGUOUS",
+    "receipt_keys": [
+      "action",
+      "authority_effect",
+      "tab_id",
+      "target"
+    ],
+    "target_shape": {
+      "name": "How can I help you today?",
+      "role": "textbox",
+      "frame_id": "8E4C2383EB9E6B5EE8907E2758A8992C",
+      "semantic_ref": "dict",
+      "backend_node_id": 456
+    },
+    "focus_evidence": {
+      "semantic_ref_id": null
+    }
+  },
+  {
+    "time": "09:08:12",
+    "action": "CLOSE_TAB",
+    "status": "COMPLETED",
+    "error": "",
+    "receipt_keys": [
+      "ok"
+    ],
+    "target_shape": null,
+    "focus_evidence": null
+  },
+  {
+    "time": "09:08:24",
+    "action": "NEW_TAB",
+    "status": "COMPLETED",
+    "error": "",
+    "receipt_keys": [
+      "automatic_retry_allowed",
+      "browser_cell_generation",
+      "browser_cell_id",
+      "created_at",
+      "effect_outcome",
+      "kind",
+      "load_pending",
+      "navigation",
+      "role",
+      "tab_id"
+    ],
+    "target_shape": null,
+    "focus_evidence": null
+  },
+  {
+    "time": "09:09:00",
+    "action": "CAPTURE",
+    "status": "COMPLETED",
+    "error": "",
+    "receipt_keys": [
+      "authority_effect",
+      "captured_at",
+      "interaction_tree",
+      "process_incarnation_id",
+      "runtime_binding_generation",
+      "runtime_binding_observed",
+      "runtime_document_generation",
+      "runtime_execution_context_unique_id",
+      "runtime_main_frame_id",
+      "runtime_observation_id"
+    ],
+    "target_shape": null,
+    "focus_evidence": null
+  },
+  {
+    "time": "09:09:04",
+    "action": "SEMANTIC_FOCUS",
+    "status": "LEASED",
+    "error": "",
+    "receipt_keys": [],
+    "target_shape": null,
+    "focus_evidence": null
+  }
+]

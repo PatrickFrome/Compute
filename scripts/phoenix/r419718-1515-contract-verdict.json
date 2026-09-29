@@ -1,0 +1,42 @@
+{
+ "chain": "fleet-readback contract-test",
+ "ts": "2026-09-28T07:29:14Z",
+ "steps": [
+  {
+   "step": "CT1-NEW_TAB",
+   "status": "OK",
+   "note": "tab=tab_67ebf13f-b7bb-464b-8"
+  },
+  {
+   "step": "CT2-CAPTURE",
+   "status": "OK",
+   "note": "ref={'schema': 'metaengine.native-browser.se role=textbox"
+  },
+  {
+   "step": "CT3-FOCUS",
+   "status": "OK",
+   "note": null
+  },
+  {
+   "step": "CT4-TYPE",
+   "status": "OK",
+   "note": null
+  },
+  {
+   "step": "CT5-SUBMIT",
+   "status": "OK",
+   "note": null
+  },
+  {
+   "step": "CT6-READBACK",
+   "status": "OK",
+   "note": "len=1284 marker=True tail='аких-либо других слов. Это механический контракт-тест доставки. Job 419718.\\nDeep Think\\nMax'"
+  },
+  {
+   "step": "CT7-CLOSE",
+   "status": "OK",
+   "note": null
+  }
+ ],
+ "verdict": "CONTRACT-PASS: fleet-readback chain физически доказана (enqueue→composer→reply→readback)"
+}

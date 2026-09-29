@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://www.openhands.dev",
+    "name": "10 Claude Code Best Practices for Agentic Coding: A 2026",
+    "snippet": "Jul 2, 2026 — 10 Claude Code Best Practices for Agentic Coding: A 2026 Guide · 1. Explore in plan mode before it touches your code · 2. Turn exploration into a ... Read more",
+    "host_name": "www.openhands.dev",
+    "rank": 0,
+    "date": "Jul 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.promptlayer.com",
+    "name": "Claude Code: Behind-the-scenes of the master agent loop",
+    "snippet": "Aug 29, 2025 — Claude Code's architecture follows a clean, layered design that prioritizes simplicity and debuggability. At the top sits the user interaction ... Read more",
+    "host_name": "blog.promptlayer.com",
+    "rank": 1,
+    "date": "Aug 29, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.developersdigest.tech",
+    "name": "Claude Code Sub Agents: Parallel AI Development",
+    "snippet": "Jul 25, 2025 — Claude Code subagents let you split coding work across specialized assistants with their own context, tools, and instructions.",
+    "host_name": "www.developersdigest.tech",
+    "rank": 2,
+    "date": "Jul 25, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.totalum.app",
+    "name": "Claude Code subagents: the 2026 production playbook",
+    "snippet": "Aug 11, 2026 — A Claude Code subagent is a fresh Claude instance the main agent spawns, with its own context window, its own tools , and its own model. The lead ... Read more",
+    "host_name": "www.totalum.app",
+    "rank": 3,
+    "date": "Aug 11, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://dev.to",
+    "name": "The best way to do agentic development in 2026",
+    "snippet": "Jan 23, 2026 — Its currently a macOS-only developer tool that uses Claude Code (or OpenAI Codex) to orchestrate many git worktrees of a repo to accomplish ...",
+    "host_name": "dev.to",
+    "rank": 4,
+    "date": "Jan 23, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://claudepedia.dev",
+    "name": "Ecosystem - ClaudePedia | The Claude Code Encyclopedia",
+    "snippet": "Agent Loop Architecture Tool System . Anthropic's agentic coding tool. executes tasks through natural language. async subagents, curated tools, and a Claude … s ...",
+    "host_name": "claudepedia.dev",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.kunalganglani.com",
+    "name": "Loop Engineering: Build Agent Loops in Claude Code [2026]",
+    "snippet": "Jun 22, 2026 — Loop engineering replaces one-shot prompting with self-correcting agent loops . Skills, hooks, subagents, and CLAUDE.md patterns that ship ...",
+    "host_name": "www.kunalganglani.com",
+    "rank": 6,
+    "date": "Jun 22, 2026",
+    "favicon": ""
+  }
+]

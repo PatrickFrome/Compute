@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "```json\n{\n  \"pass\": true,\n  \"findings\": [\n    \"Панель «ГРАФ КОДА» присутствует с метриками (106/267/150/57) и футером otel-lite.\",\n    \"В футере панели «ГРАФ КОДА» обнаружен элемент «вердиктов RH: 1» розового (rose) цвета.\",\n    \"Панель «РОАДМАП» (ОЧЕРЕДЬ ЗАДАЧ) отображает статус M1–M7 как «7/7» (завершено).\",\n    \"Панель «САНДБОКС» (COMMAND BUS) визуально выделена и содержит данные о времени выполнения.\",\n    \"Контрастность текста на темном фоне (#0d1117) соответствует стандартам доступности (WCAG AA).\",\n    \"Сетка布局 (Grid) выровнена корректно: обрезки и наложения элементов не обнаружены.\"\n  ]\n}\n```",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790096220,
+  "id": "202609230056555618a7f33eac47d6",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609230056555618a7f33eac47d6",
+  "usage": {
+    "completion_tokens": 217,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 997,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1214
+  }
+}

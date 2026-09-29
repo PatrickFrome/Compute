@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://www.infoq.com",
+    "name": "Another Rust Rewrite: OpenAI's Codex CLI Goes Native",
+    "snippet": "Jun 4, 2025 — The rewrite aims to achieve security and performance gains , in addition to an improved developer experience.",
+    "host_name": "www.infoq.com",
+    "rank": 0,
+    "date": "Jun 4, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.devclass.com",
+    "name": "Node.js frustrating and inefficient? OpenAI rewrites AI",
+    "snippet": "Jun 2, 2025 — OpenAI has rewritten its forthcoming AI command-line coding tool, Codex CLI , in Rust , citing gains in performance and security, as well as ... Read more",
+    "host_name": "www.devclass.com",
+    "rank": 1,
+    "date": "Jun 2, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com",
+    "name": "They're rewriting Codex CLI from TypeScript to Rust, for",
+    "snippet": "Jun 1, 2025 — Codex CLI from TypeScript to Rust , for performance, security, zero dependency install, extensibility. 99.9% of the compute happens remotely. ...",
+    "host_name": "news.ycombinator.com",
+    "rank": 2,
+    "date": "Jun 1, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Codex CLI is Going Native #1174",
+    "snippet": "May 30, 2025 — we've been working on a rewrite of Codex CLI into Rust . we get the Rust implementation to experience and feature parity in the coming weeks.",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "May 30, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://linuxsecurity.com",
+    "name": "OpenAI Rewrites AI Coding Tool in Rust",
+    "snippet": "Jun 5, 2025 — OpenAI's rewrite of Codex CLI in Rust is, honestly, a solid move. It simplifies installs, makes the tool more secure, and leans on Rust's ...",
+    "host_name": "linuxsecurity.com",
+    "rank": 4,
+    "date": "Jun 5, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.techzine.eu",
+    "name": "OpenAI rewrites AI coding tool in Rust",
+    "snippet": "Jun 3, 2025 — Codex CLI can now function as both a client and server for the Model Context Protocol (MCP), thanks to an existing Rust implementation. Rust is ... Read more",
+    "host_name": "www.techzine.eu",
+    "rank": 5,
+    "date": "Jun 3, 2025",
+    "favicon": ""
+  }
+]

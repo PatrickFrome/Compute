@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://rustify.rs",
+    "name": "Tauri v2 Tutorial 2026: Build a Rust Desktop App Step by",
+    "snippet": "Tauri apps are dramatically smaller than Electron (5–10 MB vs 120 MB+) because they use the OS webview instead of bundling Chromium. Tauri v2 adds mobile ... Read more",
+    "host_name": "rustify.rs",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Linux: no CDP, so no automated UI verification of a Tauri app",
+    "snippet": "Aug 28, 2026 — Automated UI verification of a Tauri app on Linux is effectively impossible. a CDP shim over the WebKit inspector protocol, a test harness can ...",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "Aug 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mayhemcode.com",
+    "name": "Build Mobile and Desktop Apps From One Codebase | Tauri 2",
+    "snippet": "Jul 13, 2026 — Tauri 2 in 2026 : real numbers on bundle size, memory, mobile support, and Electron comparison, plus the questions developers actually search ...",
+    "host_name": "www.mayhemcode.com",
+    "rank": 2,
+    "date": "Jul 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.digitalapplied.com",
+    "name": "Desktop Apps from Web: Tauri vs Electron vs Deno 2026",
+    "snippet": "Jun 26, 2026 — Tauri v2 is the 2026 default for new projects .A minimal Tauri app can be under 600 KB because it uses the OS's native WebView instead of ... Read more",
+    "host_name": "www.digitalapplied.com",
+    "rank": 3,
+    "date": "Jun 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://v2.tauri.app",
+    "name": "Debug",
+    "snippet": "Mar 29, 2025 — The Core process is powered by Rust so you can use GDB or LLDB to debug it. You can follow the Debugging in VS Code guide to learn how to use ... Read more",
+    "host_name": "v2.tauri.app",
+    "rank": 4,
+    "date": "Mar 29, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://tarai.dev",
+    "name": "Is tauri-webview-debug safe? Skill security audit & score",
+    "snippet": "Jul 28, 2026 — The ` tauri - webview - debug ` skill enables debugging of Tauri v2 applications using the WebView2 CDP endpoint, primarily through Playwright MCP for ... Read more",
+    "host_name": "tarai.dev",
+    "rank": 5,
+    "date": "Jul 28, 2026",
+    "favicon": ""
+  }
+]

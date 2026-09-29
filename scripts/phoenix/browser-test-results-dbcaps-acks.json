@@ -1,0 +1,26 @@
+{
+ "PLANNER": {
+  "len": 48000,
+  "ack_count": 5,
+  "beyond_brief_count": 4,
+  "truncated": true
+ },
+ "RESEARCHER": {
+  "len": 13970,
+  "ack_count": 2,
+  "beyond_brief_count": 1,
+  "truncated": false
+ },
+ "IMPLEMENTER": {
+  "len": 4856,
+  "ack_count": 5,
+  "beyond_brief_count": 3,
+  "truncated": false
+ },
+ "CRITIC": {
+  "len": 13011,
+  "ack_count": 2,
+  "beyond_brief_count": 1,
+  "truncated": false
+ }
+}

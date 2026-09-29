@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "ME2 shell: окно грузит консоль демона по HTTP; IPC-разрешения минимальны (консоль общается с daemon напрямую, Tauri IPC не нужен)",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "updater:default"
+  ]
+}

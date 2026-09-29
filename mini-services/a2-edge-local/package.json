@@ -1,0 +1,12 @@
+{
+  "name": "a2-edge-local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot index.ts"
+  },
+  "dependencies": {
+    "postgres": "3.4.7"
+  }
+}

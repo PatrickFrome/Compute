@@ -1,0 +1,17 @@
+{
+ "PLANNER": {
+  "effect": "PROVEN_NEW_CONVERSATION",
+  "delivered": true,
+  "len_after": 2607
+ },
+ "IMPLEMENTER": {
+  "effect": "PROVEN_NEW_CONVERSATION",
+  "delivered": true,
+  "len_after": 883
+ },
+ "CRITIC": "already_delivered",
+ "_meta": {
+  "ts": "2026-09-28T10:12+08",
+  "task": "fleet-connect-capsule-dispatch"
+ }
+}

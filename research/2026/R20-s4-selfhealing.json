@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://www.keysight.com",
+    "name": "2026 Self-Healing Test Automation: Beyond Locator Patching",
+    "snippet": "Jun 18, 2026 — Third generation: This AI -driven approach uses semantic understanding, contextual reasoning, and visual matching to identify interface elements. Read more",
+    "host_name": "www.keysight.com",
+    "rank": 0,
+    "date": "Jun 18, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://qaskills.sh",
+    "name": "Playwright Self-Healing Locators: AI Guide for 2026",
+    "snippet": "Jun 27, 2026 — Learn how Playwright self-healing locators cut selector-maintenance PRs by 60-80% in 2026 . Role-based locators, custom fallback wrappers, ...",
+    "host_name": "qaskills.sh",
+    "rank": 1,
+    "date": "Jun 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.shiplight.ai",
+    "name": "Best Self-Healing Test Automation Tools 2026 (By",
+    "snippet": "Sep 9, 2026 — Self - healing test automation automatically detects when a UI change breaks a test step and repairs it without human intervention - updating ... Read more",
+    "host_name": "www.shiplight.ai",
+    "rank": 2,
+    "date": "Sep 9, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://club.ministryoftesting.com",
+    "name": "Self-Healing Tests in Web Automation – Anyone Using",
+    "snippet": "May 28, 2025 — One concept that caught our attention is self-healing test automation — tools or frameworks that can automatically update or adapt locators when ... Read more",
+    "host_name": "club.ministryoftesting.com",
+    "rank": 3,
+    "date": "May 28, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://cadmusgroup.com",
+    "name": "Self-healing test scripts",
+    "snippet": "Feb 5, 2026 — This white paper introduces self-healing test scripts , a solution that combines heuristic logic and identification driven by artificial ... Read more",
+    "host_name": "cadmusgroup.com",
+    "rank": 4,
+    "date": "Feb 5, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.drizz.dev",
+    "name": "Self-Healing Mobile Tests: How Every Tool Actually Does It",
+    "snippet": "May 25, 2026 — Every tool claims self-healing . Four architectures actually power it. Compare selector fallback, fingerprinting, NLP, and vision-based ...",
+    "host_name": "www.drizz.dev",
+    "rank": 5,
+    "date": "May 25, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://contextqa.com",
+    "name": "Self-Healing Test Automation: How It Works in 2026",
+    "snippet": "Jun 10, 2026 — TL;DR: Self-healing test automation uses AI to repair broken element locators on the fly, so a test keeps passing when a button moves or a ... Read more",
+    "host_name": "contextqa.com",
+    "rank": 6,
+    "date": "Jun 10, 2026",
+    "favicon": ""
+  }
+]

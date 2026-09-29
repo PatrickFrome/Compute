@@ -1,0 +1,714 @@
+[
+ {
+  "step": "V0b",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "schema": [
+    "str",
+    32
+   ],
+   "by_kind": [
+    "dict",
+    3
+   ],
+   "by_role": [
+    "dict",
+    3
+   ],
+   "max_tabs": [
+    "int",
+    null
+   ],
+   "total_tabs": [
+    "int",
+    null
+   ],
+   "fleet_tab_ids": [
+    "list",
+    4
+   ],
+   "total_at_wall": [
+    "bool",
+    null
+   ],
+   "release_signal": [
+    "str",
+    19
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "fleet_at_ceiling": [
+    "bool",
+    null
+   ],
+   "fleet_tab_ceiling": [
+    "int",
+    null
+   ],
+   "user_tab_headroom": [
+    "int",
+    null
+   ],
+   "fleet_backpressure": [
+    "dict",
+    8
+   ],
+   "fleet_tab_headroom": [
+    "int",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V0b-parse",
+  "tab_count": 5,
+  "leftover_own": [],
+  "fleet_tabs_seen": [
+   "tab_6f7ea6e9-",
+   "tab_9f8b697d-",
+   "tab_bc085d57-",
+   "tab_fe50ead8-"
+  ]
+ },
+ {
+  "step": "V2-back",
+  "action": "BACK",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "ok": [
+    "bool",
+    null
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "navigated": [
+    "bool",
+    null
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V2-cap1",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "url": [
+    "str",
+    18
+   ],
+   "title": [
+    "str",
+    59
+   ],
+   "schema": [
+    "str",
+    39
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "viewport": [
+    "dict",
+    5
+   ],
+   "target_id": [
+    "str",
+    15
+   ],
+   "captured_at": [
+    "str",
+    24
+   ],
+   "text_excerpt": [
+    "str",
+    1476
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "interaction_tree": [
+    "dict",
+    6
+   ],
+   "semantic_targets": [
+    "list",
+    36
+   ],
+   "state_revision_id": [
+    "str",
+    68
+   ],
+   "semantic_refs_issued": [
+    "int",
+    null
+   ],
+   "runtime_main_frame_id": [
+    "str",
+    32
+   ]
+  },
+  "url": "https://chat.z.ai/"
+ },
+ {
+  "step": "V2-fwd",
+  "action": "FORWARD",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "ok": [
+    "bool",
+    null
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "navigated": [
+    "bool",
+    null
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V2-cap2",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "url": [
+    "str",
+    20
+   ],
+   "title": [
+    "str",
+    14
+   ],
+   "schema": [
+    "str",
+    39
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "viewport": [
+    "dict",
+    5
+   ],
+   "target_id": [
+    "str",
+    15
+   ],
+   "captured_at": [
+    "str",
+    24
+   ],
+   "text_excerpt": [
+    "str",
+    142
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "interaction_tree": [
+    "dict",
+    6
+   ],
+   "semantic_targets": [
+    "list",
+    1
+   ],
+   "state_revision_id": [
+    "str",
+    68
+   ],
+   "semantic_refs_issued": [
+    "int",
+    null
+   ],
+   "runtime_main_frame_id": [
+    "str",
+    32
+   ]
+  },
+  "url": "https://example.com/"
+ },
+ {
+  "step": "V2-chain-resume",
+  "chain": [
+   {
+    "step": "V2-back",
+    "action": "BACK",
+    "status": "COMPLETED",
+    "url_after": null,
+    "err": null
+   },
+   {
+    "step": "V2-cap1",
+    "action": "CAPTURE",
+    "status": "COMPLETED",
+    "url_after": "https://chat.z.ai/",
+    "err": null
+   },
+   {
+    "step": "V2-fwd",
+    "action": "FORWARD",
+    "status": "COMPLETED",
+    "url_after": null,
+    "err": null
+   },
+   {
+    "step": "V2-cap2",
+    "action": "CAPTURE",
+    "status": "COMPLETED",
+    "url_after": "https://example.com/",
+    "err": null
+   }
+  ],
+  "nav_v1": "COMPLETED (chat-home -> example.com)"
+ },
+ {
+  "step": "V3",
+  "action": "TYPED_CLICK",
+  "status": "FAILED",
+  "error": "native_semantic_ref_invalid",
+  "result_keys": {}
+ },
+ {
+  "step": "V3-verdict",
+  "rpc_rejects_object_semref": false
+ },
+ {
+  "step": "V4",
+  "action": "GATE_ENABLE_ALL",
+  "status": "FAILED",
+  "error": "owner_gate_override_id_invalid",
+  "result_keys": {}
+ },
+ {
+  "step": "V5-dlstatus",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "last": [
+    "dict",
+    7
+   ],
+   "active": [
+    "NoneType",
+    null
+   ],
+   "schema": [
+    "str",
+    39
+   ],
+   "root_path": [
+    "str",
+    34
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "install_authority": [
+    "bool",
+    null
+   ],
+   "arbitrary_execution": [
+    "bool",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V5-dl",
+  "download_ids": []
+ },
+ {
+  "step": "V5-dlcancel",
+  "status": "SKIPPED",
+  "why": "no active download; DOWNLOAD_FILE broken"
+ },
+ {
+  "step": "V6-newtab",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "url": [
+    "str",
+    18
+   ],
+   "kind": [
+    "str",
+    8
+   ],
+   "role": [
+    "str",
+    4
+   ],
+   "title": [
+    "str",
+    4
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "created_at": [
+    "str",
+    24
+   ],
+   "navigation": [
+    "dict",
+    11
+   ],
+   "load_pending": [
+    "bool",
+    null
+   ],
+   "effect_outcome": [
+    "str",
+    9
+   ],
+   "webcontents_id": [
+    "int",
+    null
+   ],
+   "browser_cell_id": [
+    "str",
+    41
+   ],
+   "automatic_retry_allowed": [
+    "bool",
+    null
+   ],
+   "browser_cell_generation": [
+    "int",
+    null
+   ]
+  },
+  "url": "https://chat.z.ai/"
+ },
+ {
+  "step": "V6-capture",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "url": [
+    "str",
+    18
+   ],
+   "title": [
+    "str",
+    59
+   ],
+   "schema": [
+    "str",
+    39
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "viewport": [
+    "dict",
+    5
+   ],
+   "target_id": [
+    "str",
+    15
+   ],
+   "captured_at": [
+    "str",
+    24
+   ],
+   "text_excerpt": [
+    "str",
+    1476
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "interaction_tree": [
+    "dict",
+    6
+   ],
+   "semantic_targets": [
+    "list",
+    36
+   ],
+   "state_revision_id": [
+    "str",
+    68
+   ],
+   "semantic_refs_issued": [
+    "int",
+    null
+   ],
+   "runtime_main_frame_id": [
+    "str",
+    32
+   ]
+  },
+  "url": "https://chat.z.ai/"
+ },
+ {
+  "step": "V6-focus",
+  "action": "SEMANTIC_FOCUS",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "action": [
+    "str",
+    14
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "target": [
+    "dict",
+    5
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V6-type",
+  "action": "SEMANTIC_TYPE",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "action": [
+    "str",
+    13
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "target": [
+    "dict",
+    5
+   ],
+   "platform": [
+    "str",
+    7
+   ],
+   "effect_state": [
+    "str",
+    23
+   ],
+   "prompt_sha256": [
+    "str",
+    64
+   ],
+   "stop_observed": [
+    "bool",
+    null
+   ],
+   "inserted_chars": [
+    "int",
+    null
+   ],
+   "post_url_sha256": [
+    "str",
+    64
+   ],
+   "prompt_included": [
+    "bool",
+    null
+   ],
+   "replace_gesture": [
+    "str",
+    10
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "composer_cleared": [
+    "bool",
+    null
+   ],
+   "replace_existing": [
+    "bool",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V6-transcript",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "url": [
+    "str",
+    56
+   ],
+   "text": [
+    "str",
+    1214
+   ],
+   "title": [
+    "str",
+    59
+   ],
+   "offset": [
+    "int",
+    null
+   ],
+   "schema": [
+    "str",
+    39
+   ],
+   "tab_id": [
+    "str",
+    40
+   ],
+   "has_more": [
+    "bool",
+    null
+   ],
+   "max_chars": [
+    "int",
+    null
+   ],
+   "target_id": [
+    "str",
+    15
+   ],
+   "captured_at": [
+    "str",
+    24
+   ],
+   "total_chars": [
+    "int",
+    null
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "page_data_authority": [
+    "bool",
+    null
+   ],
+   "semantic_refs_issued": [
+    "int",
+    null
+   ]
+  },
+  "url": "https://chat.z.ai/c/d7dc7126-c9df-494b-9da6-16716f6bbcd8"
+ },
+ {
+  "step": "V6-verdict",
+  "chain_ok": true,
+  "conversation_url": "https://chat.z.ai/c/d7dc7126-c9df-494b-9da6-16716f6bbcd8",
+  "type_status": "COMPLETED",
+  "mech_ok_in_transcript": true
+ },
+ {
+  "step": "V6-cleanup",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "ok": [
+    "bool",
+    null
+   ]
+  }
+ },
+ {
+  "step": "V7",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "error": null,
+  "result_keys": {
+   "schema": [
+    "str",
+    32
+   ],
+   "by_kind": [
+    "dict",
+    3
+   ],
+   "by_role": [
+    "dict",
+    3
+   ],
+   "max_tabs": [
+    "int",
+    null
+   ],
+   "total_tabs": [
+    "int",
+    null
+   ],
+   "fleet_tab_ids": [
+    "list",
+    4
+   ],
+   "total_at_wall": [
+    "bool",
+    null
+   ],
+   "release_signal": [
+    "str",
+    19
+   ],
+   "authority_effect": [
+    "bool",
+    null
+   ],
+   "fleet_at_ceiling": [
+    "bool",
+    null
+   ],
+   "fleet_tab_ceiling": [
+    "int",
+    null
+   ],
+   "user_tab_headroom": [
+    "int",
+    null
+   ],
+   "fleet_backpressure": [
+    "dict",
+    8
+   ],
+   "fleet_tab_headroom": [
+    "int",
+    null
+   ]
+  }
+ }
+]

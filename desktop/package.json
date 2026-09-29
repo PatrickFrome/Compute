@@ -1,0 +1,23 @@
+{
+  "name": "metaengine-desktop",
+  "productName": "MetaEngine",
+  "version": "0.40.0",
+  "private": true,
+  "description": "MetaEngine (ME2 OS) — единая Electron-система: флот чат-агентов + вечный daemon + живой браузер. Умное слияние Electron-оболочки и ME2 в одну систему.",
+  "author": "PatrickFrome",
+  "license": "MIT",
+  "main": "dist/main.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "start": "bun run build && electron .",
+    "dev": "bun run build && electron . --me2-dev",
+    "dist": "bun run build && electron-builder --config electron-builder.yml"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  }
+}

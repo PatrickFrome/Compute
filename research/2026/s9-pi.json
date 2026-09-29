@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://mariozechner.at",
+    "name": "What I learned building an opinionated and minimal coding",
+    "snippet": "Nov 30, 2025 — pi-tui : A minimal terminal UI framework with differential rendering, synchronized output for (almost) flicker-free updates, and components like ... Read more",
+    "host_name": "mariozechner.at",
+    "rank": 0,
+    "date": "Nov 30, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "earendil-works/pi: AI agent toolkit: unified LLM API",
+    "snippet": "This is the home of the Pi agent harness project including our self extensible coding agent . coding agents with real-world tasks, tool use, sessions, use  ...",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://explainx.ai",
+    "name": "Pi Agent Harness: Mario Zechner's Minimal Coding",
+    "snippet": "Jun 19, 2026 — Pi is a minimal terminal coding harness from Mario Zechner (badlogic, creator of libGDX and a long line of developer tools), now documented at ... Read more",
+    "host_name": "explainx.ai",
+    "rank": 2,
+    "date": "Jun 19, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://lucumr.pocoo.org",
+    "name": "Pi: The Minimal Agent Within OpenClaw",
+    "snippet": "Jan 31, 2026 — It is an agent connected to a communication channel of your choice that just runs code. Pi is written by Mario Zechner and. Pi is a coding ...",
+    "host_name": "lucumr.pocoo.org",
+    "rank": 3,
+    "date": "Jan 31, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.wordman.dev",
+    "name": "Code Isn't Free - Mario Zechner on the Hard Truths of",
+    "snippet": "Mario Zechner is the creator of Pi , a minimal extensible coding agent designed to adapt to your workflows instead of forcing you into someone else's harness. He ... Read more",
+    "host_name": "www.wordman.dev",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai.plainenglish.io",
+    "name": "Pi Agent: The 418-Line Agent Loop That Outperforms",
+    "snippet": "Mar 29, 2026 — What Is Pi Agent? Pi Agent (officially pi-coding-agent ) is an open-source, terminal-based AI coding agent created by Mario Zechner (@badlogic). Read more",
+    "host_name": "ai.plainenglish.io",
+    "rank": 5,
+    "date": "Mar 29, 2026",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,365 @@
+# R61 — SOURCE REGISTRY
+
+Раунд: R61 (2026-09-24). Принцип миссии: **только официальные источники** (docs → product pages → engineering/research blog → changelog → announcements → security). Независимые источники не использовались вовсе — весь корпус официальен, поэтому класс «независимая проверка» честно помечен как НЕ ВЫПОЛНЕН (кандидат следующего окна с открытым web_search).
+
+## Каналы (честный журнал)
+
+| Канал | Статус | Использование |
+|---|---|---|
+| z-ai `web_search` | 429 (11-я сессия подряд) | 1 проба, не амплифицирован |
+| z-ai `page_reader` | 429 | 1 проба, не амплифицирован |
+| прямой `curl` к cursor.com | РАБОТАЕТ (HTTP 200, ~0.1с/стр) | основной канал: sitemap + 329 страниц |
+| agent-browser | доступен (не понадобился — SSR-HTML парсится bs4) | резерв |
+
+## Методика
+
+1. `curl https://cursor.com/docs/sitemap.xml` (338 loc) + `https://cursor.com/sitemap.xml` (192 loc).
+2. Скачивание 329 страниц (6 потоков, `--compressed`), извлечение текста bs4 (article/main), корпус `/tmp/r61-corpus/` (3.5MB). Скрипт: `tool-results/r61/fetch-corpus.py` — корпус воспроизводим одной командой.
+3. 7 параллельных исследовательских треков (A,B,C1,C2,D,E1,E2) по корпусу → 360 capabilities с цитатами → дедупликация в матрицу 138 строк.
+
+## Уровни доверия
+
+| Тип | Доверие | Примечание |
+|---|---|---|
+| docs.cursor.com (документация) | HIGH | прямые формулировки продукта |
+| cursor.com/blog (research/engineering) | HIGH для фактов о себе, MED для внешних сравнений | self-reported |
+| cursor.com/changelog | HIGH | датированная история |
+| cursor.com/security | HIGH | политика безопасности |
+| Отсутствие страницы ≠ отсутствие capability | — | corpus-negative фиксируется как UNKNOWN/SUPERIOR-кандидат, не как доказательство отсутствия у Cursor |
+
+## Полный список источников — docs (207 URL)
+
+- https://cursor.com/docs/account/enterprise/billing-groups
+- https://cursor.com/docs/account/enterprise/cyber-safeguards
+- https://cursor.com/docs/account/enterprise/service-accounts
+- https://cursor.com/docs/account/organizations/organization-admin-api
+- https://cursor.com/docs/account/pricing/request-based-legacy
+- https://cursor.com/docs/account/regions
+- https://cursor.com/docs/account/teams/admin-api
+- https://cursor.com/docs/account/teams/ai-code-tracking-api
+- https://cursor.com/docs/account/teams/analytics
+- https://cursor.com/docs/account/teams/analytics-api
+- https://cursor.com/docs/account/teams/dashboard
+- https://cursor.com/docs/account/teams/members
+- https://cursor.com/docs/account/teams/pricing
+- https://cursor.com/docs/account/teams/scim
+- https://cursor.com/docs/account/teams/setup
+- https://cursor.com/docs/account/teams/sso
+- https://cursor.com/docs/account/update-access
+- https://cursor.com/docs/agent/agent-review
+- https://cursor.com/docs/agent/agents-window
+- https://cursor.com/docs/agent/debug-mode
+- https://cursor.com/docs/agent/design-mode
+- https://cursor.com/docs/agent/overview
+- https://cursor.com/docs/agent/plan-mode
+- https://cursor.com/docs/agent/projects
+- https://cursor.com/docs/agent/prompting
+- https://cursor.com/docs/agent/security
+- https://cursor.com/docs/agent/security/run-modes
+- https://cursor.com/docs/agent/tools/browser
+- https://cursor.com/docs/agent/tools/canvas
+- https://cursor.com/docs/agent/tools/search
+- https://cursor.com/docs/agent/tools/terminal
+- https://cursor.com/docs/api/origin/changelog
+- https://cursor.com/docs/api/origin/grants-api
+- https://cursor.com/docs/api/origin/migrations
+- https://cursor.com/docs/api/origin
+- https://cursor.com/docs/api
+- https://cursor.com/docs/approval-agents
+- https://cursor.com/docs/bugbot
+- https://cursor.com/docs/cli/acp
+- https://cursor.com/docs/cli/changelog
+- https://cursor.com/docs/cli/github-actions
+- https://cursor.com/docs/cli/headless
+- https://cursor.com/docs/cli/installation
+- https://cursor.com/docs/cli/mcp
+- https://cursor.com/docs/cli/overview
+- https://cursor.com/docs/cli/reference/authentication
+- https://cursor.com/docs/cli/reference/configuration
+- https://cursor.com/docs/cli/reference/output-format
+- https://cursor.com/docs/cli/reference/parameters
+- https://cursor.com/docs/cli/reference/permissions
+- https://cursor.com/docs/cli/reference/slash-commands
+- https://cursor.com/docs/cli/reference/terminal-setup
+- https://cursor.com/docs/cli/shell-mode
+- https://cursor.com/docs/cli/using
+- https://cursor.com/docs/cloud-agent/api/endpoints
+- https://cursor.com/docs/cloud-agent/api/webhooks
+- https://cursor.com/docs/cloud-agent/automations
+- https://cursor.com/docs/cloud-agent/best-practices
+- https://cursor.com/docs/cloud-agent/builds
+- https://cursor.com/docs/cloud-agent/capabilities
+- https://cursor.com/docs/cloud-agent/identity
+- https://cursor.com/docs/cloud-agent/metadata
+- https://cursor.com/docs/cloud-agent/mobile
+- https://cursor.com/docs/cloud-agent
+- https://cursor.com/docs/cloud-agent/private-connectivity
+- https://cursor.com/docs/cloud-agent/security
+- https://cursor.com/docs/cloud-agent/security-network
+- https://cursor.com/docs/cloud-agent/self-hosted/choose-runtime
+- https://cursor.com/docs/cloud-agent/self-hosted/computer-use
+- https://cursor.com/docs/cloud-agent/self-hosted/integrations
+- https://cursor.com/docs/cloud-agent/self-hosted/my-machines
+- https://cursor.com/docs/cloud-agent/self-hosted
+- https://cursor.com/docs/cloud-agent/self-hosted/pool
+- https://cursor.com/docs/cloud-agent/settings
+- https://cursor.com/docs/cloud-agent/setup
+- https://cursor.com/docs/configuration/migrations/vscode
+- https://cursor.com/docs/configuration/worktrees
+- https://cursor.com/docs/cursor-router
+- https://cursor.com/docs/customize-cursor
+- https://cursor.com/docs/customizing/aws-bedrock
+- https://cursor.com/docs/enterprise/admin-setup-guide
+- https://cursor.com/docs/enterprise/baa
+- https://cursor.com/docs/enterprise/compliance-and-monitoring
+- https://cursor.com/docs/enterprise/deployment-patterns
+- https://cursor.com/docs/enterprise/endpoint-security
+- https://cursor.com/docs/enterprise/identity-and-access-management
+- https://cursor.com/docs/enterprise/llm-safety-and-controls
+- https://cursor.com/docs/enterprise/model-and-integration-management
+- https://cursor.com/docs/enterprise/network-configuration
+- https://cursor.com/docs/enterprise/opentelemetry-export
+- https://cursor.com/docs/enterprise/opentelemetry-export/wire
+- https://cursor.com/docs/enterprise/organization-groups
+- https://cursor.com/docs/enterprise/organizations
+- https://cursor.com/docs/enterprise
+- https://cursor.com/docs/enterprise/pooled-usage
+- https://cursor.com/docs/enterprise/privacy-and-data-governance
+- https://cursor.com/docs/enterprise/security-hardening
+- https://cursor.com/docs/evals
+- https://cursor.com/docs/extension-api
+- https://cursor.com/docs/get-started/quickstart
+- https://cursor.com/docs/grok-bot/computers
+- https://cursor.com/docs/grok-bot/get-started
+- https://cursor.com/docs/grok-bot/identity
+- https://cursor.com/docs/grok-bot
+- https://cursor.com/docs/grok-bot/private-networks
+- https://cursor.com/docs/grok-bot/proxies
+- https://cursor.com/docs/grok-bot/security
+- https://cursor.com/docs/grok-bot/security-faq
+- https://cursor.com/docs/grok-bot/settings
+- https://cursor.com/docs/grok-bot/teams
+- https://cursor.com/docs/grok-bot/use-cases
+- https://cursor.com/docs/grok-bot/work
+- https://cursor.com/docs/hooks
+- https://cursor.com/docs/integrations/azure-devops
+- https://cursor.com/docs/integrations/bitbucket
+- https://cursor.com/docs/integrations/cursor-blame
+- https://cursor.com/docs/integrations/github
+- https://cursor.com/docs/integrations/gitlab
+- https://cursor.com/docs/integrations/jetbrains
+- https://cursor.com/docs/integrations/jira
+- https://cursor.com/docs/integrations/linear
+- https://cursor.com/docs/integrations/microsoft-teams
+- https://cursor.com/docs/integrations/notion
+- https://cursor.com/docs/integrations/slack
+- https://cursor.com/docs/integrations/xcode
+- https://cursor.com/docs/mcp/install-links
+- https://cursor.com/docs/mcp
+- https://cursor.com/docs/models/claude-4-5-haiku
+- https://cursor.com/docs/models/claude-4-5-sonnet
+- https://cursor.com/docs/models/claude-4-6-sonnet
+- https://cursor.com/docs/models/claude-4-sonnet
+- https://cursor.com/docs/models/claude-4-sonnet-1m
+- https://cursor.com/docs/models/claude-fable-5
+- https://cursor.com/docs/models/claude-fable-5-1
+- https://cursor.com/docs/models/claude-opus-4-5
+- https://cursor.com/docs/models/claude-opus-4-6
+- https://cursor.com/docs/models/claude-opus-4-7
+- https://cursor.com/docs/models/claude-opus-4-7-fast
+- https://cursor.com/docs/models/claude-opus-4-8
+- https://cursor.com/docs/models/claude-opus-5
+- https://cursor.com/docs/models/claude-opus-5-5
+- https://cursor.com/docs/models/claude-sonnet-5
+- https://cursor.com/docs/models/cursor-composer-1
+- https://cursor.com/docs/models/cursor-composer-2-5
+- https://cursor.com/docs/models/gemini-2-5-flash
+- https://cursor.com/docs/models/gemini-3-1-pro
+- https://cursor.com/docs/models/gemini-3-5-flash
+- https://cursor.com/docs/models/gemini-3-6-flash
+- https://cursor.com/docs/models/gemini-3-7-flash
+- https://cursor.com/docs/models/gemini-3-8-flash
+- https://cursor.com/docs/models/gemini-3-flash
+- https://cursor.com/docs/models/gemini-3-pro
+- https://cursor.com/docs/models/gemini-3-pro-image-preview
+- https://cursor.com/docs/models/glm-5-2
+- https://cursor.com/docs/models/gpt-5
+- https://cursor.com/docs/models/gpt-5-1-codex
+- https://cursor.com/docs/models/gpt-5-1-codex-max
+- https://cursor.com/docs/models/gpt-5-1-codex-mini
+- https://cursor.com/docs/models/gpt-5-2
+- https://cursor.com/docs/models/gpt-5-2-codex
+- https://cursor.com/docs/models/gpt-5-3-codex
+- https://cursor.com/docs/models/gpt-5-4
+- https://cursor.com/docs/models/gpt-5-4-mini
+- https://cursor.com/docs/models/gpt-5-4-nano
+- https://cursor.com/docs/models/gpt-5-5
+- https://cursor.com/docs/models/gpt-5-6-luna
+- https://cursor.com/docs/models/gpt-5-6-sol
+- https://cursor.com/docs/models/gpt-5-6-terra
+- https://cursor.com/docs/models/gpt-5-codex
+- https://cursor.com/docs/models/gpt-5-fast
+- https://cursor.com/docs/models/gpt-5-mini
+- https://cursor.com/docs/models/grok-4-5
+- https://cursor.com/docs/models/grok-4-6
+- https://cursor.com/docs/models/grok-4-7
+- https://cursor.com/docs/models/kimi-k2-7-code
+- https://cursor.com/docs/models/kimi-k3
+- https://cursor.com/docs/models/muse-spark-1-3
+- https://cursor.com/docs/models-and-pricing
+- https://cursor.com/docs/origin/browse
+- https://cursor.com/docs/origin/cli
+- https://cursor.com/docs/origin/cli/reference/commands
+- https://cursor.com/docs/origin/cli/reference/pull-requests
+- https://cursor.com/docs/origin/clonekit-ci
+- https://cursor.com/docs/origin/codebase-settings
+- https://cursor.com/docs/origin/create-repository
+- https://cursor.com/docs/origin/git
+- https://cursor.com/docs/origin/integrations
+- https://cursor.com/docs/origin/mirror-github
+- https://cursor.com/docs/origin
+- https://cursor.com/docs/origin/pull-requests
+- https://cursor.com/docs/origin/settings
+- https://cursor.com/docs/plugins
+- https://cursor.com/docs/reference/deeplinks
+- https://cursor.com/docs/reference/ignore-file
+- https://cursor.com/docs/reference/keyboard-shortcuts
+- https://cursor.com/docs/reference/permissions
+- https://cursor.com/docs/reference/plugins
+- https://cursor.com/docs/reference/sandbox
+- https://cursor.com/docs/reference/third-party-hooks
+- https://cursor.com/docs/rules
+- https://cursor.com/docs/sdk/bridge
+- https://cursor.com/docs/sdk/changelog
+- https://cursor.com/docs/sdk/python
+- https://cursor.com/docs/sdk/typescript
+- https://cursor.com/docs/security-agents
+- https://cursor.com/docs/skills
+- https://cursor.com/docs/subagents
+
+## Полный список источников — blog/security/changelog (122 URL)
+
+- https://cursor.com/blog/joining-spacex
+- https://cursor.com/blog/firetiger
+- https://cursor.com/blog/aiuc-1
+- https://cursor.com/blog/builds
+- https://cursor.com/blog/grok-4-6
+- https://cursor.com/blog/how-cursor-router-works
+- https://cursor.com/blog/mixture-of-kittens
+- https://cursor.com/blog/cloud-agent-environment
+- https://cursor.com/blog/cursor-start-india
+- https://cursor.com/blog/vercel
+- https://cursor.com/blog/router
+- https://cursor.com/blog/agent-swarm-model-economics
+- https://cursor.com/blog/grok-4-5-model-card
+- https://cursor.com/blog/grok-4-5
+- https://cursor.com/blog/cfo-council
+- https://cursor.com/blog/ios-mobile-app
+- https://cursor.com/blog/notion
+- https://cursor.com/blog/reward-hacking-coding-benchmarks
+- https://cursor.com/blog/coinbase
+- https://cursor.com/blog/wayfair
+- https://cursor.com/blog/agent-autonomy-auto-review
+- https://cursor.com/blog/bugbot-updates-june-2026
+- https://cursor.com/blog/design-mode
+- https://cursor.com/blog/cursor-leads-gartner-mq-2026
+- https://cursor.com/blog/teams-pricing-june-2026
+- https://cursor.com/blog/may-2026-bugbot-changes
+- https://cursor.com/blog/cursor-3
+- https://cursor.com/blog/composer-2-5
+- https://cursor.com/blog/composer-2-technical-report
+- https://cursor.com/blog/multi-agent-kernels
+- https://cursor.com/blog/real-time-rl-for-composer
+- https://cursor.com/blog/spacex-model-training
+- https://cursor.com/blog/continually-improving-agent-harness
+- https://cursor.com/blog/typescript-sdk
+- https://cursor.com/blog/warp-decode
+- https://cursor.com/blog/canvas
+- https://cursor.com/blog/organizations
+- https://cursor.com/blog/cloud-agent-development-environments
+- https://cursor.com/blog/cloud-agent-lessons
+- https://cursor.com/blog/bugbot-learning
+- https://cursor.com/blog/bootstrapping-composer-with-autoinstall
+- https://cursor.com/blog/app-stability
+- https://cursor.com/blog/better-models-ambitious-work
+- https://cursor.com/blog/faire
+- https://cursor.com/blog/paypal
+- https://cursor.com/blog/nab
+- https://cursor.com/blog/amplitude
+- https://cursor.com/blog/self-hosted-cloud-agents
+- https://cursor.com/blog/fast-regex-search
+- https://cursor.com/blog/composer-2
+- https://cursor.com/blog/money-forward
+- https://cursor.com/blog/self-summarization
+- https://cursor.com/blog/security-agents
+- https://cursor.com/blog/cursorbench
+- https://cursor.com/blog/new-plugins
+- https://cursor.com/blog/automations
+- https://cursor.com/blog/jetbrains-acp
+- https://cursor.com/blog/cursor-support
+- https://cursor.com/blog/planetscale
+- https://cursor.com/blog/third-era
+- https://cursor.com/blog/bugbot-autofix
+- https://cursor.com/blog/agent-computer-use
+- https://cursor.com/blog/agent-sandboxing
+- https://cursor.com/blog/stripe
+- https://cursor.com/blog/marketplace
+- https://cursor.com/blog/box
+- https://cursor.com/blog/long-running-agents
+- https://cursor.com/blog/increased-agent-usage
+- https://cursor.com/blog/composer-1-5
+- https://cursor.com/blog/nvidia
+- https://cursor.com/blog/self-driving-codebases
+- https://cursor.com/blog/secure-codebase-indexing
+- https://cursor.com/blog/dropbox
+- https://cursor.com/blog/salesforce
+- https://cursor.com/blog/building-bugbot
+- https://cursor.com/blog/scaling-agents
+- https://cursor.com/blog/agent-best-practices
+- https://cursor.com/blog/dynamic-context-discovery
+- https://cursor.com/blog/hooks-partners
+- https://cursor.com/blog/graphite
+- https://cursor.com/blog/browser-visual-editor
+- https://cursor.com/blog/debug-mode
+- https://cursor.com/blog/codex-model-harness
+- https://cursor.com/blog/series-d
+- https://cursor.com/blog/productivity
+- https://cursor.com/blog/semsearch
+- https://cursor.com/blog/enterprise
+- https://cursor.com/blog/cloud-agents
+- https://cursor.com/blog/composer
+- https://cursor.com/blog/2-0
+- https://cursor.com/blog/plan-mode
+- https://cursor.com/blog/java
+- https://cursor.com/blog/tab-rl
+- https://cursor.com/blog/kernels
+- https://cursor.com/blog/linear
+- https://cursor.com/blog/aug-2025-pricing
+- https://cursor.com/blog/cli
+- https://cursor.com/blog/gpt-5
+- https://cursor.com/blog/bugbot-out-of-beta
+- https://cursor.com/blog/june-2025-pricing
+- https://cursor.com/blog/agent-web
+- https://cursor.com/blog/new-tier
+- https://cursor.com/blog/series-c
+- https://cursor.com/blog/team
+- https://cursor.com/blog/series-b
+- https://cursor.com/blog/tab-update
+- https://cursor.com/blog/cpc
+- https://cursor.com/blog/supermaven
+- https://cursor.com/blog/shadow-workspace
+- https://cursor.com/blog/series-a
+- https://cursor.com/blog/problems-2024
+- https://cursor.com/blog/instant-apply
+- https://cursor.com/blog/problems-2023
+- https://cursor.com/blog/llama-inference
+- https://cursor.com/blog/prompt-design
+- https://cursor.com/security
+- https://cursor.com/changelog
+- https://cursor.com/blog/topic/research
+- https://cursor.com/blog/topic/product
+- https://cursor.com/blog/research/multi-agent-kernels
+- https://cursor.com/blog/price-performance
+- https://cursor.com/blog/long-context-retrieval
+
+Итого источников в корпусе: **329**. Дата фиксации: 2026-09-24T01:45:52Z. Всё, что помечено в треках как «fetch 2026-09-24», относится к этому корпусу.

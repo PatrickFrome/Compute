@@ -1,0 +1,6 @@
+{
+  "qa": "r30 APPROVALS block crop 1440px",
+  "verdict": "PASS 5/5",
+  "model": "glm-5v-turbo",
+  "content": "1) Да, заголовок **APPROVALS** присутствует в левом верхнем углу панели.\n2) Значения чипов: **pending 1**, **used 2**.\n3) Список строк политик:\n   * **authority_effect** (бейдж: gate) — текст справа: *selfupdate apply*\n   * **fence_clear** (бейдж: gate) — текст справа: *снять fence*\n   * **rsi_adopt** (бейдж: gate) — текст справа: *RSI adopt*\n4) Да, заявка в списке есть (**authority_effect**: *Self-update daemon (apply) – смена живого кода*), и присутствуют кнопки **approve** и **deny**.\n5) Дефекты не обнаружены: нет видимых обрезков текста, наложений элементов или вылезания содержимого за границы контейнера."
+}

@@ -1,0 +1,130 @@
+[
+ {
+  "step": "R0-attribution",
+  "recent40_total": 40,
+  "issued_by_counts": {
+   "zai-419718-1307": 7,
+   "zai-419203-1300": 9,
+   "zai-419203-1240": 19,
+   "zai-419718-1231": 5
+  },
+  "others_sample": []
+ },
+ {
+  "step": "R1-transcript",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "R1-verdict",
+  "type_status": "COMPLETED",
+  "total_chars": 34786,
+  "toolreq_count": 6,
+  "reply_zone_chars": 234,
+  "ack_in_reply_zone": false,
+  "gate_words_in_zone": [],
+  "mybrief_present": true,
+  "verdict": "SILENT",
+  "reply_zone_head": "TOOL_REQUEST_V1\nrequest_id=adac6557-systel-01\naction=SYSTEM_TELEMETRY\ntab_id=tab_bc085d57-4e9d-4395-9e63-90afd921bdfa\npayload_json={\"scope\":\"full\",\"note\":\"fresh digest to anchor eval-roadmap baseline; result consumed next generation\"}"
+ },
+ {
+  "step": "M1-newtab",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "M2-navigate",
+  "action": "NAVIGATE",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "M3-capture-pre",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "M3-link",
+  "role": "link",
+  "accessible_name": "None",
+  "ref_is_object": true
+ },
+ {
+  "step": "M4-typed-click",
+  "action": "TYPED_CLICK",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "M5-capture-post",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "M-verdict",
+  "click_status": "COMPLETED",
+  "url_pre": "https://www.example.com/",
+  "url_post": "https://www.example.com/",
+  "effect_iana": false,
+  "TYPED_CLICK_STATIC": "RPC-OK-NO-EFFECT",
+  "err": null
+ },
+ {
+  "step": "M6-download-status",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  },
+  "error": null
+ },
+ {
+  "step": "M9-cleanup",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "M10-census",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "result": null,
+  "error": null
+ },
+ {
+  "step": "final",
+  "tab_count": 0,
+  "fleet_intact": 0
+ }
+]

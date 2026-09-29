@@ -1,0 +1,61 @@
+[
+ {
+  "step": "F1-newtab",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "latency_s": 34.0,
+  "error": null
+ },
+ {
+  "step": "F2-capture-pre",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "latency_s": 2.3,
+  "error": null
+ },
+ {
+  "step": "F2-pick",
+  "name": "Select a model",
+  "count_pre": 37
+ },
+ {
+  "step": "F3-typed-click-fast",
+  "action": "TYPED_CLICK",
+  "status": "COMPLETED",
+  "latency_s": 4.5,
+  "error": null
+ },
+ {
+  "step": "F4-capture-post",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "latency_s": 2.3,
+  "error": null
+ },
+ {
+  "step": "F-verdict",
+  "click_status": "COMPLETED",
+  "url_pre": "https://chat.z.ai/",
+  "url_post": "https://chat.z.ai/",
+  "cnt_pre": 37,
+  "cnt_post": 37,
+  "new_targets": [],
+  "effect": false,
+  "EFFECT_PLANE_INAPP_FAST": "IN-APP-CLICK-NO-EFFECT",
+  "err": null
+ },
+ {
+  "step": "F5-escape",
+  "action": "PRESS_KEY",
+  "status": "FAILED",
+  "latency_s": 4.6,
+  "error": "postcondition_not_confirmed:AMBIGUOUS"
+ },
+ {
+  "step": "F9-cleanup",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "latency_s": 6.8,
+  "error": null
+ }
+]

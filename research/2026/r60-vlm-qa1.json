@@ -1,0 +1,17 @@
+{
+  "schema": "me2.vlm-qa.v1",
+  "round": "R60",
+  "ran_at": "2026-09-24T00:38:30.136Z",
+  "shots": [
+    {
+      "file": "download/r60-workbench.png",
+      "ok": false,
+      "error": "Error: API request failed with status 429: {\"error\":\"Too many requests, please try again later\"}"
+    },
+    {
+      "file": "download/r60-workbench-mobile.png",
+      "ok": false,
+      "error": "Error: API request failed with status 429: {\"error\":\"Too many requests, please try again later\"}"
+    }
+  ]
+}

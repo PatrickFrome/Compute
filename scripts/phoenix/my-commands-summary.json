@@ -1,0 +1,274 @@
+[
+ {
+  "action": "POLL",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:09:55",
+  "completed_at": "19:09:58"
+ },
+ {
+  "action": "CONTROL_CAPABILITIES",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:12",
+  "completed_at": "19:12:15"
+ },
+ {
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:16",
+  "completed_at": "19:12:19"
+ },
+ {
+  "action": "SYSTEM_TELEMETRY",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:20",
+  "completed_at": "19:12:23"
+ },
+ {
+  "action": "PROCESS_CENSUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:23",
+  "completed_at": "19:12:29"
+ },
+ {
+  "action": "GATE_STATUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:30",
+  "completed_at": "19:12:33"
+ },
+ {
+  "action": "SELF_UPDATE_STATUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:34",
+  "completed_at": "19:12:37"
+ },
+ {
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:38",
+  "completed_at": "19:12:39"
+ },
+ {
+  "action": "DEV_PLANE_STATUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:41",
+  "completed_at": "19:12:44"
+ },
+ {
+  "action": "FLEET_STATUS",
+  "status": "FAILED",
+  "error": "supervisor_action_budget_exceeded",
+  "agents_in_receipt": null,
+  "issued_at": "19:12:45",
+  "completed_at": "19:12:46"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:13:35",
+  "completed_at": "19:13:37"
+ },
+ {
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:13:38",
+  "completed_at": "19:13:41"
+ },
+ {
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:15:44",
+  "completed_at": "19:16:03"
+ },
+ {
+  "action": "FLEET_RECONCILE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": 4,
+  "issued_at": "19:16:04",
+  "completed_at": "19:16:06"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:17:01",
+  "completed_at": "19:17:04"
+ },
+ {
+  "action": "SELECT_TAB",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:17:04",
+  "completed_at": "19:17:07"
+ },
+ {
+  "action": "SEMANTIC_FOCUS",
+  "status": "FAILED",
+  "error": "native_semantic_ref_stale",
+  "agents_in_receipt": null,
+  "issued_at": "19:17:24",
+  "completed_at": "19:17:43"
+ },
+ {
+  "action": "SEMANTIC_TYPE",
+  "status": "FAILED",
+  "error": "native_semantic_ref_stale",
+  "agents_in_receipt": null,
+  "issued_at": "19:17:44",
+  "completed_at": "19:17:49"
+ },
+ {
+  "action": "PRESS_KEY",
+  "status": "FAILED",
+  "error": "postcondition_not_confirmed:AMBIGUOUS",
+  "agents_in_receipt": null,
+  "issued_at": "19:18:04",
+  "completed_at": "19:18:07"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:18:08",
+  "completed_at": "19:18:10"
+ },
+ {
+  "action": "NAVIGATE",
+  "status": "FAILED",
+  "error": "postcondition_not_confirmed:AMBIGUOUS",
+  "agents_in_receipt": null,
+  "issued_at": "19:18:24",
+  "completed_at": "19:18:44"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:21:18",
+  "completed_at": "19:21:20"
+ },
+ {
+  "action": "SEMANTIC_TYPE",
+  "status": "FAILED",
+  "error": "native_semantic_type_replace_unverified",
+  "agents_in_receipt": null,
+  "issued_at": "19:21:22",
+  "completed_at": "19:21:30"
+ },
+ {
+  "action": "PRESS_KEY",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:21:42",
+  "completed_at": "19:21:45"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:21:45",
+  "completed_at": "19:21:49"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:23:11",
+  "completed_at": "19:23:14"
+ },
+ {
+  "action": "SEMANTIC_TYPE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:23:15",
+  "completed_at": "19:23:20"
+ },
+ {
+  "action": "PRESS_KEY",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:23:35",
+  "completed_at": "19:23:38"
+ },
+ {
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:23:38",
+  "completed_at": "19:23:41"
+ },
+ {
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": null,
+  "issued_at": "19:24:21",
+  "completed_at": "19:24:23"
+ },
+ {
+  "action": "FLEET_STATUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": 4,
+  "issued_at": "19:24:59",
+  "completed_at": "19:25:03"
+ },
+ {
+  "action": "FLEET_RECONCILE",
+  "status": "FAILED",
+  "error": "postcondition_not_confirmed:NO_EFFECT_PROVEN",
+  "agents_in_receipt": 4,
+  "issued_at": "19:25:06",
+  "completed_at": "19:25:07"
+ },
+ {
+  "action": "FLEET_STATUS",
+  "status": "COMPLETED",
+  "error": "",
+  "agents_in_receipt": 4,
+  "issued_at": "19:25:09",
+  "completed_at": "19:25:12"
+ },
+ {
+  "action": "SELF_UPDATE_CHECK",
+  "status": "FAILED",
+  "error": "postcondition_not_confirmed:NO_EFFECT_PROVEN",
+  "agents_in_receipt": null,
+  "issued_at": "19:25:26",
+  "completed_at": "19:25:34"
+ }
+]

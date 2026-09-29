@@ -1,0 +1,55 @@
+# divergence-list-batch0 (regenerated 2026-09-28 ~13:17 +08, Job 419718)
+# basis: git diff --name-status 73c5021c (capsule SECURITY-FIX head) .. main HEAD 83598aa4
+# result: 49 paths = 46 A (main-only additions) + 3 M (both-modified) + 0 D; tracked trees 2552(cap) <-> 2598(main)
+# earlier measurement '83/222' (11:00 cycle) — basis differed; convergence improved or basis artifact; current numbers authoritative
+# C-class resolutions: all 3 M -> take me2-os (CONTEXT-CURRENT=live digest; gh.sh=fix on main; worklog=canonical append-only)
+# A-class: one-way propagation main->capsule when capsule refresh green-lit (operator gate per plan §5)
+M	CONTEXT-CURRENT.md
+A	scripts/me2-r28/c3_reviewer_skeleton.py
+A	scripts/me2-r28/divergence-merge-plan-83.md
+A	scripts/me2-r28/policy_engine_mvp.py
+A	scripts/phoenix/browser-test-results-419718-telemetry.json
+A	scripts/phoenix/browser-test-results-419718-transcripts.json
+A	scripts/phoenix/browser-test-results-mt419203-VERDICT.json
+A	scripts/phoenix/browser-test-results-mt419203-delta1300.json
+A	scripts/phoenix/browser-test-results-mt419203-verify.json
+A	scripts/phoenix/browser-test-results-mt419203.json
+A	scripts/phoenix/browser-test-results-mt419203.json.ctx
+A	scripts/phoenix/browser-test-results-tr1046-d.json
+A	scripts/phoenix/browser-test-results-tr1046-e.json
+A	scripts/phoenix/browser-test-results-tr1046-f.json
+A	scripts/phoenix/browser-test-results-tr1046-impl-retry.json
+A	scripts/phoenix/browser-test-results-tr1046-rbcheck.json
+A	scripts/phoenix/browser-test-results-tr1046-rbcheck2.json
+A	scripts/phoenix/browser-test-results-tr1046-verify.json
+A	scripts/phoenix/browser-test-results-tr1215-dispatch.json
+A	scripts/phoenix/browser-test-results-tr1215-readback.json
+A	scripts/phoenix/browser-test-results-trfull-1231-readback.json
+A	scripts/phoenix/browser-test-results-trfull-1231.json
+A	scripts/phoenix/browser-test-results-trfull-1307-readback.json
+A	scripts/phoenix/browser-test-results-trremind-1307.json
+A	scripts/phoenix/dispatch-toolresult-1046.py
+A	scripts/phoenix/dispatch-toolresult-1215.py
+A	scripts/phoenix/dispatch-toolresult-full-1231.py
+A	scripts/phoenix/mt-419203-c2.py
+A	scripts/phoenix/mt-419203-c3.py
+A	scripts/phoenix/mt-419203-c4.py
+A	scripts/phoenix/mt-419203-c5.py
+A	scripts/phoenix/mt-419203-c6.py
+A	scripts/phoenix/mt-419203-c7.py
+A	scripts/phoenix/mt-419203-c8.py
+A	scripts/phoenix/mt-419203-delta-1300.py
+A	scripts/phoenix/mt-419203-verify.py
+A	scripts/phoenix/mt-419203.py
+A	scripts/phoenix/mt-419203c3.py
+A	scripts/phoenix/mt-419203c5.py
+A	scripts/phoenix/persist-verdicts-1046.py
+A	scripts/phoenix/r419718-1307-reping.py
+A	scripts/phoenix/r419718-1307-researcher-readback.py
+A	scripts/phoenix/readback-trfull-1231.py
+A	scripts/phoenix/seed-tokens-1044.py
+A	scripts/phoenix/tr-full-dump-1307.txt
+A	scripts/phoenix/verify-acks-1046.py
+A	scripts/swarm/agent-harness-v1.py
+M	scripts/swarm/gh.sh
+M	worklog.md

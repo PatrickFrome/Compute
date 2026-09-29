@@ -1,0 +1,438 @@
+{
+ "generated": "2026-09-28T04:15:01+00:00",
+ "build": "0.7.0-dev.36336130139.1",
+ "verdicts": [
+  {
+   "action": "ARM",
+   "verdict": "WORKS",
+   "ok": 2,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "DISARM",
+   "verdict": "BROKEN",
+   "ok": 0,
+   "fail": 0,
+   "enqueue_err": 1,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "SET_SUPERVISOR_MODE",
+   "verdict": "FLAKY",
+   "ok": 2,
+   "fail": 0,
+   "enqueue_err": 2,
+   "other": 1,
+   "last_errors": ""
+  },
+  {
+   "action": "DEV_PLANE_CAPABILITIES",
+   "verdict": "WORKS",
+   "ok": 3,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "DEV_PLANE_HEALTH",
+   "verdict": "WORKS",
+   "ok": 4,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "DEV_PLANE_PROCESS_METRICS",
+   "verdict": "WORKS",
+   "ok": 1,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "DEV_PLANE_REPO_HEAD",
+   "verdict": "FLAKY",
+   "ok": 3,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "supervisor_action_budget_exceeded"
+  },
+  {
+   "action": "DEV_PLANE_STATUS",
+   "verdict": "WORKS",
+   "ok": 3,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "DOWNLOAD_CANCEL",
+   "verdict": "UNTESTED",
+   "ok": 0,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "DOWNLOAD_FILE",
+   "verdict": "FLAKY",
+   "ok": 1,
+   "fail": 9,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "verified_download_filename_invalid; verified_download_interrupted; verified_download_sha25"
+  },
+  {
+   "action": "DOWNLOAD_STATUS",
+   "verdict": "WORKS",
+   "ok": 6,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 2,
+   "last_errors": ""
+  },
+  {
+   "action": "FLEET_RECONCILE",
+   "verdict": "FLAKY",
+   "ok": 6,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "postcondition_not_confirmed:NO_EFFECT_PROVEN; supervisor_action_budget_exceeded"
+  },
+  {
+   "action": "FLEET_SET_PROFILE",
+   "verdict": "FLAKY",
+   "ok": 4,
+   "fail": 5,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "fleet_profile_invalid"
+  },
+  {
+   "action": "FLEET_STATUS",
+   "verdict": "WORKS",
+   "ok": 37,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "BACK",
+   "verdict": "FLAKY",
+   "ok": 2,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "postcondition_not_confirmed:NO_EFFECT_PROVEN"
+  },
+  {
+   "action": "FORWARD",
+   "verdict": "FLAKY",
+   "ok": 2,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "postcondition_not_confirmed:NO_EFFECT_PROVEN"
+  },
+  {
+   "action": "NAVIGATE",
+   "verdict": "FLAKY",
+   "ok": 12,
+   "fail": 5,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "postcondition_not_confirmed:AMBIGUOUS"
+  },
+  {
+   "action": "RELOAD",
+   "verdict": "WORKS",
+   "ok": 7,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "CAPTURE",
+   "verdict": "FLAKY",
+   "ok": 156,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 2,
+   "last_errors": "native_supervisor_target_view_unavailable"
+  },
+  {
+   "action": "CAPTURE_VIEW",
+   "verdict": "WORKS",
+   "ok": 3,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "CONTROL_CAPABILITIES",
+   "verdict": "WORKS",
+   "ok": 5,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "CONTROL_LATENCY_STATUS",
+   "verdict": "WORKS",
+   "ok": 5,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "POLL",
+   "verdict": "WORKS",
+   "ok": 2,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "PROCESS_CENSUS",
+   "verdict": "WORKS",
+   "ok": 3,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "PROCESS_EVENTS",
+   "verdict": "WORKS",
+   "ok": 2,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "READ_TRANSCRIPT",
+   "verdict": "FLAKY",
+   "ok": 69,
+   "fail": 4,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "supervisor_action_budget_exceeded"
+  },
+  {
+   "action": "SEMANTIC_CENSUS",
+   "verdict": "FLAKY",
+   "ok": 3,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "supervisor_action_budget_exceeded"
+  },
+  {
+   "action": "SEMANTIC_EVENTS",
+   "verdict": "FLAKY",
+   "ok": 3,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "supervisor_action_budget_exceeded"
+  },
+  {
+   "action": "SYSTEM_TELEMETRY",
+   "verdict": "WORKS",
+   "ok": 4,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "TAB_CENSUS",
+   "verdict": "WORKS",
+   "ok": 17,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 1,
+   "last_errors": ""
+  },
+  {
+   "action": "TAB_TELEMETRY",
+   "verdict": "WORKS",
+   "ok": 2,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "GATE_DISABLE",
+   "verdict": "BROKEN",
+   "ok": 0,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "owner_gate_override_id_invalid"
+  },
+  {
+   "action": "GATE_DISABLE_ALL",
+   "verdict": "BROKEN",
+   "ok": 0,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "owner_gate_override_id_invalid; owner_gate_reason_invalid"
+  },
+  {
+   "action": "GATE_ENABLE",
+   "verdict": "BROKEN",
+   "ok": 0,
+   "fail": 3,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "owner_gate_override_id_invalid"
+  },
+  {
+   "action": "GATE_ENABLE_ALL",
+   "verdict": "UNTESTED",
+   "ok": 0,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "GATE_STATUS",
+   "verdict": "WORKS",
+   "ok": 9,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "PRESS_KEY",
+   "verdict": "FLAKY",
+   "ok": 8,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "native_press_key_invalid; postcondition_not_confirmed:AMBIGUOUS"
+  },
+  {
+   "action": "SCROLL",
+   "verdict": "FLAKY",
+   "ok": 1,
+   "fail": 8,
+   "enqueue_err": 0,
+   "other": 1,
+   "last_errors": "native_scroll_delta_invalid; native_supervisor_cdp_deadline:30000; native_supervisor_targe"
+  },
+  {
+   "action": "SEMANTIC_FOCUS",
+   "verdict": "FLAKY",
+   "ok": 5,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "postcondition_not_confirmed:AMBIGUOUS"
+  },
+  {
+   "action": "SEMANTIC_TYPE",
+   "verdict": "FLAKY",
+   "ok": 19,
+   "fail": 10,
+   "enqueue_err": 0,
+   "other": 1,
+   "last_errors": "Element is not focusable; native_semantic_type_replace_unverified; postcondition_not_confi"
+  },
+  {
+   "action": "STOP_GENERATION",
+   "verdict": "BROKEN",
+   "ok": 0,
+   "fail": 5,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "native_glm_stop_requires_semantic_ref_button; native_supervisor_effect_binding_http_502:na"
+  },
+  {
+   "action": "TYPED_CLICK",
+   "verdict": "FLAKY",
+   "ok": 13,
+   "fail": 3,
+   "enqueue_err": 24,
+   "other": 1,
+   "last_errors": "native_semantic_ref_invalid; native_semantic_ref_stale; native_supervisor_effect_binding_e"
+  },
+  {
+   "action": "SELF_UPDATE_APPLY",
+   "verdict": "BROKEN",
+   "ok": 0,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 1,
+   "last_errors": "lease_timeout_no_retry; self_update_apply_not_ready"
+  },
+  {
+   "action": "SELF_UPDATE_CHECK",
+   "verdict": "FLAKY",
+   "ok": 4,
+   "fail": 2,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "postcondition_not_confirmed:NO_EFFECT_PROVEN"
+  },
+  {
+   "action": "SELF_UPDATE_STATUS",
+   "verdict": "WORKS",
+   "ok": 7,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "CLOSE_TAB",
+   "verdict": "WORKS",
+   "ok": 12,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  },
+  {
+   "action": "NEW_TAB",
+   "verdict": "FLAKY",
+   "ok": 11,
+   "fail": 1,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": "supervisor_action_budget_exceeded"
+  },
+  {
+   "action": "SELECT_TAB",
+   "verdict": "WORKS",
+   "ok": 7,
+   "fail": 0,
+   "enqueue_err": 0,
+   "other": 0,
+   "last_errors": ""
+  }
+ ]
+}

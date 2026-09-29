@@ -1,0 +1,703 @@
+[
+ {
+  "step": "R1",
+  "action": "SELF_UPDATE_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "state": "CURRENT",
+   "schema": "metaengine.self-update-runtime.v8",
+   "last_error": null,
+   "hint_version": "0.7.0-dev.36315939303.1",
+   "resolved_tag": null,
+   "hint_retry_ms": 300000,
+   "last_check_at": "2026-09-28T06:29:15.535Z",
+   "current_version": "0.7.0-dev.36336130139.1",
+   "hint_last_error": null,
+   "host_resilience": {
+    "state": "ACTIVE",
+    "schema": "metaengine.host-resilience-runtime.v7",
+    "sentinel": {
+     "token": "83ffb3c9-0756-4cb6-8b68-aee62af05192",
+     "schema": "metaengine.browser-sentinel.state.v1",
+     "version": "1.6.1",
+     "lifecycle": "ARMED",
+     "created_at": "2026-09-27T17:36:32.517Z",
+     "executable": "C:\\Users\\User\\AppData\\Local\\Programs\\METAENGINE Browser Test\\METAENGINE Browser Test.exe",
+     "parent_pid": 16356,
+     "updated_at": "2026-09-28T05:23:25.218Z",
+     "worker_pid": 560,
+     "relaunch_pid": null,
+     "worker_ready": true,
+     "worker_health": "HEALTHY",
+     "worker_script": "C:\\Users\\User\\AppData\\Local\\Programs\\METAENGINE Browser Test\\resources\\app.asar.unpacked\\src\\browser-sentinel-worker.cjs",
+     "state_revision": 47,
+     "relaunch_result": null,
+     "worker_released": false,
+     "authority_effect": false,
+     "expected_restart": false,
+     "installer_handoff": false,
+     "relaunch_attempted": false,
+     "relaunch_intent_at": null,
+     "transition_latched": null,
+     "worker_recovery_at": "2026-09-28T05:23:24.945Z",
+     "worker_released_at": null,
+     "worker_heartbeat_at": "2026-09-28T06:36:05.743Z",
+     "worker_recovery_state": "RECOVERED",
+     "worker_recovery_result": "heartbeat_pid:560",
+     "expected_restart_reason": null,
+     "worker_heartbeat_age_ms": 1421,
+     "worker_recovery_old_pid": 16520,
+     "exact_child_exit_observed": false,
+     "single_writer_parent_state": true,
+     "worker_recovery_generation": 15,
+     "worker_recovery_candidate_pid": 560
+    },
+    "last_error": null,
+    "open_at_login": true,
+    "last_resume_at": null,
+    "parent_progress": {
+     "token": "83ffb3c9-0756-4cb6-8b68-aee62af05192",
+     "detail": null,
+     "schema": "metaengine.browser-sentinel.parent-progress.v1",
+     "parent_pid": 16356,
+     "progress_at": "2026-09-28T06:36:03.795Z",
+     "progress_seq": 9283,
+     "progress_kind": "EVENT_LOOP_HEARTBEAT",
+     "authority_effect": false,
+     "automatic_retry_allowed": false
+    },
+    "authority_effect": false,
+    "sentinel_bootstrap": {
+     "state": "HEALTHY",
+     "attempt": 1,
+     "worker_pid": 20432,
+     "completed_at": "2026-09-27T17:36:33.038Z",
+     "spawn_invoked": true,
+     "spawn_returned": true,
+     "authority_effect": false,
+     "automatic_retry_allowed": false
+    },
+    "login_start_attempts": 1549,
+    "login_start_required": true,
+    "login_start_verified": true,
+    "watchdog_task_leasing": false,
+    "login_start_recheck_ms": 30000,
+    "prevent_app_suspension": true,
+    "external_stop_requested": false,
+    "login_start_policy_hold": true,
+    "sentinel_worker_failure": null,
+    "sentinel_worker_healthy": true,
+    "sentinel_worker_recovery": {
+     "state": "HEALTHY",
+     "recovered": false,
+     "authority_effect": false,
+     "automatic_retry_allowed": false
+    },
+    "useful_progress_required": true,
+    "last_login_start_check_at": "2026-09-28T06:35:38.704Z",
+    "login_start_retry_pending": false,
+    "login_start_repair_attempts": 0,
+    "parent_progress_heartbeat_ms": 5000,
+    "watchdog_scheduler_authority": false,
+    "pid_liveness_alone_sufficient": false,
+    "executable_will_launch_at_login": false,
+    "terminal_requires_external_stop": true,
+    "sentinel_bootstrap_retry_pending": false,
+    "parent_progress_heartbeat_isolated": true,
+    "login_start_policy_hold_is_advisory": true,
+    "resilience_work_blocks_parent_progress": false,
+    "sentinel_recovery_uses_existing_progress_tick": true,
+    "login_start_policy_hold_grants_repair_authority": false,
+    "login_start_recovery_uses_existing_progress_tick": true,
+    "sentinel_recovery_requires_exact_old_pid_absence": true,
+    "login_start_repair_requires_fresh_absence_readback": true,
+    "sentinel_bootstrap_recovery_uses_existing_progress_tick": true,
+    "sentinel_bootstrap_retry_requires_proven_no_spawn_effect": true
+   },
+   "trusted_channel": "dev",
+   "authority_effect": false,
+   "download_percent": null,
+   "hint_interval_ms": 2000,
+   "resolved_git_sha": null,
+   "restart_grace_ms": 1000,
+   "startup_recovery": {
+    "state": "AMBIGUOUS_INSTALL",
+    "reason": "durable_transaction_hold:TRUSTED_RELEASE_RESOLUTION_FAILED",
+    "schema": "metaengine.self-update.recovery-diagnostic.v1",
+    "version": "1.1.0",
+    "startup_state": "AMBIGUOUS_INSTALL",
+    "target_git_sha": "e7fccd08da180f324490da85c151fcbe656053a3",
+    "target_version": "0.7.0-dev.36228915117.1",
+    "transaction_id": "e6e32848-0eb9-4680-9ade-25b8b8177ca7",
+    "current_version": "0.7.0-dev.36336130139.1",
+    "recovery_active": true,
+    "authority_effect": false,
+    "transaction_state": "AMBIGUOUS_INSTALL",
+    "automatic_retry_allowed": false,
+    "qualification_resume_allowed": false,
+    "recovery_installer_effect_allowed": false
+   },
+   "automatic_install": true,
+   "available_version": null,
+   "metadata_verified": false,
+   "resolved_feed_url": null,
+   "restart_gate_safe": false,
+   "downloaded_version": null,
+   "hint_last_check_at": "2026-09-28T06:35:00.530Z",
+   "publisher_verified": false,
+   "release_resolution": "UNRESOLVED",
+   "restart_gate_since": null,
+   "staging_percentage": null,
+   "ci_test_feed_active": false,
+   "network_deadline_ms": 3000,
+   "candidate_file_count": 0,
+   "control_plane_enabled": true,
+   "hint_authority_effect": false,
+   "automatic_effect_retry": false,
+   "hint_last_triggered_at": null,
+   "hint_triggered_version": null,
+   "self_update_hold_reason": "AMBIGUOUS_INSTALL",
+   "hint_network_deadline_ms": 3000,
+   "developer_emergency_state": "NONE",
+   "exact_discovery_in_flight": false,
+   "install_attempted_version": null,
+   "network_discovery_bounded": true,
+   "exact_discovery_started_at": null,
+   "install_effect_quarantined": false,
+   "installer_handoff_prepared": false,
+   "exact_discovery_deadline_ms": 8000,
+   "install_effect_barrier_mode": "WRITE_AHEAD_V1",
+   "exact_discovery_completed_at": null,
+   "developer_emergency_requested": false,
+   "pre_install_receipt_persisted": false,
+   "developer_emergency_command_id": null,
+   "developer_emergency_requested_at": null,
+   "old_parent_handoff_watchdog_mode": "DURABLE_SUCCESSOR_BOOTED_WATCHDOG_V1",
+   "developer_emergency_policy_bypass": false,
+   "old_parent_handoff_automatic_retry": false,
+   "hint_triggered_exact_discovery_background": true,
+   "install_effect_barrier_before_final_handoff": true,
+   "old_parent_handoff_requires_successor_booted": true
+  }
+ },
+ {
+  "step": "R1-verdict",
+  "build_pin": "0.7.0-dev.36336130139.1",
+  "state": "CURRENT",
+  "changed": false,
+  "note": "effect-plane re-probe SKIPPED unless changed (5 no-effect proofs stand)"
+ },
+ {
+  "step": "R2",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "result": null
+ },
+ {
+  "step": "R2-verdict",
+  "total_chars": 34786,
+  "zone_chars": 234,
+  "ack": false,
+  "verdict": "SILENT"
+ },
+ {
+  "step": "R3",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "result": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": {
+    "GLM_CHAT": 30,
+    "USER_WEB": 1,
+    "LOCAL_DEV": 1
+   },
+   "by_role": {
+    "USER": 27,
+    "FLEET": 4,
+    "SUPERVISOR": 1
+   },
+   "max_tabs": 48,
+   "total_tabs": 32,
+   "fleet_tab_ids": [
+    "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+   ],
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 16,
+   "fleet_backpressure": {
+    "reason": null,
+    "blocked": false,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 28,
+     "fleet_tabs": 4,
+     "total_tabs": 32,
+     "total_at_wall": false,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": [
+    "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+   ],
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  }
+ },
+ {
+  "step": "R4",
+  "action": "FLEET_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "agents": [
+    {
+     "role": "PLANNER",
+     "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+     "agent_id": "agent_5a554241-82e3-4d51-9ca6-e0599aca7945",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:4",
+     "created_at": "2026-09-27T17:37:01.787Z",
+     "updated_at": "2026-09-27T20:10:50.774Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+      "proven_at": "2026-09-27T20:10:50.774Z",
+      "target_id": "webcontents:4",
+      "authority_effect": false,
+      "conversation_url": "https://chat.z.ai/c/4d04c632-e541-4ee7-87af-4c0e2cd6874d",
+      "generation_epoch": 28,
+      "conversation_url_sha256": "3a3e7e07ab204bbe70cd74a6e4a6ce4b1f5b7d258f18df068d910175da1f7e23"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    },
+    {
+     "role": "RESEARCHER",
+     "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+     "agent_id": "agent_5ecfe721-6a16-42a3-af53-e61ae3843e6d",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:5",
+     "created_at": "2026-09-27T17:37:01.796Z",
+     "updated_at": "2026-09-27T17:37:17.164Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+      "proven_at": "2026-09-27T17:38:20.294Z",
+      "target_id": "webcontents:5",
+      "transport_stage": "PRECONVERSATION_ROOT",
+      "authority_effect": false,
+      "generation_epoch": 28,
+      "conversation_url_sha256": "fefdde7be4c033d6078852eb22ec02d9f635f3dd546b16cd1572bee03ad5feda"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    },
+    {
+     "role": "IMPLEMENTER",
+     "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+     "agent_id": "agent_68a08a14-5a33-4daf-a93d-2cf7038d791c",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:6",
+     "created_at": "2026-09-27T17:37:01.803Z",
+     "updated_at": "2026-09-27T17:37:30.702Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+      "proven_at": "2026-09-27T17:38:48.811Z",
+      "target_id": "webcontents:6",
+      "transport_stage": "PRECONVERSATION_ROOT",
+      "authority_effect": false,
+      "generation_epoch": 28,
+      "conversation_url_sha256": "fefdde7be4c033d6078852eb22ec02d9f635f3dd546b16cd1572bee03ad5feda"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    },
+    {
+     "role": "CRITIC",
+     "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+     "agent_id": "agent_d19c53a1-7f93-4a02-90d2-7dfdb08897fc",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:7",
+     "created_at": "2026-09-27T17:37:56.548Z",
+     "updated_at": "2026-09-27T19:20:20.816Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+      "proven_at": "2026-09-27T19:20:20.816Z",
+      "target_id": "webcontents:7",
+      "authority_effect": false,
+      "conversation_url": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375c",
+      "generation_epoch": 28,
+      "conversation_url_sha256": "dd1ad311bea2666df0ba43f0e1e40785a086e4b370d5a7b4c50fc3c66440dd49"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    }
+   ],
+   "counts": {
+    "LOST": 0,
+    "ACTIVE": 4,
+    "RETIRED": 0,
+    "REGISTERED": 0,
+    "PROVISIONING": 0,
+    "BOUND_UNVERIFIED": 0,
+    "PROVISIONING_AMBIGUOUS": 0
+   },
+   "policy": {
+    "elastic": true,
+    "profile": "BALANCED",
+    "max_agents": null,
+    "warm_agents": 0,
+    "adopt_existing": false,
+    "capacity_model": "ELASTIC_BACKLOG_DRIVEN",
+    "desired_agents": 4,
+    "hard_agent_cap": null,
+    "boot_fleet_target": 4,
+    "browser_authority": false,
+    "spawn_burst_limit": 8,
+    "idle_physical_tabs": false,
+    "automatic_work_retry": false,
+    "direct_peer_messaging": false,
+    "legacy_max_agents_ignored": false
+   },
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": {
+    "reason": null,
+    "blocked": false,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 28,
+     "fleet_tabs": 4,
+     "total_tabs": 32,
+     "total_at_wall": false,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "owner_override_ambiguous_compensating_fanout": false
+  }
+ },
+ {
+  "step": "M1",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "result": {
+   "url": "https://chat.z.ai/",
+   "kind": "GLM_CHAT",
+   "role": "USER",
+   "title": "Z.ai",
+   "tab_id": "tab_26bdb50b-6be0-4b32-a283-e299a8d1c837",
+   "created_at": "2026-09-28T06:36:25.572Z",
+   "navigation": {
+    "state": "AMBIGUOUS",
+    "reason": "DEADLINE_EXCEEDED",
+    "schema": "metaengine.browser.bounded-navigation.v1",
+    "pre_url": "",
+    "stopped": true,
+    "post_url": "https://chat.z.ai/",
+    "error_code": 0,
+    "duration_ms": 15006,
+    "requested_url": "https://chat.z.ai/",
+    "authority_effect": false,
+    "automatic_retry_allowed": false
+   },
+   "load_pending": false,
+   "effect_outcome": "CONFIRMED",
+   "webcontents_id": 473,
+   "browser_cell_id": "cell:e895b470-99c0-4337-b6cf-e4503b1bc7fa",
+   "automatic_retry_allowed": false,
+   "browser_cell_generation": 1
+  }
+ },
+ {
+  "step": "M2",
+  "action": "NAVIGATE",
+  "status": "FAILED",
+  "result": {
+   "ok": false,
+   "url": "https://chat.z.ai/",
+   "tab_id": "tab_26bdb50b-6be0-4b32-a283-e299a8d1c837",
+   "navigation": {
+    "state": "FAILED",
+    "reason": "LOAD_URL_REJECTED:ERR_FAILED (-2) loading 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz'",
+    "schema": "metaengine.browser.bounded-navigation.v1",
+    "pre_url": "https://chat.z.ai/",
+    "stopped": false,
+    "post_url": "https://chat.z.ai/",
+    "error_code": 0,
+    "duration_ms": 835,
+    "requested_url": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+    "authority_effect": false,
+    "automatic_retry_allowed": false
+   },
+   "effect_outcome": "AMBIGUOUS",
+   "automatic_retry_allowed": false
+  },
+  "error": "postcondition_not_confirmed:AMBIGUOUS"
+ },
+ {
+  "step": "M3-status-0",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "M3-status-1",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "M3-status-2",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "M3-status-3",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "M3-status-4",
+  "action": "DOWNLOAD_STATUS",
+  "status": "COMPLETED",
+  "result": {
+   "last": {
+    "url": "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md",
+    "path": "C:\\Users\\User\\Downloads\\METAENGINE\\CONTEXT.md",
+    "bytes": 17844,
+    "schema": "metaengine.verified-download-receipt.v1",
+    "sha256": "64517dd11dc6c3fabffa9aa35c52157bc804448a7cd77c22fc4afc5ae5f14635",
+    "filename": "CONTEXT.md",
+    "url_chain": [
+     "https://raw.githubusercontent.com/PatrickFrome/Compute/sandbox/me2-os/CONTEXT.md"
+    ],
+    "request_id": "26766442-2bb5-4cbe-abd9-8efb1e1be5c8",
+    "completed_at": "2026-09-28T05:04:21.358Z",
+    "authority_effect": true,
+    "executable_started": false
+   },
+   "active": null,
+   "schema": "metaengine.verified-download-manager.v1",
+   "root_path": "C:\\Users\\User\\Downloads\\METAENGINE",
+   "authority_effect": false,
+   "install_authority": false,
+   "arbitrary_execution": false
+  }
+ },
+ {
+  "step": "M3-verdict",
+  "active_type": "NoneType",
+  "active": null
+ },
+ {
+  "step": "M4-skip",
+  "why": "no active download id in window (render-inline or too fast); DOWNLOAD_CANCEL stays UNTESTED"
+ },
+ {
+  "step": "M9",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "result": {
+   "ok": true
+  }
+ },
+ {
+  "step": "R9",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "result": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": {
+    "GLM_CHAT": 29,
+    "USER_WEB": 1,
+    "LOCAL_DEV": 1
+   },
+   "by_role": {
+    "USER": 26,
+    "FLEET": 4,
+    "SUPERVISOR": 1
+   },
+   "max_tabs": 48,
+   "total_tabs": 31,
+   "fleet_tab_ids": [
+    "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+   ],
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 17,
+   "fleet_backpressure": {
+    "reason": null,
+    "blocked": false,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 27,
+     "fleet_tabs": 4,
+     "total_tabs": 31,
+     "total_at_wall": false,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": [
+    "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+   ],
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  }
+ }
+]

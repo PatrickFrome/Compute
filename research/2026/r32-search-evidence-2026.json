@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://www.digitalapplied.com",
+    "name": "Agent Audit Trail Design: 7 Best Practices for 2026",
+    "snippet": "May 9, 2026 — The hash chain alone proves internal consistency. proves the chain existed at a point in time. This is what makes the trail credible to a third ...",
+    "host_name": "www.digitalapplied.com",
+    "rank": 0,
+    "date": "May 9, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.augmentcode.com",
+    "name": "What Multi-Agent Outputs Need to Pass Enterprise Audit",
+    "snippet": "Apr 8, 2026 — Multi- agent AI outputs pass enterprise audit when every output segment traces to a specific agent , model version, and authorizing spec, ... Read more",
+    "host_name": "www.augmentcode.com",
+    "rank": 1,
+    "date": "Apr 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://datatracker.ietf.org",
+    "name": "draft-sharif-agent-audit-trail-04",
+    "snippet": "8 days ago — Agent Audit Trail (AAT): An ordered sequence of audit records produced by an agent during a session, linked by hash chaining . Hash chaining and ...",
+    "host_name": "datatracker.ietf.org",
+    "rank": 2,
+    "date": "Sep 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.emergentmind.com",
+    "name": "LLM Audit Trails Overview",
+    "snippet": "Feb 4, 2026 — LLM audit trails are tamper-evident, cryptographically secured ledgers that record every event in the LLM lifecycle. Read more",
+    "host_name": "www.emergentmind.com",
+    "rank": 3,
+    "date": "Feb 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.openlayer.com",
+    "name": "Audit Evidence From LLM Traces (July 2026)",
+    "snippet": "Jul 21, 2026 — Map LLM observability traces to EU AI Act, NIST AI RMF, and ISO 42001 compliance evidence with structured audit -ready logging .",
+    "host_name": "www.openlayer.com",
+    "rank": 4,
+    "date": "Jul 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://mightybot.ai",
+    "name": "What Are AI Agent Audit Trails?",
+    "snippet": "Mar 15, 2026 — AI agent audit trails are structured records that connect every automated decision to the policy, data, evidence , model or tool actions, ... Read more",
+    "host_name": "mightybot.ai",
+    "rank": 5,
+    "date": "Mar 15, 2026",
+    "favicon": ""
+  }
+]

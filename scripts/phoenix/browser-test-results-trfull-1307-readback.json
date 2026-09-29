@@ -1,0 +1,11 @@
+{
+ "status": "COMPLETED",
+ "text_len": 34786,
+ "baseline": 40152,
+ "grown": false,
+ "total_chars_field": 34786,
+ "ack_full1231_in_text": true,
+ "ack_in_reply_zone": false,
+ "reply_zone_clean_len": 116,
+ "reply_zone": "payload_json={\"scope\":\"full\",\"note\":\"fresh digest to anchor eval-roadmap baseline; result consumed next generation\"}"
+}

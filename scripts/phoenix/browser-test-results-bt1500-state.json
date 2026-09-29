@@ -1,0 +1,126 @@
+{
+ "checked_at": "2026-09-28T07:12:29.653748+00:00",
+ "workspace": "2de9f84b-7c0a-4091-911c-894ff1d6eaf4",
+ "target_client": "2a60d6a2-c7c2-4dcc-b4c9-99de768443c9",
+ "state_rows": 1,
+ "state": {
+  "version": null,
+  "heartbeat_at": "2026-09-28T07:12:29.969Z",
+  "keys": [
+   "active_tab",
+   "armed",
+   "client_kind",
+   "compute",
+   "control_latency",
+   "development_plane",
+   "fleet",
+   "heartbeat_at",
+   "host_resilience",
+   "last_error",
+   "operator_mode",
+   "perception",
+   "realtime_observation_push",
+   "realtime_process_plane",
+   "schema",
+   "self_update",
+   "shell_version",
+   "started_at",
+   "supervisor_lifecycle",
+   "supervisor_mesh",
+   "supervisor_mode",
+   "tabs",
+   "transport_identity"
+  ],
+  "tabs_total": 31,
+  "tab_kinds": {
+   "LOCAL_DEV": 1,
+   "GLM_CHAT": 29,
+   "USER_WEB": 1
+  },
+  "selected_tab": "tab_40f534a7-6370-"
+ },
+ "mesh_error": "HTTP Error 404: Not Found",
+ "device_error": "HTTP Error 404: Not Found",
+ "recent_commands": [
+  {
+   "command_id": "3e3b3b21-cb4d-4245-a182-47ac83f67a24",
+   "action": "READ_TRANSCRIPT",
+   "status": "COMPLETED",
+   "issued_by": "zai-419718-1445",
+   "issued_at": "2026-09-28T06:48:02.157642+00:00",
+   "error": null
+  },
+  {
+   "command_id": "9f6f18ed-b35b-4288-9a8d-a29febebb0d5",
+   "action": "SELF_UPDATE_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419718-1445",
+   "issued_at": "2026-09-28T06:47:58.933397+00:00",
+   "error": null
+  },
+  {
+   "command_id": "1304d466-80c0-4746-abd1-73de9a934e02",
+   "action": "CLOSE_TAB",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:43:21.860259+00:00",
+   "error": null
+  },
+  {
+   "command_id": "a59a7ea7-4f31-47a3-b033-c05136016623",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:43:18.739555+00:00",
+   "error": null
+  },
+  {
+   "command_id": "f67826e0-050e-4a47-a92a-9e8424f820a4",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:43:08.903072+00:00",
+   "error": null
+  },
+  {
+   "command_id": "55ce741a-ba3d-4a0d-a712-9db279cfa9b2",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:43:01.854191+00:00",
+   "error": null
+  },
+  {
+   "command_id": "63952d48-d63a-4e6d-90c5-db0367f400d5",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:42:54.777396+00:00",
+   "error": null
+  },
+  {
+   "command_id": "97d15cfa-6c23-486f-9ec7-cd0ff9a3d290",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:42:47.641411+00:00",
+   "error": null
+  },
+  {
+   "command_id": "a60f7c4e-3de2-4b50-9595-7767c3ee405e",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:42:37.644125+00:00",
+   "error": null
+  },
+  {
+   "command_id": "e7c3fad8-04ec-49f5-a35a-c56828f28582",
+   "action": "DOWNLOAD_STATUS",
+   "status": "COMPLETED",
+   "issued_by": "zai-419203-1430",
+   "issued_at": "2026-09-28T06:42:30.532315+00:00",
+   "error": null
+  }
+ ]
+}

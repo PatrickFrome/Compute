@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://particula.tech",
+    "name": "Claude Computer Use vs OpenAI Operator vs Browser Use",
+    "snippet": "Jun 16, 2026 — On WebVoyager, Browser Use reports the highest score at 89.1 % across 586 live web tasks, ahead of OpenAI's Computer-Using Agent at 87%. But the ...",
+    "host_name": "particula.tech",
+    "rank": 0,
+    "date": "Jun 16, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.openhermit.com",
+    "name": "Claude vs Operator: What the Browser Agent Race Taught",
+    "snippet": "May 25, 2026 — Claude Computer Use hit 72.5% OSWorld . Anthropic's Claude Computer Use survived, acquiring Vercept in February 2026 and pushing Sonnet 4.6 to ...",
+    "host_name": "www.openhermit.com",
+    "rank": 1,
+    "date": "May 25, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://workos.com",
+    "name": "Anthropic's Computer Use versus OpenAI's",
+    "snippet": "Jul 30, 2025 — Anthropic's Computer Use gives Claude direct control over your desktop , letting it interact with native apps and the web like a human.",
+    "host_name": "workos.com",
+    "rank": 2,
+    "date": "Jul 30, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.respan.ai",
+    "name": "Anthropic Computer Use vs Browser Use (2026)",
+    "snippet": "Mar 9, 2026 — Use is the leading open-source browser agent framework an 89% success rate on the WebVoyager benchmark. Starting Price $3.00/1M input, $15.00/1 ...",
+    "host_name": "www.respan.ai",
+    "rank": 3,
+    "date": "Mar 9, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://coasty.ai",
+    "name": "Anthropic Computer Use vs OpenAI Claude: Why 82% on",
+    "snippet": "May 23, 2026 — OpenAI scored 38% on OSWorld. Anthropic's Claude Sonnet 4.6 scored 72.5 %. Coasty scored 82%. That's not a rounding error.",
+    "host_name": "coasty.ai",
+    "rank": 4,
+    "date": "May 23, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.shareuhack.com",
+    "name": "Computer Use Agent Guide 2026: What They Are & Best",
+    "snippet": "Mar 21, 2026 — Anthropic publishes official benchmark results and security guidance for developers building on the API. Designed primarily for web-based tasks ...",
+    "host_name": "www.shareuhack.com",
+    "rank": 5,
+    "date": "Mar 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.anthropic.com",
+    "name": "Introducing computer use, a new Claude 3.5 Sonnet, and",
+    "snippet": "Oct 22, 2024 — The Browser Company, in using the model for automating web-based workflows, noted Claude 3.5 Sonnet outperformed every model they've tested ...",
+    "host_name": "www.anthropic.com",
+    "rank": 6,
+    "date": "Oct 22, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://zapier.com",
+    "name": "What is a computer use agent? Claude",
+    "snippet": "Claude computer use is a move toward creating accessible general use AI agents that can act independently. The OSWorld benchmark measures computer use in real- ...",
+    "host_name": "zapier.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

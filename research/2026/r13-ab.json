@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://dl.acm.org",
+    "name": "Agent A/B: Automated and Scalable A/B Testing on Live",
+    "snippet": "Apr 13, 2026 — A/B is an end-to-end system for simulating A/B tests on websites with persona-driven LLM agents .",
+    "host_name": "dl.acm.org",
+    "rank": 0,
+    "date": "Apr 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org",
+    "name": "Adaptive Memory Admission Control for LLM Agents",
+    "snippet": "Mar 4, 2026 — This design enables transparent and efficient control over long-term memory . Experiments on the LoCoMo benchmark show that A-MAC achieves a ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 1,
+    "date": "Mar 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://openreview.net",
+    "name": "MemAgent: Reshaping Long-Context LLM with Multi-Conv",
+    "snippet": "by H Yu · Cited by 185 — The goal is to control the total context length per conversation turn. In the original ablation study , increasing the memory size results in ... Read more",
+    "host_name": "openreview.net",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://engineering.atspotify.com",
+    "name": "When Can LLMs Replace Humans in A/B Tests?",
+    "snippet": "Aug 13, 2026 — LLM predictions can stand in for human outcomes in A/B tests , but only by assumption, not by design . Randomized experiments are considered the ...",
+    "host_name": "engineering.atspotify.com",
+    "rank": 3,
+    "date": "Aug 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://iclr.cc",
+    "name": "ICLR 2026 Workshop on Memory for LLM-Based Agentic",
+    "snippet": "Apr 27, 2026 — This workshop aims to advance the design of the memory layer for agentic systems and to convene interdisciplinary researchers across ... Read more",
+    "host_name": "iclr.cc",
+    "rank": 4,
+    "date": "Apr 27, 2026",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "id": "mirror-digest",
+  "title": "Дайджест зеркала SQL (изолированный прогон: prlimit + stdio-only)",
+  "version": "1.0.0",
+  "entry": "main.js",
+  "activation": ["manual"],
+  "caps": ["mirror.feed.read"],
+  "timeout_ms": 5000
+}

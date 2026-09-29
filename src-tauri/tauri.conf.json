@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ME2 OS",
+  "version": "0.17.0",
+  "identifier": "dev.me2.os",
+  "build": {
+    "frontendDist": "./dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ME2 OS · Mission Control",
+        "width": 1600,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "url": "index.html",
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/me2-daemon"],
+    "createUpdaterArtifacts": true,
+    "publisher": "ME2 OS"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBKEY",
+      "endpoints": [
+        "https://github.com/PatrickFrome/Compute/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

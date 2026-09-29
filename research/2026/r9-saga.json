@@ -1,0 +1,29 @@
+[
+  {
+    "url": "https://microservices.io",
+    "name": "Pattern: Saga",
+    "snippet": "If a local transaction fails because it violates a business rule then the saga executes a series of compensating transactions that undo the changes that were ... Read more",
+    "host_name": "microservices.io",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.conduktor.io",
+    "name": "Saga Pattern for Microservices Explained",
+    "snippet": "Sep 11, 2026 — Unlike database transactions that rollback on failure , sagas use compensating transactions to semantically undo completed steps.",
+    "host_name": "www.conduktor.io",
+    "rank": 1,
+    "date": "Sep 11, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://orkes.io",
+    "name": "Compensation Transaction Patterns - The Key to Handling",
+    "snippet": "May 22, 2023 — Distributed transactions can safely recover from failures using rollback mechanisms like the saga pattern .",
+    "host_name": "orkes.io",
+    "rank": 2,
+    "date": "May 22, 2023",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,153 @@
+[
+ {
+  "id": "R1-CAP-RES",
+  "action": "CAPTURE",
+  "command_id": "1e7e0be0-323e-430f-9e6e-27729640c7fc",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3942,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:5",
+   "captured_at": "2026-09-28T01:35:01.958Z",
+   "text_excerpt": "GLM-5.3-Flash\nThought Process\nThis response is generated based on system protocol simulation. Regarding your query \"META",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:5>",
+   "state_revision_id": "rev_9acd2e5a3779c3a7630e81d966130e12e5e7028782a7dafbde46194595d94190",
+   "semantic_refs_issued": 5,
+   "runtime_main_frame_id": "2813D99530F0FF9BB1BEFBAB0C125B43",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_72b0bff9644f4448bcb0d0d5ceaaee6b",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 2,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-8495871151874312211.-2188432373245558826",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "R1-ANALYSIS",
+  "action": "RES-THREAD-READBACK",
+  "status": "COMPLETED",
+  "channel": "local",
+  "url": "https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f",
+  "n_named_buttons": 0,
+  "button_sample": [],
+  "n_text_nodes": 0,
+  "text_sample": [],
+  "n_textboxes": 1,
+  "draft": "Send a Message"
+ },
+ {
+  "id": "PROBE-FLEET",
+  "action": "FLEET_STATUS",
+  "command_id": "f1e6c841-2042-4694-be43-caa71acd5bf5",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3795,
+  "result_summary": {
+   "agents": "<list:4>",
+   "counts": "<dict:LOST,ACTIVE,RETIRED,REGISTERED,PROVISIONING>",
+   "policy": "<dict:elastic,profile,max_agents,warm_agents,adopt_existing>",
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "owner_override_ambiguous_compensating_fanout": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "R2-SELECT",
+  "action": "SELECT_TAB",
+  "command_id": "0e5de99b-07bd-43bd-a563-396e91177d63",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3965,
+  "result_summary": {
+   "ok": true,
+   "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "PROBE-FLEET",
+  "action": "FLEET_STATUS",
+  "command_id": "972f0b1f-c6f1-4836-b2ee-b49f2e9d70b3",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 4067,
+  "result_summary": {
+   "agents": "<list:4>",
+   "counts": "<dict:LOST,ACTIVE,RETIRED,REGISTERED,PROVISIONING>",
+   "policy": "<dict:elastic,profile,max_agents,warm_agents,adopt_existing>",
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "owner_override_ambiguous_compensating_fanout": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "R2-ANALYSIS",
+  "action": "SELECT-PROOF-MINT",
+  "status": "COMPLETED",
+  "channel": "local",
+  "before": {
+   "PLANNER": {
+    "proven_at": "2026-09-27T20:10:50.774Z",
+    "conv": "7af-4c0e2cd6874d"
+   },
+   "RESEARCHER": {
+    "proven_at": "2026-09-27T17:38:20.294Z",
+    "conv": ""
+   },
+   "IMPLEMENTER": {
+    "proven_at": "2026-09-27T17:38:48.811Z",
+    "conv": ""
+   },
+   "CRITIC": {
+    "proven_at": "2026-09-27T19:20:20.816Z",
+    "conv": "3be-bde9fe49375c"
+   }
+  },
+  "after": {
+   "PLANNER": {
+    "proven_at": "2026-09-27T20:10:50.774Z",
+    "conv": "7af-4c0e2cd6874d"
+   },
+   "RESEARCHER": {
+    "proven_at": "2026-09-27T17:38:20.294Z",
+    "conv": ""
+   },
+   "IMPLEMENTER": {
+    "proven_at": "2026-09-27T17:38:48.811Z",
+    "conv": ""
+   },
+   "CRITIC": {
+    "proven_at": "2026-09-27T19:20:20.816Z",
+    "conv": "3be-bde9fe49375c"
+   }
+  },
+  "proof_minted": false,
+  "select_status": "COMPLETED"
+ }
+]

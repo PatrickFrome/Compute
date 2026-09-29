@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://news.ycombinator.com",
+    "name": "Show HN: Chromiumoxid – An Async Headless Chrome API in Rust",
+    "snippet": "Dec 14, 2020 — The main differences are that are that chromiumoxide uses async rust by design and that all the devtools protocol types are generated.",
+    "host_name": "news.ycombinator.com",
+    "rank": 0,
+    "date": "Dec 14, 2020",
+    "favicon": ""
+  },
+  {
+    "url": "https://dev.to",
+    "name": "Puppeteer in Rust: Chromiumoxide and Headless_Chrome vs the",
+    "snippet": "Apr 3, 2026 — Three main options as of 2026: 1. chromiumoxide — The most complete Puppeteer-like API for Rust. Chromiumoxide controls Chrome via CDP (Chrome ...",
+    "host_name": "dev.to",
+    "rank": 1,
+    "date": "Apr 3, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "mattsse/chromiumoxide: Chrome Devtools Protocol rust API",
+    "snippet": "chromiumoxide provides a high-level and async API to control Chrome or Chromium over the DevTools Protocol. It comes with support for all types of the ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.rs",
+    "name": "chromiumoxide - Rust",
+    "snippet": "A high-level API for programmatically interacting with the Chrome DevTools Protocol. This crate uses the [Chrome DevTools protocol] to drive/launch a Chromium ...",
+    "host_name": "docs.rs",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://crates.io",
+    "name": "headless_chrome - crates.io: Rust Package Registry",
+    "snippet": "Jun 10, 2026 — A high-level API to control headless Chrome or Chromium over the DevTools Protocol. It is the Rust equivalent of Puppeteer, a Node library ...",
+    "host_name": "crates.io",
+    "rank": 4,
+    "date": "Jun 10, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://lib.rs",
+    "name": "cdpkit — WebSocket library in Rust",
+    "snippet": "Type-safe Rust Chrome DevTools Protocol (CDP) client with async/await support. cdpkit provides generated, type-safe commands and events for browser-level CDP ...",
+    "host_name": "lib.rs",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.libhunt.com",
+    "name": "rust-headless-chrome vs puppeteer - compare differences and reviews?",
+    "snippet": "A high-level API to control headless Chrome or Chromium over the DevTools Protocol. It is the Rust equivalent of Puppeteer, a Node library maintained by the ...",
+    "host_name": "www.libhunt.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  }
+]

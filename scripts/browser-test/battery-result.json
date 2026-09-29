@@ -1,0 +1,97 @@
+[
+ {
+  "mech": "M01 state: REST alive, roster",
+  "verdict": "PASS",
+  "evidence": "HTTP 200, agents=84"
+ },
+ {
+  "mech": "M02 непрерывные жизненные циклы",
+  "verdict": "FAIL",
+  "evidence": "Δциклов за 60с = 0 (fix: fatal-guard+watchdog в коде)"
+ },
+ {
+  "mech": "M03 POST /chat принят",
+  "verdict": "PASS",
+  "evidence": "HTTP 200, resp={'ok': True}"
+ },
+ {
+  "mech": "M04 сообщение оператора в ленте",
+  "verdict": "PASS",
+  "evidence": "нашёл 1 упоминаний"
+ },
+ {
+  "mech": "M05 рой отвечает (LLM-координация)",
+  "verdict": "PASS",
+  "evidence": "ответов за 3мин: 5, напр: Интегрировать проверку readiness GPU‑Ollama‑Collector в период 5 минут и передавать метрик"
+ },
+ {
+  "mech": "M06 POST /broadcast",
+  "verdict": "PASS",
+  "evidence": "HTTP 200"
+ },
+ {
+  "mech": "M07 POST /goal (доска целей)",
+  "verdict": "PASS",
+  "evidence": "HTTP 200, resp={'ok': True}"
+ },
+ {
+  "mech": "M08 POST /spawn (создание чат-агента)",
+  "verdict": "PASS",
+  "evidence": "HTTP 200, id=sw_ndgewnyb"
+ },
+ {
+  "mech": "M09 новорождённый в ростере + родословная",
+  "verdict": "PASS",
+  "evidence": "state=thinking, gen=1, parent=True"
+ },
+ {
+  "mech": "M10 событие рождения в ленте (видят все)",
+  "verdict": "PASS",
+  "evidence": "spawn-сообщений: 1"
+ },
+ {
+  "mech": "M11 POST /mute",
+  "verdict": "PASS",
+  "evidence": "HTTP 200"
+ },
+ {
+  "mech": "M12 mute отражён в состоянии",
+  "verdict": "PASS",
+  "evidence": "muted=True"
+ },
+ {
+  "mech": "M13 POST /kill (retire)",
+  "verdict": "PASS",
+  "evidence": "HTTP 200"
+ },
+ {
+  "mech": "M14 агент ушёл в архив",
+  "verdict": "PASS",
+  "evidence": "state=удалён/архив"
+ },
+ {
+  "mech": "M15 память: уроки+эпизоды накоплены",
+  "verdict": "PASS",
+  "evidence": "HTTP 200, lessons=60, episodes=80"
+ },
+ {
+  "mech": "M16 пул самоулучшения (swarm_improve)",
+  "verdict": "PASS",
+  "evidence": "HTTP 200, предложений: 60"
+ },
+ {
+  "mech": "M17 gateway :81 e2e (XTransformPort)",
+  "verdict": "PASS",
+  "evidence": "HTTP 200"
+ },
+ {
+  "mech": "M18 Next-прокси /api/swarm → :3046",
+  "verdict": "PASS",
+  "evidence": "HTTP 200"
+ },
+ {
+  "mech": "M19 browser-директивы в ленте",
+  "verdict": "PASS",
+  "evidence": "директив: 9 (историч. свидетельство pulse:emerald от Вестника)"
+ }
+]

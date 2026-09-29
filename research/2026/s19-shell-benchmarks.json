@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "Tauri might consume more RAM than Electron · Issue #5889",
+    "snippet": "Dec 21, 2022 — I'm researching the use of native web views in comparison Chromium (with Electron ) and faced some unexpected results in terms of memory usage . Read more",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "Dec 21, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.xda-developers.com",
+    "name": "I'm sick of every PC program turning into an Electron app",
+    "snippet": "Nov 26, 2025 — The issue, for me, isn't just that Electron apps use more memory than native ones . ... There is an alternative: use a WebView with a Rust wrapper. Read more",
+    "host_name": "www.xda-developers.com",
+    "rank": 1,
+    "date": "Nov 26, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://teamdev.com",
+    "name": "Top 5 Electron alternatives in 2026 | MōBrowser Blog",
+    "snippet": "Apr 27, 2026 — This article compares Electron , Tauri, MōBrowser, NW.js, and Electrobun for web developers choosing a desktop app framework in 2026.",
+    "host_name": "teamdev.com",
+    "rank": 2,
+    "date": "Apr 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://tech-insider.org",
+    "name": "Tauri vs Electron [2026]: 96% Smaller Apps, 1 Winner",
+    "snippet": "Apr 5, 2026 — Tauri apps are 96% smaller and use 75% less RAM than Electron , per benchmarks current through September 2026. Here's which one to pick for ...",
+    "host_name": "tech-insider.org",
+    "rank": 3,
+    "date": "Apr 5, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://seenaburns.com",
+    "name": "Debugging Electron Memory Usage - Seena Burns",
+    "snippet": "Jan 21, 2018 — The activity monitor shows the app holds onto memory , even when navigating way from searches/directories with images. If I refresh with cmd-R , ... Read more",
+    "host_name": "seenaburns.com",
+    "rank": 4,
+    "date": "Jan 21, 2018",
+    "favicon": ""
+  },
+  {
+    "url": "https://electronjs.org",
+    "name": "Performance",
+    "snippet": "This document outlines some of the Electron maintainers' favorite ways to reduce the amount of memory , CPU, and disk resources being used",
+    "host_name": "electronjs.org",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

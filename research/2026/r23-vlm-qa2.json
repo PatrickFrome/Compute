@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "```json\n{\"sense_block\": true, \"effect_badge\": true, \"notes\": \"The SENSE block is clearly visible in the middle section of the UI, containing multiple small target chips (e.g., 'but.ЖК', 'but.Maya IMPLEMENTER', etc.). To the right of the SENSE label and version info, there is a small dark badge with the text 'CONFIRMED' in white/cyan.\"}\n```",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790121841,
+  "id": "20260923080359139943c9c9634b53",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260923080359139943c9c9634b53",
+  "usage": {
+    "completion_tokens": 93,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 434,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 527
+  }
+}

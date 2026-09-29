@@ -1,0 +1,78 @@
+[
+ {
+  "action": "SYSTEM_TELEMETRY",
+  "decision": "Decision(action='SYSTEM_TELEMETRY', verdict='ALLOW', trust_tier='T0', reason='read-only allowlist', conditions=[], ledger_sha='c0eed756423c4000')",
+  "conditions": [],
+  "ts": "2026-09-28T04:33:57.100436+00:00",
+  "command_id": "f683a197-670f-498b-8701-428b4c5676a0"
+ },
+ {
+  "step": "S1",
+  "action": "SYSTEM_TELEMETRY",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "action": "CAPTURE",
+  "decision": "Decision(action='CAPTURE', verdict='ALLOW', trust_tier='T0', reason='read-only allowlist', conditions=[], ledger_sha='1e0c071d144daf6a')",
+  "conditions": [],
+  "ts": "2026-09-28T04:34:21.065797+00:00",
+  "command_id": "d4eb2ec5-9982-49e0-a874-530ea2e1585f"
+ },
+ {
+  "step": "S2",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "action": "SEMANTIC_FOCUS",
+  "decision": "Decision(action='SEMANTIC_FOCUS', verdict='ALLOW', trust_tier='T0', reason='supervised mutation allowlist', conditions=['enforce_mutation_gap_ge_15s'], ledger_sha='690f06f37c42f88d')",
+  "conditions": [
+   "enforce_mutation_gap_ge_15s"
+  ],
+  "ts": "2026-09-28T04:34:44.559571+00:00",
+  "command_id": "126ef79f-c321-4884-9539-70d1c460285b"
+ },
+ {
+  "step": "S3",
+  "action": "SEMANTIC_FOCUS",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "action": "SEMANTIC_TYPE",
+  "decision": "Decision(action='SEMANTIC_TYPE', verdict='ALLOW', trust_tier='T0', reason='supervised mutation allowlist', conditions=['enforce_mutation_gap_ge_15s'], ledger_sha='d80e9c3326ec6e16')",
+  "conditions": [
+   "enforce_mutation_gap_ge_15s"
+  ],
+  "ts": "2026-09-28T04:35:53.141906+00:00",
+  "command_id": "7676f0fe-6669-4531-b93f-86d62d74a388"
+ },
+ {
+  "step": "S4",
+  "action": "SEMANTIC_TYPE",
+  "status": "FAILED",
+  "error": "postcondition_not_confirmed:AMBIGUOUS"
+ },
+ {
+  "action": "READ_TRANSCRIPT",
+  "decision": "Decision(action='READ_TRANSCRIPT', verdict='ALLOW', trust_tier='T0', reason='read-only allowlist', conditions=[], ledger_sha='15fe5528cd6dad7b')",
+  "conditions": [],
+  "ts": "2026-09-28T04:36:20.105475+00:00",
+  "command_id": "7d1bd2c6-ad3b-49b0-942c-68edfa32e146"
+ },
+ {
+  "step": "S5",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "S5-readback",
+  "marker_landed": false,
+  "ack_1215_present": false,
+  "critic_gate_content": false,
+  "transcript_tail": ""
+ }
+]

@@ -1,0 +1,121 @@
+[
+ {
+  "step": "S0-state",
+  "agents": 4,
+  "agent_statuses": {
+   "agent_5a554241-82e3-4d51-9ca6-e0599aca7945": null,
+   "agent_5ecfe721-6a16-42a3-af53-e61ae3843e6d": null,
+   "agent_68a08a14-5a33-4daf-a93d-2cf7038d791c": null,
+   "agent_d19c53a1-7f93-4a02-90d2-7dfdb08897fc": null
+  },
+  "bound_tabs": {
+   "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f": {
+    "agent": "agent_5a554241-82e3-4d51-9ca6-e0599aca7945",
+    "status": null
+   },
+   "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa": {
+    "agent": "agent_5ecfe721-6a16-42a3-af53-e61ae3843e6d",
+    "status": null
+   },
+   "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9": {
+    "agent": "agent_68a08a14-5a33-4daf-a93d-2cf7038d791c",
+    "status": null
+   },
+   "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314": {
+    "agent": "agent_d19c53a1-7f93-4a02-90d2-7dfdb08897fc",
+    "status": null
+   }
+  }
+ },
+ {
+  "step": "S1",
+  "action": "TAB_CENSUS",
+  "status": "COMPLETED",
+  "error": null,
+  "result": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": {
+    "GLM_CHAT": 46,
+    "USER_WEB": 1,
+    "LOCAL_DEV": 1
+   },
+   "by_role": {
+    "USER": 43,
+    "FLEET": 4,
+    "SUPERVISOR": 1
+   },
+   "max_tabs": 48,
+   "total_tabs": 48,
+   "fleet_tab_ids": [
+    "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+   ],
+   "total_at_wall": true,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 0,
+   "fleet_backpressure": {
+    "reason": "TAB_CAPACITY_EXCEEDED_PRE_EFFECT",
+    "blocked": true,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 44,
+     "fleet_tabs": 4,
+     "total_tabs": 48,
+     "total_at_wall": true,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": [
+    "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+   ],
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  }
+ },
+ {
+  "step": "VERDICT",
+  "verdict": {
+   "circuit_state_after_soak": "COMPLETED",
+   "circuit_error": null,
+   "tab_census": {
+    "status": "COMPLETED",
+    "total_tabs": 48,
+    "by_kind": {
+     "GLM_CHAT": 46,
+     "USER_WEB": 1,
+     "LOCAL_DEV": 1
+    },
+    "at_wall": true
+   },
+   "protected_bound_tabs": {
+    "fleet": [
+     "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+     "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+     "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+     "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+    ],
+    "supervisor": [
+     "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+    ]
+   },
+   "reclaim_candidates_glm_unbound_estimate": 42,
+   "note": "READ-ONLY — reclamation belongs to swarm work package / owner decision"
+  }
+ }
+]

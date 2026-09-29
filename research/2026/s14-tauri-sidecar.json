@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://v2.tauri.app",
+    "name": "Embedding External Binaries",
+    "snippet": "Jun 15, 2026 — When running the sidecar , Tauri requires you to give the sidecar permission to run the execute or spawn method on the child process. To grant ... Read more",
+    "host_name": "v2.tauri.app",
+    "rank": 0,
+    "date": "Jun 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "increasing tauri app when add backend binary as sidecar",
+    "snippet": "Jan 15, 2024 — Describe the bug. when i add backend node binary as sidecar it is taking binary size as it is in installer .resulting when i install the app ... Read more",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "Jan 15, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://jonaskruckenberg.github.io",
+    "name": "Sidecar - The Tauri Documentation WIP",
+    "snippet": "The sidecar feature can only bundle self-contained binaries, making Node .js applications difficult to bundle. You can either include a stock Node .js",
+    "host_name": "jonaskruckenberg.github.io",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://evilmartians.com",
+    "name": "Making desktop apps with revved-up potential: Rust + Tauri",
+    "snippet": "Apr 22, 2025 — Webview . Tauri uses WebKit on macOS and Linux, and WebView2 on Windows. This requires us to check the frontend's behavior outside of Chromium. Read more",
+    "host_name": "evilmartians.com",
+    "rank": 3,
+    "date": "Apr 22, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://mclare.blog",
+    "name": "Writing a pandas Sidecar for Tauri - MClare Blog",
+    "snippet": "I'm currently working on a Tauri project that needs to utilize a series of pandas scripts for data cleaning before loading them into my database in Tauri . While ... Read more",
+    "host_name": "mclare.blog",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

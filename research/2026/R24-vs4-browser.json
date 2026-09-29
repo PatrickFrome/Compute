@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://stevekinney.com",
+    "name": "Playwright vs. Chrome DevTools MCP",
+    "snippet": "Apr 6, 2026 — Compare Playwright CLI, Playwright MCP , and Chrome DevTools MCP to choose browser automation and debugging tools for coding agents .",
+    "host_name": "stevekinney.com",
+    "rank": 0,
+    "date": "Apr 6, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.webfuse.com",
+    "name": "6 Best MCP Servers for Browser Automation in 2026",
+    "snippet": "Mar 8, 2026 — Start with Playwright MCP if you need a local, predictable browser automation server for testing, scraping, or repeatable agent workflows. Read more",
+    "host_name": "www.webfuse.com",
+    "rank": 1,
+    "date": "Mar 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.heyuan110.com",
+    "name": "Browser Automation in Claude Code: 5 Tools Compared (2026)",
+    "snippet": "Jan 28, 2026 — Browser-use vs Agent Browser vs Playwright CLI vs Playwright MCP vs DevTools MCP — real-world token usage differs by 10x+.",
+    "host_name": "www.heyuan110.com",
+    "rank": 2,
+    "date": "Jan 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://agentskillshub.dev",
+    "name": "MCP Browser Automation 2026: Chrome DevTools &",
+    "snippet": "Jun 10, 2026 — Start with Chrome DevTools MCP when the job is debugging a live Chrome page, Playwright MCP when the job needs repeatable browser assertions, ... Read more",
+    "host_name": "agentskillshub.dev",
+    "rank": 3,
+    "date": "Jun 10, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://dev.to",
+    "name": "Browser Tools for AI Agents Part 1: Playwright, Puppeteer",
+    "snippet": "Apr 26, 2026 — Playwright is the fastest browser automation tool . gives agents direct access to Chrome DevTools. 29 tools across six categories: input  ...",
+    "host_name": "dev.to",
+    "rank": 4,
+    "date": "Apr 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.cloudflare.com",
+    "name": "Browser Run: give your agents a browser",
+    "snippet": "Apr 15, 2026 — The Chrome DevTools Protocol (CDP ) is the low-level protocol that powers browser automation. Exposing CDP directly means the growing ecosystem ... Read more",
+    "host_name": "blog.cloudflare.com",
+    "rank": 5,
+    "date": "Apr 15, 2026",
+    "favicon": ""
+  }
+]

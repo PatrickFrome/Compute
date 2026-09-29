@@ -1,0 +1,43 @@
+{"ts": "2026-09-28T04:33:57Z", "action": "SYSTEM_TELEMETRY", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "c0eed756423c4000"}
+{"ts": "2026-09-28T04:34:21Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "1e0c071d144daf6a"}
+{"ts": "2026-09-28T04:34:44Z", "action": "SEMANTIC_FOCUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "690f06f37c42f88d"}
+{"ts": "2026-09-28T04:35:53Z", "action": "SEMANTIC_TYPE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "d80e9c3326ec6e16"}
+{"ts": "2026-09-28T04:36:20Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "15fe5528cd6dad7b"}
+{"ts": "2026-09-28T04:38:03Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "39635b02db852269"}
+{"ts": "2026-09-28T04:43:20Z", "action": "TAB_CENSUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "5bec855e4734682f"}
+{"ts": "2026-09-28T04:43:48Z", "action": "NEW_TAB", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "0db8292ecd73148a"}
+{"ts": "2026-09-28T04:44:32Z", "action": "NAVIGATE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "9a8ccd781c6f8b46"}
+{"ts": "2026-09-28T04:44:46Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "c55dd61c999303f5"}
+{"ts": "2026-09-28T04:45:12Z", "action": "BACK", "verdict": "DENY", "trust_tier": "NONE", "reason": "action not in any allowlist tier", "conditions": [], "ledger_sha": "42b97a3445d021d2"}
+{"ts": "2026-09-28T04:48:03Z", "action": "TAB_CENSUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "0f5cd11c1725c8b3"}
+{"ts": "2026-09-28T04:48:29Z", "action": "BACK", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "5d6c6f2a064c8feb"}
+{"ts": "2026-09-28T04:48:46Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "0d1e4f51ad9416ad"}
+{"ts": "2026-09-28T04:49:09Z", "action": "FORWARD", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "fad6492d20573876"}
+{"ts": "2026-09-28T04:49:20Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "dd5c435c1985e985"}
+{"ts": "2026-09-28T04:49:43Z", "action": "TYPED_CLICK", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "b21d0cac59278ecf"}
+{"ts": "2026-09-28T04:50:13Z", "action": "GATE_ENABLE_ALL", "verdict": "ESCALATE", "trust_tier": "T2", "reason": "owner-authority action requires operator/owner approval", "conditions": ["owner_override_id_required"], "ledger_sha": "47cd8bbda12351d3"}
+{"ts": "2026-09-28T04:50:13Z", "action": "GATE_ENABLE_ALL", "verdict": "ESCALATE-PROCEED", "reason": "operator mandate Job 419203 mechanics sweep; owner-authority action requires operator/owner approval", "owner_directive": "job-419203-mechanics-sweep-1240"}
+{"ts": "2026-09-28T04:50:36Z", "action": "DOWNLOAD_STATUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "f45004061ea52bb2"}
+{"ts": "2026-09-28T04:51:04Z", "action": "NEW_TAB", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "6d2b49e558f9fecd"}
+{"ts": "2026-09-28T04:51:45Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "9774f3bde2cdf65e"}
+{"ts": "2026-09-28T04:52:09Z", "action": "SEMANTIC_FOCUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "38e92a45196f2d04"}
+{"ts": "2026-09-28T04:52:35Z", "action": "SEMANTIC_TYPE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "67c8d36eea75e9fd"}
+{"ts": "2026-09-28T04:53:04Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "0373b0fe53818dbf"}
+{"ts": "2026-09-28T04:53:33Z", "action": "CLOSE_TAB", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "40336d3827aeb750"}
+{"ts": "2026-09-28T04:54:02Z", "action": "TAB_CENSUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "d0bce62c0fde974e"}
+{"ts": "2026-09-28T05:01:45Z", "action": "SELF_UPDATE_STATUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "a2675d00abd4e7a6"}
+{"ts": "2026-09-28T05:02:08Z", "action": "NEW_TAB", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "c0aba0a1556456d1"}
+{"ts": "2026-09-28T05:02:51Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "e1aa364d683b4e27"}
+{"ts": "2026-09-28T05:03:17Z", "action": "TYPED_CLICK", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "9a6227b49c807b95"}
+{"ts": "2026-09-28T05:03:51Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "963403fc3196354f"}
+{"ts": "2026-09-28T05:04:17Z", "action": "DOWNLOAD_FILE", "verdict": "ESCALATE", "trust_tier": "T2", "reason": "owner-authority action requires operator/owner approval", "conditions": ["owner_override_id_required"], "ledger_sha": "f1389bba67444328"}
+{"ts": "2026-09-28T05:04:17Z", "action": "DOWNLOAD_FILE", "verdict": "ESCALATE-PROCEED", "reason": "operator mandate Job 419203; owner-authority action requires operator/owner approval", "owner_directive": "job-419203-delta-sweep-1300"}
+{"ts": "2026-09-28T05:04:31Z", "action": "DOWNLOAD_STATUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "294a72bd7cd1936f"}
+{"ts": "2026-09-28T05:04:58Z", "action": "CLOSE_TAB", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "eafd6da331c03693"}
+{"ts": "2026-09-28T05:05:27Z", "action": "TAB_CENSUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "1bdd3ab9525a7219"}
+{"ts": "2026-09-28T05:09:12Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "a38f5a8ab2428605"}
+{"ts": "2026-09-28T05:10:16Z", "action": "CAPTURE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "5706c17c3fc582ef"}
+{"ts": "2026-09-28T05:10:42Z", "action": "SEMANTIC_FOCUS", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "cdcdea0e9d752759"}
+{"ts": "2026-09-28T05:11:16Z", "action": "SEMANTIC_TYPE", "verdict": "ALLOW", "trust_tier": "T0", "reason": "supervised mutation allowlist", "conditions": ["enforce_mutation_gap_ge_15s"], "ledger_sha": "f0e58fd026dd0dd8"}
+{"ts": "2026-09-28T05:11:40Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "ca366acac6236a0f"}
+{"ts": "2026-09-28T05:13:10Z", "action": "READ_TRANSCRIPT", "verdict": "ALLOW", "trust_tier": "T0", "reason": "read-only allowlist", "conditions": [], "ledger_sha": "3f77a43c25906f83"}

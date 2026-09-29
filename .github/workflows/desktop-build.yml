@@ -1,0 +1,77 @@
+name: desktop-build
+
+# R65 (smart-merge): CI для desktop/ — единственной Electron-оболочки ME2 OS
+# (R46-R64: supervisor + gateway + tab-registry + updater; git-sync паттерн R17/R21).
+# В dev-песочнице нет дисплея — верифицируемая сборка = CI: typecheck → tsc build →
+# electron-builder smoke (--dir) на 3 ОС. Установщики (AppImage/NSIS/DMG) — на тегах v*.
+# Backlog: упаковка bun-рантайма для supervisor (packaged-профиль daemon+UI без dev-сервера).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [sandbox/me2-os]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-build.yml"
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-client:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+          - os: macos-14
+          - os: windows-2022
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Typecheck desktop shell (tsc --noEmit)
+        shell: bash
+        working-directory: desktop
+        run: |
+          bun install --frozen-lockfile || bun install
+          bun run typecheck
+
+      - name: Compile desktop shell (tsc → dist/)
+        shell: bash
+        working-directory: desktop
+        run: bun run build
+
+      - name: Smoke-build ME2 OS desktop (unpacked dir; full installers on tags)
+        shell: bash
+        working-directory: desktop
+        env:
+          FULL: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+        run: |
+          npm install --no-fund --no-audit
+          if [ "$FULL" = "1" ]; then
+            npx electron-builder --config electron-builder.yml --publish never
+          else
+            npx electron-builder --config electron-builder.yml --dir
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: me2-os-desktop-${{ matrix.os }}
+          path: |
+            desktop/release/**
+          if-no-files-found: error
+
+      - name: Draft release on tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            desktop/release/*.dmg
+            desktop/release/*.AppImage
+            desktop/release/*.exe

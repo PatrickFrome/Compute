@@ -1,0 +1,19 @@
+[
+ {
+  "id": "M01",
+  "action": "NEW_TAB",
+  "command_id": "f6e1d00d-4156-463a-94ec-f016f5787e5d",
+  "status": "FAILED",
+  "channel": "insert",
+  "error": "tab_capacity_exceeded",
+  "ms": 6451,
+  "result_summary": null,
+  "receipt_schema": null
+ },
+ {
+  "id": "M01-verdict",
+  "action": "CHAIN_ABORT",
+  "status": "NO_TAB",
+  "note": "NEW_TAB не дал tab_id — стена ёмкости/отказ: None"
+ }
+]

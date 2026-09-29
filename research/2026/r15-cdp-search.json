@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "startScreencast feature? · Issue #478 · puppeteer/puppeteer",
+    "snippet": "I think it depends on how much the page is changing, in my experience it will stop sending frames if there are no changes on the page . I tried it on a youtube ... Read more",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://chromedevtools.github.io",
+    "name": "Chrome DevTools Protocol",
+    "snippet": "The Chrome DevTools Protocol allows for tools to instrument, inspect, debug and profile Chromium, Chrome and other Blink-based browsers.",
+    "host_name": "chromedevtools.github.io",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://issues.chromium.org",
+    "name": "Page screencasting (Page.screencastFrame) causes huge",
+    "snippet": "Open a page which has a infinite animation, screen to update very frequently. View huge CPU usage that chrome causes. if a page changes a lot then it causes ...",
+    "host_name": "issues.chromium.org",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.chrome.com",
+    "name": "Protocol monitor: View and send CDP requests",
+    "snippet": "Jun 5, 2024 — Use the Protocol monitor to view all CDP requests and responses made by DevTools and send CDP commands directly. Read more",
+    "host_name": "developer.chrome.com",
+    "rank": 3,
+    "date": "Jun 5, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://pkg.go.dev",
+    "name": "page package - github.com/chromedp/cdproto/page",
+    "snippet": "Package page provides the Chrome DevTools Protocol commands, types, and events for the Page domain. ScreencastFrame compressed image data requested by the  ...",
+    "host_name": "pkg.go.dev",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

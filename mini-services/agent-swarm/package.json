@@ -1,0 +1,14 @@
+{
+  "name": "me2-agent-swarm",
+  "version": "1.4.0",
+  "private": true,
+  "description": "ME2 CHAT-SWARM v1.0.0 — autonomous continuously-running chat-agent swarm: no budgets, no limits, no cron fleet. Self-reproducing, self-improving, memoryful, highest coordination, live browser updates.",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1",
+    "z-ai-web-dev-sdk": "^0.0.18"
+  }
+}

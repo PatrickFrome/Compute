@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://antmedia.io",
+    "name": "Frame Rate Explained (FPS): 24 vs 30 vs 60 for Live",
+    "snippet": "Jan 14, 2026 — The frame rate you configure affects encoding CPU usage, bandwidth consumption, glass-to-glass latency, and perceived video smoothness. Read more",
+    "host_name": "antmedia.io",
+    "rank": 0,
+    "date": "Jan 14, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.flashnetworks.com",
+    "name": "Adaptive Bitrate Management by Flash Networks",
+    "snippet": "Apr 10, 2024 — Adaptive bitrate streaming adjusts and improves video streaming over HTTP networks. It makes playback smooth for subscribers and saves costs ...",
+    "host_name": "www.flashnetworks.com",
+    "rank": 1,
+    "date": "Apr 10, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://bunny.net",
+    "name": "Adaptive bitrate streaming",
+    "snippet": "Aug 12, 2026 — Adaptive bitrate streaming optimizes video resolution and framerate based on the viewer's network bandwidth . This technology allows users with ...",
+    "host_name": "bunny.net",
+    "rank": 2,
+    "date": "Aug 12, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mux.com",
+    "name": "Adaptive Bitrate Streaming: How It Works for Developers",
+    "snippet": "It's the technology that lets video playback adjust to your network conditions in real time, switching to lower quality when bandwidth drops and scaling back up",
+    "host_name": "www.mux.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.boxcast.com",
+    "name": "Adaptive Bitrate Streaming + How It Works for Your",
+    "snippet": "Sep 28, 2022 — Adaptive bitrate streaming can improve your live broadcast and grow your audience. It's constantly monitoring the server load, bandwidth, and  ...",
+    "host_name": "www.boxcast.com",
+    "rank": 4,
+    "date": "Sep 28, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.clevercast.com",
+    "name": "Adaptive Bitrate Streaming",
+    "snippet": "Adaptive bitrate streaming ensures that your audience gets the best possible viewing experience, no matter their network conditions.",
+    "host_name": "www.clevercast.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

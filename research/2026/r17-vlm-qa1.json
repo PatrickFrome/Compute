@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "```json\n{\n  \"pass\": true,\n  \"findings\": [\n    \"Текст полностью читаем, обрезок или наложений не обнаружено\",\n    \"Контрастность высокая: белый/зелёный текст на тёмном фоне (#0d1117), цветовая дифференциация статусов (COMPLETED/LEASED) чёткая\",\n    \"CSS-сетка (grid) отрисована корректно: 3 колонки (Сандбокс, Центр, Event Log), пропорции сохранены, границы панелей видны\",\n    \"Панель ROADMAP (M1–M7, 7 строк DONE) визуально подтверждена в верхней левой зоне (заголовок 'ROADMAP ЗАКРЫТ' с датой и галочкой)\",\n    \"Панель САНДБОКС присутствует в виде формы слева: заголовок 'САНДБОКС · 1', поле ввода 'r17-ui1-test', кнопка '+ создать', терминальный вывод (exit 0)\"\n  ]\n}\n```",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790091343,
+  "id": "20260922233538733d8a2b8ff1443b",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260922233538733d8a2b8ff1443b",
+  "usage": {
+    "completion_tokens": 240,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 969,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 1209
+  }
+}

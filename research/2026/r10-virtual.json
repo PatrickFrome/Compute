@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://help.mypurecloud.com",
+    "name": "Virtual Agent performance dashboard",
+    "snippet": "The dashboard provides a holistic view of the performance of Virtual Agents and their features, including intent performance , AI-powered slots, AI-powered ... Read more",
+    "host_name": "help.mypurecloud.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "perf: Implement virtual rendering for large task lists #23",
+    "snippet": "Feb 14, 2026 — When users have many tasks ( 100 +), the TasksWidget may have performance issues. Virtual rendering should be implemented to only render visible ... Read more",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "Feb 14, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.aws.amazon.com",
+    "name": "AI Agent performance dashboard",
+    "snippet": "The dashboard provides a single. Use the dashboard to view your AI Agents metrics such as invocation count, latency, and success rate.",
+    "host_name": "docs.aws.amazon.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://support.intermedia.com",
+    "name": "Dashboards - AI Agent Performance",
+    "snippet": "Sep 14, 2026 — AI Agent Performance Dashboard gives you visibility into how your AI agents are handling calls, how callers are exiting, and how much of your ...",
+    "host_name": "support.intermedia.com",
+    "rank": 3,
+    "date": "Sep 14, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://fast.io",
+    "name": "AI Agent Performance Dashboard: 5 Metrics to Track",
+    "snippet": "Apr 15, 2026 — Build an AI agent performance dashboard that tracks task success rate, latency, token cost, tool errors, and file operations.",
+    "host_name": "fast.io",
+    "rank": 4,
+    "date": "Apr 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.augmentcode.com",
+    "name": "How we solved the \"AI agent black box\" problem with typed",
+    "snippet": "Jul 28, 2025 — Tasklist transforms \"AI agent , do X\" from a black-box wish into a transparent, measurable workflow. By storing each step as a first-class ...",
+    "host_name": "www.augmentcode.com",
+    "rank": 5,
+    "date": "Jul 28, 2025",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,1939 @@
+[
+ {
+  "id": "CT1",
+  "action": "NEW_TAB",
+  "command_id": "82a109e8-ac6c-4757-a2c1-9ede546eac31",
+  "status": "LEASED",
+  "channel": "insert",
+  "error": null,
+  "ms": 62712,
+  "result_summary": null,
+  "receipt_schema": null
+ },
+ {
+  "id": "CT1",
+  "action": "NEW_TAB",
+  "command_id": "a0b80f46-8579-4510-bebf-5500f0aabbee",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 20788,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "kind": "GLM_CHAT",
+   "role": "USER",
+   "title": "Z.ai",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "created_at": "2026-09-28T07:29:17.485Z",
+   "navigation": "<dict:state,reason,schema,pre_url,stopped>",
+   "load_pending": false,
+   "effect_outcome": "CONFIRMED",
+   "webcontents_id": 516,
+   "browser_cell_id": "cell:f55359db-7026-4428-b0ea-a319263f8544",
+   "automatic_retry_allowed": false,
+   "browser_cell_generation": 1
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/",
+   "kind": "GLM_CHAT",
+   "role": "USER",
+   "title": "Z.ai",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "created_at": "2026-09-28T07:29:17.485Z",
+   "navigation": {
+    "state": "AMBIGUOUS",
+    "reason": "DEADLINE_EXCEEDED",
+    "schema": "metaengine.browser.bounded-navigation.v1",
+    "pre_url": "",
+    "stopped": true,
+    "post_url": "https://chat.z.ai/",
+    "error_code": 0,
+    "duration_ms": 15018,
+    "requested_url": "https://chat.z.ai/",
+    "authority_effect": false,
+    "automatic_retry_allowed": false
+   },
+   "load_pending": false,
+   "effect_outcome": "CONFIRMED",
+   "webcontents_id": 516,
+   "browser_cell_id": "cell:f55359db-7026-4428-b0ea-a319263f8544",
+   "automatic_retry_allowed": false,
+   "browser_cell_generation": 1
+  }
+ },
+ {
+  "id": "CT2",
+  "action": "CAPTURE",
+  "command_id": "622e309d-fd52-461d-8fed-6cbf2bc1dd55",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3363,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:516",
+   "captured_at": "2026-09-28T07:29:35.879Z",
+   "text_excerpt": "New Chat\nAI PPT\nGLM-5.3-Flash\nZCode\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI ",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:37>",
+   "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+   "semantic_refs_issued": 37,
+   "runtime_main_frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_e7f83efdafb34a0cbc43ba5719e4bbbb",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 2,
+   "runtime_document_generation": 3,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "7842336998969357725.6650942683058397974",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "viewport": {
+    "scale": 1,
+    "width": 950.0377197265625,
+    "height": 577.8113403320312,
+    "page_x": 0,
+    "page_y": 0
+   },
+   "target_id": "webcontents:516",
+   "captured_at": "2026-09-28T07:29:35.879Z",
+   "text_excerpt": "New Chat\nAI PPT\nGLM-5.3-Flash\nZCode\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI Agents\nCode faster with ZCode. Automate more with AutoClaw.\nZCode\nAutoClaw\nAPI\npaprika1\nMECH-OK-1240: Mechanics Verification Ping\nMETAENGINE Unlock Probe\n3000-Word Essay on Computing History\nMETAENGINE Research Task V1\nTask-Board Web Page Development\nMETAENGINE Supervisor Seed v1\nShared DB & Repo Setup\nFleet Brief: Swarm Audit & Growth Plan\nMETAENGINE Test Instructions\nMETAENGINE FLEET RESEARCH EXECUTE\nMETAENGINE FLEET SEED v1: Bootstrap Message\nMETAENGINE FLEET SEED MSG\nMETAENGINE FLEET SEED v1 - Bootstrap\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE_SUPERVISOR_WAKE_V1 Coordination\nMinimalist Display Pedestal Design\nMETAENGINE Supervisor Rollover\nMetaengine Fleet Task Execution\nMETAENGINE FLEET Task Execution\nMETAENGINE FLEET EXECUTION\nMETAENGINE FLEET Task Execution\nMETAENGINE_FLEET_TASK_V1\nMETAENGINE FLEET Task Coordination\nPing Test Response\nNew Chat\nWhat can I build for you?\nW\nW\nh\nh\na\na\nt\nt\nc\nc\na\na\nn\nn\nI\nI\nb\nb\nu\nu\ni\ni\nl\nl\nd\nd\nf\nf\no\no\nr\nr\ny\ny\no\no\nu\nu\n?\n?\nInteract with z.ai and explore the boundless creative world\nLanding Page\nKnowledge/Teaching Material\n3D Modeling\nMini Game\nPersonal Blog\nDeep Think\nMax\nMETAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY",
+   "authority_effect": false,
+   "interaction_tree": {
+    "schema": "metaengine.native-browser.interaction-tree.v1",
+    "elements": [
+     {
+      "path": "rootwebarea>region",
+      "role": "region",
+      "text": "Notifications alt+T",
+      "visible": null,
+      "selector": "backend_node_id:51"
+     },
+     {
+      "path": "rootwebarea>button",
+      "role": "button",
+      "text": "Chat Agent New Chat AI PPT Today MECH-OK-1240: Mechanics Verification Ping METAENGINE Unlock Probe 3000-Word Essay on Computing History METAENGINE Research Task",
+      "visible": null,
+      "selector": "backend_node_id:367"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:393"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "AI PPT",
+      "visible": null,
+      "selector": "backend_node_id:399"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Chat",
+      "visible": null,
+      "selector": "backend_node_id:378"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Agent",
+      "visible": null,
+      "selector": "backend_node_id:383"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open Settings",
+      "visible": null,
+      "selector": "backend_node_id:429"
+     },
+     {
+      "path": "button",
+      "role": "button",
+      "text": "Select a model",
+      "visible": null,
+      "selector": "backend_node_id:240"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "ZCode",
+      "visible": null,
+      "selector": "backend_node_id:358"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:246"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:495"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "AI PPT",
+      "visible": null,
+      "selector": "backend_node_id:496"
+     },
+     {
+      "path": "button>link",
+      "role": "link",
+      "text": "ZCode",
+      "visible": null,
+      "selector": "backend_node_id:419"
+     },
+     {
+      "path": "button>link",
+      "role": "link",
+      "text": "AutoClaw",
+      "visible": null,
+      "selector": "backend_node_id:423"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:228"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "GLM-5.3-Flash",
+      "visible": null,
+      "selector": "backend_node_id:502"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "ZCode",
+      "visible": null,
+      "selector": "backend_node_id:503"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:247"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "Chat",
+      "visible": null,
+      "selector": "backend_node_id:493"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "Agent",
+      "visible": null,
+      "selector": "backend_node_id:494"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Today",
+      "visible": null,
+      "selector": "backend_node_id:1730"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "MECH-OK-1240: Mechanics Verification Ping",
+      "visible": null,
+      "selector": "backend_node_id:1447"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Unlock Probe",
+      "visible": null,
+      "selector": "backend_node_id:1453"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "3000-Word Essay on Computing History",
+      "visible": null,
+      "selector": "backend_node_id:1459"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Research Task V1",
+      "visible": null,
+      "selector": "backend_node_id:1465"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Task-Board Web Page Development",
+      "visible": null,
+      "selector": "backend_node_id:1471"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Supervisor Seed v1",
+      "visible": null,
+      "selector": "backend_node_id:1477"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Shared DB & Repo Setup",
+      "visible": null,
+      "selector": "backend_node_id:1483"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Fleet Brief: Swarm Audit & Growth Plan",
+      "visible": null,
+      "selector": "backend_node_id:1489"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Test Instructions",
+      "visible": null,
+      "selector": "backend_node_id:1495"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Yesterday",
+      "visible": null,
+      "selector": "backend_node_id:1740"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET RESEARCH EXECUTE",
+      "visible": null,
+      "selector": "backend_node_id:1502"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Previous 7 days",
+      "visible": null,
+      "selector": "backend_node_id:1742"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET SEED v1: Bootstrap Message",
+      "visible": null,
+      "selector": "backend_node_id:1509"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET SEED MSG",
+      "visible": null,
+      "selector": "backend_node_id:1515"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET SEED v1 - Bootstrap",
+      "visible": null,
+      "selector": "backend_node_id:1521"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:1527"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:1533"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:1539"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Previous 30 days",
+      "visible": null,
+      "selector": "backend_node_id:1749"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+      "visible": null,
+      "selector": "backend_node_id:1546"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Minimalist Display Pedestal Design",
+      "visible": null,
+      "selector": "backend_node_id:1552"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE Supervisor Rollover",
+      "visible": null,
+      "selector": "backend_node_id:1558"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Metaengine Fleet Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:1564"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:1570"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET EXECUTION",
+      "visible": null,
+      "selector": "backend_node_id:1576"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:1582"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE_FLEET_TASK_V1",
+      "visible": null,
+      "selector": "backend_node_id:1588"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "METAENGINE FLEET Task Coordination",
+      "visible": null,
+      "selector": "backend_node_id:1594"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Ping Test Response",
+      "visible": null,
+      "selector": "backend_node_id:1600"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:1606"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "Loading...",
+      "visible": null,
+      "selector": "backend_node_id:1761"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "Meet Your AI Agents",
+      "visible": null,
+      "selector": "backend_node_id:497"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "Code faster with ZCode. Automate more with AutoClaw.",
+      "visible": null,
+      "selector": "backend_node_id:498"
+     },
+     {
+      "path": "link>statictext",
+      "role": "statictext",
+      "text": "ZCode",
+      "visible": null,
+      "selector": "backend_node_id:499"
+     },
+     {
+      "path": "link>statictext",
+      "role": "statictext",
+      "text": "AutoClaw",
+      "visible": null,
+      "selector": "backend_node_id:500"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:504"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "paprika1",
+      "visible": null,
+      "selector": "backend_node_id:501"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "MECH-OK-1240: Mechanics Verification Ping",
+      "visible": null,
+      "selector": "backend_node_id:1731"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Unlock Probe",
+      "visible": null,
+      "selector": "backend_node_id:1732"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "3000-Word Essay on Computing History",
+      "visible": null,
+      "selector": "backend_node_id:1733"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Research Task V1",
+      "visible": null,
+      "selector": "backend_node_id:1734"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Task-Board Web Page Development",
+      "visible": null,
+      "selector": "backend_node_id:1735"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Supervisor Seed v1",
+      "visible": null,
+      "selector": "backend_node_id:1736"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Shared DB & Repo Setup",
+      "visible": null,
+      "selector": "backend_node_id:1737"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Fleet Brief: Swarm Audit & Growth Plan",
+      "visible": null,
+      "selector": "backend_node_id:1738"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Test Instructions",
+      "visible": null,
+      "selector": "backend_node_id:1739"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET RESEARCH EXECUTE",
+      "visible": null,
+      "selector": "backend_node_id:1741"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET SEED v1: Bootstrap Message",
+      "visible": null,
+      "selector": "backend_node_id:1743"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET SEED MSG",
+      "visible": null,
+      "selector": "backend_node_id:1744"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET SEED v1 - Bootstrap",
+      "visible": null,
+      "selector": "backend_node_id:1745"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:1746"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:1747"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET CONVERSATION SEED",
+      "visible": null,
+      "selector": "backend_node_id:1748"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+      "visible": null,
+      "selector": "backend_node_id:1750"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Minimalist Display Pedestal Design",
+      "visible": null,
+      "selector": "backend_node_id:1751"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE Supervisor Rollover",
+      "visible": null,
+      "selector": "backend_node_id:1752"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Metaengine Fleet Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:1753"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:1754"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET EXECUTION",
+      "visible": null,
+      "selector": "backend_node_id:1755"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET Task Execution",
+      "visible": null,
+      "selector": "backend_node_id:1756"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE_FLEET_TASK_V1",
+      "visible": null,
+      "selector": "backend_node_id:1757"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "METAENGINE FLEET Task Coordination",
+      "visible": null,
+      "selector": "backend_node_id:1758"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "Ping Test Response",
+      "visible": null,
+      "selector": "backend_node_id:1759"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:1760"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "What can I build for you?",
+      "visible": null,
+      "selector": "backend_node_id:550"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "W",
+      "visible": null,
+      "selector": "backend_node_id:506"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "W",
+      "visible": null,
+      "selector": "backend_node_id:505"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "h",
+      "visible": null,
+      "selector": "backend_node_id:508"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "h",
+      "visible": null,
+      "selector": "backend_node_id:507"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "a",
+      "visible": null,
+      "selector": "backend_node_id:510"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "a",
+      "visible": null,
+      "selector": "backend_node_id:509"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "t",
+      "visible": null,
+      "selector": "backend_node_id:512"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "t",
+      "visible": null,
+      "selector": "backend_node_id:511"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "c",
+      "visible": null,
+      "selector": "backend_node_id:515"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "c",
+      "visible": null,
+      "selector": "backend_node_id:514"
+     }
+    ],
+    "truncated": true,
+    "element_count": 96,
+    "authority_effect": false,
+    "input_values_exposed": false
+   },
+   "semantic_targets": [
+    {
+     "name": "How can I help you today?",
+     "role": "textbox",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "How can I help you today?",
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 474,
+      "semantic_ref_id": "semref_7b9b397b9161e9d2e14386b3e4663671c951c011f089c1a05fbc61c16d238857",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "value_length": 202,
+     "value_sha256": "6ad6c2e9f1dd26340d0ea79b778918ad22bc65e17101bc265743951669c08bea",
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "value_exposed": false,
+     "backend_node_id": 474
+    },
+    {
+     "name": null,
+     "role": "textbox",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": null,
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 476,
+      "semantic_ref_id": "semref_3a9e482ace64a74e3e9a52b74f99eb5fc993b0f678e9332d2f654d8ad3e71d73",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "value_length": 0,
+     "value_sha256": null,
+     "selector_mode": "BACKEND_NODE_ID_REQUIRED",
+     "value_exposed": false,
+     "backend_node_id": 476
+    },
+    {
+     "name": "AI PPT",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "AI PPT",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 399,
+      "semantic_ref_id": "semref_d85485e7dc06c3ca4c602d6834ade4258b40e040c5982b3321635feac636bf4a",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 399
+    },
+    {
+     "name": "Chat",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Chat",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 378,
+      "semantic_ref_id": "semref_ff215bd66189191e645202b3b82a75a9b4ce2e5d959606823a52ceb08645e997",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 378
+    },
+    {
+     "name": "Agent",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Agent",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 383,
+      "semantic_ref_id": "semref_61763eea04cbf8c2f103249c9b3d6bf897a6bcd9a408e9da722e4f32fe5efa50",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 383
+    },
+    {
+     "name": "Open Settings",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Open Settings",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 429,
+      "semantic_ref_id": "semref_150ed8f7f929010a810f872bbfe6d864718fa4685586e6a38eba8e36d65d22ef",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 429
+    },
+    {
+     "name": "Select a model",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Select a model",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 240,
+      "semantic_ref_id": "semref_0e5851e575d8bac657cfcb74241594d8d6c74f61b152a2801458b5c5edb6777e",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 240
+    },
+    {
+     "name": "ZCode",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "ZCode",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 358,
+      "semantic_ref_id": "semref_c6e1342cb26a66db993ef96b3337be6b6a1e92d9eebb88425572321703ae5ad6",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 358
+    },
+    {
+     "name": "ZCode",
+     "role": "link",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "ZCode",
+       "role": "link",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 419,
+      "semantic_ref_id": "semref_418262bff320bc01155914277b1406241d0ee72aa336b1e6540312f86fb9e6c8",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 419
+    },
+    {
+     "name": "AutoClaw",
+     "role": "link",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "AutoClaw",
+       "role": "link",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 423,
+      "semantic_ref_id": "semref_4ccfc72078cc8e7ff3e11af2cc1f820b34a70351ed76c211370a9b40dfd7ce18",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 423
+    },
+    {
+     "name": "Open User Menu",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Open User Menu",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 228,
+      "semantic_ref_id": "semref_a48d0fe63e662dbb07e3948f855dc7640fd58275189eac4d6b9940f53550217f",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 228
+    },
+    {
+     "name": "MECH-OK-1240: Mechanics Verification Ping",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "MECH-OK-1240: Mechanics Verification Ping",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1447,
+      "semantic_ref_id": "semref_af2f2ab0d8e0d48b31092ab272bd1753807bc5f42cb1bcbc18646c15a1ded395",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1447
+    },
+    {
+     "name": "METAENGINE Unlock Probe",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Unlock Probe",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1453,
+      "semantic_ref_id": "semref_67e28241f4922c0097027f3eb7564d2efc89a80b7023d2992485db7ae6cefd4d",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1453
+    },
+    {
+     "name": "3000-Word Essay on Computing History",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "3000-Word Essay on Computing History",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1459,
+      "semantic_ref_id": "semref_bda76125845afb939dede82a4f075ea91caf04278693392eabb33efff00eae4c",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1459
+    },
+    {
+     "name": "METAENGINE Research Task V1",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Research Task V1",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1465,
+      "semantic_ref_id": "semref_c13b2ccca9ca67fab8e7e7463a00b459e3f9bcb9fe5de77f941e14face0dffe2",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1465
+    },
+    {
+     "name": "Task-Board Web Page Development",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Task-Board Web Page Development",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1471,
+      "semantic_ref_id": "semref_53eb9821dc238baf1150c7899f23074f787030331dc502402d375aba5f644f12",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1471
+    },
+    {
+     "name": "METAENGINE Supervisor Seed v1",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Supervisor Seed v1",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1477,
+      "semantic_ref_id": "semref_865877a42a062f06549843309719537a9c8c02e57a20bd1066cc7b6a89c9a57b",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1477
+    },
+    {
+     "name": "Shared DB & Repo Setup",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Shared DB & Repo Setup",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1483,
+      "semantic_ref_id": "semref_68a3d60876d97749e4401cea90bc96aaf87806425be821c065c5e3b7f1329515",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1483
+    },
+    {
+     "name": "Fleet Brief: Swarm Audit & Growth Plan",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Fleet Brief: Swarm Audit & Growth Plan",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1489,
+      "semantic_ref_id": "semref_25b868621f74acdd45d00e20f5be62b03d4784f577894d1917eae0af8406b12a",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1489
+    },
+    {
+     "name": "METAENGINE Test Instructions",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Test Instructions",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1495,
+      "semantic_ref_id": "semref_cc5760169510ed13af4cdea5d68ffddb9ffce8ab1757e6ae3ce350e65136223a",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1495
+    },
+    {
+     "name": "METAENGINE FLEET RESEARCH EXECUTE",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET RESEARCH EXECUTE",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1502,
+      "semantic_ref_id": "semref_0b026378108a9400e78c4eb488b27ab2da2420c26f12f2289050ba2a0162495c",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1502
+    },
+    {
+     "name": "METAENGINE FLEET SEED v1: Bootstrap Message",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET SEED v1: Bootstrap Message",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1509,
+      "semantic_ref_id": "semref_bb639fbb8b7e27fa63a00f91c139f3cf3341f120b6c9c8fd3efead6009464002",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1509
+    },
+    {
+     "name": "METAENGINE FLEET SEED MSG",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET SEED MSG",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1515,
+      "semantic_ref_id": "semref_288628fb995725748e82623a220778459eab1ff43b889eef2626fb02cb2da921",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1515
+    },
+    {
+     "name": "METAENGINE FLEET SEED v1 - Bootstrap",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET SEED v1 - Bootstrap",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1521,
+      "semantic_ref_id": "semref_4b3a666c8385077f9d1201bf1a9b4713ada603d611772deb9cfe3fede64dacbe",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1521
+    },
+    {
+     "name": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE_SUPERVISOR_WAKE_V1 Coordination",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1546,
+      "semantic_ref_id": "semref_bb480007d10554a618359b216072f9954c5d34d53194e5371638482111272a50",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1546
+    },
+    {
+     "name": "Minimalist Display Pedestal Design",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Minimalist Display Pedestal Design",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1552,
+      "semantic_ref_id": "semref_f3af2aa6a21b405ae974635fe496f321aa71ded4af765b0c8f58107ec0195d48",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1552
+    },
+    {
+     "name": "METAENGINE Supervisor Rollover",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE Supervisor Rollover",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1558,
+      "semantic_ref_id": "semref_f0938624f331376cba28d156c22452849b7794570efcdb3615ff1d853efd4a49",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1558
+    },
+    {
+     "name": "Metaengine Fleet Task Execution",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Metaengine Fleet Task Execution",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1564,
+      "semantic_ref_id": "semref_14a2d12befe7113258e8fdf65763b0d7cd0a25b1d1dd17014b36debe9ee70660",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1564
+    },
+    {
+     "name": "METAENGINE FLEET EXECUTION",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET EXECUTION",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1576,
+      "semantic_ref_id": "semref_70628239724ce6850398860cb3117bbb99842aeca3b6aecad81dc6968cdeabc8",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1576
+    },
+    {
+     "name": "METAENGINE_FLEET_TASK_V1",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE_FLEET_TASK_V1",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1588,
+      "semantic_ref_id": "semref_87435bdcefe6a4fa0fe54e220c5a3a6affef12276c102b5323a907bc5eb7b1e1",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1588
+    },
+    {
+     "name": "METAENGINE FLEET Task Coordination",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "METAENGINE FLEET Task Coordination",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1594,
+      "semantic_ref_id": "semref_065cf44fd127868d093565f49d0965ad6aa944d443dbd44ce1c6fec967762111",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1594
+    },
+    {
+     "name": "Ping Test Response",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Ping Test Response",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 1600,
+      "semantic_ref_id": "semref_3716ac95ef4120860f9905863cfb7b08f765390b73c70e25599a78572ae9b9bd",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1600
+    },
+    {
+     "name": "Landing Page",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Landing Page",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 700,
+      "semantic_ref_id": "semref_43d8ae769fbb4becc135c7dd74b9712bdf75dd46871db701568aa495894828fe",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 700
+    },
+    {
+     "name": "Knowledge/Teaching Material",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Knowledge/Teaching Material",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 701,
+      "semantic_ref_id": "semref_405ffbf6ca1acda7336fe9cd0f66dc7f52bf79fc66ebab9048881837e6fd6ca3",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 701
+    },
+    {
+     "name": "3D Modeling",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "3D Modeling",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 702,
+      "semantic_ref_id": "semref_4f70c97ce7fcd364e85abe37afa835cb8cd4742190a8d61c171b2fd67ac502de",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 702
+    },
+    {
+     "name": "Mini Game",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Mini Game",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 703,
+      "semantic_ref_id": "semref_3be4b415c6313bd57cb0826ac436e6623707ff5484989134a88c997b3bb4668b",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 703
+    },
+    {
+     "name": "Personal Blog",
+     "role": "button",
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Personal Blog",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "target_id": "webcontents:516",
+      "backend_node_id": 704,
+      "semantic_ref_id": "semref_f60c3e8d5be05dd5f913ab7d9b00913843895d838b666aa368d07f06a27a5d61",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+      "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 704
+    }
+   ],
+   "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+   "semantic_refs_issued": 37,
+   "runtime_main_frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_e7f83efdafb34a0cbc43ba5719e4bbbb",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 2,
+   "runtime_document_generation": 3,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "7842336998969357725.6650942683058397974",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  }
+ },
+ {
+  "id": "CT3",
+  "action": "SEMANTIC_FOCUS",
+  "command_id": "228d63b0-7bf8-4a88-9ed7-876d1f277da0",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 6194,
+  "result_summary": {
+   "action": "SEMANTIC_FOCUS",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "target": "<dict:name,role,frame_id,semantic_ref,backend_node_id>",
+   "authority_effect": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "action": "SEMANTIC_FOCUS",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "target": {
+    "name": "How can I help you today?",
+    "role": "textbox",
+    "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+    "semantic_ref": {
+     "schema": "metaengine.native-browser.semantic-ref.v1",
+     "evidence": {
+      "name": "How can I help you today?",
+      "role": "textbox",
+      "identity_authority": false
+     },
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "target_id": "webcontents:516",
+     "backend_node_id": 474,
+     "semantic_ref_id": "semref_7b9b397b9161e9d2e14386b3e4663671c951c011f089c1a05fbc61c16d238857",
+     "authority_effect": false,
+     "stale_by_default": true,
+     "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+     "automatic_retry_allowed": false,
+     "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+    },
+    "backend_node_id": 474
+   },
+   "authority_effect": true
+  }
+ },
+ {
+  "id": "CT4",
+  "action": "SEMANTIC_TYPE",
+  "command_id": "f0c65f86-2dc7-4962-8dd4-65467dff3606",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 6427,
+  "result_summary": {
+   "action": "SEMANTIC_TYPE",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "target": "<dict:name,role,frame_id,semantic_ref,backend_node_id>",
+   "prompt_sha256": "b4f3a53ff15f27eae0d129aa76d06672aee10b9b0bd406a50295eb04c68bc0fa",
+   "inserted_chars": 148,
+   "prompt_included": false,
+   "replace_gesture": "KEY_ATOMIC",
+   "authority_effect": true,
+   "replace_existing": true,
+   "replace_verified": true,
+   "value_length_after": 148,
+   "value_sha256_after": "b4f3a53ff15f27eae0d129aa76d06672aee10b9b0bd406a50295eb04c68bc0fa",
+   "value_length_before": 202
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "action": "SEMANTIC_TYPE",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "target": {
+    "name": "How can I help you today?",
+    "role": "textbox",
+    "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+    "semantic_ref": {
+     "schema": "metaengine.native-browser.semantic-ref.v1",
+     "evidence": {
+      "name": "How can I help you today?",
+      "role": "textbox",
+      "identity_authority": false
+     },
+     "frame_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "target_id": "webcontents:516",
+     "backend_node_id": 474,
+     "semantic_ref_id": "semref_7b9b397b9161e9d2e14386b3e4663671c951c011f089c1a05fbc61c16d238857",
+     "authority_effect": false,
+     "stale_by_default": true,
+     "runtime_target_id": "1CD6DB1D7554AF23980C689233EF0B1A",
+     "state_revision_id": "rev_103cc04ba20600e91d210c296388f720457dd9ae5d600f2cd386f1d86cd35389",
+     "automatic_retry_allowed": false,
+     "execution_context_unique_id": "7842336998969357725.6650942683058397974"
+    },
+    "backend_node_id": 474
+   },
+   "prompt_sha256": "b4f3a53ff15f27eae0d129aa76d06672aee10b9b0bd406a50295eb04c68bc0fa",
+   "inserted_chars": 148,
+   "prompt_included": false,
+   "replace_gesture": "KEY_ATOMIC",
+   "authority_effect": true,
+   "replace_existing": true,
+   "replace_verified": true,
+   "value_length_after": 148,
+   "value_sha256_after": "b4f3a53ff15f27eae0d129aa76d06672aee10b9b0bd406a50295eb04c68bc0fa",
+   "value_length_before": 202
+  }
+ },
+ {
+  "id": "CT5",
+  "action": "PRESS_KEY",
+  "command_id": "f0a598c9-c1d3-4424-969d-d0d06c7835f3",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 6640,
+  "result_summary": {
+   "key": "Enter",
+   "action": "PRESS_KEY",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "target": null,
+   "authority_effect": true,
+   "mouse_geometry_required": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "key": "Enter",
+   "action": "PRESS_KEY",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "target": null,
+   "authority_effect": true,
+   "mouse_geometry_required": false
+  }
+ },
+ {
+  "id": "CT6",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "6cef6d48-9a3a-4dbf-aa18-b08231d4a4ce",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 4134,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/7c1749d9-ed38-4016-ac02-773bb45390d2",
+   "text": "GLM-5.3-Flash\nShare\nNew Chat\nAI PPT\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI ",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:516",
+   "captured_at": "2026-09-28T07:30:48.619Z",
+   "total_chars": 1284,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/c/7c1749d9-ed38-4016-ac02-773bb45390d2",
+   "text": "GLM-5.3-Flash\nShare\nNew Chat\nAI PPT\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI Agents\nCode faster with ZCode. Automate more with AutoClaw.\nZCode\nAutoClaw\npaprika1\nACK-ME2-ADAPTER-OK Format Check\nMECH-OK-1240: Mechanics Verification Ping\nMETAENGINE Unlock Probe\n3000-Word Essay on Computing History\nMETAENGINE Research Task V1\nTask-Board Web Page Development\nMETAENGINE Supervisor Seed v1\nShared DB & Repo Setup\nFleet Brief: Swarm Audit & Growth Plan\nMETAENGINE Test Instructions\nMETAENGINE FLEET RESEARCH EXECUTE\nMETAENGINE FLEET SEED v1: Bootstrap Message\nMETAENGINE FLEET SEED MSG\nMETAENGINE FLEET SEED v1 - Bootstrap\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE FLEET CONVERSATION SEED\nMETAENGINE_SUPERVISOR_WAKE_V1 Coordination\nMinimalist Display Pedestal Design\nMETAENGINE Supervisor Rollover\nMetaengine Fleet Task Execution\nMETAENGINE FLEET Task Execution\nMETAENGINE FLEET EXECUTION\nMETAENGINE FLEET Task Execution\nMETAENGINE_FLEET_TASK_V1\nMETAENGINE FLEET Task Coordination\nPing Test Response\nNew Chat\nThought Process\nACK-ME2-ADAPTER-OK\nME2-ADAPTER-CONTRACT: ответь РОВНО одной строкой ACK-ME2-ADAPTER-OK без каких-либо других слов. Это механический контракт-тест доставки. Job 419718.\nDeep Think\nMax",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_67ebf13f-b7bb-464b-8f3b-aeb8e3bfb32e",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:516",
+   "captured_at": "2026-09-28T07:30:48.619Z",
+   "total_chars": 1284,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  }
+ },
+ {
+  "id": "CT7",
+  "action": "CLOSE_TAB",
+  "command_id": "09f625d2-b671-42ea-b430-61e460018398",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 14800,
+  "result_summary": {
+   "ok": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "ok": true
+  }
+ }
+]

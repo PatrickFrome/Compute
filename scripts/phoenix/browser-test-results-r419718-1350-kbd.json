@@ -1,0 +1,70 @@
+[
+ {
+  "step": "K1-newtab",
+  "action": "NEW_TAB",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "K2-navigate",
+  "action": "NAVIGATE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "K3-capture",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "K3-link",
+  "name": "Learn more",
+  "ref_keys": [
+   "schema",
+   "evidence",
+   "frame_id",
+   "target_id",
+   "backend_node_id",
+   "semantic_ref_id",
+   "authority_effect",
+   "stale_by_default",
+   "runtime_target_id",
+   "state_revision_id",
+   "automatic_retry_allowed",
+   "execution_context_unique_id"
+  ]
+ },
+ {
+  "step": "K4-semantic-focus",
+  "action": "SEMANTIC_FOCUS",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "K5-press-enter",
+  "action": "PRESS_KEY",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "K6-capture-post",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "K-verdict",
+  "focus": "COMPLETED",
+  "press": "COMPLETED",
+  "url_post": "https://www.example.com/",
+  "effect_iana": false,
+  "TYPED_CLICK_ALT_KEYBOARD": "NO-EFFECT"
+ },
+ {
+  "step": "K9-cleanup",
+  "action": "CLOSE_TAB",
+  "status": "COMPLETED",
+  "error": null
+ }
+]

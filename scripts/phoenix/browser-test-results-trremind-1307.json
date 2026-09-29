@@ -1,0 +1,35 @@
+[
+ {
+  "step": "P1",
+  "action": "CAPTURE",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "P2",
+  "action": "SEMANTIC_FOCUS",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "P3",
+  "action": "SEMANTIC_TYPE",
+  "status": "FAILED",
+  "error": "postcondition_not_confirmed:AMBIGUOUS"
+ },
+ {
+  "step": "P4",
+  "action": "READ_TRANSCRIPT",
+  "status": "COMPLETED",
+  "error": null
+ },
+ {
+  "step": "verdict",
+  "type_status": "COMPLETED",
+  "total_chars": 34786,
+  "baseline": 40152,
+  "grown": false,
+  "reminder_landed": false,
+  "tail_after_toolreq": "payload_json={\"scope\":\"full\",\"note\":\"fresh digest to anchor eval-roadmap baseline; result consumed next generation\"}"
+ }
+]

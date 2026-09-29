@@ -1,0 +1,78 @@
+[
+ {
+  "id": "S",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "d6491c7e-925b-462a-9563-3fee4fd719f8",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 9831,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/3772a24d-bb45-46f3-b7dc-c12b18eb8976",
+   "text": "New Chat\nAI PPT\nGLM-5.3-Flash\nChat\nAgent\nToday\nYesterday\nPrevious 7 days\nPrevious 30 days\nLoading...\nMeet Your AI Agents",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+   "has_more": true,
+   "max_chars": 48000,
+   "target_id": "webcontents:4",
+   "captured_at": "2026-09-28T02:19:36.442Z",
+   "total_chars": 48021,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "S",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "fb44d21b-cc1a-41b2-b0a2-ae4860700946",
+  "status": "FAILED",
+  "channel": "insert",
+  "error": "supervisor_action_budget_exceeded",
+  "ms": 3625,
+  "result_summary": null,
+  "receipt_schema": "metaengine.a2-browser-supervisor.action-budget.v1"
+ },
+ {
+  "id": "S",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "6958e7a8-fdf5-4c20-a594-a1f73f5b743b",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3596,
+  "result_summary": {
+   "url": "https://chat.z.ai/c/54093101-09b9-41b2-ae9e-55f7b7df5ec5",
+   "text": "Share\nGLM-5.3-Flash\nThought Process\nI can't reply \"CONNECTED-IMPLEMENTER,\" because doing so would misrepresent what I ca",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "offset": 0,
+   "schema": "metaengine.native-browser.transcript.v1",
+   "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+   "has_more": false,
+   "max_chars": 48000,
+   "target_id": "webcontents:6",
+   "captured_at": "2026-09-28T02:19:46.205Z",
+   "total_chars": 4856,
+   "authority_effect": false,
+   "page_data_authority": false,
+   "semantic_refs_issued": 0,
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7"
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2"
+ },
+ {
+  "id": "S",
+  "action": "READ_TRANSCRIPT",
+  "command_id": "5dd24fee-38ba-4c4e-86e5-ad877d38d293",
+  "status": "FAILED",
+  "channel": "insert",
+  "error": "supervisor_action_budget_exceeded",
+  "ms": 3610,
+  "result_summary": null,
+  "receipt_schema": "metaengine.a2-browser-supervisor.action-budget.v1"
+ }
+]

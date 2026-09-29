@@ -1,0 +1,17 @@
+{
+ "ts": "2026-09-28T21:07:07+0000",
+ "P1_noauth": {
+  "code": 401,
+  "sec": 0.06
+ },
+ "P2_fakejwt": {
+  "code": 401,
+  "sec": 0.09
+ },
+ "P3_realjwt": {
+  "code": 503,
+  "sec": 1.31,
+  "body_head": "{\"code\":\"PGRST002\",\"details\":null,\"hint\":null,\"message\":\"Could not query the database for the schema cache. Retrying.\"}"
+ },
+ "verdict": "DEGRADED"
+}

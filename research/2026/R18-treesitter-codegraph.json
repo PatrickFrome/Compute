@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://arxiv.org",
+    "name": "Codebase-Memory: Tree-Sitter-Based Knowledge Graphs",
+    "snippet": "by M Vogel · 2026 · Cited by 6 — Evaluated across 31 real-world repositories, Codebase-Memory achieves 83% answer quality versus 92% for a file-exploration agent , at ten times ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net",
+    "name": "Codebase-Memory: Tree-Sitter-Based Knowledge Graphs",
+    "snippet": "Apr 2, 2026 — We present Codebase-Memory, an open-source system that constructs a persistent, Tree - Sitter -based knowledge graph via the Model Context Protocol ... Read more",
+    "host_name": "www.researchgate.net",
+    "rank": 1,
+    "date": "Apr 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://antaoalmada.dev",
+    "name": "Knowledge Graph Tools for AI Code Agents | Antão Almada",
+    "snippet": "Jul 2, 2026 — Aider builds a lightweight in-memory repo map using tree - sitter and ctags before each session. It is not a persistent graph and does not expose ... Read more",
+    "host_name": "antaoalmada.dev",
+    "rank": 2,
+    "date": "Jul 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "YerbaPage/Awesome-Agent-Context-Compression",
+    "snippet": "Observation Compression . Compressing raw environment observations (HTML pages, code files, tool outputs, screenshots) before they enter the agent context . Read more",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.semanticscholar.org",
+    "name": "Tree-Sitter-Based Knowledge Graphs for LLM Code",
+    "snippet": "Codebase-Memory, an open-source system that constructs a persistent, Tree - Sitter -based knowledge graph via the Model Context Protocol via the Model Context ...",
+    "host_name": "www.semanticscholar.org",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://explainx.ai",
+    "name": "Headroom AI: Context Compression for Agents Guide",
+    "snippet": "Jun 14, 2026 — Headroom compresses agent context 60–95% locally —library, proxy, MCP, wrap for Claude Code and Cursor. CCR, Kompress-base, benchmarks, ...",
+    "host_name": "explainx.ai",
+    "rank": 5,
+    "date": "Jun 14, 2026",
+    "favicon": ""
+  }
+]
