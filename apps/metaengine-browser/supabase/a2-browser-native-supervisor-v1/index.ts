@@ -263,11 +263,22 @@ const emergencyRoutes=createEmergencyCommandRoutes({
   json,
 });
 
+function routedServicePath(pathname:string){
+  const raw=String(pathname||'');
+  const hostedPrefix='/functions/v1/';
+  if(raw.startsWith(hostedPrefix)){
+    const deployed=raw.slice(hostedPrefix.length);
+    const slash=deployed.indexOf('/');
+    return slash>=0?(deployed.slice(slash)||'/'):'/';
+  }
+  const i=raw.indexOf(SERVICE_MARKER);
+  return i>=0?(raw.slice(i+SERVICE_MARKER.length)||'/'):raw;
+}
+
 Deno.serve(async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
   const url=new URL(req.url);
-  const i=url.pathname.indexOf(SERVICE_MARKER);
-  const path=i>=0?(url.pathname.slice(i+SERVICE_MARKER.length)||'/'):url.pathname;
+  const path=routedServicePath(url.pathname);
   try{
     if(req.method==='GET'&&path==='/health')return json(200,await health());
     const bodyText=req.method==='GET'?'':await req.text();
