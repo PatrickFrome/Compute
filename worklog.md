@@ -13018,3 +13018,48 @@ Stage Summary:
 - РАБОТАЕТ (локальный контур, 13/13): жизненный цикл агентов, чат, broadcast, цели, spawn/mute/kill, память, scout, colab-реестр, gateway :81, Next-прокси. Цели #1/#2/#3/#5 — подтверждены на v1.4.x ПОСЛЕ снятия лимитов (регрессий нет).
 - НЕ РАБОТАЕТ: ничего нового. (Исторический вердикт live-браузера 2026-09-28: DISARM BROKEN, SET_SUPERVISOR_MODE/DEV_PLANE_REPO_HEAD FLAKY — в силе до следующего доступного канала.)
 - НЕ ПРОВЕРЕНО: e2e-канал Supabase (browser_supervisor_state/command/mesh/device) — PostgREST 503 ~17ч; вечноживущий облачный супервизор (цель #4) наблюдаем только локально (watchdog PPID=1 жив).
+
+---
+## Task ID: BROWSER-TEST-20260929-1700
+Agent: Super Z (main, Job 419203 tick 17:00)
+Task: Повторный тик live-browser теста. Изменений в коде с прогона 16:30 нет.
+
+Work Log:
+- Supabase-канал live-браузера: state/command/mesh/device — ВСЕ 503 (PostgREST-аут продолжается, ~17.5ч). JWT pending operator.
+- Локальный контур: /health ver=1.4.0, pop/циклы/память живы, llm ok-счётчики растут — база 13/13 (16:30) в силе, перегон не требовался.
+
+Stage Summary:
+- РАБОТАЕТ: локальный контур 13/13 (эталон 16:30). НЕ РАБОТАЕТ: ничего нового. НЕ ПРОВЕРЕНО: e2e-канал Supabase (503 внешний блокер).
+
+---
+Task ID: EVOLVE-ROUND-28
+Agent: self-evolve v1.57 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-A11Y] доступность: focus-visible кольца, aria-live для статусов, контраст пар
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.57
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-A11Y] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-A11Y' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 28 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+## Task ID: EVOLVE-ROUND-28
+Agent: self-evolve v1.58 (sealed engine, Job 416839)
+Task: Раунд самоэволюции: [EV-A11Y] доступность — focus-visible кольца, aria-live для статусов, контраст пар.
+
+Work Log:
+- engine: evolve ok round=28 lint=0/0 client=200 score=83% → next_task=EV-A11Y.
+- Честный аудит «уже реализовано?» через gateway :81 (НЕ raw :3000):
+  - focus-visible — УЖЕ ЕСТЬ: глобальное правило *:focus-visible (globals.css:193) + shadcn focus-visible:ring-[3px] варианты в собранном CSS.
+  - aria-live — УЖЕ ЕСТЬ: Toaster-регион aria-live="polite" в served HTML (:81), agent-browser подтверждил querySelector('[aria-live]')=true.
+  - контраст — просчёт WCAG 2.1 всех основных oklch-пар (scripts/phoenix/a11y-contrast.py): 7/8 OK; ОДИН провал light muted/muted-foreground 4.34:1 (< 4.5 AA).
+- Фикс: globals.css light --muted-foreground oklch(0.556→0.53) = 4.84:1 (1 строка, page.tsx НЕ тронут — фриз соблюдён; dark 0.708 не менялся, там 5.8:1).
+- Инцидент по пути: dev-сервер :3000 умирал тихо 3 раза (рестарт руками → смерть; рестарт с heap-cap 768M → смерть за 20с). Причина выживания роя — parent 6152 (watchdog.sh, PPID=1). Применён scripts/dev-watchdog.sh (double-fork паттерн): :3000 и :81 восстановлены; инстансы watchdog'а сами тоже умирали вместе с сессией → урок записан новой EV-задачей EV-DEV-SUPERVISE (durable-супервизор).
+- Верификация :81: served CSS содержит --muted-foreground: lab(45.48% 0 0) (новый, 4.84:1); lab(48.496%) остался только в Tailwind neutral-500 (другие элементы). agent-browser: страница рендерится (ME2 CHAT-SWARM v1.0.0), aria-live=true, ошибок нет.
+- lint: bun run lint = 0/0. self-update implemented-EV-A11Y → engine v1.59. BACKLOG+EV-DEV-SUPERVISE; зеркала synced (/tmp/context-vault-mirror/phoenix-sealed/, /home/sync/me2-context-backups/phoenix-sealed/).
+
+Stage Summary:
+- EV-A11Y ЗАКРЫТ: focus-visible и aria-live уже были в проде (подтверждено :81 + agent-browser); контраст дожат до WCAG AA одним токеном (4.34→4.84:1). page.tsx цел (0 строк).
+- Движок v1.59; следующий кандидат — EV-DEV-SUPERVISE (инфраструктурная стабильность консоли, цель #5).
