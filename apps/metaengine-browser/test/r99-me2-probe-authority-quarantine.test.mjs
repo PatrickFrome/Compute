@@ -16,11 +16,16 @@ const SAFE_PROBE = Object.freeze({
   read_only: true,
   model_execution_enabled: false,
   provider_api_enabled: false,
+  provider_network_enabled: false,
   agentchat_mutation_enabled: false,
   scheduler_authority: false,
   browser_actuation_authority: false,
   command_mutation_enabled: false,
   token_mutation_enabled: false,
+  filesystem_mutation_enabled: false,
+  sql_mutation_enabled: false,
+  legacy_daemon_module_loaded: false,
+  socket_mutation_surface_enabled: false,
   authority_effect: false,
 });
 
@@ -167,9 +172,11 @@ test('R103 Browser launch cannot be promoted to the historical full daemon by en
   });
   assert.equal(launch, null, 'legacy full source entrypoint must fail closed');
 
-  assert.match(entry, /process\.env\.ME2_HOSTED_BY_BROWSER\s*=\s*'1'/);
-  assert.match(entry, /process\.env\.ME2_BOOT_MODE\s*=\s*'probe'/);
-  assert.match(entry, /await import\('\.\/index'\)/);
+  assert.match(entry, /const PROBE_POLICY = Object\.freeze/);
+  assert.match(entry, /boot_mode:\s*'probe'/);
+  assert.match(entry, /legacy_daemon_module_loaded:\s*false/);
+  assert.match(entry, /socket_mutation_surface_enabled:\s*false/);
+  assert.doesNotMatch(entry, /import\(['"]\.\/index|from ['"]\.\/index|ME2_BOOT_MODE|ME2_HOSTED_BY_BROWSER|z-ai-web-dev-sdk|SqlMirror/);
 
   assert.match(build, /build --compile --target=bun-windows-x64 browser-probe-entry\.ts --outfile/);
   assert.match(build, /probe_only_entrypoint = 'browser-probe-entry\.ts'/);
