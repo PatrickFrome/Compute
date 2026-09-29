@@ -7,29 +7,22 @@ const tasks = await readFile(
   'utf8',
 );
 
-test('R96D BranchGraph nested actions are reachable in sequential keyboard navigation', () => {
-  assert.match(tasks, /className="branch-retry cursor-pointer"[\s\S]{0,500}role="button"[\s\S]{0,120}tabIndex=\{0\}/);
-  assert.match(tasks, /className="branch-reflect cursor-pointer"[\s\S]{0,500}role="button"[\s\S]{0,120}tabIndex=\{0\}/);
-  assert.doesNotMatch(tasks, /className="branch-(?:retry|reflect) cursor-pointer"[\s\S]{0,240}tabIndex=\{-1\}/);
-});
-
-test('R96D nested action buttons honor both standard button activation keys', () => {
-  assert.match(tasks, /branch-retry[\s\S]{0,420}e\.key !== "Enter" && e\.key !== " "/);
-  assert.match(tasks, /branch-retry[\s\S]{0,520}e\.preventDefault\(\)[\s\S]{0,120}e\.stopPropagation\(\)[\s\S]{0,120}onRetry\(t\)/);
-  assert.match(tasks, /branch-reflect[\s\S]{0,420}e\.key !== "Enter" && e\.key !== " "/);
-  assert.match(tasks, /branch-reflect[\s\S]{0,520}e\.preventDefault\(\)[\s\S]{0,120}e\.stopPropagation\(\)[\s\S]{0,120}onReflect\(t\)/);
+test('R108 BranchGraph rows remain keyboard reachable after task mutations retire', () => {
+  assert.match(tasks, /className="branch-row"/);
+  assert.match(tasks, /role="group"/);
+  assert.match(tasks, /tabIndex=\{0\}/);
   assert.match(tasks, /aria-keyshortcuts="Enter Space"/);
+  assert.match(tasks, /if \(e\.key === "Enter"\)[\s\S]{0,140}onOpen\(t\)/);
+  assert.match(tasks, /else if \(e\.key === " "\) e\.preventDefault\(\)/);
 });
 
-test('R96D nested button activation stops bubbling before the existing callbacks', () => {
-  assert.match(
-    tasks,
-    /className="branch-retry cursor-pointer"[\s\S]{0,420}onKeyDown=\{\(e\) => \{[\s\S]{0,240}e\.preventDefault\(\);[\s\S]{0,120}e\.stopPropagation\(\);[\s\S]{0,120}onRetry\(t\);/,
-  );
-  assert.match(
-    tasks,
-    /className="branch-reflect cursor-pointer"[\s\S]{0,420}onKeyDown=\{\(e\) => \{[\s\S]{0,240}e\.preventDefault\(\);[\s\S]{0,120}e\.stopPropagation\(\);[\s\S]{0,120}onReflect\(t\);/,
-  );
-  assert.match(tasks, /className="branch-retry cursor-pointer"[\s\S]{0,160}onClick=\{\(e\) => \{ e\.stopPropagation\(\); onRetry\(t\); \}\}/);
-  assert.match(tasks, /className="branch-reflect cursor-pointer"[\s\S]{0,160}onClick=\{\(e\) => \{ e\.stopPropagation\(\); onReflect\(t\); \}\}/);
+test('R108 retired retry and reflection controls cannot regain task mutation authority', () => {
+  assert.doesNotMatch(tasks, /className="branch-(?:retry|reflect) cursor-pointer"/);
+  assert.doesNotMatch(tasks, /onRetry\(|onReflect\(|TASK_RETRY|agentChatOp|branch-reflect/);
+  assert.match(tasks, /read-only projection/);
+});
+
+test('R108 task-row activation remains presentation-only', () => {
+  assert.match(tasks, /onClick=\{\(\) => \{ onSelect\?\.\(t\.id\); onOpen\(t\); \}\}/);
+  assert.doesNotMatch(tasks, /sendCommand\(|taskAction\(|me2Fetch\([^\n]*TASK_/);
 });
