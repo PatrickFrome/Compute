@@ -12941,3 +12941,37 @@ Work Log:
 
 Stage Summary:
 - Awaiting operator: open notebook in Colab (Google account needed) -> Run all -> paste public trycloudflare URL to register node; swarm auto-scales throughput on registration
+
+---
+Task ID: EVOLVE-ROUND-27
+Agent: self-evolve v1.56 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-A11Y] доступность: focus-visible кольца, aria-live для статусов, контраст пар
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.56
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-A11Y] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-A11Y' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 27 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+## Task ID: UNLIMIT-20260929-1546
+Agent: Super Z (main, cron tick ctx-vault + secrets-phoenix + user directive)
+Task: Директива оператора «сними все лимиты по времени, рой должен искать способы перевести агентов на самые лучшие доступные ai модели» + фоновые тики (CONTEXT GUARD 15:46 ok snaps=55; SECRETS-PHOENIX 15:48: envf kept 5/5, github.env kept api=200, audit 83%, Supabase REST 503 / JWT pending operator, R2 S3 secret key pending operator; SELF-EVOLVE round=27 lint=0/0 v=1.57).
+
+Work Log:
+- Обнаружено: параллельный cron-agent-loop уже поднял код роя до v1.4.0 (governor/cooldown/таймауты удалены, порядок цепочки по качеству, multi-colab до 8 узлов, tier.ts, model-scout.ts с источниками pollinations/hackclub/openrouter/agent-proposals). Мой вклад — недостающие критические слои (v1.4.1):
+  - llm.ts: РОЕВАЯ БАЛАНСИРОВКА БЕЗ ЛИМИТОВ — маршрутизация по in-flight (менее загруженный провайдер первым; записи с метками времени, слот-висяк >30 мин освобождается как мёртвый сокет, вызов не прерывается). Полураспад failStreak (×0.5 каждые 5 мин) — заболевший провайдер уходит в хвост, но АВТОМАТИЧЕСКИ воскресает (~35 мин даже после сотни 429), никаких постоянных банов. inflight виден в /health.
+  - agent.ts: персональное самолечение — агент в 'thinking' >15 мин (подвисший fetch) пересобирается индивидуально, не дожидаясь глобального фриза 180с.
+  - model-scout.ts: источник cf-catalog (каталог Cloudflare Workers AI на существующих creds, фильтр tier>=70, authKeyName CF_AI_WORKER_TOKEN); парсинг CF-формата {result:{response}} в probeEndpoint/makeCaller; фикс счётчика scout.verified (не инкрементировался).
+  - tier.ts: deepseek-v4 → 93, gpt-oss-120b → 72.
+- Live-пробы: models.github.ai недоступен из песочницы (egress-прокси отдаёт заглушку "OK" text/plain — не реальный API). CF: glm-5.3/deepseek-v4-pro/glm-5.2 — НЕ на Workers Free плане; deepseek-r1-distill-32b/qwen3.8-27b/qwen3-30b/llama-4-scout/gpt-oss-120b/glm-4.7-flash — доступны, но дневные 10k neurons ИСЧЕРПАНЫ (объясняет cf_http_429) — верификация и миграция на них произойдут автоматически после суточного сброса (скан каждые 20 мин). Pollinations: каталог анонима сжался до 1 модели (openai-fast = gpt-oss-20b, tier 55 — принят в голову цепочки catalog:openai-fast), рабочие вызовы отдают 402 (анонимная квота). Hack Club AI /model — 404 (API умер). OpenRouter: free-модели найдены, лучший qwen/qwen3.8-27b:free (tier 86) — нужен OPENROUTER_API_KEY.
+- Гигиена прода: тестовый mock-узел colab-test-b (127.0.0.1:3061, 43 ok-вызова заглушками) ВЫВЕДЕН из цепочки — реальные ответы роя не должны подменяться E2E-заглушками.
+- Рестарт роя на объединённом v1.4.0/v1.4.1 (kill+setsid bun, watchdog-механика): /health ver=1.4.0, unlimited:true, in-flight routing живой (наблюдалось pollinations 3 / ollama 58), pop 107, циклы идут. Broadcast рою: полнота директивы, погода провайдеров, путь ускорения (ключи оператора).
+- Финальное состояние погоды: работает только ollama-local (CPU, медленно) — zai 429 (воскреснет сам), cf 429 (neurons), pollinations 402; colony самобалансируется, деградации вечности нет.
+
+Stage Summary:
+- ЛИМИТЫ ВРЕМЕНИ: сняты ПОЛНОСТЬЮ (governor, cooldown, таймауты работы, pace, backoff). Замена — очередная маршрутизация (in-flight) + самовоскрешение (failStreak half-life) + персональный per-agent watchdog. Ни один вызов не отклоняется и не прерывается.
+- ЛУЧШИЕ МОДЕЛИ: разведка непрерывна (5 источников + предложения агентов «MODEL:url|модель»); верифицированное встаёт в голову цепочки по tier. Сейчас в голове catalog:openai-fast (55); авто-миграция на CF strong (86-93) после суточного сброса neurons. Для мгновенного прыжка на tier 86+ оператору: OPENROUTER_API_KEY и/или запуск colab-node.ipynb (GPU).
+- Артефакты: mini-services/agent-swarm/src/{llm,agent,model-scout,tier}.ts v1.4.0/v1.4.1; /health поля llmChain.inflight, llmProviders[].inflight, scout.needsKeys.
