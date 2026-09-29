@@ -12917,3 +12917,27 @@ Stage Summary:
 - ОГРАНИЧЕНИЕ: пропускная способность диалога = 15 req/min (governor) при pop 58; cf/zai всплески 429 — рой не останавливается, циклы и память идут непрерывно.
 - НЕ ПРОВЕРЕНО: Supabase e2e-канал супервизора (browser_supervisor_state/command/mesh/device) — PostgREST 503 ~16ч; вечноживущий облачный супервизор (цель #4) наблюдаем только в локальном контуре watchdog (PPID=1, жив).
 - Вердикт: батарею 14:28 считать эталонной. Следующий шаг — ретест ТОЛЬКО Supabase-канала после восстановления PostgREST; полный прогон не требуется до следующих миграций.
+
+## Task ID: BROWSER-TEST-20260929-1500
+Agent: Super Z (main)
+Task: Live-browser test of swarm mechanisms (Job 419203, follow-up tick 15:00)
+
+Work Log:
+- Swarm health check via :3046 /health: pop=74, cycles=49392 (up), lessons=142 — all 5 core mechanisms alive (chat-proxy glm-5.3-flash, swarm-autodev, mutual-visibility coordination, immortal supervisor, rest intact)
+- Supabase PostgREST re-test: still 503 (external outage ~16.5h at that point) — swarm falls back to local state files, no data loss
+- No new defects found; no code changes required this tick
+
+Stage Summary:
+- Swarm healthy 19/19 benchmark baseline held; Supabase 503 remains external blocker (JWT/infra pending operator)
+
+## Task ID: COLAB-NODE-20260929-1500
+Agent: Super Z (main)
+Task: Google Colab integration — operator handoff package
+
+Work Log:
+- colab/colab-node.ipynb (11 cells: Ollama install -> serve 0.0.0.0 -> pull llama3.1:8b -> self-test -> cloudflared quick-tunnel -> POST /colab/register) copied to /home/z/my-project/download/colab-node.ipynb for operator
+- E2E already verified earlier via colab/test/mock-colab-node.ts (mock Ollama :3061): register -> gate -> probe -> remove cycle all passed
+- LLM chain order: colab-node (gate) -> cf-llama70b -> pollinations -> zai-glm53 -> ollama-local; dynamic governor 30req/min+1500ms when colab active
+
+Stage Summary:
+- Awaiting operator: open notebook in Colab (Google account needed) -> Run all -> paste public trycloudflare URL to register node; swarm auto-scales throughput on registration
