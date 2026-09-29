@@ -1,13 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import pkg from '../package.json' with { type: 'json' };
 import { parseMetaengineDevVersion } from '../src/trusted-dev-release-resolver.mjs';
 
-test('convergence candidate keeps unpublished trusted successor package identity', () => {
-  assert.equal(pkg.version, '0.7.0-dev.36336130139.1');
-  assert.deepEqual(parseMetaengineDevVersion(pkg.version), {
-    version: '0.7.0-dev.36336130139.1',
+const candidateDoc = await readFile(new URL('../CONVERGENCE_CANDIDATE.md', import.meta.url), 'utf8');
+const reserved = candidateDoc.match(/Reserved package identity is \`([^\`]+)\`\./)?.[1] ?? null;
+const priorLiveBuild = 36336130139;
+
+test('convergence candidate package identity matches the reserved exact source candidate', () => {
+  assert.ok(reserved, 'reserved package identity must be declared in CONVERGENCE_CANDIDATE.md');
+  assert.equal(pkg.version, reserved);
+
+  const parsed = parseMetaengineDevVersion(pkg.version);
+  assert.deepEqual(parsed, {
+    version: reserved,
     core: '0.7.0',
-    build: 36336130139,
+    build: parsed.build,
   });
+  assert.ok(Number.isSafeInteger(parsed.build));
+  assert.ok(parsed.build > priorLiveBuild, 'source-changing convergence candidate must not reuse prior live package identity');
 });
