@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - work/client-v1-c2-new-supabase-rehome-v1
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
+      - 'coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json'
+      - '.github/workflows/client-v1-supabase-edge-live-probe.yml'
   workflow_dispatch:
 
 permissions:

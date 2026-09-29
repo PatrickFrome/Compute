@@ -59,13 +59,16 @@ export function nativeSupervisorEnrollmentMetadata(version, { env = process.env 
   const metadata = { shell_version: String(version || '').slice(0, 32) };
   const kind = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_KIND || '').trim().toUpperCase();
   const runId = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ID || '').trim();
+  const runAttempt = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ATTEMPT || '').trim();
   const sourceHead = String(env?.METAENGINE_ENROLLMENT_SOURCE_HEAD || '').trim().toLowerCase();
   const correlationValid = kind === 'INSTALLED_ELECTRON'
     && /^[0-9]{1,20}$/.test(runId)
+    && /^[1-9][0-9]{0,5}$/.test(runAttempt)
     && /^[0-9a-f]{40}$/.test(sourceHead);
   if (correlationValid) {
     metadata.qualification_kind = kind;
     metadata.qualification_run_id = runId;
+    metadata.qualification_run_attempt = runAttempt;
     metadata.source_head = sourceHead;
   }
   return Object.freeze(metadata);

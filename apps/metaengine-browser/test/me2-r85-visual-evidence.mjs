@@ -175,6 +175,54 @@ function registerPresentationIpc() {
       authority_effect: false,
     });
   });
+  ipcMain.handle('metaengine:client:select-agent', (_event, rawAgentId) => {
+    const agentId = String(rawAgentId || '').trim().toLowerCase();
+    const actorId = `agent:${agentId}`;
+    const match = fixtureRoster(selectedActor).actors.find(
+      (row) => row.actor_id === actorId && row.actor_type === 'AGENT',
+    );
+    if (!match) throw new Error('visual_client_agent_not_bound');
+    selectedActor = actorId;
+    return Object.freeze({
+      schema: 'metaengine.client.agent-selection.v1',
+      agent_id: agentId,
+      actor_id: actorId,
+      tab_id: match.tab_id,
+      selection_applied: true,
+      exact_native_binding: true,
+      presentation_only: true,
+      scheduler_authority: false,
+      browser_actuation_authority: false,
+      update_authority: false,
+      authority_effect: false,
+    });
+  });
+  ipcMain.handle('metaengine:client:submit-goal', (_event, rawGoal) => {
+    const goal = String(rawGoal || '').trim();
+    if (!goal || goal.length > 480) throw new Error('visual_client_goal_invalid');
+    const taskId = '11111111-1111-4111-8111-111111111112';
+    const pointId = 'obj.visual-client-goal.v1';
+    return Object.freeze({
+      schema: 'metaengine.client.goal-submission.v1',
+      goal,
+      objective_id: 'metaengine-client-v1:g1',
+      roadmap_id: 'metaengine-client-v1',
+      plan_generation: 1,
+      point_ids: Object.freeze([pointId]),
+      node_count: 1,
+      task_id: taskId,
+      task_ids: Object.freeze([taskId]),
+      task_admission_state: 'ADMITTED',
+      atomic_plan_and_admission: true,
+      exact_activation_readback: true,
+      operator_initiated: true,
+      automatic_retry_allowed: false,
+      scheduler_authority: false,
+      browser_actuation_authority: false,
+      release_authority: false,
+      authority_effect: false,
+    });
+  });
 }
 
 async function waitFor(contents, expression, timeoutMs = 20_000) {
@@ -210,6 +258,10 @@ async function metrics(contents) {
       native_slot: rect('native-chat-surface-slot'),
       cmdbar: rect('global-cmdbar'),
       settings: rect('settings-button'),
+      goal_composer: rect('client-goal-composer'),
+      goal_input: rect('client-goal-input'),
+      goal_submit: rect('client-goal-submit'),
+      goal_readback: document.querySelector('[data-testid="client-goal-readback"]')?.textContent || null,
       supervisor_rows: document.querySelectorAll('[data-testid="chat-supervisor-row"]').length,
       agent_rows: document.querySelectorAll('[data-testid="chat-agent-row"]').length,
       page: document.querySelector('[data-testid="page-outlet"]')?.getAttribute('data-page') || null,
@@ -251,6 +303,7 @@ function assertMain(row) {
     throw new Error(`r97_visual_actor_rows:${m.supervisor_rows}:${m.agent_rows}`);
   }
   if (!m.cmdbar || !m.settings) throw new Error('r97_visual_global_search_or_settings_missing');
+  if (!m.goal_composer || !m.goal_input || !m.goal_submit) throw new Error('r97_visual_client_goal_composer_missing');
   if (m.pagebar_present || m.statusbar_present || m.context_drawer_present || m.run_inspector_present) {
     throw new Error(`r97_visual_legacy_persistent_chrome_present:${JSON.stringify(m)}`);
   }
@@ -329,6 +382,27 @@ async function main() {
     assertMain(mainCapture);
     evidence.captures.push(mainCapture);
     evidence.exact_main_workspace = true;
+
+    markPhase('SUBMIT_TYPED_GOAL');
+    await shellView.webContents.executeJavaScript(`(() => {
+      const input = document.querySelector('[data-testid="client-goal-input"]');
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, 'Qualify the typed Client goal bridge');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=client-goal-input]')?.value === 'Qualify the typed Client goal bridge'");
+    await shellView.webContents.executeJavaScript(
+      `document.querySelector('[data-testid="client-goal-submit"]')?.click(); true`,
+    );
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=client-goal-readback]')?.textContent?.includes('ADMITTED')");
+    const goalCapture = await capture(shellView, 'r97-client-goal-admitted-1440x960');
+    if (!String(goalCapture.metrics.goal_readback || '').includes('task 11111111') || !String(goalCapture.metrics.goal_readback || '').includes('ADMITTED')) {
+      throw new Error(`r97_visual_client_goal_readback_invalid:${goalCapture.metrics.goal_readback}`);
+    }
+    evidence.captures.push(goalCapture);
 
     markPhase('SELECT_AGENT');
     await shellView.webContents.executeJavaScript(

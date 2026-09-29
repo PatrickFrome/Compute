@@ -49,6 +49,12 @@ import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervis
 import { createSupabaseHealthSentinel } from './supabase-health-sentinel.mjs';
 import { createFallbackConsoleRuntime } from './fallback-console-runtime.mjs';
 import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
+import {
+  normalizeClientAgentId,
+  normalizeClientAgentSelectionReadback,
+  normalizeClientGoalActivationReadback,
+  normalizeClientGoalIntent,
+} from './client-control-contract.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -530,6 +536,24 @@ function selectPrimaryChatActor(actorId) {
     update_authority: false,
     authority_effect: false,
   });
+}
+
+
+async function submitClientGoal(rawInput) {
+  if (!nativeSupervisor || typeof nativeSupervisor.metaObjectiveSet !== 'function') {
+    throw new Error('client_goal_native_supervisor_unavailable');
+  }
+  const intent = normalizeClientGoalIntent(rawInput);
+  const activation = await nativeSupervisor.metaObjectiveSet({ roadmap_id: 'metaengine-client-v1', objective: intent.goal });
+  const readback = normalizeClientGoalActivationReadback(activation, intent.goal);
+  await publishSnapshot().catch(() => {});
+  return readback;
+}
+
+function selectClientAgent(rawAgentId) {
+  const agentId = normalizeClientAgentId(rawAgentId);
+  const selected = selectPrimaryChatActor(`agent:${agentId}`);
+  return normalizeClientAgentSelectionReadback(selected, agentId);
 }
 
 
@@ -2174,6 +2198,14 @@ ipcMain.handle('metaengine:shell:primary-chat-fleet-roster', async (event) => {
 ipcMain.handle('metaengine:shell:primary-chat-actor-select', async (event, rawActorId) => {
   assertShellSender(event);
   return selectPrimaryChatActor(rawActorId);
+});
+ipcMain.handle('metaengine:client:submit-goal', async (event, rawInput) => {
+  assertShellSender(event);
+  return submitClientGoal(rawInput);
+});
+ipcMain.handle('metaengine:client:select-agent', async (event, rawAgentId) => {
+  assertShellSender(event);
+  return selectClientAgent(rawAgentId);
 });
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);
