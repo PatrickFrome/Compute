@@ -152,10 +152,12 @@ function enrollmentMetadata(body:any){
   const metadata:any={client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(body?.metadata?.shell_version||'').slice(0,32)};
   const kind=String(body?.metadata?.qualification_kind||'').trim().toUpperCase();
   const runId=String(body?.metadata?.qualification_run_id||'').trim();
+  const runAttempt=String(body?.metadata?.qualification_run_attempt||'').trim();
   const sourceHead=String(body?.metadata?.source_head||'').trim().toLowerCase();
-  if(kind==='INSTALLED_ELECTRON'&&/^[0-9]{1,20}$/.test(runId)&&/^[0-9a-f]{40}$/.test(sourceHead)){
+  if(kind==='INSTALLED_ELECTRON'&&/^[0-9]{1,20}$/.test(runId)&&/^[1-9][0-9]{0,5}$/.test(runAttempt)&&/^[0-9a-f]{40}$/.test(sourceHead)){
     metadata.qualification_kind=kind;
     metadata.qualification_run_id=runId;
+    metadata.qualification_run_attempt=runAttempt;
     metadata.source_head=sourceHead;
   }
   return metadata;
