@@ -28,14 +28,16 @@ export function normalizeClientGoalActivationReadback(value, expectedGoal) {
     !row
     || row.schema !== 'metaengine.meta-orchestrator.objective-activation.v1'
     || String(row.objective || '') !== goal
-    || typeof row.roadmap_id !== 'string'
-    || !row.roadmap_id
+    || row.roadmap_id !== 'metaengine-client-v1'
     || !Number.isSafeInteger(Number(row.plan_generation))
     || Number(row.plan_generation) < 1
     || !Array.isArray(row.point_ids)
-    || row.point_ids.length < 1
-    || row.point_ids.length > 32
-    || Number(row.node_count) !== row.point_ids.length
+    || row.point_ids.length !== 1
+    || Number(row.node_count) !== 1
+    || !Array.isArray(row.task_ids)
+    || row.task_ids.length !== 1
+    || row.task_admission_state !== 'ADMITTED'
+    || row.atomic_plan_and_admission !== true
     || row.operator_initiated !== true
     || row.automatic_retry_allowed !== false
     || row.scheduler_authority !== false
@@ -46,6 +48,16 @@ export function normalizeClientGoalActivationReadback(value, expectedGoal) {
 
   const pointIds = row.point_ids.map((point) => String(point || '').trim());
   if (pointIds.some((point) => !point || point.length > 192)) throw new Error('client_goal_point_readback_invalid');
+  const taskIds = row.task_ids.map((taskId) => String(taskId || '').trim().toLowerCase());
+  if (taskIds.some((taskId) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(taskId))) {
+    throw new Error('client_goal_task_readback_invalid');
+  }
+  if (
+    row.admission?.schema !== 'metaengine.meta-orchestrator.task-admission.v1'
+    || String(row.admission?.task_id || '').toLowerCase() !== taskIds[0]
+    || String(row.admission?.point_id || '').toLowerCase() !== pointIds[0].toLowerCase()
+    || row.admission?.authority_effect !== false
+  ) throw new Error('client_goal_admission_binding_invalid');
 
   const planGeneration = Number(row.plan_generation);
   return Object.freeze({
@@ -56,7 +68,10 @@ export function normalizeClientGoalActivationReadback(value, expectedGoal) {
     plan_generation: planGeneration,
     point_ids: Object.freeze(pointIds),
     node_count: pointIds.length,
-    task_admission_state: 'PENDING_CANONICAL_SCHEDULER_ADMISSION',
+    task_id: taskIds[0],
+    task_ids: Object.freeze(taskIds),
+    task_admission_state: 'ADMITTED',
+    atomic_plan_and_admission: true,
     exact_activation_readback: true,
     operator_initiated: true,
     automatic_retry_allowed: false,
