@@ -19,7 +19,7 @@ function activation(goal = 'Ship a useful browser task') {
     schema: 'metaengine.meta-orchestrator.objective-activation.v1',
     activation: { schema: 'metaengine.meta-orchestrator.plan-state.v1' },
     objective: goal,
-    roadmap_id: 'metaengine-development-os-v1',
+    roadmap_id: 'metaengine-client-v1',
     plan_generation: 17,
     point_ids: ['obj.ship-a-useful-browser-task.v1'],
     node_count: 1,
@@ -40,7 +40,7 @@ test('typed goal intent and exact activation readback are bounded and authority 
 
   const out = normalizeClientGoalActivationReadback(activation(intent.goal), intent.goal);
   assert.equal(out.schema, CLIENT_GOAL_SCHEMA);
-  assert.equal(out.objective_id, 'metaengine-development-os-v1:g17');
+  assert.equal(out.objective_id, 'metaengine-client-v1:g17');
   assert.deepEqual(out.point_ids, ['obj.ship-a-useful-browser-task.v1']);
   assert.equal(out.task_admission_state, 'PENDING_CANONICAL_SCHEDULER_ADMISSION');
   assert.equal(out.exact_activation_readback, true);
@@ -95,7 +95,7 @@ test('typed agent selection requires exact Native Browser binding readback', () 
 test('main process owns dedicated typed IPC routes and Native Supervisor goal transport', () => {
   assert.match(main, /ipcMain\.handle\('metaengine:client:submit-goal'/);
   assert.match(main, /ipcMain\.handle\('metaengine:client:select-agent'/);
-  assert.match(main, /nativeSupervisor\.metaObjectiveSet\(\{ objective: intent\.goal \}\)/);
+  assert.match(main, /nativeSupervisor\.metaObjectiveSet\(\{ roadmap_id: 'metaengine-client-v1', objective: intent\.goal \}\)/);
   assert.match(main, /normalizeClientGoalActivationReadback\(activation, intent\.goal\)/);
   assert.match(main, /selectPrimaryChatActor\(\`agent:\$\{agentId\}\`\)/);
   assert.match(main, /normalizeClientAgentSelectionReadback\(selected, agentId\)/);
