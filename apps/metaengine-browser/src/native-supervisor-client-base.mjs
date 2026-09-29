@@ -54,6 +54,23 @@ const DEFAULT_MAINTENANCE_INTERVAL_MS = 10000;
 const MAX_LEASE_FAILURE_BACKOFF_MS = 8000;
 const ALWAYS_ON_CONTROL_ERROR = 'FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED';
 
+
+export function nativeSupervisorEnrollmentMetadata(version, { env = process.env } = {}) {
+  const metadata = { shell_version: String(version || '').slice(0, 32) };
+  const kind = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_KIND || '').trim().toUpperCase();
+  const runId = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ID || '').trim();
+  const sourceHead = String(env?.METAENGINE_ENROLLMENT_SOURCE_HEAD || '').trim().toLowerCase();
+  const correlationValid = kind === 'INSTALLED_ELECTRON'
+    && /^[0-9]{1,20}$/.test(runId)
+    && /^[0-9a-f]{40}$/.test(sourceHead);
+  if (correlationValid) {
+    metadata.qualification_kind = kind;
+    metadata.qualification_run_id = runId;
+    metadata.source_head = sourceHead;
+  }
+  return Object.freeze(metadata);
+}
+
 export function nativeSupervisorLeaseRetryDelayMs({
   batchTransport = 'UNKNOWN',
   consecutiveFailures = 0,
@@ -1053,7 +1070,7 @@ export class NativeSupervisorClient {
     const identity = await this.#identity.ensure();
     if (identity.device_id) { this.#enrollmentStatus = 'ENROLLED'; return identity; }
     if (!identity.enrollment_request_id) {
-      const payload = { profile: SUPERVISOR_DEVICE_PROFILE, public_jwk: identity.public_jwk, key_fingerprint_sha256: identity.key_fingerprint_sha256, metadata: { shell_version: this.#version } };
+      const payload = { profile: SUPERVISOR_DEVICE_PROFILE, public_jwk: identity.public_jwk, key_fingerprint_sha256: identity.key_fingerprint_sha256, metadata: nativeSupervisorEnrollmentMetadata(this.#version) };
       const response = await this.#enrollmentRequest('/v1/device/enrollment/request', payload);
       const body = await response.json().catch(() => ({}));
       if (![200, 202].includes(response.status) || !body?.request_id) throw new Error(`native_supervisor_enrollment_request_http_${response.status}:${body?.reason || body?.error || 'unknown'}`);
