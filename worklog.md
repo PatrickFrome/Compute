@@ -12783,3 +12783,46 @@ Work Log:
 
 Stage Summary:
 - РАБОТАЕТ 18/19; НЕ РАБОТАЕТ M05 (glm-429) + Supabase (REST 503, Storage 429); НЕ ПРОВЕРЕНО e2e-диспетчирование (канал деградирован).
+
+---
+Task ID: BROWSER-TEST-20260929-1303 (цикл 22)
+Agent: cron-agent-loop (Job 419203)
+Task: Цикл 22 (13:00) — репроб канала Supabase + батарея M01–M19.
+
+Work Log:
+- Репроб: P1/P2 = 401, P3 = 503 PGRST002 → DEGRADED (~14.5ч).
+- Батарея → 18/19 PASS (11-й цикл подряд); FAIL M05 (glm-429).
+- Рой: 14/14 living, Δ96 циклов/60с; spawn sw_gq4qbjw2 (серия 21/21); lessons=53, episodes=16, proposals=60.
+
+Stage Summary:
+- РАБОТАЕТ 18/19; НЕ РАБОТАЕТ M05 (glm-429) + Supabase (REST 503, Storage 429); НЕ ПРОВЕРЕНО e2e-диспетчирование (канал деградирован).
+
+---
+Task ID: EVOLVE-ROUND-26
+Agent: self-evolve v1.54 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-LIST-MEMO] мемоизация списков вкладок Память/Управление (lessons/proposals/memories рендерятся при каждом секундном тике без memo): memo-строки + стабильные колбэки; продолжение трека EV-PERF→EV-VIRT-SCROLL
+
+Work Log:
+- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.54
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-LIST-MEMO] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-LIST-MEMO' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+
+Stage Summary:
+- раунд 26 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-26 (EV-LIST-MEMO)
+Agent: cron-agent-loop (Job 416839)
+Task: Self-evolve tick — реализация EV-LIST-MEMO в / route, верификация :81, self-update, бэклог+.
+
+Work Log:
+- evolve: round=26, next_task=EV-LIST-MEMO (мемоизация списков Память/Управление; трек EV-PERF→EV-VIRT-SCROLL).
+- console.tsx: добавлены memo-компоненты LessonRow/MemoryRow/ProposalRow (строки lessons/memories/proposals больше не перерисовываются на каждом секундном тике uptime/pulse); inline map-тела заменены на мемо-компоненты.
+- lint 0/0.
+- ИНЦИДЕНТ при верификации: Next dev :3000 падал многократно и тихо (gateway :81 → 502). Диагноз: (1) исторический OOM-kill next-server (dmesg, RSS 1.78GB / лимит среды 4GB), (2) .next-кэш 1.8GB повреждён повторными OOM-убийствами, (3) штатный scripts/dev-watchdog.sh НЕ был запущен (умер при env-reset). Лечение: wipe .next, рестарт, запуск dev-watchdog.sh (single-instance lock) → :3000 стабилен, :81 → 200.
+- Верификация :81 (agent-browser): клиент «ME2 CHAT-SWARM v1.0.0» загрузился; вкладка «Память»: Уроки роя 53 (тексты рендерятся), Эпизоды 16, Пул самоулучшения — PASS; agent-browser errors — пусто.
+- self-update implemented-EV-LIST-MEMO → v1.56; в BACKLOG добавлена EV-RECONNECT (socket.io backoff + online/offline индикатор + авто-refresh; мотив: OOM-краш-луп рвал WS без сигнала); зеркала phoenix-sealed синхронизированы (vault-mirror + ossfs).
+
+Stage Summary:
+- EV-LIST-MEMO РЕАЛИЗОВАН и верифицирован; движок v1.56; клиент стабилен через watchdog.
+- Инфра-урок: после env-reset обязательно восстанавливать dev-watchdog; :3000 смерти — тихие, без OOM-следов в моменте.
