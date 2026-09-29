@@ -1,0 +1,224 @@
+name: Client V1 Installed Electron Live Qualification
+
+on:
+  push:
+    branches:
+      - work/client-v1-c2-new-supabase-rehome-v1
+    paths:
+      - .github/workflows/client-v1-installed-electron-live-qualification.yml
+      - apps/metaengine-browser/src/native-supervisor-client-base.mjs
+      - apps/metaengine-browser/src/native-supervisor-endpoints.mjs
+      - apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**
+      - apps/metaengine-browser/test/native-supervisor-enrollment-correlation.test.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installed-electron-live:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Acquire provenanced exact-head installer from Package Smoke
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bindingPath = "$env:RUNNER_TEMP\installed-live\consumer-binding.json"
+          .\scripts\qualified-installer-consumer.ps1 `
+            -Mode Acquire `
+            -ExpectedHead $env:GITHUB_SHA `
+            -WorkRoot "$env:RUNNER_TEMP\installed-live" `
+            -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json') `
+            -BindingPath $bindingPath `
+            -TimeoutMinutes 55 `
+            -AcquireIntervalSeconds 20
+          if ($LASTEXITCODE -ne 0) { throw 'installed_live_installer_acquire_failed' }
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding.v1' -or [string]$binding.source_head -ne $env:GITHUB_SHA) {
+            throw 'installed_live_installer_binding_invalid'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_INSTALLER_BINDING_PATH=$bindingPath" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_INSTALLER_PATH=$([string]$binding.installer_path)" -Encoding utf8
+
+      - name: Install exact artifact and hold signed Browser qualification
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          METAENGINE_ENROLLMENT_QUALIFICATION_KIND: INSTALLED_ELECTRON
+          METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ID: ${{ github.run_id }}
+          METAENGINE_ENROLLMENT_SOURCE_HEAD: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:ME2_INSTALLER_BINDING_PATH) { throw 'installed_live_binding_path_missing' }
+          $binding = Get-Content $env:ME2_INSTALLER_BINDING_PATH -Raw | ConvertFrom-Json
+          $installer = [string]$env:ME2_INSTALLER_PATH
+          if (-not (Test-Path $installer -PathType Leaf)) { throw 'installed_live_installer_missing' }
+
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "installed_live_installer_exit_$($install.ExitCode)" }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw 'installed_live_browser_missing' }
+
+          # NSIS may start the app after install. Correlation env was already present,
+          # but make the qualification process single and observable.
+          Get-CimInstance Win32_Process -Filter "Name='METAENGINE Browser Test.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+          }
+          Start-Sleep -Milliseconds 500
+
+          $profileOut = "$env:RUNNER_TEMP\installed-live-profile.out"
+          $profileErr = "$env:RUNNER_TEMP\installed-live-profile.err"
+          $priorProbe = $env:METAENGINE_PROFILE_PROBE_WRITE
+          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+          try {
+            $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+            $null = $probe.Handle
+            if (-not $probe.WaitForExit(15000)) {
+              try { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue } catch {}
+              throw 'installed_live_profile_probe_timeout'
+            }
+            if ($probe.ExitCode -ne 0) { throw "installed_live_profile_probe_exit_$($probe.ExitCode)" }
+          } finally {
+            $env:METAENGINE_PROFILE_PROBE_WRITE = $priorProbe
+          }
+          $profileLine = Get-Content $profileOut -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+          if (-not $profileLine) { throw 'installed_live_profile_probe_missing' }
+          $profile = $profileLine | ConvertFrom-Json
+          if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or -not [string]$profile.user_data_path) { throw 'installed_live_profile_probe_invalid' }
+          $userData = [string]$profile.user_data_path
+          $identityPath = Join-Path $userData 'metaengine-native-supervisor-device-v1.json'
+          $controlPath = Join-Path $userData 'metaengine-native-supervisor-control-state-v1.json'
+
+          $out = "$env:RUNNER_TEMP\installed-live-normal.out"
+          $err = "$env:RUNNER_TEMP\installed-live-normal.err"
+          Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+          $process = $null
+          $identity = $null
+          try {
+            $process = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            $null = $process.Handle
+            $deadline = [DateTime]::UtcNow.AddMinutes(10)
+            while ([DateTime]::UtcNow -lt $deadline) {
+              $process.Refresh()
+              if ($process.HasExited) {
+                Get-Content $out -ErrorAction SilentlyContinue
+                Get-Content $err -ErrorAction SilentlyContinue
+                throw "installed_live_browser_exited_before_enrollment:$($process.ExitCode)"
+              }
+              if (Test-Path $identityPath -PathType Leaf) {
+                try { $candidate = Get-Content $identityPath -Raw | ConvertFrom-Json } catch { $candidate = $null }
+                if ($candidate -and [string]$candidate.device_id -match '^[0-9a-fA-F-]{36}$' -and [string]$candidate.client_id -match '^[0-9a-fA-F-]{36}$') {
+                  $identity = $candidate
+                  break
+                }
+              }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $identity) {
+              Get-Content $out -ErrorAction SilentlyContinue
+              Get-Content $err -ErrorAction SilentlyContinue
+              throw 'installed_live_device_bind_timeout'
+            }
+
+            $control = $null
+            if (Test-Path $controlPath -PathType Leaf) {
+              try { $control = Get-Content $controlPath -Raw | ConvertFrom-Json } catch { $control = $null }
+            }
+            if (-not $control -or $control.schema -ne 'metaengine.native-supervisor.control-state.v1' -or $control.supervisor_mode -ne 'CONTROL' -or $control.armed -ne $true -or $control.authority_effect -ne $false) {
+              throw 'installed_live_control_state_invalid'
+            }
+
+            @{
+              schema='metaengine.client-v1.installed-electron-live.v1'
+              source_head=$env:GITHUB_SHA
+              qualification_run_id=$env:GITHUB_RUN_ID
+              package_version=[string](node -p "require('./package.json').version")
+              installer_sha256=[string]$binding.installer_sha256
+              producer_run_id=[int64]$binding.producer_run_id
+              producer_run_number=[int64]$binding.producer_run_number
+              producer_run_attempt=[int64]$binding.producer_run_attempt
+              client_id=[string]$identity.client_id
+              device_id=[string]$identity.device_id
+              key_fingerprint_sha256=[string]$identity.key_fingerprint_sha256
+              encrypted_private_key_present=([bool]([string]$identity.encrypted_private_key_b64))
+              private_key_exported=$false
+              installed_process_alive=$true
+              control_mode='CONTROL'
+              armed=$true
+              signed_transport_ready=$true
+              authority_effect=$false
+            } | ConvertTo-Json -Depth 7 | Set-Content "$env:RUNNER_TEMP\installed-electron-live-proof.json" -Encoding utf8
+
+            # Keep the exact installed process alive long enough for the trusted
+            # controller to issue and verify one READ_ONLY POLL externally.
+            $holdDeadline = [DateTime]::UtcNow.AddSeconds(150)
+            while ([DateTime]::UtcNow -lt $holdDeadline) {
+              $process.Refresh()
+              if ($process.HasExited) { throw "installed_live_browser_exited_during_control_roundtrip:$($process.ExitCode)" }
+              Start-Sleep -Seconds 1
+            }
+          } finally {
+            if ($process -and -not $process.HasExited) {
+              try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+            }
+          }
+
+      - name: Require Package Smoke producer terminal success
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\qualified-installer-consumer.ps1 `
+            -Mode Wait `
+            -ExpectedHead $env:GITHUB_SHA `
+            -BindingPath $env:ME2_INSTALLER_BINDING_PATH `
+            -ProofPath "$env:RUNNER_TEMP\installed-electron-live-proof.json" `
+            -TimeoutMinutes 55
+          if ($LASTEXITCODE -ne 0) { throw 'installed_live_package_producer_not_qualified' }
+
+      - name: Prove exact checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload installed Electron live proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-client-v1-installed-electron-live-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/installed-electron-live-proof.json
+            ${{ runner.temp }}/installed-live-normal.out
+            ${{ runner.temp }}/installed-live-normal.err
+            ${{ runner.temp }}/installed-live-profile.out
+            ${{ runner.temp }}/installed-live-profile.err
+          if-no-files-found: ignore
+          retention-days: 30
