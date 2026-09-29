@@ -39,6 +39,7 @@ jobs:
         shell: bash
         env:
           METAENGINE_CLIENT_V1_CANARY_BASE: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary
+          METAENGINE_CLIENT_V1_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           METAENGINE_CLIENT_V1_APPROVAL_TIMEOUT_MS: '600000'
           METAENGINE_CLIENT_V1_CANARY_EVIDENCE: ${{ runner.temp }}/client-v1-c4-signed-canary-goal.json
         run: |
