@@ -51,7 +51,13 @@ Exact-head CI already green:
 - METAENGINE Browser Control Plane Fast Lane V1
 - METAENGINE Browser Developer Emergency Update V1
 
-Broad Critical Audit / full Browser Node regression and physical workflows are still running at checkpoint time.
+Broad regression completed after the initial checkpoint:
+- METAENGINE Browser Critical Audit V1: SUCCESS
+- focused-authority-causal-wake-contracts: SUCCESS
+- full-browser-node-test-suite: SUCCESS
+- the complete npm test suite executed the newly added native-supervisor-lease-retry-backoff.test.mjs.
+
+Physical/package workflows remain independently qualified by their own exact-head runs.
 
 ## RESEARCH
 
@@ -76,6 +82,6 @@ References:
 
 IMPLEMENTED = true
 FOCUSED_CI = GREEN
-FULL_REGRESSION = PENDING
+FULL_REGRESSION = GREEN
 LIVE_DEPLOYED = false
 PROMOTION_AUTHORIZED = false
