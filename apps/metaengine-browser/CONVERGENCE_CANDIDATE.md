@@ -1,14 +1,28 @@
 # METAENGINE Browser convergence candidate
 
-R97 single-main-workspace candidate. Package identity is `0.7.0-dev.36336130139.1`.
+R109 final-authority convergence source candidate. Reserved package identity is `0.7.0-dev.36516587173.1`.
 
-This identity is intentionally distinct from the previously installed `0.7.0-dev.3.2`: the R97 candidate changes UI/runtime bytes and must not reuse an older package version. The canonical trusted-development version shape remains `<core>-dev.<monotonic-build>.1`, matching the existing release resolver and continuous self-update pipeline. R97 uses build epoch `36336130139`, taken from the qualification-line Package Smoke run identity so it is strictly above the previously observed live release hint while remaining in the same monotonic run-based namespace.
+The version is intentionally distinct from the previously observed R97/live identity `0.7.0-dev.36336130139.1`: R109 changes Browser UI/runtime bytes and must not reuse an older package version. The monotonic build component was reserved from the first R109 Package Smoke qualification run namespace; the final producer run, installer SHA-256 and released artifact identity must still be recorded separately on the exact final source SHA.
+
+Canonical production authority:
+- one Native Browser Supervisor/Fleet task and Agent lifecycle authority;
+- real authenticated z.ai Agent Web UI sessions, with durable Agent-origin/session provenance;
+- one geometry-independent Browser effect path with readback and no blind retry;
+- Browser Brain and durable memory remain Native Browser-owned;
+- Browser-packaged ME2 is a standalone read-only, zero-authority compatibility probe;
+- legacy ME2 Mission Control scheduler, Browser/Agents/Command/Compute authority pages and daemon task-mutation UI are retired;
+- historical managed-model/API coordination is quarantined from production Agent execution.
 
 Primary UI contract:
 - one persistent Chat Fleet workspace;
-- supervisors and fleet chat agents on the left;
-- exact selected native chat WebContents on the right;
-- all advanced surfaces reachable only through Settings or command/search palette;
-- no second scheduler, executor, browser-command authority, or retry plane in the renderer.
+- supervisors and fleet agents on the left;
+- exact selected native Agent/Chat WebContents on the right;
+- advanced observation surfaces are non-authoritative unless explicitly bound to canonical DevOS mutations;
+- no second scheduler, executor, browser-command authority, retry plane or model API fallback in the renderer/runtime.
 
-Safety invariants: no automatic retry of ambiguous browser effects, no authority widening, no bypass of self-update receipts, installer barriers, successor qualification, or Sentinel recovery fences.
+Release safety invariants:
+- ambiguous external effects are reconciled, never blindly replayed;
+- no authority widening or bypass of Guardian/Sentinel, self-update receipts, installer barriers or successor qualification;
+- source qualification does not imply live Edge equivalence: the R83 v14 canary gate remains fail-closed until a separately authorized exact-source canary deployment and qualification;
+- tested source SHA, built installer and released installer must be identical in the final release chain;
+- promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update z.ai Agent E2E evidence.
