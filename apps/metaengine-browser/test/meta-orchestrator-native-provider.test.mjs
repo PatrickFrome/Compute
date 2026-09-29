@@ -32,3 +32,120 @@ test('SQL durable admission reconstructs task from ACTIVE plan and calls the exi
 test('SQL capacity projection mirrors ACTIVE transport admission without scheduling work',async()=>{const sql=await readFile(new URL('../../../supabase/migrations/20260831204000_devos_fleet_scheduler_capacity_snapshot_v1.sql',import.meta.url),'utf8');assert.match(sql,/TRANSPORT_PROOF_REQUIRED/);assert.match(sql,/lifecycle_state' <> 'ACTIVE'/);assert.match(sql,/devos_fleet_claim_h205f22/);assert.match(sql,/DEVOS_SCHEDULER_SNAPSHOT/);for(const forbidden of ['devos_fleet_lease_v1','devos_fleet_enqueue_v1','devos_fleet_mark_running_v1','devos_fleet_complete_v1'])assert.equal(sql.toLowerCase().includes(forbidden.toLowerCase()),false)});
 
 test('native supervisor wiring keeps Meta routes behind existing device authentication',async()=>{const source=await readFile(new URL('../supabase/a2-browser-native-supervisor-v1/index.ts',import.meta.url),'utf8');const auth=source.indexOf('authenticateDevice(req,canonicalPath,bodyText)');const meta=source.indexOf('await metaRoutes(');assert.ok(auth>=0&&meta>auth);assert.equal(source.includes('setInterval'),false)});
+
+
+test('Client V1 objective route atomically returns exact admitted task id',async()=>{
+  const clientRoadmap='metaengine-client-v1';
+  const clientBaseline='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const objective='Ship useful work';
+  const pointId='obj.ship-useful-work.v1';
+  const exactTask='11111111-1111-4111-8111-111111111111';
+  const calls=[];
+  const clientInputs={
+    schema:'metaengine.meta-orchestrator.authoritative-inputs.v1',
+    workspace_id:workspaceId,
+    roadmap_id:clientRoadmap,
+    roadmap_authority:{
+      authority_key:'METAENGINE_CLIENT_V1',
+      roadmap_id:clientRoadmap,
+      active_milestone_key:'C4_TYPED_PRODUCT_CONTROL',
+      integration_line:'work/client-v1-c4-typed-goal-bridge-v1',
+      baseline_sha:clientBaseline,
+      alignment_epoch:1,
+    },
+    plan_state:{
+      schema:'metaengine.meta-orchestrator.plan-state.v1',
+      found:false,
+      workspace_id:workspaceId,
+      roadmap_id:clientRoadmap,
+      plan_generation:0,
+      automatic_retry_allowed:false,
+      scheduler_authority:false,
+      browser_authority:false,
+      release_authority:false,
+      authority_effect:false,
+    },
+    tasks:[],
+    roadmap_receipts:[],
+    capacity:{source:'UNSPECIFIED_FAIL_CLOSED',available_slots:0,authority_effect:false},
+    task_meta_projection_only:true,
+    task_payload_exposed:false,
+    result_summary_exposed:false,
+    scheduler_identity_exposed:false,
+    receipt_summary_exposed:false,
+    receipt_evidence_exposed:false,
+    automatic_retry_allowed:false,
+    task_content_authority:false,
+    scheduler_authority:false,
+    browser_authority:false,
+    release_authority:false,
+    authority_effect:false,
+  };
+  const routes=createMetaSupervisorRoutes({workspaceId,rpc:async(name,args)=>{
+    calls.push({name,args});
+    if(name==='meta_orchestrator_authoritative_inputs_v1')return clientInputs;
+    if(name==='client_v1_goal_submit_v1'){
+      return{
+        schema:'metaengine.client-v1.goal-submit.v1',
+        workspace_id:workspaceId,
+        roadmap_id:clientRoadmap,
+        plan_generation:1,
+        point_id:pointId,
+        task_id:exactTask,
+        atomic_plan_and_admission:true,
+        operator_initiated:true,
+        task_payload_returned:false,
+        scheduler_identity_returned:false,
+        automatic_retry_allowed:false,
+        scheduler_authority:false,
+        browser_authority:false,
+        release_authority:false,
+        authority_effect:false,
+        activation:{
+          schema:'metaengine.meta-orchestrator.plan-state.v1',
+          workspace_id:workspaceId,
+          roadmap_id:clientRoadmap,
+          plan_generation:1,
+          state:'ACTIVE',
+          automatic_retry_allowed:false,
+          scheduler_authority:false,
+          browser_authority:false,
+          release_authority:false,
+          authority_effect:false,
+        },
+        admission:{
+          schema:'metaengine.meta-orchestrator.task-admission.v1',
+          workspace_id:workspaceId,
+          roadmap_id:clientRoadmap,
+          plan_generation:1,
+          point_id:pointId,
+          task_id:exactTask,
+          task_payload_returned:false,
+          scheduler_identity_returned:false,
+          automatic_retry_allowed:false,
+          scheduler_authority:false,
+          browser_authority:false,
+          release_authority:false,
+          authority_effect:false,
+        },
+      };
+    }
+    throw new Error('unexpected_rpc:'+name);
+  }});
+  const response=await routes({req:request(),path:'/v1/meta/objective',body:{roadmap_id:clientRoadmap,objective},clientId:'device'});
+  assert.equal(response.status,200);
+  const out=await body(response);
+  assert.equal(out.roadmap_id,clientRoadmap);
+  assert.equal(out.plan_generation,1);
+  assert.deepEqual(out.point_ids,[pointId]);
+  assert.deepEqual(out.task_ids,[exactTask]);
+  assert.equal(out.task_admission_state,'ADMITTED');
+  assert.equal(out.atomic_plan_and_admission,true);
+  assert.equal(out.authority_effect,false);
+  assert.equal(calls.length,2);
+  assert.equal(calls[0].name,'meta_orchestrator_authoritative_inputs_v1');
+  assert.equal(calls[1].name,'client_v1_goal_submit_v1');
+  assert.equal(calls[1].args.p_point_id,pointId);
+  assert.equal(calls[1].args.p_expected_current_generation,0);
+  assert.equal(calls[1].args.p_plan.roadmap_id,clientRoadmap);
+});
