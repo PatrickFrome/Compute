@@ -1,1 +1,5 @@
-{"publicBase": "https://preview-chat-579ed13b-1316-4eff-b1cd-d44815301cbd.space-z.ai/", "hint": "operator: paste sandbox public URL here via one-line edit; notebook falls back to manual input if empty"}
+{
+  "publicBase": "https://preview-chat-579ed13b-1316-4eff-b1cd-d44815301cbd.space-z.ai/",
+  "hint": "sandbox public URL provided by operator 2026-09-29 19:52 +08 (trace 1a0ed02575dafc1d); notebook reads this file at start and registers 5 nodes",
+  "updatedAt": "2026-09-29T11:53:00Z"
+}
