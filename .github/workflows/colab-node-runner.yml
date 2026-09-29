@@ -1,12 +1,11 @@
 name: colab-node-runner
-# ME2 CHAT-SWARM: запускает узел роя на GitHub Actions (CPU-раннер) вместо Google Colab.
-# Цикл: ollama + qwen3:8b -> cloudflared quick-tunnel -> публикация tunnel-URL
-# в colab/last-tunnel.json (этой же веткой). Песочница забирает файл и
-# регистрирует узел у роя: POST /colab/register?XTransformPort=3046.
+# ME2 CHAT-SWARM: узел роя на GitHub Actions (CPU-раннер).
+# v2: раннер верифицирует туннель ДО публикации и перебирает провайдеров:
+# trycloudflare -> pinggy -> localhost.run. Публикуется только живой URL.
 on:
   workflow_dispatch:
   schedule:
-    - cron: '20 */5 * * *'   # самовосстановление узла каждые 5 часов
+    - cron: '20 */5 * * *'
 permissions:
   contents: write
 concurrency:
@@ -15,7 +14,7 @@ concurrency:
 jobs:
   node:
     runs-on: ubuntu-latest
-    timeout-minutes: 330     # ~5.5ч (6ч лимит раннера минус запас)
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,37 +38,65 @@ jobs:
             "messages":[{"role":"user","content":"Reply with one word: alive"}],
             "options":{"num_predict":16}
           }' | head -c 400
-      - name: Install cloudflared
+      - name: Tunnel (trycloudflare -> pinggy -> localhost.run) with verification
         run: |
+          TUNNEL_URL=""
+          verify() {
+            for i in $(seq 1 8); do
+              if curl -s --max-time 20 "$1/api/tags" | grep -q '"models"'; then return 0; fi
+              sleep 5
+            done
+            return 1
+          }
+          # --- попытка 1: cloudflared quick tunnel ---
           wget -q -O cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared
-      - name: Start quick tunnel
-        run: |
-          nohup ./cloudflared tunnel --url http://localhost:11434 --no-autoupdate > tunnel.log 2>&1 &
-          URL=""
-          for i in $(seq 1 60); do
-            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log | head -1)
-            [ -n "$URL" ] && break
+          nohup ./cloudflared tunnel --url http://localhost:11434 --no-autoupdate > tunnel1.log 2>&1 &
+          for i in $(seq 1 45); do
             sleep 2
+            U=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel1.log | head -1)
+            [ -n "$U" ] && break
           done
-          if [ -z "$URL" ]; then echo "TUNNEL FAILED"; tail -20 tunnel.log; exit 1; fi
-          echo "TUNNEL_URL=$URL" >> "$GITHUB_ENV"
-          echo "TUNNEL_URL=$URL"
+          if [ -n "$U" ] && verify "$U"; then TUNNEL_URL="$U"; echo "provider=trycloudflare"; fi
+          # --- попытка 2: pinggy ---
+          if [ -z "$TUNNEL_URL" ]; then
+            pkill -f cloudflared 2>/dev/null || true
+            nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R0:localhost:11434 a.pinggy.io > tunnel2.log 2>&1 &
+            sleep 12
+            U=$(grep -oE 'https://[a-z0-9-]+\.(pinggy\.link|pinggy\.io|a\.free\.pinggy\.io)' tunnel2.log | head -1)
+            [ -z "$U" ] && U=$(grep -oE 'https://[a-zA-Z0-9.-]+' tunnel2.log | grep -vE 'pinggy.io$|github' | head -1)
+            if [ -n "$U" ] && verify "$U"; then TUNNEL_URL="$U"; echo "provider=pinggy"; fi
+          fi
+          # --- попытка 3: localhost.run ---
+          if [ -z "$TUNNEL_URL" ]; then
+            pkill -f "ssh.*pinggy" 2>/dev/null || true
+            nohup ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:11434 nokey@localhost.run > tunnel3.log 2>&1 &
+            sleep 12
+            U=$(grep -oE 'https://[a-z0-9-]+\.lhr\.life' tunnel3.log | head -1)
+            [ -z "$U" ] && U=$(grep -oE 'https://[a-zA-Z0-9.-]+' tunnel3.log | grep -E 'lhr|localhost' | head -1)
+            if [ -n "$U" ] && verify "$U"; then TUNNEL_URL="$U"; echo "provider=localhost.run"; fi
+          fi
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "ALL TUNNEL PROVIDERS FAILED"
+            tail -5 tunnel1.log tunnel2.log tunnel3.log 2>/dev/null || true
+            exit 1
+          fi
+          echo "TUNNEL_URL=$TUNNEL_URL" >> "$GITHUB_ENV"
+          echo "FINAL TUNNEL_URL=$TUNNEL_URL"
       - name: Publish tunnel URL to repo (rendezvous)
         run: |
           ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           run_id="${GITHUB_RUN_ID}"
           cat > colab/last-tunnel.json <<EOF
-          {"url": "$TUNNEL_URL", "model": "qwen3:8b", "name": "gha-qwen3-8b", "publishedAt": "$ts", "runId": "$run_id"}
+          {"url": "$TUNNEL_URL", "model": "qwen3:8b", "name": "gha-qwen3-8b", "publishedAt": "$ts", "runId": "$run_id", "verified": true}
           EOF
           git config user.email "runner@me2-swarm.local"
           git config user.name "colab-node-runner"
           git add colab/last-tunnel.json
-          git commit -m "node rendezvous $ts run=$run_id"
+          git commit -m "node rendezvous $ts run=$run_id verified"
           git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:context-vault
       - name: Keep node alive (probe loop)
         run: |
-          # держим раннер живым; ollama+cloudflared уже в фоне
           end=$((SECONDS + 18000))
           while [ $SECONDS -lt $end ]; do
             sleep 300
