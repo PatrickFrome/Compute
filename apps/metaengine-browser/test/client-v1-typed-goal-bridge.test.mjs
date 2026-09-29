@@ -23,6 +23,15 @@ function activation(goal = 'Ship a useful browser task') {
     plan_generation: 17,
     point_ids: ['obj.ship-a-useful-browser-task.v1'],
     node_count: 1,
+    task_ids: ['98903ffd-dc3f-4a3e-ab09-55931c5100a9'],
+    task_admission_state: 'ADMITTED',
+    atomic_plan_and_admission: true,
+    admission: {
+      schema: 'metaengine.meta-orchestrator.task-admission.v1',
+      task_id: '98903ffd-dc3f-4a3e-ab09-55931c5100a9',
+      point_id: 'obj.ship-a-useful-browser-task.v1',
+      authority_effect: false,
+    },
     operator_initiated: true,
     automatic_retry_allowed: false,
     scheduler_authority: false,
@@ -42,7 +51,10 @@ test('typed goal intent and exact activation readback are bounded and authority 
   assert.equal(out.schema, CLIENT_GOAL_SCHEMA);
   assert.equal(out.objective_id, 'metaengine-client-v1:g17');
   assert.deepEqual(out.point_ids, ['obj.ship-a-useful-browser-task.v1']);
-  assert.equal(out.task_admission_state, 'PENDING_CANONICAL_SCHEDULER_ADMISSION');
+  assert.equal(out.task_id, '98903ffd-dc3f-4a3e-ab09-55931c5100a9');
+  assert.deepEqual(out.task_ids, ['98903ffd-dc3f-4a3e-ab09-55931c5100a9']);
+  assert.equal(out.task_admission_state, 'ADMITTED');
+  assert.equal(out.atomic_plan_and_admission, true);
   assert.equal(out.exact_activation_readback, true);
   assert.equal(out.scheduler_authority, false);
   assert.equal(out.browser_actuation_authority, false);
@@ -53,6 +65,10 @@ test('typed goal intent and exact activation readback are bounded and authority 
   assert.throws(() => normalizeClientGoalIntent('x'.repeat(481)), /client_goal_invalid/);
   assert.throws(
     () => normalizeClientGoalActivationReadback({ ...activation(intent.goal), authority_effect: true }, intent.goal),
+    /client_goal_activation_readback_invalid/,
+  );
+  assert.throws(
+    () => normalizeClientGoalActivationReadback({ ...activation(intent.goal), atomic_plan_and_admission: false }, intent.goal),
     /client_goal_activation_readback_invalid/,
   );
 });
