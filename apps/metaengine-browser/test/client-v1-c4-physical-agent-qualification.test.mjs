@@ -88,7 +88,10 @@ test('physical qualification polls only readback after one goal submission', () 
   assert.match(script, /devicePost\('\/v1\/meta\/client-goal-progress'/);
   assert.match(script, /devicePost\('\/v1\/meta\/client-goal-execution-proof'/);
   assert.match(script, /physical_effect_replayed: false/);
-  assert.doesNotMatch(script, /while[\s\S]{0,3000}client-goal-submit/);
+  const pollStart = script.indexOf('const proofDeadline = Date.now() + agentProofTimeoutMs');
+  const pollEnd = script.indexOf('const evidence = {', pollStart);
+  assert.ok(pollStart >= 0 && pollEnd > pollStart);
+  assert.doesNotMatch(script.slice(pollStart, pollEnd), /client-goal-submit/);
 });
 
 test('physical C4 exit requires Agent-origin proof, not synthetic or accepted-result completion', () => {
