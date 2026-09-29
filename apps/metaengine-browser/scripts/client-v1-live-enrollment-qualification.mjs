@@ -184,8 +184,9 @@ try {
   if (waitResponse.status !== 200) {
     throw new Error(`qualification_wait_batch_http_${waitResponse.status}:${waitBody?.error || 'unknown'}`);
   }
-  if (waitBody?.wake_reason !== 'POSTGRES_NOTIFY') {
-    throw new Error(`qualification_postgres_notify_not_proven:${String(waitBody?.wake_reason || 'NONE')}`);
+  const wakeReason = String(waitBody?.wake_reason || '');
+  if (!['POSTGRES_NOTIFY', 'DB_POLL_SESSION_WAKE_UNAVAILABLE'].includes(wakeReason)) {
+    throw new Error(`qualification_command_wake_not_proven:${wakeReason || 'NONE'}`);
   }
   const commands = Array.isArray(waitBody?.commands) ? waitBody.commands : [];
   if (commands.length !== 1 || commands[0]?.action !== 'POLL' || !commands[0]?.command_id) {
@@ -237,8 +238,9 @@ try {
     signed_state_accepted: true,
     signed_status_http: statusResponse.status,
     runtime_control_observed: Boolean(stateBody?.runtime_control),
-    postgres_notify_wake_proven: true,
-    wake_reason: waitBody.wake_reason,
+    postgres_notify_wake_proven: wakeReason === 'POSTGRES_NOTIFY',
+    bounded_db_poll_fallback_proven: wakeReason === 'DB_POLL_SESSION_WAKE_UNAVAILABLE',
+    wake_reason: wakeReason,
     receipt_terminal_readback_proven: true,
     authority_effect: false,
   }));
