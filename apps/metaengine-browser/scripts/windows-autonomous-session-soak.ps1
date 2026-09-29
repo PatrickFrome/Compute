@@ -165,18 +165,16 @@ try {
     if ($unexpectedInitialRemoteRows -gt 0) { throw 'soak_zero_topology_startup_started_initial_remote_load' }
   }
 
-  # R85: the full installed runtime is asynchronous beyond PRIMARY_WINDOW_STABLE.
-  # Mission Control creates its supervisor WebContents only after daemon contract
-  # qualification and gateway startup. Taking the handle baseline before that
-  # topology exists misclassifies expected startup handles as an activation leak.
-  # Wait for exact ME2 lifecycle evidence and a live UI probe, then demand a short
-  # handle plateau before measuring the 72 second-instance activations.
+  # R108: the full installed runtime is asynchronous beyond PRIMARY_WINDOW_STABLE,
+  # but the duplicate ME2 Mission Control scheduler/tab is intentionally absent.
+  # Wait for exact daemon contract + UI/gateway + scheduler-removal evidence, then
+  # demand a short handle plateau before measuring second-instance activations.
   $me2DaemonReady = $false
   $me2ContractOk = $false
   $me2UiStarted = $false
   $me2UiReady = $false
   $me2GatewayLive = $false
-  $me2MissionTabCreated = $false
+  $me2MissionControlRemoved = $false
   $me2PrimaryShellReady = $false
   $me2R97UiConfirmed = $false
   $me2Fatal = $null
@@ -195,7 +193,7 @@ try {
         if ($schema -eq 'metaengine.browser.me2.integration.v1' -and $event -eq 'ME2_CONTRACT_OK') { $me2ContractOk = $true }
         if ($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_SPAWN','UI_ADOPTED') -contains $event) { $me2UiStarted = $true }
         if ($schema -eq 'metaengine.browser.me2.ui-gateway.v1' -and $event -eq 'GATEWAY_LIVE') { $me2GatewayLive = $true }
-        if ($schema -eq 'metaengine.browser.me2.mission-control.v1' -and $event -eq 'SUPERVISOR_TAB_CREATED') { $me2MissionTabCreated = $true }
+        if ($schema -eq 'metaengine.browser.me2.integration.v1' -and $event -eq 'DAEMON_MISSION_CONTROL_REMOVED' -and [string]$row.replacement -eq 'NATIVE_BROWSER_FLEET_AND_SUPERVISOR' -and $row.authority_effect -eq $false) { $me2MissionControlRemoved = $true }
         if ($schema -eq 'metaengine.browser-local-shell.v2' -and [string]$row.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' -and [string]$row.shell_mode -eq 'ME2_PRIMARY' -and $row.legacy_shell_is_normal_path -eq $false) { $me2PrimaryShellReady = $true }
         if ($schema -eq 'metaengine.browser.me2-r97-installed-ui.v1' -and [string]$row.state -eq 'ME2_R97_UI_CONTRACT_CONFIRMED') { $me2R97UiConfirmed = $true }
         if ($schema -eq 'metaengine.browser.me2-r97-installed-ui.v1' -and [string]$row.state -eq 'ME2_R97_UI_CONTRACT_INCOMPLETE') { $me2Fatal = "$schema/ME2_R97_UI_CONTRACT_INCOMPLETE" }
@@ -213,11 +211,11 @@ try {
         if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) { $me2UiReady = $true }
       } catch {}
     }
-    if ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated -and $me2PrimaryShellReady -and $me2R97UiConfirmed) { break }
+    if ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionControlRemoved -and $me2PrimaryShellReady -and $me2R97UiConfirmed) { break }
     Start-Sleep -Milliseconds 200
   }
-  if (-not ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated -and $me2PrimaryShellReady -and $me2R97UiConfirmed)) {
-    throw "soak_me2_runtime_not_settled:daemon=$me2DaemonReady,contract=$me2ContractOk,ui=$me2UiReady,gateway=$me2GatewayLive,mission=$me2MissionTabCreated,primary_shell=$me2PrimaryShellReady,r97_dom=$me2R97UiConfirmed"
+  if (-not ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionControlRemoved -and $me2PrimaryShellReady -and $me2R97UiConfirmed)) {
+    throw "soak_me2_runtime_not_settled:daemon=$me2DaemonReady,contract=$me2ContractOk,ui=$me2UiReady,gateway=$me2GatewayLive,mission_removed=$me2MissionControlRemoved,primary_shell=$me2PrimaryShellReady,r97_dom=$me2R97UiConfirmed"
   }
 
   $stableHandleSamples = 0
@@ -392,7 +390,7 @@ try {
   $proof | Add-Member -NotePropertyName me2_contract_ok -NotePropertyValue ([bool]$me2ContractOk) -Force
   $proof | Add-Member -NotePropertyName me2_ui_ready -NotePropertyValue ([bool]$me2UiReady) -Force
   $proof | Add-Member -NotePropertyName me2_gateway_live -NotePropertyValue ([bool]$me2GatewayLive) -Force
-  $proof | Add-Member -NotePropertyName me2_mission_supervisor_tab_created -NotePropertyValue ([bool]$me2MissionTabCreated) -Force
+  $proof | Add-Member -NotePropertyName me2_mission_control_removed -NotePropertyValue ([bool]$me2MissionControlRemoved) -Force
   $proof | Add-Member -NotePropertyName me2_primary_shell_ready -NotePropertyValue ([bool]$me2PrimaryShellReady) -Force
   $proof | Add-Member -NotePropertyName me2_r97_dom_contract_verified -NotePropertyValue ([bool]$me2R97UiConfirmed) -Force
   $proof | Add-Member -NotePropertyName resource_baseline_after_r75_mount -NotePropertyValue $true -Force
