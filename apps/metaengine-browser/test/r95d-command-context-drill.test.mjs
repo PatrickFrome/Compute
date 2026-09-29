@@ -1,37 +1,23 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const command = await readFile(
-  new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url),
-  'utf8',
-);
+const commandUrl = new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url);
+const tasks = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
+const observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
+const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
 
-test('R102 retired COMMAND compatibility page cannot resurrect exact task/chat drill authority', () => {
-  assert.match(command, /data-testid="retired-command-page"/);
-  assert.match(command, /data-authority-effect="false"/);
-  assert.match(command, /legacy daemon Command surface is retired/i);
-
-  for (const retiredAuthority of [
-    'focusTaskId',
-    'focusChatId',
-    'openAttention',
-    'openTask',
-    'setChatId',
-    'setPage',
-    'selectPrimaryAgentSession',
-    'mission-active-work',
-    'mission-attention',
-    'mission-outcomes',
-  ]) {
-    assert.equal(command.includes(retiredAuthority), false, `retired COMMAND authority resurfaced: ${retiredAuthority}`);
-  }
+test('R106 retired COMMAND page is absent rather than a compatibility authority surface', () => {
+  assert.equal(fs.existsSync(commandUrl), false);
+  const pageType = store.slice(store.indexOf('export type PageKey'), store.indexOf('// R97 native swarm convergence'));
+  assert.equal(pageType.includes('"command"'), false);
 });
 
-test('R102 retired COMMAND remains an inert compatibility surface with no effect transport', () => {
-  assert.doesNotMatch(command, /BrowserStage/);
-  assert.doesNotMatch(command, /primaryShellPage\s*=/);
-  assert.doesNotMatch(command, /ipcRenderer/);
-  assert.doesNotMatch(command, /sendCommand|me2Fetch|fetch\(|WebSocket|agentChatOp/);
-  assert.doesNotMatch(command, /onClick=|onKeyDown=|onSubmit=/);
+test('R106 exact task drill remains on TASKS and OBSERVE after COMMAND removal', () => {
+  assert.match(tasks, /openTask\(t\.id\)/);
+  assert.match(observability, /const inspectedTaskId = useMe2\(\(s\) => s\.inspectedTaskId\)/);
+  assert.match(observability, /data-binding-mode=\{inspectedTaskId \? "EXACT_TASK_ID" : "UNBOUND"\}/);
+  assert.match(observability, /openTask\(inspectedTaskId\)/);
+  assert.match(observability, /setPage\("tasks"\)/);
 });
