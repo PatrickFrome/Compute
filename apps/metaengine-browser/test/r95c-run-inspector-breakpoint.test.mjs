@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -11,7 +12,6 @@ import {
 } from '../src/shell-layout.mjs';
 
 const read = (url) => readFile(new URL(url, import.meta.url), 'utf8');
-const browserPage = await read('../../me2-ui/src/components/me2/pages/browser.tsx');
 const store = await read('../../me2-ui/src/components/me2/store.tsx');
 const shell = await read('../../me2-ui/src/components/me2/shell/me2-shell.tsx');
 const main = await read('../src/main.mjs');
@@ -56,7 +56,7 @@ test('R97 requested Utility Panel cannot displace native Browser pixels in the m
 test('R97 IPC readback carries native telemetry decision without authority widening', () => {
   assert.match(main, /run_inspector_visible: shellLayoutPlan\?\.me2_run_inspector_effective_visible === true/);
   const handlerStart = main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'");
-  const handlerEnd = main.indexOf("ipcMain.handle('metaengine:shell:primary-agent-session-select'", handlerStart);
+  const handlerEnd = main.indexOf("ipcMain.handle('metaengine:shell:primary-chat-fleet-roster'", handlerStart);
   const handler = main.slice(handlerStart, handlerEnd);
   assert.match(handler, /presentation_only:\s*true/);
   assert.match(handler, /browser_command_authority:\s*false/);
@@ -65,13 +65,13 @@ test('R97 IPC readback carries native telemetry decision without authority widen
   assert.match(handler, /authority_effect:\s*false/);
 });
 
-test('legacy RUN telemetry component remains native-readback-driven but is not mounted persistently', () => {
+test('R108 native telemetry readback survives physical removal of the daemon Browser page', () => {
   assert.match(store, /runTelemetryInspectorVisible: boolean/);
   assert.match(store, /run_inspector_visible\?: boolean/);
   assert.match(store, /runTelemetryInspectorVisible: result\?\.run_inspector_visible === true/);
-  assert.match(browserPage, /const telemetryInspectorVisible = useMe2/);
-  assert.doesNotMatch(browserPage, /min-\[1124px\]:flex|\blg:flex\b|\bxl:flex\b/);
-  assert.doesNotMatch(shell, /run-telemetry-inspector/);
+  assert.equal(fs.existsSync(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url)), false);
+  assert.doesNotMatch(shell, /BrowserPage|pages\/browser|run-telemetry-inspector/);
+  assert.match(shell, /data-testid="native-chat-surface-slot"/);
 });
 
 test('R97 physical visual harness proves no persistent RUN inspector or Context Drawer', () => {
