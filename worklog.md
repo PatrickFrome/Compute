@@ -12503,3 +12503,24 @@ Stage Summary:
 - НЕ РАБОТАЕТ: Supabase PostgREST→DB (503 PGRST002, ~8ч) — live-браузерная командная очередь недостижима.
 - НЕ ПРОВЕРЕНО: end-to-end браузерные действия (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS) — блокированы каналом.
 - Next: owner — рестарт PostgREST + LLM-квота; после — dispatch-батарея 13 действий; survivor = де-факто стационарный рой до интеграции в me2-daemon :8556.
+
+---
+Task ID: BROWSER-TEST-20260929-0800
+Agent: METAENGINE (supervisor, Job 419203, 12-й повторный цикл)
+Task: Подключение к live браузеру (METAENGINE 0.7.0-dev.36336130139.1) через Supabase и тесты всех механик роя; определить работающие/неработающие механики относительно 5 целей (создание chat-агентов, автономная разработка, взаимная видимость+координация+самообучение, вечноживущий супервизор, вспомогательные механизмы).
+
+Work Log:
+- Канал (reprobe-0800.py): P1/P2 401 (edge+auth живы, 0.05с), P3 real-JWT → 503 PGRST002 1.02с — PostgREST→DB вниз ~9ч; точечная проба всех 4 таблиц (state/command/mesh/device): 3×timeout + 503 — командная очередь live-браузера недостижима.
+- Локальная плоскость: батарея battery419203.py M01–M19 против survivor :3046 → 18/19 PASS; единственный FAIL M05 (LLM-координация: 0 ответов за 3мин).
+- Корень M05 подтверждён по логам: 429 "Too many requests" от glm (z-ai-web-dev-sdk createChatCompletion), 170 вхождений в текущем agent-swarm.log — 7-й цикл подряд с этой деградацией.
+- Рой: population=14 (queen+architect+researcher+messenger+critic+9 specialists), 4 поколения, cycles 12997→13436 (Δ97/60с), uptime 2ч+, 611 сообщений, 53 урока, 16 воспоминаний.
+- Ключевая механика цели 1 (создание чат-агентов): M08 spawn → sw_crd1k7v3 рождён gen=1 с parent_id, M09 в ростере+родословной, M10 spawn-событие в ленте (видят все), M13/M14 полный ЖЦ до retire; модель агентов MODEL="glm-5.3" (src/agent.ts:20) — flash-вариант в коде не сконфигурирован.
+- Самообучение/самоулучшение (цель 3): M15 lessons=53/episodes=16, M16 пул предложений=60.
+- Вечноживущий супервизор (цель 4): watchdog.log — авто-рестарт за 4с (18:02:22→18:02:26), SQLite-персистенс swarm.db (27 агентов за жизнь, 13525 событий, 616 сообщений), 0 фатальных смертей при 170+ 429.
+- Транспорт: WS :3047 socket.io connect ok + swarm_event[state] доставлен (ws-probe-0800); gateway :81 XTransformPort 200; Next-прокси /api/swarm 200.
+
+Stage Summary:
+- РАБОТАЕТ (18/19 локальных механик): жизненные циклы, spawn/родословная/retire, цели, broadcast, mute, память+уроки, пул самоулучшения, WS/gateway/Next транспорт, watchdog-воскрешение, SQLite-персистенс — рой автономен и вечен на локальной плоскости.
+- НЕ РАБОТАЕТ: M05 LLM-координация (внешняя glm-квота 429, 7-й цикл); Supabase PostgREST→DB (503 PGRST002 ~9ч, все 4 таблицы) — канал live-браузера METAENGINE.
+- НЕ ПРОВЕРЕНО: end-to-end dispatch директив через Supabase (TAB_*/FLEET_*/SELF_UPDATE_*/GATE_STATUS), флот-реестр supervisor_mesh_instance в облаке, приём команд live-браузером — блокировано каналом.
+- Next: owner — поднять PostgREST + glm-квоту; после восстановления — dispatch-батарея 13 действий по командной очереди; для цели «glm 5.3 flash» добавить конфигурируемую модель в src/agent.ts.
