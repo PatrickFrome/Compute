@@ -905,6 +905,40 @@ export class NativeSupervisorClient {
     return body;
   }
 
+  // Client V1 C4.3: request_id is allocated and durably recorded by the
+  // Browser BEFORE this effect crosses HTTP. The server persists the same
+  // identifier atomically with plan activation + task admission. Any transport
+  // ambiguity is reconciled through clientGoalProgress(); this method is never
+  // automatically re-issued as an effect retry.
+  async clientGoalSubmit({ request_id, objective } = {}) {
+    const payload = {
+      request_id: String(request_id ?? ''),
+      objective: String(objective ?? ''),
+    };
+    const response = await this.#signedRequest('/v1/meta/client-goal-submit', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(`native_supervisor_client_goal_submit_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+      error.http_status = response.status;
+      error.request_id = payload.request_id;
+      throw error;
+    }
+    return body;
+  }
+
+  async clientGoalProgress({ request_id } = {}) {
+    const payload = { request_id: String(request_id ?? '') };
+    const response = await this.#signedRequest('/v1/meta/client-goal-progress', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(`native_supervisor_client_goal_progress_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+      error.http_status = response.status;
+      error.request_id = payload.request_id;
+      throw error;
+    }
+    return body;
+  }
+
   setControlState({ mode, armed } = {}) {
     if (mode !== undefined && String(mode).trim().toUpperCase() !== 'CONTROL') {
       const error = new Error(ALWAYS_ON_CONTROL_ERROR);
