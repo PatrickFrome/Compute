@@ -6,46 +6,23 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
-const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
-
 const retired = [
   'me2-ui/src/components/me2/pages/agents.tsx',
   'me2-ui/src/components/me2/pages/command.tsx',
   'me2-ui/src/components/me2/pages/compute.tsx',
 ];
 
-test('R100 retired daemon pages are inert compatibility tombstones', () => {
+test('R106 retired daemon authority pages are physically removed', () => {
   for (const file of retired) {
-    const source = read(file);
-    assert.match(source, /data-authority-effect="false"/, file);
-    assert.match(source, /retired/i, file);
-    for (const forbidden of [
-      'sendCommand',
-      'me2Fetch',
-      'spawnAgent',
-      'agentChatOp',
-      'useAgentChatSessions',
-      'MODEL_OPTIONS',
-      '/providers',
-      '/llm',
-      '/glm',
-      '/agentchat',
-      'TASK_ENQUEUE',
-      'TASK_SCHEDULE',
-      'AGENT_MODEL',
-      'AGENT_PAUSE',
-      'AGENT_RETIRE',
-    ]) {
-      assert.equal(source.includes(forbidden), false, `${file} still carries legacy authority token: ${forbidden}`);
-    }
+    assert.equal(fs.existsSync(path.join(ROOT, file)), false, file);
   }
 });
 
-test('R100 retired daemon pages import no bus, socket, provider or fleet runtime', () => {
-  for (const file of retired) {
-    const source = read(file);
-    assert.doesNotMatch(source, /@\/lib\/me2-(?:bus|socket)/, file);
-    assert.doesNotMatch(source, /@\/hooks\/use-agentchat/, file);
-    assert.doesNotMatch(source, /from\s+["'][^"']*(?:provider|fleet|agentchat)[^"']*["']/, file);
+test('R106 removal replaces compatibility tombstones instead of preserving dead UI state', () => {
+  const shell = fs.readFileSync(path.join(ROOT, 'me2-ui/src/components/me2/shell/me2-shell.tsx'), 'utf8');
+  const store = fs.readFileSync(path.join(ROOT, 'me2-ui/src/components/me2/store.tsx'), 'utf8');
+  for (const token of ['AgentsPage','CommandPage','ComputePage','pages/agents','pages/command','pages/compute']) {
+    assert.equal(shell.includes(token), false, 'shell consumer remains: ' + token);
+    assert.equal(store.includes(token), false, 'store consumer remains: ' + token);
   }
 });
