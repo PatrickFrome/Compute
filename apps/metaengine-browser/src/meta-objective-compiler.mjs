@@ -98,9 +98,14 @@ function normalizeAuthority(authority) {
 function currentGeneration(planState) {
   const row = planState && typeof planState === 'object' && !Array.isArray(planState) ? planState : null;
   if (!row) fail('plan_state_invalid');
-  const found = row.found === true;
-  const generation = found ? Number(row.plan_generation) : 0;
-  if (!Number.isSafeInteger(generation) || generation < 0) fail('plan_state_generation_invalid');
+  if (row.found !== true && row.found !== false) fail('plan_state_found_invalid');
+  // found=false means there is no ACTIVE plan. It does not erase the durable
+  // generation watermark: a retired/superseded generation still fences the
+  // next activation and must be used as the CAS expected generation.
+  const generation = Number(row.plan_generation);
+  if (!Number.isSafeInteger(generation) || generation < 0 || (row.found === true && generation < 1)) {
+    fail('plan_state_generation_invalid');
+  }
   return generation;
 }
 
