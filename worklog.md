@@ -12620,3 +12620,41 @@ Stage Summary:
 - НЕ РАБОТАЕТ: M05 (glm-429 квота); Supabase PostgREST→DB (503 ~11.5ч).
 - НЕ ПРОВЕРЕНО: end-to-end dispatch через Supabase (канал).
 - Next: владелец — PostgREST + glm-квота; затем dispatch-батарея 13 действий.
+
+---
+Task ID: RELEASE-VERIFY-20260929-1015
+Agent: cron-agent-loop (анализ версии по запросу оператора)
+Task: Фактчекинг отчёта тика (ME2-TICK-20260929-0026) о релизе ME2 CHAT-SWARM v1.0.0 / daemon v0.58.0-swarm.1.
+
+Work Log:
+- Git: коммиты подтверждены на main — 383c622ae (CHAT-SWARM v1.0.0), 2715bab13 (daemon v0.58.0-swarm.1 budget-plane retirement), 7fb065f25 (объединённый HEAD); ветки release/chat-swarm-v1 и release/chat-agent-swarm-v1 существуют.
+- Версии: mini-services/me2-daemon/package.json = 0.58.0-swarm.1; mini-services/agent-swarm/package.json = 1.0.0 — совпадают с отчётом.
+- Де-лимитация в коде: quota.ts:111 PARK_MAX = Number.POSITIVE_INFINITY с комментом «v0.58.0-swarm.1: бюджет парков УДАЛЕН» — подтверждено.
+- GATE: независимый запуск mini-services/me2-daemon/scripts/probe.sh → «GATE PASS: daemon boot + eval 70/70», EXIT=0 — воспроизведён.
+- Рой жив: :3046 отвечает, queen Мать-Рой gen=0.
+- ПРОТИВОРЕЧИЕ: отчёт утверждает «supabase REST=200 (JWT restored)» (из тика 00:26, унаследовано от старых записей) — независимо воспроизведено СЕЙЧАС: root /rest/v1/ = 503 И таблица state = 503 PGRST002 → канал по-прежнему DEGRADED (~11.5ч). REST=200 ложный/устаревший сигнал (root-эндпоинт скрипта не эквивалентен живой таблице).
+- audit 85% (отчёт) vs 83% (наши прогоны 09:37/10:03) — мелкий дрейф счёта.
+- Кросс-чек с батареей 419203 (циклы 15–16): 18/19 PASS, M05 LLM-координация FAIL из-за glm-429 upstream-квоты — «прямая glm-5.3 линия» механически жива (spawn/ЖЦ 16/16), но LLM-ответы роя сейчас ограничены внешней квотой — в отчёте эта оговорка отсутствует.
+- Job 420565: worklog заявляет «выведен из эксплуатации», но в risk-register тика сам же помечен как «всё ещё диспетчеризуется параллельной сессией» — требуется списание в supervisor-сессии.
+
+Stage Summary:
+- ВЕРДИКТ: релизная сборка подлинная и рабочая (коммиты/версии/де-лимитация/GATE 70/70 подтверждены независимо).
+- ЛОЖНОЕ УТВЕРЖДЕНИЕ: supabase REST=200 — фактически 503 PGRST002 (канал live-браузера не восстановлен).
+- Пробел отчёта: нет оговорки о glm-429 (M05). push по-прежнему отклонён repo-rules (owner-уровень).
+
+---
+Task ID: BROWSER-TEST-20260929-1030 (цикл 17)
+Agent: cron-agent-loop (Job 419203)
+Task: Цикл 17 (10:30) — репроб канала Supabase + батарея M01–M19 на локальном рое (:3046).
+
+Work Log:
+- Канал (reprobe-1030.py): P1/P2 401, P3 real-JWT → 503 PGRST002 — PostgREST→DB вниз ~12ч. Verdict: DEGRADED.
+- Батарея → 18/19 PASS (6-й цикл подряд); FAIL M05 (glm-429 upstream, 12-й цикл подряд).
+- Рой: 14/14 living, 4 поколения (0:1/1:7/2:5/3:1), Δ97 циклов/60с, lessons=53, episodes=16, proposals=60.
+- Дополнительно 10:25: детальный отчёт по рою выдан оператору; endpoints GET /goal//improve — 404 by design (только POST), не считать дефектом.
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик; spawn 17/17; рой автономен 5ч+, ~97 циклов/60с.
+- НЕ РАБОТАЕТ: M05 (glm-429); Supabase PostgREST→DB (503 ~12ч).
+- НЕ ПРОВЕРЕНО: end-to-end dispatch через Supabase.
+- Next: владелец — PostgREST + glm-квота; затем dispatch-батарея.
