@@ -194,7 +194,8 @@ test('Browser persists correlation before effect and uses read-only reconciliati
   assert.match(main, /await journal\.markReconcileRequired\(requestId, error\)/);
   assert.match(main, /await reconcileClientGoal\(requestId\)/);
   assert.match(main, /latestClientGoal/);
-  assert.doesNotMatch(main.slice(main.indexOf('async function submitClientGoal'), main.indexOf('function selectClientAgent')), /clientGoalSubmit[\s\S]*clientGoalSubmit/);
+  const submitBlock = main.slice(main.indexOf('async function submitClientGoal'), main.indexOf('function selectClientAgent'));
+  assert.equal([...submitBlock.matchAll(/nativeSupervisor\.clientGoalSubmit\s*\(/g)].length, 1);
 
   assert.match(preload, /latestGoal: latestClientGoal/);
   assert.match(preload, /goalStatus: clientGoalStatus/);
