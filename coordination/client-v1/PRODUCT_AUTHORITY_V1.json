@@ -1,0 +1,159 @@
+{
+  "schema": "metaengine.client-v1.product-authority.v1",
+  "captured_at": "2026-09-29",
+  "source_baseline": "ff95e9c886fac35b9302ec5c04a4c6bf7b8e8551",
+  "release_authority_scope": "METAENGINE_CLIENT_V1",
+  "owners": [
+    {
+      "domain": "ORCHESTRATION",
+      "owner": "NATIVE_BROWSER_SUPERVISOR",
+      "mode": "SOLE_AUTHORITY"
+    },
+    {
+      "domain": "AGENT_LIFECYCLE",
+      "owner": "NATIVE_BROWSER_FLEET",
+      "mode": "SOLE_AUTHORITY",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/fleet-provisioner.mjs",
+          "blob": "cfde1402686d062b48e20ab1f0e993a8f6a63fa2"
+        }
+      ]
+    },
+    {
+      "domain": "TASK_LEASE",
+      "owner": "DEVOS_NATIVE_TASK_CYCLE",
+      "mode": "SOLE_AUTHORITY",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/devos-native-task-cycle.mjs",
+          "blob": "2f60c676451286ba8df2b19390ba1db4d2cb9738"
+        }
+      ]
+    },
+    {
+      "domain": "BROWSER_EFFECT",
+      "owner": "NATIVE_BROWSER_CONTROL",
+      "mode": "SOLE_AUTHORITY",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/native-browser-control.mjs",
+          "blob": "64a519fe52d9f4f515aefefda5411b173d4658f2"
+        }
+      ]
+    },
+    {
+      "domain": "RECOVERY_ROOT",
+      "owner": "GUARDIAN_SENTINEL",
+      "mode": "SOLE_PRIVILEGED_RECOVERY",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/browser-guardian-core.mjs",
+          "blob": "c1a1af5d50f58af08424e02525d2b2350e0d8a62"
+        },
+        {
+          "path": "apps/metaengine-browser/src/browser-sentinel.mjs",
+          "blob": "2e4cbd4965e7df05f3ed9d1ef7e27af0b68e1d7c"
+        }
+      ]
+    },
+    {
+      "domain": "SELF_UPDATE",
+      "owner": "BROWSER_SELF_UPDATE_CHAIN",
+      "mode": "SOLE_AUTHORITY",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/self-update-runtime.mjs",
+          "blob": "e82828a9afc65dfa0ab59137270e946c153a52c9"
+        }
+      ]
+    },
+    {
+      "domain": "MEMORY",
+      "owner": "BROWSER_BRAIN_PRIMARY_MEMORY",
+      "mode": "PRIMARY",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/browser-brain-episodic-memory.mjs",
+          "blob": "f21eceacc00a23941e8e4557c1ad3deb983d128a"
+        }
+      ]
+    },
+    {
+      "domain": "DURABLE_DISTRIBUTED_STATE",
+      "owner": "SUPABASE_EDGE",
+      "mode": "DURABLE_AUTHORITY"
+    },
+    {
+      "domain": "CODE_CI_ARTIFACT_RELEASE",
+      "owner": "GITHUB",
+      "mode": "IMMUTABLE_ARTIFACT_AUTHORITY"
+    },
+    {
+      "domain": "AGENT_INFERENCE",
+      "owner": "AUTHENTICATED_ZAI_AGENT_WEB_UI",
+      "mode": "SOLE_PRODUCTION_AGENT_PATH"
+    }
+  ],
+  "compatibility_planes": [
+    {
+      "name": "ME2_COMPATIBILITY_PROBE",
+      "authority_effect": false,
+      "status": "TEMPORARY_C9_REMOVAL"
+    },
+    {
+      "name": "ME2_UI_HOST_GATEWAY",
+      "authority_effect": false,
+      "status": "TEMPORARY_C9_REMOVAL"
+    },
+    {
+      "name": "ME2_FLEET_BRIDGE",
+      "authority_effect": false,
+      "status": "OBSERVATION_ONLY_C9_REMOVAL"
+    },
+    {
+      "name": "ME2_SUPERVISOR_MESH_BRIDGE",
+      "authority_effect": false,
+      "status": "OBSERVATION_ONLY_C9_REVIEW"
+    }
+  ],
+  "negative_evidence": [
+    {
+      "path": "apps/metaengine-browser/src/me2/me2-mission-control.mjs",
+      "expected": "ABSENT",
+      "observed": "ABSENT"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/agents.tsx",
+      "expected": "ABSENT",
+      "observed": "ABSENT"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/command.tsx",
+      "expected": "ABSENT",
+      "observed": "ABSENT"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/compute.tsx",
+      "expected": "ABSENT",
+      "observed": "ABSENT"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/browser.tsx",
+      "expected": "ABSENT",
+      "observed": "ABSENT"
+    }
+  ],
+  "invariants": [
+    "ONE_SCHEDULER_AUTHORITY",
+    "ONE_BROWSER_EFFECT_AUTHORITY",
+    "ONE_AGENT_LIFECYCLE_AUTHORITY",
+    "ONE_UPDATER_AUTHORITY",
+    "NO_BLIND_RETRY_AFTER_AMBIGUOUS_EFFECT",
+    "NO_COORDINATE_ACTUATION_AS_CANONICAL_PATH",
+    "NO_MANAGED_MODEL_API_FALLBACK",
+    "ME2_COMPATIBILITY_PLANES_ZERO_AUTHORITY"
+  ],
+  "next_required_stage": "C2_EDGE_SOURCE_CONVERGENCE",
+  "authority_effect": false
+}
