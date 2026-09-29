@@ -264,15 +264,16 @@ const emergencyRoutes=createEmergencyCommandRoutes({
 });
 
 function routedServicePath(pathname:string){
-  const raw=String(pathname||'');
+  let raw=String(pathname||'');
   const hostedPrefix='/functions/v1/';
-  if(raw.startsWith(hostedPrefix)){
-    const deployed=raw.slice(hostedPrefix.length);
-    const slash=deployed.indexOf('/');
-    return slash>=0?(deployed.slice(slash)||'/'):'/';
-  }
-  const i=raw.indexOf(SERVICE_MARKER);
-  return i>=0?(raw.slice(i+SERVICE_MARKER.length)||'/'):raw;
+  if(raw.startsWith(hostedPrefix))raw=raw.slice(hostedPrefix.length-1);
+  const firstSlash=raw.indexOf('/',1);
+  const mount=firstSlash>0?raw.slice(1,firstSlash):raw.slice(1);
+  const deployedMount=/^a2-browser-native-supervisor-v[0-9]+(?:-[a-z0-9][a-z0-9-]{0,63})?$/;
+  if(deployedMount.test(mount))return firstSlash>0?(raw.slice(firstSlash)||'/'):'/';
+  if(raw===SERVICE_MARKER)return'/';
+  if(raw.startsWith(`${SERVICE_MARKER}/`))return raw.slice(SERVICE_MARKER.length)||'/';
+  return raw;
 }
 
 Deno.serve(async(req:Request)=>{
