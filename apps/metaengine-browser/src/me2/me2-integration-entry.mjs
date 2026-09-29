@@ -2,22 +2,17 @@
  * ME2 Integration Entry (R40+R41+R42 smart merge) — единая точка включения ME2-плоскости в браузере.
  *
  * Принципы (унаследованы от механизмов браузера, не ломают ни один из них):
- *   • fail-open: ME2_INTEGRATION=0 или отсутствие рантайма → браузер живёт как раньше;
- *   • zero authority: никаких эффектов на self-update authority, single-instance,
- *     second-scheduler — только дочерний сервис + наблюдение + ШТАТНОЕ открытие вкладок
- *     (R41: TabRegistry.create(role='SUPERVISOR') — Mission Control, браузер сам открывает
- *     чат-агентов прямо в сайте);
+ *   • fail-open: ME2_INTEGRATION=0 или отсутствие compatibility probe/UI → Browser живёт дальше;
+ *   • zero authority: packaged ME2 exposes only a read-only loopback compatibility projection;
+ *   • Native Browser exclusively owns Agent sessions, fleet, tasks, Brain memory, scheduler and effects;
  *   • lifecycle-строки — в stdout-шину (schema-контракт final-runtime).
  *
  * Запуск: final-runtime-entry.mjs → startMe2Integration({ app }) после main-entry.
- * R41: main.mjs аддитивно регистрирует capability вкладок через me2-fleet-tabs-host.
  */
 import { join } from 'node:path';
 import { startMe2DaemonHost, stopMe2DaemonHost, me2DaemonStatus } from './me2-daemon-host.mjs';
-import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
 import { startMe2UiHost, stopMe2UiHost, stopMe2UiHostAndWait, me2UiHostStatus } from './me2-ui-host.mjs';
 import { startMe2UiGateway, stopMe2UiGateway, me2UiGatewayStatus } from './me2-ui-gateway.mjs';
-import { me2SocketStatus } from './me2-socket-client.mjs';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
 
 export const ME2_INTEGRATION_SCHEMA = 'metaengine.browser.me2.integration.v1';
@@ -94,13 +89,13 @@ export function me2IntegrationStatus() {
     started,
     stopped: stoppedFlag,
     contract: contractState,
-    socket_client: me2SocketStatus(),
+    socket_client: { state: 'REMOVED_STANDALONE_PROBE_HAS_NO_SOCKET', authority_effect: false },
     ui_host: me2UiHostStatus(),
     ui_gateway: me2UiGatewayStatus(),
     daemon: me2DaemonStatus(),
     fleet_bridge: { state: 'REMOVED_NATIVE_BROWSER_AUTHORITY', authority_effect: false },
     mission_control: { state: 'REMOVED_NATIVE_BROWSER_FLEET_AUTHORITY', scheduler_authority: false, browser_command_authority: false, authority_effect: false },
-    brain_adapter: me2BrainAdapterStatus(),
+    brain_adapter: { state: 'REMOVED_NATIVE_BROWSER_BRAIN_MEMORY_AUTHORITY', authority_effect: false },
     supervisor_mesh_bridge: { state: 'REMOVED_NATIVE_BROWSER_AUTHORITY', authority_effect: false },
   };
 }
@@ -142,19 +137,13 @@ async function startMe2IntegrationOnce({ app } = {}) {
   }
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_AGENTCHAT_FLEET_BRIDGE_REMOVED', replacement: 'NATIVE_BROWSER_FLEET', authority_effect: false });
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_MISSION_CONTROL_REMOVED', replacement: 'NATIVE_BROWSER_FLEET_AND_SUPERVISOR', authority_effect: false });
-  // R42a: память brain ⇄ mem-economy (чтение checkpoint'а мозга, sidecar блока памяти ME2)
-  try {
-    startMe2BrainAdapter({ userData });
-  } catch (e) {
-    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'BRAIN_ADAPTER_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
-  }
+  emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_MEMORY_BRIDGE_REMOVED', replacement: 'NATIVE_BROWSER_BRAIN_MEMORY', authority_effect: false });
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_AGENTCHAT_SUPERVISOR_BRIDGE_REMOVED', replacement: 'NATIVE_BROWSER_SUPERVISOR_MESH', authority_effect: false });
   if (app && typeof app.once === 'function' && typeof app.on === 'function') {
     let quitDrainStarted = false;
     let quitDrainComplete = false;
 
     const stopNonUiPlanes = () => {
-      stopMe2BrainAdapter();
       stopMe2UiGateway();
       stopMe2DaemonHost({ killChild: true });
     };
