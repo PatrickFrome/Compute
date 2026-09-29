@@ -75,21 +75,20 @@ jobs:
           if (!/^[0-9a-f]{40}$/.test(m.rollback.source_pin)) throw new Error('rollback_pin');
           if (!/^[0-9a-f]{64}$/.test(m.rollback.ezbr_sha256)) throw new Error('rollback_digest');
           if (m.live_qualification.completed !== false) throw new Error('live_qualification_must_remain_open');
+          if (m.live_qualification.signed_health_required !== true) throw new Error('signed_health_gate_required');
+          if (m.live_qualification.installed_electron_signed_e2e_required !== true) throw new Error('installed_electron_gate_required');
           if (m.live_qualification.bounded_durable_lease_readback_required !== true) throw new Error('durable_lease_gate_required');
           if (m.live_qualification.result_receipt_readback_required !== true) throw new Error('result_receipt_gate_required');
           if (m.live_qualification.postgres_notify_accelerator_required !== false) throw new Error('postgres_notify_must_remain_optional_accelerator');
-          if (m.live_qualification.installed_electron_signed_e2e_required !== true) throw new Error('installed_electron_gate_required');
           if (m.live_qualification.rollback_drill_required !== true) throw new Error('rollback_drill_gate_required');
-          if (m.live_evidence?.signed_device_transport?.completed !== true) throw new Error('signed_device_transport_evidence_missing');
-          if (m.live_evidence?.bounded_durable_lease?.completed !== true) throw new Error('durable_lease_live_evidence_missing');
-          if (m.live_evidence?.bounded_durable_lease?.authority_effect !== false) throw new Error('durable_lease_authority_effect');
-          if (m.live_evidence?.result_receipt_readback?.completed !== true) throw new Error('receipt_live_evidence_missing');
-          if (m.live_evidence?.result_receipt_readback?.authority_effect !== false) throw new Error('receipt_authority_effect');
-          if (m.live_evidence?.installed_electron_signed_e2e?.completed !== false) throw new Error('installed_electron_gate_must_remain_open');
-          if (m.live_evidence?.rollback_drill?.completed !== true) throw new Error('rollback_drill_live_evidence_missing');
-          if (m.live_evidence?.rollback_drill?.restore_runtime_ready !== true) throw new Error('rollback_restore_not_ready');
-          if (m.live_evidence?.rollback_drill?.restore_capability_state !== 'ATTESTED') throw new Error('rollback_restore_not_attested');
-          if (m.live_evidence?.rollback_drill?.authority_effect !== false) throw new Error('rollback_authority_effect');
+          if (m.evidence_policy?.mode !== 'EXTERNAL_SHA_BOUND') throw new Error('external_sha_bound_evidence_policy_required');
+          if (m.evidence_policy?.build_once_test_exact_artifact !== true) throw new Error('build_once_policy_required');
+          if (m.evidence_policy?.live_evidence_must_bind_exact_source_sha !== true) throw new Error('live_evidence_sha_binding_required');
+          if (m.evidence_policy?.source_manifest_mutation_after_live_evidence !== false) throw new Error('source_manifest_post_evidence_mutation_forbidden');
+          if (m.evidence_policy?.authority_effect !== false) throw new Error('evidence_policy_authority_effect');
+          if (m.live_evidence?.mode !== 'EXTERNAL_SHA_BOUND') throw new Error('live_evidence_mode_invalid');
+          if (m.live_evidence?.recorded_in_source_manifest !== false) throw new Error('live_evidence_must_not_be_committed_into_candidate');
+          if (m.live_evidence?.completed !== false || m.live_evidence?.authority_effect !== false) throw new Error('source_manifest_live_evidence_must_remain_fail_closed');
           if (m.promotion_authorized !== false || m.authority_effect !== false) throw new Error('promotion_must_remain_fail_closed');
           const required = new Set([
             'createDbInspectRoutes',
