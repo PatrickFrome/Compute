@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { normalizeClientGoalActivationReadback } from '../src/client-control-contract.mjs';
 
 const PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 const CANONICAL_SERVICE = '/a2-browser-native-supervisor-v1';
@@ -171,6 +172,9 @@ if (goal.response.status !== 200) {
   throw new Error(`canary_goal_http_${goal.response.status}:${JSON.stringify(goal.body)}`);
 }
 const out = goal.body;
+// Exercise the exact installed-client validator against the real signed Edge
+// response; a separate shallow assertion set must never qualify a weaker contract.
+const clientReadback = normalizeClientGoalActivationReadback(out, objective);
 assert.equal(out?.schema, 'metaengine.meta-orchestrator.objective-activation.v1');
 assert.equal(out?.roadmap_id, 'metaengine-client-v1');
 assert.equal(out?.objective, objective);
@@ -202,6 +206,12 @@ const evidence = {
   enrollment_request_id: requestId,
   device_id: deviceId,
   fingerprint_sha256: fingerprint,
+  workspace_id: clientReadback.workspace_id,
+  alignment_epoch: clientReadback.alignment_epoch,
+  baseline_sha: clientReadback.baseline_sha,
+  plan_sha256: clientReadback.plan_sha256,
+  task_spec_sha256: clientReadback.task_spec_sha256,
+  client_readback_validated: true,
   roadmap_id: out.roadmap_id,
   plan_generation: out.plan_generation,
   point_id: out.point_ids[0],
