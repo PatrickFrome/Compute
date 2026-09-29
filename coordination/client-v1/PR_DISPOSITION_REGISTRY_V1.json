@@ -7,9 +7,9 @@
     "disposition": "ACTIVE_CANONICAL"
   },
   "counters": {
-    "open_prs": 335,
-    "draft_prs": 322,
-    "closed_as_proven_absorbed_this_cycle": 24
+    "open_prs": 331,
+    "draft_prs": 319,
+    "closed_as_proven_absorbed_this_cycle": 28
   },
   "closed_proven_absorbed": [
     {
@@ -137,41 +137,33 @@
       "disposition": "SUPERSEDED",
       "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
       "evidence": "R109 standalone browser-probe-entry removes legacy store/SQLite dependency entirely and exposes zero mutation authority"
-    }
-  ],
-  "pending_semantic_review": [
-    {
-      "pr": 1041,
-      "head": "b68bd6c402b9658f32d6b031b0439291aa2cb422",
-      "ahead_from_head_to_r109": 160,
-      "unique_commits": 45,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
     },
     {
       "pr": 1033,
-      "head": "ff0bfe4fa5baf09e0b95a2d940e3d35405a36611",
-      "ahead_from_head_to_r109": 160,
-      "unique_commits": 29,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 persists and validates agent_surface_sha256 across exact Agent transport/effect proof; matching migration exists"
     },
     {
       "pr": 1028,
-      "head": "5e0f025cfb3b5c9bc59a0d8c3c297c522c7bd064",
-      "ahead_from_head_to_r109": 160,
-      "unique_commits": 42,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 has exact Agent-origin admission, PRECONVERSATION non-task authority, no standalone dispatcher, semantic non-coordinate actuation, no AgentChat task authority"
+    },
+    {
+      "pr": 1041,
+      "disposition": "OBSOLETE",
+      "proof": "TRANSIENT_CI_REPAIR_NO_LONGER_REQUIRED",
+      "evidence": "R109 evolved tests/contracts and exact Shell/Critical/Self Update gates are green; old public seed re-export is no longer current API"
     },
     {
       "pr": 1002,
-      "head": "2252eae400bbf83e1bee63c37ca5b847d25c7682",
-      "ahead_from_head_to_r109": 410,
-      "unique_commits": 2,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
-    },
+      "disposition": "OBSOLETE",
+      "proof": "ARCHITECTURE_PROTOTYPE_SUPERSEDED",
+      "evidence": "R109 removed Mission Control/legacy Agents+Compute authority and uses current Browser/Tasks/Code/Supervisor/Memory/Observability/System navigation"
+    }
+  ],
+  "pending_semantic_review": [
     {
       "pr": 982,
       "head": "ad5e01c6c14a61f77a6cb65679cd79f20f99a669",
@@ -187,5 +179,18 @@
     "branch_delete": false,
     "force_push": false,
     "release_candidate_mutation": false
-  }
+  },
+  "release_line_remaining": [
+    {
+      "pr": 1071,
+      "disposition": "ACTIVE_CANONICAL",
+      "sha": "ff95e9c886fac35b9302ec5c04a4c6bf7b8e8551"
+    },
+    {
+      "pr": 982,
+      "disposition": "REFERENCE_ONLY",
+      "sha": "ad5e01c6c14a61f77a6cb65679cd79f20f99a669",
+      "scope": "COMPUTE_INFRASTRUCTURE"
+    }
+  ]
 }
