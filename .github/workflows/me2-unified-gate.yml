@@ -1,8 +1,9 @@
 name: ME2 Unified Gate (daemon boot+eval, UI deps+build+pack)
 
-# R51 (фаза C, план C6-C7): контрактный гейт единой системы.
-# daemon-gate: изолированный инстанс (свежая SQLite, свои порты, ME2_BOOT_MODE=probe)
-#   должен подняться и дать eval verdict=PASS — тот же probe, что проверен локально.
+# R109: release gate follows the current Browser architecture rather than reviving
+# the retired full ME2 daemon. daemon-gate boots only browser-probe-entry.ts and
+# proves its zero-authority contract plus mutation denial. The historical
+# index.ts/eval scheduler remains reference-only and is not a Browser release gate.
 # ui-gate: разрешение зависимостей панельного UI (frozen lockfile).
 # R52 (C7): ui-build — полная production-сборка панелей + упаковка me2-ui-dist
 #   (контракт me2-ui-host: package.json+start, health GET /, манифест me2.ui-bundle-manifest.v1)
@@ -22,12 +23,60 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Install daemon deps (frozen)
+      - name: Boot standalone zero-authority Browser compatibility probe
         working-directory: apps/me2-daemon
-        run: bun install --frozen-lockfile
-      - name: Boot probe + eval (isolated instance, fresh DB)
-        working-directory: apps/me2-daemon
-        run: bun run check
+        shell: bash
+        run: |
+          set -euo pipefail
+          REST=$((31000 + RANDOM % 10000))
+          LOG="$(mktemp)"
+          ME2_REST_PORT="$REST" bun browser-probe-entry.ts >"$LOG" 2>&1 &
+          PID=$!
+          cleanup() { kill "$PID" 2>/dev/null || true; rm -f "$LOG" /tmp/me2-r109-state.json /tmp/me2-r109-denied.json; }
+          trap cleanup EXIT
+
+          READY=0
+          for _ in $(seq 1 40); do
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "standalone compatibility probe exited early" >&2
+              cat "$LOG" >&2
+              exit 1
+            fi
+            if curl -sf "http://127.0.0.1:$REST/health" >/dev/null; then READY=1; break; fi
+            sleep 0.25
+          done
+          test "$READY" = "1" || { echo "probe readiness timeout" >&2; cat "$LOG" >&2; exit 1; }
+
+          curl -sf "http://127.0.0.1:$REST/state" -o /tmp/me2-r109-state.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/me2-r109-state.json', encoding='utf-8') as f:
+              s=json.load(f)
+          assert s['contract']=='me2-daemon-contract.v1'
+          p=s['browser_probe']
+          for key in (
+              'read_only','model_execution_enabled','provider_api_enabled',
+              'provider_network_enabled','agentchat_mutation_enabled',
+              'scheduler_authority','browser_actuation_authority',
+              'command_mutation_enabled','token_mutation_enabled',
+              'filesystem_mutation_enabled','sql_mutation_enabled',
+              'legacy_daemon_module_loaded','socket_mutation_surface_enabled',
+              'authority_effect',
+          ):
+              expected = True if key == 'read_only' else False
+              assert p[key] is expected, (key,p[key],expected)
+          assert p['boot_mode']=='probe'
+          assert s['scheduler_authority'] is False
+          assert s['browser_actuation_authority'] is False
+          assert s['release_authority'] is False
+          assert s['automatic_retry_allowed'] is False
+          assert s['authority_effect'] is False
+          PY
+
+          STATUS="$(curl -sS -o /tmp/me2-r109-denied.json -w '%{http_code}' -X POST             -H 'Content-Type: application/json' -d '{"op":"mutate"}'             "http://127.0.0.1:$REST/state")"
+          test "$STATUS" = "403"
+          grep -q 'ME2_BROWSER_PROBE_READ_ONLY' /tmp/me2-r109-denied.json
+          echo "standalone Browser compatibility probe: PASS"
 
   ui-gate:
     runs-on: ubuntu-latest
