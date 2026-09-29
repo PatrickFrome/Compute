@@ -18,7 +18,7 @@ test('R105 Browser workspace remains the canonical native selected-agent surface
   assert.match(shell, /data-main-workspace=\{mainWorkspace \? "chat-fleet" : "advanced"\}/);
   assert.match(shell, /primaryChatFleetRoster/);
   assert.match(shell, /selectPrimaryChatActor/);
-  assert.match(store, /\{ key: "browser", label: "RUN", num: "1" \}/);
+  assert.match(store, /\{ key: "browser", label: "BROWSER", num: "1" \}/);
 });
 
 test('R105 removed page cannot retain daemon browser-effect authority', () => {
