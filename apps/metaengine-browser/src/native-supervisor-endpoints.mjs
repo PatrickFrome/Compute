@@ -2,7 +2,7 @@
 // hard-duplicated in native-supervisor-endpoints.mjs AND
 // native-supervisor-client-base.mjs. This file is now the single source of
 // truth; client-base re-exports the resolved constant. The pinned default
-// remains cloud-first (METAENGINE_H205F22_RECOVERY ref xpeibufgzjknrhbhpffp),
+// remains cloud-first (Client V1 recovery project ref jhriwwsryeqsvvvufkok),
 // with an optional METAENGINE_SUPERVISOR_BASE_URL override for local-edge
 // rehearsal deployments so a cloud switch never requires a code edit + rebuild.
 //
