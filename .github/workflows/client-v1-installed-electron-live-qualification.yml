@@ -32,6 +32,10 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Prove installed-enrollment correlation contract
+        working-directory: apps/metaengine-browser
+        run: node --test test/native-supervisor-enrollment-correlation.test.mjs
+
       - name: Acquire provenanced exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
         shell: powershell
