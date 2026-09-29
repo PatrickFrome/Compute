@@ -12826,3 +12826,24 @@ Work Log:
 Stage Summary:
 - EV-LIST-MEMO РЕАЛИЗОВАН и верифицирован; движок v1.56; клиент стабилен через watchdog.
 - Инфра-урок: после env-reset обязательно восстанавливать dev-watchdog; :3000 смерти — тихие, без OOM-следов в моменте.
+
+---
+Task ID: BROWSER-TEST-20260929-1330
+Agent: Super Z (cron agent-loop, Job 419203)
+Task: Подключиться к live браузеру (METAENGINE 0.7.0-dev, Supabase supervisor), прогнать тесты всех механик роя, определить рабочие/нерабочие механики.
+
+Work Log:
+- Supabase канал: reprobe-1330 → DEGRADED. P1 no-auth=401, P2 fake-jwt=401 (auth-слой OK), P3 real-jwt=503 PGRST002 (PostgREST schema cache down, ~15h). browser_supervisor_state и browser_supervisor_command недоступны для e2e.
+- Локальный swarm :3046 health: population=14, generations=4, messages=658, lessons=53, memories=16, cycles=45031, uptime 26920s (genesis 2026-09-28T16:44Z). :3047 secondary жив (socket.io transport).
+- Клиент :3000 → 200 (0.06s, стабилен после OOM-фикса), gateway :81 → 200.
+- Полная батарея battery419203.py (13:34–13:36 UTC+8): 18/19 PASS.
+  PASS: M01 roster(14), M02 Δциклов 96/60с, M03 chat 200, M04 оператор в ленте(10), M06 broadcast, M07 goal, M08 spawn(sw_cztizgo1), M09 родословная(gen=1,living), M10 событие рождения в ленте(7), M11 mute, M12 mute-state, M13 kill/retire, M14 архив, M15 память(lessons=53,episodes=16), M16 swarm_improve(60 предложений), M17 gateway e2e, M18 Next-прокси /api/swarm, M19 browser-директивы(4).
+  FAIL: M05 (рой отвечает LLM-координацией: 0 ответов за 3 мин).
+- M05 root-cause верификация: MODEL="glm-5.3" в src/agent.ts; прямой пробой z-ai-web-dev-sdk → HTTP 429 "Too many requests" — upstream LLM квота исчерпана (та же причина 11+ циклов подряд). Проба /chat + 40с ожидания → 0 ответов роя.
+- Лента: kinds user=7/broadcast=6/spawn=6/system=6, swarm say/direct = 0.
+
+Stage Summary:
+- РАБОТАЮТ (механически, 18): жизненные циклы, чат-канал оператора, broadcast, доска целей, spawn чат-агентов (цель #1 выполняется механически), родословная+ростер, видимость событий всеми агентами (#3 частично), mute/kill/архив, память (уроки/эпизоды), пул самоулучшения, gateway e2e, Next-прокси, browser-директивы.
+- НЕ РАБОТАЕТ (1): M05 автономные LLM-ответы роя — блокер внешняя квота upstream LLM (429). Из-за этого цели #2 (автономная непрерывная разработка) и полноценная #3 (координация/самообучение в диалоге) деградированы: циклы и память идут, диалоговая координация — нет.
+- НЕ ПРОВЕРЕНО: Supabase e2e-канал супервизора (browser_supervisor_state/command/mesh/device) — PostgREST 503 ~15h; вечноживущий супервизор на стороне облака не наблюдаем, локальный watchdog-контур жив.
+- Рекомендация: держать механики роя как есть (все нужные для целей #1-#5 рабочие), ждать восстановления upstream-квоты и PostgREST; ретест M05 + Supabase e2e после восстановления.
