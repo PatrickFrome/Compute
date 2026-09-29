@@ -2,7 +2,7 @@
 // hard-duplicated in native-supervisor-endpoints.mjs AND
 // native-supervisor-client-base.mjs. This file is now the single source of
 // truth; client-base re-exports the resolved constant. The pinned default
-// remains cloud-first (METAENGINE_H205F22_RECOVERY ref xpeibufgzjknrhbhpffp),
+// remains cloud-first (Client V1 recovery project ref jhriwwsryeqsvvvufkok),
 // with an optional METAENGINE_SUPERVISOR_BASE_URL override for local-edge
 // rehearsal deployments so a cloud switch never requires a code edit + rebuild.
 //
@@ -16,7 +16,7 @@
 // value (no silent mid-run fallback to the pinned default), and the swap is
 // refusal-free for importers because `export let` bindings stay live across
 // the re-export chain (client-base → client-core-base request builders).
-const DEFAULT_NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+const DEFAULT_NATIVE_SUPERVISOR_BASE = 'https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 
 export const NATIVE_SUPERVISOR_DEFAULT_BASE = DEFAULT_NATIVE_SUPERVISOR_BASE;
 

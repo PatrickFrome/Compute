@@ -11,6 +11,7 @@ import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
 import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
 
 const DB_URL=Deno.env.get('SUPABASE_DB_URL')||'';
+const DB_SESSION_URL=Deno.env.get('SUPABASE_DB_SESSION_URL')||'';
 const SERVICE_ROLE=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
 const REALTIME_API_KEY=Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
 // Modern Supabase sb_secret_* values are API keys, not JWT access tokens. Realtime
@@ -53,8 +54,11 @@ if(!DB_URL)throw new Error('supabase_db_url_missing');
 const sql=postgres(DB_URL,{max:2,prepare:false,connect_timeout:4,idle_timeout:20});
 // LISTEN holds a dedicated connection. Keep it isolated from the query pool so a
 // held command-wake subscription cannot starve durable lease/heartbeat queries.
-const wakeSql=postgres(DB_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:null});
-const postgresWakeHub=createPostgresCommandWakeHub({listen:(channel:string,onNotify:(payload:string)=>void,onListen:()=>void)=>wakeSql.listen(channel,onNotify,onListen)});
+const wakeSql=DB_SESSION_URL?postgres(DB_SESSION_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:null}):null;
+const postgresWakeHub=createPostgresCommandWakeHub({listen:(channel:string,onNotify:(payload:string)=>void,onListen:()=>void)=>{
+  if(!wakeSql)throw new Error('postgres_session_wake_url_unavailable');
+  return wakeSql.listen(channel,onNotify,onListen);
+}});
 const rpcMetaCache=new Map<string,any>();
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -144,7 +148,19 @@ function parseJson(text:string){try{return text?JSON.parse(text):{}}catch{return
 function boundedObject(value:any,maxBytes:number){if(!value||typeof value!=='object'||Array.isArray(value))return null;try{const text=JSON.stringify(value);if(text.length>maxBytes)return null;return JSON.parse(text)}catch{return null}}
 function boundedMesh(value:any){if(!value||typeof value!=='object'||Array.isArray(value)||String(value.schema||'')!=='metaengine.supervisor-mesh-runtime.v1'||value.authority_effect===true)return null;const mesh=value.mesh;if(!mesh||typeof mesh!=='object'||Array.isArray(mesh)||String(mesh.schema||'')!=='metaengine.supervisor-mesh.state.v1'||!Array.isArray(mesh.supervisors)||mesh.supervisors.length>16)return null;const supervisors=[];for(const row of mesh.supervisors){const supervisor_id=String(row?.supervisor_id||'').toLowerCase();const conversation_url_sha256=String(row?.conversation_url_sha256||'').toLowerCase();const status=String(row?.status||'LOST').toUpperCase();const tab_id=row?.tab_id==null?null:String(row.tab_id).slice(0,160);if(!/^sup_[a-f0-9]{24}$/.test(supervisor_id)||!/^[a-f0-9]{64}$/.test(conversation_url_sha256)||supervisor_id!==`sup_${conversation_url_sha256.slice(0,24)}`||!['ACTIVE','PAUSED','LOST','AMBIGUOUS_INCARNATION'].includes(status)||row?.authority_effect===true)return null;supervisors.push({supervisor_id,conversation_url_sha256,status,tab_id:status==='LOST'||status==='AMBIGUOUS_INCARNATION'?null:tab_id,selected:row?.selected===true,authority_effect:false})}const preferred=mesh.preferred_supervisor_id==null?null:String(mesh.preferred_supervisor_id).toLowerCase();if(preferred!==null&&!/^sup_[a-f0-9]{24}$/.test(preferred))return null;return{schema:'metaengine.supervisor-mesh-runtime.v1',running:value.running===true,last_reconcile_at:value.last_reconcile_at||null,last_error:String(value.last_error||'').slice(0,500)||null,authority_effect:false,mesh:{schema:'metaengine.supervisor-mesh.state.v1',version:String(mesh.version||'').slice(0,32),mesh_epoch:Math.max(1,Number(mesh.mesh_epoch)||1),preferred_supervisor_id:preferred,supervisors,authority_effect:false}}}
 async function verifyEnrollment(req:Request,bodyText:string,body:any){const id=clientId(req);if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};let jwk;try{jwk=canonicalJwk(body?.public_jwk)}catch{return{ok:false,reason:'JWK_INVALID'}};if(String(body?.profile||'')!==PROFILE)return{ok:false,reason:'PROFILE_INVALID'};const fingerprint=await sha256(JSON.stringify(jwk));if(String(body?.key_fingerprint_sha256||'')!==fingerprint)return{ok:false,reason:'FINGERPRINT_MISMATCH'};const timestamp=String(req.headers.get('x-metaengine-enroll-timestamp')||'');const nonce=String(req.headers.get('x-metaengine-enroll-nonce')||'');const signature=String(req.headers.get('x-metaengine-enroll-signature')||'');const parsed=Date.parse(timestamp);if(!Number.isFinite(parsed)||Math.abs(Date.now()-parsed)>120000)return{ok:false,reason:'TIMESTAMP_OUT_OF_WINDOW'};if(!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'ENROLL_HEADERS_INVALID'};const material=['METAENGINE_NATIVE_ENROLLMENT_V1',`client_id:${id}`,`profile:${PROFILE}`,`fingerprint:${fingerprint}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${await sha256(bodyText)}`].join('\n');if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};return{ok:true,id,jwk,fingerprint}}
-async function enrollmentRequest(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const existing=await enrollmentExisting(proof.id!,proof.fingerprint!);if(existing[0])return json(existing[0].status==='APPROVED'?200:202,{accepted:true,...existing[0],reason:'EXISTING_REQUEST',authority_effect:false});const rows=await enrollmentInsert(proof.id!,proof.jwk,proof.fingerprint!,{client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(body?.metadata?.shell_version||'').slice(0,32)});const row=rows[0];if(!row)throw new Error('enrollment_insert_failed');return json(202,{accepted:true,...row,reason:'APPROVAL_REQUIRED',authority_effect:false})}
+function enrollmentMetadata(body:any){
+  const metadata:any={client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(body?.metadata?.shell_version||'').slice(0,32)};
+  const kind=String(body?.metadata?.qualification_kind||'').trim().toUpperCase();
+  const runId=String(body?.metadata?.qualification_run_id||'').trim();
+  const sourceHead=String(body?.metadata?.source_head||'').trim().toLowerCase();
+  if(kind==='INSTALLED_ELECTRON'&&/^[0-9]{1,20}$/.test(runId)&&/^[0-9a-f]{40}$/.test(sourceHead)){
+    metadata.qualification_kind=kind;
+    metadata.qualification_run_id=runId;
+    metadata.source_head=sourceHead;
+  }
+  return metadata;
+}
+async function enrollmentRequest(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const existing=await enrollmentExisting(proof.id!,proof.fingerprint!);if(existing[0])return json(existing[0].status==='APPROVED'?200:202,{accepted:true,...existing[0],reason:'EXISTING_REQUEST',authority_effect:false});const rows=await enrollmentInsert(proof.id!,proof.jwk,proof.fingerprint!,enrollmentMetadata(body));const row=rows[0];if(!row)throw new Error('enrollment_insert_failed');return json(202,{accepted:true,...row,reason:'APPROVAL_REQUIRED',authority_effect:false})}
 async function enrollmentStatus(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const requestId=String(body?.request_id||'');if(!/^[0-9a-f-]{36}$/i.test(requestId))return json(400,{error:'request_id_invalid'});const rows=await enrollmentById(requestId,proof.id!,proof.fingerprint!);const row=rows[0];if(!row)return json(404,{error:'enrollment_request_not_found'});if(row.status==='PENDING')return json(202,{accepted:false,request_id:row.request_id,status:'PENDING',reason:'APPROVAL_REQUIRED',expires_at:row.expires_at,authority_effect:false});if(row.status==='REJECTED'||row.status==='EXPIRED')return json(409,{accepted:false,request_id:row.request_id,status:row.status,reason:`REQUEST_${row.status}`,authority_effect:false});const activated=await rpc(ACTIVATE_RPC,{p_request_id:row.request_id,p_client_id:proof.id,p_profile:PROFILE,p_key_fingerprint_sha256:proof.fingerprint,p_public_jwk:proof.jwk});return json(activated?.accepted===true?200:409,{...activated,request_id:row.request_id,authority_effect:false})}
 async function authenticateDevice(req:Request,path:string,bodyText:string){const id=clientId(req);if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};const profile=String(req.headers.get('x-a2-device-profile')||'');const deviceId=String(req.headers.get('x-a2-device-id')||'');const timestamp=String(req.headers.get('x-a2-device-timestamp')||'');const nonce=String(req.headers.get('x-a2-device-nonce')||'');const bodyHash=String(req.headers.get('x-a2-device-body-sha256')||'').toLowerCase();const signature=String(req.headers.get('x-a2-device-signature')||'');if(profile!==PROFILE||!/^[0-9a-f-]{36}$/i.test(deviceId)||!Number.isFinite(Date.parse(timestamp))||!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(bodyHash)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'DEVICE_HEADERS_INVALID'};if(await sha256(bodyText)!==bodyHash)return{ok:false,reason:'BODY_HASH_MISMATCH'};const rows=await deviceLookup(deviceId,id);const device=rows[0];if(!device)return{ok:false,reason:'DEVICE_NOT_FOUND'};if(device.active!==true||device.revoked_at)return{ok:false,reason:'DEVICE_REVOKED'};let jwk;try{jwk=canonicalJwk(device.public_jwk)}catch{return{ok:false,reason:'DEVICE_KEY_INVALID'}};const material=[PROFILE,`device_id:${deviceId}`,`method:${req.method.toUpperCase()}`,`path:${path}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${bodyHash}`].join('\n');if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};const grant=String(device.enrollment_pairing_token_hash||'');const grants=await pairingLookup(grant);if(grants.length!==1)return{ok:false,reason:'PAIRING_REVOKED'};const nr=await rpc(NONCE_RPC,{p_device_id:deviceId,p_client_id:id,p_nonce_sha256:await sha256(nonce),p_request_timestamp:timestamp});if(nr?.accepted!==true)return{ok:false,reason:String(nr?.reason||'NONCE_REJECTED')};return{ok:true,id,device_id:deviceId,profile:PROFILE,key_fingerprint_sha256:nr.key_fingerprint_sha256||null}}
 // P1-2 multi-writer repair: plane ownership semantics for the persisted state.
@@ -171,6 +187,11 @@ async function waitBatch(req:Request,body:any){
   const client=clientId(req);
 
   if(!REALTIME_API_KEY||!REALTIME_ACCESS_TOKEN){
+    if(!DB_SESSION_URL){
+      await sleep(waitMs);
+      const fallback=await leaseBatch(req,body);
+      return{...fallback,wake_reason:'DB_POLL_SESSION_WAKE_UNAVAILABLE',transport_delivery_is_authority:false,authority_effect:false};
+    }
     const subscription=postgresWakeHub.open({clientId:client,timeoutMs:waitMs});
     try{
       const joined=await subscription.subscribed;
@@ -242,8 +263,8 @@ async function issueTool(req:Request,body:any){
     return json(409,{accepted:false,error:'agent_tool_issue_failed',reason:String((error as any)?.message||error).slice(0,160),authority_effect:false});
   }
 }
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
-async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,states,commands}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
@@ -263,11 +284,29 @@ const emergencyRoutes=createEmergencyCommandRoutes({
   json,
 });
 
+function routedServicePath(pathname:string){
+  let raw=String(pathname||'');
+  const hostedPrefix='/functions/v1/';
+  if(raw.startsWith(hostedPrefix))raw=raw.slice(hostedPrefix.length-1);
+  const firstSlash=raw.indexOf('/',1);
+  const mount=firstSlash>0?raw.slice(1,firstSlash):raw.slice(1);
+  const deployedMount=/^a2-browser-native-supervisor-v[0-9]+(?:-[a-z0-9][a-z0-9-]{0,63})?$/;
+  if(deployedMount.test(mount))return firstSlash>0?(raw.slice(firstSlash)||'/'):'/';
+  if(raw===SERVICE_MARKER)return'/';
+  if(raw.startsWith(`${SERVICE_MARKER}/`))return raw.slice(SERVICE_MARKER.length)||'/';
+  return raw;
+}
+
 Deno.serve(async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
   const url=new URL(req.url);
-  const i=url.pathname.indexOf(SERVICE_MARKER);
-  const path=i>=0?(url.pathname.slice(i+SERVICE_MARKER.length)||'/'):url.pathname;
+  const path=routedServicePath(url.pathname);
+  if (
+    (url.pathname.includes('/health') && path!=='/health')
+    || (url.pathname.includes('/v1/device/enrollment/request') && path!=='/v1/device/enrollment/request')
+  ) {
+    console.warn('native_supervisor_route_mismatch',JSON.stringify({method:req.method,pathname:url.pathname,routed_path:path}));
+  }
   try{
     if(req.method==='GET'&&path==='/health')return json(200,await health());
     const bodyText=req.method==='GET'?'':await req.text();

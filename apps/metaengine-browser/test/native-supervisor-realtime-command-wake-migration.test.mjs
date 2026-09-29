@@ -51,19 +51,20 @@ test('publisher topic/privacy contract matches wait-batch subscriber and durable
 });
 
 
-test('modern non-JWT service keys use the existing Postgres NOTIFY channel instead of a fixed 15s poll', () => {
+test('serverless DB URL never impersonates a session-capable LISTEN transport', () => {
   assert.match(edge, /REALTIME_ACCESS_TOKEN=SERVICE_ROLE\.split\('\.'\)\.length===3\?SERVICE_ROLE:''/);
-  assert.match(edge, /const wakeSql=postgres\(DB_URL,\{max:1,prepare:false,connect_timeout:4,idle_timeout:null\}\)/,
-    'LISTEN must use a dedicated connection rather than consuming the durable query pool');
-  assert.match(edge, /createPostgresCommandWakeHub\(\{listen:\(channel:string,onNotify:\(payload:string\)=>void,onListen:\(\)=>void\)=>wakeSql\.listen\(channel,onNotify,onListen\)\}\)/);
-  assert.match(edge, /if\(!REALTIME_API_KEY\|\|!REALTIME_ACCESS_TOKEN\)\{[\s\S]*postgresWakeHub\.open\(\{clientId:client,timeoutMs:waitMs\}\)/);
+  assert.match(edge, /DB_SESSION_URL=Deno\.env\.get\('SUPABASE_DB_SESSION_URL'\)\|\|''/);
+  assert.match(edge, /const wakeSql=DB_SESSION_URL\?postgres\(DB_SESSION_URL,\{max:1,prepare:false,connect_timeout:4,idle_timeout:null\}\):null/,
+    'LISTEN must require an explicit session-capable URL and stay isolated from the query pool');
+  assert.match(edge, /if\(!wakeSql\)throw new Error\('postgres_session_wake_url_unavailable'\)/);
+  assert.match(edge, /if\(!DB_SESSION_URL\)\{\s*await sleep\(waitMs\);\s*const fallback=await leaseBatch\(req,body\);\s*return\{\.\.\.fallback,wake_reason:'DB_POLL_SESSION_WAKE_UNAVAILABLE'/s,
+    'missing session transport must degrade to one bounded idle wait plus durable DB re-lease');
   assert.match(edge, /const afterSubscribe=await leaseBatch\(req,body\)/,
     'durable queue must be re-read after LISTEN becomes active to close the subscribe race');
   assert.match(edge, /const wake=await subscription\.wake;\s*const afterWake=await leaseBatch\(req,body\)/s,
     'NOTIFY is wake-only; durable DB leasing remains authoritative after wake');
-  assert.match(edge, /await sleep\(waitMs\);\s*const fallback=await leaseBatch\(req,body\)/s,
-    'LISTEN degradation must retain a bounded idle wait instead of creating a hot poll loop');
-  assert.match(edge, /command_wait_batch:\(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN\)\?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY'/);
+  assert.match(edge, /command_wait_batch:\(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN\)\?'REALTIME_BROADCAST_PROXY':\(DB_SESSION_URL\?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'\)/);
+  assert.match(edge, /postgres_notify_wake:Boolean\(DB_SESSION_URL\)/);
   assert.match(edge, /postgres_notify_delivery_is_authority:false/);
 
   assert.match(postgresWake, /row\.table \?\? row\.tbl/);

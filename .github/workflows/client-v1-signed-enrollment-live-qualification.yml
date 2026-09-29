@@ -1,0 +1,40 @@
+name: Client V1 Signed Enrollment Live Qualification
+
+on:
+  push:
+    branches:
+      - work/client-v1-c2-new-supabase-rehome-v1
+    paths:
+      - apps/metaengine-browser/scripts/client-v1-live-enrollment-qualification.mjs
+      - apps/metaengine-browser/src/supervisor-device-identity.mjs
+      - apps/metaengine-browser/src/native-supervisor-endpoints.mjs
+      - .github/workflows/client-v1-signed-enrollment-live-qualification.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-enrollment-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prove exact source head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Execute signed enrollment and wait for explicit trusted approval
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_APPROVAL_WAIT_MS: '300000'
+          METAENGINE_APPROVAL_POLL_MS: '2000'
+        run: node scripts/client-v1-live-enrollment-qualification.mjs

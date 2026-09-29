@@ -21,7 +21,7 @@ after(() => {
 });
 
 test('pinned default stays cloud-first and is the fallback for empty input', () => {
-  assert.equal(NATIVE_SUPERVISOR_DEFAULT_BASE, 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1');
+  assert.equal(NATIVE_SUPERVISOR_DEFAULT_BASE, 'https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1');
   assert.equal(resolveNativeSupervisorBase(null), NATIVE_SUPERVISOR_DEFAULT_BASE);
   assert.equal(resolveNativeSupervisorBase(''), NATIVE_SUPERVISOR_DEFAULT_BASE);
   assert.equal(resolveNativeSupervisorBase('   '), NATIVE_SUPERVISOR_DEFAULT_BASE);

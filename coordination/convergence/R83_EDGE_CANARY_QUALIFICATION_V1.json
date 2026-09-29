@@ -1,20 +1,20 @@
 {
   "schema": "metaengine.r83.edge-canary-qualification.v1",
   "captured_at": "2026-09-29",
-  "project_ref": "xpeibufgzjknrhbhpffp",
+  "project_ref": "jhriwwsryeqsvvvufkok",
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
-    "function_id": "991d9bf0-e46f-4eca-8f6a-0140e0eac1fe",
-    "deployed_version": 2,
-    "ezbr_sha256": "780b6537584d96edc754bf389956e9c405a6713a823b6f9ef7995e954c116911",
-    "source_pin": "ff95e9c886fac35b9302ec5c04a4c6bf7b8e8551"
+    "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
+    "deployed_version": 13,
+    "ezbr_sha256": "7849c573918fff9646d2b335ec3f6d712a454b1c8fd13d5df3531e36ab1f75a3",
+    "source_pin": "f3d193fbaaf682fb31e28ac6438c2cfae568c6b5"
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",
-    "function_id": "2599cb19-2c85-4292-838e-05e9d17e58da",
-    "deployed_version": 13,
-    "ezbr_sha256": "68c269077c9f6114a4abf2fabb4d51a5eb4ada263ba5c04c1adb898c600c6570",
-    "source_pin": "d8b239e7c11c72ab5db821952733dbb6c6500366"
+    "function_id": "b94f0619-675a-40fc-b340-0299b0250b9a",
+    "deployed_version": 6,
+    "ezbr_sha256": "5b3b6bb3fde3b991461e4806e4a8b25114f922c736642302844e835c0c01fa96",
+    "source_pin": "d4a95a62ac84de64e4f5dcc25e11dee0cb4198b0"
   },
   "required_capabilities": [
     "createDbInspectRoutes",
@@ -32,12 +32,26 @@
   },
   "live_qualification": {
     "signed_health_required": true,
-    "signed_e2e_required": true,
-    "postgres_notify_readback_required": true,
+    "installed_electron_signed_e2e_required": true,
+    "bounded_durable_lease_readback_required": true,
     "result_receipt_readback_required": true,
+    "postgres_notify_accelerator_required": false,
     "rollback_drill_required": true,
     "completed": false
   },
   "promotion_authorized": false,
-  "authority_effect": false
+  "authority_effect": false,
+  "live_evidence": {
+    "mode": "EXTERNAL_SHA_BOUND",
+    "recorded_in_source_manifest": false,
+    "completed": false,
+    "authority_effect": false
+  },
+  "evidence_policy": {
+    "mode": "EXTERNAL_SHA_BOUND",
+    "build_once_test_exact_artifact": true,
+    "live_evidence_must_bind_exact_source_sha": true,
+    "source_manifest_mutation_after_live_evidence": false,
+    "authority_effect": false
+  }
 }

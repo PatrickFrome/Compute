@@ -82,7 +82,8 @@ test('R83 canonical Edge source exposes every canary convergence capability befo
     /createEmergencyCommandRoutes/,
     /state=coalesce\(target\.state,'\{\}'::jsonb\)\|\|excluded\.state/,
     /cognitive_delta_route:true/,
-    /postgres_notify_wake:true/,
+    /postgres_notify_wake:Boolean\(DB_SESSION_URL\)/,
+    /command_wait_batch:\(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN\)\?'REALTIME_BROADCAST_PROXY':\(DB_SESSION_URL\?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'\)/,
     /result_receipt_readback:true/,
     /emergency_wait_route:true/,
   ]) assert.match(source, pattern);

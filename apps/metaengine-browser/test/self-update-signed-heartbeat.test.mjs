@@ -11,7 +11,7 @@ import {
 } from '../src/self-update-signed-heartbeat.mjs';
 import { acceptedSignedSupervisorHeartbeatSnapshot } from '../src/self-update-successor-qualification.mjs';
 
-const SUPERVISOR_BASE_URL = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+const SUPERVISOR_BASE_URL = 'https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 const STATE_URL = `${SUPERVISOR_BASE_URL}/v1/state`;
 const HEARTBEAT_URL = `${SUPERVISOR_BASE_URL}/v1/heartbeat`;
 
