@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import { normalizeClientGoalActivationReadback } from '../src/client-control-contract.mjs';
+import {
+  normalizeClientGoalProgressReadback,
+  normalizeClientGoalSubmissionReadback,
+} from '../src/client-control-contract.mjs';
 
 const PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 const CANONICAL_SERVICE = '/a2-browser-native-supervisor-v1';
@@ -164,8 +167,9 @@ while (Date.now() - started < timeoutMs) {
 if (!deviceId) throw new Error('canary_enrollment_approval_timeout');
 
 const objective = `C4 signed canary qualification ${runId} attempt ${runAttempt}`;
-const goal = await devicePost('/v1/meta/objective', {
-  roadmap_id: 'metaengine-client-v1',
+const goalRequestId = crypto.randomUUID().toLowerCase();
+const goal = await devicePost('/v1/meta/client-goal-submit', {
+  request_id: goalRequestId,
   objective,
 }, deviceId);
 if (goal.response.status !== 200) {
@@ -174,8 +178,10 @@ if (goal.response.status !== 200) {
 const out = goal.body;
 // Exercise the exact installed-client validator against the real signed Edge
 // response; a separate shallow assertion set must never qualify a weaker contract.
-const clientReadback = normalizeClientGoalActivationReadback(out, objective);
+const clientReadback = normalizeClientGoalSubmissionReadback(out, objective, goalRequestId);
 assert.equal(out?.schema, 'metaengine.meta-orchestrator.objective-activation.v1');
+assert.equal(out?.request_id, goalRequestId);
+assert.equal(out?.exact_request_correlation, true);
 assert.equal(out?.roadmap_id, 'metaengine-client-v1');
 assert.equal(out?.objective, objective);
 assert.equal(out?.node_count, 1);
@@ -196,6 +202,20 @@ assert.equal(String(out?.admission?.task_id || '').toLowerCase(), String(out.tas
 assert.equal(String(out?.admission?.point_id || '').toLowerCase(), String(out.point_ids[0]).toLowerCase());
 assert.equal(out?.admission?.authority_effect, false);
 
+const progressResponse = await devicePost('/v1/meta/client-goal-progress', {
+  request_id: goalRequestId,
+}, deviceId);
+if (progressResponse.response.status !== 200) {
+  throw new Error(`canary_goal_progress_http_${progressResponse.response.status}:${JSON.stringify(progressResponse.body)}`);
+}
+const progress = normalizeClientGoalProgressReadback(progressResponse.body, goalRequestId, clientReadback);
+assert.equal(progress.found, true);
+assert.equal(progress.request_id, goalRequestId);
+assert.equal(progress.task_id, clientReadback.task_id);
+assert.equal(progress.plan_generation, clientReadback.plan_generation);
+assert.equal(progress.automatic_retry_allowed, false);
+assert.equal(progress.authority_effect, false);
+
 const evidence = {
   schema: 'metaengine.client-v1.signed-canary-goal-evidence.v1',
   source_head: sourceHead,
@@ -212,6 +232,10 @@ const evidence = {
   plan_sha256: clientReadback.plan_sha256,
   task_spec_sha256: clientReadback.task_spec_sha256,
   client_readback_validated: true,
+  goal_request_id: goalRequestId,
+  progress_readback_validated: true,
+  progress_task_state: progress.task_state,
+  progress_terminal: progress.terminal,
   roadmap_id: out.roadmap_id,
   plan_generation: out.plan_generation,
   point_id: out.point_ids[0],
