@@ -32,7 +32,7 @@ comment on table destruktion_meta.metaengine_devos_roadmap_authority_h205f22 is
 
 
 -- METAENGINE Meta-Orchestrator durable plan generation state v1.
--- Branch-local migration only. Do not apply to production from this convergence task.
+-- Ported into the fresh Client V1 recovery/live plane by this wrapper migration.
 --
 -- This is not a scheduler, lease owner, Browser authority or release authority.
 -- It only gives the semantic plan an atomic durable generation + digest so stale brains
@@ -266,7 +266,7 @@ grant execute on function public.meta_orchestrator_plan_snapshot_v1(uuid,text) t
 
 
 -- METAENGINE Meta-Orchestrator authoritative provider projection v1.
--- Branch-local migration only. Do not apply to production from this convergence task.
+-- Ported into the fresh Client V1 recovery/live plane by this wrapper migration.
 --
 -- This function is a read-only projection membrane for the existing native supervisor.
 -- It exposes only roadmap identity, active durable plan state, Meta routing metadata,
@@ -395,7 +395,7 @@ grant execute on function public.meta_orchestrator_authoritative_inputs_v1(uuid,
 
 
 -- METAENGINE Meta-Orchestrator durable task admission v1.
--- Branch-local migration only. Do not apply to production from this convergence task.
+-- Ported into the fresh Client V1 recovery/live plane by this wrapper migration.
 --
 -- The Meta brain never supplies privileged task content here. It names only an exact
 -- ACTIVE durable plan generation and point. This RPC rereads roadmap + plan authority,
@@ -586,7 +586,7 @@ grant execute on function public.meta_orchestrator_task_admit_v1(uuid,text,bigin
 
 
 -- METAENGINE Meta-Orchestrator atomic frontier admission v1.
--- Branch-local migration only. Do not apply to production from this audit task.
+-- Ported into the fresh Client V1 recovery/live plane by this wrapper migration.
 --
 -- A Meta superstep may require a safety group (primary + critic/falsifier). Admitting those
 -- points one HTTP request at a time can leave a partial group after process/network failure.
@@ -697,7 +697,7 @@ grant execute on function public.meta_orchestrator_frontier_admit_v1(uuid,text,b
 
 
 -- METAENGINE DevOS scheduler capacity projection v1.
--- Branch-local migration only. Do not apply to production from this convergence task.
+-- Ported into the fresh Client V1 recovery/live plane by this wrapper migration.
 --
 -- This is a read-only projection inside the single existing DevOS scheduler boundary.
 -- It deliberately mirrors the transport-admission membrane: only fresh FLEET_OWNED
