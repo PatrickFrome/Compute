@@ -25,7 +25,17 @@ The signed canary now invokes the same production normalizer and records the val
 - Before: the new 20-case suite failed all 20 cases (19 malformed-input rejection cases and one positive projection case).
 - After: 20/20 integrity tests pass; all 55 Client V1 plus Meta provider tests pass.
 - Parser checks for the normalizer and signed canary pass; `git diff --check` passes.
-- Windows/installed/signed-canary qualification for the new commit remains a separate required CI result.
+- On code head `188ae9e14e1f4a8e1e95190e6a2b8cea4783a8dd`, Shell, Critical Audit, Installed Chat, Autonomous Soak, Final Runtime, Package Smoke and the signed C4 canary are SUCCESS. Self Update E2E was still in progress at the last checkpoint read and remains a separate gate.
+
+## Generation-watermark live repair and C4 canary qualification
+
+The first live canary against the strengthened client exposed a second, independent defect after the previous generation-1 canary had been intentionally retired. `meta_orchestrator_plan_snapshot_v1` returned `found=false, plan_generation=0` whenever no ACTIVE plan existed, while `meta_orchestrator_plan_activate_v1` correctly fenced against the historical `max(plan_generation)=1`. The client compiler therefore sent stale CAS expectation 0 and received `meta_plan_generation_fenced`.
+
+The repair keeps the write-side CAS unchanged and makes the read side monotonic: the snapshot now returns the durable generation watermark even when `found=false`; the objective compiler consumes that watermark instead of resetting it to zero. A new forward migration `20260929203000_client_v1_plan_generation_watermark_v1.sql` was applied to recovery project `jhriwwsryeqsvvvufkok`. Independent readback then returned `found=false, plan_generation=1` both directly and through `meta_orchestrator_authoritative_inputs_v1`.
+
+The canary Edge function was advanced to version 19 with only the Meta route pinned to code head `188ae9e14e1f4a8e1e95190e6a2b8cea4783a8dd`; its existing custom device-signature authentication and `verify_jwt=false` setting were preserved. The first run attempt failed before goal submission on one transient Edge-to-Postgres `CONNECT_TIMEOUT` during enrollment polling; adjacent polls were HTTP 202, so this was not a generation or signature-contract failure.
+
+Rerun attempt 2 was approved through the existing enrollment approval RPC and completed SUCCESS. Artifact `11060879768` has ZIP SHA-256 `9d4b8fb07cc865a452da70dc0f8e220dfda75600dffe39ab1c0b5b1bb9847387`. Production readback validation accepted generation 2 and durable task `411614e0-2602-4f4f-ba1c-4405bc663a90`, point `obj.c4-signed-canary-qualification-36627212762-attem.v1`, with `task_admission_state=ADMITTED`, matching workspace, epoch 3, baseline, plan digest and task-spec digest. Independent DB readback observed the task as READY with lease generation 0 and no agent. The probe was then deliberately fenced before any lease with reason `CLIENT_V1_SIGNED_CANARY_QUALIFICATION_COMPLETE`, and generation-2 plan state was retired to SUPERSEDED. This qualifies signed submission -> atomic plan activation -> durable ADMITTED task creation; it still does not qualify Agent execution.
 
 ## Research and decisions
 
@@ -36,11 +46,12 @@ The signed canary now invokes the same production normalizer and records the val
 
 ## Next acceptance gates
 
-1. Qualify the new production normalizer against a fresh signed canary response on this exact source head; verify DB task identity and quarantine the probe task afterward.
-2. Add durable goal progress/reconciliation keyed by exact workspace + plan generation + task id, including response-loss and restart cases. A task admission receipt must not be displayed as a completed development result.
-3. Prove the admitted task reaches a real z.ai Agent-origin session, verified submission/readback and accepted result. Preserve the single canonical scheduler and geometry-independent controls.
-4. Qualify the installed Client against the new recovery project. Historical installed Browser heartbeat and old-project AMBIGUOUS_INSTALL do not demonstrate this migration.
-5. Only after exact-head qualification, publish the tested installer and perform a reconciled update. No blind SELF_UPDATE_APPLY.
+1. Add durable goal progress/reconciliation keyed by exact workspace + plan generation + task id, including response-loss and restart cases. A task admission receipt must not be displayed as a completed development result.
+2. Prove the admitted task reaches a real z.ai Agent-origin session, verified submission/readback and accepted result. Preserve the single canonical scheduler and geometry-independent controls.
+3. Qualify the installed Client against the new recovery project. Historical installed Browser heartbeat and old-project AMBIGUOUS_INSTALL do not demonstrate this migration.
+4. Close the remaining exact-code-head CI gate (Self Update E2E if still running/failing), then publish only the tested installer and perform a reconciled update. No blind SELF_UPDATE_APPLY.
+
+The checkpoint commit itself is documentation-only and therefore is not evidence that a different runtime tree was exercised; runtime qualification above refers explicitly to code head `188ae9e14e1f4a8e1e95190e6a2b8cea4783a8dd`.
 
 ## Branch audit
 
