@@ -12708,3 +12708,51 @@ Work Log:
 
 Stage Summary:
 - Без изменений: РАБОТАЕТ 18/19; НЕ РАБОТАЕТ M05 + Supabase (REST 503, Storage 429); НЕ ПРОВЕРЕНО dispatch.
+
+---
+Task ID: CAPSULE-20260929-1128
+Agent: Z.ai Code (main, direct operator request)
+Task: Скачать весь сохранённый worklog + dev-инфо + контекст, запечатать в капсулу, дать ссылку скачивания с нелокального хоста.
+
+Work Log:
+- Инвентаризация: worklog.md 2330148B (sha12=bb8e463d28af), CONTEXT.md, PHOENIX-PROTOCOL.md, CONTEXT-CURRENT.md, vault/journal, scripts/phoenix (~200 dev-скриптов), scripts/browser-test, vault/repo git-history.
+- Секрет-гигиена: ИСКЛЮЧЕНЫ swarm-secrets.env, agent-connect.sh/.env.sh, agent-access-capsule.json, self-evolve.sealed.sh, phoenix-secrets-restore.sh; скан стаджа на eyJ/ghp_ — только замаскированные partial-префиксы в журнале (ghp_****, eyJhbGciOi<masked>), живых секретов нет.
+- Написан CHAT-SUMMARY-20260929.md (jobs-статус, browser-test выводы 18/19+M05, фактчек ME2-TICK-20260929-0026, GH/SB аудит, 4 блокера, инструкция восстановления).
+- Собран MANIFEST.txt (sha256 каждого файла); запечатано: me2-capsule-20260929-1128.tar.gz (5554623B, sha256=e24183e0688bbdb3331f5b551abe86a9b6880ddb643c7b1f6de52405a04eddf4) + .zip (5692579B).
+- worklog-repo.bundle: git-bundle всей history-vault (1.5MB) вместо сырого .git (42MB).
+- Upload-маршруты: Supabase storage 3x HTTP 429 too_many_connections (деградация канала сохраняется); pixeldrain требует API-key; temp.sh/bashupload/transfer.sh/0x0.st/litterbox/gofile недоступны; УСПЕХ: uguu.se.
+- Верификация: HEAD 200 + Content-Length 5554623; ranged-GET и полный GET — sha256 файла с хоста == локальному (e24183e0...).
+- Зеркалирование капсулы: /home/sync/me2-context-backups/capsules/, /home/z/context-vault/latest/capsules/, /tmp/context-vault-mirror/capsules/, /tmp/my-project/context-vault-mirror/capsules/.
+
+Stage Summary:
+- Публичная ссылка (нелокальный хост, retention 48h с 2026-09-29 03:35 UTC): https://n.uguu.se/iUmOMZfq.tar.gz
+- Капсула: 187 файлов, 14MB raw -> 5.55MB gz; включает полный worklog + 4 последних снапшота + git-bundle истории + все dev-скрипты + CHAT-SUMMARY.
+- Supabase 503/429 остаётся глобальным блокером загрузок; uguu.se — рабочий внешний канал.
+
+---
+Task ID: CAPSULE-SEAL-20260929-1132
+Agent: cron-agent-loop (по прямому запросу оператора)
+Task: Запечатать worklog + контекст + инфо о разработке в капсулу; дать скачивание с нелокального хоста.
+
+Work Log:
+- Скрипт scripts/phoenix/capsule-seal-1130.sh: собран me2-capsule-20260929-033230.tar.gz (5149235 B, sha256 7ad6ba0823f1...caf71164c).
+- Состав: worklog.md (2.33MB полный), CONTEXT.md, PHOENIX-PROTOCOL.md, CONTEXT-CURRENT.md, CTX-SHARD-*, scripts/phoenix, scripts/browser-test, журналы vault, swarm-snapshot (лог.tail200k + manifest'ы), audit/, a2-capsule-reference, docs/, research/. Секреты вычищены (env/key/token удалены из дерева).
+- Зеркала: download/ (чат-видимо) OK; ossfs versioned/ + latest/ (НЕЛОКАЛЬНЫЙ хост) OK; Supabase Storage — HTTP 429 too_many_connections.
+- Фоновый ретрай Supabase (5×, 3мн backoff) запущен: scripts/phoenix/capsule-upload-retry-1130.sh → /tmp/capsule-upload-retry.out.
+
+Stage Summary:
+- Капсула доступна: локально download/me2-capsule-20260929-033230.tar.gz; нелокально ossfs me2-context-backups/{versioned,latest}/ (восстановление: phoenix-restore). Supabase URL появится в /tmp/capsule-upload-retry.out при успехе ретрая (облако деградировано 429/503).
+
+---
+Task ID: BROWSER-TEST-20260929-1134 (цикл 19)
+Agent: cron-agent-loop (Job 419203)
+Task: Цикл 19 (11:30) — репроб канала Supabase + батарея M01–M19.
+
+Work Log:
+- Репроб: P1/P2 = 401 (edge жив), P3 = 503 PGRST002 → DEGRADED (~13ч); Storage 429.
+- Батарея → 18/19 PASS (8-й цикл подряд); FAIL M05 (glm-429 подтверждён в логе роя).
+- Рой: 14/14 living, Δ97 циклов/60с; spawn sw_z7t5tb4b (M08/M09 PASS, серия 18/18); lessons=53, episodes=16, proposals=60.
+- Дополнительно: капсула контекста запечатана и зеркалирована (см. CAPSULE-SEAL-20260929-1132).
+
+Stage Summary:
+- РАБОТАЕТ 18/19 (M01–M04, M06–M19); НЕ РАБОТАЕТ M05 (glm-429, внешнее) + Supabase-канал (REST 503 PGRST002 ~13ч, Storage 429); НЕ ПРОВЕРЕНО e2e-диспетчирование в браузер (канал деградирован).
