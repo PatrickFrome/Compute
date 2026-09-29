@@ -6,7 +6,7 @@ import path from 'node:path';
 import { validateR83LiveEvidenceSeal } from '../scripts/verify-r83-live-evidence-seal.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT=path.resolve(HERE,'../..');
+const REPO_ROOT=path.resolve(HERE,'../../..');
 const EVIDENCE_PATH=path.join(REPO_ROOT,'coordination','convergence','R83_LIVE_EVIDENCE_SEAL_V1.json');
 
 async function fixture(){
