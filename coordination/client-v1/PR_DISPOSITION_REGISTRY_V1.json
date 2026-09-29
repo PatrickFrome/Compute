@@ -7,9 +7,9 @@
     "disposition": "ACTIVE_CANONICAL"
   },
   "counters": {
-    "open_prs": 341,
-    "draft_prs": 326,
-    "closed_as_proven_absorbed_this_cycle": 18
+    "open_prs": 336,
+    "draft_prs": 322,
+    "closed_as_proven_absorbed_this_cycle": 24
   },
   "closed_proven_absorbed": [
     {
@@ -101,49 +101,45 @@
       "pr": 986,
       "disposition": "SUPERSEDED",
       "proof": "EXACT_ANCESTRY_BEHIND_ZERO"
-    }
-  ],
-  "pending_semantic_review": [
+    },
+    {
+      "pr": 999,
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 evolved context-drawer contains Escape cancel, double-click reset, enlarged hit zone and focus cue; successor docking tests present"
+    },
     {
       "pr": 1069,
-      "head": "bcac5a88a00506a0a1d5c37101def2ae0f1463c8",
-      "ahead_from_head_to_r109": 67,
-      "unique_commits": 36,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 physically lacks duplicate me2-mission-control scheduler"
     },
     {
       "pr": 1068,
-      "head": "6faf68f642ba70135da9aae1e1f2f94466ac191f",
-      "ahead_from_head_to_r109": 67,
-      "unique_commits": 30,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 physically lacks retired Agents/Command/Compute authority pages"
     },
     {
       "pr": 1067,
-      "head": "e60083e1f074d66ad7caa43696d4d9a1688761e0",
-      "ahead_from_head_to_r109": 57,
-      "unique_commits": 14,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 Tasks is read-only for retry lineage and Command Palette deny-lists all five retired daemon task mutations at visibility + dispatch"
     },
     {
       "pr": 1066,
-      "head": "579050e1623601d986986fe861159035817f7884",
-      "ahead_from_head_to_r109": 67,
-      "unique_commits": 21,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 physically lacks retired ME2 Browser effect page"
     },
     {
       "pr": 1061,
-      "head": "5ecafa9505e07b69f5cf12de2f91457d4eb71b0e",
-      "ahead_from_head_to_r109": 67,
-      "unique_commits": 19,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
-    },
+      "disposition": "SUPERSEDED",
+      "proof": "SEMANTIC_CONSUMER_SUPERSESSION",
+      "evidence": "R109 standalone browser-probe-entry removes legacy store/SQLite dependency entirely and exposes zero mutation authority"
+    }
+  ],
+  "pending_semantic_review": [
     {
       "pr": 1041,
       "head": "b68bd6c402b9658f32d6b031b0439291aa2cb422",
@@ -177,20 +173,13 @@
       "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
     },
     {
-      "pr": 999,
-      "head": "04ee7239d6d2020e1ec3a91a274950fa7b39fda4",
-      "ahead_from_head_to_r109": 410,
-      "unique_commits": 1,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
-    },
-    {
       "pr": 982,
       "head": "ad5e01c6c14a61f77a6cb65679cd79f20f99a669",
       "ahead_from_head_to_r109": 772,
       "unique_commits": 1,
-      "disposition": "SELECTIVE_PORT_PENDING",
-      "required_proof": "PATCH_EQUIVALENCE_OR_CONSUMER_CENSUS"
+      "disposition": "REFERENCE_ONLY",
+      "required_proof": "SEPARATE_COMPUTE_INFRASTRUCTURE_ROADMAP",
+      "evidence": "23-file historical Cloudflare worker/provenance tree is unique and absent from Client V1 R109; PR deploys nothing"
     }
   ],
   "invariants": {
