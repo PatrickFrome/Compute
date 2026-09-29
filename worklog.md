@@ -12603,3 +12603,20 @@ Stage Summary:
 - НЕ РАБОТАЕТ: M05 LLM-координация (glm-429 upstream-квота); Supabase PostgREST→DB (503 PGRST002 ~11ч).
 - НЕ ПРОВЕРЕНО: end-to-end dispatch директив через Supabase — канал недоступен.
 - Next: владелец — восстановить PostgREST + glm-квоту; после восстановления — dispatch-батарея 13 действий по всем 4 таблицам.
+
+---
+Task ID: BROWSER-TEST-20260929-1000 (цикл 16)
+Agent: cron-agent-loop (Job 419203)
+Task: Цикл 16 (10:00) — репроб канала Supabase + батарея M01–M19 на локальном рое (:3046).
+
+Work Log:
+- Канал (reprobe-1000.py): P1/P2 401, P3 real-JWT → 503 PGRST002 — PostgREST→DB вниз ~11.5ч. Verdict: DEGRADED.
+- Батарея M01–M19 → 18/19 PASS (5-й цикл подряд идентично); FAIL M05 (glm-429 upstream, 11-й цикл подряд).
+- Spawn sw_qsd1wfvw: полный ЖЦ spawn→living(gen=1,parent)→retire→архив; событие рождения в ленте.
+- Рой: 14/14 living, Δ97 циклов/60с, lessons=53, episodes=16, proposals=60.
+
+Stage Summary:
+- РАБОТАЕТ: 18/19 механик стабильно; spawn 16/16; рой автономен 4.5ч+, ~97 циклов/60с; gateway/прокси живы.
+- НЕ РАБОТАЕТ: M05 (glm-429 квота); Supabase PostgREST→DB (503 ~11.5ч).
+- НЕ ПРОВЕРЕНО: end-to-end dispatch через Supabase (канал).
+- Next: владелец — PostgREST + glm-квота; затем dispatch-батарея 13 действий.
