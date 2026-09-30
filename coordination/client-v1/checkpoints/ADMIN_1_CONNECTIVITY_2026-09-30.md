@@ -170,3 +170,16 @@ The only remaining ADMIN.1 proof is one final exact-head Windows installed quali
 - no master/OIDC token exposure to Browser.
 
 Do not promote the production Edge from this checkpoint alone. Final promotion remains evidence-gated.
+
+
+## ADMIN.1 nonce transport repair
+
+Readback of run `36753232589`, attempt 1, source `c8a0779cf6215bd5d911b8371d3578e62a25593f` found its exact enrollment PENDING with `nonce_present=false`. Installed logs ended with `installed_oidc_enrollment_qualification_not_proven`. This is independent of the earlier immutable OIDC subject correction.
+
+The Native Browser already emitted the nonce, but the Edge enrollment metadata whitelist dropped it. The same omission existed in the candidate source, so redeploying it unchanged would not repair the gate.
+
+The Edge now uses a small bounded metadata normalizer. It persists the nonce only under a valid installed-Electron run/attempt/head tuple, never spreads arbitrary metadata, and leaves nonce-bound OIDC/SQL approval mandatory. Behavioral tests exercise Native Browser metadata through this exact Edge normalizer and reject malformed/unqualified nonces.
+
+Live rollback smoke on the selected Meta integration/project `jhriwwsryeqsvvvufkok` proved: exact four-argument tuple accepted; wrong attempt rejected; weak three-argument RPC absent; `service_role` EXECUTE allowed; `anon`/`authenticated` denied; all temporary records rolled back. No production device or pairing grant was committed.
+
+Package identity advances to `0.7.0-dev.36753232676.1`; ADMIN.1 must not reuse the UI.1 version for different runtime bytes. Canary deployment and final installed proof must bind the next exact head. Stable production Edge remains the rollback authority until qualification is complete.
