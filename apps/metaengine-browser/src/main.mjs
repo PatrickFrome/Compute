@@ -846,7 +846,7 @@ async function preparePrimaryShellTarget() {
   return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
-const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
+const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'admin-connection-badge', 'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
 
 function cdpBoxVisible(model) {
   const points = Array.isArray(model?.content) && model.content.length >= 8
