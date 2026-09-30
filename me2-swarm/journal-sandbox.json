@@ -1,31 +1,7 @@
 {
-  "savedAt": "2026-09-30T18:17:50.374Z",
+  "savedAt": "2026-09-30T18:20:49.661Z",
   "version": "2.0.0-restore",
   "lessons": [
-    {
-      "ts": "2026-09-30T16:15:13.063Z",
-      "source": "self_improve",
-      "author": "Аналитик-4829",
-      "text": "Learned: Prioritized openai endpoints for high success-rate models; avoided openrouter to prevent chain exhaustion."
-    },
-    {
-      "ts": "2026-09-30T16:15:47.674Z",
-      "source": "self_improve",
-      "author": "Стратег-4821",
-      "text": "Сбои из‑за llm_chain_exhausted на OpenRouter и nvidia/nemotron‑3‑ultra‑550b‑a55b указывают, что необходимо исключать OpenRouter‑endpoints, ограничивать параллельные вызовы тяжёлых моделей, увеличивать rest_window_ms и отдавать приоритет бесплатных inference‑эндпоинтов с проверенным success‑rate >0.05."
-    },
-    {
-      "ts": "2026-09-30T16:17:03.261Z",
-      "source": "self_improve",
-      "author": "Стратег-6657",
-      "text": "Avoided openrouter usage after llm_chain_exhausted; ensure success-rate >0.05 for selected models"
-    },
-    {
-      "ts": "2026-09-30T16:17:17.431Z",
-      "source": "self_improve",
-      "author": "Аналитик-977",
-      "text": "Learned that relying on OpenRouter endpoints causes llm_chain_exhausted errors; must now exclude them from any synchronization or proposal."
-    },
     {
       "ts": "2026-09-30T16:17:32.466Z",
       "source": "self_improve",
@@ -361,6 +337,30 @@
       "source": "self_improve",
       "author": "Зодчий-7",
       "text": "Урок: Бесшовная интеграция бесплатных LLM требует тщательной верификации их доступности."
+    },
+    {
+      "ts": "2026-09-30T18:17:58.495Z",
+      "source": "self_improve",
+      "author": "Разведчик-4",
+      "text": "Урок: Бесплатные модели требуют проверки надёжности перед интеграцией в цепочки."
+    },
+    {
+      "ts": "2026-09-30T18:17:58.836Z",
+      "source": "self_improve",
+      "author": "Архивариус-12",
+      "text": "Урок: Бесполезность действий с неаутентифицированными ресурсами без верификации."
+    },
+    {
+      "ts": "2026-09-30T18:17:59.903Z",
+      "source": "self_improve",
+      "author": "Летописец-8",
+      "text": "Урок: Бесплодные попытки интеграции снижают эффективность роя."
+    },
+    {
+      "ts": "2026-09-30T18:18:00.074Z",
+      "source": "self_improve",
+      "author": "Критик-14",
+      "text": "Урок: Интеграция бесплатных LLM требует проверки каталога на наличие моделей."
     }
   ],
   "memories": [
@@ -695,7 +695,7 @@
     "op_goal": "ресёрч бесплатных LLM-каналов и их интеграция (директива оператора)",
     "host": "dataforge-sandbox (chat 4e7a8a53)",
     "restored_from": "journal-latest.json @ Compute main (внешний рой жив)",
-    "total_born": 52,
-    "cycles": 2
+    "total_born": 96,
+    "cycles": 5
   }
 }
