@@ -2313,6 +2313,42 @@ ipcMain.handle('metaengine:client:goal-status', async (event, rawRequestId) => {
   assertShellSender(event);
   return refreshClientGoal(rawRequestId);
 });
+ipcMain.handle('metaengine:client:connection-status', async (event) => {
+  assertShellSender(event);
+  const status = nativeSupervisor?.connectionStatus?.() || Object.freeze({
+    schema: 'metaengine.client.connection-status.v1',
+    local_runtime_ready: false,
+    secure_device_key_ready: false,
+    device_enrolled: false,
+    enrollment_state: 'UNINITIALIZED',
+    admin_ready: false,
+    access_tier: null,
+    admin_scopes: Object.freeze([]),
+    admin_grant_epoch: null,
+    cloud_control_state: 'CONNECTING',
+    automatic_reconnect: true,
+    reconnect_uses_existing_supervisor_cycle: true,
+    second_connection_scheduler: false,
+    local_shell_survives_cloud_outage: true,
+    network_availability_guaranteed: false,
+    legacy_daemon_feed_is_authority: false,
+    master_secret_embedded: false,
+    service_role_embedded: false,
+    cloudflare_token_embedded: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+  const reserve = fallbackConsole?.snapshot?.() || null;
+  return Object.freeze({
+    ...status,
+    fallback_mode: reserve?.gate?.mode || 'CLOUD_AUTHORITY',
+    fallback_ready: reserve?.gate?.reserve_usable === true,
+    fallback_enabled: reserve?.failover?.enabled === true,
+    cloud_health: reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN',
+    legacy_daemon_feed_is_authority: false,
+    authority_effect: false,
+  });
+});
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;
