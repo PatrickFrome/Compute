@@ -18,6 +18,10 @@ const topbar = await readFile(
   new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url),
   'utf8',
 );
+const installedQualification = await readFile(
+  new URL('../../../.github/workflows/browser-windows-installed-chat-qualification.yml', import.meta.url),
+  'utf8',
+);
 
 test('ADMIN is device-bound and revocable without embedding infrastructure secrets', () => {
   assert.match(migration, /add column if not exists access_tier text not null default 'ADMIN'/i);
@@ -100,4 +104,21 @@ test('top bar no longer treats legacy Socket.IO feed as product connection autho
   assert.match(topbar, /Admin reconnecting/);
   assert.match(topbar, /Enrollment/);
   assert.match(topbar, /connectionStatus/);
+});
+
+
+test('installed Windows qualification binds exact client to signed ADMIN canary', () => {
+  assert.match(main, /'admin-connection-badge'/);
+  assert.match(client, /schema: 'metaengine\.client\.admin-connection\.v1'/);
+  assert.match(client, /state: 'ADMIN_CONNECTED'/);
+  assert.match(client, /backend_transport: String\(body\.backend_transport \|\| 'UNKNOWN'\)/);
+  assert.match(client, /direct_postgres_query_plane: body\.direct_postgres_query_plane === true/);
+  assert.match(installedQualification, /METAENGINE_SUPERVISOR_BASE_URL: https:\/\/jhriwwsryeqsvvvufkok\.supabase\.co\/functions\/v1\/a2-browser-native-supervisor-v14-canary/);
+  assert.match(installedQualification, /metaengine\.client\.admin-connection\.v1/);
+  assert.match(installedQualification, /ADMIN_CONNECTED/);
+  assert.match(installedQualification, /backend_transport -eq 'POSTGREST_RPC'/);
+  assert.match(installedQualification, /direct_postgres_query_plane -eq \$false/);
+  assert.match(installedQualification, /automatic_reconnect -eq \$true/);
+  assert.match(installedQualification, /installed_admin_connection_not_proven/);
+  assert.match(installedQualification, /admin_connection_verified/);
 });
