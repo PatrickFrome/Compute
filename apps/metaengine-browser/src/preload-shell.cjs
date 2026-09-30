@@ -254,6 +254,7 @@ const clientGoalStatus = (requestId) => ipcRenderer.invoke(
   'metaengine:client:goal-status',
   String(requestId ?? ''),
 );
+const clientConnectionStatus = () => ipcRenderer.invoke('metaengine:client:connection-status');
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
@@ -280,6 +281,7 @@ if (isPrimaryMe2PresentationDocument()) {
     selectAgent: selectClientAgent,
     latestGoal: latestClientGoal,
     goalStatus: clientGoalStatus,
+    connectionStatus: clientConnectionStatus,
     typed_positive_api: true,
     generic_command_exposed: false,
     scheduler_authority: false,
