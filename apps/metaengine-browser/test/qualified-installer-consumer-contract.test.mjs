@@ -18,7 +18,7 @@ async function workflow(file) {
 
 test('R91 qualified installer consumer helper centralizes exact acquire and terminal producer fencing', async () => {
   const script = await source('scripts/qualified-installer-consumer.ps1');
-  assert.match(script, /ValidateSet\('Acquire', 'Wait'\)/);
+  assert.match(script, /ValidateSet\('Acquire', 'Verify', 'Wait'\)/);
   assert.match(script, /installer-provenance\.mjs/);
   assert.match(script, /'acquire'/);
   assert.match(script, /'--allow-in-progress', 'true'/);
@@ -40,6 +40,7 @@ test('R91 installer consumers use one binding file instead of duplicating low-le
     'browser-windows-installed-chat-qualification.yml',
     'browser-final-runtime-activation-v1.yml',
     'browser-windows-autonomous-soak-v1.yml',
+    'metaengine-browser-self-update-e2e.yml',
   ];
 
   for (const file of cases) {
@@ -87,4 +88,29 @@ test('R91 Package Smoke trigger closure guarantees an exact-head producer whenev
   assert.match(source, /browser-windows-installed-chat-qualification\.yml/);
   assert.match(source, /browser-final-runtime-activation-v1\.yml/);
   assert.match(source, /browser-windows-autonomous-soak-v1\.yml/);
+  assert.match(source, /metaengine-browser-self-update-e2e\.yml/);
+});
+
+test('full physical self-update consumes the shared artifact and seals its producer before publication', async () => {
+  const text = await workflow('metaengine-browser-self-update-e2e.yml');
+  assert.match(text, /ME2_REQUIRE_QUALIFIED_INSTALLER: '1'/);
+  assert.match(text, /actions: read/);
+  assert.doesNotMatch(text, /npm pkg set|npx .*electron-builder|Build and stage exact-head ME2 UI/);
+  const acquire = text.indexOf('- name: Acquire immutable Package Smoke installer');
+  const effect = text.indexOf('- name: Published baseline to one-built exact candidate');
+  const resident = text.indexOf('- name: Reproduce reported resident installer upgrade');
+  const terminal = text.indexOf('- name: Require bound Package Smoke producer terminal success');
+  const publish = text.indexOf('- name: Upload self-update evidence');
+  assert.ok(acquire > 0 && effect > acquire && resident > effect && terminal > resident && publish > terminal);
+  assert.match(text, /consumer_target_build_count -ne 0/);
+  assert.match(text, /target_installer_source -ne 'PACKAGE_SMOKE_ARTIFACT'/);
+  assert.match(text, /Prove exact source checkout unchanged/);
+
+  const physical = await source('test/self-update-fast-physical.ps1');
+  assert.match(physical, /-Mode Verify -ExpectedHead \$head/);
+  assert.match(physical, /self_update_qualified_installer_binding_required/);
+  assert.match(physical, /self_update_qualified_target_not_monotonic/);
+  assert.match(physical, /self_update_qualified_target_name_mismatch/);
+  assert.match(physical, /source_head = \$head/);
+  assert.match(physical, /producer_run_attempt = if \(\$qualifiedBinding\)/);
 });

@@ -94,6 +94,30 @@ $profileRow = Read-LastJsonLine $profileOut
 if ($profileRow.marker_present -ne $true -or -not $profileRow.user_data_path) { throw 'baseline_profile_probe_invalid' }
 [string]$profileRow.user_data_path | Set-Content (Join-Path $temp 'baseline-user-data-path.txt')
 
+$qualifiedBindingPath = [string]$env:ME2_INSTALLER_BINDING_PATH
+$qualifiedBinding = $null
+$consumerTargetBuildCount = 1
+$targetInstallerSource = 'LOCAL_COMPATIBILITY_BUILD'
+if ($env:ME2_REQUIRE_QUALIFIED_INSTALLER -eq '1' -and -not $qualifiedBindingPath) {
+  throw 'self_update_qualified_installer_binding_required'
+}
+if ($qualifiedBindingPath) {
+  & (Join-Path $root 'scripts/qualified-installer-consumer.ps1') -Mode Verify -ExpectedHead $head `
+    -BindingPath $qualifiedBindingPath -ConfigPath (Join-Path $root 'electron-builder.test.json') | Out-Null
+  $qualifiedBinding = Get-Content $qualifiedBindingPath -Raw | ConvertFrom-Json
+  $payloadPath = Split-Path -Parent ([string]$qualifiedBinding.installer_path)
+  $acquired = Get-Content (Join-Path $payloadPath 'acquired.json') -Raw | ConvertFrom-Json
+  $target = [string]$acquired.package_version
+  if ($target -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw 'self_update_qualified_target_version_invalid' }
+  $baselineBuild = [Int64](($baseline -split '\.')[3])
+  $targetBuild = [Int64](($target -split '\.')[3])
+  if ($targetBuild -le $baselineBuild) { throw 'self_update_qualified_target_not_monotonic' }
+  $installer = Get-Item -LiteralPath ([string]$acquired.installer_path)
+  $blockmap = Get-Item -LiteralPath ([string]$acquired.blockmap_path)
+  if ($installer.Name -ne "METAENGINE-Browser-Test-Setup-$target-x64.exe") { throw 'self_update_qualified_target_name_mismatch' }
+  $consumerTargetBuildCount = 0
+  $targetInstallerSource = 'PACKAGE_SMOKE_ARTIFACT'
+} else {
 # Build exactly one new target. Preserve a permanent floor above the newest locally deployed pre-release,
 # then use UTC or published-baseline+1 thereafter so every verified release remains monotonic.
 $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart('-'))
@@ -110,6 +134,7 @@ $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$tar
 $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$target-x64.exe.blockmap" -File | Select-Object -First 1
 if (-not $installer) { throw 'target_installer_missing' }
 if (-not $blockmap) { throw 'target_blockmap_missing' }
+}
 
 $feed = Join-Path $temp 'self-update-feed'
 Remove-Item $feed -Recurse -Force -ErrorAction SilentlyContinue
@@ -276,6 +301,7 @@ $manifest = [ordered]@{
   schema = 'metaengine.browser.self-update-e2e-manifest.v2'
   version = $target
   git_sha = $head
+  source_head = $head
   run_id = [string]$env:GITHUB_RUN_ID
   run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
   transaction_id = [string]$transaction.transaction_id
@@ -294,6 +320,11 @@ $manifest = [ordered]@{
   development_channel = $true
   published_baseline_reused = $true
   target_build_count = 1
+  consumer_target_build_count = $consumerTargetBuildCount
+  target_installer_source = $targetInstallerSource
+  producer_run_id = if ($qualifiedBinding) { [int64]$qualifiedBinding.producer_run_id } else { $null }
+  producer_run_number = if ($qualifiedBinding) { [int64]$qualifiedBinding.producer_run_number } else { $null }
+  producer_run_attempt = if ($qualifiedBinding) { [int64]$qualifiedBinding.producer_run_attempt } else { $null }
   production_safe = $false
 } | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText((Join-Path $evidence 'verified-self-update-manifest.json'), $manifest + "`n", [System.Text.UTF8Encoding]::new($false))

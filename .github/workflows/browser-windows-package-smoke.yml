@@ -27,6 +27,7 @@ on:
       - '.github/workflows/browser-windows-installed-chat-qualification.yml'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'
       - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
+      - '.github/workflows/metaengine-browser-self-update-e2e.yml'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
 concurrency:

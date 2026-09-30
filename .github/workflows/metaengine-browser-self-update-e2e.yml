@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: metaengine-browser-self-update-${{ github.ref }}
@@ -76,6 +77,7 @@ jobs:
       GITHUB_ACTIONS: 'true'
       METAENGINE_SELF_UPDATE_TEST_MODE: '1'
       METAENGINE_DISABLE_CRASH_SENTINEL: '1'
+      ME2_REQUIRE_QUALIFIED_INSTALLER: '1'
     steps:
       - name: Checkout exact source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -95,33 +97,31 @@ jobs:
       - name: Install physical-test dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
-      - name: Prove electron-builder 26.15.7 UI dependency copy
+      - name: Parse and behaviorally qualify the installer re-verification boundary
         working-directory: apps/metaengine-browser
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          npm install --prefix scripts/build-tools --no-audit --no-fund --ignore-scripts app-builder-lib@26.15.7
-          node scripts/verify-builder-copy.cjs
-
-      - name: Build and stage exact-head ME2 UI
-        shell: pwsh
+          foreach ($path in @('scripts/qualified-installer-consumer.ps1', 'test/self-update-fast-physical.ps1', 'test/self-update-fast-physical-ci.ps1', 'test/qualified-installer-consumer-verify.ps1')) {
+            $tokens = $null
+            $parseErrors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $path).Path, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count -ne 0) { throw "physical_script_parse_failed:${path}:$($parseErrors[0].Message)" }
+          }
+          ./test/qualified-installer-consumer-verify.ps1
+      - name: Acquire immutable Package Smoke installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
         env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          ME2_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          npm install --no-audit --no-fund --global bun
-          Push-Location apps/me2-ui
-          try {
-            bun install --frozen-lockfile
-            bun run build
-            node scripts/pack-me2-ui.mjs
-          } finally { Pop-Location }
-          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
-          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'full_e2e_staged_me2_ui_invalid' }
+          $work = Join-Path $env:RUNNER_TEMP 'self-update-qualified-installer'
+          $bindingPath = Join-Path $work 'consumer-binding.json'
+          ./scripts/qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead '${{ github.event.pull_request.head.sha || github.sha }}' -WorkRoot $work -BindingPath $bindingPath -ConfigPath './electron-builder.test.json'
+          "ME2_INSTALLER_BINDING_PATH=$bindingPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Bind physical harness to live 0.7.0 line and exact run identity
+      - name: Prepare 0.7.0 baseline rehearsal without changing target bytes
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
@@ -130,19 +130,7 @@ jobs:
           $raw = $raw.Replace('0\.6\.3', '0\.7\.0')
           if ($raw.Contains('0.6.3') -or $raw.Contains('0\.6\.3')) { throw 'legacy_release_core_rewrite_incomplete' }
           if ($raw -notmatch "currentVersion: '0\.7\.0-dev\.0\.1'") { throw 'published_070_baseline_resolver_missing' }
-          $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
-          $replacement = @'
-          # Build exactly one target from the exact PR head. The immutable Actions
-          # run identity keeps the candidate monotonic without editing source version.
-          $target = "0.7.0-dev.$env:GITHUB_RUN_ID.1"
-          if ($target -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
-          npm pkg set version=$target
-          '@
-          $replacementLiteral = $replacement.Replace('$', '$$')
-          $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
-          if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
-          if ($next -notmatch 'GITHUB_RUN_ID') { throw 'physical_target_run_identity_lost' }
-          [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'self-update-fast-physical-qualified.ps1'), $raw, [System.Text.UTF8Encoding]::new($false))
       - name: Published baseline to one-built exact candidate
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -196,6 +184,7 @@ jobs:
           if ($manifest.profile_continuity -ne $true -or $manifest.physical_singleton -ne $true) { throw 'continuity_or_singleton_not_proven' }
           if ($manifest.published_baseline_reused -ne $true) { throw 'published_baseline_reuse_not_proven' }
           if ([int]$manifest.target_build_count -ne 1) { throw 'target_build_count_invalid' }
+          if ([int]$manifest.consumer_target_build_count -ne 0 -or [string]$manifest.target_installer_source -ne 'PACKAGE_SMOKE_ARTIFACT') { throw 'self_update_target_rebuilt' }
           if ($manifest.guardian_native_staging_present -ne $true -or $manifest.guardian_native_staging_verified -ne $true) { throw 'guardian_native_staging_not_proven' }
           if ($manifest.guardian_native_no_activation -ne $true -or $manifest.guardian_native_requires_machine_secure_copy -ne $true) { throw 'guardian_native_activation_boundary_invalid' }
           if ([string]$manifest.guardian_native_manifest_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'guardian_native_manifest_digest_invalid' }
@@ -223,6 +212,22 @@ jobs:
           if ($proof.new_primary_started -ne $true -or $proof.new_sentinel_started -ne $true) { throw 'installer_target_runtime_not_started' }
           if ($proof.planned_shutdown_verified -ne $true -or $proof.retry_dialog_required -ne $false) { throw 'installer_shutdown_contract_invalid' }
           Copy-Item $proofPath './self-update-fast-evidence/installer-resident-upgrade-proof.json' -Force
+      - name: Require bound Package Smoke producer terminal success
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead '${{ github.event.pull_request.head.sha || github.sha }}' -BindingPath $env:ME2_INSTALLER_BINDING_PATH -ProofPath './self-update-fast-evidence/verified-self-update-manifest.json'
+
+      - name: Prove exact source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/test apps/metaengine-browser/scripts apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
       - name: Upload self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
