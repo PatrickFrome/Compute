@@ -365,6 +365,10 @@ export class NativeSupervisorClient {
   #connectionLastSuccessAt = null;
   #connectionLastFailureAt = null;
   #connectionConsecutiveFailures = 0;
+  #authRecoveryPromise = null;
+  #authRecoveryCount = 0;
+  #lastAuthRecoveryAt = null;
+  #lastAuthRecoveryReason = null;
   #supervisorMode = 'CONTROL';
   #armed = true;
   #lifecycle = null;
@@ -967,6 +971,14 @@ export class NativeSupervisorClient {
       last_connection_success_at: this.#connectionLastSuccessAt,
       last_connection_failure_at: this.#connectionLastFailureAt,
       connection_consecutive_failures: this.#connectionConsecutiveFailures,
+      auth_recovery_count: this.#authRecoveryCount,
+      last_auth_recovery_at: this.#lastAuthRecoveryAt,
+      last_auth_recovery_reason: this.#lastAuthRecoveryReason,
+      auth_recovery_in_flight: this.#authRecoveryPromise != null,
+      recoverable_auth_reasons: Object.freeze(['DEVICE_NOT_FOUND', 'DEVICE_REVOKED', 'PAIRING_REVOKED']),
+      admin_denial_auto_bypass: false,
+      invalid_signature_auto_bypass: false,
+      request_replayed_after_auth_recovery: false,
       automatic_reconnect: true,
       reconnect_uses_existing_supervisor_cycle: true,
       second_connection_scheduler: false,
@@ -1177,6 +1189,55 @@ export class NativeSupervisorClient {
     return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'POST', headers, body: bodyText, cache: 'no-store' });
   }
 
+  async #recoverDeviceBindingAfterAuthDenial(response) {
+    if (response?.status !== 401 || typeof response?.clone !== 'function') return false;
+    let body = null;
+    try { body = await response.clone().json(); } catch { return false; }
+    const reason = String(body?.reason || body?.error || '').trim().toUpperCase();
+    const recoverable = new Set(['DEVICE_NOT_FOUND', 'DEVICE_REVOKED', 'PAIRING_REVOKED']);
+    if (!recoverable.has(reason)) return false;
+
+    if (!this.#authRecoveryPromise) {
+      this.#authRecoveryPromise = (async () => {
+        const before = this.#identity.snapshot();
+        if (!before?.device_id) return;
+        if (typeof this.#identity.clearDeviceBindingForReenrollment !== 'function') {
+          throw new Error('native_supervisor_device_reenrollment_reset_unavailable');
+        }
+        await this.#identity.clearDeviceBindingForReenrollment();
+        this.#enrollmentStatus = 'RETRY_REQUIRED';
+        this.#adminStatus = Object.freeze({
+          state: 'REENROLLMENT_REQUIRED',
+          admin_ready: false,
+          access_tier: null,
+          admin_scopes: Object.freeze([]),
+          admin_grant_epoch: null,
+          last_checked_at: new Date().toISOString(),
+          last_error: reason,
+          authority_effect: false,
+        });
+        this.#authRecoveryCount += 1;
+        this.#lastAuthRecoveryAt = new Date().toISOString();
+        this.#lastAuthRecoveryReason = reason;
+        console.warn(JSON.stringify({
+          schema: 'metaengine.client.device-auth-recovery.v1',
+          state: 'REENROLLMENT_REQUIRED',
+          reason,
+          client_id_preserved: true,
+          key_fingerprint_preserved: true,
+          device_binding_cleared: true,
+          approval_required: true,
+          request_replayed: false,
+          browser_effect_replayed: false,
+          automatic_effect_retry_allowed: false,
+          authority_effect: false,
+        }));
+      })().finally(() => { this.#authRecoveryPromise = null; });
+    }
+    await this.#authRecoveryPromise;
+    return true;
+  }
+
   async #signedRequest(path, { method = 'POST', payload = null, signal = null } = {}) {
     const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
@@ -1184,7 +1245,14 @@ export class NativeSupervisorClient {
     const init = { method, headers, cache: 'no-store' };
     if (method !== 'GET') init.body = bodyText;
     if (signal) init.signal = signal;
-    return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
+    const response = await this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
+    // Authentication runs before every privileged route on the Edge. A 401 with
+    // one of these exact server reasons therefore proves the requested Browser/
+    // scheduler effect was not admitted. Recover only the credential binding;
+    // never replay this request here. The next ordinary supervisor cycle enters
+    // enrollment and still requires approval.
+    await this.#recoverDeviceBindingAfterAuthDenial(response);
+    return response;
   }
 
   async ensureEnrollment() {
