@@ -133,6 +133,7 @@ jobs:
           METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ID: ${{ github.run_id }}
           METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ATTEMPT: ${{ github.run_attempt }}
           METAENGINE_ENROLLMENT_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          METAENGINE_SUPERVISOR_BASE_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary
         run: |
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
@@ -207,7 +208,7 @@ jobs:
           try {
             $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
             $null = $normal.Handle
-            $deadline = [DateTime]::UtcNow.AddSeconds(55)
+            $deadline = [DateTime]::UtcNow.AddSeconds(180)
             $primaryShellIndex = -1
             $preconnectIndex = -1
             $userSessionIndex = -1
@@ -215,6 +216,8 @@ jobs:
             $initialTabIndex = -1
             $remoteLoadIndex = -1
             $r97UiConfirmed = $false
+            $adminConnected = $false
+            $adminConnection = $null
             $cleanControl = $false
             $controlState = $null
             $readySince = $null
@@ -234,6 +237,8 @@ jobs:
                 $initialTabIndex = -1
                 $remoteLoadIndex = -1
                 $r97UiConfirmed = $false
+                $adminConnected = $false
+                $adminConnection = $null
                 for ($i = 0; $i -lt $normalLines.Count; $i++) {
                   $line = [string]$normalLines[$i]
                   if (-not $line.Trim().StartsWith('{')) { continue }
@@ -286,6 +291,20 @@ jobs:
                     Get-Content $normalErr -ErrorAction SilentlyContinue
                     throw 'installed_me2_r97_dom_contract_incomplete'
                   }
+                  if ($runtimeEvent.schema -eq 'metaengine.client.admin-connection.v1' `
+                      -and $runtimeEvent.state -eq 'ADMIN_CONNECTED' `
+                      -and $runtimeEvent.access_tier -eq 'ADMIN' `
+                      -and [int64]$runtimeEvent.admin_grant_epoch -ge 1 `
+                      -and $runtimeEvent.backend_transport -eq 'POSTGREST_RPC' `
+                      -and $runtimeEvent.direct_postgres_query_plane -eq $false `
+                      -and $runtimeEvent.automatic_reconnect -eq $true `
+                      -and $runtimeEvent.master_secret_embedded -eq $false `
+                      -and $runtimeEvent.service_role_embedded -eq $false `
+                      -and $runtimeEvent.cloudflare_token_embedded -eq $false `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $adminConnected = $true
+                    $adminConnection = $runtimeEvent
+                  }
                 }
               }
               $cleanControl = $false
@@ -300,7 +319,7 @@ jobs:
                   $cleanControl = $true
                 }
               }
-              if ($primaryShellIndex -ge 0 -and $r97UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
+              if ($primaryShellIndex -ge 0 -and $r97UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $adminConnected -and $cleanControl) {
                 if (-not $readySince) { $readySince = [DateTime]::UtcNow }
                 if (([DateTime]::UtcNow - $readySince).TotalSeconds -ge 2) { break }
               } else {
@@ -319,6 +338,7 @@ jobs:
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
+            if (-not $adminConnected -or -not $adminConnection) { throw 'installed_admin_connection_not_proven' }
             if (-not $cleanControl) { throw 'installed_clean_genesis_control_not_verified' }
             if ($initialTabIndex -ge 0) { throw 'installed_clean_genesis_created_initial_tab' }
             if ($remoteLoadIndex -ge 0) { throw 'installed_clean_genesis_started_initial_remote_load' }
@@ -341,6 +361,13 @@ jobs:
             $proof | Add-Member -NotePropertyName control_state_schema -NotePropertyValue ([string]$controlState.schema) -Force
             $proof | Add-Member -NotePropertyName control_state_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
             $proof | Add-Member -NotePropertyName control_state_armed -NotePropertyValue ([bool]$controlState.armed) -Force
+            $proof | Add-Member -NotePropertyName admin_connection_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName admin_access_tier -NotePropertyValue ([string]$adminConnection.access_tier) -Force
+            $proof | Add-Member -NotePropertyName admin_grant_epoch -NotePropertyValue ([int64]$adminConnection.admin_grant_epoch) -Force
+            $proof | Add-Member -NotePropertyName admin_backend_transport -NotePropertyValue ([string]$adminConnection.backend_transport) -Force
+            $proof | Add-Member -NotePropertyName admin_direct_postgres_query_plane -NotePropertyValue ([bool]$adminConnection.direct_postgres_query_plane) -Force
+            $proof | Add-Member -NotePropertyName admin_automatic_reconnect -NotePropertyValue ([bool]$adminConnection.automatic_reconnect) -Force
+            $proof | Add-Member -NotePropertyName admin_canary_base -NotePropertyValue ([string]$env:METAENGINE_SUPERVISOR_BASE_URL) -Force
             $proof | Add-Member -NotePropertyName remote_content_qualification -NotePropertyValue 'NOT_REQUESTED_IN_CLEAN_GENESIS' -Force
             $proof | Add-Member -NotePropertyName evidence_source -NotePropertyValue 'INSTALLED_NORMAL_UI_STDOUT_PLUS_DURABLE_CONTROL_STATE' -Force
             $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
