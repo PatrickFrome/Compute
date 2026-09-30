@@ -135,7 +135,9 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}));
     const sourceHead = String((body as any)?.source_head || "").trim().toLowerCase();
+    const qualificationNonceSha256 = String((body as any)?.qualification_nonce_sha256 || "").trim().toLowerCase();
     if (!SHA40.test(sourceHead)) throw new Error("source_head_invalid");
+    if (!/^[0-9a-f]{64}$/.test(qualificationNonceSha256)) throw new Error("qualification_nonce_sha256_invalid");
 
     const runId = String(payload.run_id);
     const runAttempt = Number(payload.run_attempt);
@@ -157,6 +159,7 @@ Deno.serve(async (req: Request) => {
       p_run_id: runId,
       p_run_attempt: runAttempt,
       p_source_head: sourceHead,
+      p_qualification_nonce_sha256: qualificationNonceSha256,
     });
 
     if (approval?.accepted === true) {
@@ -170,6 +173,7 @@ Deno.serve(async (req: Request) => {
         run_attempt: runAttempt,
         source_head: sourceHead,
         qualification_kind: "INSTALLED_ELECTRON",
+        nonce_bound: approval.nonce_bound === true,
         oidc_verified: true,
         github_run_verified: true,
         master_secret_exposed: false,
@@ -186,6 +190,7 @@ Deno.serve(async (req: Request) => {
         run_id: runId,
         run_attempt: runAttempt,
         source_head: sourceHead,
+        nonce_bound: true,
         oidc_verified: true,
         github_run_verified: true,
         master_secret_exposed: false,
