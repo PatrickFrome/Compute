@@ -46,7 +46,9 @@ The current product is R97/R109's single native Agent workspace, not the histori
 | P2 | Heavy tools eagerly load | Main shell imports all advanced pages. | Lazy page modules; retained tools keep their existing ownership and controls. |
 | P2 | External presentation dependencies | Google-font build downloads and an unrelated remote favicon. | System font stack and METAENGINE metadata; no runtime font/icon request needed. |
 | P1 | Settings advertises unavailable mutations | Token writes, policy reload and source check remain enabled without a successful resource read; recovery copy points to retired SQLite files. | Require available section data before exposing these actions; remove obsolete local-database advice. |
-| P2 | Package identity reused | Several candidates reuse `0.7.0-dev.36516587173.1`. | Commit unique monotonic candidate version `0.7.0-dev.36718632888.1` before producer qualification. |
+| P1 | Palette portal escapes readable style scope | Physical capture retains 8–10px faint labels and decorative item icons outside the shell scope. | Give the portal its own workbench scope, remove decorative SVGs and duplicate Browser navigation, and physically measure rendered scope/detail font size and contrast. |
+| P1 | Registry flush confirmation closes before review | The direct-action dispatcher closes the palette immediately after `confirmBudgetFlush`. | Keep that confirmation mounted; no flush effect occurs from merely selecting the action. |
+| P2 | Package identity reused | Several candidates reuse `0.7.0-dev.36516587173.1`. | Commit unique monotonic candidate version `0.7.0-dev.36719340135.1` before producer qualification. |
 
 ## Scope and evidence boundaries
 
@@ -59,3 +61,5 @@ Local strict TypeScript and production webpack build pass. Local browser/server 
 Windows clean-build finding: the unused `src/lib/db.ts` template imported an ungenerated Prisma client; no runtime imports refer to it. Removing that dead module closes the clean-install typing failure without disabling strict validation.
 
 Follow-up audit items: historical tracked `.next` output should be removed in a separately qualified repository-hygiene change; deeper advanced pages still contain legacy technical content; the canonical C4/C5 physical Agent-origin/result exit gate remains independent of these UI improvements.
+
+The second physical UI review adds modal opener focus and measures command-palette labels against actual composited backgrounds. This is a bounded legibility gate, not a full accessibility certification.

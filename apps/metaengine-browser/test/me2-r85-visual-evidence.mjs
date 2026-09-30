@@ -281,7 +281,21 @@ async function metrics(contents) {
       const r = el.getBoundingClientRect();
       return { x:r.x, y:r.y, width:r.width, height:r.height };
     };
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const ctx = canvas.getContext('2d', { willReadFrequently:true });
+    const rgba = (color) => { ctx.clearRect(0,0,1,1); ctx.fillStyle = color; ctx.fillRect(0,0,1,1); return [...ctx.getImageData(0,0,1,1).data]; };
+    const composite = (fg,bg) => fg.slice(0,3).map((v,i) => v*fg[3]/255+bg[i]*(1-fg[3]/255));
+    const luminance = (rgb) => rgb.map((v) => { const c=v/255; return c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); }).reduce((n,v,i)=>n+v*[0.2126,0.7152,0.0722][i],0);
+    const paletteTextStyles = [...document.querySelectorAll('[data-palette-detail], [data-palette-scope]')].filter((el)=>el.getClientRects().length).map((el)=>{
+      const ancestors=[]; for(let n=el;n;n=n.parentElement) ancestors.unshift(n);
+      let bg=[0,0,0]; for(const n of ancestors) bg=composite(rgba(getComputedStyle(n).backgroundColor),bg);
+      const style=getComputedStyle(el); const fg=composite(rgba(style.color),bg);
+      const a=luminance(fg), b=luminance(bg);
+      return { text:el.textContent, font_size:parseFloat(style.fontSize), contrast:(Math.max(a,b)+0.05)/(Math.min(a,b)+0.05) };
+    });
     return {
+      palette_text_styles: paletteTextStyles,
+      palette_svg_count: document.querySelectorAll('[cmdk-root] svg').length,
       topbar: rect('topbar'),
       primary: rect('primary-chat-fleet'),
       rail: rect('chat-fleet-rail'),
@@ -551,6 +565,14 @@ async function main() {
     if (!searchCapture.metrics.palette_present) throw new Error('r97_visual_command_search_not_visible');
     evidence.captures.push(searchCapture);
     evidence.command_search_available = true;
+    if (searchCapture.metrics.palette_text_styles.length < 4 || searchCapture.metrics.palette_text_styles.some((row) => row.font_size < 12 || row.contrast < 4.5) || searchCapture.metrics.palette_svg_count !== 0) throw new Error('ui1_palette_legibility_failed');
+    evidence.command_palette_legibility_verified = true;
+    if (geometryFixture.getVisible()) throw new Error('ui1_native_fixture_overlays_command_palette');
+    shellView.webContents.focus();
+    shellView.webContents.sendInputEvent({ type:'keyDown', keyCode:'Escape' });
+    shellView.webContents.sendInputEvent({ type:'keyUp', keyCode:'Escape' });
+    await waitFor(shellView.webContents, "!document.querySelector('[cmdk-root]') && document.activeElement?.getAttribute('data-testid') === 'global-cmdbar'");
+    evidence.command_palette_focus_verified = true;
     if (goalSubmitCount !== 1) throw new Error(`ui1_goal_submission_replayed:${goalSubmitCount}`);
     evidence.goal_submit_once_verified = true;
 

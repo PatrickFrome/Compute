@@ -162,6 +162,8 @@ jobs:
               -or $evidence.exact_main_workspace -ne $true `
               -or $evidence.advanced_surfaces_settings_only -ne $true `
               -or $evidence.command_search_available -ne $true `
+              -or $evidence.command_palette_legibility_verified -ne $true `
+              -or $evidence.command_palette_focus_verified -ne $true `
               -or $evidence.native_geometry_verified -ne $true `
               -or $evidence.narrow_agent_picker_verified -ne $true `
               -or $evidence.goal_status_focus_verified -ne $true `
