@@ -10,7 +10,9 @@ const REPOSITORY_ID = "1341371143";
 const OWNER_ID = "20597814";
 const WORKFLOW_PATH = ".github/workflows/browser-windows-installed-chat-qualification.yml";
 const WORKFLOW_REF_PREFIX = `${REPO}/${WORKFLOW_PATH}@`;
-const SUBJECT = `repo:${REPO}:pull_request`;
+const LEGACY_SUBJECT = `repo:${REPO}:pull_request`;
+const IMMUTABLE_SUBJECT = `repo:PatrickFrome@${OWNER_ID}/Compute@${REPOSITORY_ID}:pull_request`;
+const ALLOWED_SUBJECTS = new Set([LEGACY_SUBJECT, IMMUTABLE_SUBJECT]);
 const SHA40 = /^[0-9a-f]{40}$/;
 
 const SUPABASE_URL = String(Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
@@ -170,7 +172,7 @@ Deno.serve(async (req: Request) => {
     if (String(payload.repository_owner_id || "") !== OWNER_ID) throw new Error("repository_owner_id_forbidden");
     if (payload.event_name !== "pull_request") throw new Error("event_forbidden");
     if (payload.runner_environment !== "github-hosted") throw new Error("runner_environment_forbidden");
-    if (payload.sub !== SUBJECT) throw new Error("subject_forbidden");
+    if (!ALLOWED_SUBJECTS.has(String(payload.sub || ""))) throw new Error("subject_forbidden");
     if (!String(payload.workflow_ref || "").startsWith(WORKFLOW_REF_PREFIX)) {
       throw new Error("workflow_ref_forbidden");
     }
