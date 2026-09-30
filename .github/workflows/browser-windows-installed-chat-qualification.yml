@@ -1,4 +1,5 @@
 name: Browser Windows Installed Chat Qualification
+# ADMIN.1 exact-head physical gate: OIDC-correlated enrollment + signed ADMIN readback.
 
 on:
   push:
