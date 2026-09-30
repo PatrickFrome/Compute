@@ -234,3 +234,38 @@ The secure invariant is:
 - after enrollment, connection and ADMIN reauthorization are automatic and revocable.
 
 A future zero-touch *new machine* flow must bind enrollment to a separate trusted installation/owner attestation; it must not be implemented by embedding a reusable master secret.
+
+
+## Installed Electron qualification trust
+
+The Windows installed-runtime gate initially exposed a useful distinction:
+
+- the installed Browser reached `NATIVE_SUPERVISOR READY`;
+- UI, packaged daemon and clean-genesis control were healthy;
+- the runtime remained `WAITING_FOR_ENROLLMENT`;
+- therefore `ADMIN_CONNECTED` could not honestly be claimed on a fresh GitHub-hosted machine.
+
+The qualification path now uses a separate backend-only GitHub Actions OIDC gate:
+
+`metaengine-client-installed-qualification-h205f22`
+
+It verifies:
+
+- GitHub OIDC issuer and dedicated audience;
+- exact repository/repository ID/owner ID;
+- pull-request subject;
+- exact installed-qualification workflow path;
+- GitHub-hosted runner;
+- run ID + attempt;
+- live GitHub Actions run metadata;
+- exact run head SHA.
+
+Approval is additionally bound to a random 256-bit per-run correlation value. Only its SHA-256 is inherited by the installed Browser and stored in enrollment metadata. The SQL approval RPC requires the exact tuple:
+
+`run_id + run_attempt + source_head + qualification_nonce_sha256`
+
+and exactly one fresh matching `INSTALLED_ELECTRON` enrollment request.
+
+The GitHub OIDC minting environment is cleared before Electron starts. The OIDC JWT itself exists only in the workflow PowerShell process and is never passed to the Browser. The qualification hash has no independent authority and cannot approve anything without the separately verified GitHub OIDC identity.
+
+This gate is deliberately isolated from normal production enrollment. It exists to produce physical installed-runtime evidence, not to make arbitrary freshly downloaded Browser copies self-authorizing administrators.
