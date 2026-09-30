@@ -13,6 +13,7 @@ test('convergence candidate package identity matches the reserved exact source c
   assert.equal(pkg.version, reserved);
 
   const parsed = parseMetaengineDevVersion(pkg.version);
+  assert.ok(parsed, "reserved package identity must be accepted by the trusted updater");
   assert.deepEqual(parsed, {
     version: reserved,
     core: '0.7.0',

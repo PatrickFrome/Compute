@@ -46,7 +46,7 @@ The current product is R97/R109's single native Agent workspace, not the histori
 | P2 | Heavy tools eagerly load | Main shell imports all advanced pages. | Lazy page modules; retained tools keep their existing ownership and controls. |
 | P2 | External presentation dependencies | Google-font build downloads and an unrelated remote favicon. | System font stack and METAENGINE metadata; no runtime font/icon request needed. |
 | P1 | Settings advertises unavailable mutations | Token writes, policy reload and source check remain enabled without a successful resource read; recovery copy points to retired SQLite files. | Require available section data before exposing these actions; remove obsolete local-database advice. |
-| P2 | Package identity reused | Several candidates reuse `0.7.0-dev.36516587173.1`. | Commit unique monotonic candidate version `0.7.0-dev.36686651354.2` before producer qualification. |
+| P2 | Package identity reused | Several candidates reuse `0.7.0-dev.36516587173.1`. | Commit unique monotonic candidate version `0.7.0-dev.36718632888.1` before producer qualification. |
 
 ## Scope and evidence boundaries
 
@@ -55,5 +55,7 @@ This slice repairs presentation, observation and installed UI qualification. It 
 The Windows visual harness uses a labeled local native geometry fixture and controlled IPC receipts. It proves renderer/native composition, navigation and interaction contracts. It does not prove C4/C5 live Agent execution, perpetual autonomous development, a working user-machine update or production readiness.
 
 Local strict TypeScript and production webpack build pass. Local browser/server launch was blocked by the execution environment (`uv_interface_addresses`, executable permission); no local live visual PASS is claimed. Windows exact-head Package Smoke, Installed Chat, Final Runtime, Soak and Self Update remain required.
+
+Windows clean-build finding: the unused `src/lib/db.ts` template imported an ungenerated Prisma client; no runtime imports refer to it. Removing that dead module closes the clean-install typing failure without disabling strict validation.
 
 Follow-up audit items: historical tracked `.next` output should be removed in a separately qualified repository-hygiene change; deeper advanced pages still contain legacy technical content; the canonical C4/C5 physical Agent-origin/result exit gate remains independent of these UI improvements.
