@@ -61,6 +61,7 @@ export function nativeSupervisorEnrollmentMetadata(version, { env = process.env 
   const runId = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ID || '').trim();
   const runAttempt = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ATTEMPT || '').trim();
   const sourceHead = String(env?.METAENGINE_ENROLLMENT_SOURCE_HEAD || '').trim().toLowerCase();
+  const qualificationNonceSha256 = String(env?.METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256 || '').trim().toLowerCase();
   const correlationValid = kind === 'INSTALLED_ELECTRON'
     && /^[0-9]{1,20}$/.test(runId)
     && /^[1-9][0-9]{0,5}$/.test(runAttempt)
@@ -70,6 +71,9 @@ export function nativeSupervisorEnrollmentMetadata(version, { env = process.env 
     metadata.qualification_run_id = runId;
     metadata.qualification_run_attempt = runAttempt;
     metadata.source_head = sourceHead;
+    if (/^[0-9a-f]{64}$/.test(qualificationNonceSha256)) {
+      metadata.qualification_nonce_sha256 = qualificationNonceSha256;
+    }
   }
   return Object.freeze(metadata);
 }
