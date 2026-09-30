@@ -158,6 +158,20 @@ export class SupervisorDeviceIdentity {
     return this.#persist({ ...this.#state, enrollment_request_id: null });
   }
 
+  async clearDeviceBindingForReenrollment() {
+    await this.ensure();
+    // Preserve client_id + public/private key material. Only the server-issued
+    // device binding is cleared, so a recoverable auth denial enters the
+    // ordinary approval enrollment path without rotating identity or embedding
+    // another credential. Revocation is never bypassed: the replacement device
+    // still requires server approval before any signed privileged route works.
+    return this.#persist({
+      ...this.#state,
+      enrollment_request_id: null,
+      device_id: null,
+    });
+  }
+
   async bindDevice(deviceId) {
     await this.ensure();
     if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw new Error('supervisor_device_id_invalid');
