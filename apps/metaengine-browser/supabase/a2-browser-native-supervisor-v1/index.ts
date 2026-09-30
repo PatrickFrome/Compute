@@ -180,7 +180,83 @@ function enrollmentMetadata(body:any){
 }
 async function enrollmentRequest(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const existing=await enrollmentExisting(proof.id!,proof.fingerprint!);if(existing[0])return json(existing[0].status==='APPROVED'?200:202,{accepted:true,...existing[0],reason:'EXISTING_REQUEST',authority_effect:false});const rows=await enrollmentInsert(proof.id!,proof.jwk,proof.fingerprint!,enrollmentMetadata(body));const row=rows[0];if(!row)throw new Error('enrollment_insert_failed');return json(202,{accepted:true,...row,reason:'APPROVAL_REQUIRED',authority_effect:false})}
 async function enrollmentStatus(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const requestId=String(body?.request_id||'');if(!/^[0-9a-f-]{36}$/i.test(requestId))return json(400,{error:'request_id_invalid'});const rows=await enrollmentById(requestId,proof.id!,proof.fingerprint!);const row=rows[0];if(!row)return json(404,{error:'enrollment_request_not_found'});if(row.status==='PENDING')return json(202,{accepted:false,request_id:row.request_id,status:'PENDING',reason:'APPROVAL_REQUIRED',expires_at:row.expires_at,authority_effect:false});if(row.status==='REJECTED'||row.status==='EXPIRED')return json(409,{accepted:false,request_id:row.request_id,status:row.status,reason:`REQUEST_${row.status}`,authority_effect:false});const activated=await rpc(ACTIVATE_RPC,{p_request_id:row.request_id,p_client_id:proof.id,p_profile:PROFILE,p_key_fingerprint_sha256:proof.fingerprint,p_public_jwk:proof.jwk});return json(activated?.accepted===true?200:409,{...activated,request_id:row.request_id,authority_effect:false})}
-async function authenticateDevice(req:Request,path:string,bodyText:string){const id=clientId(req);if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};const profile=String(req.headers.get('x-a2-device-profile')||'');const deviceId=String(req.headers.get('x-a2-device-id')||'');const timestamp=String(req.headers.get('x-a2-device-timestamp')||'');const nonce=String(req.headers.get('x-a2-device-nonce')||'');const bodyHash=String(req.headers.get('x-a2-device-body-sha256')||'').toLowerCase();const signature=String(req.headers.get('x-a2-device-signature')||'');if(profile!==PROFILE||!/^[0-9a-f-]{36}$/i.test(deviceId)||!Number.isFinite(Date.parse(timestamp))||!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(bodyHash)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'DEVICE_HEADERS_INVALID'};if(await sha256(bodyText)!==bodyHash)return{ok:false,reason:'BODY_HASH_MISMATCH'};const rows=await deviceLookup(deviceId,id);const device=rows[0];if(!device)return{ok:false,reason:'DEVICE_NOT_FOUND'};if(device.active!==true||device.revoked_at)return{ok:false,reason:'DEVICE_REVOKED'};let jwk;try{jwk=canonicalJwk(device.public_jwk)}catch{return{ok:false,reason:'DEVICE_KEY_INVALID'}};const material=[PROFILE,`device_id:${deviceId}`,`method:${req.method.toUpperCase()}`,`path:${path}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${bodyHash}`].join('\n');if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};const grant=String(device.enrollment_pairing_token_hash||'');const grants=await pairingLookup(grant);if(grants.length!==1)return{ok:false,reason:'PAIRING_REVOKED'};const nr=await rpc(NONCE_RPC,{p_device_id:deviceId,p_client_id:id,p_nonce_sha256:await sha256(nonce),p_request_timestamp:timestamp});if(nr?.accepted!==true)return{ok:false,reason:String(nr?.reason||'NONCE_REJECTED')};return{ok:true,id,device_id:deviceId,profile:PROFILE,key_fingerprint_sha256:nr.key_fingerprint_sha256||null}}
+async function authenticateDevice(req:Request,path:string,bodyText:string){
+  const id=clientId(req);
+  if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};
+  const profile=String(req.headers.get('x-a2-device-profile')||'');
+  const deviceId=String(req.headers.get('x-a2-device-id')||'');
+  const timestamp=String(req.headers.get('x-a2-device-timestamp')||'');
+  const nonce=String(req.headers.get('x-a2-device-nonce')||'');
+  const bodyHash=String(req.headers.get('x-a2-device-body-sha256')||'').toLowerCase();
+  const signature=String(req.headers.get('x-a2-device-signature')||'');
+  if(profile!==PROFILE||!/^[0-9a-f-]{36}$/i.test(deviceId)||!Number.isFinite(Date.parse(timestamp))||!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(bodyHash)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'DEVICE_HEADERS_INVALID'};
+  if(await sha256(bodyText)!==bodyHash)return{ok:false,reason:'BODY_HASH_MISMATCH'};
+  const rows=await deviceLookup(deviceId,id);
+  const device=Array.isArray(rows)?rows[0]:null;
+  if(!device)return{ok:false,reason:'DEVICE_NOT_FOUND'};
+  if(device.active!==true||device.revoked_at)return{ok:false,reason:'DEVICE_REVOKED'};
+  const adminEpoch=Number(device.admin_grant_epoch);
+  const adminScopes=Array.isArray(device.admin_scopes)?device.admin_scopes.map(String):[];
+  if(
+    String(device.access_tier||'')!=='ADMIN'
+    || device.admin_revoked_at
+    || !Number.isSafeInteger(adminEpoch)
+    || adminEpoch<1
+    || !adminScopes.includes('CONTROL_PLANE')
+  )return{ok:false,reason:'ADMIN_GRANT_REQUIRED'};
+  let jwk;
+  try{jwk=canonicalJwk(device.public_jwk)}catch{return{ok:false,reason:'DEVICE_KEY_INVALID'}}
+  const material=[PROFILE,`device_id:${deviceId}`,`method:${req.method.toUpperCase()}`,`path:${path}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${bodyHash}`].join('\n');
+  if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};
+  const grant=String(device.enrollment_pairing_token_hash||'');
+  const grants=await pairingLookup(grant);
+  if(!Array.isArray(grants)||grants.length!==1)return{ok:false,reason:'PAIRING_REVOKED'};
+  const nr=await rpc(NONCE_RPC,{p_device_id:deviceId,p_client_id:id,p_nonce_sha256:await sha256(nonce),p_request_timestamp:timestamp});
+  if(nr?.accepted!==true)return{ok:false,reason:String(nr?.reason||'NONCE_REJECTED')};
+  return{
+    ok:true,
+    id,
+    device_id:deviceId,
+    profile:PROFILE,
+    key_fingerprint_sha256:nr.key_fingerprint_sha256||device.key_fingerprint_sha256||null,
+    access_tier:'ADMIN',
+    admin_scopes:adminScopes,
+    admin_grant_epoch:adminEpoch,
+    admin_ready:true,
+  };
+}
+async function adminStatus(identity:any){
+  const readback=await rpc('client_v1_device_admin_readback_v1',{
+    p_device_id:identity.device_id,
+    p_client_id:identity.id,
+    p_key_fingerprint_sha256:identity.key_fingerprint_sha256,
+  });
+  if(
+    readback?.found!==true
+    || readback?.admin_ready!==true
+    || readback?.access_tier!=='ADMIN'
+    || Number(readback?.admin_grant_epoch)!==Number(identity.admin_grant_epoch)
+  )throw new Error('admin_device_readback_not_exact');
+  return{
+    schema:'metaengine.client-v1.admin-connection.v1',
+    connected:true,
+    device_id:identity.device_id,
+    client_id:identity.id,
+    profile:identity.profile,
+    access_tier:'ADMIN',
+    admin_scopes:Array.isArray(readback.admin_scopes)?readback.admin_scopes:[],
+    admin_grant_epoch:Number(readback.admin_grant_epoch),
+    admin_ready:true,
+    backend_transport:'POSTGREST_RPC',
+    direct_postgres_query_plane:false,
+    direct_postgres_notify_only:Boolean(DB_SESSION_URL),
+    master_secret_embedded:false,
+    service_role_embedded:false,
+    cloudflare_token_embedded:false,
+    automatic_effect_retry_allowed:false,
+    authority_effect:false,
+  };
+}
 // P1-2 multi-writer repair: plane ownership semantics for the persisted state.
 // /v1/state accepts three writers (bootstrap heartbeat, 5s supervisor heartbeat,
 // realtime observation push). The former full-JSON replacement meant any writer
@@ -193,7 +269,37 @@ async function authenticateDevice(req:Request,path:string,bodyText:string){const
 // plane keys are emitted only when the writer actually included them.
 const PLANE_KEYS=['tabs','development_plane','compute','fleet','perception','supervisor_lifecycle','supervisor_mesh','self_update','host_resilience','realtime_process_plane','control_latency'] as const;
 function boundedState(value:any){const s=value&&typeof value==='object'?value:{};const tabs=Array.isArray(s.tabs)?s.tabs.slice(0,64).map((t:any)=>({tab_id:String(t?.tab_id||'').slice(0,80),url:String(t?.url||'').slice(0,1200),title:String(t?.title||'').slice(0,240),kind:String(t?.kind||'').slice(0,40),selected:t?.selected===true})):[];const row:any={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(s.shell_version||'').slice(0,32),supervisor_mode:modeOf(s.supervisor_mode),armed:s.armed===true,operator_mode:String(s.operator_mode||'CONTROL').slice(0,32),active_tab:s.active_tab&&typeof s.active_tab==='object'?s.active_tab:null,realtime_observation_push:s.realtime_observation_push===true,last_error:String(s.last_error||'').slice(0,500)||null,started_at:s.started_at||null,heartbeat_at:new Date().toISOString()};if('tabs'in s)row.tabs=tabs;if('development_plane'in s)row.development_plane=boundedObject(s.development_plane,32768);if('compute'in s)row.compute=boundedObject(s.compute,32768);if('fleet'in s)row.fleet=boundedObject(s.fleet,65536);if('perception'in s)row.perception=boundedObject(s.perception,32768);if('supervisor_lifecycle'in s)row.supervisor_lifecycle=boundedObject(s.supervisor_lifecycle,32768);if('supervisor_mesh'in s)row.supervisor_mesh=boundedMesh(s.supervisor_mesh);if('self_update'in s)row.self_update=boundedObject(s.self_update,32768);if('host_resilience'in s)row.host_resilience=boundedObject(s.host_resilience,32768);if('realtime_process_plane'in s)row.realtime_process_plane=boundedObject(s.realtime_process_plane,262144);if('control_latency'in s)row.control_latency=boundedObject(s.control_latency,32768);if('rsi'in s)row.rsi=boundedObject(s.rsi,16384);if('rsi_outcome_river'in s)row.rsi_outcome_river=boundedObject(s.rsi_outcome_river,16384);if('rsi_operator_steering'in s)row.rsi_operator_steering=boundedObject(s.rsi_operator_steering,16384);return row}
-async function upsertState(req:Request,body:any,identity:any){const id=clientId(req);const s=boundedState(body?.state);if(s.supervisor_mesh)await rpc(MESH_SYNC_RPC,{p_client_id:id,p_mesh:s.supervisor_mesh});const row={client_id:id,workspace_id:WORKSPACE_ID,extension_version:s.shell_version||null,operator_runtime:'native-electron-supervisor-v1',supervisor_mode:s.supervisor_mode,armed:s.armed,operator_mode:s.operator_mode,ordering_policy:'NATIVE_TYPED_COMMAND_LANES_V1',last_command_id:body?.last_command_id||null,last_command_status:body?.last_command_status||null,state:{...s,transport_identity:{profile:identity.profile,device_id:identity.device_id,key_fingerprint_sha256:identity.key_fingerprint_sha256}},authority_effect:s.supervisor_mode==='CONTROL'||s.armed===true};await upsertStateRow(row);return{...row,last_seen_at:new Date().toISOString()}}
+async function upsertState(req:Request,body:any,identity:any){
+  const id=clientId(req);
+  const s=boundedState(body?.state);
+  if(s.supervisor_mesh)await rpc(MESH_SYNC_RPC,{p_client_id:id,p_mesh:s.supervisor_mesh});
+  const row={
+    client_id:id,
+    workspace_id:WORKSPACE_ID,
+    extension_version:s.shell_version||null,
+    operator_runtime:'native-electron-supervisor-v1',
+    supervisor_mode:s.supervisor_mode,
+    armed:s.armed,
+    operator_mode:s.operator_mode,
+    ordering_policy:'NATIVE_TYPED_COMMAND_LANES_V1',
+    last_command_id:body?.last_command_id||null,
+    last_command_status:body?.last_command_status||null,
+    state:{
+      ...s,
+      transport_identity:{
+        profile:identity.profile,
+        device_id:identity.device_id,
+        key_fingerprint_sha256:identity.key_fingerprint_sha256,
+        access_tier:identity.access_tier,
+        admin_grant_epoch:identity.admin_grant_epoch,
+        admin_ready:identity.admin_ready===true,
+      },
+    },
+    authority_effect:s.supervisor_mode==='CONTROL'||s.armed===true,
+  };
+  const merged=await upsertStateRow(row);
+  return{...row,last_seen_at:merged?.last_seen_at||new Date().toISOString()};
+}
 async function lease(req:Request,body:any){return rpc(LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120})}
 async function leaseBatch(req:Request,body:any){return rpc(BATCH_LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120,p_max_batch:Math.max(1,Math.min(64,Number(body?.max_batch)||64)),p_max_tab_mutations:Math.max(1,Math.min(16,Number(body?.max_tab_mutations)||8))})}
 function realtimeTopic(client:string){return`metaengine-control:${WORKSPACE_ID}:${client}`}
@@ -281,8 +387,8 @@ async function issueTool(req:Request,body:any){
     return json(409,{accepted:false,error:'agent_tool_issue_failed',reason:String((error as any)?.message||error).slice(0,160),authority_effect:false});
   }
 }
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
-async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,profile:PROFILE,approval_enrollment:true,admin_device_grant_required:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,device_auth_required:true,admin_device_grant_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
@@ -335,6 +441,7 @@ Deno.serve(async(req:Request)=>{
     const canonicalPath=`${SERVICE_MARKER}${path}`;
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
+    if(req.method==='GET'&&path==='/v1/admin/status')return json(200,await adminStatus(identity));
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
     const emergency=await emergencyRoutes({req,path,body,clientId:identity.id});if(emergency)return emergency;
     const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
@@ -356,7 +463,7 @@ Deno.serve(async(req:Request)=>{
     if(req.method==='GET'&&path==='/v1/status')return json(200,await status());
     return json(404,{error:'not_found'});
   }catch(e){
-    console.error('native_supervisor_direct_postgres_failure',String((e as any)?.message||e));
-    return json(502,{error:'native_supervisor_failure',backend_transport:'DIRECT_POSTGRES'});
+    console.error('native_supervisor_request_failure',String((e as any)?.message||e));
+    return json(502,{error:'native_supervisor_failure',backend_transport:'POSTGREST_RPC'});
   }
 });
