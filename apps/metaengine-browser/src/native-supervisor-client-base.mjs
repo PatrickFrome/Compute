@@ -1290,6 +1290,8 @@ export class NativeSupervisorClient {
       ) {
         throw new Error(`native_supervisor_admin_status_invalid:${response.status}`);
       }
+      const priorAdminReady = this.#adminStatus?.admin_ready === true;
+      const priorAdminEpoch = Number(this.#adminStatus?.admin_grant_epoch || 0);
       this.#adminStatus = Object.freeze({
         state: 'ADMIN_READY',
         admin_ready: true,
@@ -1302,6 +1304,23 @@ export class NativeSupervisorClient {
         authority_effect: false,
       });
       this.#markConnectionSuccess();
+      if (!priorAdminReady || priorAdminEpoch !== Number(body.admin_grant_epoch)) {
+        console.log(JSON.stringify({
+          schema: 'metaengine.client.admin-connection.v1',
+          state: 'ADMIN_CONNECTED',
+          device_id: String(body.device_id),
+          access_tier: 'ADMIN',
+          admin_grant_epoch: Number(body.admin_grant_epoch),
+          admin_scopes: body.admin_scopes.map((value) => String(value)),
+          backend_transport: String(body.backend_transport || 'UNKNOWN'),
+          direct_postgres_query_plane: body.direct_postgres_query_plane === true,
+          automatic_reconnect: true,
+          master_secret_embedded: false,
+          service_role_embedded: false,
+          cloudflare_token_embedded: false,
+          authority_effect: false,
+        }));
+      }
       return this.#adminStatus;
     } catch (error) {
       this.#adminStatus = Object.freeze({
