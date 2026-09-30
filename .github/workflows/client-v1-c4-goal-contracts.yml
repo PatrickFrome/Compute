@@ -27,6 +27,7 @@ on:
       - 'supabase/migrations/20260929224500_client_v1_agent_origin_result_proof_v1.sql'
       - 'supabase/migrations/20260930163000_client_v1_admin_connectivity_v1.sql'
       - 'supabase/migrations/20260930165500_client_v1_installed_qualification_oidc_v1.sql'
+      - 'supabase/migrations/20260930171500_client_v1_installed_qualification_nonce_v1.sql'
       - 'supabase/functions/metaengine-client-installed-qualification-h205f22/**'
       - 'apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs'
       - 'apps/metaengine-browser/test/fixtures/client-goal-proof.mjs'
