@@ -59,6 +59,25 @@ function serviceHeaders(extra: Record<string, string> = {}) {
   return headers;
 }
 
+async function rest(path: string) {
+  if (!REST_BASE || !SERVICE_KEY) throw new Error("supabase_server_identity_missing");
+  if (!String(path || "").startsWith("/")) throw new Error("postgrest_path_invalid");
+  const response = await fetch(`${REST_BASE}${path}`, {
+    method: "GET",
+    headers: serviceHeaders(),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`postgrest_http_${response.status}:${text.slice(0, 180)}`);
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("postgrest_json_invalid");
+  }
+}
+
 async function rpc(name: string, args: Record<string, unknown>) {
   if (!REST_BASE || !SERVICE_KEY) throw new Error("supabase_server_identity_missing");
   if (!/^[a-z0-9_]+$/i.test(name)) throw new Error("rpc_name_invalid");
@@ -77,6 +96,36 @@ async function rpc(name: string, args: Record<string, unknown>) {
   } catch {
     throw new Error("postgrest_json_invalid");
   }
+}
+
+async function exactNonceEnrollmentRows({
+  runId,
+  runAttempt,
+  sourceHead,
+  qualificationNonceSha256,
+}: {
+  runId: string;
+  runAttempt: number;
+  sourceHead: string;
+  qualificationNonceSha256: string;
+}) {
+  const now = new Date();
+  const minRequestedAt = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
+  const params = new URLSearchParams();
+  params.set("status", "in.(PENDING,APPROVED)");
+  params.set("expires_at", `gt.${now.toISOString()}`);
+  params.set("requested_at", `gte.${minRequestedAt}`);
+  params.set("metadata->>qualification_kind", "eq.INSTALLED_ELECTRON");
+  params.set("metadata->>client_kind", "eq.METAENGINE_BROWSER_ELECTRON_NATIVE");
+  params.set("metadata->>qualification_run_id", `eq.${runId}`);
+  params.set("metadata->>qualification_run_attempt", `eq.${runAttempt}`);
+  params.set("metadata->>source_head", `eq.${sourceHead}`);
+  params.set("metadata->>qualification_nonce_sha256", `eq.${qualificationNonceSha256}`);
+  params.set("select", "request_id,client_id,status,requested_at,expires_at");
+  params.set("order", "requested_at.desc");
+  params.set("limit", "2");
+  const rows = await rest(`/compute_fabric_a2_browser_device_enrollment_request_h205f22?${params.toString()}`);
+  return Array.isArray(rows) ? rows : [];
 }
 
 async function githubRun(runId: string) {
@@ -155,34 +204,17 @@ Deno.serve(async (req: Request) => {
       && run.pull_requests.some((row: any) => String(row?.head?.sha || "").toLowerCase() === sourceHead);
     if (!exactPr) throw new Error("run_pr_head_binding_missing");
 
-    const approval = await rpc("client_v1_installed_qualification_approve_v1", {
-      p_run_id: runId,
-      p_run_attempt: runAttempt,
-      p_source_head: sourceHead,
-      p_qualification_nonce_sha256: qualificationNonceSha256,
+    // Nonce preflight is performed in the OIDC verifier itself so the live
+    // qualification path remains fail-closed even while the optional V2 SQL
+    // nonce migration is not yet applied. The already-live V1 approval RPC
+    // independently rejects an ambiguous run tuple (>1 matching request).
+    const exactRows = await exactNonceEnrollmentRows({
+      runId,
+      runAttempt,
+      sourceHead,
+      qualificationNonceSha256,
     });
-
-    if (approval?.accepted === true) {
-      return reply(200, {
-        schema: "metaengine.client-v1.installed-qualification-oidc.v1",
-        accepted: true,
-        reason: approval.reason,
-        request_id: approval.request_id,
-        client_id: approval.client_id,
-        run_id: runId,
-        run_attempt: runAttempt,
-        source_head: sourceHead,
-        qualification_kind: "INSTALLED_ELECTRON",
-        nonce_bound: approval.nonce_bound === true,
-        oidc_verified: true,
-        github_run_verified: true,
-        master_secret_exposed: false,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      });
-    }
-
-    if (approval?.reason === "QUALIFICATION_REQUEST_NOT_FOUND") {
+    if (exactRows.length === 0) {
       return reply(202, {
         schema: "metaengine.client-v1.installed-qualification-oidc.v1",
         accepted: false,
@@ -196,6 +228,33 @@ Deno.serve(async (req: Request) => {
         master_secret_exposed: false,
         automatic_retry_allowed: true,
         retry_scope: "READ_MATCH_AND_APPROVE_EXACT_ENROLLMENT_ONLY",
+        authority_effect: false,
+      });
+    }
+    if (exactRows.length !== 1) throw new Error("qualification_nonce_request_ambiguous");
+
+    const approval = await rpc("client_v1_installed_qualification_approve_v1", {
+      p_run_id: runId,
+      p_run_attempt: runAttempt,
+      p_source_head: sourceHead,
+    });
+
+    if (approval?.accepted === true) {
+      return reply(200, {
+        schema: "metaengine.client-v1.installed-qualification-oidc.v1",
+        accepted: true,
+        reason: approval.reason,
+        request_id: approval.request_id,
+        client_id: approval.client_id,
+        run_id: runId,
+        run_attempt: runAttempt,
+        source_head: sourceHead,
+        qualification_kind: "INSTALLED_ELECTRON",
+        nonce_bound: true,
+        oidc_verified: true,
+        github_run_verified: true,
+        master_secret_exposed: false,
+        automatic_retry_allowed: false,
         authority_effect: false,
       });
     }
