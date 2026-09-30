@@ -9,6 +9,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(HERE, '..');
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 const BINDING_PATH = path.join(REPO_ROOT, 'coordination', 'convergence', 'R83_EDGE_V14_CANARY_SOURCE_BINDING_V1.json');
+const ADMIN_CONNECTIVITY_MIGRATION = path.join(REPO_ROOT, 'supabase', 'migrations', '20260930163000_client_v1_admin_connectivity_v1.sql');
 
 function gitTextBlobSha1(bytes) {
   // actions/checkout on Windows may materialize CRLF even though the Git blob is
@@ -76,15 +77,19 @@ test('R83 deployed v14 binding classifies source drift as requalification-requir
 
 test('R83 canonical Edge source exposes every canary convergence capability before promotion', async () => {
   const source = await fs.readFile(path.join(APP_ROOT, 'supabase', 'a2-browser-native-supervisor-v1', 'index.ts'), 'utf8');
+  const migration = await fs.readFile(ADMIN_CONNECTIVITY_MIGRATION, 'utf8');
   for (const pattern of [
     /createPostgresCommandWakeHub/,
     /createRsiResultReceiptReadback/,
     /createEmergencyCommandRoutes/,
-    /state=coalesce\(target\.state,'\{\}'::jsonb\)\|\|excluded\.state/,
+    /client_v1_native_supervisor_state_merge_v1/,
     /cognitive_delta_route:true/,
     /postgres_notify_wake:Boolean\(DB_SESSION_URL\)/,
     /command_wait_batch:\(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN\)\?'REALTIME_BROADCAST_PROXY':\(DB_SESSION_URL\?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'\)/,
     /result_receipt_readback:true/,
     /emergency_wait_route:true/,
   ]) assert.match(source, pattern);
+  assert.match(migration, /create or replace function public\.client_v1_native_supervisor_state_merge_v1/);
+  assert.match(migration, /state=coalesce\(target\.state,'\{\}'::jsonb\)\|\|excluded\.state/);
+  assert.match(migration, /grant execute on function public\.client_v1_native_supervisor_state_merge_v1[\s\S]*to service_role/i);
 });
