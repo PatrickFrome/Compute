@@ -19,6 +19,7 @@ concurrency:
 permissions:
   contents: read
   actions: read
+  id-token: write
 
 jobs:
   windows-installed-chat-qualification:
@@ -133,6 +134,8 @@ jobs:
           METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ID: ${{ github.run_id }}
           METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ATTEMPT: ${{ github.run_attempt }}
           METAENGINE_ENROLLMENT_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          METAENGINE_SUPERVISOR_BASE_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary
+          METAENGINE_INSTALL_QUALIFIER_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/metaengine-client-installed-qualification-h205f22
         run: |
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
@@ -200,6 +203,44 @@ jobs:
           }
           $controlStatePath = Join-Path ([string]$profile.user_data_path) 'metaengine-native-supervisor-control-state-v1.json'
 
+          # The installed Browser never receives GitHub OIDC. The workflow uses
+          # it out-of-band only to approve the exact enrollment request created
+          # by this run/head/attempt on the isolated qualification path.
+          if (-not $env:ACTIONS_ID_TOKEN_REQUEST_URL -or -not $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
+            throw 'installed_qualification_oidc_environment_missing'
+          }
+          $audience = 'metaengine-client-installed-qualification'
+          $oidcUri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=$([uri]::EscapeDataString($audience))"
+          $oidcEnvelope = Invoke-RestMethod -Method Get -Uri $oidcUri -Headers @{
+            Authorization = "bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+          }
+          $qualificationOidc = [string]$oidcEnvelope.value
+          if (-not $qualificationOidc -or ($qualificationOidc -split '\.').Count -ne 3) {
+            throw 'installed_qualification_oidc_token_invalid'
+          }
+          $env:ACTIONS_ID_TOKEN_REQUEST_URL = $null
+          $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN = $null
+          $qualificationNonceBytes = New-Object byte[] 32
+          $qualificationRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+          try { $qualificationRng.GetBytes($qualificationNonceBytes) } finally { $qualificationRng.Dispose() }
+          $qualificationSha = [System.Security.Cryptography.SHA256]::Create()
+          try {
+            $qualificationNonceSha256 = -join ($qualificationSha.ComputeHash($qualificationNonceBytes) | ForEach-Object { $_.ToString('x2') })
+          } finally {
+            $qualificationSha.Dispose()
+          }
+          if ([string]$qualificationNonceSha256 -notmatch '^[0-9a-f]{64}$') {
+            throw 'installed_qualification_nonce_invalid'
+          }
+          $env:METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256 = $qualificationNonceSha256
+          $qualificationBody = @{
+            source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
+            qualification_nonce_sha256 = $qualificationNonceSha256
+          } | ConvertTo-Json -Compress
+          $qualificationApproved = $false
+          $qualificationReadback = $null
+          $qualificationNextAttempt = [DateTime]::UtcNow
+
           $normalOut = "$env:RUNNER_TEMP\installed-chat-normal.out"
           $normalErr = "$env:RUNNER_TEMP\installed-chat-normal.err"
           Remove-Item $normalOut,$normalErr -Force -ErrorAction SilentlyContinue
@@ -207,7 +248,9 @@ jobs:
           try {
             $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
             $null = $normal.Handle
-            $deadline = [DateTime]::UtcNow.AddSeconds(55)
+            # Child inherited only the one-run correlation hash; remove the parent copy immediately.
+            $env:METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256 = $null
+            $deadline = [DateTime]::UtcNow.AddSeconds(180)
             $primaryShellIndex = -1
             $preconnectIndex = -1
             $userSessionIndex = -1
@@ -215,6 +258,8 @@ jobs:
             $initialTabIndex = -1
             $remoteLoadIndex = -1
             $r97UiConfirmed = $false
+            $adminConnected = $false
+            $adminConnection = $null
             $cleanControl = $false
             $controlState = $null
             $readySince = $null
@@ -225,6 +270,36 @@ jobs:
                 Get-Content $normalErr -ErrorAction SilentlyContinue
                 throw "qualified_installed_browser_exited_early:$($normal.ExitCode)"
               }
+
+              if (-not $qualificationApproved -and [DateTime]::UtcNow -ge $qualificationNextAttempt) {
+                try {
+                  $qualificationResponse = Invoke-WebRequest -UseBasicParsing -Method Post `
+                    -Uri $env:METAENGINE_INSTALL_QUALIFIER_URL `
+                    -Headers @{ Authorization = "Bearer $qualificationOidc" } `
+                    -ContentType 'application/json' `
+                    -Body $qualificationBody
+                  $qualificationPayload = $qualificationResponse.Content | ConvertFrom-Json
+                  if ([int]$qualificationResponse.StatusCode -eq 200 `
+                      -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
+                      -and $qualificationPayload.accepted -eq $true `
+                      -and $qualificationPayload.oidc_verified -eq $true `
+                      -and $qualificationPayload.github_run_verified -eq $true `
+                      -and $qualificationPayload.nonce_bound -eq $true `
+                      -and [string]$qualificationPayload.source_head -eq '${{ github.event.pull_request.head.sha || github.sha }}' `
+                      -and [string]$qualificationPayload.run_id -eq '${{ github.run_id }}' `
+                      -and [int]$qualificationPayload.run_attempt -eq [int]'${{ github.run_attempt }}') {
+                    $qualificationApproved = $true
+                    $qualificationReadback = $qualificationPayload
+                  } elseif ([int]$qualificationResponse.StatusCode -ne 202 `
+                      -or $qualificationPayload.reason -ne 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
+                    throw "installed_qualification_oidc_unexpected:$($qualificationResponse.StatusCode):$($qualificationPayload.reason)"
+                  }
+                } catch {
+                  throw "installed_qualification_oidc_failed:$($_.Exception.Message)"
+                }
+                $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
+              }
+
               if (Test-Path $normalOut -PathType Leaf) {
                 $normalLines = @(Get-Content $normalOut -ErrorAction SilentlyContinue)
                 $primaryShellIndex = -1
@@ -234,6 +309,8 @@ jobs:
                 $initialTabIndex = -1
                 $remoteLoadIndex = -1
                 $r97UiConfirmed = $false
+                $adminConnected = $false
+                $adminConnection = $null
                 for ($i = 0; $i -lt $normalLines.Count; $i++) {
                   $line = [string]$normalLines[$i]
                   if (-not $line.Trim().StartsWith('{')) { continue }
@@ -286,6 +363,20 @@ jobs:
                     Get-Content $normalErr -ErrorAction SilentlyContinue
                     throw 'installed_me2_r97_dom_contract_incomplete'
                   }
+                  if ($runtimeEvent.schema -eq 'metaengine.client.admin-connection.v1' `
+                      -and $runtimeEvent.state -eq 'ADMIN_CONNECTED' `
+                      -and $runtimeEvent.access_tier -eq 'ADMIN' `
+                      -and [int64]$runtimeEvent.admin_grant_epoch -ge 1 `
+                      -and $runtimeEvent.backend_transport -eq 'POSTGREST_RPC' `
+                      -and $runtimeEvent.direct_postgres_query_plane -eq $false `
+                      -and $runtimeEvent.automatic_reconnect -eq $true `
+                      -and $runtimeEvent.master_secret_embedded -eq $false `
+                      -and $runtimeEvent.service_role_embedded -eq $false `
+                      -and $runtimeEvent.cloudflare_token_embedded -eq $false `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $adminConnected = $true
+                    $adminConnection = $runtimeEvent
+                  }
                 }
               }
               $cleanControl = $false
@@ -300,7 +391,7 @@ jobs:
                   $cleanControl = $true
                 }
               }
-              if ($primaryShellIndex -ge 0 -and $r97UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
+              if ($primaryShellIndex -ge 0 -and $r97UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $adminConnected -and $cleanControl) {
                 if (-not $readySince) { $readySince = [DateTime]::UtcNow }
                 if (([DateTime]::UtcNow - $readySince).TotalSeconds -ge 2) { break }
               } else {
@@ -319,6 +410,8 @@ jobs:
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
+            if (-not $qualificationApproved -or -not $qualificationReadback) { throw 'installed_oidc_enrollment_qualification_not_proven' }
+            if (-not $adminConnected -or -not $adminConnection) { throw 'installed_admin_connection_not_proven' }
             if (-not $cleanControl) { throw 'installed_clean_genesis_control_not_verified' }
             if ($initialTabIndex -ge 0) { throw 'installed_clean_genesis_created_initial_tab' }
             if ($remoteLoadIndex -ge 0) { throw 'installed_clean_genesis_started_initial_remote_load' }
@@ -341,6 +434,19 @@ jobs:
             $proof | Add-Member -NotePropertyName control_state_schema -NotePropertyValue ([string]$controlState.schema) -Force
             $proof | Add-Member -NotePropertyName control_state_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
             $proof | Add-Member -NotePropertyName control_state_armed -NotePropertyValue ([bool]$controlState.armed) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_qualification_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_request_id -NotePropertyValue ([string]$qualificationReadback.request_id) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_client_id -NotePropertyValue ([string]$qualificationReadback.client_id) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_source_head -NotePropertyValue ([string]$qualificationReadback.source_head) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_nonce_bound -NotePropertyValue ([bool]$qualificationReadback.nonce_bound) -Force
+            $proof | Add-Member -NotePropertyName oidc_token_exposed_to_browser -NotePropertyValue $false -Force
+            $proof | Add-Member -NotePropertyName admin_connection_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName admin_access_tier -NotePropertyValue ([string]$adminConnection.access_tier) -Force
+            $proof | Add-Member -NotePropertyName admin_grant_epoch -NotePropertyValue ([int64]$adminConnection.admin_grant_epoch) -Force
+            $proof | Add-Member -NotePropertyName admin_backend_transport -NotePropertyValue ([string]$adminConnection.backend_transport) -Force
+            $proof | Add-Member -NotePropertyName admin_direct_postgres_query_plane -NotePropertyValue ([bool]$adminConnection.direct_postgres_query_plane) -Force
+            $proof | Add-Member -NotePropertyName admin_automatic_reconnect -NotePropertyValue ([bool]$adminConnection.automatic_reconnect) -Force
+            $proof | Add-Member -NotePropertyName admin_canary_base -NotePropertyValue ([string]$env:METAENGINE_SUPERVISOR_BASE_URL) -Force
             $proof | Add-Member -NotePropertyName remote_content_qualification -NotePropertyValue 'NOT_REQUESTED_IN_CLEAN_GENESIS' -Force
             $proof | Add-Member -NotePropertyName evidence_source -NotePropertyValue 'INSTALLED_NORMAL_UI_STDOUT_PLUS_DURABLE_CONTROL_STATE' -Force
             $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8

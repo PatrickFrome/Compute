@@ -691,6 +691,7 @@ test('verify binds installer, blockmap, config and exact producer generation', (
       '--run-number', '2465',
       '--run-attempt', '2',
       '--workflow', 'browser-windows-package-smoke.yml',
+      '--package-version', '0.8.3',
     ]);
     const { json } = runCli([
       'verify',
@@ -708,6 +709,8 @@ test('verify binds installer, blockmap, config and exact producer generation', (
     assert.equal(json.provenance_run_number, 2465);
     assert.equal(json.provenance_run_attempt, 2);
     assert.equal(json.provenance_workflow, 'browser-windows-package-smoke.yml');
+    assert.equal(json.package_version, '0.8.3');
+    assert.equal(json.blockmap_path, blockmapPath);
     assert.equal(json.blockmap_verified, true);
     assert.equal(json.config_verified, true);
 

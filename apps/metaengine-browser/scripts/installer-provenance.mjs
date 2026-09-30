@@ -585,6 +585,7 @@ async function verifyInstaller(options) {
   }
 
   let blockmapVerified = false;
+  let verifiedBlockmapPath = null;
   if (provenance.blockmap_name || provenance.blockmap_sha256) {
     const blockmapPath = options.blockmap
       ? resolve(options.blockmap)
@@ -602,6 +603,7 @@ async function verifyInstaller(options) {
       throw new ProvenanceError('blockmap_sha_mismatch', { provenance_sha256: provenance.blockmap_sha256, actual_sha256: blockmapSha256 });
     }
     blockmapVerified = true;
+    verifiedBlockmapPath = resolve(blockmapPath);
   }
 
   let configVerified = false;
@@ -623,6 +625,8 @@ async function verifyInstaller(options) {
     installer_name: installerName,
     installer_sha256: actualSha256,
     installer_bytes: stats.size,
+    package_version: provenance.package_version || null,
+    blockmap_path: verifiedBlockmapPath,
     source_head: provenance.source_head || null,
     provenance_run_id: provenance.run_id || null,
     provenance_run_number: provenance.run_number || null,

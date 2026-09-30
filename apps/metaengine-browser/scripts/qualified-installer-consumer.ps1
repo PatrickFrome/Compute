@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('Acquire', 'Wait')]
+  [ValidateSet('Acquire', 'Verify', 'Wait')]
   [string]$Mode,
 
   [Parameter(Mandatory = $true)]
@@ -135,8 +135,37 @@ if ($Mode -eq 'Acquire') {
 }
 
 if (-not $BindingPath) { throw 'qualified_installer_binding_path_missing' }
-if (-not $ProofPath) { throw 'qualified_installer_proof_path_missing' }
 $binding = Read-JsonFile -Path $BindingPath -MissingCode 'qualified_installer_binding_missing'
+if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding.v1' -or
+    [string]$binding.source_head -ne $ExpectedHead -or
+    [int64]$binding.producer_run_id -le 0 -or
+    [int64]$binding.producer_run_number -le 0 -or
+    [int64]$binding.producer_run_attempt -le 0) {
+  throw 'qualified_installer_binding_invalid'
+}
+
+if ($Mode -eq 'Verify') {
+  if (-not $ConfigPath) { throw 'qualified_installer_config_path_missing' }
+  $payloadPath = Split-Path -Parent ([string]$binding.installer_path)
+  & node $provenanceScript 'verify' '--dir' $payloadPath `
+    '--expect-head' $ExpectedHead `
+    '--expect-run-id' ([string]$binding.producer_run_id) `
+    '--expect-run-number' ([string]$binding.producer_run_number) `
+    '--expect-run-attempt' ([string]$binding.producer_run_attempt) `
+    '--expect-workflow' 'browser-windows-package-smoke.yml' `
+    '--config' $ConfigPath
+  if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_reverify_failed' }
+  $acquired = Read-JsonFile -Path (Join-Path $payloadPath 'acquired.json') -MissingCode 'qualified_installer_acquired_missing'
+  if ([string]$acquired.installer_sha256 -ne [string]$binding.installer_sha256 -or
+      [string]$acquired.installer_path -ne [string]$binding.installer_path -or
+      [string]$acquired.provenance_path -ne [string]$binding.provenance_path -or
+      $acquired.blockmap_verified -ne $true -or $acquired.config_verified -ne $true) {
+    throw 'qualified_installer_reverify_binding_drift'
+  }
+  return
+}
+
+if (-not $ProofPath) { throw 'qualified_installer_proof_path_missing' }
 $proof = Read-JsonFile -Path $ProofPath -MissingCode 'qualified_installer_proof_missing'
 
 $terminalBindingInvalid = (

@@ -846,7 +846,7 @@ async function preparePrimaryShellTarget() {
   return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
-const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
+const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'admin-connection-badge', 'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
 
 function cdpBoxVisible(model) {
   const points = Array.isArray(model?.content) && model.content.length >= 8
@@ -2312,6 +2312,42 @@ ipcMain.handle('metaengine:client:latest-goal', async (event) => {
 ipcMain.handle('metaengine:client:goal-status', async (event, rawRequestId) => {
   assertShellSender(event);
   return refreshClientGoal(rawRequestId);
+});
+ipcMain.handle('metaengine:client:connection-status', async (event) => {
+  assertShellSender(event);
+  const status = nativeSupervisor?.connectionStatus?.() || Object.freeze({
+    schema: 'metaengine.client.connection-status.v1',
+    local_runtime_ready: false,
+    secure_device_key_ready: false,
+    device_enrolled: false,
+    enrollment_state: 'UNINITIALIZED',
+    admin_ready: false,
+    access_tier: null,
+    admin_scopes: Object.freeze([]),
+    admin_grant_epoch: null,
+    cloud_control_state: 'CONNECTING',
+    automatic_reconnect: true,
+    reconnect_uses_existing_supervisor_cycle: true,
+    second_connection_scheduler: false,
+    local_shell_survives_cloud_outage: true,
+    network_availability_guaranteed: false,
+    legacy_daemon_feed_is_authority: false,
+    master_secret_embedded: false,
+    service_role_embedded: false,
+    cloudflare_token_embedded: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+  const reserve = fallbackConsole?.snapshot?.() || null;
+  return Object.freeze({
+    ...status,
+    fallback_mode: reserve?.gate?.mode || 'CLOUD_AUTHORITY',
+    fallback_ready: reserve?.gate?.reserve_usable === true,
+    fallback_enabled: reserve?.failover?.enabled === true,
+    cloud_health: reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN',
+    legacy_daemon_feed_is_authority: false,
+    authority_effect: false,
+  });
 });
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);

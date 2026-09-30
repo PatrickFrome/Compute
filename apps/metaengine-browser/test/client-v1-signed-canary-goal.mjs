@@ -133,6 +133,37 @@ async function devicePost(path, payload, deviceId) {
   return { response, body };
 }
 
+async function deviceGet(path, deviceId) {
+  const bodyText = '';
+  const timestamp = new Date().toISOString();
+  const oneNonce = nonce();
+  const bodySha = hexSha256(bodyText);
+  const canonicalPath = `${CANONICAL_SERVICE}${path}`;
+  const material = [
+    PROFILE,
+    `device_id:${deviceId}`,
+    'method:GET',
+    `path:${canonicalPath}`,
+    `timestamp:${timestamp}`,
+    `nonce:${oneNonce}`,
+    `body_sha256:${bodySha}`,
+  ].join('\n');
+  const response = await fetch(`${base}${path}`, {
+    method: 'GET',
+    headers: {
+      'x-a2-chat-bridge-client': clientId,
+      'x-a2-device-profile': PROFILE,
+      'x-a2-device-id': deviceId,
+      'x-a2-device-timestamp': timestamp,
+      'x-a2-device-nonce': oneNonce,
+      'x-a2-device-body-sha256': bodySha,
+      'x-a2-device-signature': await sign(material),
+    },
+  });
+  const body = await response.json().catch(() => ({}));
+  return { response, body };
+}
+
 const requestPayload = {
   profile: PROFILE,
   public_jwk: publicJwk,
@@ -180,6 +211,27 @@ while (Date.now() - started < timeoutMs) {
 }
 if (!deviceId) throw new Error('canary_enrollment_approval_timeout');
 
+const adminResponse = await deviceGet('/v1/admin/status', deviceId);
+if (adminResponse.response.status !== 200) {
+  throw new Error(`canary_admin_status_http_${adminResponse.response.status}:${JSON.stringify(adminResponse.body)}`);
+}
+const adminStatus = adminResponse.body;
+assert.equal(adminStatus?.schema, 'metaengine.client-v1.admin-connection.v1');
+assert.equal(adminStatus?.connected, true);
+assert.equal(adminStatus?.admin_ready, true);
+assert.equal(adminStatus?.access_tier, 'ADMIN');
+assert.equal(adminStatus?.backend_transport, 'POSTGREST_RPC');
+assert.equal(adminStatus?.direct_postgres_query_plane, false);
+assert.equal(adminStatus?.master_secret_embedded, false);
+assert.equal(adminStatus?.service_role_embedded, false);
+assert.equal(adminStatus?.cloudflare_token_embedded, false);
+assert.equal(adminStatus?.automatic_effect_retry_allowed, false);
+assert.equal(adminStatus?.authority_effect, false);
+assert.ok(Array.isArray(adminStatus?.admin_scopes));
+assert.ok(adminStatus.admin_scopes.includes('CONTROL_PLANE'));
+assert.ok(adminStatus.admin_scopes.includes('DEVOS'));
+assert.ok(adminStatus.admin_scopes.includes('FLEET'));
+
 let physicalPreflight = null;
 if (requirePhysicalAgent) {
   const environmentResponse = await devicePost('/v1/devos/environment-state', {}, deviceId);
@@ -220,6 +272,9 @@ if (requirePhysicalAgent) {
       client_id: clientId,
       enrollment_request_id: requestId,
       device_id: deviceId,
+      admin_status_validated: true,
+      admin_grant_epoch: Number(adminStatus.admin_grant_epoch),
+      backend_transport: adminStatus.backend_transport,
       state: 'PHYSICAL_PREREQUISITES_NOT_READY',
       preflight: physicalPreflight,
       goal_submitted: false,
@@ -383,6 +438,11 @@ const evidence = {
   baseline_sha: clientReadback.baseline_sha,
   plan_sha256: clientReadback.plan_sha256,
   task_spec_sha256: clientReadback.task_spec_sha256,
+  admin_status_validated: true,
+  admin_grant_epoch: Number(adminStatus.admin_grant_epoch),
+  admin_scopes: adminStatus.admin_scopes,
+  backend_transport: adminStatus.backend_transport,
+  direct_postgres_query_plane: adminStatus.direct_postgres_query_plane,
   client_readback_validated: true,
   goal_request_id: goalRequestId,
   progress_readback_validated: true,

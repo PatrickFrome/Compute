@@ -4,14 +4,18 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/client-control-contract.mjs'
+      - 'apps/metaengine-browser/src/supervisor-device-identity.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+      - 'apps/me2-ui/src/components/me2/shell/topbar.tsx'
       - 'apps/metaengine-browser/src/client-goal-journal.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
-      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
       - 'apps/metaengine-browser/src/preload-shell.cjs'
       - 'apps/metaengine-browser/src/meta-objective-compiler.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
       - 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx'
       - 'apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-goal-journal.test.mjs'
@@ -21,6 +25,10 @@ on:
       - 'supabase/migrations/20260929203000_client_v1_plan_generation_watermark_v1.sql'
       - 'supabase/migrations/20260929211500_client_v1_goal_progress_reconciliation_v1.sql'
       - 'supabase/migrations/20260929224500_client_v1_agent_origin_result_proof_v1.sql'
+      - 'supabase/migrations/20260930163000_client_v1_admin_connectivity_v1.sql'
+      - 'supabase/migrations/20260930165500_client_v1_installed_qualification_oidc_v1.sql'
+      - 'supabase/migrations/20260930171500_client_v1_installed_qualification_nonce_v1.sql'
+      - 'supabase/functions/metaengine-client-installed-qualification-h205f22/**'
       - 'apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs'
       - 'apps/metaengine-browser/test/fixtures/client-goal-proof.mjs'
       - '.github/workflows/client-v1-c4-goal-contracts.yml'
@@ -59,5 +67,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
+          node --test apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
           node --check apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs

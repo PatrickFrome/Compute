@@ -1,4 +1,5 @@
 import postgres from 'npm:postgres@3.4.7';
+import { normalizeEnrollmentMetadata } from './enrollment-metadata.mjs';
 import { createDevosSupervisorRoutes, readDevosRuntimeControl, unavailableDevosRuntimeControl } from './devos-routes.mjs';
 import { createDbInspectRoutes } from './db-inspect-routes.mjs';
 import { createDevosPromotionRoutes } from './devos-promotion-routes.mjs';
@@ -12,7 +13,20 @@ import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
 
 const DB_URL=Deno.env.get('SUPABASE_DB_URL')||'';
 const DB_SESSION_URL=Deno.env.get('SUPABASE_DB_SESSION_URL')||'';
-const SERVICE_ROLE=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
+const SUPABASE_URL=String(Deno.env.get('SUPABASE_URL')||'').replace(/\/+$/,'');
+function serverSecretKey(){
+  const modern=String(Deno.env.get('SUPABASE_SECRET_KEYS')||'').trim();
+  if(modern){
+    try{
+      const parsed=JSON.parse(modern);
+      const value=String(parsed?.default||'').trim();
+      if(value)return value;
+    }catch{/* legacy env below */}
+  }
+  return String(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'').trim();
+}
+const SERVICE_ROLE=serverSecretKey();
+const REST_BASE=SUPABASE_URL?SUPABASE_URL+'/rest/v1':'';
 const REALTIME_API_KEY=Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
 // Modern Supabase sb_secret_* values are API keys, not JWT access tokens. Realtime
 // private-channel auth therefore stays disabled unless a legacy JWT-shaped token is
@@ -51,7 +65,11 @@ const MAX_REALTIME_WAIT_MS=15000;
 const cors={'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'content-type,x-a2-chat-bridge-client,x-a2-device-profile,x-a2-device-id,x-a2-device-timestamp,x-a2-device-nonce,x-a2-device-body-sha256,x-a2-device-signature,x-metaengine-enroll-timestamp,x-metaengine-enroll-nonce,x-metaengine-enroll-signature','cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(status:number,body:any)=>new Response(JSON.stringify(body),{status,headers:{...cors,'content-type':'application/json; charset=utf-8'}});
 if(!DB_URL)throw new Error('supabase_db_url_missing');
-const sql=postgres(DB_URL,{max:2,prepare:false,connect_timeout:4,idle_timeout:20});
+if(!REST_BASE||!SERVICE_ROLE)throw new Error('supabase_postgrest_service_identity_missing');
+// Direct Postgres is retained only for explicit DB-inspect diagnostics. Normal
+// enrollment/auth/heartbeat/command/RPC traffic below uses PostgREST so an Edge
+// isolate does not consume a query session merely to serve the Native Browser.
+const sql=postgres(DB_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:20});
 // LISTEN holds a dedicated connection. Keep it isolated from the query pool so a
 // held command-wake subscription cannot starve durable lease/heartbeat queries.
 const wakeSql=DB_SESSION_URL?postgres(DB_SESSION_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:null}):null;
@@ -59,51 +77,33 @@ const postgresWakeHub=createPostgresCommandWakeHub({listen:(channel:string,onNot
   if(!wakeSql)throw new Error('postgres_session_wake_url_unavailable');
   return wakeSql.listen(channel,onNotify,onListen);
 }});
-const rpcMetaCache=new Map<string,any>();
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
-function rpcParam(value:any,_type:string){return value}
-async function rpcMeta(name:string,args:any={}){
-  if(!/^[a-z0-9_]+$/i.test(name))throw new Error('rpc_name_invalid');
-  const key=name+':'+Object.keys(args).sort().join(',');
-  if(rpcMetaCache.has(key))return rpcMetaCache.get(key);
-  const rows=await sql`
-    select p.oid::text as oid,p.pronargs,p.pronargdefaults,p.proretset,
-      coalesce(p.proargnames[1:p.pronargs],array[]::text[]) as arg_names,
-      array(select format_type(t.oid,null)
-            from unnest(p.proargtypes::oid[]) with ordinality u(type_oid,ord)
-            join pg_type t on t.oid=u.type_oid order by u.ord) as arg_types
-    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-    where n.nspname='public' and p.proname=${name}`;
-  const supplied=new Set(Object.keys(args));
-  const candidates=rows.filter((r:any)=>{
-    const names=[...(r.arg_names||[])];
-    const required=names.slice(0,Math.max(0,Number(r.pronargs)-Number(r.pronargdefaults||0)));
-    return [...supplied].every(k=>names.includes(k))&&required.every((k:string)=>supplied.has(k));
+function serviceHeaders(extra:Record<string,string>={}){
+  const headers:Record<string,string>={'apikey':SERVICE_ROLE,'accept':'application/json',...extra};
+  // Legacy service_role JWTs may be used as Bearer tokens. Modern sb_secret_*
+  // keys are deliberately NOT placed in Authorization because they are not JWTs.
+  if(SERVICE_ROLE.split('.').length===3)headers.authorization=`Bearer ${SERVICE_ROLE}`;
+  return headers;
+}
+async function rest(path:string,{method='GET',body=null,prefer=null}:{method?:string,body?:any,prefer?:string|null}={}){
+  if(!String(path||'').startsWith('/'))throw new Error('postgrest_path_invalid');
+  const headers=serviceHeaders(body===null?{}:{'content-type':'application/json'});
+  if(prefer)headers.prefer=prefer;
+  const response=await fetch(REST_BASE+path,{
+    method,
+    headers,
+    body:body===null?undefined:JSON.stringify(body),
+    cache:'no-store',
   });
-  if(candidates.length!==1)throw new Error(`rpc_signature_ambiguous:${name}:${candidates.length}`);
-  rpcMetaCache.set(key,candidates[0]);
-  return candidates[0];
+  const text=await response.text();
+  if(!response.ok)throw new Error(`postgrest_http_${response.status}:${text.slice(0,240)}`);
+  if(!text)return null;
+  try{return JSON.parse(text)}catch{throw new Error('postgrest_json_invalid')}
 }
 async function rpc(name:string,args:any={}){
-  const m=await rpcMeta(name,args);
-  const names=[...m.arg_names];
-  const types=[...m.arg_types];
-  const params:any[]=[];
-  const clauses:string[]=[];
-  for(const [k,v] of Object.entries(args)){
-    const i=names.indexOf(k);
-    if(i<0)throw new Error(`rpc_arg_missing:${name}:${k}`);
-    params.push(rpcParam(v,types[i]));
-    clauses.push(`\"${k}\" => $${params.length}::${types[i]}`);
-  }
-  const call=`public.\"${name}\"(${clauses.join(',')})`;
-  if(m.proretset){
-    const rows=await sql.unsafe(`select to_jsonb(x) as value from ${call} x`,params);
-    return rows.map((r:any)=>r.value);
-  }
-  const rows=await sql.unsafe(`select to_jsonb(${call}) as value`,params);
-  return rows[0]?.value??null;
+  if(!/^[a-z0-9_]+$/i.test(name))throw new Error('rpc_name_invalid');
+  return rest('/rpc/'+encodeURIComponent(name),{method:'POST',body:args});
 }
 async function boundedRpc(name:string,args:any,ms:number){
   let timer:any;
@@ -113,29 +113,57 @@ async function boundedRpc(name:string,args:any,ms:number){
   ])}finally{if(timer)clearTimeout(timer)}
 }
 
-async function enrollmentExisting(client:string,fingerprint:string){return sql.unsafe(`select request_id::text,status,requested_at,expires_at,key_fingerprint_sha256 from public.${ENROLL_TABLE} where client_id=$1 and key_fingerprint_sha256=$2 and status in ('PENDING','APPROVED') and expires_at>clock_timestamp() order by requested_at desc limit 1`,[client,fingerprint])}
-async function enrollmentInsert(client:string,jwk:any,fingerprint:string,metadata:any){return sql.unsafe(`insert into public.${ENROLL_TABLE}(client_id,profile,public_jwk,key_fingerprint_sha256,status,metadata,authority_effect) values($1,$2,$3::jsonb,$4,'PENDING',$5::jsonb,false) returning request_id::text,status,requested_at,expires_at,key_fingerprint_sha256`,[client,PROFILE,jwk,fingerprint,metadata||{}])}
-async function enrollmentById(requestId:string,client:string,fingerprint:string){return sql.unsafe(`select request_id::text,status,requested_at,expires_at,approved_at,device_id::text from public.${ENROLL_TABLE} where request_id=$1::uuid and client_id=$2 and key_fingerprint_sha256=$3 limit 1`,[requestId,client,fingerprint])}
-async function deviceLookup(deviceId:string,client:string){return sql.unsafe(`select device_id::text,client_id,profile,public_jwk,enrollment_pairing_token_hash,active,revoked_at from public.${DEVICE_TABLE} where device_id=$1::uuid and client_id=$2 limit 1`,[deviceId,client])}
-async function pairingLookup(hash:string){return sql.unsafe('select token_hash from public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22 where token_hash=$1 and active=true limit 1',[hash])}
-async function commandLookup(commandId:string){return sql.unsafe(`select command_id::text,action from public.${COMMAND_TABLE} where workspace_id=$1::uuid and command_id=$2::uuid limit 1`,[WORKSPACE_ID,commandId])}
-async function commandReceiptLookup({workspaceId,commandId,clientId}:{workspaceId:string,commandId:string,clientId:string}){const rows=await sql.unsafe(`select command_id::text,leased_by,status,receipt,error from public.${COMMAND_TABLE} where workspace_id=$1::uuid and command_id=$2::uuid and leased_by=$3 limit 1`,[workspaceId,commandId,clientId]);return rows[0]||null}
+const eq=(value:any)=>encodeURIComponent(String(value??''));
+async function enrollmentExisting(client:string,fingerprint:string){
+  const now=encodeURIComponent(new Date().toISOString());
+  return rest(`/${ENROLL_TABLE}?client_id=eq.${eq(client)}&key_fingerprint_sha256=eq.${eq(fingerprint)}&status=in.(PENDING,APPROVED)&expires_at=gt.${now}&select=request_id,status,requested_at,expires_at,key_fingerprint_sha256&order=requested_at.desc&limit=1`);
+}
+async function enrollmentInsert(client:string,jwk:any,fingerprint:string,metadata:any){
+  return rest(`/${ENROLL_TABLE}?select=request_id,status,requested_at,expires_at,key_fingerprint_sha256`,{
+    method:'POST',
+    prefer:'return=representation',
+    body:{client_id:client,profile:PROFILE,public_jwk:jwk,key_fingerprint_sha256:fingerprint,status:'PENDING',metadata:metadata||{},authority_effect:false},
+  });
+}
+async function enrollmentById(requestId:string,client:string,fingerprint:string){
+  return rest(`/${ENROLL_TABLE}?request_id=eq.${eq(requestId)}&client_id=eq.${eq(client)}&key_fingerprint_sha256=eq.${eq(fingerprint)}&select=request_id,status,requested_at,expires_at,approved_at,device_id&limit=1`);
+}
+async function deviceLookup(deviceId:string,client:string){
+  return rest(`/${DEVICE_TABLE}?device_id=eq.${eq(deviceId)}&client_id=eq.${eq(client)}&select=device_id,client_id,profile,public_jwk,enrollment_pairing_token_hash,active,revoked_at,access_tier,admin_scopes,admin_grant_epoch,admin_granted_at,admin_revoked_at&limit=1`);
+}
+async function pairingLookup(hash:string){
+  return rest(`/compute_fabric_a2_chat_bridge_remote_pairing_h205f22?token_hash=eq.${eq(hash)}&active=eq.true&select=token_hash&limit=1`);
+}
+async function commandLookup(commandId:string){
+  return rest(`/${COMMAND_TABLE}?workspace_id=eq.${eq(WORKSPACE_ID)}&command_id=eq.${eq(commandId)}&select=command_id,action&limit=1`);
+}
+async function commandReceiptLookup({workspaceId,commandId,clientId}:{workspaceId:string,commandId:string,clientId:string}){
+  const rows=await rest(`/${COMMAND_TABLE}?workspace_id=eq.${eq(workspaceId)}&command_id=eq.${eq(commandId)}&leased_by=eq.${eq(clientId)}&select=command_id,leased_by,status,receipt,error&limit=1`);
+  return Array.isArray(rows)?rows[0]||null:null;
+}
 const rsiReceiptReadback=createRsiResultReceiptReadback({lookupCommand:commandReceiptLookup});
 async function upsertStateRow(row:any){
-  // P1-2 multi-writer repair: per-plane shallow jsonb merge instead of a full
-  // replacement. Keys present in the incoming payload (including explicit
-  // nulls, e.g. supervisor_mesh:null when the mesh is not running) overwrite;
-  // keys the writer omitted are preserved from the stored state. This is what
-  // makes plane ownership possible: the 5s heartbeat, the realtime
-  // observation push, and the bootstrap heartbeat can each own their planes
-  // without erasing the others.
-  await sql.unsafe(`insert into public.${STATE_TABLE} as target(client_id,workspace_id,last_seen_at,extension_version,operator_runtime,supervisor_mode,armed,operator_mode,ordering_policy,last_command_id,last_command_status,state,authority_effect) values($1,$2::uuid,clock_timestamp(),$3,$4,$5,$6::boolean,$7,$8,$9::uuid,$10,$11::jsonb,$12::boolean) on conflict(client_id) do update set workspace_id=excluded.workspace_id,last_seen_at=excluded.last_seen_at,extension_version=excluded.extension_version,operator_runtime=excluded.operator_runtime,supervisor_mode=excluded.supervisor_mode,armed=excluded.armed,operator_mode=excluded.operator_mode,ordering_policy=excluded.ordering_policy,last_command_id=excluded.last_command_id,last_command_status=excluded.last_command_status,state=coalesce(target.state,'{}'::jsonb)||excluded.state,authority_effect=excluded.authority_effect`,[row.client_id,row.workspace_id,row.extension_version,row.operator_runtime,row.supervisor_mode,row.armed,row.operator_mode,row.ordering_policy,row.last_command_id,row.last_command_status,row.state,row.authority_effect]);
-  return row;
+  const merged=await rpc('client_v1_native_supervisor_state_merge_v1',{
+    p_client_id:row.client_id,
+    p_workspace_id:row.workspace_id,
+    p_extension_version:row.extension_version,
+    p_operator_runtime:row.operator_runtime,
+    p_supervisor_mode:row.supervisor_mode,
+    p_armed:row.armed,
+    p_operator_mode:row.operator_mode,
+    p_ordering_policy:row.ordering_policy,
+    p_last_command_id:row.last_command_id,
+    p_last_command_status:row.last_command_status,
+    p_state:row.state,
+    p_authority_effect:row.authority_effect,
+  });
+  if(merged?.accepted!==true)throw new Error('supervisor_state_merge_rejected');
+  return merged;
 }
 async function statusRows(){
-  const states=await sql.unsafe(`select client_id,workspace_id::text,last_seen_at,extension_version,operator_runtime,supervisor_mode,armed,operator_mode,ordering_policy,last_command_id::text,last_command_status,state,authority_effect from public.${STATE_TABLE} where workspace_id=$1::uuid order by last_seen_at desc limit 8`,[WORKSPACE_ID]);
-  const commands=await sql.unsafe(`select command_id::text,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error from public.${COMMAND_TABLE} where workspace_id=$1::uuid order by issued_at desc limit 40`,[WORKSPACE_ID]);
-  return{states,commands};
+  const states=await rest(`/${STATE_TABLE}?workspace_id=eq.${eq(WORKSPACE_ID)}&select=client_id,workspace_id,last_seen_at,extension_version,operator_runtime,supervisor_mode,armed,operator_mode,ordering_policy,last_command_id,last_command_status,state,authority_effect&order=last_seen_at.desc&limit=8`);
+  const commands=await rest(`/${COMMAND_TABLE}?workspace_id=eq.${eq(WORKSPACE_ID)}&select=command_id,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error&order=issued_at.desc&limit=40`);
+  return{states:Array.isArray(states)?states:[],commands:Array.isArray(commands)?commands:[]};
 }
 
 async function sha256(v:string){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return[...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
@@ -149,22 +177,87 @@ function boundedObject(value:any,maxBytes:number){if(!value||typeof value!=='obj
 function boundedMesh(value:any){if(!value||typeof value!=='object'||Array.isArray(value)||String(value.schema||'')!=='metaengine.supervisor-mesh-runtime.v1'||value.authority_effect===true)return null;const mesh=value.mesh;if(!mesh||typeof mesh!=='object'||Array.isArray(mesh)||String(mesh.schema||'')!=='metaengine.supervisor-mesh.state.v1'||!Array.isArray(mesh.supervisors)||mesh.supervisors.length>16)return null;const supervisors=[];for(const row of mesh.supervisors){const supervisor_id=String(row?.supervisor_id||'').toLowerCase();const conversation_url_sha256=String(row?.conversation_url_sha256||'').toLowerCase();const status=String(row?.status||'LOST').toUpperCase();const tab_id=row?.tab_id==null?null:String(row.tab_id).slice(0,160);if(!/^sup_[a-f0-9]{24}$/.test(supervisor_id)||!/^[a-f0-9]{64}$/.test(conversation_url_sha256)||supervisor_id!==`sup_${conversation_url_sha256.slice(0,24)}`||!['ACTIVE','PAUSED','LOST','AMBIGUOUS_INCARNATION'].includes(status)||row?.authority_effect===true)return null;supervisors.push({supervisor_id,conversation_url_sha256,status,tab_id:status==='LOST'||status==='AMBIGUOUS_INCARNATION'?null:tab_id,selected:row?.selected===true,authority_effect:false})}const preferred=mesh.preferred_supervisor_id==null?null:String(mesh.preferred_supervisor_id).toLowerCase();if(preferred!==null&&!/^sup_[a-f0-9]{24}$/.test(preferred))return null;return{schema:'metaengine.supervisor-mesh-runtime.v1',running:value.running===true,last_reconcile_at:value.last_reconcile_at||null,last_error:String(value.last_error||'').slice(0,500)||null,authority_effect:false,mesh:{schema:'metaengine.supervisor-mesh.state.v1',version:String(mesh.version||'').slice(0,32),mesh_epoch:Math.max(1,Number(mesh.mesh_epoch)||1),preferred_supervisor_id:preferred,supervisors,authority_effect:false}}}
 async function verifyEnrollment(req:Request,bodyText:string,body:any){const id=clientId(req);if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};let jwk;try{jwk=canonicalJwk(body?.public_jwk)}catch{return{ok:false,reason:'JWK_INVALID'}};if(String(body?.profile||'')!==PROFILE)return{ok:false,reason:'PROFILE_INVALID'};const fingerprint=await sha256(JSON.stringify(jwk));if(String(body?.key_fingerprint_sha256||'')!==fingerprint)return{ok:false,reason:'FINGERPRINT_MISMATCH'};const timestamp=String(req.headers.get('x-metaengine-enroll-timestamp')||'');const nonce=String(req.headers.get('x-metaengine-enroll-nonce')||'');const signature=String(req.headers.get('x-metaengine-enroll-signature')||'');const parsed=Date.parse(timestamp);if(!Number.isFinite(parsed)||Math.abs(Date.now()-parsed)>120000)return{ok:false,reason:'TIMESTAMP_OUT_OF_WINDOW'};if(!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'ENROLL_HEADERS_INVALID'};const material=['METAENGINE_NATIVE_ENROLLMENT_V1',`client_id:${id}`,`profile:${PROFILE}`,`fingerprint:${fingerprint}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${await sha256(bodyText)}`].join('\n');if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};return{ok:true,id,jwk,fingerprint}}
 function enrollmentMetadata(body:any){
-  const metadata:any={client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(body?.metadata?.shell_version||'').slice(0,32)};
-  const kind=String(body?.metadata?.qualification_kind||'').trim().toUpperCase();
-  const runId=String(body?.metadata?.qualification_run_id||'').trim();
-  const runAttempt=String(body?.metadata?.qualification_run_attempt||'').trim();
-  const sourceHead=String(body?.metadata?.source_head||'').trim().toLowerCase();
-  if(kind==='INSTALLED_ELECTRON'&&/^[0-9]{1,20}$/.test(runId)&&/^[1-9][0-9]{0,5}$/.test(runAttempt)&&/^[0-9a-f]{40}$/.test(sourceHead)){
-    metadata.qualification_kind=kind;
-    metadata.qualification_run_id=runId;
-    metadata.qualification_run_attempt=runAttempt;
-    metadata.source_head=sourceHead;
-  }
-  return metadata;
+  return normalizeEnrollmentMetadata(body);
 }
 async function enrollmentRequest(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const existing=await enrollmentExisting(proof.id!,proof.fingerprint!);if(existing[0])return json(existing[0].status==='APPROVED'?200:202,{accepted:true,...existing[0],reason:'EXISTING_REQUEST',authority_effect:false});const rows=await enrollmentInsert(proof.id!,proof.jwk,proof.fingerprint!,enrollmentMetadata(body));const row=rows[0];if(!row)throw new Error('enrollment_insert_failed');return json(202,{accepted:true,...row,reason:'APPROVAL_REQUIRED',authority_effect:false})}
 async function enrollmentStatus(req:Request,bodyText:string,body:any){const proof=await verifyEnrollment(req,bodyText,body);if(!proof.ok)return json(401,{error:'enrollment_proof_required',reason:proof.reason});const requestId=String(body?.request_id||'');if(!/^[0-9a-f-]{36}$/i.test(requestId))return json(400,{error:'request_id_invalid'});const rows=await enrollmentById(requestId,proof.id!,proof.fingerprint!);const row=rows[0];if(!row)return json(404,{error:'enrollment_request_not_found'});if(row.status==='PENDING')return json(202,{accepted:false,request_id:row.request_id,status:'PENDING',reason:'APPROVAL_REQUIRED',expires_at:row.expires_at,authority_effect:false});if(row.status==='REJECTED'||row.status==='EXPIRED')return json(409,{accepted:false,request_id:row.request_id,status:row.status,reason:`REQUEST_${row.status}`,authority_effect:false});const activated=await rpc(ACTIVATE_RPC,{p_request_id:row.request_id,p_client_id:proof.id,p_profile:PROFILE,p_key_fingerprint_sha256:proof.fingerprint,p_public_jwk:proof.jwk});return json(activated?.accepted===true?200:409,{...activated,request_id:row.request_id,authority_effect:false})}
-async function authenticateDevice(req:Request,path:string,bodyText:string){const id=clientId(req);if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};const profile=String(req.headers.get('x-a2-device-profile')||'');const deviceId=String(req.headers.get('x-a2-device-id')||'');const timestamp=String(req.headers.get('x-a2-device-timestamp')||'');const nonce=String(req.headers.get('x-a2-device-nonce')||'');const bodyHash=String(req.headers.get('x-a2-device-body-sha256')||'').toLowerCase();const signature=String(req.headers.get('x-a2-device-signature')||'');if(profile!==PROFILE||!/^[0-9a-f-]{36}$/i.test(deviceId)||!Number.isFinite(Date.parse(timestamp))||!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(bodyHash)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'DEVICE_HEADERS_INVALID'};if(await sha256(bodyText)!==bodyHash)return{ok:false,reason:'BODY_HASH_MISMATCH'};const rows=await deviceLookup(deviceId,id);const device=rows[0];if(!device)return{ok:false,reason:'DEVICE_NOT_FOUND'};if(device.active!==true||device.revoked_at)return{ok:false,reason:'DEVICE_REVOKED'};let jwk;try{jwk=canonicalJwk(device.public_jwk)}catch{return{ok:false,reason:'DEVICE_KEY_INVALID'}};const material=[PROFILE,`device_id:${deviceId}`,`method:${req.method.toUpperCase()}`,`path:${path}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${bodyHash}`].join('\n');if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};const grant=String(device.enrollment_pairing_token_hash||'');const grants=await pairingLookup(grant);if(grants.length!==1)return{ok:false,reason:'PAIRING_REVOKED'};const nr=await rpc(NONCE_RPC,{p_device_id:deviceId,p_client_id:id,p_nonce_sha256:await sha256(nonce),p_request_timestamp:timestamp});if(nr?.accepted!==true)return{ok:false,reason:String(nr?.reason||'NONCE_REJECTED')};return{ok:true,id,device_id:deviceId,profile:PROFILE,key_fingerprint_sha256:nr.key_fingerprint_sha256||null}}
+async function authenticateDevice(req:Request,path:string,bodyText:string){
+  const id=clientId(req);
+  if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};
+  const profile=String(req.headers.get('x-a2-device-profile')||'');
+  const deviceId=String(req.headers.get('x-a2-device-id')||'');
+  const timestamp=String(req.headers.get('x-a2-device-timestamp')||'');
+  const nonce=String(req.headers.get('x-a2-device-nonce')||'');
+  const bodyHash=String(req.headers.get('x-a2-device-body-sha256')||'').toLowerCase();
+  const signature=String(req.headers.get('x-a2-device-signature')||'');
+  if(profile!==PROFILE||!/^[0-9a-f-]{36}$/i.test(deviceId)||!Number.isFinite(Date.parse(timestamp))||!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(bodyHash)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'DEVICE_HEADERS_INVALID'};
+  if(await sha256(bodyText)!==bodyHash)return{ok:false,reason:'BODY_HASH_MISMATCH'};
+  const rows=await deviceLookup(deviceId,id);
+  const device=Array.isArray(rows)?rows[0]:null;
+  if(!device)return{ok:false,reason:'DEVICE_NOT_FOUND'};
+  if(device.active!==true||device.revoked_at)return{ok:false,reason:'DEVICE_REVOKED'};
+  const adminEpoch=Number(device.admin_grant_epoch);
+  const adminScopes=Array.isArray(device.admin_scopes)?device.admin_scopes.map(String):[];
+  if(
+    String(device.access_tier||'')!=='ADMIN'
+    || device.admin_revoked_at
+    || !Number.isSafeInteger(adminEpoch)
+    || adminEpoch<1
+    || !adminScopes.includes('CONTROL_PLANE')
+  )return{ok:false,reason:'ADMIN_GRANT_REQUIRED'};
+  let jwk;
+  try{jwk=canonicalJwk(device.public_jwk)}catch{return{ok:false,reason:'DEVICE_KEY_INVALID'}}
+  const material=[PROFILE,`device_id:${deviceId}`,`method:${req.method.toUpperCase()}`,`path:${path}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${bodyHash}`].join('\n');
+  if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};
+  const grant=String(device.enrollment_pairing_token_hash||'');
+  const grants=await pairingLookup(grant);
+  if(!Array.isArray(grants)||grants.length!==1)return{ok:false,reason:'PAIRING_REVOKED'};
+  const nr=await rpc(NONCE_RPC,{p_device_id:deviceId,p_client_id:id,p_nonce_sha256:await sha256(nonce),p_request_timestamp:timestamp});
+  if(nr?.accepted!==true)return{ok:false,reason:String(nr?.reason||'NONCE_REJECTED')};
+  return{
+    ok:true,
+    id,
+    device_id:deviceId,
+    profile:PROFILE,
+    key_fingerprint_sha256:nr.key_fingerprint_sha256||device.key_fingerprint_sha256||null,
+    access_tier:'ADMIN',
+    admin_scopes:adminScopes,
+    admin_grant_epoch:adminEpoch,
+    admin_ready:true,
+  };
+}
+async function adminStatus(identity:any){
+  const readback=await rpc('client_v1_device_admin_readback_v1',{
+    p_device_id:identity.device_id,
+    p_client_id:identity.id,
+    p_key_fingerprint_sha256:identity.key_fingerprint_sha256,
+  });
+  if(
+    readback?.found!==true
+    || readback?.admin_ready!==true
+    || readback?.access_tier!=='ADMIN'
+    || Number(readback?.admin_grant_epoch)!==Number(identity.admin_grant_epoch)
+  )throw new Error('admin_device_readback_not_exact');
+  return{
+    schema:'metaengine.client-v1.admin-connection.v1',
+    connected:true,
+    device_id:identity.device_id,
+    client_id:identity.id,
+    profile:identity.profile,
+    access_tier:'ADMIN',
+    admin_scopes:Array.isArray(readback.admin_scopes)?readback.admin_scopes:[],
+    admin_grant_epoch:Number(readback.admin_grant_epoch),
+    admin_ready:true,
+    backend_transport:'POSTGREST_RPC',
+    direct_postgres_query_plane:false,
+    direct_postgres_notify_only:Boolean(DB_SESSION_URL),
+    master_secret_embedded:false,
+    service_role_embedded:false,
+    cloudflare_token_embedded:false,
+    automatic_effect_retry_allowed:false,
+    authority_effect:false,
+  };
+}
 // P1-2 multi-writer repair: plane ownership semantics for the persisted state.
 // /v1/state accepts three writers (bootstrap heartbeat, 5s supervisor heartbeat,
 // realtime observation push). The former full-JSON replacement meant any writer
@@ -177,7 +270,37 @@ async function authenticateDevice(req:Request,path:string,bodyText:string){const
 // plane keys are emitted only when the writer actually included them.
 const PLANE_KEYS=['tabs','development_plane','compute','fleet','perception','supervisor_lifecycle','supervisor_mesh','self_update','host_resilience','realtime_process_plane','control_latency'] as const;
 function boundedState(value:any){const s=value&&typeof value==='object'?value:{};const tabs=Array.isArray(s.tabs)?s.tabs.slice(0,64).map((t:any)=>({tab_id:String(t?.tab_id||'').slice(0,80),url:String(t?.url||'').slice(0,1200),title:String(t?.title||'').slice(0,240),kind:String(t?.kind||'').slice(0,40),selected:t?.selected===true})):[];const row:any={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(s.shell_version||'').slice(0,32),supervisor_mode:modeOf(s.supervisor_mode),armed:s.armed===true,operator_mode:String(s.operator_mode||'CONTROL').slice(0,32),active_tab:s.active_tab&&typeof s.active_tab==='object'?s.active_tab:null,realtime_observation_push:s.realtime_observation_push===true,last_error:String(s.last_error||'').slice(0,500)||null,started_at:s.started_at||null,heartbeat_at:new Date().toISOString()};if('tabs'in s)row.tabs=tabs;if('development_plane'in s)row.development_plane=boundedObject(s.development_plane,32768);if('compute'in s)row.compute=boundedObject(s.compute,32768);if('fleet'in s)row.fleet=boundedObject(s.fleet,65536);if('perception'in s)row.perception=boundedObject(s.perception,32768);if('supervisor_lifecycle'in s)row.supervisor_lifecycle=boundedObject(s.supervisor_lifecycle,32768);if('supervisor_mesh'in s)row.supervisor_mesh=boundedMesh(s.supervisor_mesh);if('self_update'in s)row.self_update=boundedObject(s.self_update,32768);if('host_resilience'in s)row.host_resilience=boundedObject(s.host_resilience,32768);if('realtime_process_plane'in s)row.realtime_process_plane=boundedObject(s.realtime_process_plane,262144);if('control_latency'in s)row.control_latency=boundedObject(s.control_latency,32768);if('rsi'in s)row.rsi=boundedObject(s.rsi,16384);if('rsi_outcome_river'in s)row.rsi_outcome_river=boundedObject(s.rsi_outcome_river,16384);if('rsi_operator_steering'in s)row.rsi_operator_steering=boundedObject(s.rsi_operator_steering,16384);return row}
-async function upsertState(req:Request,body:any,identity:any){const id=clientId(req);const s=boundedState(body?.state);if(s.supervisor_mesh)await rpc(MESH_SYNC_RPC,{p_client_id:id,p_mesh:s.supervisor_mesh});const row={client_id:id,workspace_id:WORKSPACE_ID,extension_version:s.shell_version||null,operator_runtime:'native-electron-supervisor-v1',supervisor_mode:s.supervisor_mode,armed:s.armed,operator_mode:s.operator_mode,ordering_policy:'NATIVE_TYPED_COMMAND_LANES_V1',last_command_id:body?.last_command_id||null,last_command_status:body?.last_command_status||null,state:{...s,transport_identity:{profile:identity.profile,device_id:identity.device_id,key_fingerprint_sha256:identity.key_fingerprint_sha256}},authority_effect:s.supervisor_mode==='CONTROL'||s.armed===true};await upsertStateRow(row);return{...row,last_seen_at:new Date().toISOString()}}
+async function upsertState(req:Request,body:any,identity:any){
+  const id=clientId(req);
+  const s=boundedState(body?.state);
+  if(s.supervisor_mesh)await rpc(MESH_SYNC_RPC,{p_client_id:id,p_mesh:s.supervisor_mesh});
+  const row={
+    client_id:id,
+    workspace_id:WORKSPACE_ID,
+    extension_version:s.shell_version||null,
+    operator_runtime:'native-electron-supervisor-v1',
+    supervisor_mode:s.supervisor_mode,
+    armed:s.armed,
+    operator_mode:s.operator_mode,
+    ordering_policy:'NATIVE_TYPED_COMMAND_LANES_V1',
+    last_command_id:body?.last_command_id||null,
+    last_command_status:body?.last_command_status||null,
+    state:{
+      ...s,
+      transport_identity:{
+        profile:identity.profile,
+        device_id:identity.device_id,
+        key_fingerprint_sha256:identity.key_fingerprint_sha256,
+        access_tier:identity.access_tier,
+        admin_grant_epoch:identity.admin_grant_epoch,
+        admin_ready:identity.admin_ready===true,
+      },
+    },
+    authority_effect:s.supervisor_mode==='CONTROL'||s.armed===true,
+  };
+  const merged=await upsertStateRow(row);
+  return{...row,last_seen_at:merged?.last_seen_at||new Date().toISOString()};
+}
 async function lease(req:Request,body:any){return rpc(LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120})}
 async function leaseBatch(req:Request,body:any){return rpc(BATCH_LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120,p_max_batch:Math.max(1,Math.min(64,Number(body?.max_batch)||64)),p_max_tab_mutations:Math.max(1,Math.min(16,Number(body?.max_tab_mutations)||8))})}
 function realtimeTopic(client:string){return`metaengine-control:${WORKSPACE_ID}:${client}`}
@@ -265,8 +388,8 @@ async function issueTool(req:Request,body:any){
     return json(409,{accepted:false,error:'agent_tool_issue_failed',reason:String((error as any)?.message||error).slice(0,160),authority_effect:false});
   }
 }
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
-async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,profile:PROFILE,approval_enrollment:true,admin_device_grant_required:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,device_auth_required:true,admin_device_grant_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
@@ -319,6 +442,7 @@ Deno.serve(async(req:Request)=>{
     const canonicalPath=`${SERVICE_MARKER}${path}`;
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
+    if(req.method==='GET'&&path==='/v1/admin/status')return json(200,await adminStatus(identity));
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
     const emergency=await emergencyRoutes({req,path,body,clientId:identity.id});if(emergency)return emergency;
     const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
@@ -340,7 +464,7 @@ Deno.serve(async(req:Request)=>{
     if(req.method==='GET'&&path==='/v1/status')return json(200,await status());
     return json(404,{error:'not_found'});
   }catch(e){
-    console.error('native_supervisor_direct_postgres_failure',String((e as any)?.message||e));
-    return json(502,{error:'native_supervisor_failure',backend_transport:'DIRECT_POSTGRES'});
+    console.error('native_supervisor_request_failure',String((e as any)?.message||e));
+    return json(502,{error:'native_supervisor_failure',backend_transport:'POSTGREST_RPC'});
   }
 });

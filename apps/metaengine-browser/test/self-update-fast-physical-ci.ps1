@@ -86,7 +86,12 @@ $diagnosticFiles = @(
 )
 
 try {
-  & (Join-Path $PSScriptRoot 'self-update-fast-physical.ps1')
+  $physicalScript = Join-Path $PSScriptRoot 'self-update-fast-physical.ps1'
+  if ($env:ME2_REQUIRE_QUALIFIED_INSTALLER -eq '1') {
+    $physicalScript = Join-Path $temp 'self-update-fast-physical-qualified.ps1'
+    if (-not (Test-Path $physicalScript -PathType Leaf)) { throw 'qualified_self_update_rehearsal_missing' }
+  }
+  & $physicalScript
   'PASS' | Set-Content (Join-Path $evidence 'physical-script-status.txt')
 } catch {
   'FAIL' | Set-Content (Join-Path $evidence 'physical-script-status.txt')

@@ -11,7 +11,16 @@ test('S5b receipt readback route is device-authenticated and same-client scoped'
   const routeAt = source.indexOf("readCommandReceipt(req,decodeURIComponent(receipt[1]))");
   assert.ok(authAt >= 0 && routeAt > authAt, 'receipt route must remain behind device authentication');
   assert.match(source, /createRsiResultReceiptReadback/);
-  assert.match(source, /where workspace_id=\$1::uuid and command_id=\$2::uuid and leased_by=\$3 limit 1/);
+  assert.match(source, /commandReceiptLookup\(\{workspaceId,commandId,clientId\}/);
+  assert.match(source, /workspace_id=eq\.\$\{eq\(workspaceId\)\}/);
+  assert.match(source, /command_id=eq\.\$\{eq\(commandId\)\}/);
+  assert.match(source, /leased_by=eq\.\$\{eq\(clientId\)\}/);
+  assert.match(source, /select=command_id,leased_by,status,receipt,error&limit=1/);
+  const receiptLookupStart = source.indexOf('async function commandReceiptLookup');
+  const receiptLookupEnd = source.indexOf('const rsiReceiptReadback=', receiptLookupStart);
+  assert.ok(receiptLookupStart >= 0 && receiptLookupEnd > receiptLookupStart);
+  const receiptLookup = source.slice(receiptLookupStart, receiptLookupEnd);
+  assert.doesNotMatch(receiptLookup, /sql\.unsafe|await sql\x60/, 'receipt readback must not reopen a direct Postgres query session');
   assert.match(source, /\/v1\\\/commands\\\/\(\[\^\/\]\+\)\\\/receipt\$\/\)/);
   assert.match(source, /authority_effect:false/);
   assert.match(source, /result_receipt_readback:true/);

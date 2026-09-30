@@ -2,10 +2,70 @@
 // R97 quiet top bar: the main workspace has only global search/commands and
 // Settings. All other persistent navigation chrome was removed.
 
+import { useEffect, useState } from "react";
 import { useMe2 } from "@/components/me2/store";
+
+type ClientConnectionStatus = {
+  schema: "metaengine.client.connection-status.v1";
+  local_runtime_ready: boolean;
+  secure_device_key_ready: boolean;
+  device_enrolled: boolean;
+  enrollment_state: string;
+  admin_ready: boolean;
+  access_tier: "ADMIN" | null;
+  admin_scopes: string[];
+  admin_grant_epoch: number | null;
+  cloud_control_state: "CONNECTED" | "RECONNECTING" | "ENROLLMENT_REQUIRED" | "CONNECTING" | "LOCAL_ONLY" | string;
+  automatic_reconnect: true;
+  fallback_mode?: string;
+  fallback_ready?: boolean;
+  fallback_enabled?: boolean;
+  cloud_health?: string;
+  legacy_daemon_feed_is_authority: false;
+  master_secret_embedded: false;
+  service_role_embedded: false;
+  cloudflare_token_embedded: false;
+  authority_effect: false;
+};
+
+function useClientConnectionStatus() {
+  const [status, setStatus] = useState<ClientConnectionStatus | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    let inFlight = false;
+    const read = async () => {
+      if (!live || inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      try {
+        const bridge = (window as Window & {
+          metaengineClient?: { connectionStatus?: () => Promise<ClientConnectionStatus> };
+        }).metaengineClient;
+        const next = await bridge?.connectionStatus?.();
+        if (live && next?.schema === "metaengine.client.connection-status.v1") setStatus(next);
+      } catch {
+        // IPC readback is observation-only. The Native Supervisor owns reconnect.
+      } finally {
+        inFlight = false;
+      }
+    };
+    void read();
+    const timer = window.setInterval(() => { void read(); }, 2_000);
+    const visible = () => { if (document.visibilityState === "visible") void read(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, []);
+
+  return status;
+}
+
 export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOpen?: boolean; onOpenFleet?: () => void }) {
-  const connected = useMe2((s) => s.connected);
   const page = useMe2((s) => s.page);
+  const connection = useClientConnectionStatus();
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const mainWorkspace = page === "browser";
@@ -72,15 +132,33 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
           Settings
         </button>
         <span
-          data-testid="ws-badge"
-          className={`flex h-7 items-center gap-1.5 border px-2 font-bold tracking-[0.12em] ${
-            connected
+          data-testid="admin-connection-badge"
+          data-cloud-state={connection?.cloud_control_state || "CONNECTING"}
+          data-admin-ready={connection?.admin_ready === true ? "true" : "false"}
+          className={`flex h-7 items-center gap-1.5 border px-2 font-bold tracking-[0.08em] ${
+            connection?.admin_ready === true && connection?.cloud_control_state === "CONNECTED"
               ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
-              : "border-rose-900/60 bg-rose-950/20 text-rose-300"
+              : connection?.local_runtime_ready === true
+                ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
+                : "border-zinc-800 bg-zinc-950 text-zinc-400"
           }`}
-          title={connected ? "Daemon data feed connected. This does not prove autonomous task execution." : "Daemon data feed unavailable. Native agent status is shown separately in the roster."}
+          title={
+            connection?.admin_ready === true && connection?.cloud_control_state === "CONNECTED"
+              ? `ADMIN device connected · cloud ${connection.cloud_health || "healthy"} · grant epoch ${connection.admin_grant_epoch ?? "?"}`
+              : connection?.cloud_control_state === "ENROLLMENT_REQUIRED"
+                ? "Native device enrollment is pending. Local Browser remains available; no master token is required."
+                : connection?.local_runtime_ready === true
+                  ? `Local Browser ready · cloud ${connection?.cloud_control_state || "reconnecting"} · automatic reconnect active`
+                  : "Starting Native Browser control plane"
+          }
         >
-          {connected ? "Data live" : "Data offline"}
+          {connection?.admin_ready === true && connection?.cloud_control_state === "CONNECTED"
+            ? "Admin connected"
+            : connection?.cloud_control_state === "ENROLLMENT_REQUIRED"
+              ? "Enrollment"
+              : connection?.local_runtime_ready === true
+                ? "Admin reconnecting"
+                : "Starting"}
         </span>
       </div>
     </header>

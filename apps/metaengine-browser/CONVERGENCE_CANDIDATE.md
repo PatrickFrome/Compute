@@ -1,8 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client UI.1 workbench candidate on the R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36719340135.1`.
+Client ADMIN.1 connectivity candidate on the UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36760350225.1`.
 
-The version is intentionally distinct from the previously observed R97/live identity `0.7.0-dev.36336130139.1`: R109 changes Browser UI/runtime bytes and must not reuse an older package version. The previous R109 source candidate used `0.7.0-dev.36516587173.1`. UI.1 reserves a higher observed workflow namespace with the canonical `.1` suffix before building; the final producer run, installer SHA-256 and released artifact identity must still be recorded separately on the exact final source SHA.
+ADMIN.1 changes packaged runtime bytes and must not reuse the UI.1 package identity `0.7.0-dev.36719340135.1`. The version is intentionally distinct from the previously observed R97/live identity `0.7.0-dev.36336130139.1`: R109 changes Browser UI/runtime bytes and must not reuse an older package version. The previous R109 source candidate used `0.7.0-dev.36516587173.1`. ADMIN.1 reserves a higher observed workflow namespace with the canonical `.1` suffix before building; the final producer run, installer SHA-256 and released artifact identity must still be recorded separately on the exact final source SHA.
 
 Canonical production authority:
 - one Native Browser Supervisor/Fleet task and Agent lifecycle authority;
@@ -25,4 +25,6 @@ Release safety invariants:
 - no authority widening or bypass of Guardian/Sentinel, self-update receipts, installer barriers or successor qualification;
 - source qualification does not imply live Edge equivalence: the R83 v14 canary gate remains fail-closed until a separately authorized exact-source canary deployment and qualification;
 - tested source SHA, built installer and released installer must be identical in the final release chain;
+- full Self Update E2E consumes and re-verifies the same Package Smoke installer, records zero consumer target builds and waits for its exact producer terminal success;
+- concurrent fresh startup shares one durable device identity initialization and never changes the signing key under an enrollment request;
 - promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update z.ai Agent E2E evidence.
