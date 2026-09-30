@@ -1,43 +1,7 @@
 {
-  "savedAt": "2026-09-30T18:15:46.121Z",
+  "savedAt": "2026-09-30T18:17:50.374Z",
   "version": "2.0.0-restore",
   "lessons": [
-    {
-      "ts": "2026-09-30T16:13:36.739Z",
-      "source": "self_improve",
-      "author": "Изыскатель-6589",
-      "text": "Identified recurring llm_chain_exhausted errors due to repeated unthrottled calls; will now throttle intervals and monitor success rates."
-    },
-    {
-      "ts": "2026-09-30T16:13:58.756Z",
-      "source": "self_improve",
-      "author": "Стратег-6603",
-      "text": "Теперь буду использовать только модели из llm7.io, избегая провайдера https://openrouter.ai, чтобы не вызывать llm_chain_exhausted"
-    },
-    {
-      "ts": "2026-09-30T16:14:23.790Z",
-      "source": "self_improve",
-      "author": "Зодчий-3492",
-      "text": "Learned that large hit-rate models like openai can inject reliably when used with proper API keys, avoiding llm_chain_exhausted errors by setting adequate rate limits."
-    },
-    {
-      "ts": "2026-09-30T16:14:36.945Z",
-      "source": "self_improve",
-      "author": "Вестник-4817",
-      "text": "Из наблюдений: llm_chain_exhausted возник на openrouter с nvidia/nemotron-3-ultra-550b-a55b:free; следует избегать openrouter и моделей с success_rate ≤ 0.05."
-    },
-    {
-      "ts": "2026-09-30T16:14:43.563Z",
-      "source": "self_improve",
-      "author": "Критик-6613",
-      "text": "Confirmed that non-catalogued models (e.g., llm7-free) fail criteria and must be rejected."
-    },
-    {
-      "ts": "2026-09-30T16:14:53.246Z",
-      "source": "self_improve",
-      "author": "Строитель-372",
-      "text": "Learned to avoid using OpenRouter endpoints for high‑success models due to llm_chain_exhausted and to enforce rest_window_ms settings for local or high‑success-rate calls, ensuring continuous scanning and seamless deployment of free AI resources."
-    },
     {
       "ts": "2026-09-30T16:15:13.063Z",
       "source": "self_improve",
@@ -361,6 +325,42 @@
       "source": "doctrine",
       "author": "Доктринёр",
       "text": "Основная проблема роя — llm_chain_exhausted от OpenRouter и NVIDIA Nemotron, решение — полное исключение этих провайдеров и настройка таймаутов для оставшихся."
+    },
+    {
+      "ts": "2026-09-30T18:15:55.472Z",
+      "source": "self_improve",
+      "author": "Стратег-1",
+      "text": "Урок: Проверка наличия модели в каталоге критически важна перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:15:55.574Z",
+      "source": "self_improve",
+      "author": "Строитель-6",
+      "text": "Урок: Бесплатные LLM-модели требуют проверки скорости инференса и ограничений токенов."
+    },
+    {
+      "ts": "2026-09-30T18:15:56.996Z",
+      "source": "self_improve",
+      "author": "Аналитик-3",
+      "text": "Урок: Критика моделей должна основываться на верифицированных каталогах, а не на предположениях."
+    },
+    {
+      "ts": "2026-09-30T18:15:57.099Z",
+      "source": "self_improve",
+      "author": "Критик-2",
+      "text": "Урок: Бесплатные LLM-модели требуют тщательной верификации перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:15:57.700Z",
+      "source": "self_improve",
+      "author": "Вестник-5",
+      "text": "Урок: Бесплатные LLM-модели требуют тщательной верификации перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:15:57.828Z",
+      "source": "self_improve",
+      "author": "Зодчий-7",
+      "text": "Урок: Бесшовная интеграция бесплатных LLM требует тщательной верификации их доступности."
     }
   ],
   "memories": [
@@ -695,7 +695,7 @@
     "op_goal": "ресёрч бесплатных LLM-каналов и их интеграция (директива оператора)",
     "host": "dataforge-sandbox (chat 4e7a8a53)",
     "restored_from": "journal-latest.json @ Compute main (внешний рой жив)",
-    "total_born": 32,
-    "cycles": 0
+    "total_born": 52,
+    "cycles": 2
   }
 }
