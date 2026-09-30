@@ -6,6 +6,14 @@ const migration = await readFile(
   new URL('../../../supabase/migrations/20260930163000_client_v1_admin_connectivity_v1.sql', import.meta.url),
   'utf8',
 );
+const qualificationMigration = await readFile(
+  new URL('../../../supabase/migrations/20260930165500_client_v1_installed_qualification_oidc_v1.sql', import.meta.url),
+  'utf8',
+);
+const qualificationEdge = await readFile(
+  new URL('../../../supabase/functions/metaengine-client-installed-qualification-h205f22/index.ts', import.meta.url),
+  'utf8',
+);
 const edge = await readFile(
   new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url),
   'utf8',
@@ -151,4 +159,53 @@ test('recoverable device-auth denial re-enters approval enrollment without repla
   assert.match(signed, /return response/);
   assert.equal((signed.match(/this\.#fetch/g) || []).length, 1, 'auth recovery must never replay the denied HTTP request');
   assert.doesNotMatch(signed, /ensureEnrollment\(/, 'credential recovery must be deferred to the ordinary supervisor cycle');
+});
+
+test('installed qualification SQL approves only one fresh exact correlation tuple', () => {
+  assert.match(qualificationMigration, /client_v1_installed_qualification_approve_v1/);
+  assert.match(qualificationMigration, /qualification_kind' = 'INSTALLED_ELECTRON'/);
+  assert.match(qualificationMigration, /client_kind' = 'METAENGINE_BROWSER_ELECTRON_NATIVE'/);
+  assert.match(qualificationMigration, /qualification_run_id' = p_run_id/);
+  assert.match(qualificationMigration, /qualification_run_attempt',''\) = p_run_attempt::text/);
+  assert.match(qualificationMigration, /source_head',''\)\) = lower\(p_source_head\)/);
+  assert.match(qualificationMigration, /requested_at >= v_now - interval '15 minutes'/);
+  assert.match(qualificationMigration, /if v_count <> 1/);
+  assert.match(qualificationMigration, /h205f22_a2_browser_device_enrollment_approve_v1\(v_request\.request_id\)/);
+  assert.match(qualificationMigration, /revoke all on function public\.client_v1_installed_qualification_approve_v1[\s\S]*from public, anon, authenticated/i);
+  assert.match(qualificationMigration, /grant execute on function public\.client_v1_installed_qualification_approve_v1[\s\S]*to service_role/i);
+});
+
+test('GitHub OIDC qualifier binds repository workflow run and exact source head before approval', () => {
+  assert.match(qualificationEdge, /AUDIENCE = "metaengine-client-installed-qualification"/);
+  assert.match(qualificationEdge, /createRemoteJWKSet/);
+  assert.match(qualificationEdge, /payload\.repository !== REPO/);
+  assert.match(qualificationEdge, /payload\.repository_id/);
+  assert.match(qualificationEdge, /payload\.repository_owner_id/);
+  assert.match(qualificationEdge, /payload\.event_name !== "pull_request"/);
+  assert.match(qualificationEdge, /payload\.runner_environment !== "github-hosted"/);
+  assert.match(qualificationEdge, /payload\.sub !== SUBJECT/);
+  assert.match(qualificationEdge, /payload\.workflow_ref/);
+  assert.match(qualificationEdge, /githubRun\(runId\)/);
+  assert.match(qualificationEdge, /run\?\.head_sha/);
+  assert.match(qualificationEdge, /run\?\.path/);
+  assert.match(qualificationEdge, /run\?\.run_attempt/);
+  assert.match(qualificationEdge, /client_v1_installed_qualification_approve_v1/);
+  assert.match(qualificationEdge, /QUALIFICATION_REQUEST_NOT_FOUND/);
+  assert.match(qualificationEdge, /WAITING_FOR_EXACT_ENROLLMENT_REQUEST/);
+  assert.doesNotMatch(qualificationEdge, /postgres\(|SUPABASE_DB_URL/);
+});
+
+test('installed Windows runner uses OIDC out-of-band and clears minting credentials before Electron launch', () => {
+  assert.match(installedQualification, /id-token: write/);
+  assert.match(installedQualification, /metaengine-client-installed-qualification-h205f22/);
+  assert.match(installedQualification, /metaengine-client-installed-qualification/);
+  assert.match(installedQualification, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+  assert.match(installedQualification, /ACTIONS_ID_TOKEN_REQUEST_TOKEN/);
+  const clearUrl = installedQualification.indexOf('$env:ACTIONS_ID_TOKEN_REQUEST_URL = $null');
+  const clearToken = installedQualification.indexOf('$env:ACTIONS_ID_TOKEN_REQUEST_TOKEN = $null');
+  const launch = installedQualification.indexOf('$normal = Start-Process -FilePath $app');
+  assert.ok(clearUrl >= 0 && clearToken >= 0 && launch > clearUrl && launch > clearToken);
+  assert.match(installedQualification, /oidc_token_exposed_to_browser -NotePropertyValue \$false/);
+  assert.match(installedQualification, /installed_oidc_enrollment_qualification_not_proven/);
+  assert.match(installedQualification, /oidc_enrollment_qualification_verified/);
 });
