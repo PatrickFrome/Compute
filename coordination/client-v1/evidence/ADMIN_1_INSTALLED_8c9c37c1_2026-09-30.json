@@ -1,0 +1,276 @@
+{
+  "schema": "metaengine.client-v1.installed-admin-qualification.v1",
+  "captured_at": "2026-09-30",
+  "source": {
+    "repository": "PatrickFrome/Compute",
+    "branch": "work/client-v1-admin-connectivity-v1",
+    "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+    "pr": 1085
+  },
+  "scope": "GITHUB_HOSTED_WINDOWS_INSTALLED_ELECTRON",
+  "user_machine_connection_proven": false,
+  "authority_effect": false,
+  "promotion_authorized": false,
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "installer": {
+    "schema": "metaengine.browser.installer-provenance.v1",
+    "provenance_id": "d15e3147-6866-4aa7-982e-9761c53db8be",
+    "source_head": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+    "workflow": "browser-windows-package-smoke.yml",
+    "run_id": "36760350120",
+    "run_number": 3059,
+    "run_attempt": 1,
+    "package_version": "0.7.0-dev.36755969299.1",
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36755969299.1-x64.exe",
+    "installer_sha256": "e3918133727756f64546ad4d8bfddf4cac04243e2fe18314fad2c4c8fe23ec6f",
+    "installer_bytes": 159530451,
+    "blockmap_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36755969299.1-x64.exe.blockmap",
+    "blockmap_sha256": "819fcad4eface3d5e23102675aa833101c2c15b1dbf7ef8fa10cad3a5516334d",
+    "config_path": "electron-builder.test.json",
+    "config_sha256": "ec02edd3184de2204a47ab76b73bfbcc5ab7f4fb2c94403dc2fde084ec5d3077",
+    "builder_version": null,
+    "built_at": "2026-09-30T18:46:57.980Z",
+    "signed": false,
+    "promotion_authorized": false,
+    "artifact_id": 11118174462,
+    "artifact_zip_sha256": "da5ac240c2e0688cb511c7cb9edbdc275d239bc6440720e7ae991cc27d68e3a5",
+    "download_page": "https://github.com/PatrickFrome/Compute/actions/runs/36760350120/artifacts/11118174462"
+  },
+  "installed": {
+    "schema": "metaengine.browser.windows-installed-chat-qualification.v2",
+    "source_head": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+    "package_version": "0.7.0-dev.36755969299.1",
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36755969299.1-x64.exe",
+    "installer_sha256": "e3918133727756f64546ad4d8bfddf4cac04243e2fe18314fad2c4c8fe23ec6f",
+    "producer_run_id": 36760350120,
+    "producer_run_number": 3059,
+    "producer_run_attempt": 1,
+    "oidc_enrollment_qualification_verified": true,
+    "oidc_enrollment_source_head": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+    "oidc_enrollment_nonce_bound": true,
+    "oidc_token_exposed_to_browser": false,
+    "admin_connection_verified": true,
+    "admin_access_tier": "ADMIN",
+    "admin_grant_epoch": 1,
+    "admin_backend_transport": "POSTGREST_RPC",
+    "admin_direct_postgres_query_plane": false,
+    "admin_automatic_reconnect": true,
+    "admin_canary_base": "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary",
+    "me2_ui_installed_size_bytes": 38779621
+  },
+  "producer_gate": {
+    "schema": "metaengine.browser.qualified-installer-producer-gate.v1",
+    "source_head": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+    "producer_run_id": 36760350120,
+    "producer_run_number": 3059,
+    "producer_run_attempt": 1,
+    "producer_terminal_success": true,
+    "authority_effect": false
+  },
+  "durable_readback": {
+    "run_id": "36760350225",
+    "run_attempt": 1,
+    "source_head": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+    "status": "CLAIMED",
+    "nonce_present": true,
+    "device_bound": true,
+    "access_tier": "ADMIN",
+    "admin_grant_epoch": 1,
+    "claimed_at": "2026-09-30T18:48:20.246555Z",
+    "heartbeat_at": "2026-09-30T18:48:25.300532Z"
+  },
+  "backend": {
+    "canary": {
+      "slug": "a2-browser-native-supervisor-v14-canary",
+      "version": 25,
+      "source_pin": "9b935a3dbd2c2722c0ff72a624d98b1c3a5542de",
+      "ezbr_sha256": "bfab94d1acb6a55ef5e2c55bbfa561dfce94c8f4aaadc56064b556b91475c4fb"
+    },
+    "oidc": {
+      "slug": "metaengine-client-installed-qualification-h205f22",
+      "version": 5,
+      "source_pin": "c8a0779cf6215bd5d911b8371d3578e62a25593f",
+      "ezbr_sha256": "c8e686c558813e44cc498f4924ee215fec6225b379e6bb05c1ee314cd772b048"
+    },
+    "stable": {
+      "slug": "a2-browser-native-supervisor-v1",
+      "version": 8,
+      "source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb",
+      "unchanged": true
+    }
+  },
+  "tests": {
+    "local_focused": {
+      "pass": 39,
+      "fail": 0
+    },
+    "critical_windows": {
+      "pass": 3745,
+      "fail": 0,
+      "skipped": 0
+    },
+    "workflows": [
+      {
+        "id": 36760350086,
+        "name": "Client V1 C4 Goal Contracts",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350076,
+        "name": "R84 Desktop Convergence V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350094,
+        "name": "R83 Edge Canary Qualification V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350088,
+        "name": "Browser Typed Workspaces V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350074,
+        "name": "Browser Meta Orchestrator V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350117,
+        "name": "Browser Live Control Recovery V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350141,
+        "name": "Client V1 Supabase Edge Live Probe",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350188,
+        "name": "METAENGINE Browser Control Plane Fast Lane V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350078,
+        "name": "METAENGINE Browser Cognitive Ingest V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350073,
+        "name": "Browser Workspace Reincarnation V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350089,
+        "name": "METAENGINE Browser Host Resilience Login Start V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350202,
+        "name": "METAENGINE Browser Developer Emergency Update V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350075,
+        "name": "METAENGINE Browser Shell-First Dirty Profile V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350121,
+        "name": "METAENGINE Browser Shell V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350112,
+        "name": "METAENGINE Browser Critical Audit V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350120,
+        "name": "Browser Windows Package Smoke",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350191,
+        "name": "METAENGINE Browser Windows Autonomous Soak V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350225,
+        "name": "Browser Windows Installed Chat Qualification",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350152,
+        "name": "METAENGINE Browser Final Runtime Activation V1",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      },
+      {
+        "id": 36760350098,
+        "name": "METAENGINE Browser Self Update E2E",
+        "sha": "8c9c37c1a74f59f0d0ed72d2ec8683a2475203e3",
+        "attempt": 1,
+        "conclusion": "success"
+      }
+    ]
+  },
+  "physical_visual": {
+    "artifact_id": 11118946776,
+    "artifact_zip_sha256": "637a74001b0a22c4fd79b0a38fc9d530b1e8b4904ca132cc8e5114d912a7c62b",
+    "fixture_captures_are_not_live_connection_proof": true
+  },
+  "self_update": {
+    "run_id": 36760350098,
+    "conclusion": "success",
+    "same_source": true,
+    "exact_package_smoke_installer_proven": false,
+    "resident_target_version": "0.7.0-dev.36760350098.1",
+    "resident_target_installer_sha256": "a7e52b5102971ecfe645a3242a90621ffae07bc69c2e8c5dbe0e417d47190a65",
+    "new_primary_started": true,
+    "new_sentinel_started": true,
+    "retry_dialog_required": false
+  },
+  "release_blockers": [
+    "Self Update E2E rebuilds a distinct target rather than consuming the shared Package Smoke installer.",
+    "Stable production Edge remains v8; installed ADMIN proof is explicitly canary-bound.",
+    "R83 full lease/result/rollback promotion gates are not closed by an ADMIN readback alone."
+  ]
+}
