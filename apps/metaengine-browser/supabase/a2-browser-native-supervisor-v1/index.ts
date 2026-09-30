@@ -13,7 +13,18 @@ import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
 const DB_URL=Deno.env.get('SUPABASE_DB_URL')||'';
 const DB_SESSION_URL=Deno.env.get('SUPABASE_DB_SESSION_URL')||'';
 const SUPABASE_URL=String(Deno.env.get('SUPABASE_URL')||'').replace(/\/+$/,'');
-const SERVICE_ROLE=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
+function serverSecretKey(){
+  const modern=String(Deno.env.get('SUPABASE_SECRET_KEYS')||'').trim();
+  if(modern){
+    try{
+      const parsed=JSON.parse(modern);
+      const value=String(parsed?.default||'').trim();
+      if(value)return value;
+    }catch{/* legacy env below */}
+  }
+  return String(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'').trim();
+}
+const SERVICE_ROLE=serverSecretKey();
 const REST_BASE=SUPABASE_URL?SUPABASE_URL+'/rest/v1':'';
 const REALTIME_API_KEY=Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
 // Modern Supabase sb_secret_* values are API keys, not JWT access tokens. Realtime
