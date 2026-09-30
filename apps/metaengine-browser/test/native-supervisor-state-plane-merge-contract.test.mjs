@@ -15,15 +15,23 @@ import test from 'node:test';
 // ---------------------------------------------------------------------------
 
 const read = (rel) => fs.readFile(new URL(rel, import.meta.url), 'utf8');
+const migration = () => read('../../../supabase/migrations/20260930163000_client_v1_admin_connectivity_v1.sql');
 
-test('edge upsert merges state per plane instead of full replacement', async () => {
+test('edge upsert delegates to server-side shallow plane merge instead of full replacement', async () => {
   const edge = await read('../supabase/a2-browser-native-supervisor-v1/index.ts');
-  assert.match(edge, /coalesce\(target\.state,'\{\}'::jsonb\)\|\|excluded\.state/,
-    'the persisted state must shallow-merge per top-level plane');
+  const sql = await migration();
+  assert.match(edge, /rpc\('client_v1_native_supervisor_state_merge_v1'/,
+    'the Edge must delegate the state write to the exact server-side merge RPC');
   assert.doesNotMatch(edge, /state=excluded\.state\b/,
-    'full-JSON replacement must be gone');
-  assert.match(edge, /insert into public\.\$\{STATE_TABLE\} as target\(/,
+    'full-JSON replacement must remain absent from the Edge path');
+  assert.match(sql, /create or replace function public\.client_v1_native_supervisor_state_merge_v1/);
+  assert.match(sql, /state=coalesce\(target\.state,'\{\}'::jsonb\)\|\|excluded\.state/,
+    'the persisted state must shallow-merge per top-level plane');
+  assert.doesNotMatch(sql, /state=excluded\.state\b/,
+    'the server-side merge RPC must not regress to full JSON replacement');
+  assert.match(sql, /insert into public\.compute_fabric_a2_browser_supervisor_state_h205f22 as target\(/,
     'the conflict target must be aliased so the merge can reference the stored row');
+  assert.match(sql, /grant execute on function public\.client_v1_native_supervisor_state_merge_v1[\s\S]*to service_role/i);
 });
 
 test('edge boundedState preserves the absent-vs-null distinction for every plane', async () => {
