@@ -12,7 +12,9 @@ import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
 
 const DB_URL=Deno.env.get('SUPABASE_DB_URL')||'';
 const DB_SESSION_URL=Deno.env.get('SUPABASE_DB_SESSION_URL')||'';
+const SUPABASE_URL=String(Deno.env.get('SUPABASE_URL')||'').replace(/\/+$/,'');
 const SERVICE_ROLE=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
+const REST_BASE=SUPABASE_URL?SUPABASE_URL+'/rest/v1':'';
 const REALTIME_API_KEY=Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
 // Modern Supabase sb_secret_* values are API keys, not JWT access tokens. Realtime
 // private-channel auth therefore stays disabled unless a legacy JWT-shaped token is
@@ -51,7 +53,11 @@ const MAX_REALTIME_WAIT_MS=15000;
 const cors={'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'content-type,x-a2-chat-bridge-client,x-a2-device-profile,x-a2-device-id,x-a2-device-timestamp,x-a2-device-nonce,x-a2-device-body-sha256,x-a2-device-signature,x-metaengine-enroll-timestamp,x-metaengine-enroll-nonce,x-metaengine-enroll-signature','cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(status:number,body:any)=>new Response(JSON.stringify(body),{status,headers:{...cors,'content-type':'application/json; charset=utf-8'}});
 if(!DB_URL)throw new Error('supabase_db_url_missing');
-const sql=postgres(DB_URL,{max:2,prepare:false,connect_timeout:4,idle_timeout:20});
+if(!REST_BASE||!SERVICE_ROLE)throw new Error('supabase_postgrest_service_identity_missing');
+// Direct Postgres is retained only for explicit DB-inspect diagnostics. Normal
+// enrollment/auth/heartbeat/command/RPC traffic below uses PostgREST so an Edge
+// isolate does not consume a query session merely to serve the Native Browser.
+const sql=postgres(DB_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:20});
 // LISTEN holds a dedicated connection. Keep it isolated from the query pool so a
 // held command-wake subscription cannot starve durable lease/heartbeat queries.
 const wakeSql=DB_SESSION_URL?postgres(DB_SESSION_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:null}):null;
@@ -59,51 +65,33 @@ const postgresWakeHub=createPostgresCommandWakeHub({listen:(channel:string,onNot
   if(!wakeSql)throw new Error('postgres_session_wake_url_unavailable');
   return wakeSql.listen(channel,onNotify,onListen);
 }});
-const rpcMetaCache=new Map<string,any>();
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
-function rpcParam(value:any,_type:string){return value}
-async function rpcMeta(name:string,args:any={}){
-  if(!/^[a-z0-9_]+$/i.test(name))throw new Error('rpc_name_invalid');
-  const key=name+':'+Object.keys(args).sort().join(',');
-  if(rpcMetaCache.has(key))return rpcMetaCache.get(key);
-  const rows=await sql`
-    select p.oid::text as oid,p.pronargs,p.pronargdefaults,p.proretset,
-      coalesce(p.proargnames[1:p.pronargs],array[]::text[]) as arg_names,
-      array(select format_type(t.oid,null)
-            from unnest(p.proargtypes::oid[]) with ordinality u(type_oid,ord)
-            join pg_type t on t.oid=u.type_oid order by u.ord) as arg_types
-    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-    where n.nspname='public' and p.proname=${name}`;
-  const supplied=new Set(Object.keys(args));
-  const candidates=rows.filter((r:any)=>{
-    const names=[...(r.arg_names||[])];
-    const required=names.slice(0,Math.max(0,Number(r.pronargs)-Number(r.pronargdefaults||0)));
-    return [...supplied].every(k=>names.includes(k))&&required.every((k:string)=>supplied.has(k));
+function serviceHeaders(extra:Record<string,string>={}){
+  const headers:Record<string,string>={'apikey':SERVICE_ROLE,'accept':'application/json',...extra};
+  // Legacy service_role JWTs may be used as Bearer tokens. Modern sb_secret_*
+  // keys are deliberately NOT placed in Authorization because they are not JWTs.
+  if(SERVICE_ROLE.split('.').length===3)headers.authorization=`Bearer ${SERVICE_ROLE}`;
+  return headers;
+}
+async function rest(path:string,{method='GET',body=null,prefer=null}:{method?:string,body?:any,prefer?:string|null}={}){
+  if(!String(path||'').startsWith('/'))throw new Error('postgrest_path_invalid');
+  const headers=serviceHeaders(body===null?{}:{'content-type':'application/json'});
+  if(prefer)headers.prefer=prefer;
+  const response=await fetch(REST_BASE+path,{
+    method,
+    headers,
+    body:body===null?undefined:JSON.stringify(body),
+    cache:'no-store',
   });
-  if(candidates.length!==1)throw new Error(`rpc_signature_ambiguous:${name}:${candidates.length}`);
-  rpcMetaCache.set(key,candidates[0]);
-  return candidates[0];
+  const text=await response.text();
+  if(!response.ok)throw new Error(`postgrest_http_${response.status}:${text.slice(0,240)}`);
+  if(!text)return null;
+  try{return JSON.parse(text)}catch{throw new Error('postgrest_json_invalid')}
 }
 async function rpc(name:string,args:any={}){
-  const m=await rpcMeta(name,args);
-  const names=[...m.arg_names];
-  const types=[...m.arg_types];
-  const params:any[]=[];
-  const clauses:string[]=[];
-  for(const [k,v] of Object.entries(args)){
-    const i=names.indexOf(k);
-    if(i<0)throw new Error(`rpc_arg_missing:${name}:${k}`);
-    params.push(rpcParam(v,types[i]));
-    clauses.push(`\"${k}\" => $${params.length}::${types[i]}`);
-  }
-  const call=`public.\"${name}\"(${clauses.join(',')})`;
-  if(m.proretset){
-    const rows=await sql.unsafe(`select to_jsonb(x) as value from ${call} x`,params);
-    return rows.map((r:any)=>r.value);
-  }
-  const rows=await sql.unsafe(`select to_jsonb(${call}) as value`,params);
-  return rows[0]?.value??null;
+  if(!/^[a-z0-9_]+$/i.test(name))throw new Error('rpc_name_invalid');
+  return rest('/rpc/'+encodeURIComponent(name),{method:'POST',body:args});
 }
 async function boundedRpc(name:string,args:any,ms:number){
   let timer:any;
@@ -113,29 +101,57 @@ async function boundedRpc(name:string,args:any,ms:number){
   ])}finally{if(timer)clearTimeout(timer)}
 }
 
-async function enrollmentExisting(client:string,fingerprint:string){return sql.unsafe(`select request_id::text,status,requested_at,expires_at,key_fingerprint_sha256 from public.${ENROLL_TABLE} where client_id=$1 and key_fingerprint_sha256=$2 and status in ('PENDING','APPROVED') and expires_at>clock_timestamp() order by requested_at desc limit 1`,[client,fingerprint])}
-async function enrollmentInsert(client:string,jwk:any,fingerprint:string,metadata:any){return sql.unsafe(`insert into public.${ENROLL_TABLE}(client_id,profile,public_jwk,key_fingerprint_sha256,status,metadata,authority_effect) values($1,$2,$3::jsonb,$4,'PENDING',$5::jsonb,false) returning request_id::text,status,requested_at,expires_at,key_fingerprint_sha256`,[client,PROFILE,jwk,fingerprint,metadata||{}])}
-async function enrollmentById(requestId:string,client:string,fingerprint:string){return sql.unsafe(`select request_id::text,status,requested_at,expires_at,approved_at,device_id::text from public.${ENROLL_TABLE} where request_id=$1::uuid and client_id=$2 and key_fingerprint_sha256=$3 limit 1`,[requestId,client,fingerprint])}
-async function deviceLookup(deviceId:string,client:string){return sql.unsafe(`select device_id::text,client_id,profile,public_jwk,enrollment_pairing_token_hash,active,revoked_at from public.${DEVICE_TABLE} where device_id=$1::uuid and client_id=$2 limit 1`,[deviceId,client])}
-async function pairingLookup(hash:string){return sql.unsafe('select token_hash from public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22 where token_hash=$1 and active=true limit 1',[hash])}
-async function commandLookup(commandId:string){return sql.unsafe(`select command_id::text,action from public.${COMMAND_TABLE} where workspace_id=$1::uuid and command_id=$2::uuid limit 1`,[WORKSPACE_ID,commandId])}
-async function commandReceiptLookup({workspaceId,commandId,clientId}:{workspaceId:string,commandId:string,clientId:string}){const rows=await sql.unsafe(`select command_id::text,leased_by,status,receipt,error from public.${COMMAND_TABLE} where workspace_id=$1::uuid and command_id=$2::uuid and leased_by=$3 limit 1`,[workspaceId,commandId,clientId]);return rows[0]||null}
+const eq=(value:any)=>encodeURIComponent(String(value??''));
+async function enrollmentExisting(client:string,fingerprint:string){
+  const now=encodeURIComponent(new Date().toISOString());
+  return rest(`/${ENROLL_TABLE}?client_id=eq.${eq(client)}&key_fingerprint_sha256=eq.${eq(fingerprint)}&status=in.(PENDING,APPROVED)&expires_at=gt.${now}&select=request_id,status,requested_at,expires_at,key_fingerprint_sha256&order=requested_at.desc&limit=1`);
+}
+async function enrollmentInsert(client:string,jwk:any,fingerprint:string,metadata:any){
+  return rest(`/${ENROLL_TABLE}?select=request_id,status,requested_at,expires_at,key_fingerprint_sha256`,{
+    method:'POST',
+    prefer:'return=representation',
+    body:{client_id:client,profile:PROFILE,public_jwk:jwk,key_fingerprint_sha256:fingerprint,status:'PENDING',metadata:metadata||{},authority_effect:false},
+  });
+}
+async function enrollmentById(requestId:string,client:string,fingerprint:string){
+  return rest(`/${ENROLL_TABLE}?request_id=eq.${eq(requestId)}&client_id=eq.${eq(client)}&key_fingerprint_sha256=eq.${eq(fingerprint)}&select=request_id,status,requested_at,expires_at,approved_at,device_id&limit=1`);
+}
+async function deviceLookup(deviceId:string,client:string){
+  return rest(`/${DEVICE_TABLE}?device_id=eq.${eq(deviceId)}&client_id=eq.${eq(client)}&select=device_id,client_id,profile,public_jwk,enrollment_pairing_token_hash,active,revoked_at,access_tier,admin_scopes,admin_grant_epoch,admin_granted_at,admin_revoked_at&limit=1`);
+}
+async function pairingLookup(hash:string){
+  return rest(`/compute_fabric_a2_chat_bridge_remote_pairing_h205f22?token_hash=eq.${eq(hash)}&active=eq.true&select=token_hash&limit=1`);
+}
+async function commandLookup(commandId:string){
+  return rest(`/${COMMAND_TABLE}?workspace_id=eq.${eq(WORKSPACE_ID)}&command_id=eq.${eq(commandId)}&select=command_id,action&limit=1`);
+}
+async function commandReceiptLookup({workspaceId,commandId,clientId}:{workspaceId:string,commandId:string,clientId:string}){
+  const rows=await rest(`/${COMMAND_TABLE}?workspace_id=eq.${eq(workspaceId)}&command_id=eq.${eq(commandId)}&leased_by=eq.${eq(clientId)}&select=command_id,leased_by,status,receipt,error&limit=1`);
+  return Array.isArray(rows)?rows[0]||null:null;
+}
 const rsiReceiptReadback=createRsiResultReceiptReadback({lookupCommand:commandReceiptLookup});
 async function upsertStateRow(row:any){
-  // P1-2 multi-writer repair: per-plane shallow jsonb merge instead of a full
-  // replacement. Keys present in the incoming payload (including explicit
-  // nulls, e.g. supervisor_mesh:null when the mesh is not running) overwrite;
-  // keys the writer omitted are preserved from the stored state. This is what
-  // makes plane ownership possible: the 5s heartbeat, the realtime
-  // observation push, and the bootstrap heartbeat can each own their planes
-  // without erasing the others.
-  await sql.unsafe(`insert into public.${STATE_TABLE} as target(client_id,workspace_id,last_seen_at,extension_version,operator_runtime,supervisor_mode,armed,operator_mode,ordering_policy,last_command_id,last_command_status,state,authority_effect) values($1,$2::uuid,clock_timestamp(),$3,$4,$5,$6::boolean,$7,$8,$9::uuid,$10,$11::jsonb,$12::boolean) on conflict(client_id) do update set workspace_id=excluded.workspace_id,last_seen_at=excluded.last_seen_at,extension_version=excluded.extension_version,operator_runtime=excluded.operator_runtime,supervisor_mode=excluded.supervisor_mode,armed=excluded.armed,operator_mode=excluded.operator_mode,ordering_policy=excluded.ordering_policy,last_command_id=excluded.last_command_id,last_command_status=excluded.last_command_status,state=coalesce(target.state,'{}'::jsonb)||excluded.state,authority_effect=excluded.authority_effect`,[row.client_id,row.workspace_id,row.extension_version,row.operator_runtime,row.supervisor_mode,row.armed,row.operator_mode,row.ordering_policy,row.last_command_id,row.last_command_status,row.state,row.authority_effect]);
-  return row;
+  const merged=await rpc('client_v1_native_supervisor_state_merge_v1',{
+    p_client_id:row.client_id,
+    p_workspace_id:row.workspace_id,
+    p_extension_version:row.extension_version,
+    p_operator_runtime:row.operator_runtime,
+    p_supervisor_mode:row.supervisor_mode,
+    p_armed:row.armed,
+    p_operator_mode:row.operator_mode,
+    p_ordering_policy:row.ordering_policy,
+    p_last_command_id:row.last_command_id,
+    p_last_command_status:row.last_command_status,
+    p_state:row.state,
+    p_authority_effect:row.authority_effect,
+  });
+  if(merged?.accepted!==true)throw new Error('supervisor_state_merge_rejected');
+  return merged;
 }
 async function statusRows(){
-  const states=await sql.unsafe(`select client_id,workspace_id::text,last_seen_at,extension_version,operator_runtime,supervisor_mode,armed,operator_mode,ordering_policy,last_command_id::text,last_command_status,state,authority_effect from public.${STATE_TABLE} where workspace_id=$1::uuid order by last_seen_at desc limit 8`,[WORKSPACE_ID]);
-  const commands=await sql.unsafe(`select command_id::text,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error from public.${COMMAND_TABLE} where workspace_id=$1::uuid order by issued_at desc limit 40`,[WORKSPACE_ID]);
-  return{states,commands};
+  const states=await rest(`/${STATE_TABLE}?workspace_id=eq.${eq(WORKSPACE_ID)}&select=client_id,workspace_id,last_seen_at,extension_version,operator_runtime,supervisor_mode,armed,operator_mode,ordering_policy,last_command_id,last_command_status,state,authority_effect&order=last_seen_at.desc&limit=8`);
+  const commands=await rest(`/${COMMAND_TABLE}?workspace_id=eq.${eq(WORKSPACE_ID)}&select=command_id,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error&order=issued_at.desc&limit=40`);
+  return{states:Array.isArray(states)?states:[],commands:Array.isArray(commands)?commands:[]};
 }
 
 async function sha256(v:string){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return[...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
