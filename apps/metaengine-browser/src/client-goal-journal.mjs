@@ -1,3 +1,5 @@
+import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
+
 const SCHEMA = 'metaengine.client.goal-journal.v1';
 const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -47,7 +49,7 @@ function normalizeEntry(value) {
     progress: value.progress && typeof value.progress === 'object' && !Array.isArray(value.progress)
       ? Object.freeze(clone(value.progress))
       : null,
-    execution_proof: value.execution_proof && typeof value.execution_proof === 'object' && !Array.isArray(value.execution_proof)
+    execution_proof: clientGoalExecutionProofMatchesProgress(value.execution_proof, value.progress)
       ? Object.freeze(clone(value.execution_proof))
       : null,
     last_error: value.last_error == null ? null : String(value.last_error).slice(0, 240),
@@ -81,6 +83,7 @@ export class ClientGoalJournal {
   #maxEntries;
   #state = emptyState();
   #loaded = false;
+  #writeTail = Promise.resolve();
 
   constructor({ loadState, saveState, maxEntries = 32 } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') {
@@ -135,106 +138,125 @@ export class ClientGoalJournal {
     return this.#state.entries.find((row) => row.request_id === id) || null;
   }
 
-  async #replace(entry) {
-    if (!this.#loaded) await this.load();
-    const normalized = normalizeEntry(entry);
-    const entries = this.#state.entries.filter((row) => row.request_id !== normalized.request_id);
-    entries.push(normalized);
-    while (entries.length > this.#maxEntries) entries.shift();
-    this.#state = Object.freeze({ ...emptyState(), entries: Object.freeze(entries) });
-    await this.#saveState(this.snapshot());
-    return normalized;
+  #replace(id, change) {
+    const write = this.#writeTail.then(async () => {
+      if (!this.#loaded) await this.load();
+      const existing = this.get(id);
+      const next = change(existing);
+      if (next === existing) return existing;
+      const normalized = normalizeEntry(next);
+      const entries = this.#state.entries.filter(row => row.request_id !== id);
+      entries.push(normalized);
+      while (entries.length > this.#maxEntries) entries.shift();
+      const state = Object.freeze({ ...emptyState(), entries: Object.freeze(entries) });
+      // Do not publish an in-memory state that failed to become durable.
+      await this.#saveState(clone(state));
+      this.#state = state;
+      return normalized;
+    });
+    this.#writeTail = write.catch(() => {});
+    return write;
   }
 
   async begin({ request_id, goal }) {
     if (!this.#loaded) await this.load();
     const id = requestId(request_id);
     const text = goalText(goal);
-    const existing = this.get(id);
-    if (existing && existing.goal !== text) throw new Error('client_goal_journal_request_collision');
-    if (existing) return existing;
     const observed = nowIso();
-    return this.#replace({
-      schema: ENTRY_SCHEMA,
-      request_id: id,
-      goal: text,
-      state: 'SUBMITTING',
-      receipt: null,
-      progress: null,
-      execution_proof: null,
-      last_error: null,
-      created_at: observed,
-      updated_at: observed,
-      automatic_retry_allowed: false,
-      authority_effect: false,
+    return this.#replace(id, existing => {
+      if (existing && existing.goal !== text) throw new Error('client_goal_journal_request_collision');
+      if (existing) return existing;
+      return {
+        schema: ENTRY_SCHEMA,
+        request_id: id,
+        goal: text,
+        state: 'SUBMITTING',
+        receipt: null,
+        progress: null,
+        execution_proof: null,
+        last_error: null,
+        created_at: observed,
+        updated_at: observed,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
     });
   }
 
   async recordSubmission(receipt) {
     const id = requestId(receipt?.request_id);
-    const existing = this.get(id);
-    if (!existing) throw new Error('client_goal_journal_request_missing');
     if (receipt?.schema !== 'metaengine.client.goal-submission.v1' || receipt?.exact_request_correlation !== true) {
       throw new Error('client_goal_journal_receipt_invalid');
     }
-    return this.#replace({
-      ...existing,
-      state: 'ADMITTED',
-      receipt: clone(receipt),
-      last_error: null,
-      updated_at: nowIso(),
-      automatic_retry_allowed: false,
-      authority_effect: false,
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      return {
+        ...existing,
+        state: 'ADMITTED',
+        receipt: clone(receipt),
+        last_error: null,
+        updated_at: nowIso(),
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
     });
   }
 
   async recordProgress(progress) {
     const id = requestId(progress?.request_id);
-    const existing = this.get(id);
-    if (!existing) throw new Error('client_goal_journal_request_missing');
     if (progress?.schema !== 'metaengine.client.goal-progress.v1') throw new Error('client_goal_journal_progress_invalid');
     const state = progress.found === true ? String(progress.task_state || '').toUpperCase() : 'RECONCILE_REQUIRED';
     if (!STATES.has(state)) throw new Error('client_goal_journal_progress_state_invalid');
-    return this.#replace({
-      ...existing,
-      state,
-      progress: clone(progress),
-      last_error: progress.found === true ? null : existing.last_error,
-      updated_at: nowIso(),
-      automatic_retry_allowed: false,
-      authority_effect: false,
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      return {
+        ...existing,
+        state,
+        progress: clone(progress),
+        execution_proof: clientGoalExecutionProofMatchesProgress(existing.execution_proof, progress)
+          ? existing.execution_proof : null,
+        last_error: progress.found === true ? null : existing.last_error,
+        updated_at: nowIso(),
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
     });
   }
 
   async recordExecutionProof(proof) {
     const id = requestId(proof?.request_id);
-    const existing = this.get(id);
-    if (!existing) throw new Error('client_goal_journal_request_missing');
     if (
       proof?.schema !== 'metaengine.client.goal-execution-proof.v1'
       || proof?.authority_effect !== false
       || proof?.automatic_retry_allowed !== false
     ) throw new Error('client_goal_journal_execution_proof_invalid');
-    return this.#replace({
-      ...existing,
-      execution_proof: clone(proof),
-      updated_at: nowIso(),
-      automatic_retry_allowed: false,
-      authority_effect: false,
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      if (!clientGoalExecutionProofMatchesProgress(proof, existing.progress)) {
+        throw new Error('client_goal_journal_execution_proof_progress_drift');
+      }
+      return {
+        ...existing,
+        execution_proof: clone(proof),
+        updated_at: nowIso(),
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
     });
   }
 
   async markReconcileRequired(rawRequestId, error = null) {
     const id = requestId(rawRequestId);
-    const existing = this.get(id);
-    if (!existing) throw new Error('client_goal_journal_request_missing');
-    return this.#replace({
-      ...existing,
-      state: 'RECONCILE_REQUIRED',
-      last_error: safeError(error),
-      updated_at: nowIso(),
-      automatic_retry_allowed: false,
-      authority_effect: false,
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      return {
+        ...existing,
+        state: 'RECONCILE_REQUIRED',
+        last_error: safeError(error),
+        updated_at: nowIso(),
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
     });
   }
 }

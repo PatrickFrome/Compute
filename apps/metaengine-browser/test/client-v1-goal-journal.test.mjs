@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ClientGoalJournal } from '../src/client-goal-journal.mjs';
+import { normalizeClientGoalExecutionProofReadback, normalizeClientGoalProgressReadback } from '../src/client-control-contract.mjs';
+import { receipt, wireProof, wireProgress } from './fixtures/client-goal-proof.mjs';
 
 const requestId = '11111111-1111-4111-8111-111111111111';
 
@@ -80,21 +82,12 @@ test('execution proof survives restart and BLOCKED is terminal journal state', a
   const first = new ClientGoalJournal({ loadState: store.loadState, saveState: store.saveState });
   await first.load();
   await first.begin({ request_id: requestId, goal: 'Ship durable proof' });
-  await first.recordProgress({
-    schema: 'metaengine.client.goal-progress.v1',
-    request_id: requestId,
-    found: true,
-    task_state: 'BLOCKED',
-  });
-  const proof = await first.recordExecutionProof({
-    schema: 'metaengine.client.goal-execution-proof.v1',
-    request_id: requestId,
-    found: true,
-    user_goal_to_agent_readback: true,
-    user_goal_to_result_readback: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
+  const progress = { ...wireProgress(), task_state: 'BLOCKED', terminal: true };
+  await first.recordProgress(normalizeClientGoalProgressReadback(progress, requestId, receipt));
+  const rawProof = { ...wireProof(), task_state: 'BLOCKED', terminal: true, user_goal_to_result_readback: false };
+  rawProof.result_proof.accepted = false;
+  rawProof.result_proof.claim_disposition = 'BLOCKED';
+  const proof = await first.recordExecutionProof(normalizeClientGoalExecutionProofReadback(rawProof, requestId, receipt));
   assert.equal(proof.state, 'BLOCKED');
   assert.equal(proof.execution_proof.user_goal_to_agent_readback, true);
 

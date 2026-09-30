@@ -1,20 +1,20 @@
 {
   "schema": "metaengine.r83.edge-canary-qualification.v1",
-  "captured_at": "2026-09-29",
+  "captured_at": "2026-09-30",
   "project_ref": "jhriwwsryeqsvvvufkok",
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 21,
-    "ezbr_sha256": "2fe43cc51e166f46d2d0ed5d22bdad2eb562953831c96a685eaae30e54cb973d",
-    "source_pin": "42c47251d75e804b6799d584fe26f2b2faf5a272"
+    "deployed_version": 22,
+    "ezbr_sha256": "53ea85117de5d1ee8dee8414a3bdc4c2cbb54782d7f03c3eac9259e271307336",
+    "source_pin": "a798561cc462d7a625177e98f18bab47f42b82fa"
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",
     "function_id": "b94f0619-675a-40fc-b340-0299b0250b9a",
-    "deployed_version": 6,
-    "ezbr_sha256": "5b3b6bb3fde3b991461e4806e4a8b25114f922c736642302844e835c0c01fa96",
-    "source_pin": "d4a95a62ac84de64e4f5dcc25e11dee0cb4198b0"
+    "deployed_version": 8,
+    "ezbr_sha256": "3ce87ea81481dbf8fd6afee819bed3bd3b41528e7b5c6842a2d7b7be38ccf829",
+    "source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb"
   },
   "required_capabilities": [
     "createDbInspectRoutes",
