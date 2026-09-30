@@ -1,5 +1,5 @@
 {
-  "savedAt": "2026-09-30T18:27:19.822Z",
+  "savedAt": "2026-09-30T18:27:34.512Z",
   "version": "2.0.0-restore",
   "lessons": [
     {
@@ -695,7 +695,7 @@
     "op_goal": "ресёрч бесплатных LLM-каналов и их интеграция (директива оператора)",
     "host": "dataforge-sandbox (chat 4e7a8a53)",
     "restored_from": "journal-latest.json @ Compute main (внешний рой жив)",
-    "total_born": 177,
+    "total_born": 185,
     "cycles": 11
   }
 }
