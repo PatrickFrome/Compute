@@ -11,8 +11,12 @@ const PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 const CANONICAL_SERVICE = '/a2-browser-native-supervisor-v1';
 const base = String(process.env.METAENGINE_CLIENT_V1_CANARY_BASE || '').replace(/\/+$/, '');
 const sourceHead = String(process.env.METAENGINE_CLIENT_V1_SOURCE_HEAD || '').trim().toLowerCase();
-const runId = String(process.env.GITHUB_RUN_ID || '').trim();
-const runAttempt = String(process.env.GITHUB_RUN_ATTEMPT || '').trim();
+const executionOrigin = String(process.env.METAENGINE_CLIENT_V1_QUALIFICATION_ORIGIN || 'GITHUB_ACTIONS');
+assert.ok(['GITHUB_ACTIONS', 'LOCAL'].includes(executionOrigin));
+const runId = String(executionOrigin === 'LOCAL'
+  ? process.env.METAENGINE_CLIENT_V1_LOCAL_RUN_ID || ''
+  : process.env.GITHUB_RUN_ID || '').trim();
+const runAttempt = executionOrigin === 'LOCAL' ? '1' : String(process.env.GITHUB_RUN_ATTEMPT || '').trim();
 const evidencePath = String(process.env.METAENGINE_CLIENT_V1_CANARY_EVIDENCE || '').trim();
 const timeoutMs = Math.max(60_000, Math.min(900_000, Number(process.env.METAENGINE_CLIENT_V1_APPROVAL_TIMEOUT_MS || 600_000)));
 const requirePhysicalAgent = String(process.env.METAENGINE_CLIENT_V1_REQUIRE_PHYSICAL_AGENT || '').trim() === '1';
@@ -26,7 +30,7 @@ assert.match(sourceHead, /^[0-9a-f]{40}$/);
 assert.match(runId, /^[0-9]{1,20}$/);
 assert.match(runAttempt, /^[1-9][0-9]{0,5}$/);
 
-const clientId = `client-v1-canary-${sourceHead.slice(0, 12)}-${runId}-${runAttempt}`;
+const clientId = `client-v1-${executionOrigin === 'LOCAL' ? 'local' : 'canary'}-${sourceHead.slice(0, 12)}-${runId}-${runAttempt}`;
 const enc = new TextEncoder();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const hexSha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -144,6 +148,7 @@ if (![200, 202].includes(requested.response.status) || !requested.body?.request_
 const requestId = String(requested.body.request_id);
 console.log(JSON.stringify({
   schema: 'metaengine.client-v1.signed-canary.enrollment-request.v1',
+  execution_origin: executionOrigin,
   source_head: sourceHead,
   run_id: runId,
   run_attempt: runAttempt,
@@ -208,6 +213,7 @@ if (requirePhysicalAgent) {
   ) {
     const evidence = {
       schema: 'metaengine.client-v1.c4-physical-qualification-evidence.v1',
+      execution_origin: executionOrigin,
       source_head: sourceHead,
       run_id: runId,
       run_attempt: runAttempt,
@@ -332,6 +338,7 @@ if (requirePhysicalAgent) {
   if (executionProof.user_goal_to_agent_readback !== true) {
     const evidence = {
       schema: 'metaengine.client-v1.c4-physical-qualification-evidence.v1',
+      execution_origin: executionOrigin,
       source_head: sourceHead,
       run_id: runId,
       run_attempt: runAttempt,
@@ -362,6 +369,7 @@ if (requirePhysicalAgent) {
 
 const evidence = {
   schema: 'metaengine.client-v1.signed-canary-goal-evidence.v1',
+  execution_origin: executionOrigin,
   source_head: sourceHead,
   run_id: runId,
   run_attempt: runAttempt,

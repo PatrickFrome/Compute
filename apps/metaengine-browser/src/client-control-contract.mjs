@@ -339,6 +339,7 @@ export function normalizeClientGoalExecutionProofReadback(value, expectedRequest
       || typeof origin.agent_surface_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(origin.agent_surface_sha256)
       || typeof origin.prompt_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(origin.prompt_sha256)
       || !['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(String(origin.effect_state || ''))
+      || !positiveInteger(origin.lease_generation)
       || origin.lease_generation !== row.lease_generation
     ) throw new Error('client_goal_execution_proof_agent_origin_invalid');
   }
@@ -346,22 +347,27 @@ export function normalizeClientGoalExecutionProofReadback(value, expectedRequest
   if (result.available === true && (
     typeof result.result_summary_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(result.result_summary_sha256)
     || typeof result.result_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(result.result_sha256)
+    || result.result_sha256 !== result.result_summary_sha256
   )) throw new Error('client_goal_execution_proof_result_digest_invalid');
 
   if (result.claim_valid === true && (
-    result.claim_schema !== 'metaengine.agent-result-claim.v1'
+    result.available !== true
+    || result.claim_schema !== 'metaengine.agent-result-claim.v1'
     || typeof result.claim_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(result.claim_sha256)
     || !['READY','BLOCKED','FAILED','ACCEPT','REJECT'].includes(String(result.claim_disposition || ''))
   )) throw new Error('client_goal_execution_proof_result_claim_invalid');
 
   if (result.origin_bound === true && (
-    origin.proven !== true
+    result.available !== true
+    || origin.proven !== true
     || result.conversation_url_sha256 !== origin.conversation_url_sha256
   )) throw new Error('client_goal_execution_proof_result_origin_invalid');
 
   if (result.accepted === true && (
-    result.claim_valid !== true
+    result.available !== true
+    || result.claim_valid !== true
     || result.origin_bound !== true
+    || !['READY','ACCEPT'].includes(result.claim_disposition)
     || !['RESULT_READY','COMPLETED'].includes(state)
   )) throw new Error('client_goal_execution_proof_result_acceptance_invalid');
 
@@ -434,6 +440,30 @@ export function normalizeClientGoalExecutionProofReadback(value, expectedRequest
     release_authority: false,
     authority_effect: false,
   });
+}
+
+// Progress and proof are separate read-only snapshots. Neither may silently
+// borrow identity/state from the other when the task advances between reads.
+export function clientGoalExecutionProofMatchesProgress(proof, progress) {
+  if (
+    !object(proof) || !object(progress)
+    || proof.schema !== CLIENT_GOAL_EXECUTION_PROOF_SCHEMA
+    || progress.schema !== CLIENT_GOAL_PROGRESS_SCHEMA
+    || proof.found !== true || progress.found !== true
+    || proof.authority_effect !== false || proof.automatic_retry_allowed !== false
+    || typeof proof.request_id !== 'string' || !UUID_RE.test(proof.request_id)
+    || typeof proof.task_id !== 'string' || !UUID_RE.test(proof.task_id)
+    || !positiveInteger(proof.plan_generation) || !positiveInteger(proof.alignment_epoch)
+    || !Number.isSafeInteger(proof.lease_generation) || proof.lease_generation < 0
+  ) return false;
+  const binding = [
+    'request_id','workspace_id','roadmap_id','plan_generation','alignment_epoch',
+    'baseline_sha','plan_sha256','point_id','task_id','task_spec_sha256',
+    'lease_generation','task_state','terminal',
+  ];
+  if (binding.some(key => proof[key] == null || proof[key] !== progress[key])) return false;
+  return (proof.result_proof?.result_summary_sha256 ?? null) === (progress.result_summary_sha256 ?? null)
+    && (proof.result_proof?.result_sha256 ?? null) === (progress.result_sha256 ?? null);
 }
 
 export function normalizeClientAgentId(value) {

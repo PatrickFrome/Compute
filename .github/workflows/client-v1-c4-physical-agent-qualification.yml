@@ -1,6 +1,8 @@
 name: Client V1 C4 Physical Agent Qualification
 
 on:
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
 
 permissions:
@@ -8,20 +10,21 @@ permissions:
 
 jobs:
   physical-agent-readback:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'client-v1:physical-agent'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout exact qualification head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Prove exact qualification head and deployed-source equivalence contract
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
@@ -48,7 +51,7 @@ jobs:
         shell: bash
         env:
           METAENGINE_CLIENT_V1_CANARY_BASE: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary
-          METAENGINE_CLIENT_V1_SOURCE_HEAD: ${{ github.sha }}
+          METAENGINE_CLIENT_V1_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           METAENGINE_CLIENT_V1_APPROVAL_TIMEOUT_MS: '600000'
           METAENGINE_CLIENT_V1_REQUIRE_PHYSICAL_AGENT: '1'
           METAENGINE_CLIENT_V1_AGENT_PROOF_TIMEOUT_MS: '480000'
@@ -62,7 +65,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: client-v1-c4-physical-agent-qualification-${{ github.sha }}
+          name: client-v1-c4-physical-agent-qualification-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/client-v1-c4-physical-agent-qualification.json
           if-no-files-found: warn
           retention-days: 30

@@ -2,26 +2,7 @@ name: Client V1 C4 Signed Canary Goal Qualification
 
 on:
   pull_request:
-    paths:
-      - 'apps/metaengine-browser/src/client-control-contract.mjs'
-      - 'apps/metaengine-browser/src/client-goal-journal.mjs'
-      - 'apps/metaengine-browser/src/main.mjs'
-      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
-      - 'apps/metaengine-browser/src/preload-shell.cjs'
-      - 'apps/metaengine-browser/src/meta-objective-compiler.mjs'
-      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
-      - 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx'
-      - 'apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs'
-      - 'apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs'
-      - 'apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs'
-      - 'apps/metaengine-browser/test/client-v1-goal-journal.test.mjs'
-      - 'apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs'
-      - 'apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs'
-      - 'apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs'
-      - 'supabase/migrations/20260929203000_client_v1_plan_generation_watermark_v1.sql'
-      - 'supabase/migrations/20260929211500_client_v1_goal_progress_reconciliation_v1.sql'
-      - 'supabase/migrations/20260929224500_client_v1_agent_origin_result_proof_v1.sql'
-      - '.github/workflows/client-v1-c4-signed-canary-goal.yml'
+    types: [labeled]
   workflow_dispatch:
 
 permissions:
@@ -29,6 +10,7 @@ permissions:
 
 jobs:
   signed-canary-goal:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'client-v1:signed-canary'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -36,7 +18,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Prove exact candidate head
@@ -52,6 +34,15 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Prove candidate Edge source matches qualification pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST=coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json
+          PIN="$(node -p "require('./' + process.argv[1]).candidate.source_pin" "$MANIFEST")"
+          git merge-base --is-ancestor "$PIN" HEAD
+          git diff --exit-code "$PIN" HEAD -- apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1 supabase/migrations
+
       - name: Request signed enrollment and qualify one Client V1 goal
         shell: bash
         env:
@@ -61,7 +52,7 @@ jobs:
           METAENGINE_CLIENT_V1_CANARY_EVIDENCE: ${{ runner.temp }}/client-v1-c4-signed-canary-goal.json
         run: |
           set -euo pipefail
-          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
+          node --test apps/metaengine-browser/test/client-goal-readback-integrity.test.mjs apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs apps/metaengine-browser/test/client-v1-c4-physical-agent-qualification.test.mjs apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs apps/metaengine-browser/test/client-v1-goal-journal.test.mjs apps/metaengine-browser/test/client-v1-goal-progress-reconciliation.test.mjs apps/metaengine-browser/test/client-v1-plan-generation-watermark.test.mjs apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs
           node --check apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
           node apps/metaengine-browser/test/client-v1-signed-canary-goal.mjs
 
