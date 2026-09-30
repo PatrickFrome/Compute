@@ -191,7 +191,9 @@ test('GitHub OIDC qualifier binds repository workflow run and exact source head 
   assert.match(qualificationEdge, /payload\.repository_owner_id/);
   assert.match(qualificationEdge, /payload\.event_name !== "pull_request"/);
   assert.match(qualificationEdge, /payload\.runner_environment !== "github-hosted"/);
-  assert.match(qualificationEdge, /payload\.sub !== SUBJECT/);
+  assert.match(qualificationEdge, /LEGACY_SUBJECT/);
+  assert.match(qualificationEdge, /IMMUTABLE_SUBJECT/);
+  assert.match(qualificationEdge, /ALLOWED_SUBJECTS\.has\(String\(payload\.sub \|\| ""\)\)/);
   assert.match(qualificationEdge, /payload\.workflow_ref/);
   assert.match(qualificationEdge, /githubRun\(runId\)/);
   assert.match(qualificationEdge, /run\?\.head_sha/);
