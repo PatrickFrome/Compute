@@ -218,6 +218,8 @@ jobs:
           if (-not $qualificationOidc -or ($qualificationOidc -split '\.').Count -ne 3) {
             throw 'installed_qualification_oidc_token_invalid'
           }
+          $env:ACTIONS_ID_TOKEN_REQUEST_URL = $null
+          $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN = $null
           $qualificationBody = @{
             source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
           } | ConvertTo-Json -Compress
