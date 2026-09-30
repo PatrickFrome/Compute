@@ -230,10 +230,37 @@ test('qualification correlation hash is emitted only for explicit installed-Elec
   assert.match(client, /\/\^\[0-9a-f\]\{64\}\$\/\.test\(qualificationNonceSha256\)/);
 });
 
+test('live nonce fallback is fail-closed before the weaker approval RPC', () => {
+  const preflight = qualificationEdge.slice(
+    qualificationEdge.indexOf('const exactRows = await exactNonceEnrollmentRows'),
+    qualificationEdge.indexOf('const approval = await rpc("client_v1_installed_qualification_approve_v1"'),
+  );
+  assert.match(preflight, /runId/);
+  assert.match(preflight, /runAttempt/);
+  assert.match(preflight, /sourceHead/);
+  assert.match(preflight, /qualificationNonceSha256/);
+  assert.match(preflight, /exactRows\.length === 0/);
+  assert.match(preflight, /exactRows\.length !== 1/);
+  assert.match(preflight, /WAITING_FOR_EXACT_ENROLLMENT_REQUEST/);
+  assert.match(preflight, /qualification_nonce_request_ambiguous/);
+});
+
 test('OIDC qualifier and Windows runner both require the same one-run nonce hash', () => {
   assert.match(qualificationEdge, /qualification_nonce_sha256/);
-  assert.match(qualificationEdge, /p_qualification_nonce_sha256: qualificationNonceSha256/);
-  assert.match(qualificationEdge, /nonce_bound: approval\.nonce_bound === true/);
+  assert.match(qualificationEdge, /exactNonceEnrollmentRows/);
+  assert.match(qualificationEdge, /metadata->>qualification_nonce_sha256/);
+  assert.match(qualificationEdge, /exactRows\.length === 0/);
+  assert.match(qualificationEdge, /exactRows\.length !== 1/);
+  assert.match(qualificationEdge, /qualification_nonce_request_ambiguous/);
+  assert.match(qualificationEdge, /nonce_bound: true/);
+  const approvalCall = qualificationEdge.slice(
+    qualificationEdge.indexOf('const approval = await rpc("client_v1_installed_qualification_approve_v1"'),
+    qualificationEdge.indexOf('if (approval?.accepted === true)'),
+  );
+  assert.match(approvalCall, /p_run_id: runId/);
+  assert.match(approvalCall, /p_run_attempt: runAttempt/);
+  assert.match(approvalCall, /p_source_head: sourceHead/);
+  assert.doesNotMatch(approvalCall, /p_qualification_nonce_sha256/, 'live fallback must remain compatible with already-applied V1 RPC');
   assert.match(installedQualification, /RandomNumberGenerator/);
   assert.match(installedQualification, /qualificationNonceSha256/);
   assert.match(installedQualification, /METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256/);
