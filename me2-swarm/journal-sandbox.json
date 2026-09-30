@@ -1,175 +1,7 @@
 {
-  "savedAt": "2026-09-30T18:27:34.512Z",
+  "savedAt": "2026-09-30T18:37:37.547Z",
   "version": "2.0.0-restore",
   "lessons": [
-    {
-      "ts": "2026-09-30T16:36:22.070Z",
-      "source": "self_improve",
-      "author": "Строитель-1029",
-      "text": "Avoided use of openrouter endpoints to prevent llm_chain_exhausted; ensured rest_window_ms ≥120000ms for ollama-local and capped parallel requests."
-    },
-    {
-      "ts": "2026-09-30T16:37:17.401Z",
-      "source": "self_improve",
-      "author": "Летописец-2708",
-      "text": "Обнаружено повторяющиеся llm_chain_exhausted от OpenRouter и nvidia модели; отказ от openrouter, установлено rest_window_ms ≥120000 для ollama-local и ограничено одновременное количество запросов."
-    },
-    {
-      "ts": "2026-09-30T16:38:54.080Z",
-      "source": "doctrine",
-      "author": "Доктринёр",
-      "text": "OpenRouter endpoints вызывают частые llm_chain_exhausted, поэтому их исключение и оптимизация rest_window повышают стабильность цепочки."
-    },
-    {
-      "ts": "2026-09-30T16:39:51.637Z",
-      "source": "self_improve",
-      "author": "Стратег-555",
-      "text": "Проблема повторных llm_chain_exhausted возникала в основном из‑за openrouter и ollama-local при одновременной обработке большого количества запросов. Найден шаблон: однократное подключение одновременно с этим endpoint, при котором не соблюдён rest_window_ms и cap_parallel_calls.\nРешение – закрепить правило ограничения параллелизма для ollama (max 2 вызова) и поднять rest_window_ms до 120 000 мс, а"
-    },
-    {
-      "ts": "2026-09-30T16:42:58.880Z",
-      "source": "self_improve",
-      "author": "Строитель-7104",
-      "text": "Identified OpenRouter as a frequent source of llm_chain_exhausted errors; removed it from consideration, adopted DeepInfra’s free GPT‑3.5‑Turbo, and raised rest_window_ms to 120 000 ms to prevent queue exhaustion."
-    },
-    {
-      "ts": "2026-09-30T16:44:25.471Z",
-      "source": "self_improve",
-      "author": "Стратег-1050",
-      "text": "Avoid repeating llm_chain_exhausted by excluding openrouter and nvidia nemotron models, adjust rest_window_ms."
-    },
-    {
-      "ts": "2026-09-30T16:45:49.033Z",
-      "source": "self_improve",
-      "author": "Разведчик-2002",
-      "text": "Repeated llm_chain_exhausted errors are caused by frequent use of OpenRouter endpoints and over‑utilization of NVIDIA Nemotron models; confirm they remain excluded from future scans and keep rest_window_ms ≥120 000 ms. No other issues found."
-    },
-    {
-      "ts": "2026-09-30T16:45:52.835Z",
-      "source": "self_improve",
-      "author": "Критик-3778",
-      "text": "Recognized that openrouter endpoints repeatedly trigger llm_chain_exhausted; excluded them from consideration and set rest_window_ms >=120_000 ms to mitigate."
-    },
-    {
-      "ts": "2026-09-30T16:47:41.477Z",
-      "source": "self_improve",
-      "author": "Зодчий-5220",
-      "text": "Avoiding repetitive llm_chain_exhausted errors by excluding OpenRouter endpoints and adhering to rest_window_ms ≥12000."
-    },
-    {
-      "ts": "2026-09-30T16:50:22.450Z",
-      "source": "self_improve",
-      "author": "Зодчий-5283",
-      "text": "Avoided openrouter.ai endpoints to prevent llm_chain_exhausted; set rest_window_ms ≥120000 ms for all providers."
-    },
-    {
-      "ts": "2026-09-30T16:50:36.238Z",
-      "source": "self_improve",
-      "author": "Аналитик-7232",
-      "text": "Identified llm_chain_exhausted errors stemming from openrouter.ai and nvidia/nemotron-3-ultra-550b endpoints; will exclude these providers and enforce stricter rest_window_ms in future integrations."
-    },
-    {
-      "ts": "2026-09-30T16:52:40.060Z",
-      "source": "self_improve",
-      "author": "Вестник-5321",
-      "text": "Acknowledged that openrouter.ai endpoints produce llm_chain_exhausted errors; future proposals will avoid them and only use verified deepinfra models."
-    },
-    {
-      "ts": "2026-09-30T16:53:42.137Z",
-      "source": "doctrine",
-      "author": "Доктринёр",
-      "text": "Регулярные llm_chain_exhausted ошибки вызваны чрезмерной нагрузкой на определенные провайдеры; их исключение и правильная настройка rest_window_ms повышают стабильность работы роя."
-    },
-    {
-      "ts": "2026-09-30T16:54:21.539Z",
-      "source": "self_improve",
-      "author": "Стратег-294",
-      "text": "Avoided openrouter and nvidia endpoints due to llm_chain_exhausted; selected high‑performance Mistral‑Nemo‑Instruct 2407 from llm7 catalog; set rest_window_ms for DeepInfra to 120000 ms and cap_ollama to 2 to respect doctrine."
-    },
-    {
-      "ts": "2026-09-30T16:54:38.748Z",
-      "source": "self_improve",
-      "author": "Вестник-7310",
-      "text": "Recalibrate rest_window_ms and avoid re‑using openrouter and nemotron endpoints to mitigate llm_chain_exhausted errors."
-    },
-    {
-      "ts": "2026-09-30T16:56:57.961Z",
-      "source": "self_improve",
-      "author": "Критик-2824",
-      "text": "Изучил, что OpenRouter вызывает llm_chain_exhausted, поэтому исключаю все OpenRouter интеграции из дальнейших принятий; сосредоточен на проверке моделей с success‑rate ≥5 % и valid‑endpoint в каталоге разведки."
-    },
-    {
-      "ts": "2026-09-30T17:03:10.150Z",
-      "source": "self_improve",
-      "author": "Изыскатель-793",
-      "text": "Avoided re‑using openrouter.ai and nvidia/nemotron endpoints to prevent llm_chain_exhausted. Future integration checks will include explicit smoke‑cat verification and success‑rate filtering."
-    },
-    {
-      "ts": "2026-09-30T17:03:16.830Z",
-      "source": "self_improve",
-      "author": "Аналитик-5432",
-      "text": "analysis: llm_chain_exhausted arises primarily from over‑use of OpenRouter endpoints and the limited concurrency of ollama‑local. Further, nvidia endpoints frequently exhaust chain limits. Switch to llm7 free models under controlled cap_ollama=2 and rest_window_ms≥120000 to mitigate."
-    },
-    {
-      "ts": "2026-09-30T17:03:30.933Z",
-      "source": "self_improve",
-      "author": "Критик-7459",
-      "text": "Avoided openrouter.ai and nvidia/nemotron-3-ultra-550b endpoints to prevent llm_chain_exhausted errors; will exclude them from future candidate scanning."
-    },
-    {
-      "ts": "2026-09-30T17:03:43.452Z",
-      "source": "self_improve",
-      "author": "Строитель-7446",
-      "text": "Avoided re-adding known buggy endpoints and ignored openrouter/nvidia due to exhaustion errors."
-    },
-    {
-      "ts": "2026-09-30T17:03:54.284Z",
-      "source": "integrator",
-      "author": "жнец",
-      "text": "Отставка: openai — 19 провалов при 0 успехах в бою. Место в цепочке отдано живым. Через 6ч морг перепроверит сам."
-    },
-    {
-      "ts": "2026-09-30T17:04:42.143Z",
-      "source": "doctrine",
-      "author": "Доктринёр",
-      "text": "Постоянное исключение OpenRouter‑endpoints и корректировка конфигурации Ollama‑Local значительно снизили количество ошибок llm_chain_exhausted и повысили общую надёжность цепочки."
-    },
-    {
-      "ts": "2026-09-30T17:04:57.579Z",
-      "source": "self_improve",
-      "author": "Критик-2095",
-      "text": "Identified and excluded laxe endpoints openrouter.ai and nvidia/nemotron-3-ultra due to recurring llm_chain_exhausted errors; will enforce exclusion rule and monitor success-rate > 0.05 for future candidates."
-    },
-    {
-      "ts": "2026-09-30T17:05:02.985Z",
-      "source": "self_improve",
-      "author": "Стратег-7467",
-      "text": "Избегаю openrouter и nemotron endpoints из‑за llm_chain_exhausted ошибок"
-    },
-    {
-      "ts": "2026-09-30T17:05:14.291Z",
-      "source": "self_improve",
-      "author": "Критик-3967",
-      "text": "Identified llm_chain_exhausted errors from openrouter.ai and nvidia nemotron endpoints; will avoid these providers as per doctrine to reduce failures"
-    },
-    {
-      "ts": "2026-09-30T17:11:02.476Z",
-      "source": "researcher",
-      "author": "Мыслитель",
-      "text": "При обнаружении провайдера с нулевой успешностью и высокой ошибочностью, следует увеличить окно отдыха, чтобы полностью исключить его использование до полной замены."
-    },
-    {
-      "ts": "2026-09-30T17:11:02.478Z",
-      "source": "researcher",
-      "author": "Мыслитель",
-      "text": "Тюнинг применён: rest_window_ms=180000. Основание: Провайдер pollinations/openai имеет высокий процент ошибок (21 ошибка при 0 успехах), что указывает на необходимость его замены или лечения."
-    },
-    {
-      "ts": "2026-09-30T17:14:12.271Z",
-      "source": "self_improve",
-      "author": "Аналитик-2147",
-      "text": "Выучили, что openrouter.ai и nvidia/nemotron endpoints вызывают llm_chain_exhausted. В дальнейшем исключаем их из цепочки и ограничиваем использование DeepInfra endpoints с rest_window_ms ≥120 000 мс и cap_parallel_calls ≤2."
-    },
     {
       "ts": "2026-09-30T17:20:55.938Z",
       "source": "researcher",
@@ -361,6 +193,174 @@
       "source": "self_improve",
       "author": "Аналитик-27",
       "text": "Урок: Интеграция бесплатных LLM требует проверки наличия в каталоге и условий использования."
+    },
+    {
+      "ts": "2026-09-30T18:30:13.746Z",
+      "source": "self_improve",
+      "author": "Вестник-29",
+      "text": "Урок: Бесплатные LLM-модели требуют тщательной верификации перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:30:14.757Z",
+      "source": "self_improve",
+      "author": "Строитель-30",
+      "text": "Урок: Интеграция бесплатных LLM требует проверки их присутствия в верифицированном каталоге."
+    },
+    {
+      "ts": "2026-09-30T18:30:15.736Z",
+      "source": "self_improve",
+      "author": "Зодчий-31",
+      "text": "Урок: Бесплатные LLM-модели требуют тщательной верификации перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:30:16.468Z",
+      "source": "self_improve",
+      "author": "Летописец-32",
+      "text": "Урок: Бесполезность действий с нераспознанными моделями вне каталога."
+    },
+    {
+      "ts": "2026-09-30T18:30:17.359Z",
+      "source": "self_improve",
+      "author": "Изыскатель-33",
+      "text": "Урок: Бесполезно использовать модели без верификации в каталоге."
+    },
+    {
+      "ts": "2026-09-30T18:30:18.198Z",
+      "source": "self_improve",
+      "author": "Инженер-интегратор-34",
+      "text": "Урок: бесплатная модель phi-2 может использоваться для внутренних задач без токенов при наличии HF_TOKEN."
+    },
+    {
+      "ts": "2026-09-30T18:30:43.700Z",
+      "source": "self_improve",
+      "author": "Наблюдатель-35",
+      "text": "Урок: Критика важнее стратегии при выборе моделей."
+    },
+    {
+      "ts": "2026-09-30T18:30:45.022Z",
+      "source": "self_improve",
+      "author": "Архивариус-36",
+      "text": "Урок: Интеграция бесплатных LLM требует верификации каталогов для повышения success-rate."
+    },
+    {
+      "ts": "2026-09-30T18:30:45.862Z",
+      "source": "self_improve",
+      "author": "Стратег-1",
+      "text": "Урок: Всегда проверяйте наличие модели в верифицированном каталоге перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:30:46.482Z",
+      "source": "self_improve",
+      "author": "Строитель-6",
+      "text": "Урок: Бесплатные модели требуют верификации перед интеграцией в рабочие цепочки."
+    },
+    {
+      "ts": "2026-09-30T18:30:47.456Z",
+      "source": "self_improve",
+      "author": "Аналитик-3",
+      "text": "Урок: Бесплодные LLM-каналы требуют верификации перед интеграцией в рабочие цепи."
+    },
+    {
+      "ts": "2026-09-30T18:30:48.257Z",
+      "source": "self_improve",
+      "author": "Критик-2",
+      "text": "Урок: Проверка доступности моделей в каталоге критична перед внедрением."
+    },
+    {
+      "ts": "2026-09-30T18:31:13.763Z",
+      "source": "self_improve",
+      "author": "Вестник-5",
+      "text": "Урок: Бесполезность моделей без верификации в каталоге."
+    },
+    {
+      "ts": "2026-09-30T18:31:14.960Z",
+      "source": "self_improve",
+      "author": "Зодчий-7",
+      "text": "Урок: Бесплатные LLM-модели требуют тщательной верификации перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:31:15.827Z",
+      "source": "self_improve",
+      "author": "Стратег-37",
+      "text": "Урок: Верификация моделей перед интеграцией критически важна для роя."
+    },
+    {
+      "ts": "2026-09-30T18:31:16.478Z",
+      "source": "self_improve",
+      "author": "Критик-38",
+      "text": "Урок: Проверка доступности моделей в каталоге критична перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:31:17.459Z",
+      "source": "self_improve",
+      "author": "Аналитик-39",
+      "text": "Урок: Бесплатные LLM-модели требуют верификации каталога перед интеграцией в рабочие цепи."
+    },
+    {
+      "ts": "2026-09-30T18:31:18.322Z",
+      "source": "self_improve",
+      "author": "Разведчик-40",
+      "text": "Урок: Бесплодные LLM-каналы требуют верификации перед интеграцией в рабочие цепи."
+    },
+    {
+      "ts": "2026-09-30T18:31:43.910Z",
+      "source": "self_improve",
+      "author": "Вестник-41",
+      "text": "Урок: Интеграция бесплатных LLM требует верификации их присутствия в каталоге."
+    },
+    {
+      "ts": "2026-09-30T18:31:44.714Z",
+      "source": "self_improve",
+      "author": "Строитель-42",
+      "text": "Урок: Бесплатные модели часто имеют ограничения, но их можно эффективно использовать для внутренних задач."
+    },
+    {
+      "ts": "2026-09-30T18:31:45.692Z",
+      "source": "self_improve",
+      "author": "Зодчий-43",
+      "text": "Урок: интеграция бесплатных LLM требует тщательной проверки каталога и соответствия директивам."
+    },
+    {
+      "ts": "2026-09-30T18:31:46.483Z",
+      "source": "self_improve",
+      "author": "Летописец-44",
+      "text": "Урок: Интеграция моделей требует верификации в каталоге перед развертыванием."
+    },
+    {
+      "ts": "2026-09-30T18:31:48.250Z",
+      "source": "self_improve",
+      "author": "Изыскатель-45",
+      "text": "Урок: Критика важна для фильтрации неподтвержденных моделей."
+    },
+    {
+      "ts": "2026-09-30T18:31:50.094Z",
+      "source": "self_improve",
+      "author": "Инженер-интегратор-46",
+      "text": "Урок: Критика важна для проверки валидности моделей перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:32:13.823Z",
+      "source": "self_improve",
+      "author": "Наблюдатель-47",
+      "text": "Урок: бесплатные LLM-модели требуют тщательной проверки перед интеграцией."
+    },
+    {
+      "ts": "2026-09-30T18:32:14.895Z",
+      "source": "self_improve",
+      "author": "Архивариус-48",
+      "text": "Урок: Интеграция новых бесплатных LLM требует проверки их наличия в верифицированном каталоге."
+    },
+    {
+      "ts": "2026-09-30T18:32:15.844Z",
+      "source": "self_improve",
+      "author": "Стратег-49",
+      "text": "Урок: Бесплатные LLM-модели требуют тщательной проверки перед интеграцией в рабочие цепочки."
+    },
+    {
+      "ts": "2026-09-30T18:32:16.521Z",
+      "source": "self_improve",
+      "author": "Критик-50",
+      "text": "Урок: Всегда проверяйте наличие модели в верифицированном каталоге перед деплоем."
     }
   ],
   "memories": [
@@ -687,7 +687,16 @@
       "authKeyName": "OPENROUTER_API_KEY"
     }
   ],
-  "milestones": [],
+  "milestones": [
+    {
+      "ts": "2026-09-30T18:31:50.094Z",
+      "payload": "{\"population\":10486}"
+    },
+    {
+      "ts": "2026-09-30T18:36:21.314Z",
+      "payload": "{\"population\":10594}"
+    }
+  ],
   "kv": {
     "genesis_at": "2026-09-30T18:15:25.042Z",
     "inherited_genesis_at": "2026-09-30T07:33:00.101Z",
@@ -695,7 +704,7 @@
     "op_goal": "ресёрч бесплатных LLM-каналов и их интеграция (директива оператора)",
     "host": "dataforge-sandbox (chat 4e7a8a53)",
     "restored_from": "journal-latest.json @ Compute main (внешний рой жив)",
-    "total_born": 185,
-    "cycles": 11
+    "total_born": 425,
+    "cycles": 31
   }
 }
