@@ -351,6 +351,20 @@ export class NativeSupervisorClient {
   #commandStartsAtMs = new Map();
   #cycleStartedAtMs = 0;
   #enrollmentStatus = 'UNINITIALIZED';
+  #adminStatus = Object.freeze({
+    state: 'UNKNOWN',
+    admin_ready: false,
+    access_tier: null,
+    admin_scopes: Object.freeze([]),
+    admin_grant_epoch: null,
+    last_checked_at: null,
+    last_error: null,
+    authority_effect: false,
+  });
+  #adminStatusCheckedAtMs = 0;
+  #connectionLastSuccessAt = null;
+  #connectionLastFailureAt = null;
+  #connectionConsecutiveFailures = 0;
   #supervisorMode = 'CONTROL';
   #armed = true;
   #lifecycle = null;
@@ -605,6 +619,8 @@ export class NativeSupervisorClient {
       }),
       enrollment_status: this.#enrollmentStatus,
       identity: this.#identity.snapshot(),
+      connection: this.connectionStatus(),
+      admin_access: structuredClone(this.#adminStatus),
       supervisor_mode: this.#supervisorMode,
       armed: this.#armed,
       command_fastlane: this.#commandFastlane?.snapshot()
@@ -843,6 +859,7 @@ export class NativeSupervisorClient {
       // lifecycle cycle. Unknown/missing readback leaves continuous service fenced;
       // self-update and Sentinel startup remain independent below.
       await this.#heartbeat().catch((error) => {
+        this.#markConnectionFailure(error);
         this.#lastError = `startup_heartbeat:${clipError(error)}`;
       });
       await this.#restoreSessionContinuity().catch((error) => {
@@ -910,6 +927,60 @@ export class NativeSupervisorClient {
   // identifier atomically with plan activation + task admission. Any transport
   // ambiguity is reconciled through clientGoalProgress(); this method is never
   // automatically re-issued as an effect retry.
+  async clientAdminStatus() {
+    await this.ensureEnrollment();
+    return this.#refreshAdminStatus({ force: true });
+  }
+
+  connectionStatus() {
+    const identity = this.#identity.snapshot();
+    const heartbeatAtMs = Date.parse(String(this.#lastHeartbeatAt || ''));
+    const heartbeatFresh = Number.isFinite(heartbeatAtMs)
+      && Date.now() - heartbeatAtMs <= Math.max(15_000, this.#intervalMs * 5);
+    const hasDevice = Boolean(identity?.device_id);
+    const adminReady = this.#adminStatus?.admin_ready === true;
+    let cloudControlState = 'LOCAL_ONLY';
+    if (!hasDevice) {
+      cloudControlState = ['PENDING','PENDING_APPROVAL','RETRY_REQUIRED'].includes(String(this.#enrollmentStatus))
+        ? 'ENROLLMENT_REQUIRED'
+        : 'CONNECTING';
+    } else if (adminReady && heartbeatFresh) {
+      cloudControlState = 'CONNECTED';
+    } else if (this.#running) {
+      cloudControlState = 'RECONNECTING';
+    }
+
+    return Object.freeze({
+      schema: 'metaengine.client.connection-status.v1',
+      local_runtime_ready: this.#running === true,
+      secure_device_key_ready: Boolean(identity?.key_fingerprint_sha256),
+      device_enrolled: hasDevice,
+      device_id: hasDevice ? String(identity.device_id) : null,
+      enrollment_state: String(this.#enrollmentStatus || 'UNKNOWN'),
+      admin_ready: adminReady,
+      access_tier: adminReady ? 'ADMIN' : null,
+      admin_scopes: Object.freeze(adminReady ? [...(this.#adminStatus.admin_scopes || [])] : []),
+      admin_grant_epoch: adminReady ? Number(this.#adminStatus.admin_grant_epoch) : null,
+      admin_status_checked_at: this.#adminStatus.last_checked_at || null,
+      cloud_control_state: cloudControlState,
+      last_heartbeat_at: this.#lastHeartbeatAt,
+      last_connection_success_at: this.#connectionLastSuccessAt,
+      last_connection_failure_at: this.#connectionLastFailureAt,
+      connection_consecutive_failures: this.#connectionConsecutiveFailures,
+      automatic_reconnect: true,
+      reconnect_uses_existing_supervisor_cycle: true,
+      second_connection_scheduler: false,
+      local_shell_survives_cloud_outage: true,
+      network_availability_guaranteed: false,
+      legacy_daemon_feed_is_authority: false,
+      master_secret_embedded: false,
+      service_role_embedded: false,
+      cloudflare_token_embedded: false,
+      automatic_effect_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
   async clientGoalSubmit({ request_id, objective } = {}) {
     const payload = {
       request_id: String(request_id ?? ''),
@@ -1167,6 +1238,82 @@ export class NativeSupervisorClient {
     const lifecycleSnapshot = await this.#lifecycle?.applyRuntimeControl?.(observedControl);
     this.#synchronizeRuntimeControlFromLifecycle(lifecycleSnapshot, observedControl.reason || 'LIFECYCLE_READBACK_UNAVAILABLE');
     this.#lastHeartbeatAt = new Date().toISOString();
+    this.#markConnectionSuccess();
+  }
+
+  #markConnectionSuccess() {
+    this.#connectionLastSuccessAt = new Date().toISOString();
+    this.#connectionConsecutiveFailures = 0;
+  }
+
+  #markConnectionFailure(error) {
+    this.#connectionLastFailureAt = new Date().toISOString();
+    this.#connectionConsecutiveFailures += 1;
+    return clipError(error);
+  }
+
+  async #refreshAdminStatus({ force = false } = {}) {
+    const identity = this.#identity.snapshot();
+    if (!identity?.device_id) {
+      this.#adminStatus = Object.freeze({
+        state: 'ENROLLMENT_REQUIRED',
+        admin_ready: false,
+        access_tier: null,
+        admin_scopes: Object.freeze([]),
+        admin_grant_epoch: null,
+        last_checked_at: new Date().toISOString(),
+        last_error: null,
+        authority_effect: false,
+      });
+      return this.#adminStatus;
+    }
+    const now = Date.now();
+    if (!force && this.#adminStatusCheckedAtMs > 0 && now - this.#adminStatusCheckedAtMs < 30_000) {
+      return this.#adminStatus;
+    }
+    this.#adminStatusCheckedAtMs = now;
+    try {
+      const response = await this.#signedRequest('/v1/admin/status', { method: 'GET' });
+      const body = await response.json().catch(() => ({}));
+      if (
+        !response.ok
+        || body?.schema !== 'metaengine.client-v1.admin-connection.v1'
+        || body?.admin_ready !== true
+        || body?.access_tier !== 'ADMIN'
+        || String(body?.device_id || '') !== String(identity.device_id)
+        || !Array.isArray(body?.admin_scopes)
+        || !Number.isSafeInteger(Number(body?.admin_grant_epoch))
+        || Number(body.admin_grant_epoch) < 1
+        || body?.master_secret_embedded !== false
+        || body?.service_role_embedded !== false
+        || body?.cloudflare_token_embedded !== false
+      ) {
+        throw new Error(`native_supervisor_admin_status_invalid:${response.status}`);
+      }
+      this.#adminStatus = Object.freeze({
+        state: 'ADMIN_READY',
+        admin_ready: true,
+        access_tier: 'ADMIN',
+        admin_scopes: Object.freeze(body.admin_scopes.map((value) => String(value))),
+        admin_grant_epoch: Number(body.admin_grant_epoch),
+        backend_transport: String(body.backend_transport || 'UNKNOWN'),
+        last_checked_at: new Date().toISOString(),
+        last_error: null,
+        authority_effect: false,
+      });
+      this.#markConnectionSuccess();
+      return this.#adminStatus;
+    } catch (error) {
+      this.#adminStatus = Object.freeze({
+        ...this.#adminStatus,
+        state: 'UNAVAILABLE',
+        admin_ready: false,
+        last_checked_at: new Date().toISOString(),
+        last_error: this.#markConnectionFailure(error),
+        authority_effect: false,
+      });
+      throw error;
+    }
   }
 
   #synchronizeRuntimeControlFromLifecycle(snapshot, fallbackReason) {
@@ -1180,7 +1327,10 @@ export class NativeSupervisorClient {
   #kickHeartbeat() {
     if (this.#heartbeatPromise) return this.#heartbeatPromise;
     this.#heartbeatPromise = this.#heartbeat()
-      .catch((error) => { this.#lastError = `heartbeat:${clipError(error)}`; })
+      .catch((error) => {
+        this.#markConnectionFailure(error);
+        this.#lastError = `heartbeat:${clipError(error)}`;
+      })
       .finally(() => { this.#heartbeatPromise = null; });
     return this.#heartbeatPromise;
   }
@@ -1768,6 +1918,9 @@ export class NativeSupervisorClient {
       try {
         const identity = await this.ensureEnrollment();
         if (!identity?.device_id) return this.snapshot();
+        // ADMIN readback piggybacks on the existing supervisor cycle. It has a
+        // 30s cache and never creates a second reconnect/poll scheduler.
+        await this.#refreshAdminStatus().catch(() => {});
 
         // Heartbeat is kept alive independently, but it never sits in front of the
         // command lease. Its state collection may be expensive (perception, fleet,
