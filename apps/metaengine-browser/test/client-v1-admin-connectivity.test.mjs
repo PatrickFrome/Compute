@@ -266,6 +266,7 @@ test('OIDC qualifier and Windows runner both require the same one-run nonce hash
   assert.match(installedQualification, /METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256/);
   assert.match(installedQualification, /qualification_nonce_sha256 = \$qualificationNonceSha256/);
   assert.match(installedQualification, /qualificationPayload\.nonce_bound -eq \$true/);
+  assert.match(installedQualification, /oidc_enrollment_nonce_bound -NotePropertyValue \(\[bool\]\$qualificationReadback\.nonce_bound\)/);
   const launch = installedQualification.indexOf('$normal = Start-Process -FilePath $app');
   const clear = installedQualification.indexOf('$env:METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256 = $null', launch);
   assert.ok(launch >= 0 && clear > launch, 'runner must drop its correlation env immediately after Electron inherits it');
