@@ -19,6 +19,7 @@ concurrency:
 permissions:
   contents: read
   actions: read
+  id-token: write
 
 jobs:
   windows-installed-chat-qualification:
@@ -134,6 +135,7 @@ jobs:
           METAENGINE_ENROLLMENT_QUALIFICATION_RUN_ATTEMPT: ${{ github.run_attempt }}
           METAENGINE_ENROLLMENT_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           METAENGINE_SUPERVISOR_BASE_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v14-canary
+          METAENGINE_INSTALL_QUALIFIER_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/metaengine-client-installed-qualification-h205f22
         run: |
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
@@ -201,6 +203,28 @@ jobs:
           }
           $controlStatePath = Join-Path ([string]$profile.user_data_path) 'metaengine-native-supervisor-control-state-v1.json'
 
+          # The installed Browser never receives GitHub OIDC. The workflow uses
+          # it out-of-band only to approve the exact enrollment request created
+          # by this run/head/attempt on the isolated qualification path.
+          if (-not $env:ACTIONS_ID_TOKEN_REQUEST_URL -or -not $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
+            throw 'installed_qualification_oidc_environment_missing'
+          }
+          $audience = 'metaengine-client-installed-qualification'
+          $oidcUri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=$([uri]::EscapeDataString($audience))"
+          $oidcEnvelope = Invoke-RestMethod -Method Get -Uri $oidcUri -Headers @{
+            Authorization = "bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+          }
+          $qualificationOidc = [string]$oidcEnvelope.value
+          if (-not $qualificationOidc -or ($qualificationOidc -split '\.').Count -ne 3) {
+            throw 'installed_qualification_oidc_token_invalid'
+          }
+          $qualificationBody = @{
+            source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
+          } | ConvertTo-Json -Compress
+          $qualificationApproved = $false
+          $qualificationReadback = $null
+          $qualificationNextAttempt = [DateTime]::UtcNow
+
           $normalOut = "$env:RUNNER_TEMP\installed-chat-normal.out"
           $normalErr = "$env:RUNNER_TEMP\installed-chat-normal.err"
           Remove-Item $normalOut,$normalErr -Force -ErrorAction SilentlyContinue
@@ -228,6 +252,35 @@ jobs:
                 Get-Content $normalErr -ErrorAction SilentlyContinue
                 throw "qualified_installed_browser_exited_early:$($normal.ExitCode)"
               }
+
+              if (-not $qualificationApproved -and [DateTime]::UtcNow -ge $qualificationNextAttempt) {
+                try {
+                  $qualificationResponse = Invoke-WebRequest -UseBasicParsing -Method Post `
+                    -Uri $env:METAENGINE_INSTALL_QUALIFIER_URL `
+                    -Headers @{ Authorization = "Bearer $qualificationOidc" } `
+                    -ContentType 'application/json' `
+                    -Body $qualificationBody
+                  $qualificationPayload = $qualificationResponse.Content | ConvertFrom-Json
+                  if ([int]$qualificationResponse.StatusCode -eq 200 `
+                      -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
+                      -and $qualificationPayload.accepted -eq $true `
+                      -and $qualificationPayload.oidc_verified -eq $true `
+                      -and $qualificationPayload.github_run_verified -eq $true `
+                      -and [string]$qualificationPayload.source_head -eq '${{ github.event.pull_request.head.sha || github.sha }}' `
+                      -and [string]$qualificationPayload.run_id -eq '${{ github.run_id }}' `
+                      -and [int]$qualificationPayload.run_attempt -eq [int]'${{ github.run_attempt }}') {
+                    $qualificationApproved = $true
+                    $qualificationReadback = $qualificationPayload
+                  } elseif ([int]$qualificationResponse.StatusCode -ne 202 `
+                      -or $qualificationPayload.reason -ne 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
+                    throw "installed_qualification_oidc_unexpected:$($qualificationResponse.StatusCode):$($qualificationPayload.reason)"
+                  }
+                } catch {
+                  throw "installed_qualification_oidc_failed:$($_.Exception.Message)"
+                }
+                $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
+              }
+
               if (Test-Path $normalOut -PathType Leaf) {
                 $normalLines = @(Get-Content $normalOut -ErrorAction SilentlyContinue)
                 $primaryShellIndex = -1
@@ -338,6 +391,7 @@ jobs:
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
+            if (-not $qualificationApproved -or -not $qualificationReadback) { throw 'installed_oidc_enrollment_qualification_not_proven' }
             if (-not $adminConnected -or -not $adminConnection) { throw 'installed_admin_connection_not_proven' }
             if (-not $cleanControl) { throw 'installed_clean_genesis_control_not_verified' }
             if ($initialTabIndex -ge 0) { throw 'installed_clean_genesis_created_initial_tab' }
@@ -361,6 +415,11 @@ jobs:
             $proof | Add-Member -NotePropertyName control_state_schema -NotePropertyValue ([string]$controlState.schema) -Force
             $proof | Add-Member -NotePropertyName control_state_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
             $proof | Add-Member -NotePropertyName control_state_armed -NotePropertyValue ([bool]$controlState.armed) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_qualification_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_request_id -NotePropertyValue ([string]$qualificationReadback.request_id) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_client_id -NotePropertyValue ([string]$qualificationReadback.client_id) -Force
+            $proof | Add-Member -NotePropertyName oidc_enrollment_source_head -NotePropertyValue ([string]$qualificationReadback.source_head) -Force
+            $proof | Add-Member -NotePropertyName oidc_token_exposed_to_browser -NotePropertyValue $false -Force
             $proof | Add-Member -NotePropertyName admin_connection_verified -NotePropertyValue $true -Force
             $proof | Add-Member -NotePropertyName admin_access_tier -NotePropertyValue ([string]$adminConnection.access_tier) -Force
             $proof | Add-Member -NotePropertyName admin_grant_epoch -NotePropertyValue ([int64]$adminConnection.admin_grant_epoch) -Force
