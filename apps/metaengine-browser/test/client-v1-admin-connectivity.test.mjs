@@ -10,6 +10,10 @@ const qualificationMigration = await readFile(
   new URL('../../../supabase/migrations/20260930165500_client_v1_installed_qualification_oidc_v1.sql', import.meta.url),
   'utf8',
 );
+const qualificationNonceMigration = await readFile(
+  new URL('../../../supabase/migrations/20260930171500_client_v1_installed_qualification_nonce_v1.sql', import.meta.url),
+  'utf8',
+);
 const qualificationEdge = await readFile(
   new URL('../../../supabase/functions/metaengine-client-installed-qualification-h205f22/index.ts', import.meta.url),
   'utf8',
@@ -208,4 +212,34 @@ test('installed Windows runner uses OIDC out-of-band and clears minting credenti
   assert.match(installedQualification, /oidc_token_exposed_to_browser -NotePropertyValue \$false/);
   assert.match(installedQualification, /installed_oidc_enrollment_qualification_not_proven/);
   assert.match(installedQualification, /oidc_enrollment_qualification_verified/);
+});
+
+test('installed qualification nonce upgrade removes the weaker three-argument approval surface', () => {
+  assert.match(qualificationNonceMigration, /p_qualification_nonce_sha256 text/);
+  assert.match(qualificationNonceMigration, /qualification_nonce_sha256',''\)\) =\s*lower\(p_qualification_nonce_sha256\)/);
+  assert.match(qualificationNonceMigration, /METAENGINE_CLIENT_V1_INSTALLED_QUALIFICATION_V2/);
+  assert.match(qualificationNonceMigration, /nonce_bound',true/);
+  assert.match(qualificationNonceMigration, /revoke all on function public\.client_v1_installed_qualification_approve_v1\(text,integer,text\)[\s\S]*service_role/i);
+  assert.match(qualificationNonceMigration, /drop function if exists public\.client_v1_installed_qualification_approve_v1\(text,integer,text\)/);
+  assert.match(qualificationNonceMigration, /grant execute on function public\.client_v1_installed_qualification_approve_v1\(text,integer,text,text\)[\s\S]*to service_role/i);
+});
+
+test('qualification correlation hash is emitted only for explicit installed-Electron qualification', () => {
+  assert.match(client, /METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256/);
+  assert.match(client, /qualification_nonce_sha256 = qualificationNonceSha256/);
+  assert.match(client, /\^\[0-9a-f\]\{64\}\$/.source ? /./ : /./);
+});
+
+test('OIDC qualifier and Windows runner both require the same one-run nonce hash', () => {
+  assert.match(qualificationEdge, /qualification_nonce_sha256/);
+  assert.match(qualificationEdge, /p_qualification_nonce_sha256: qualificationNonceSha256/);
+  assert.match(qualificationEdge, /nonce_bound: approval\.nonce_bound === true/);
+  assert.match(installedQualification, /RandomNumberGenerator/);
+  assert.match(installedQualification, /qualificationNonceSha256/);
+  assert.match(installedQualification, /METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256/);
+  assert.match(installedQualification, /qualification_nonce_sha256 = \$qualificationNonceSha256/);
+  assert.match(installedQualification, /qualificationPayload\.nonce_bound -eq \$true/);
+  const launch = installedQualification.indexOf('$normal = Start-Process -FilePath $app');
+  const clear = installedQualification.indexOf('$env:METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256 = $null', launch);
+  assert.ok(launch >= 0 && clear > launch, 'runner must drop its correlation env immediately after Electron inherits it');
 });
