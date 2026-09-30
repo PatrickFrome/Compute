@@ -57,12 +57,12 @@ test('R97 workspace and workflow selectors are advanced-only instead of persiste
   assert.doesNotMatch(topbar, /data-testid="workspace-switcher"/);
   assert.doesNotMatch(topbar, /data-testid="workspace-reset-layout"/);
   assert.doesNotMatch(topbar, /WORKSPACES\.map|WORKFLOW_STAGES\.map/);
-  assert.match(topbar, /Search agents, settings, tools or run a command/);
+  assert.match(topbar, /Search tools and commands/);
   assert.match(topbar, /setPage\("system"\)/);
 });
 
 test('R94 separates brand/selection accent from runtime health green', () => {
-  assert.match(topbar, /border-cyan-800/);
+  assert.match(topbar, /border-cyan-900/);
   assert.match(topbar, /text-cyan-300/);
   assert.match(topbar, /border-emerald-900/);
   assert.match(topbar, /text-emerald-300/);

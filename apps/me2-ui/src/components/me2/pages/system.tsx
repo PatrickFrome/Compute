@@ -5,7 +5,7 @@
 // Секреты никогда не рендерятся: наружу только маски; значение set-формы уходит
 // напрямую в daemon (POST /tokens) и не логируется.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileJson, GitMerge, KeyRound, ListChecks, RefreshCw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { sendCommand, me2Fetch, hhmmss } from "@/lib/me2-bus";
@@ -60,20 +60,29 @@ const mechState = (v: string): SysState => (v === "WORKS" ? "Completed" : v === 
 const SHORT7 = (h: string | null) => (h ? h.slice(0, 7) : "—");
 
 const ADVANCED_SURFACES: ReadonlyArray<{ page: PageKey; label: string; description: string }> = [
-  { page: "command", label: "Command", description: "mission control and orchestration overview" },
-  { page: "agents", label: "Agents", description: "fleet diagnostics and agent controls" },
-  { page: "code", label: "Code", description: "repository, execution and sandbox tools" },
-  { page: "tasks", label: "Tasks", description: "task graph, queue and task detail" },
-  { page: "supervisor", label: "Supervisor", description: "supervisor lifecycle and control plane" },
-  { page: "compute", label: "Compute", description: "workers, pools and compute capacity" },
-  { page: "memory", label: "Memory", description: "episodic memory and knowledge surfaces" },
-  { page: "observability", label: "Observability", description: "events, evidence and runtime health" },
+  { page: "tasks", label: "Tasks", description: "Plan, queue and task details" },
+  { page: "code", label: "Code", description: "Repository and development workspace" },
+  { page: "supervisor", label: "Supervisor", description: "Coordination, readiness and recovery" },
+  { page: "memory", label: "Memory", description: "Learning history and knowledge" },
+  { page: "observability", label: "Evidence", description: "Events, results and runtime health" },
 ];
+
+const SETTINGS_AREAS = [
+  { id: "tools", label: "Tools" }, { id: "runtime", label: "Runtime" },
+  { id: "access", label: "Access" }, { id: "policy", label: "Policy" },
+  { id: "recovery", label: "Recovery" },
+] as const;
+type SettingsArea = typeof SETTINGS_AREAS[number]["id"];
 
 export function SystemPage() {
   const { toast } = useToast();
   const setDialog = useMe2((s) => s.setDialog);
   const setPage = useMe2((s) => s.setPage);
+  const [area, setArea] = useState<SettingsArea>("tools");
+  const [loadState, setLoadState] = useState<"LOADING" | "LIVE" | "UNAVAILABLE">("LIVE");
+  const readsInFlight = useRef(new Set<SettingsArea>());
+  const activeArea = useRef(area);
+  activeArea.current = area;
 
   const [tokensData, setTokensData] = useState<TokensT | null>(null);
   const [tokensBusy, setTokensBusy] = useState(false);
@@ -90,27 +99,43 @@ export function SystemPage() {
 
   // ── загрузчики ──
   const loadTokens = useCallback(async () => {
-    const r = await me2Fetch<TokensT>("/tokens?XTransformPort=3041"); if (r?.ok) setTokensData(r);
+    const r = await me2Fetch<TokensT>("/tokens?XTransformPort=3041"); setTokensData(r?.ok ? r : null); return r?.ok === true;
   }, []);
   const loadPolicy = useCallback(async () => {
-    const r = await me2Fetch<PolicyT>("/policy?XTransformPort=3041"); if (r?.ok) setPolicy(r);
+    const r = await me2Fetch<PolicyT>("/policy?XTransformPort=3041"); setPolicy(r?.ok ? r : null); return r?.ok === true;
   }, []);
   const loadSu = useCallback(async () => {
-    const r = await me2Fetch<SuT>("/selfupdate?XTransformPort=3041"); if (r?.ok) setSu(r);
+    const r = await me2Fetch<SuT>("/selfupdate?XTransformPort=3041"); setSu(r?.ok ? r : null); return r?.ok === true;
   }, []);
   const loadMech = useCallback(async () => {
-    const r = await me2Fetch<MechT>("/mechanics?XTransformPort=3041"); if (r?.ok) setMech(r);
+    const r = await me2Fetch<MechT>("/mechanics?XTransformPort=3041"); setMech(r?.ok ? r : null); return r?.ok === true;
   }, []);
-  const loadState = useCallback(async () => {
-    const r = await me2Fetch<StateT>("/state?XTransformPort=3041"); if (r?.ok) setStateData(r);
+  const loadContract = useCallback(async () => {
+    const r = await me2Fetch<StateT>("/state?XTransformPort=3041"); setStateData(r?.ok ? r : null); return r?.ok === true;
   }, []);
 
-  // ── поллинги (mount + интервал, cleanup) ──
-  useEffect(() => { void loadTokens(); const iv = setInterval(() => void loadTokens(), 60_000); return () => clearInterval(iv); }, [loadTokens]);
-  useEffect(() => { void loadPolicy(); const iv = setInterval(() => void loadPolicy(), 60_000); return () => clearInterval(iv); }, [loadPolicy]);
-  useEffect(() => { void loadSu(); const iv = setInterval(() => void loadSu(), 60_000); return () => clearInterval(iv); }, [loadSu]);
-  useEffect(() => { void loadMech(); const iv = setInterval(() => void loadMech(), 60_000); return () => clearInterval(iv); }, [loadMech]);
-  useEffect(() => { void loadState(); const iv = setInterval(() => void loadState(), 60_000); return () => clearInterval(iv); }, [loadState]);
+  // Hidden areas neither mount their controls nor poll their resources.
+  const loadCurrent = useCallback(async () => {
+    if (readsInFlight.current.has(area)) return;
+    readsInFlight.current.add(area);
+    setLoadState("LOADING");
+    try {
+      const loaders = area === "runtime" ? [loadMech, loadContract]
+        : area === "access" ? [loadTokens] : area === "policy" ? [loadPolicy]
+        : area === "recovery" ? [loadSu] : [];
+      const results = await Promise.all(loaders.map((load) => load()));
+      if (activeArea.current === area) setLoadState(results.every(Boolean) ? "LIVE" : "UNAVAILABLE");
+    } catch {
+      if (activeArea.current === area) setLoadState("UNAVAILABLE");
+    } finally { readsInFlight.current.delete(area); }
+  }, [area, loadMech, loadPolicy, loadContract, loadSu, loadTokens]);
+  useEffect(() => {
+    let current = true;
+    const load = () => { if (current && document.visibilityState === "visible") void loadCurrent(); };
+    load();
+    const timer = area === "tools" ? null : window.setInterval(load, 60_000);
+    return () => { current = false; if (timer !== null) window.clearInterval(timer); };
+  }, [area, loadCurrent]);
 
   // ── vault-операции (T0-плоскость оператора; значение не логируется) ──
   const tokenSetOp = useCallback(async () => {
@@ -157,9 +182,8 @@ export function SystemPage() {
     else toast({ title: `policy reload ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
   }, [loadPolicy, toast]);
 
-  // ── selfupdate: check / apply-ff (403 authority_effect — честный toast) ──
-  const suOp = useCallback(async (op: "check" | "apply") => {
-    if (op === "apply" && !window.confirm("Применить fast-forward обновление из sandbox/me2-os? После — рестарт daemon (start.sh).")) return;
+  // Source inspection only; package update remains owned by native Browser.
+  const suOp = useCallback(async (op: "check") => {
     setSuBusy(true);
     try {
       const res = await fetch("/selfupdate?XTransformPort=3041", {
@@ -167,13 +191,9 @@ export function SystemPage() {
         body: JSON.stringify({ op }),
       });
       const j = await res.json().catch(() => null) as { ok?: boolean; error?: string; check?: SuT["check"]; result?: string } | null;
-      if (res.status === 403) {
-        toast({ title: "apply ff ✗ 403 · гейт authority_effect", description: "смена живого кода daemon требует живого согласия: оформи approval (один approve = один apply) и повтори", variant: "destructive" });
-      } else if (res.ok && j?.ok) {
-        if (op === "check") {
+      if (res.ok && j?.ok) {
           const c = j.check;
           toast({ title: "проверка обновлений выполнена", description: c ? `${c.verdict} · local ${SHORT7(c.local_head)} · remote ${SHORT7(c.remote_head)} · dirty ${c.dirty_files}` : undefined });
-        } else toast({ title: "ff-only применён — рестартуйте daemon (start.sh)", description: String(j?.result ?? "") });
         await loadSu();
       } else toast({ title: `selfupdate ${op} ✗ ${String(j?.error ?? res.statusText).slice(0, 70)}`, variant: "destructive" });
     } catch {
@@ -203,39 +223,57 @@ export function SystemPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-system" data-panel-system>
-      <PageHeader title="SYSTEM" sub="settings · advanced surfaces · vault · policy · runtime" />
-      <div className="border-b border-zinc-800 bg-zinc-950/45 p-2" data-testid="settings-advanced-surfaces">
+      <PageHeader title="Settings" sub="Tools and client configuration" />
+      <div role="tablist" aria-label="Settings areas" className="mb-4 flex shrink-0 flex-wrap gap-1 border-b border-zinc-800" data-testid="settings-areas">
+        {SETTINGS_AREAS.map((item, index) => <button key={item.id} type="button" role="tab" id={`settings-tab-${item.id}`}
+          aria-selected={area === item.id} aria-controls={`settings-panel-${item.id}`} tabIndex={area === item.id ? 0 : -1}
+          onClick={() => setArea(item.id)} onKeyDown={(event) => {
+            const next = event.key === "ArrowRight" ? (index + 1) % SETTINGS_AREAS.length
+              : event.key === "ArrowLeft" ? (index + SETTINGS_AREAS.length - 1) % SETTINGS_AREAS.length
+              : event.key === "Home" ? 0 : event.key === "End" ? SETTINGS_AREAS.length - 1 : null;
+            if (next === null) return; event.preventDefault();
+            const target = SETTINGS_AREAS[next]; setArea(target.id); document.getElementById(`settings-tab-${target.id}`)?.focus();
+          }} className={`min-h-9 border-b-2 px-4 text-[13px] ${area === item.id ? "border-cyan-400 text-zinc-100" : "border-transparent text-zinc-400 hover:text-zinc-100"}`}>{item.label}</button>)}
+      </div>
+      <div id={`settings-panel-${area}`} role="tabpanel" aria-labelledby={`settings-tab-${area}`} className="mc-scroll min-h-0 flex-1 overflow-y-auto">
+      {area === "tools" ? <div className="mx-auto max-w-[960px]" data-testid="settings-advanced-surfaces">
         <div className="mb-1.5 flex items-center justify-between gap-2">
           <div>
-            <strong className="text-[10px] uppercase tracking-[0.16em] text-zinc-300">Advanced surfaces</strong>
-            <p className="text-[9px] text-zinc-600">Hidden from the main Chat Fleet workspace. Open only from Settings or Ctrl+K.</p>
+            <strong className="text-[14px] font-medium text-zinc-200">Development tools</strong>
+            <p className="mt-1 text-[12px] text-zinc-400">Open a tool here or find it with Ctrl+K.</p>
           </div>
         </div>
-        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
           {ADVANCED_SURFACES.map((surface) => (
             <button
               key={surface.page}
               type="button"
               onClick={() => setPage(surface.page)}
               data-testid={`settings-open-${surface.page}`}
-              className="border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-left transition hover:border-cyan-900/70 hover:bg-cyan-950/10"
+              className="flex w-full items-center justify-between gap-4 px-3 py-4 text-left hover:bg-zinc-900"
               title={surface.description}
             >
-              <strong className="block text-[10px] text-zinc-300">{surface.label}</strong>
-              <span className="block truncate text-[9px] text-zinc-600">{surface.description}</span>
+              <span><strong className="block text-[13px] font-medium text-zinc-200">{surface.label}</strong>
+                <span className="mt-1 block text-[12px] text-zinc-400">{surface.description}</span></span>
+              <span className="text-[12px] text-zinc-400">Open</span>
             </button>
           ))}
         </div>
-      </div>
-      <div className="grid min-h-0 flex-1 gap-2 overflow-y-auto lg:grid-cols-2 mc-scroll items-start">
+      </div> : null}
+      {area !== "tools" ? <div className="mx-auto mb-3 flex max-w-[960px] items-center justify-between gap-3 text-[12px]" role="status">
+        <span className={loadState === "UNAVAILABLE" ? "text-amber-300" : "text-zinc-400"}>
+          {loadState === "LOADING" ? "Reading runtime data…" : loadState === "UNAVAILABLE" ? "Some runtime data is unavailable. Check the daemon connection, then refresh." : "Runtime data received"}
+        </span><button type="button" onClick={() => void loadCurrent()} className="h-8 shrink-0 border border-zinc-700 px-3 text-zinc-200">Refresh</button>
+      </div> : null}
+      <div className="mx-auto flex max-w-[960px] flex-col gap-3">
 
         {/* ── КОЛОНКА 1 ── */}
         <div className="flex min-w-0 flex-col gap-2">
           {/* R47: VAULT·TOKENS */}
-          <Sec id="sys-tokens" title="VAULT·TOKENS" icon={KeyRound} tone="emerald"
+          {area === "access" ? <Sec id="sys-tokens" title="Access tokens" icon={KeyRound} tone="emerald"
             right={
               <span className="flex items-center gap-1">
-                <button type="button" data-testid="tokens-add" onClick={() => setFormOpen((o) => !o)} disabled={tokensBusy}
+                <button type="button" data-testid="tokens-add" onClick={() => setFormOpen((o) => !o)} disabled={tokensBusy || !tokensData || loadState !== "LIVE"}
                   title="записать/ротировать токен в БД (POST /tokens {op:set} — значение уходит в daemon, не логируется)"
                   className="rounded border border-emerald-900/60 bg-emerald-950/30 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 transition hover:bg-emerald-950/60 disabled:opacity-40">
                   ＋ токен
@@ -259,7 +297,7 @@ export function SystemPage() {
                 )}
               </div>
 
-              {formOpen && (
+              {formOpen && tokensData && (
                 <div className="space-y-1.5 rounded-md border border-emerald-900/40 bg-emerald-950/10 p-2">
                   <div className="flex gap-1.5">
                     <Input value={tName} onChange={(e) => setTName(e.target.value)} placeholder="ИМЯ (A-Z_0-9)" aria-label="Имя токена"
@@ -273,7 +311,7 @@ export function SystemPage() {
                     </select>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <button type="button" onClick={() => void tokenSetOp()} disabled={tokensBusy}
+                    <button type="button" onClick={() => void tokenSetOp()} disabled={tokensBusy || !tokensData || loadState !== "LIVE"}
                       className="rounded border border-emerald-900/60 bg-emerald-950/40 px-2 py-0.5 font-mono text-[9px] text-emerald-300 transition hover:bg-emerald-950/70 disabled:opacity-40">
                       записать
                     </button>
@@ -312,12 +350,12 @@ export function SystemPage() {
                 </p>
               )}
             </div>
-          </Sec>
+          </Sec> : null}
 
           {/* POLICY T0/T1/T2 */}
-          <Sec id="sys-policy" title="POLICY T0/T1/T2" icon={SlidersHorizontal} tone="amber"
+          {area === "policy" ? <Sec id="sys-policy" title="Execution policy" icon={SlidersHorizontal} tone="amber"
             right={
-              <button type="button" onClick={() => void policyReload()} title="перечитать policy.json (POST /policy {op:reload})"
+              <button type="button" onClick={() => void policyReload()} disabled={!policy || loadState !== "LIVE"} title="перечитать policy.json (POST /policy {op:reload})"
                 className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800">
                 reload
               </button>
@@ -356,13 +394,13 @@ export function SystemPage() {
                   ))}
                 </>
               ) : (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка политики…</div>
+                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">Policy data is not available.</div>
               )}
             </div>
-          </Sec>
+          </Sec> : null}
 
           {/* ME7 legacy daemon source synchronizer — not the Browser package updater */}
-          <Sec id="sys-selfupdate" title="DAEMON SOURCE SYNC" icon={GitMerge} tone="amber">
+          {area === "recovery" ? <Sec id="sys-selfupdate" title="DAEMON SOURCE SYNC" icon={GitMerge} tone="amber" defaultOpen={false}>
             <div className="space-y-1.5" data-testid="selfupdate-card">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="Development-only ff sync из sandbox/me2-os. Это НЕ Browser/Sentinel package self-update.">
@@ -379,24 +417,22 @@ export function SystemPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <button type="button" onClick={() => void suOp("check")} disabled={suBusy}
+                <button type="button" onClick={() => void suOp("check")} disabled={suBusy || !su || loadState !== "LIVE"}
                   title="git ls-remote + fetch + rev-list"
                   className="rounded border border-zinc-700 px-2 py-1 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">check</button>
-                <button type="button" onClick={() => void suOp("apply")} disabled={suBusy}
-                  title="daemon source sync: dirty/diverged fail-close; не обновляет установленный METAENGINE Browser"
-                  className="rounded border border-amber-800/60 px-2 py-1 font-mono text-[9px] text-amber-300/90 transition hover:bg-zinc-800 disabled:opacity-40">apply ff</button>
+                <p className="text-[12px] text-zinc-400">Source inspection only. Installed Browser updates use the native updater.</p>
                 <span className="ml-auto self-center font-mono text-[9px] text-zinc-600" title="журнал обновлений (transactional journal v8)">
                   {su ? `journal: ${su.journal.length}` : ""}{su?.check.error ? ` · ⚠ ${su.check.error.slice(0, 40)}` : ""}
                 </span>
               </div>
             </div>
-          </Sec>
+          </Sec> : null}
         </div>
 
         {/* ── КОЛОНКА 2 ── */}
         <div className="flex min-w-0 flex-col gap-2">
           {/* ME-МАТРИЦА */}
-          <Sec id="sys-mech" title="ME·МАТРИЦА" icon={ListChecks} tone="emerald"
+          {area === "runtime" ? <Sec id="sys-mech" title="Mechanics health" icon={ListChecks} tone="emerald"
             right={mech ? (
               <span className={`font-mono text-[9px] ${mech.mechanics.every((m) => m.verdict === "WORKS") ? "text-emerald-400" : "text-amber-400"}`}
                 title="живые пробы механик · порт M1–M18">{mech.verdict}</span>
@@ -416,7 +452,7 @@ export function SystemPage() {
                     <StateBadge state={mechState(m.verdict)} size="xs" />
                   </div>
                 ))}
-                {!mech && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка матрицы…</div>}
+                {!mech && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">Mechanics data is not available.</div>}
               </div>
               {(mech?.gaps ?? []).length > 0 && (
                 <div className="space-y-0.5">
@@ -429,10 +465,10 @@ export function SystemPage() {
                 </div>
               )}
             </div>
-          </Sec>
+          </Sec> : null}
 
           {/* CONTRACT·CAPABILITIES */}
-          <Sec id="sys-contract" title="CONTRACT·CAPABILITIES" icon={FileJson} tone="cyan"
+          {area === "runtime" ? <Sec id="sys-contract" title="Runtime capabilities" icon={FileJson} tone="cyan" defaultOpen={false}
             right={stateData ? <Chip label="daemon" value={stateData.meta.version} title={`boot ${hhmmss(stateData.meta.boot)}`} /> : undefined}
           >
             <div className="space-y-1.5">
@@ -448,13 +484,13 @@ export function SystemPage() {
                   <pre className="max-h-64 overflow-auto rounded bg-zinc-950/80 p-2 font-mono text-[9px] leading-relaxed text-zinc-400 mc-scroll">{contractJson}</pre>
                 </>
               ) : (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка контракта (/state)…</div>
+                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">Runtime capabilities are not available.</div>
               )}
             </div>
-          </Sec>
+          </Sec> : null}
 
           {/* ОПАСНАЯ ЗОНА */}
-          <Sec id="sys-danger" title="ОПАСНАЯ ЗОНА" icon={TriangleAlert} tone="rose">
+          {area === "recovery" ? <Sec id="sys-danger" title="Recovery actions" icon={TriangleAlert} tone="rose" defaultOpen={false}>
             <div className="space-y-1.5 rounded-md border border-rose-900/50 bg-rose-950/20 p-2" data-testid="danger-zone">
               <div className="flex flex-wrap items-center gap-1.5">
                 <button type="button" onClick={() => void budgetFlushOp()}
@@ -469,12 +505,13 @@ export function SystemPage() {
                 </button>
               </div>
               <p className="font-mono text-[9px] leading-relaxed text-rose-300/80" role="note">
-                перед опасными операциями сделай бэкап: SQLite daemon (data/*.db + WAL) и env-файлы — reset пересоздаёт среду исполнения и отменяет незавершённые задачи.
+                Recovery can cancel queued work or reset the environment. Inspect current tasks and save needed artifacts before confirming.
               </p>
             </div>
-          </Sec>
+          </Sec> : null}
 
         </div>
+      </div>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH,
   ME2_PRIMARY_TOP_HEIGHT,
+  ME2_PRIMARY_GOAL_HEIGHT,
   SHELL_MIN_REMOTE_WIDTH,
   normalizeShellLayoutState,
   planShellLayout,
@@ -29,7 +30,7 @@ test('R97 native layout is the single authority and never reserves persistent RU
     assert.equal(plan.me2_run_inspector_effective_visible, false);
     assert.equal(plan.me2_context_drawer_effective_open, false);
     assert.ok(plan.remote_bounds.width >= Math.min(SHELL_MIN_REMOTE_WIDTH, width));
-    assert.equal(plan.remote_bounds.y, ME2_PRIMARY_TOP_HEIGHT);
+    assert.equal(plan.remote_bounds.y, ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_GOAL_HEIGHT);
     if (width >= ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH + SHELL_MIN_REMOTE_WIDTH) {
       assert.equal(plan.remote_bounds.x, ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH);
     }

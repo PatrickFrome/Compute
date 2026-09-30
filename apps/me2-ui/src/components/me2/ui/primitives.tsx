@@ -168,7 +168,7 @@ export function Chip({ label, value, tone = "zinc", title }: {
 }
 
 // ── Sec: сворачиваемая секция-карточка (базовый строительный блок страниц) ──────
-export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true, tone = "zinc", dense }: {
+export function Sec({ id, title, right, children, defaultOpen = true, dense }: {
   id: string; title: string; icon: LucideIcon; right?: ReactNode; children: ReactNode;
   defaultOpen?: boolean; tone?: "zinc" | "emerald" | "amber" | "rose" | "cyan" | "violet" | "teal"; dense?: boolean;
 }) {
@@ -189,10 +189,6 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
       return !o;
     });
   };
-  const tones: Record<string, string> = {
-    zinc: "text-zinc-400", emerald: "text-emerald-400", amber: "text-amber-400", rose: "text-rose-400",
-    cyan: "text-cyan-400", violet: "text-violet-400", teal: "text-teal-400",
-  };
   return (
     <section className="flex min-h-0 flex-col overflow-hidden border border-zinc-800/90 bg-[#0b0b0d]" data-sec={id}>
       <div className="flex w-full shrink-0 items-center border-b border-zinc-800/80 bg-zinc-950/55">
@@ -200,18 +196,10 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
           type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`}
           className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-zinc-900/60"
         >
-          <Icon className={`h-3.5 w-3.5 shrink-0 ${tones[tone]}`} aria-hidden />
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-300">{title}</span>
+          <span className="text-[13px] font-medium text-zinc-200">{title}</span>
+          <span className="ml-auto text-[11px] text-zinc-400">{open ? "Hide" : "Show"}</span>
         </button>
         {right && <div className="flex shrink-0 items-center gap-1.5 pr-1">{right}</div>}
-        <button
-          type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`} aria-label={open ? "свернуть секцию" : "развернуть секцию"}
-          className="flex shrink-0 items-center px-2 py-1.5 text-zinc-600 hover:text-zinc-300"
-        >
-          <svg aria-hidden viewBox="0 0 12 12" className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}>
-            <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          </svg>
-        </button>
       </div>
       {open && (
         <div id={`${id}-body`} className={`min-h-0 flex-1 overflow-y-auto mc-scroll ${dense ? "p-1.5" : "p-2.5"}`}>
@@ -226,8 +214,8 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
 export function PageHeader({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 px-1 pb-2">
-      <h2 className="text-sm font-bold tracking-[0.2em] text-zinc-200">{title}</h2>
-      {sub && <span className="text-[10px] text-zinc-500">{sub}</span>}
+      <h2 className="text-[16px] font-medium text-zinc-100">{title}</h2>
+      {sub && <span className="text-[12px] text-zinc-400">{sub}</span>}
       <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>
     </div>
   );

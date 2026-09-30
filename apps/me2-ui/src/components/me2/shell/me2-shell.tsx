@@ -4,18 +4,19 @@
 // Right: the exact native Browser WebContents selected by Browser main.
 // Advanced pages remain available only through Settings / command search.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
-import { CodePage } from "@/components/me2/pages/code";
-import { TasksPage } from "@/components/me2/pages/tasks";
-import { SupervisorPage } from "@/components/me2/pages/supervisor";
-import { MemoryPage } from "@/components/me2/pages/memory";
-import { ObservabilityPage } from "@/components/me2/pages/observability";
-import { SystemPage } from "@/components/me2/pages/system";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+const CodePage = lazy(() => import("@/components/me2/pages/code").then((m) => ({ default: m.CodePage })));
+const TasksPage = lazy(() => import("@/components/me2/pages/tasks").then((m) => ({ default: m.TasksPage })));
+const SupervisorPage = lazy(() => import("@/components/me2/pages/supervisor").then((m) => ({ default: m.SupervisorPage })));
+const MemoryPage = lazy(() => import("@/components/me2/pages/memory").then((m) => ({ default: m.MemoryPage })));
+const ObservabilityPage = lazy(() => import("@/components/me2/pages/observability").then((m) => ({ default: m.ObservabilityPage })));
+const SystemPage = lazy(() => import("@/components/me2/pages/system").then((m) => ({ default: m.SystemPage })));
 
 type PrimaryChatActor = {
   actor_id: string;
@@ -45,6 +46,7 @@ type PrimaryShellBridge = {
     selection_applied?: boolean;
     actor_id?: string;
     tab_id?: string | null;
+    exact_native_binding?: boolean;
   } | null>;
 };
 
@@ -167,6 +169,7 @@ function usePrimaryChatRoster() {
   const [roster, setRoster] = useState<PrimaryChatRoster>(EMPTY_ROSTER);
   const [state, setState] = useState<"LOADING" | "LIVE" | "UNAVAILABLE">("LOADING");
   const inFlight = useRef(false);
+  const live = useRef(false);
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return;
@@ -178,6 +181,7 @@ function usePrimaryChatRoster() {
     inFlight.current = true;
     try {
       const next = await bridge.primaryChatFleetRoster();
+      if (!live.current) return;
       if (next?.schema !== "metaengine.browser.primary-chat-fleet-roster.v1" || !Array.isArray(next.actors)) {
         setState("UNAVAILABLE");
         return;
@@ -185,13 +189,14 @@ function usePrimaryChatRoster() {
       setRoster(next);
       setState("LIVE");
     } catch {
-      setState("UNAVAILABLE");
+      if (live.current) setState("UNAVAILABLE");
     } finally {
       inFlight.current = false;
     }
   }, []);
 
   useEffect(() => {
+    live.current = true;
     let cancelled = false;
     const load = async () => {
       if (cancelled) return;
@@ -203,6 +208,7 @@ function usePrimaryChatRoster() {
     }, 2_000);
     return () => {
       cancelled = true;
+      live.current = false;
       window.clearInterval(timer);
     };
   }, [refresh]);
@@ -210,51 +216,71 @@ function usePrimaryChatRoster() {
   return { roster, state, refresh };
 }
 
-function GoalComposer() {
+function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean; onDetailOpenChange: (open: boolean) => void }) {
   const [goal, setGoal] = useState("");
   const [pending, setPending] = useState(false);
   const [receipt, setReceipt] = useState<ClientGoalSubmission | null>(null);
   const [journalEntry, setJournalEntry] = useState<ClientGoalJournalEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const operation = useRef<"submit" | "read" | null>(null);
+  const mounted = useRef(false);
+  const loadSequence = useRef(0);
 
   const loadLatest = useCallback(async () => {
     const bridge = clientControlBridge();
     if (!bridge?.latestGoal) return;
+    const sequence = ++loadSequence.current;
     const latest = await bridge.latestGoal().catch(() => null);
-    if (latest?.schema === "metaengine.client.goal-journal-entry.v1") {
+    if (mounted.current && sequence === loadSequence.current && latest?.schema === "metaengine.client.goal-journal-entry.v1") {
       setJournalEntry(latest);
       if (latest.receipt?.schema === "metaengine.client.goal-submission.v1") setReceipt(latest.receipt);
     }
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void loadLatest();
+    return () => { mounted.current = false; loadSequence.current += 1; };
   }, [loadLatest]);
 
   const refreshProgress = useCallback(async () => {
     const bridge = clientControlBridge();
     const requestId = receipt?.request_id || journalEntry?.request_id || "";
-    if (!bridge?.goalStatus || !requestId) return;
-    setPending(true);
+    if (!bridge?.goalStatus || !requestId || operation.current) return;
+    operation.current = "read";
+    setRefreshing(true);
     try {
       await bridge.goalStatus(requestId);
       await loadLatest();
-      setError(null);
+      if (mounted.current) setError(null);
     } catch (cause) {
-      setError(String((cause as Error)?.message || cause || "goal_status_failed").slice(0, 180));
+      if (mounted.current) setError(String((cause as Error)?.message || cause || "goal_status_failed").slice(0, 180));
     } finally {
-      setPending(false);
+      operation.current = null;
+      if (mounted.current) setRefreshing(false);
     }
   }, [journalEntry?.request_id, loadLatest, receipt?.request_id]);
 
+  // Observation only: submitGoal is never called by a timer or recovery path.
+  useEffect(() => {
+    if (!(receipt?.request_id || journalEntry?.request_id) || (journalEntry?.progress?.terminal && (journalEntry.progress.task_state !== "COMPLETED" || journalEntry.execution_proof?.user_goal_to_result_readback))) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshProgress();
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [receipt?.request_id, journalEntry?.request_id, journalEntry?.progress?.terminal, journalEntry?.progress?.task_state, journalEntry?.execution_proof?.user_goal_to_result_readback, refreshProgress]);
+
   const submit = useCallback(async () => {
     const value = goal.trim();
-    if (!value || pending) return;
+    if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED") return;
     const bridge = clientControlBridge();
     if (!bridge?.submitGoal || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
       setError("Typed Client control bridge unavailable");
       return;
     }
+    operation.current = "submit";
+    loadSequence.current += 1;
     setPending(true);
     setError(null);
     try {
@@ -262,95 +288,101 @@ function GoalComposer() {
       if (next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
         throw new Error("goal_readback_invalid");
       }
-      setReceipt(next);
-      setGoal("");
+      if (mounted.current) { setReceipt(next); setJournalEntry(null); setGoal(""); }
       await loadLatest();
     } catch (cause) {
-      setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
+      if (mounted.current) setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
       // A lost submit response is never retried as an effect. The Browser main
       // process has already attempted one read-only request_id reconciliation;
       // load that durable local correlation record instead.
       await loadLatest();
     } finally {
-      setPending(false);
+      operation.current = null;
+      if (mounted.current) setPending(false);
     }
-  }, [goal, loadLatest, pending]);
+  }, [goal, journalEntry?.state, loadLatest]);
+
+  const progress = journalEntry?.progress;
+  const proof = journalEntry?.execution_proof;
+  const labels: Record<string, string> = {
+    READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
+    COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
+    AMBIGUOUS: "Needs reconciliation", FENCED: "Stopped",
+  };
+  const status = error ? "Check task status"
+    : proof?.user_goal_to_result_readback === true ? "Result verified"
+    : journalEntry?.state === "RECONCILE_REQUIRED" ? "Needs reconciliation"
+    : progress?.found ? labels[progress.task_state || ""] || "Awaiting status"
+    : receipt ? "Queued · accepted" : "";
 
   return (
     <section
-      className="flex min-h-[48px] shrink-0 items-center gap-2 border-b border-zinc-800 bg-[#0b0b0d] px-3 py-1.5"
+      className="flex h-[48px] shrink-0 items-center gap-2 overflow-hidden border-b border-zinc-800 bg-[#111114] px-3 py-1.5"
       data-testid="client-goal-composer"
       aria-label="Client goal"
     >
-      <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-400">Goal</span>
+      <label htmlFor="client-goal" className="shrink-0 text-[12px] font-medium text-zinc-300">Task</label>
       <input
+        id="client-goal"
         value={goal}
         onChange={(event) => setGoal(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
             void submit();
           }
         }}
         maxLength={480}
-        disabled={pending}
-        placeholder="Describe what METAENGINE should accomplish…"
+        disabled={pending || journalEntry?.state === "RECONCILE_REQUIRED"}
+        placeholder="Describe the task for your agents…"
         aria-label="User goal"
         data-testid="client-goal-input"
-        className="h-8 min-w-0 flex-1 border border-zinc-800 bg-zinc-950 px-2.5 text-[11px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-800 disabled:opacity-60"
+        className="h-8 min-w-0 flex-1 border border-zinc-700 bg-zinc-950 px-2.5 text-[13px] text-zinc-100 placeholder:text-zinc-400 disabled:opacity-60"
       />
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={pending || !goal.trim()}
+        disabled={pending || refreshing || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"}
         data-testid="client-goal-submit"
-        className="h-8 shrink-0 border border-cyan-800/70 bg-cyan-950/30 px-3 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-950/55 disabled:opacity-40"
+        className="h-8 shrink-0 border border-cyan-700 bg-cyan-950/50 px-3 text-[12px] font-semibold text-cyan-100 hover:bg-cyan-950 disabled:opacity-40"
       >
         {pending ? "Submitting…" : "Run"}
       </button>
-      <span className="min-w-0 max-w-[380px] truncate font-mono text-[9px] text-zinc-500" data-testid="client-goal-readback">
-        {error
-          ? `ERROR · ${error}`
-          : journalEntry?.execution_proof?.user_goal_to_result_readback === true
-            ? `task ${journalEntry.execution_proof.task_id?.slice(0, 8)} · RESULT PROVEN · Agent origin bound`
-            : journalEntry?.execution_proof?.user_goal_to_agent_readback === true
-              ? `task ${journalEntry.execution_proof.task_id?.slice(0, 8)} · ${journalEntry.execution_proof.task_state} · Agent proven`
-              : journalEntry?.progress?.found === true
-                ? `task ${journalEntry.progress.task_id?.slice(0, 8)} · ${journalEntry.progress.task_state} · ${journalEntry.progress.terminal ? "terminal" : "in progress"}`
-                : journalEntry?.state === "RECONCILE_REQUIRED"
-                  ? `request ${journalEntry.request_id.slice(0, 8)} · reconciliation required`
-                  : receipt
-                    ? `${receipt.objective_id} · task ${receipt.task_id.slice(0, 8)} · ADMITTED ≠ completed`
-                    : "typed Native Supervisor path"}
+      <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite">
+        {status}
       </span>
-      {journalEntry?.execution_proof ? (
-        <span
-          data-testid="client-goal-execution-proof"
-          className="shrink-0 font-mono text-[8px] text-zinc-600"
-          title={journalEntry.execution_proof.user_goal_to_result_readback
-            ? "Exact Client request is bound to z.ai Agent-origin transport and an accepted typed result claim"
-            : journalEntry.execution_proof.user_goal_to_agent_readback
-              ? "Exact Client request is bound to z.ai Agent-origin transport; accepted result proof is pending"
-              : "No Agent-origin proof is available for this exact Client request yet"}
-        >
-          {journalEntry.execution_proof.user_goal_to_result_readback
-            ? "AGENT+RESULT"
-            : journalEntry.execution_proof.user_goal_to_agent_readback
-              ? "AGENT"
-              : "NO AGENT PROOF"}
-        </span>
+      {(receipt || journalEntry || error) ? (
+        <button type="button" onClick={() => onDetailOpenChange(true)} data-testid="client-goal-details"
+          className="h-8 shrink-0 px-2 text-[12px] text-zinc-300 hover:bg-zinc-800">Status</button>
       ) : null}
-      {(receipt?.request_id || journalEntry?.request_id) ? (
+      {detailOpen ? <Dialog open onOpenChange={onDetailOpenChange}>
+        <DialogContent showCloseButton={false} className="mc-dark border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
+          onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
+          <DialogTitle>Task status</DialogTitle>
+          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. Acceptance means the task is queued; completion requires verified result evidence.</DialogDescription>
+          <dl className="grid grid-cols-[90px_1fr] gap-2 text-[12px]">
+            <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || receipt?.task_id || "Awaiting readback"}</dd>
+            <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
+            <dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified z.ai Agent" : "Not yet verified"}</dd>
+            <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Verified and accepted" : "Not yet verified"}</dd>
+          </dl>
+          {error ? <p role="alert" className="break-words text-[12px] text-rose-300">{error}</p> : null}
+          <div className="flex justify-end gap-2">
+          {(receipt?.request_id || journalEntry?.request_id) ? (
         <button
           type="button"
           onClick={() => void refreshProgress()}
-          disabled={pending}
+          disabled={pending || refreshing}
           data-testid="client-goal-refresh"
           className="h-8 shrink-0 border border-zinc-800 px-2.5 text-[9px] font-semibold text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-40"
         >
-          Refresh
+          {refreshing ? "Checking…" : "Refresh status"}
         </button>
-      ) : null}
+          ) : null}
+          <button type="button" onClick={() => onDetailOpenChange(false)} className="h-8 border border-zinc-700 px-3 text-[12px]">Close</button>
+          </div>
+        </DialogContent>
+      </Dialog> : null}
     </section>
   );
 }
@@ -374,79 +406,93 @@ function actorTone(actor: PrimaryChatActor) {
   return "bg-rose-400";
 }
 
-function ChatFleetRail() {
+function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean; onPickerOpenChange: (open: boolean) => void }) {
   const { roster, state, refresh } = usePrimaryChatRoster();
-  const localSelection = useMe2((s) => s.chatId);
   const setChatId = useMe2((s) => s.setChatId);
   const attemptedInitial = useRef<string | null>(null);
+  const selectionInFlight = useRef(false);
+  const [selecting, setSelecting] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
 
-  const supervisors = roster.actors.filter((actor) => actor.actor_type === "SUPERVISOR");
-  const agents = roster.actors.filter((actor) => actor.actor_type === "AGENT");
+  const query = filter.trim().toLowerCase();
+  const visible = roster.actors.filter((actor) => !query || `${actor.role} ${actor.title} ${actor.actor_id}`.toLowerCase().includes(query));
+  const supervisors = visible.filter((actor) => actor.actor_type === "SUPERVISOR");
+  const agents = visible.filter((actor) => actor.actor_type === "AGENT");
   const ordered = [...supervisors, ...agents];
-  const selectedActorId = roster.selected_actor_id || localSelection;
+  const selectedActorId = roster.selected_actor_id;
 
   const select = useCallback(async (actor: PrimaryChatActor) => {
-    setChatId(actor.actor_id);
-    if (actor.actor_type === "AGENT") {
-      const bridge = clientControlBridge();
+    if (selectionInFlight.current || state !== "LIVE" || !actor.exact_native_binding) return;
+    selectionInFlight.current = true;
+    setSelecting(actor.actor_id);
+    setSelectionError(null);
+    try {
       const agentId = actor.actor_id.startsWith("agent:") ? actor.actor_id.slice("agent:".length) : "";
-      if (!bridge?.selectAgent || !agentId) return;
-      const result = await bridge.selectAgent(agentId).catch(() => null);
-      if (result?.selection_applied === true && result.exact_native_binding === true) await refresh();
-      return;
+      const result = actor.actor_type === "AGENT"
+        ? await clientControlBridge()?.selectAgent?.(agentId)
+        : await shellBridge()?.selectPrimaryChatActor?.(actor.actor_id);
+      if (result?.selection_applied !== true || result.exact_native_binding !== true || result.actor_id !== actor.actor_id || result.tab_id !== actor.tab_id) {
+        throw new Error("selection_not_confirmed");
+      }
+      // Selection changes only after an exact native acknowledgement, never
+      // optimistically before IPC. The roster owns the visible current row.
+      setChatId(actor.actor_id);
+      onPickerOpenChange(false);
+      await refresh();
+    } catch {
+      setSelectionError("Agent selection was not confirmed. Refresh the roster before trying again.");
+      await refresh();
+    } finally {
+      selectionInFlight.current = false;
+      setSelecting(null);
     }
-    const bridge = shellBridge();
-    if (!bridge?.selectPrimaryChatActor) return;
-    const result = await bridge.selectPrimaryChatActor(actor.actor_id).catch(() => null);
-    if (result?.selection_applied === true) await refresh();
-  }, [refresh, setChatId]);
+  }, [onPickerOpenChange, refresh, setChatId, state]);
 
   // One bounded startup choice only when Browser has no selected managed actor.
   // No retry loop: exact binding must already exist for selection to succeed.
   useEffect(() => {
-    if (roster.selected_actor_id || ordered.length === 0) return;
-    const first = ordered[0];
+    if (state !== "LIVE" || roster.selected_actor_id || roster.actors.length === 0) return;
+    const first = roster.actors.find((actor) => actor.exact_native_binding);
     if (!first || attemptedInitial.current === first.actor_id) return;
     attemptedInitial.current = first.actor_id;
     void select(first);
-  }, [ordered, roster.selected_actor_id, select]);
+  }, [roster.actors, roster.selected_actor_id, select, state]);
 
   const section = (title: string, rows: PrimaryChatActor[]) => (
     <section className="space-y-1" aria-label={title}>
-      <div className="flex items-center justify-between px-2 pt-2 text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-600">
+      <div className="flex items-center justify-between px-3 py-2 text-[11px] font-medium text-zinc-400">
         <span>{title}</span><span>{rows.length}</span>
       </div>
       {rows.map((actor) => {
-        const selected = selectedActorId === actor.actor_id || actor.selected;
+        const selected = selectedActorId === actor.actor_id;
         return (
           <button
             key={actor.actor_id}
             type="button"
             onClick={() => void select(actor)}
+            disabled={selecting !== null || state !== "LIVE" || !actor.exact_native_binding}
             data-testid={actor.actor_type === "SUPERVISOR" ? "chat-supervisor-row" : "chat-agent-row"}
             data-actor-id={actor.actor_id}
             aria-current={selected ? "page" : undefined}
-            className={`group flex w-full items-center gap-2 border-l-2 px-2 py-2 text-left transition ${
+            className={`group flex w-full items-center gap-2 border-l-2 px-3 py-3 text-left disabled:cursor-default disabled:opacity-60 ${
               selected
                 ? "border-cyan-400 bg-cyan-950/20 text-zinc-100"
                 : "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/70 hover:text-zinc-200"
             }`}
-            title={actor.title || actor.role}
+            title={`${actor.title || actor.role} · ${actor.actor_id}${actor.exact_native_binding ? "" : " · native binding not yet verified"}`}
           >
-            <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950 font-mono text-[10px] font-bold text-zinc-300">
-              {(actor.actor_type === "SUPERVISOR" ? "S" : actor.role || "A").slice(0, 2).toUpperCase()}
-              <i className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-[#0b0b0d] ${actorTone(actor)}`} />
-            </span>
             <span className="min-w-0 flex-1">
-              <strong className="block truncate text-[11px] font-semibold">
-                {actor.actor_type === "SUPERVISOR" ? "SUPERVISOR" : actor.role}
+              <strong className="block truncate text-[13px] font-medium">
+                {actor.actor_type === "SUPERVISOR" ? "Supervisor" : actor.role.toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}
               </strong>
-              <small className="block truncate font-mono text-[9px] text-zinc-500" data-testid="chat-actor-short-id">
+              <small className="block truncate font-mono text-[11px] text-zinc-400" data-testid="chat-actor-short-id">
                 {actor.actor_id.split(":").at(-1)?.slice(0, 18) || actor.actor_id.slice(0, 18)}
               </small>
-              <small className="block truncate font-mono text-[9px] text-zinc-600">
-                {actor.state} · {actor.model || "GLM-5.3-Flash"}
-              </small>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
+              <i aria-hidden className={`h-1.5 w-1.5 rounded-full ${actorTone(actor)}`} />
+              {selecting === actor.actor_id ? "Opening…" : actor.state.toLowerCase().replaceAll("_", " ")}
             </span>
           </button>
         );
@@ -454,44 +500,58 @@ function ChatFleetRail() {
     </section>
   );
 
-  return (
+  const content = <>
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-3">
+        <div><strong className="block text-[13px] font-medium text-zinc-200">Agents</strong>
+          <span className="text-[11px] text-zinc-400">GLM-5.3-Flash · {state === "LIVE" ? `${roster.actor_count} sessions` : state === "LOADING" ? "Connecting…" : "Roster unavailable"}</span></div>
+        <button type="button" onClick={() => void refresh()} className="h-8 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800">Refresh</button>
+      </div>
+      <div className="shrink-0 p-3"><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Find an agent…"
+        aria-label="Filter chat agents" className="h-8 w-full border border-zinc-700 bg-zinc-950 px-2 text-[12px] text-zinc-200" /></div>
+      <div className="mc-scroll min-h-0 flex-1 overflow-y-auto pb-3">
+        {state === "LOADING" && ordered.length === 0 ? <p role="status" className="px-3 py-4 text-[12px] text-zinc-400">Connecting to the Browser…</p> : null}
+        {state === "UNAVAILABLE" ? <p role="status" className="px-3 py-4 text-[12px] text-amber-300">The Browser roster is unavailable. Refresh to reconnect.{roster.actor_count ? " Previous agents are shown below." : ""}</p> : null}
+        {selectionError ? <p role="alert" className="px-3 pb-3 text-[12px] text-amber-300">{selectionError}</p> : null}
+        {state === "LIVE" && ordered.length === 0 ? <p className="px-3 py-4 text-[12px] text-zinc-400">{query ? "No matching agents." : "No connected agents. Check Supervisor in Settings to see fleet readiness."}</p> : null}
+        {supervisors.length ? section("Supervisors", supervisors) : null}
+        {agents.length ? section("Agents", agents) : null}
+      </div>
+    </>;
+
+  return <>
     <aside
-      className="h-full min-h-0 w-[288px] shrink-0 overflow-hidden border-r border-zinc-800 bg-[#0b0b0d] max-[1007px]:hidden"
+      className="flex h-full min-h-0 w-[288px] shrink-0 flex-col overflow-hidden border-r border-zinc-800 bg-[#111114] max-[1007px]:hidden"
       data-testid="chat-fleet-rail"
       aria-label="Chat agents and supervisors"
     >
-      <div className="flex h-10 items-center justify-between border-b border-zinc-800 px-3">
-        <div>
-          <strong className="block text-[10px] uppercase tracking-[0.16em] text-zinc-300">Chat Fleet</strong>
-          <span className="font-mono text-[8px] text-zinc-600">
-            {state === "LIVE" ? `GLM-5.3-Flash · ${roster.actor_count} live` : state}
-          </span>
-        </div>
-      </div>
-      <div className="mc-scroll h-[calc(100%-40px)] overflow-y-auto pb-3">
-        {state === "LOADING" && ordered.length === 0 ? <p className="px-3 py-4 text-[10px] text-zinc-600">Loading chat actors…</p> : null}
-        {state === "UNAVAILABLE" && ordered.length === 0 ? <p className="px-3 py-4 text-[10px] text-rose-400">Browser roster unavailable</p> : null}
-        {section("Supervisors", supervisors)}
-        {section("Agents", agents)}
-      </div>
+      {content}
     </aside>
-  );
+    {pickerOpen ? <Dialog open onOpenChange={onPickerOpenChange}>
+      <DialogContent id="fleet-picker" showCloseButton={false} data-testid="fleet-picker" className="mc-dark flex h-[min(600px,85vh)] flex-col gap-0 border-zinc-700 bg-[#111114] p-0 text-zinc-200"
+        onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="fleet-picker-toggle"]')?.focus(); }}>
+        <div className="flex items-center justify-between px-3 pt-3"><DialogTitle className="text-[14px]">Choose an agent</DialogTitle>
+          <button type="button" onClick={() => onPickerOpenChange(false)} className="h-8 px-2 text-[12px]">Close</button></div>
+        <DialogDescription className="px-3 pb-2 text-[12px] text-zinc-400">Open an existing z.ai Agent conversation.</DialogDescription>
+        {content}
+      </DialogContent>
+    </Dialog> : null}
+  </>;
 }
 
-function PrimaryChatFleetWorkspace() {
+function PrimaryChatFleetWorkspace({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean; onPickerOpenChange: (open: boolean) => void }) {
   return (
     <div
       className="flex h-full min-h-0 min-w-0 overflow-hidden bg-[#09090b]"
       data-testid="primary-chat-fleet"
     >
-      <ChatFleetRail />
+      <ChatFleetRail pickerOpen={pickerOpen} onPickerOpenChange={onPickerOpenChange} />
       <section
         className="relative min-w-0 flex-1 overflow-hidden bg-black"
         data-testid="native-chat-surface-slot"
         aria-label="Selected chat agent website"
       >
-        <div className="pointer-events-none absolute inset-0 grid place-items-center text-center text-[10px] text-zinc-700">
-          <span>Selected GLM chat is rendered here by the native Browser surface.</span>
+        <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-[13px] text-zinc-400">
+          <div><h1 className="mb-2 text-[18px] font-medium text-zinc-200">Your agent workspace</h1><p>Select an agent to view its conversation.</p></div>
         </div>
       </section>
     </div>
@@ -506,6 +566,13 @@ export function Me2Shell() {
   const detail = useMe2((s) => s.detail);
   const peekTarget = useMe2((s) => s.peekTarget);
   const chromeOverlaySources = useMe2((s) => s.chromeOverlaySources);
+  const overlayScope = useMe2((s) => s.recentPages);
+  const [fleetPickerScope, setFleetPickerScope] = useState<typeof overlayScope | null>(null);
+  const [goalDetailScope, setGoalDetailScope] = useState<typeof overlayScope | null>(null);
+  const fleetPickerOpen = page === "browser" && fleetPickerScope === overlayScope;
+  const goalDetailOpen = page === "browser" && goalDetailScope === overlayScope;
+  const setFleetPickerOpen = useCallback((open: boolean) => setFleetPickerScope(open ? overlayScope : null), [overlayScope]);
+  const setGoalDetailOpen = useCallback((open: boolean) => setGoalDetailScope(open ? overlayScope : null), [overlayScope]);
   const { toast } = useToast();
 
   useEffect(() => { init(); }, [init]);
@@ -520,7 +587,7 @@ export function Me2Shell() {
   }, [toast]);
 
   const overlaysOpen = Boolean(dialog || detail);
-  const nativeOverlayOpen = Boolean(paletteOpen || overlaysOpen || peekTarget || chromeOverlaySources.length > 0);
+  const nativeOverlayOpen = Boolean(paletteOpen || overlaysOpen || peekTarget || chromeOverlaySources.length > 0 || fleetPickerOpen || goalDetailOpen);
 
   useEffect(() => {
     const shell = shellBridge();
@@ -537,14 +604,14 @@ export function Me2Shell() {
       data-testid="me2-shell"
       data-main-workspace={mainWorkspace ? "chat-fleet" : "advanced"}
     >
-      <TopBar />
-      {mainWorkspace ? <GoalComposer /> : null}
+      <TopBar fleetPickerOpen={fleetPickerOpen} onOpenFleet={() => setFleetPickerOpen(true)} />
+      {mainWorkspace ? <GoalComposer detailOpen={goalDetailOpen} onDetailOpenChange={setGoalDetailOpen} /> : null}
       <main
         className={mainWorkspace ? "min-h-0 min-w-0 flex-1 overflow-hidden" : "min-h-0 min-w-0 flex-1 overflow-auto p-1.5"}
         data-testid="page-outlet"
         data-page={page}
       >
-        {mainWorkspace ? <PrimaryChatFleetWorkspace /> : <PageOutlet page={page} />}
+        {mainWorkspace ? <PrimaryChatFleetWorkspace pickerOpen={fleetPickerOpen} onPickerOpenChange={setFleetPickerOpen} /> : <Suspense fallback={<p role="status" className="p-6 text-[13px] text-zinc-400">Opening tools…</p>}><PageOutlet page={page} /></Suspense>}
       </main>
       {paletteOpen ? <CommandPalette /> : null}
       {overlaysOpen ? <GlobalDialogs /> : null}

@@ -90,7 +90,7 @@ test('R96 inspector resolves only existing snapshot entities and never gains an 
 
 test('R97 keeps Peek capability out of persistent main chrome while preserving zero-authority state fencing', () => {
   assert.match(shell, /const peekTarget = useMe2\(\(s\) => s\.peekTarget\)/);
-  assert.match(shell, /nativeOverlayOpen = Boolean\(paletteOpen \|\| overlaysOpen \|\| peekTarget \|\| chromeOverlaySources\.length > 0\)/);
+  assert.match(shell, /nativeOverlayOpen = Boolean\(paletteOpen \|\| overlaysOpen \|\| peekTarget \|\| chromeOverlaySources\.length > 0 \|\| fleetPickerOpen \|\| goalDetailOpen\)/);
   assert.doesNotMatch(shell, /<PeekInspector \/>/);
   assert.doesNotMatch(inspector, /onClick=|sendCommand|taskAction|agentChatOp|me2Fetch|fetch\(/);
 });

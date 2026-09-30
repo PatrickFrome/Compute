@@ -6,8 +6,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Segoe UI", Arial, Helvetica, sans-serif;
+  --font-mono: Consolas, "SFMono-Regular", monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -122,6 +122,19 @@
 }
 
 /* ── METAENGINE Mission Control additions ─────────────────────── */
+
+/* Client workbench: dense does not mean faint or unreadable. Keep these
+   tokens scoped to our renderer; never restyle an external Agent website. */
+.mc-dark { color-scheme: dark; font-family: "Segoe UI", Arial, Helvetica, sans-serif; }
+.mc-dark :is(.text-zinc-500, .text-zinc-600, .text-zinc-700) { color: #a1a1aa; }
+.mc-dark :is(.text-\[8px\], .text-\[9px\], .text-\[10px\]) {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mc-dark :is(button, a, input, textarea, select, [role="tab"], [role="separator"]):focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: -2px;
+}
 
 /* R16 (VLM-QA второй ревьюер): плейсхолдеры консоли на zinc-950 были muted-foreground
    (~4:1, на грани WCAG) → zinc-400 (~7:1). Скоуп — только тёмная консоль .mc-dark. */

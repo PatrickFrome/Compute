@@ -3,10 +3,7 @@
 // Settings. All other persistent navigation chrome was removed.
 
 import { useMe2 } from "@/components/me2/store";
-import { Search, Command, Boxes, Radio, Settings, ArrowLeft } from "lucide-react";
-
-export function TopBar() {
-  const snap = useMe2((s) => s.snap);
+export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOpen?: boolean; onOpenFleet?: () => void }) {
   const connected = useMe2((s) => s.connected);
   const page = useMe2((s) => s.page);
   const setPalette = useMe2((s) => s.setPalette);
@@ -22,15 +19,15 @@ export function TopBar() {
         type="button"
         onClick={() => setPage("browser")}
         data-testid="brand"
-        className="flex h-8 shrink-0 items-center gap-2 rounded-sm px-1.5 text-left hover:bg-zinc-900 focus-visible:outline-none"
+        className="flex h-8 shrink-0 items-center px-1.5 text-left hover:bg-zinc-900"
         title="METAENGINE · Chat Fleet"
       >
-        <span className="flex h-5 w-5 items-center justify-center border border-cyan-800/60 bg-cyan-950/35">
-          <Boxes className="h-3 w-3 text-cyan-300" aria-hidden />
-        </span>
-        <span className="text-[12px] font-black tracking-[0.22em] text-zinc-100">METAENGINE</span>
-        <span className="hidden font-mono text-[9px] text-zinc-600 lg:inline">{snap?.meta.version ?? "…"}</span>
+        <span className="text-[13px] font-semibold tracking-[0.08em] text-zinc-100">METAENGINE</span>
       </button>
+
+      {mainWorkspace ? <button type="button" onClick={onOpenFleet} data-testid="fleet-picker-toggle"
+        aria-expanded={fleetPickerOpen} aria-controls="fleet-picker" aria-haspopup="dialog"
+        className="h-8 shrink-0 border border-zinc-700 px-2 text-[12px] text-zinc-200 min-[1008px]:hidden">Agents</button> : null}
 
       {!mainWorkspace ? (
         <button
@@ -40,7 +37,7 @@ export function TopBar() {
           data-testid="return-to-chat-fleet"
           title="Return to the single main workspace"
         >
-          <ArrowLeft className="h-3 w-3" aria-hidden /> Chat Fleet
+          Back to agents
         </button>
       ) : null}
 
@@ -51,12 +48,11 @@ export function TopBar() {
         aria-label="Search and commands (Ctrl+K)"
         className="group mx-auto flex h-8 min-w-0 flex-1 max-w-[720px] items-center gap-2 border border-zinc-800 bg-zinc-900/55 px-2.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
       >
-        <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-cyan-300" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">
-          Search agents, settings, tools or run a command
+        <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-400">
+          Search tools and commands
         </span>
         <kbd className="hidden shrink-0 items-center gap-0.5 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 sm:flex">
-          <Command className="h-2.5 w-2.5" aria-hidden />K
+          Ctrl K
         </kbd>
       </button>
 
@@ -73,7 +69,7 @@ export function TopBar() {
           }`}
           title="Settings and advanced tools"
         >
-          <Settings className="h-3 w-3" aria-hidden /> Settings
+          Settings
         </button>
         <span
           data-testid="ws-badge"
@@ -82,10 +78,9 @@ export function TopBar() {
               ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
               : "border-rose-900/60 bg-rose-950/20 text-rose-300"
           }`}
-          title={connected ? "Live control transport" : "Transport offline"}
+          title={connected ? "Daemon data feed connected. This does not prove autonomous task execution." : "Daemon data feed unavailable. Native agent status is shown separately in the roster."}
         >
-          <Radio className="h-3 w-3" aria-hidden />
-          {connected ? "LIVE" : "OFF"}
+          {connected ? "Data live" : "Data offline"}
         </span>
       </div>
     </header>

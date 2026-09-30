@@ -118,7 +118,7 @@ interface SentinelState {
   drillsTotal: number;
   simulateUntil: number;
   lastTickAt: number;
-  tickInFlight: Promise<void> | null;
+  tickInFlight: Promise<FallbackSnapshot> | null;
 }
 
 function iso(ms: number): string {

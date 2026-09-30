@@ -846,7 +846,7 @@ async function preparePrimaryShellTarget() {
   return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
-const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'primary-chat-fleet', 'chat-fleet-rail', 'global-cmdbar', 'settings-button']);
+const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
 
 function cdpBoxVisible(model) {
   const points = Array.isArray(model?.content) && model.content.length >= 8
@@ -902,7 +902,9 @@ async function probeMe2R97InstalledDomOnce(webContents) {
     try { if (attachedHere && dbg?.isAttached()) dbg.detach(); } catch {}
   }
   const complete = error == null
-    && ME2_R97_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
+    && ME2_R97_DOM_IDS.every((id) => present[id] === true
+      && (id === 'chat-fleet-rail' || id === 'fleet-picker-toggle' || visible[id] === true))
+    && (visible['chat-fleet-rail'] === true || visible['fleet-picker-toggle'] === true);
   return Object.freeze({
     complete,
     present: Object.freeze({ ...present }),
