@@ -204,10 +204,9 @@ Deno.serve(async (req: Request) => {
       && run.pull_requests.some((row: any) => String(row?.head?.sha || "").toLowerCase() === sourceHead);
     if (!exactPr) throw new Error("run_pr_head_binding_missing");
 
-    // Nonce preflight is performed in the OIDC verifier itself so the live
-    // qualification path remains fail-closed even while the optional V2 SQL
-    // nonce migration is not yet applied. The already-live V1 approval RPC
-    // independently rejects an ambiguous run tuple (>1 matching request).
+    // Nonce preflight fails closed before approval and the SQL RPC repeats
+    // the same exact tuple under an advisory transaction lock. The weaker V1
+    // three-argument approval surface has been removed.
     const exactRows = await exactNonceEnrollmentRows({
       runId,
       runAttempt,
@@ -237,6 +236,7 @@ Deno.serve(async (req: Request) => {
       p_run_id: runId,
       p_run_attempt: runAttempt,
       p_source_head: sourceHead,
+      p_qualification_nonce_sha256: qualificationNonceSha256,
     });
 
     if (approval?.accepted === true) {
