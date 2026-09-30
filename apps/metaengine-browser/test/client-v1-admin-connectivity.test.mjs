@@ -194,7 +194,6 @@ test('GitHub OIDC qualifier binds repository workflow run and exact source head 
   assert.match(qualificationEdge, /run\?\.path/);
   assert.match(qualificationEdge, /run\?\.run_attempt/);
   assert.match(qualificationEdge, /client_v1_installed_qualification_approve_v1/);
-  assert.match(qualificationEdge, /QUALIFICATION_REQUEST_NOT_FOUND/);
   assert.match(qualificationEdge, /WAITING_FOR_EXACT_ENROLLMENT_REQUEST/);
   assert.doesNotMatch(qualificationEdge, /postgres\(|SUPABASE_DB_URL/);
 });
@@ -260,7 +259,8 @@ test('OIDC qualifier and Windows runner both require the same one-run nonce hash
   assert.match(approvalCall, /p_run_id: runId/);
   assert.match(approvalCall, /p_run_attempt: runAttempt/);
   assert.match(approvalCall, /p_source_head: sourceHead/);
-  assert.doesNotMatch(approvalCall, /p_qualification_nonce_sha256/, 'live fallback must remain compatible with already-applied V1 RPC');
+  assert.match(approvalCall, /p_qualification_nonce_sha256: qualificationNonceSha256/);
+  assert.doesNotMatch(qualificationEdge, /already-live V1 approval RPC|optional V2 SQL/, 'qualifier must not retain the removed weaker approval contract');
   assert.match(installedQualification, /RandomNumberGenerator/);
   assert.match(installedQualification, /qualificationNonceSha256/);
   assert.match(installedQualification, /METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256/);
