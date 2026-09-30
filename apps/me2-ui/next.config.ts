@@ -4,9 +4,6 @@ const nextConfig: NextConfig = {
   output: "standalone",
   turbopack: { root: __dirname },
   /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   reactStrictMode: false,
 };
 

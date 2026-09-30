@@ -129,7 +129,7 @@ export async function issueCommand(opts: {
     status: rec?.status ?? "PENDING",
     result: (rec?.receipt?.result ?? null) as Record<string, unknown> | null,
     receipt: rec?.receipt ?? null,
-    error: rec?.receipt?.error ?? null,
+    error: typeof rec?.receipt?.error === "string" ? rec.receipt.error : rec?.receipt?.error == null ? null : "browser_action_failed",
   };
 }
 
@@ -173,7 +173,7 @@ export async function batchIssue(
       status: err ? "ISSUE_ERROR" : rec?.status ?? "PENDING",
       result: (rec?.receipt?.result ?? null) as Record<string, unknown> | null,
       receipt: rec?.receipt ?? null,
-      error: err ?? rec?.receipt?.error ?? null,
+      error: err ?? (typeof rec?.receipt?.error === "string" ? rec.receipt.error : rec?.receipt?.error == null ? null : "browser_action_failed"),
     };
   });
 }

@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH,
   ME2_PRIMARY_TOP_HEIGHT,
+  ME2_PRIMARY_GOAL_HEIGHT,
   SHELL_MIN_REMOTE_WIDTH,
   normalizeShellLayoutState,
   planShellLayout,
@@ -19,7 +20,7 @@ const store = await fs.readFile(new URL('../../me2-ui/src/components/me2/store.t
 const settings = await fs.readFile(new URL('../../me2-ui/src/components/me2/pages/system.tsx', import.meta.url), 'utf8');
 const legacyApp = await fs.readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
 
-test('R97 primary geometry reserves only top bar plus chat fleet rail for one native site', () => {
+test('primary geometry reserves both renderer rows and the fleet rail for one native site', () => {
   const plan = planShellLayout({
     width: 1440,
     height: 900,
@@ -30,9 +31,9 @@ test('R97 primary geometry reserves only top bar plus chat fleet rail for one na
   assert.equal(ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH, 288);
   assert.deepEqual(plan.remote_bounds, {
     x: ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH,
-    y: ME2_PRIMARY_TOP_HEIGHT,
+    y: ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_GOAL_HEIGHT,
     width: 1440 - ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH,
-    height: 900 - ME2_PRIMARY_TOP_HEIGHT,
+    height: 900 - ME2_PRIMARY_TOP_HEIGHT - ME2_PRIMARY_GOAL_HEIGHT,
   });
   assert.equal(plan.effective_sidebar, 'EXPANDED');
   assert.equal(plan.effective_operations, 'CLOSED');
@@ -106,12 +107,14 @@ test('R97 legacy fallback keeps chat-surface rendering callable', () => {
 
 test('R97 Settings is the explicit directory for every hidden advanced surface', () => {
   assert.match(settings, /data-testid="settings-advanced-surfaces"/);
-  for (const page of ['command','agents','code','tasks','supervisor','compute','memory','observability']) {
+  for (const page of ['code','tasks','supervisor','memory','observability']) {
     assert.match(settings, new RegExp(`page: "${page}"`));
   }
   assert.match(settings, /data-testid=\{\`settings-open-\$\{surface\.page\}\`\}/);
   assert.match(settings, /setPage\(surface\.page\)/);
-  assert.match(settings, /Hidden from the main Chat Fleet workspace/);
+  assert.doesNotMatch(settings, /page: "(?:command|agents|compute)"/);
+  assert.match(settings, /role="tablist"/);
+  assert.match(settings, /Open a tool here or find it with Ctrl\+K/);
 });
 
 

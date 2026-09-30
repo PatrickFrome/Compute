@@ -26,7 +26,7 @@ export function StatusBar() {
         <Server className="h-2.5 w-2.5" aria-hidden />
         {connected ? "runtime live" : snap ? "runtime cached" : "runtime offline"}
       </button>
-      <button type="button" className="flex shrink-0 items-center gap-1 hover:text-zinc-300" onClick={() => setPage("agents")} title="Agents">
+      <button type="button" className="flex shrink-0 items-center gap-1 hover:text-zinc-300" onClick={() => setPage("browser")} title="Agents">
         <Bot className="h-2.5 w-2.5" aria-hidden />
         {stats.agentsBusy ?? 0} busy · {stats.agentsIdle ?? 0} idle
       </button>

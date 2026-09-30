@@ -154,8 +154,8 @@ test('primary ME2 product UI submits goals and Agent selection only through type
   assert.match(me2Shell, /data-testid="client-goal-submit"/);
   assert.match(me2Shell, /clientControlBridge\(\)/);
   assert.match(me2Shell, /bridge\.submitGoal\(value\)/);
-  assert.match(me2Shell, /bridge\.selectAgent\(agentId\)/);
-  const composerStart = me2Shell.indexOf('function GoalComposer()');
+  assert.match(me2Shell, /clientControlBridge\(\)\?\.selectAgent\?\.\(agentId\)/);
+  const composerStart = me2Shell.indexOf('function GoalComposer(');
   const composerEnd = me2Shell.indexOf('function PageOutlet', composerStart);
   const composer = me2Shell.slice(composerStart, composerEnd);
   assert.doesNotMatch(composer, /fetch\s*\(|me2Fetch|sendCommand|metaengineShell|:3041|:3000/);

@@ -250,7 +250,7 @@ test('Browser reconciliation reads execution proof without another goal effect',
 
 test('product readback distinguishes Agent proof and accepted result proof', () => {
   assert.match(me2, /data-testid="client-goal-execution-proof"/);
-  assert.match(me2, /RESULT PROVEN · Agent origin bound/);
-  assert.match(me2, /Agent proven/);
-  assert.match(me2, /NO AGENT PROOF/);
+  assert.match(me2, /proof\?\.user_goal_to_result_readback === true \? "Result verified"/);
+  assert.match(me2, /proof\?\.user_goal_to_agent_readback \? "Verified z\.ai Agent" : "Not yet verified"/);
+  assert.match(me2, /proof\?\.user_goal_to_result_readback \? "Verified and accepted" : "Not yet verified"/);
 });

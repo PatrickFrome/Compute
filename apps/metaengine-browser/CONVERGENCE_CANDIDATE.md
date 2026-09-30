@@ -1,8 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-R109 final-authority convergence source candidate. Reserved package identity is `0.7.0-dev.36516587173.1`.
+Client UI.1 workbench candidate on the R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36719340135.1`.
 
-The version is intentionally distinct from the previously observed R97/live identity `0.7.0-dev.36336130139.1`: R109 changes Browser UI/runtime bytes and must not reuse an older package version. The monotonic build component was reserved from the first R109 Package Smoke qualification run namespace; the final producer run, installer SHA-256 and released artifact identity must still be recorded separately on the exact final source SHA.
+The version is intentionally distinct from the previously observed R97/live identity `0.7.0-dev.36336130139.1`: R109 changes Browser UI/runtime bytes and must not reuse an older package version. The previous R109 source candidate used `0.7.0-dev.36516587173.1`. UI.1 reserves a higher observed workflow namespace with the canonical `.1` suffix before building; the final producer run, installer SHA-256 and released artifact identity must still be recorded separately on the exact final source SHA.
 
 Canonical production authority:
 - one Native Browser Supervisor/Fleet task and Agent lifecycle authority;

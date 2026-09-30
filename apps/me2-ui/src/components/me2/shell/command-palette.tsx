@@ -1,6 +1,6 @@
 "use client";
 // ── COMMAND PALETTE (⌘K): универсальный переход к любому объекту системы ───────
-// Режимы: Pages / Agents / Tasks / Commands+Реестр-47 (keyboard-first, §8 дизайн-дока).
+// Scopes: tools, existing native sessions, tasks and the command registry.
 
 import { useMemo, useState } from "react";
 import {
@@ -9,20 +9,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
 import { sendCommand, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
-import {
-  Zap, Boxes, Download, Gauge, Trash2, Search, LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, BrainCircuit,
-  Activity, Settings2,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-
-const PAGE_META: Record<string, { icon: LucideIcon; hint: string }> = {
-  browser: { icon: Globe, hint: "браузерная инфраструктура" },
-  code: { icon: Terminal, hint: "код, exec, песочницы" },
-  tasks: { icon: ListChecks, hint: "задачи и граф" },
-  supervisor: { icon: ShieldCheck, hint: "control-plane оркестрации" },
-  memory: { icon: BrainCircuit, hint: "память и знание" },
-  observability: { icon: Activity, hint: "журналы и здоровье" },
-  system: { icon: Settings2, hint: "конфигурация" },
+const PAGE_META: Record<string, { hint: string }> = {
+  browser: { hint: "Native z.ai conversations" },
+  code: { hint: "Repository and workspace" },
+  tasks: { hint: "Queue and task details" },
+  supervisor: { hint: "Coordination and readiness" },
+  memory: { hint: "Learning history and knowledge" },
+  observability: { hint: "Events and result evidence" },
+  system: { hint: "Client settings" },
 };
 
 function laneChip(lane: string): string {
@@ -88,7 +82,7 @@ export function CommandPalette() {
     const fn = direct[meta.action];
     if (fn) {
       fn();
-      if (meta.action !== "ENVIRONMENT_RESET") setOpen(false);
+      if (meta.action !== "ENVIRONMENT_RESET" && meta.action !== "BUDGET_FLUSH") setOpen(false);
     } else if (meta.args) {
       // Keep argument entry inside the ME2 semantic overlay instead of falling
       // out to window.prompt, which was invisible to the composition model.
@@ -125,23 +119,29 @@ export function CommandPalette() {
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={(next) => { if (!next) { setPendingAction(null); setPendingArgs("{}"); setConfirmFlush(false); } setOpen(next); }}>
-      <CommandInput placeholder="ME2: найти страницу · агента · задачу · команду…" />
-      <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5" aria-label="Режим Command Palette">
+    <CommandDialog title="Search tools and commands" description="Open an existing tool or inspect available actions."
+      className="mc-dark border-zinc-700 bg-[#111114] text-zinc-100 [&_[data-slot=command]]:bg-[#111114] [&_[cmdk-group-heading]]:text-zinc-400" showCloseButton={false}
+      onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="global-cmdbar"]')?.focus(); }} open={open} onOpenChange={(next) => { if (!next) { setPendingAction(null); setPendingArgs("{}"); setConfirmFlush(false); } setOpen(next); }}>
+      <div className="flex items-center border-b border-zinc-800">
+        <div className="min-w-0 flex-1"><CommandInput showSearchIcon={false} placeholder="Search tools, tasks and commands…" aria-label="Search tools and commands" /></div>
+        <button type="button" onClick={() => setOpen(false)} className="mx-2 h-8 shrink-0 px-2 text-[12px] text-zinc-300 hover:bg-zinc-800">Close</button>
+      </div>
+      <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5" aria-label="Search scope">
         {([
-          ["all", "всё"],
-          ["pages", "pages"],
-          ["tasks", "tasks"],
-          ["actions", "actions"],
+          ["all", "All"],
+          ["pages", "Tools"],
+          ["tasks", "Tasks"],
+          ["actions", "Actions"],
         ] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"
             onClick={() => setMode(key)}
             aria-pressed={mode === key}
-            className={`border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+            data-palette-scope
+            className={`min-h-8 border px-3 py-1 text-[12px] ${
               mode === key
-                ? "border-emerald-800/70 bg-emerald-950/25 text-emerald-300"
+                ? "border-cyan-800 bg-cyan-950/30 text-cyan-200"
                 : "border-transparent text-zinc-500 hover:border-zinc-800 hover:text-zinc-300"
             }`}
           >
@@ -200,22 +200,20 @@ export function CommandPalette() {
           </div>
         </div>
       ) : (
-      <CommandList>
+      <CommandList className="max-h-[min(420px,60vh)]">
         <CommandEmpty>не найдено</CommandEmpty>
 
         {/* PAGES */}
         {(mode === "all" || mode === "pages") && <CommandGroup heading="Advanced surfaces · search">
-          {PAGES.map((p) => {
+          {PAGES.filter((p) => p.key !== "browser").map((p) => {
             const m = PAGE_META[p.key];
-            const Icon = m?.icon ?? LayoutDashboard;
             return (
               <CommandItem
                 key={p.key} value={`page ${p.key} ${p.label} ${m?.hint ?? ""}`}
                 onSelect={() => { setPage(p.key); setOpen(false); }}
               >
-                <Icon className="mr-2 h-4 w-4 text-emerald-400" /> {p.label}
-                <span className="ml-2 truncate text-[10px] text-zinc-500">{m?.hint}</span>
-                <span className="ml-auto font-mono text-[9px] text-zinc-600">search</span>
+                {p.label}
+                <span data-palette-detail className="ml-3 truncate text-[12px] text-zinc-400">{m?.hint}</span>
               </CommandItem>
             );
           })}
@@ -226,9 +224,8 @@ export function CommandPalette() {
             not spawn daemon/API agents or invent a second fleet projection. */}
         {mode === "all" ? (
           <CommandGroup heading="Native Agent fleet">
-            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}>
-              <Globe className="mr-2 h-4 w-4 text-cyan-400" /> Open native z.ai Agent fleet
-              <span className="ml-auto text-[9px] text-zinc-500">Browser roster</span>
+            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}> Open native z.ai Agent fleet
+              <span data-palette-detail className="ml-auto text-[12px] text-zinc-400">Existing sessions</span>
             </CommandItem>
           </CommandGroup>
         ) : null}
@@ -237,9 +234,7 @@ export function CommandPalette() {
         {(mode === "all" || mode === "tasks") && (
           <CommandGroup heading={`Задачи · ${tasks.length}`}>
             {tasks.slice(0, 10).map((t) => (
-              <CommandItem key={t.id} value={`task ${t.id} ${t.title}`} onSelect={() => { openTask(t.id); setOpen(false); }}>
-                <ListChecks className="mr-2 h-3.5 w-3.5 text-cyan-400" />
-                <span className="max-w-[45%] truncate text-xs">{t.title}</span>
+              <CommandItem key={t.id} value={`task ${t.id} ${t.title}`} onSelect={() => { openTask(t.id); setOpen(false); }}> <span className="max-w-[45%] truncate text-xs">{t.title}</span>
                 <span className={`ml-2 rounded px-1 font-mono text-[8px] ${STATUS_BADGE[t.status] ?? "bg-zinc-700 text-zinc-300"}`}>{t.status}</span>
                 <span className="ml-auto font-mono text-[9px] text-zinc-600">{t.id}</span>
               </CommandItem>
@@ -251,31 +246,24 @@ export function CommandPalette() {
         {(mode === "all" || mode === "actions") && <>
         <CommandSeparator />
         <CommandGroup heading="Диагностика и действия">
-          <CommandItem value="ping" onSelect={() => { void sendCommand("PING", {}, { quiet: true, successMsg: "pong" }); setOpen(false); }}>
-            <Zap className="mr-2 h-4 w-4 text-emerald-400" /> PING <span className="ml-auto text-xs text-zinc-500">READ_ONLY</span>
+          <CommandItem value="ping" onSelect={() => { void sendCommand("PING", {}, { quiet: true, successMsg: "pong" }); setOpen(false); }}> PING <span className="ml-auto text-xs text-zinc-500">READ_ONLY</span>
           </CommandItem>
-          <CommandItem value="snapshot состояния" onSelect={() => { void sendCommand("STATE_SNAPSHOT", {}, { quiet: true }); setOpen(false); }}>
-            <Boxes className="mr-2 h-4 w-4 text-cyan-400" /> Снапшот состояния
+          <CommandItem value="snapshot состояния" onSelect={() => { void sendCommand("STATE_SNAPSHOT", {}, { quiet: true }); setOpen(false); }}> Снапшот состояния
           </CommandItem>
-          <CommandItem value="events search поиск события" onSelect={() => { setDialog("eventsSearch"); setOpen(false); }}>
-            <Search className="mr-2 h-4 w-4 text-cyan-400" /> Поиск по событиям…
+          <CommandItem value="events search поиск события" onSelect={() => { setDialog("eventsSearch"); setOpen(false); }}> Поиск по событиям…
           </CommandItem>
-          <CommandItem value="export журнал" onSelect={exportEvents}>
-            <Download className="mr-2 h-4 w-4 text-cyan-400" /> Экспорт журнала (300 событий, JSON)
+          <CommandItem value="export журнал" onSelect={exportEvents}> Экспорт журнала (300 событий, JSON)
           </CommandItem>
-          <CommandItem value="budget лимит" onSelect={() => { setDialog("budget"); setOpen(false); }}>
-            <Gauge className="mr-2 h-4 w-4 text-fuchsia-400" /> Лимит бюджета…
+          <CommandItem value="budget лимит" onSelect={() => { setDialog("budget"); setOpen(false); }}> Лимит бюджета…
           </CommandItem>
         </CommandGroup>
 
         {/* ОПАСНАЯ ЗОНА */}
         <CommandSeparator />
         <CommandGroup heading="Опасная зона">
-          <CommandItem value="flush сброс очередь" onSelect={confirmBudgetFlush} className="text-rose-400">
-            <Gauge className="mr-2 h-4 w-4" /> Сбросить очередь шины (FLUSH)… <span className="ml-auto text-xs text-rose-500/70">EMERGENCY</span>
+          <CommandItem value="flush сброс очередь" onSelect={confirmBudgetFlush} className="text-rose-400"> Сбросить очередь шины (FLUSH)… <span className="ml-auto text-xs text-rose-500/70">EMERGENCY</span>
           </CommandItem>
-          <CommandItem value="reset среда" onSelect={() => { setDialog("reset"); setOpen(false); }} className="text-rose-400">
-            <Trash2 className="mr-2 h-4 w-4" /> Сброс среды (EMERGENCY)…
+          <CommandItem value="reset среда" onSelect={() => { setDialog("reset"); setOpen(false); }} className="text-rose-400"> Сброс среды (EMERGENCY)…
           </CommandItem>
         </CommandGroup>
         </>}

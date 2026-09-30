@@ -409,7 +409,7 @@ export function SupervisorPage() {
                 className="h-6 w-40 border border-zinc-800 bg-zinc-950/70 px-1.5 font-mono text-[9px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-cyan-900"
               />
               <datalist id="review-task-ids">
-                {(wg?.tasks ?? []).slice(0, 40).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                {(snap?.tasks ?? []).slice(0, 40).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </datalist>
               <button type="button" onClick={() => void runReview()} disabled={mcxBusy || !reviewTaskId.trim()} aria-label="Запустить антифальшь-ревью задачи" data-testid="reviews-run" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40 disabled:opacity-40">ревью</button>
               <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить GLM и ревью" className="ml-auto text-zinc-600 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>

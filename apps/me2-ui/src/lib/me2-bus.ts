@@ -114,7 +114,12 @@ export function toastBus(p: ToastPayload): void {
 // ── REST fetch (без store, относительный путь уже с XTransformPort) ─────────────
 export async function me2Fetch<T = unknown>(path: string, init?: RequestInit): Promise<T | null> {
   try {
-    const r = await fetch(path, { cache: "no-store", ...init });
+    // Bound observation so disconnected panels reach an unavailable state.
+    // Writes retain their existing semantics; a timeout is not proof that a
+    // mutation failed and must never introduce an automatic retry.
+    const read = !init?.method || ["GET", "HEAD"].includes(init.method.toUpperCase());
+    const signal = init?.signal ?? (read ? AbortSignal.timeout(8_000) : undefined);
+    const r = await fetch(path, { cache: "no-store", ...init, signal });
     return r.ok ? ((await r.json()) as T) : null;
   } catch { return null; }
 }

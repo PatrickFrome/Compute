@@ -256,7 +256,7 @@ export function ContextDrawer() {
   const preferredDimension = dock === "right" ? preferredWidth : preferredHeight;
   const minDimension = dock === "right" ? RIGHT_MIN : BOTTOM_MIN;
   const maxDimension = dock === "right" ? RIGHT_MAX : BOTTOM_MAX;
-  const sizePresets = dock === "right"
+  const sizePresets: ReadonlyArray<readonly [number, string]> = dock === "right"
     ? ([[320, "S"], [380, "M"], [480, "L"]] as const)
     : ([[160, "S"], [200, "M"], [300, "L"]] as const);
 

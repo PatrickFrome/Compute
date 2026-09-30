@@ -8,6 +8,8 @@ export const SHELL_MIN_REMOTE_WIDTH = 720;
 // the native WebContents geometry moves with the exact visible chrome rather
 // than retaining stale R74 dimensions. The renderer still owns no authority.
 export const ME2_PRIMARY_TOP_HEIGHT = 42;
+// The native conversation starts below BOTH persistent renderer rows.
+export const ME2_PRIMARY_GOAL_HEIGHT = 48;
 export const ME2_PRIMARY_PAGEBAR_HEIGHT = 36;
 export const ME2_PRIMARY_STATUSBAR_HEIGHT = 22;
 export const ME2_PRIMARY_PAGE_PADDING = 6;
@@ -238,12 +240,12 @@ export function planShellLayout({
     effectiveOperations = 'CLOSED';
   } else if (surfaceProfile === 'ME2_R95_RUN') {
     // R97 single-main-workspace geometry:
-    // renderer chrome is only the 42px global bar + a 288px chat-fleet rail.
+    // Reserve the 42px global bar AND the fixed 48px goal composer.
     // The exact selected native WebContents owns every remaining pixel.
     // Advanced drawers/inspectors are never persistent on this surface; they
     // are reached through Settings/command search, where native Browser pixels
     // are hidden before advanced renderer content is shown.
-    top = Math.min(ME2_PRIMARY_TOP_HEIGHT, windowHeight);
+    top = Math.min(ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_GOAL_HEIGHT, windowHeight);
     const preferredLeft = ME2_PRIMARY_CHAT_FLEET_RAIL_WIDTH;
     const railFits = windowWidth - preferredLeft >= SHELL_MIN_REMOTE_WIDTH;
     left = railFits ? preferredLeft : 0;
