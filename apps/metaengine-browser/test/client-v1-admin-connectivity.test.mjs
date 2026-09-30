@@ -122,3 +122,33 @@ test('installed Windows qualification binds exact client to signed ADMIN canary'
   assert.match(installedQualification, /installed_admin_connection_not_proven/);
   assert.match(installedQualification, /admin_connection_verified/);
 });
+
+
+test('recoverable device-auth denial re-enters approval enrollment without replaying the denied request', () => {
+  assert.match(identity, /async clearDeviceBindingForReenrollment\(\)/);
+  const resetStart = identity.indexOf('async clearDeviceBindingForReenrollment()');
+  const resetEnd = identity.indexOf('async bindDevice', resetStart);
+  const reset = identity.slice(resetStart, resetEnd);
+  assert.match(reset, /enrollment_request_id: null/);
+  assert.match(reset, /device_id: null/);
+  assert.doesNotMatch(reset, /client_id:\s*crypto\.randomUUID|generateKeyPairSync|encrypted_private_key_b64:\s*null/);
+
+  assert.match(client, /recoverable = new Set\(\['DEVICE_NOT_FOUND', 'DEVICE_REVOKED', 'PAIRING_REVOKED'\]\)/);
+  assert.match(client, /await this\.#identity\.clearDeviceBindingForReenrollment\(\)/);
+  assert.match(client, /this\.#enrollmentStatus = 'RETRY_REQUIRED'/);
+  assert.match(client, /approval_required: true/);
+  assert.match(client, /request_replayed: false/);
+  assert.match(client, /browser_effect_replayed: false/);
+  assert.match(client, /admin_denial_auto_bypass: false/);
+  assert.match(client, /invalid_signature_auto_bypass: false/);
+  assert.match(client, /request_replayed_after_auth_recovery: false/);
+
+  const signedStart = client.indexOf('async #signedRequest');
+  const signedEnd = client.indexOf('async ensureEnrollment()', signedStart);
+  const signed = client.slice(signedStart, signedEnd);
+  assert.match(signed, /const response = await this\.#fetch/);
+  assert.match(signed, /await this\.#recoverDeviceBindingAfterAuthDenial\(response\)/);
+  assert.match(signed, /return response/);
+  assert.equal((signed.match(/this\.#fetch/g) || []).length, 1, 'auth recovery must never replay the denied HTTP request');
+  assert.doesNotMatch(signed, /ensureEnrollment\(/, 'credential recovery must be deferred to the ordinary supervisor cycle');
+});
