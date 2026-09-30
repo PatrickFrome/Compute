@@ -227,7 +227,7 @@ test('installed qualification nonce upgrade removes the weaker three-argument ap
 test('qualification correlation hash is emitted only for explicit installed-Electron qualification', () => {
   assert.match(client, /METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256/);
   assert.match(client, /qualification_nonce_sha256 = qualificationNonceSha256/);
-  assert.match(client, /\^\[0-9a-f\]\{64\}\$/.source ? /./ : /./);
+  assert.match(client, /\/\^\[0-9a-f\]\{64\}\$\/\.test\(qualificationNonceSha256\)/);
 });
 
 test('OIDC qualifier and Windows runner both require the same one-run nonce hash', () => {
