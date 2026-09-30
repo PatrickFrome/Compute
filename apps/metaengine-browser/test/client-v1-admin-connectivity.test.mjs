@@ -34,6 +34,10 @@ const installedQualification = await readFile(
   new URL('../../../.github/workflows/browser-windows-installed-chat-qualification.yml', import.meta.url),
   'utf8',
 );
+const r83Manifest = JSON.parse(await readFile(
+  new URL('../../../coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json', import.meta.url),
+  'utf8',
+));
 
 test('ADMIN is device-bound and revocable without embedding infrastructure secrets', () => {
   assert.match(migration, /add column if not exists access_tier text not null default 'ADMIN'/i);
@@ -270,4 +274,14 @@ test('OIDC qualifier and Windows runner both require the same one-run nonce hash
   const launch = installedQualification.indexOf('$normal = Start-Process -FilePath $app');
   const clear = installedQualification.indexOf('$env:METAENGINE_ENROLLMENT_QUALIFICATION_NONCE_SHA256 = $null', launch);
   assert.ok(launch >= 0 && clear > launch, 'runner must drop its correlation env immediately after Electron inherits it');
+});
+
+test('ADMIN connectivity qualification is bound to the deployed R83 canary source substrate', () => {
+  assert.equal(r83Manifest.schema, 'metaengine.r83.edge-canary-qualification.v1');
+  assert.equal(r83Manifest.candidate.deployed_version, 24);
+  assert.equal(r83Manifest.candidate.source_pin, '055718db4a05ac2e59503f73cc040997a81cf85e');
+  assert.equal(r83Manifest.candidate.ezbr_sha256, '823b15ecfa16d26b92c2b87a08cbd90f12f79ce9f9844d0f4950d52d13142106');
+  assert.equal(r83Manifest.live_qualification.completed, false);
+  assert.equal(r83Manifest.promotion_authorized, false);
+  assert.equal(r83Manifest.authority_effect, false);
 });
