@@ -78,6 +78,7 @@ export class SupervisorDeviceIdentity {
   #secureStorage;
   #state = null;
   #privateKey = null;
+  #initialization = null;
 
   constructor({ statePath, secureStorage }) {
     if (!statePath) throw new Error('supervisor_device_state_path_required');
@@ -120,7 +121,21 @@ export class SupervisorDeviceIdentity {
   }
 
   async ensure() {
+    // Startup consumers share one load/create operation. Publishing a key
+    // before its identity is durable lets another caller overwrite the signer
+    // while enrollment still carries the first public key.
+    if (this.#initialization) return this.#initialization;
     if (this.#state && this.#privateKey) return this.snapshot();
+    this.#initialization = this.#initialize();
+    try {
+      return await this.#initialization;
+    } finally {
+      // Storage can become available later; a failed attempt is not cached.
+      this.#initialization = null;
+    }
+  }
+
+  async #initialize() {
     const existing = await this.#loadExisting();
     if (existing) return existing;
     if (typeof this.#secureStorage.isEncryptionAvailable === 'function' && this.#secureStorage.isEncryptionAvailable() !== true) {
@@ -130,8 +145,7 @@ export class SupervisorDeviceIdentity {
     const publicJwk = canonicalPublicJwk(publicKey.export({ format: 'jwk' }));
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
     const encrypted = this.#secureStorage.encryptString(String(privatePem));
-    this.#privateKey = privateKey;
-    return this.#persist({
+    const snapshot = await this.#persist({
       client_id: crypto.randomUUID(),
       public_jwk: publicJwk,
       key_fingerprint_sha256: fingerprintFor(publicJwk),
@@ -140,6 +154,8 @@ export class SupervisorDeviceIdentity {
       device_id: null,
       created_at: new Date().toISOString(),
     });
+    this.#privateKey = privateKey;
+    return snapshot;
   }
 
   snapshot() {

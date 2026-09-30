@@ -183,3 +183,17 @@ The Edge now uses a small bounded metadata normalizer. It persists the nonce onl
 Live rollback smoke on the selected Meta integration/project `jhriwwsryeqsvvvufkok` proved: exact four-argument tuple accepted; wrong attempt rejected; weak three-argument RPC absent; `service_role` EXECUTE allowed; `anon`/`authenticated` denied; all temporary records rolled back. No production device or pairing grant was committed.
 
 Package identity advances to `0.7.0-dev.36753232676.1`; ADMIN.1 must not reuse the UI.1 version for different runtime bytes. Canary deployment and final installed proof must bind the next exact head. Stable production Edge remains the rollback authority until qualification is complete.
+
+## ADMIN.1 concurrent device identity repair
+
+Exact source `4954f7a4b00c2f8161a965507cf586e1418171f5` finished 19/20 workflows SUCCESS, including Package Smoke, Self Update E2E, autonomous soak and all 3,742 Browser regression tests. Installed Chat run `36755969180`, attempt 1, failed at `installed_admin_connection_not_proven` after OIDC qualification succeeded.
+
+Selected Meta project readback found the exact nonce-bound enrollment APPROVED with no device binding. Edge logs contained one accepted request (202), then 141 rejected enrollment-status requests (401). Enrollment-status verifies the enrollment key before the ADMIN/device authentication boundary, so this was not an ADMIN permission deadlock. The installed UI and embedded daemon had passed runtime smoke.
+
+An isolated behavioral probe reproduced the local device identity race in 5/5 fresh starts: eight simultaneous `ensure()` calls each generated a different P-256 pair and competed for the same temporary file. Seven calls failed and the surviving public identity could not verify the in-memory signing key. No private key values were printed. Temporary probe records were removed.
+
+`SupervisorDeviceIdentity.ensure()` now shares a single initialization promise across startup consumers. The generated signing key becomes available only after the corresponding encrypted identity is durable; a failed attempt clears the promise so secure-storage availability can recover. Ordinary enrollment/device binding and explicit server approval remain unchanged.
+
+Three behavioral regressions cover sixteen parallel fresh consumers with cryptographic enrollment verification, parallel cold load without rotation, and secure-storage failure followed by recovery. Tests use fake storage only in their isolated test directories; production continues to use Electron safeStorage and excludes encrypted/private key material from public snapshots.
+
+The next candidate reserves `0.7.0-dev.36755969299.1`, above the previous Package Smoke and Self Update source namespace. This runtime-only fix does not change Edge source; canary v25 remains pinned to `9b935a3dbd2c2722c0ff72a624d98b1c3a5542de`. A fresh exact-head installed run must prove activation and ADMIN readback; local regressions do not assert that the user's Windows client is connected. Stable production promotion is still not authorized by this checkpoint.
