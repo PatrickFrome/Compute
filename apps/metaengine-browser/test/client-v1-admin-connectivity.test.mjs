@@ -280,9 +280,9 @@ test('OIDC qualifier and Windows runner both require the same one-run nonce hash
 
 test('ADMIN connectivity qualification is bound to the deployed R83 canary source substrate', () => {
   assert.equal(r83Manifest.schema, 'metaengine.r83.edge-canary-qualification.v1');
-  assert.equal(r83Manifest.candidate.deployed_version, 24);
-  assert.equal(r83Manifest.candidate.source_pin, '055718db4a05ac2e59503f73cc040997a81cf85e');
-  assert.equal(r83Manifest.candidate.ezbr_sha256, '823b15ecfa16d26b92c2b87a08cbd90f12f79ce9f9844d0f4950d52d13142106');
+  assert.equal(r83Manifest.candidate.deployed_version, 25);
+  assert.equal(r83Manifest.candidate.source_pin, '9b935a3dbd2c2722c0ff72a624d98b1c3a5542de');
+  assert.equal(r83Manifest.candidate.ezbr_sha256, 'bfab94d1acb6a55ef5e2c55bbfa561dfce94c8f4aaadc56064b556b91475c4fb');
   assert.equal(r83Manifest.live_qualification.completed, false);
   assert.equal(r83Manifest.promotion_authorized, false);
   assert.equal(r83Manifest.authority_effect, false);
