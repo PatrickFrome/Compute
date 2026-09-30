@@ -62,7 +62,9 @@ test('device private key stays in Electron safeStorage and is absent from snapsh
   assert.match(identity, /secureStorage\.encryptString/);
   assert.match(identity, /secureStorage\.decryptString/);
   assert.match(identity, /const \{ encrypted_private_key_b64: _secret, \.\.\.safe \} = this\.#state/);
-  assert.doesNotMatch(identity.slice(identity.indexOf('snapshot() {'), identity.indexOf('async bindEnrollmentRequest')), /encrypted_private_key_b64\s*:/);
+  const snapshotBlock = identity.slice(identity.indexOf('snapshot() {'), identity.indexOf('async bindEnrollmentRequest'));
+  assert.match(snapshotBlock, /return structuredClone\(\{ \.\.\.safe, enrolled:/);
+  assert.doesNotMatch(snapshotBlock, /return structuredClone\(this\.#state\)/);
 });
 
 test('connection status uses existing supervisor cycle and never claims network availability', () => {
