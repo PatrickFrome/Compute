@@ -1,0 +1,141 @@
+{
+  "schema": "metaengine.client-v1.user-installed-connectivity-proof.v1",
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "client_id": "2a60d6a2-c7c2-4dcc-b4c9-99de768443c9",
+  "checked_at": "2026-09-30 23:22:20.282025+00",
+  "installer": {
+    "source_sha": "93c64424525e00444a97abc151ef05bd386da3d7",
+    "version": "0.7.0-dev.36760350225.1",
+    "sha256": "2a608411c15673ac4f9af9c0504074ed8cb82f04afc2ac3f0a861023eb73f4bb",
+    "rebuilt": false
+  },
+  "enrollment_request_id": "3dcd5f78-ac4e-4b1c-a3d8-75c6208e4f44",
+  "routing": {
+    "scope": "ONE_INSTALLED_CLIENT",
+    "source_sha": "21507134bad46c2ecd2c0c0be150bb0ea7030893",
+    "stable_version": 9,
+    "stable_bundle_sha256": "0953dd1971acfeaae9fe77d4c81e18446d134080d2990b0f957344dd1b2c2598",
+    "deployed_source_exact": true,
+    "target_slug": "a2-browser-native-supervisor-v14-canary",
+    "target_version": 25,
+    "target_source_sha": "9b935a3dbd2c2722c0ff72a624d98b1c3a5542de",
+    "target_bundle_sha256": "bfab94d1acb6a55ef5e2c55bbfa561dfce94c8f4aaadc56064b556b91475c4fb",
+    "upstream_auth_remains_authority": true,
+    "automatic_effect_retry_allowed": false,
+    "fleet_wide_production_promotion": false
+  },
+  "first_live_readback": {
+    "checked_at": "2026-09-30 23:19:02.045927+00",
+    "status": "CLAIMED",
+    "claimed_at": "2026-09-30 23:05:22.33865+00",
+    "device_id": "719bf900-9e50-44ec-b13b-fd998f33ba95",
+    "version": "0.7.0-dev.36760350225.1",
+    "active": true,
+    "access_tier": "ADMIN",
+    "admin_grant_epoch": 1,
+    "last_used_at": "2026-09-30 23:19:02.040659+00",
+    "admin_revoked_at": null,
+    "last_seen_at": "2026-09-30 23:19:01.569416+00",
+    "extension_version": "0.7.0-dev.36760350225.1",
+    "operator_runtime": "native-electron-supervisor-v1",
+    "supervisor_mode": "CONTROL",
+    "armed": true,
+    "last_command_status": null,
+    "heartbeat_age_seconds": "0.476518",
+    "client_connection": null,
+    "client_last_error": null
+  },
+  "last_live_readback": {
+    "checked_at": "2026-09-30 23:22:20.282025+00",
+    "client_id": "2a60d6a2-c7c2-4dcc-b4c9-99de768443c9",
+    "last_seen_at": "2026-09-30 23:22:20.212874+00",
+    "extension_version": "0.7.0-dev.36760350225.1",
+    "heartbeat_age_seconds": "0.069151",
+    "last_error": null,
+    "compute_state": "HEALTHY",
+    "development_state": "READY",
+    "fleet_counts": {
+      "LOST": 0,
+      "ACTIVE": 0,
+      "RETIRED": 0,
+      "REGISTERED": 0,
+      "PROVISIONING": 0,
+      "BOUND_UNVERIFIED": 4,
+      "PROVISIONING_AMBIGUOUS": 0
+    },
+    "desired_agents": "4",
+    "keepalive_state": "ROLLOVER_AMBIGUOUS",
+    "cycle_seq": "2109",
+    "lifecycle_error": null,
+    "devos_idle_error": null,
+    "diagnostic_status": "COMPLETED",
+    "diagnostic_completed_at": "2026-09-30 23:20:46.399166+00",
+    "diagnostic_fleet": {
+      "counts": {
+        "LOST": 0,
+        "ACTIVE": 0,
+        "RETIRED": 0,
+        "REGISTERED": 0,
+        "PROVISIONING": 0,
+        "BOUND_UNVERIFIED": 4,
+        "PROVISIONING_AMBIGUOUS": 0
+      },
+      "desired_agents": 4,
+      "lifecycle_owner": "METAENGINE_BROWSER"
+    },
+    "diagnostic_tab_count": "4",
+    "diagnostic_supervisor": {
+      "last_error": null,
+      "admission_state": null,
+      "keepalive_state": null,
+      "conversation_url": null,
+      "keepalive_cycle_seq": null
+    }
+  },
+  "system_telemetry": {
+    "command_id": "3ed84ccc-a2d7-48f4-9be5-afea29d6d483",
+    "issued_at": "2026-09-30T23:20:45.425687Z",
+    "leased_at": "2026-09-30T23:20:45.884494Z",
+    "completed_at": "2026-09-30 23:20:46.399166+00",
+    "status": "COMPLETED",
+    "issued_once": true
+  },
+  "post_apply_logs": {
+    "start": "2026-09-30T23:19:00Z",
+    "end": "2026-09-30T23:22:00Z",
+    "results": [
+      {
+        "connection_slot_errors": 0,
+        "entries": 290,
+        "source": "function_edge_logs"
+      },
+      {
+        "connection_slot_errors": 0,
+        "entries": 2,
+        "source": "postgres_logs"
+      }
+    ]
+  },
+  "verification": {
+    "behavioral_tests_pass": 8,
+    "failed": 0,
+    "skipped": 0,
+    "source_parse_pass": true,
+    "user_ui_badge_visually_inspected": false,
+    "full_zai_agent_goal_result_loop_proven": false
+  },
+  "remaining_blockers": {
+    "fleet_counts": {
+      "LOST": 0,
+      "ACTIVE": 0,
+      "RETIRED": 0,
+      "REGISTERED": 0,
+      "PROVISIONING": 0,
+      "BOUND_UNVERIFIED": 4,
+      "PROVISIONING_AMBIGUOUS": 0
+    },
+    "keepalive_state": "ROLLOVER_AMBIGUOUS",
+    "cycle_seq": 2109,
+    "system_telemetry_supervisor_fields_missing": true
+  }
+}

@@ -1,6 +1,6 @@
 # User-installed ADMIN connectivity — 2026-10-01 (Europe/Moscow)
 
-Status: SCOPED_ROUTING_PREPARED_LIVE_READBACK_PENDING
+Status: USER_INSTALLED_CONNECTION_AND_READ_COMMAND_PROVEN
 
 Installer source: 93c64424525e00444a97abc151ef05bd386da3d7.
 Installed version: 0.7.0-dev.36760350225.1.
@@ -45,3 +45,21 @@ Reviewed the current Supabase changelog and official Edge Functions database gui
 - https://supabase.com/docs/guides/functions/connect-to-postgres
 
 The implemented path reuses the existing PostgREST qualification, rather than introducing another database/session owner. The current changelog includes PostgreSQL minor-version changes; this repair performs no database version upgrade or schema migration.
+
+## Live qualification completed
+
+Backend source 21507134bad46c2ecd2c0c0be150bb0ea7030893 was applied as stable version 9 (bundle 0953dd1971acfeaae9fe77d4c81e18446d134080d2990b0f957344dd1b2c2598). Deployed index and routing module were read back and exactly equal to published source. Canary v25 remains unchanged. This is a one-client routing repair; the installed app retains its default hostname.
+
+The user's request was CLAIMED at 23:05:22.33865 UTC, bound to device 719bf900-9e50-44ec-b13b-fd998f33ba95 with ADMIN epoch 1. Heartbeat and command execution became readable after the routing fix. At 23:19:02 the heartbeat was 0.477 seconds old; at 23:22:20 it was 0.069 seconds old. Version matched the exact installer throughout, with no last_error. Compute was HEALTHY and Development Plane READY.
+
+Read-only SYSTEM_TELEMETRY command 3ed84ccc-a2d7-48f4-9be5-afea29d6d483 was issued once at 23:20:45.425687 UTC, leased at 23:20:45.884494 and completed at 23:20:46.399166 with no error. It returned the actual installed observation-plane schema, four browser tabs and runtime fleet counts. This proves remote command pickup, installed execution and durable result readback.
+
+The 23:19:00–23:22:00 UTC log window contained zero connection-slot errors (290 function log entries, two Postgres log entries). This short observation is not a permanent recovery guarantee.
+
+## Remaining autonomous-work blockers
+
+Live fleet: BOUND_UNVERIFIED=4, ACTIVE=0. Supervisor keepalive: ROLLOVER_AMBIGUOUS, cycle_seq=2109. These are not resolved by connection recovery. The installed profile retains historical ambiguous lifecycle state, which must be reconciled with exact Agent-origin/target evidence without blind prompt resend.
+
+A separate observation defect is now proven: SYSTEM_TELEMETRY returns null supervisor fields while the actual heartbeat has the ambiguous keepalive state and cycle sequence. The read command calls nativeSupervisorState(), which omits supervisor_lifecycle/control state required by the observation projection. The next client candidate should fix this read-model input; it requires no scheduler change.
+
+No visual inspection of the user's local ADMIN badge was performed, and no autonomous z.ai Agent goal-to-accepted-result loop was claimed. No user-side reinstall or client rebuild was required for the connection repair.
