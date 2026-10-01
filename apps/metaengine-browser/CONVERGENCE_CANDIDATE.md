@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36814563379.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36814827922.1`.
+
+Source-binding attempt `ec20a79e` reserves `0.7.0-dev.36814563379.1` and is consumed. The final native/Edge-oracle successor advances again.
 
 Bootstrap source `5aaae3e6` reserves `0.7.0-dev.36812444308.1`; its package attempt is treated as consumed. The source/deployment binding successor has a distinct higher identity.
 

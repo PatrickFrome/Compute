@@ -57,9 +57,10 @@
   },
   "production_observed": {
     "slug": "a2-browser-native-supervisor-v1",
-    "observed_function_version": 9,
-    "observed_ezbr_sha256": "0953dd1971acfeaae9fe77d4c81e18446d134080d2990b0f957344dd1b2c2598",
-    "one_client_canary_forwarding": true
+    "observed_function_version": 10,
+    "observed_ezbr_sha256": "e6a365996221a6ed0edddbe261e450d7e17cafca1cdfb12e3bc8cff715af61cc",
+    "one_client_canary_forwarding": true,
+    "ticket_redemption_bridge_source_pin": "ec20a79e45a686aa840853b7ee404b6816730bd0"
   },
   "required_capabilities": [
     "POSTGRES_NOTIFY_WAKE",

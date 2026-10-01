@@ -46,3 +46,21 @@ jobs:
           }
           probe stable "$STABLE"
           probe canary "$CANARY"
+
+      - name: Prove ticket-only redemption rejects unissued tickets on stable and canary
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          for (const slug of ['a2-browser-native-supervisor-v1','a2-browser-native-supervisor-v14-canary']) {
+            const url = `https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/${slug}/v1/guardian/enrollment/redeem`;
+            const response = await fetch(url, { method:'POST', redirect:'error', signal:AbortSignal.timeout(8000),
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({ticket:crypto.randomBytes(32).toString('base64url'),key_fingerprint_sha256:'a'.repeat(64),owner_sid_sha256:'b'.repeat(64)}) });
+            const row = await response.json();
+            if (response.status !== 409 || row.schema !== 'metaengine.guardian-enrollment-ticket-redemption.v1'
+                || row.accepted !== false || row.reason !== 'TICKET_NOT_AVAILABLE' || row.authority_effect !== false) throw new Error('guardian_redemption_rejection_unproven:'+slug);
+            if (slug.endsWith('-v1') && response.headers.get('x-metaengine-guardian-redemption-route') !== 'META_QUALIFIED_CANARY') throw new Error('guardian_stable_redemption_route_unproven');
+            console.log(JSON.stringify({slug,status:response.status,reason:row.reason,accepted:false,authority_effect:false}));
+          }
+          NODE
