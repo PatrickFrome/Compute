@@ -191,11 +191,14 @@ test('GitHub OIDC qualifier binds repository workflow run and exact source head 
   assert.match(qualificationEdge, /payload\.repository !== REPO/);
   assert.match(qualificationEdge, /payload\.repository_id/);
   assert.match(qualificationEdge, /payload\.repository_owner_id/);
-  assert.match(qualificationEdge, /payload\.event_name !== "pull_request"/);
+  assert.match(qualificationEdge, /eventName === "pull_request" && PR_SUBJECTS\.has\(subject\)/);
+  assert.match(qualificationEdge, /eventName === "push"[\s\S]*String\(payload\.ref \|\| ""\) === RELEASE_REF[\s\S]*RELEASE_SUBJECTS\.has\(subject\)/);
   assert.match(qualificationEdge, /payload\.runner_environment !== "github-hosted"/);
-  assert.match(qualificationEdge, /LEGACY_SUBJECT/);
-  assert.match(qualificationEdge, /IMMUTABLE_SUBJECT/);
-  assert.match(qualificationEdge, /ALLOWED_SUBJECTS\.has\(String\(payload\.sub \|\| ""\)\)/);
+  assert.match(qualificationEdge, /LEGACY_PR_SUBJECT/);
+  assert.match(qualificationEdge, /IMMUTABLE_PR_SUBJECT/);
+  assert.match(qualificationEdge, /LEGACY_RELEASE_SUBJECT/);
+  assert.match(qualificationEdge, /IMMUTABLE_RELEASE_SUBJECT/);
+  assert.match(qualificationEdge, /event_or_subject_forbidden/);
   assert.match(qualificationEdge, /payload\.workflow_ref/);
   assert.match(qualificationEdge, /githubRun\(runId\)/);
   assert.match(qualificationEdge, /run\?\.head_sha/);
