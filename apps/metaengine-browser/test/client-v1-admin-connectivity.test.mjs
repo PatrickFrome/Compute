@@ -299,3 +299,17 @@ test('ADMIN connectivity qualification is bound to the deployed R83 canary sourc
   assert.equal(r83Manifest.promotion_authorized, false);
   assert.equal(r83Manifest.authority_effect, false);
 });
+
+
+test('Guardian activation bridge is typed, pathless and explicit-user-only', () => {
+  assert.match(main, /metaengine:client:guardian-status/);
+  assert.match(main, /metaengine:client:activate-guardian/);
+  assert.match(main, /connection\?\.admin_ready !== true \|\| connection\?\.access_tier !== 'ADMIN'/);
+  assert.match(main, /openPath: \(fixedExecutable\) => shell\.openPath\(fixedExecutable\)/);
+  assert.match(preload, /guardianStatus: clientGuardianStatus/);
+  assert.match(preload, /activateGuardian: activateClientGuardian/);
+  assert.match(preload, /guardian_activation_requires_explicit_user_action: true/);
+  assert.match(preload, /guardian_activation_accepts_caller_path: false/);
+  assert.match(preload, /guardian_activation_accepts_caller_arguments: false/);
+  assert.doesNotMatch(preload, /activateGuardian:\s*\([^)]/);
+});
