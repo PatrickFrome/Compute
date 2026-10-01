@@ -21,6 +21,8 @@ Meta project: `jhriwwsryeqsvvvufkok`. Migration `browser_guardian_enrollment_tic
 
 Installed user heartbeat at 04:09 UTC still reports `0.7.0-dev.36760350225.1`; this does not prove that the successor or Guardian companion is installed on the user's machine. No new live emergency update command or ambiguous-effect replay was issued.
 
+Canary v26 is deployed at immutable source pin `5aaae3e6696eeee07c09a65ff467857aab67732b`, digest `878bb81e59109e93aa49492655c6d856668495c9e85d21c323978b59d9b46eb1`. A separate ticket-only, bounded stable-to-canary redemption adapter is necessary because LocalSystem carries no Browser identity header. It forwards only the exact redemption route, validates three bounded ticket fields and never manufactures device identity, retries or falls back. Its stable deployment requires separate readback.
+
 ## Required exit gates
 
 One Package Smoke producer must build and package the companion, verify its exact source/hash binding, physically prove copy/ACL/SCM/Running, repeated observation only, embedded tamper rejection and stopped-service HOLD. Downstream Installed Chat, Final Runtime, Soak and Self Update consume the same Browser installer and require producer terminal success.

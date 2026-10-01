@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36812444308.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36814563379.1`.
+
+Bootstrap source `5aaae3e6` reserves `0.7.0-dev.36812444308.1`; its package attempt is treated as consumed. The source/deployment binding successor has a distinct higher identity.
 
 The Guardian enrollment-only predecessor `c1e93e7c` already built `0.7.0-dev.36811827764.1`; this identity is consumed. The current successor adds a separately elevated, embedded-asset machine bootstrap and correct durable enrollment readback.
 
