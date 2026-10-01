@@ -66,10 +66,17 @@ jobs:
           if ($row.schema -ne 'metaengine.browser-guardian.scm-host.v1') { throw 'guardian_contract_schema_invalid' }
           if ($row.service_name -ne 'METAENGINEBrowserGuardian') { throw 'guardian_contract_service_name_invalid' }
           if ($row.service_type -ne 'SERVICE_WIN32_OWN_PROCESS') { throw 'guardian_contract_service_type_invalid' }
-          foreach ($field in @('browser_authority','task_authority','scheduler_authority','page_model_text_authority','release_authority','process_effect_authority','automatic_retry_allowed','authority_effect')) {
+          foreach ($field in @('browser_authority','task_authority','scheduler_authority','page_model_text_authority','release_authority','process_effect_policy_authority','automatic_retry_allowed','authority_effect')) {
             if ($row.$field -ne $false) { throw "guardian_contract_authority_invalid_$field" }
           }
-          if ($row.child_process_dispatch_implemented -ne $false) { throw 'guardian_child_dispatch_unexpected' }
+          if ($row.bounded_process_effect_adapter -ne $true -or $row.child_process_dispatch_implemented -ne $true -or $row.native_write_ahead_effect_barrier -ne $true) { throw 'guardian_bounded_adapter_contract_missing' }
+          $actuator = (& $env:GUARDIAN_EXE --update-actuator-contract-json | ConvertFrom-Json)
+          foreach ($field in @('native_write_ahead_effect_barrier','at_most_one_dispatch_per_effect_id','enrolled_p256_challenge_required','first_binding_requires_server_admin_ticket','ticket_single_use_server_revalidation_required')) {
+            if ($actuator.$field -ne $true) { throw "guardian_actuator_fence_missing_$field" }
+          }
+          foreach ($field in @('caller_supplied_path_allowed','caller_supplied_url_allowed','caller_supplied_shell_allowed','automatic_retry_allowed')) {
+            if ($actuator.$field -ne $false) { throw "guardian_actuator_authority_invalid_$field" }
+          }
           if ($row.service_installation_implemented -ne $false) { throw 'guardian_service_install_authority_unexpected' }
 
       - name: Prove real Windows SCM lifecycle
@@ -120,7 +127,9 @@ jobs:
               service_name = $serviceName
               running_readback = $running
               stopped_readback = $stopped
-              child_process_dispatch_implemented = $false
+              bounded_process_effect_adapter = $true
+              native_write_ahead_effect_barrier = $true
+              installer_dispatch_exercised = $false
               authority_effect = $false
             } | ConvertTo-Json -Depth 4 | Write-Host
           }

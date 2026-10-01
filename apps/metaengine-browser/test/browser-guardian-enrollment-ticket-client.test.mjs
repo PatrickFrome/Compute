@@ -118,3 +118,36 @@ test('ticket client contract grants no retry or SID authority', () => {
   assert.equal(row.automatic_retry_allowed, false);
   assert.equal(row.authority_effect, false);
 });
+
+test('stalled ticket exchange reaches a deadline, aborts and never retries', async () => {
+  let calls = 0;
+  let signal;
+  await assert.rejects(requestBrowserGuardianEnrollmentTicket({
+    identity: identity(), timeoutMs: 20,
+    fetchImpl: async (_url, init) => {
+      calls += 1;
+      signal = init.signal;
+      return new Promise(() => {});
+    },
+  }), /guardian_enrollment_ticket_deadline/);
+  assert.equal(calls, 1);
+  assert.equal(signal.aborted, true);
+});
+
+test('response body has the same deadline and a bounded byte count', async () => {
+  for (const body of [
+    new ReadableStream({ start() {} }),
+    'x'.repeat(16 * 1024 + 1),
+  ]) {
+    let calls = 0;
+    await assert.rejects(requestBrowserGuardianEnrollmentTicket({
+      identity: identity(), timeoutMs: 20,
+      fetchImpl: async (_url, init) => {
+        calls += 1;
+        assert.equal(init.redirect, 'error');
+        return new Response(body);
+      },
+    }), /guardian_enrollment_ticket_(deadline|response_too_large)/);
+    assert.equal(calls, 1);
+  }
+});

@@ -215,14 +215,24 @@ GuardianEnrollmentTicketRedemption redeemBrowserGuardianEnrollmentTicket(
 
     GuardianEnrollmentTicketRedemption out;
     out.http_status = status;
-    out.transport_proven = true;
     bool accepted = false;
     bool revalidated = false;
     bool authorityEffect = true;
     bool automaticRetry = true;
-    jsonBool(response, "accepted", &accepted);
+    std::string schema;
+    if (!jsonString(response, "schema", &schema)
+        || schema != "metaengine.guardian-enrollment-ticket-redemption.v1"
+        || !jsonBool(response, "accepted", &accepted)) {
+        return failure("TICKET_REDEMPTION_READBACK_INVALID", status);
+    }
     jsonString(response, "reason", &out.reason);
     if (status != 200 || !accepted) {
+        // Only the explicit negative protocol response proves rejection. An
+        // upstream 5xx/HTML/malformed reply may follow durable consumption.
+        if ((status != 400 && status != 409) || accepted || out.reason.empty()) {
+            return failure("TICKET_REDEMPTION_OUTCOME_UNKNOWN", status);
+        }
+        out.transport_proven = true;
         out.accepted = false;
         if (out.reason.empty()) out.reason = "TICKET_NOT_ACCEPTED";
         return out;
@@ -254,6 +264,7 @@ GuardianEnrollmentTicketRedemption redeemBrowserGuardianEnrollmentTicket(
     }
 
     out.accepted = true;
+    out.transport_proven = true;
     out.device_grant_revalidated = true;
     out.automatic_retry_allowed = false;
     out.authority_effect = false;

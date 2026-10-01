@@ -11,6 +11,31 @@ export const BROWSER_GUARDIAN_ENROLLMENT_TICKET_PATH = '/v1/device/guardian-enro
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
+const MAX_RESPONSE_BYTES = 16 * 1024;
+
+async function readBoundedJson(response, signal) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('guardian_enrollment_ticket_response_body_missing');
+  const chunks = [];
+  let bytes = 0;
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', abort, { once: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) throw new Error('guardian_enrollment_ticket_response_too_large');
+      chunks.push(Buffer.from(value));
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } finally {
+    // Cancels oversized/incomplete streams as well as releasing the lock.
+    await reader.cancel().catch(() => {});
+    signal.removeEventListener('abort', abort);
+    reader.releaseLock();
+  }
+}
 
 function freeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -28,6 +53,7 @@ export async function requestBrowserGuardianEnrollmentTicket({
   identity,
   fetchImpl = globalThis.fetch,
   nowMs = Date.now(),
+  timeoutMs = 8_000,
 } = {}) {
   if (!identity || typeof identity.ensure !== 'function' || typeof identity.deviceHeaders !== 'function') {
     throw new Error('guardian_enrollment_ticket_identity_required');
@@ -39,13 +65,31 @@ export async function requestBrowserGuardianEnrollmentTicket({
   const bodyText = '{}';
   const signingPath = nativeSupervisorSigningPath(BROWSER_GUARDIAN_ENROLLMENT_TICKET_PATH);
   const headers = await identity.deviceHeaders('POST', signingPath, bodyText);
-  const response = await fetchImpl(nativeSupervisorRuntimeUrl(BROWSER_GUARDIAN_ENROLLMENT_TICKET_PATH), {
-    method: 'POST',
-    headers,
-    body: bodyText,
-    cache: 'no-store',
+  const controller = new AbortController();
+  const started = performance.now();
+  const boundedTimeout = Math.min(8_000, Math.max(1, Number(timeoutMs) || 8_000));
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error('guardian_enrollment_ticket_deadline'));
+    }, boundedTimeout);
   });
-  const body = await response.json().catch(() => ({}));
+  let response;
+  let body;
+  try {
+    const exchange = (async () => {
+      response = await fetchImpl(nativeSupervisorRuntimeUrl(BROWSER_GUARDIAN_ENROLLMENT_TICKET_PATH), {
+        method: 'POST', headers, body: bodyText, cache: 'no-store',
+        redirect: 'error', signal: controller.signal,
+      });
+      return readBoundedJson(response, controller.signal);
+    })();
+    body = await Promise.race([exchange, deadline]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
   if (response.status !== 200 || body?.accepted !== true) {
     throw new Error(`guardian_enrollment_ticket_http_${response.status}:${String(body?.reason || body?.error || 'unknown').slice(0,160)}`);
   }
@@ -68,7 +112,7 @@ export async function requestBrowserGuardianEnrollmentTicket({
       || !Number.isSafeInteger(adminEpoch)
       || adminEpoch < 1
       || !Number.isFinite(expiresAtMs)
-      || expiresAtMs <= nowMs
+      || expiresAtMs <= nowMs + (performance.now() - started)
       || expiresAtMs > nowMs + 130_000
       || body.single_use !== true
       || body.plaintext_persisted !== false
@@ -100,6 +144,9 @@ export function browserGuardianEnrollmentTicketClientContract() {
     authenticated_admin_device_route: true,
     ticket_bits: 256,
     ticket_single_use: true,
+    overall_https_deadline_ms: 8_000,
+    response_byte_limit: MAX_RESPONSE_BYTES,
+    redirects_allowed: false,
     ticket_persisted_locally: false,
     server_persists_digest_only: true,
     owner_sid_from_server_allowed: false,

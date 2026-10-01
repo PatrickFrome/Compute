@@ -40,6 +40,8 @@ create table if not exists public.compute_fabric_a2_browser_guardian_enrollment_
 revoke all on public.compute_fabric_a2_browser_guardian_enrollment_ticket_h205f22
   from public, anon, authenticated;
 
+alter table public.compute_fabric_a2_browser_guardian_enrollment_ticket_h205f22 enable row level security;
+
 create index if not exists browser_guardian_enrollment_ticket_expiry_idx
   on public.compute_fabric_a2_browser_guardian_enrollment_ticket_h205f22(expires_at)
   where consumed_at is null;
@@ -77,7 +79,7 @@ begin
    where device_id=p_device_id
      and client_id=v_client
      and key_fingerprint_sha256=v_fingerprint
-   limit 1;
+   limit 1 for share;
   if not found then raise exception 'guardian_enrollment_ticket_device_not_found'; end if;
   if v_device.active is not true or v_device.revoked_at is not null then
     raise exception 'guardian_enrollment_ticket_device_inactive';
@@ -85,8 +87,8 @@ begin
   if v_device.access_tier is distinct from 'ADMIN'
      or v_device.admin_revoked_at is not null
      or coalesce(v_device.admin_grant_epoch,0) <> v_epoch
-     or jsonb_typeof(v_device.admin_scopes) <> 'array'
-     or not (v_device.admin_scopes ? 'CONTROL_PLANE') then
+     or jsonb_typeof(v_device.admin_scopes) is distinct from 'array'
+     or (v_device.admin_scopes ? 'CONTROL_PLANE') is distinct from true then
     raise exception 'guardian_enrollment_ticket_admin_grant_invalid';
   end if;
 
@@ -159,15 +161,15 @@ begin
    where device_id=v_row.device_id
      and client_id=v_row.client_id
      and key_fingerprint_sha256=v_row.key_fingerprint_sha256
-   limit 1;
+   limit 1 for share;
   if not found
      or v_device.active is not true
      or v_device.revoked_at is not null
      or v_device.access_tier is distinct from 'ADMIN'
      or v_device.admin_revoked_at is not null
      or coalesce(v_device.admin_grant_epoch,0) <> v_row.admin_grant_epoch
-     or jsonb_typeof(v_device.admin_scopes) <> 'array'
-     or not (v_device.admin_scopes ? 'CONTROL_PLANE') then
+     or jsonb_typeof(v_device.admin_scopes) is distinct from 'array'
+     or (v_device.admin_scopes ? 'CONTROL_PLANE') is distinct from true then
     return jsonb_build_object('schema','metaengine.guardian-enrollment-ticket-redemption.v1','accepted',false,'reason','DEVICE_GRANT_REVOKED','authority_effect',false);
   end if;
 
@@ -176,6 +178,7 @@ begin
          consumer_owner_sid_sha256=v_owner_sid_sha
    where ticket_id=v_row.ticket_id
      and consumed_at is null
+     and expires_at > clock_timestamp()
   returning * into v_row;
   if not found then
     return jsonb_build_object('schema','metaengine.guardian-enrollment-ticket-redemption.v1','accepted',false,'reason','TICKET_CONSUME_CONFLICT','authority_effect',false);

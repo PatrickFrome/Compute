@@ -98,6 +98,15 @@ async function metaengineGuardianNativeBeforePack(context) {
     throw new Error(`guardian_native_staging_build_failed:${result.status}`);
   }
 
+  const bootstrapResult = spawnSync(powershell, [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(__dirname, 'build-guardian-machine-bootstrap.ps1'),
+    '-StagingDir', path.join(appRoot, 'native-dist/guardian'),
+    '-OutputDir', path.join(appRoot, 'native-dist/guardian-bootstrap'),
+  ], { cwd: appRoot, stdio: 'inherit', windowsHide: true });
+  if (bootstrapResult.error) throw bootstrapResult.error;
+  if (bootstrapResult.status !== 0) throw new Error(`guardian_machine_bootstrap_build_failed:${bootstrapResult.status}`);
+
   const daemonResult = spawnSync(
     powershell,
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', daemonBuildScript, '-ExpectedSourceHead', trustRoot.build_sha],

@@ -31,10 +31,10 @@ New-Item -ItemType Directory -Path $resolvedOut -Force | Out-Null
 
 $service = Join-Path $resolvedOut 'METAENGINEBrowserGuardian.exe'
 $configurator = Join-Path $resolvedOut 'METAENGINEBrowserGuardianConfigure.exe'
-$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" /Fe:"{7}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib' -f $vcvars,$serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service
+$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" /Fe:"{7}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib' -f $vcvars,$serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service
 & $env:ComSpec /d /s /c $serviceCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
-$configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
+$configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
 & $env:ComSpec /d /s /c $configCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_configurator_compile_exit_$LASTEXITCODE" }
 

@@ -65,10 +65,14 @@ test('read-only owner probe precedes exactly one ticket-bound enrollment attempt
           effect_absent_proven: true,
         });
       }
-      assert.match(wire, new RegExp(`enrollment_ticket=${TICKET}\\n`));
-      assert.match(wire, new RegExp(`enrollment_ticket_sha256=${TICKET_SHA}\\n`));
+      if (wires.length === 2) {
+        assert.match(wire, new RegExp(`enrollment_ticket=${TICKET}\\n`));
+        assert.match(wire, new RegExp(`enrollment_ticket_sha256=${TICKET_SHA}\\n`));
+      } else {
+        assert.doesNotMatch(wire, /enrollment_ticket=/);
+      }
       return result('OWNER_BOUND', 'DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT', {
-        effect_absent_proven: true,
+        effect_absent_proven: wires.length === 3,
         owner_binding_proven: true,
         device_binding_proven: true,
         device_key_fingerprint_sha256: FINGERPRINT,
@@ -79,7 +83,32 @@ test('read-only owner probe precedes exactly one ticket-bound enrollment attempt
   const bound = await client.ensureOwnerBound({ command_id: COMMAND_ID, request_nonce: NONCE });
   assert.equal(bound.state, 'OWNER_BOUND');
   assert.equal(ticketCalls, 1);
-  assert.equal(wires.length, 2);
+  assert.equal(wires.length, 3);
+});
+
+test('durable enrollment success followed by lost readback blocks dispatch without a second ticket', async () => {
+  let calls = 0;
+  let tickets = 0;
+  const client = new BrowserGuardianUpdateActuatorClient({
+    identity: identity(),
+    enrollmentTicketProvider: async () => {
+      tickets += 1;
+      return { ticket: TICKET, ticket_sha256: TICKET_SHA, single_use: true, persisted_locally: false };
+    },
+    transport: async () => {
+      calls += 1;
+      if (calls === 1) return result('NO_EFFECT_PROVEN', 'OWNER_ENROLLMENT_TICKET_REQUIRED', { effect_absent_proven: true });
+      if (calls === 2) return result('OWNER_BOUND', 'DURABLE_OWNER_AND_ADMIN_DEVICE_ENROLLMENT_EXACT', {
+        effect_absent_proven: false, owner_binding_proven: true, device_binding_proven: true,
+        device_key_fingerprint_sha256: FINGERPRINT,
+      });
+      throw new Error('readback_lost');
+    },
+  });
+  await assert.rejects(client.ensureOwnerBound({ command_id: COMMAND_ID, request_nonce: NONCE }),
+    { code: 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS' });
+  assert.equal(tickets, 1);
+  assert.equal(calls, 3);
 });
 
 test('ticket-bound transport loss is ambiguous and never auto-retried', async () => {

@@ -26,9 +26,11 @@ test('ticket issue revalidates exact live ADMIN device grant', () => {
     /v_device\.access_tier is distinct from 'ADMIN'/i,
     /v_device\.admin_revoked_at is not null/i,
     /coalesce\(v_device\.admin_grant_epoch,0\) <> v_epoch/i,
-    /not \(v_device\.admin_scopes \? 'CONTROL_PLANE'\)/i,
+    /\(v_device\.admin_scopes \? 'CONTROL_PLANE'\) is distinct from true/i,
   ]) assert.match(migration, invariant);
   assert.match(migration, /guardian_enrollment_ticket_admin_grant_invalid/i);
+  assert.equal((migration.match(/limit 1 for share;/gi) || []).length, 2, 'hold device grant stable through ticket commit');
+  assert.match(migration, /jsonb_typeof\(v_device.admin_scopes\) is distinct from 'array'/i);
 });
 
 test('ticket consume is single-use and revalidates revocation before committing consumption', () => {
@@ -37,12 +39,14 @@ test('ticket consume is single-use and revalidates revocation before committing 
   assert.match(migration, /update public\.compute_fabric_a2_browser_guardian_enrollment_ticket_h205f22[\s\S]*set consumed_at=clock_timestamp\(\)[\s\S]*where ticket_id=v_row\.ticket_id[\s\S]*and consumed_at is null/i);
   assert.match(migration, /TICKET_CONSUME_CONFLICT/);
   assert.match(migration, /consumer_owner_sid_sha256=v_owner_sid_sha/i);
+  assert.match(migration, /where ticket_id=v_row.ticket_id[\s\S]*and expires_at > clock_timestamp\(\)/i);
 });
 
 test('ticket RPCs are service-role only and ordinary clients cannot read ticket table', () => {
   assert.match(migration, /revoke all on public\.compute_fabric_a2_browser_guardian_enrollment_ticket_h205f22[\s\S]*from public, anon, authenticated/i);
   assert.match(migration, /client_v1_guardian_enrollment_ticket_issue_v1[\s\S]*to service_role/i);
   assert.match(migration, /client_v1_guardian_enrollment_ticket_consume_v1[\s\S]*to service_role/i);
+  assert.match(migration, /alter table public.compute_fabric_a2_browser_guardian_enrollment_ticket_h205f22 enable row level security/i);
 });
 
 test('Edge issue route runs after device ADMIN auth while redemption is the sole ticket pre-auth path', () => {

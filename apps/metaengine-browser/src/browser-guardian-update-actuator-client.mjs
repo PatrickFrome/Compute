@@ -218,7 +218,24 @@ export class BrowserGuardianUpdateActuatorClient {
       ambiguous.code = 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS';
       throw ambiguous;
     }
-    if (second.result.state === 'OWNER_BOUND') return this.#assertOwnerBound(second.result, second.proof);
+    if (second.result.state === 'OWNER_BOUND') {
+      // Enrollment really changed the store, so its receipt must not pretend
+      // effect absence. Prove the saved owner using an independent read-only
+      // challenge before allowing any installer dispatch.
+      try {
+        if (second.result.owner_binding_proven !== true || second.result.device_binding_proven !== true
+            || String(second.result.device_key_fingerprint_sha256 || '').toLowerCase()
+              !== String(second.proof.key_fingerprint_sha256 || '').toLowerCase()) {
+          throw new Error('guardian_owner_enrollment_binding_invalid');
+        }
+        const readback = await this.#ownerProbeRaw({ command_id, request_nonce });
+        return this.#assertOwnerBound(readback.result, readback.proof);
+      } catch (error) {
+        const ambiguous = new Error(`guardian_owner_enrollment_readback_unknown:${String(error?.message || error).slice(0,180)}`);
+        ambiguous.code = 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS';
+        throw ambiguous;
+      }
+    }
     if (second.result.state === 'NO_EFFECT_PROVEN' && second.result.effect_absent_proven === true) {
       throw new Error(`guardian_owner_enrollment_no_effect:${second.result.reason}`);
     }
