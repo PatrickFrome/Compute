@@ -233,6 +233,11 @@ int installEmbedded() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    // Double-click / ShellExecute with no arguments is the explicit UAC install
+    // surface used by the packaged Browser. --install remains the deterministic
+    // CI harness entry. No caller path, URL, command or arbitrary argument is
+    // accepted by either route.
+    if (argc == 1) return installEmbedded();
     if (argc == 2 && std::wstring_view(argv[1]) == L"--install") return installEmbedded();
     if (argc == 2 && std::wstring_view(argv[1]) == L"--contract-json") {
         std::cout << "{\"schema\":\"metaengine.browser-guardian.machine-bootstrap.v1\","
