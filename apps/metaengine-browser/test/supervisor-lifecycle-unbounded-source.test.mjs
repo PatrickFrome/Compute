@@ -23,7 +23,10 @@ test('lifecycle does not synthesize trusted rollover authority from a deferred p
   // rollover itself only fires when the state is STILL ROLLOVER_REQUIRED —
   // never from ROLLOVER_DEFERRED or any page-derived authority.
   assert.match(source, /if \(ks\.pending_wake\?\.ambiguous_at\) \{[\s\S]*?#settleRolloverBlockedAmbiguousWake/);
-  assert.match(source, /if \(keepalive\.state === 'ROLLOVER_REQUIRED'\) await this\.#rollover\(\)/);
+  assert.match(source, /if \(keepalive\.state === 'ROLLOVER_REQUIRED'\) \{/);
+  assert.match(source, /if \(this\.#rolloverCapacityBlocked\(state\)\) \{/);
+  assert.match(source, /action: 'ROLLOVER_CAPACITY_WAIT'/);
+  assert.match(source, /else \{\s*await this\.#rollover\(\);/);
 });
 
 test('terminal continuation remains autonomous but effect retries stay fenced elsewhere', () => {
