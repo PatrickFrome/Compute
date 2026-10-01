@@ -171,3 +171,82 @@ test('actuator contract explicitly forbids automatic owner-enrollment retry', ()
   assert.equal(row.owner_enrollment_transport_loss_outcome, 'AMBIGUOUS');
   assert.equal(row.automatic_owner_enrollment_retry_allowed, false);
 });
+
+test('new client recovers lost enrollment acknowledgement by read-only durable owner proof', async () => {
+  let durableOwner = false;
+  let tickets = 0;
+  const wires = [];
+  const options = {
+    identity: identity(),
+    enrollmentTicketProvider: async () => {
+      tickets += 1;
+      return { ticket: TICKET, ticket_sha256: TICKET_SHA, single_use: true, persisted_locally: false };
+    },
+    transport: async (wire) => {
+      wires.push(wire);
+      if (wire.includes('enrollment_ticket=')) {
+        durableOwner = true;
+        throw new Error('acknowledgement_lost_after_durable_CAS');
+      }
+      if (!durableOwner) return result('NO_EFFECT_PROVEN', 'OWNER_ENROLLMENT_TICKET_REQUIRED', { effect_absent_proven: true });
+      return result('OWNER_BOUND', 'DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT', {
+        effect_absent_proven: true, owner_binding_proven: true, device_binding_proven: true,
+        device_key_fingerprint_sha256: FINGERPRINT,
+      });
+    },
+  };
+  await assert.rejects(new BrowserGuardianUpdateActuatorClient(options).ensureOwnerBound({
+    command_id: COMMAND_ID, request_nonce: NONCE,
+  }), { code: 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS' });
+  const bound = await new BrowserGuardianUpdateActuatorClient(options).ensureOwnerBound({
+    command_id: '22222222-2222-4222-8222-222222222222', request_nonce: `${NONCE}new`,
+  });
+  assert.equal(bound.state, 'OWNER_BOUND');
+  assert.equal(tickets, 1);
+  assert.equal(wires.length, 3);
+  assert.doesNotMatch(wires[2], /enrollment_ticket=/);
+});
+
+test('new client rejects a persisted owner for another device without requesting enrollment', async () => {
+  let tickets = 0;
+  const client = new BrowserGuardianUpdateActuatorClient({
+    identity: identity(),
+    enrollmentTicketProvider: async () => { tickets += 1; throw new Error('must_not_replace_owner'); },
+    transport: async (wire) => {
+      assert.doesNotMatch(wire, /enrollment_ticket=/);
+      return result('OWNER_BOUND', 'DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT', {
+        effect_absent_proven: true, owner_binding_proven: true, device_binding_proven: true,
+        device_key_fingerprint_sha256: 'b'.repeat(64),
+      });
+    },
+  });
+  await assert.rejects(client.ensureOwnerBound({ command_id: COMMAND_ID, request_nonce: NONCE }),
+    /guardian_owner_probe_device_fingerprint_mismatch/);
+  assert.equal(tickets, 0);
+});
+
+test('ticket-bound enrollment has a longer fixed deadline than independent read-only probes', async () => {
+  const deadlines = [];
+  let calls = 0;
+  const client = new BrowserGuardianUpdateActuatorClient({
+    identity: identity(),
+    enrollmentTicketProvider: async () => ({
+      ticket: TICKET, ticket_sha256: TICKET_SHA, single_use: true, persisted_locally: false,
+    }),
+    transport: async (wire, options) => {
+      deadlines.push(options.timeoutMs);
+      calls += 1;
+      if (calls === 1) return result('NO_EFFECT_PROVEN', 'OWNER_ENROLLMENT_TICKET_REQUIRED', { effect_absent_proven: true });
+      assert.equal(wire.includes('enrollment_ticket='), calls === 2);
+      return result('OWNER_BOUND', 'DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT', {
+        effect_absent_proven: calls === 3,
+        owner_binding_proven: true, device_binding_proven: true,
+        device_key_fingerprint_sha256: FINGERPRINT,
+      });
+    },
+  });
+  assert.equal((await client.ensureOwnerBound({
+    command_id: COMMAND_ID, request_nonce: NONCE, timeoutMs: 999999,
+  })).state, 'OWNER_BOUND');
+  assert.deepEqual(deadlines, [2000, 30000, 2000]);
+});

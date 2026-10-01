@@ -96,7 +96,7 @@ test('absent service requires explicit activation but status never invokes UAC',
     trustRootLoader: () => ({ build_sha: HEAD }),
     bindingLoader: () => fx.binding,
     actuatorFactory: () => ({
-      observeOwner: async () => { throw new Error('guardian_update_actuator_pipe_error:ENOENT'); },
+      observeOwner: async () => { throw Object.assign(new Error('guardian_update_actuator_pipe_error:ENOENT'), { code: 'GUARDIAN_PIPE_NOT_FOUND' }); },
       ensureOwnerBound: async () => { throw new Error('must_not_enroll'); },
     }),
   });
@@ -154,7 +154,7 @@ test('UAC launch is fixed-path and READY requires independent Guardian readback 
     actuatorFactory: () => ({
       observeOwner: async () => {
         observes += 1;
-        if (observes < 3) throw new Error('guardian_update_actuator_pipe_error:ENOENT');
+        if (observes < 3) throw Object.assign(new Error('guardian_update_actuator_pipe_error:ENOENT'), { code: 'GUARDIAN_PIPE_NOT_FOUND' });
         return { state: 'NO_EFFECT_PROVEN', reason: 'OWNER_ENROLLMENT_TICKET_REQUIRED', effect_absent_proven: true };
       },
       ensureOwnerBound: async () => {
@@ -233,7 +233,7 @@ for (const scenario of [
       openPath: () => { launches += 1; return scenario.open(); },
       trustRootLoader: () => ({ build_sha: HEAD }), bindingLoader: () => fx.binding,
       actuatorFactory: () => ({
-        observeOwner: async () => { throw new Error('guardian_update_actuator_pipe_error:ENOENT'); },
+        observeOwner: async () => { throw Object.assign(new Error('guardian_update_actuator_pipe_error:ENOENT'), { code: 'GUARDIAN_PIPE_NOT_FOUND' }); },
         ensureOwnerBound: async () => { enrollments += 1; throw new Error('must_not_enroll'); },
       }),
     });
@@ -262,3 +262,37 @@ test('launcher contract exposes no renderer path/args and no startup elevation o
   assert.equal(contract.bounded_uac_acknowledgement_required, true);
   assert.equal(contract.lost_uac_acknowledgement_proves_no_effect, false);
 });
+
+for (const error of [
+  new Error('guardian_update_actuator_pipe_timeout'),
+  new Error('guardian_update_actuator_pipe_ended_without_result'),
+  new Error('guardian_update_actuator_pipe_closed_without_result'),
+  new Error('guardian_update_actuator_pipe_error:ENOENT'),
+  Object.assign(new Error('guardian_update_actuator_pipe_error:EACCES'), { code: 'GUARDIAN_PIPE_IO_ERROR' }),
+  Object.assign(new Error('guardian_update_actuator_pipe_error:ECONNRESET'), { code: 'GUARDIAN_PIPE_IO_ERROR' }),
+]) {
+  test(`unproven pipe observation ${error.message} cannot request UAC or enrollment`, async (t) => {
+    const fx = await fixture(t);
+    let launches = 0;
+    let enrollments = 0;
+    const launcher = createBrowserGuardianMachineBootstrapLauncher({
+      platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
+      identity: identity(),
+      openPath: async () => { launches += 1; return ''; },
+      trustRootLoader: () => ({ build_sha: HEAD }), bindingLoader: () => fx.binding,
+      actuatorFactory: () => ({
+        observeOwner: async () => { throw error; },
+        ensureOwnerBound: async () => { enrollments += 1; throw new Error('must_not_enroll'); },
+      }),
+    });
+    for (const observed of [await launcher.status(), await launcher.activate()]) {
+      assert.equal(observed.state, 'HOLD');
+      assert.equal(observed.reason, 'GUARDIAN_OWNER_OBSERVATION_FAILED');
+      assert.equal(observed.ready, false);
+      assert.equal(observed.uac_consent_required, false);
+      assert.equal(observed.automatic_retry_allowed, false);
+    }
+    assert.equal(launches, 0);
+    assert.equal(enrollments, 0);
+  });
+}

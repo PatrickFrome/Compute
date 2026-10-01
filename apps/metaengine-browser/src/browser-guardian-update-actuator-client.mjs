@@ -80,6 +80,16 @@ function normalizeResult(value) {
   });
 }
 
+export function guardianUpdatePipeConnectionError(error, { connected = false } = {}) {
+  const failure = new Error(`guardian_update_actuator_pipe_error:${String(error?.message || error).slice(0, 180)}`);
+  // A message mentioning ENOENT, access denial, timeout or disconnect is not
+  // endpoint absence. Only the structured OS code before connect qualifies.
+  failure.code = connected === false && error?.code === 'ENOENT'
+    ? 'GUARDIAN_PIPE_NOT_FOUND'
+    : 'GUARDIAN_PIPE_IO_ERROR';
+  return failure;
+}
+
 export function requestGuardianUpdatePipe(wireRequest, {
   pipeName = BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -94,16 +104,27 @@ export function requestGuardianUpdatePipe(wireRequest, {
     const chunks = [];
     let total = 0;
     let settled = false;
+    let connected = false;
+    let deadlineTimer;
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadlineTimer);
       try { socket.destroy(); } catch {}
       if (error) reject(error);
       else resolve(value);
     };
-    socket.setTimeout(Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
-    socket.once('connect', () => socket.write(request, 'utf8'));
+    const timeout = Math.max(1_000, Math.min(DEFAULT_TIMEOUT_MS, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
+    // Inactivity timeout alone can be prolonged indefinitely by partial data.
+    deadlineTimer = setTimeout(() => finish(new Error('guardian_update_actuator_pipe_timeout')), timeout);
+    socket.setTimeout(timeout);
+    socket.once('connect', () => {
+      if (settled) return;
+      connected = true;
+      socket.write(request, 'utf8');
+    });
     socket.on('data', (chunk) => {
+      if (settled) return;
       total += chunk.length;
       if (total > MAX_WIRE_BYTES) return finish(new Error('guardian_update_actuator_response_too_large'));
       chunks.push(Buffer.from(chunk));
@@ -114,12 +135,16 @@ export function requestGuardianUpdatePipe(wireRequest, {
       let parsed;
       try { parsed = JSON.parse(text.slice(0, newline)); }
       catch { return finish(new Error('guardian_update_actuator_response_json_invalid')); }
-      return finish(null, normalizeResult(parsed));
+      try { return finish(null, normalizeResult(parsed)); }
+      catch (error) { return finish(error); }
     });
     socket.once('timeout', () => finish(new Error('guardian_update_actuator_pipe_timeout')));
-    socket.once('error', (error) => finish(new Error(`guardian_update_actuator_pipe_error:${String(error?.message || error).slice(0, 180)}`)));
+    socket.once('error', (error) => finish(guardianUpdatePipeConnectionError(error, { connected })));
     socket.once('end', () => {
       if (!settled) finish(new Error('guardian_update_actuator_pipe_ended_without_result'));
+    });
+    socket.once('close', () => {
+      if (!settled) finish(new Error('guardian_update_actuator_pipe_closed_without_result'));
     });
   });
 }
@@ -174,7 +199,11 @@ export class BrowserGuardianUpdateActuatorClient {
       `public_jwk_y=${jwk.y}`,
       `signature=${exactSignature(proof.signature)}`,
     ]);
-    const result = normalizeResult(await this.#transport(request));
+    const result = normalizeResult(await this.#transport(request, {
+      // Enrollment includes bounded native HTTPS redemption and durable CAS.
+      // Do not give this effect the shorter read-only observation deadline.
+      timeoutMs: ticket == null ? 2_000 : 30_000,
+    }));
     return { result, proof };
   }
 
@@ -302,6 +331,8 @@ export function browserGuardianUpdateActuatorClientContract() {
     enrolled_device_signature_required: true,
     read_only_owner_probe_precedes_enrollment: true,
     read_only_owner_observation_exposed: true,
+    read_only_owner_pipe_timeout_ms: 2_000,
+    owner_enrollment_pipe_timeout_ms: 30_000,
     exact_ticket_required_reason: 'OWNER_ENROLLMENT_TICKET_REQUIRED',
     single_use_admin_ticket_required_for_first_binding: true,
     ticket_bound_device_signature_required: true,

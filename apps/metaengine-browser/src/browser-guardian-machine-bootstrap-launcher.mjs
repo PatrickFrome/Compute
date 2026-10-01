@@ -273,7 +273,7 @@ export function createBrowserGuardianMachineBootstrapLauncher({
     if (typeof actuatorFactory === 'function') return actuatorFactory();
     return new BrowserGuardianUpdateActuatorClient({
       identity,
-      transport: (wire) => requestGuardianUpdatePipe(wire, { timeoutMs: 2_000 }),
+      transport: (wire, options) => requestGuardianUpdatePipe(wire, options),
     });
   }
 
@@ -288,7 +288,7 @@ export function createBrowserGuardianMachineBootstrapLauncher({
       return ownerObservationState(result, preparedValue.binding);
     } catch (error) {
       const message = String(error?.message || error);
-      if (/guardian_update_actuator_pipe_(?:error|timeout|ended_without_result)/.test(message)) {
+      if (error?.code === 'GUARDIAN_PIPE_NOT_FOUND') {
         return state('ACTIVATION_REQUIRED', 'GUARDIAN_SERVICE_NOT_REACHABLE', {
           source_head: preparedValue.binding.source_head,
           package_version: preparedValue.binding.package_version,
@@ -418,6 +418,8 @@ export function browserGuardianMachineBootstrapLauncherContract() {
     windows_uac_manifest_required: true,
     open_path_only: true,
     read_only_service_polling_allowed: true,
+    pipe_activation_requires_preconnect_os_enoent: true,
+    pipe_timeout_or_disconnect_proves_absence: false,
     single_owner_enrollment_attempt_after_service_readback: true,
     automatic_effect_retry_allowed: false,
     ambiguous_owner_enrollment_retry_allowed: false,
