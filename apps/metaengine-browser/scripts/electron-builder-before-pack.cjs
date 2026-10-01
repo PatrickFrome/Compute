@@ -58,6 +58,49 @@ function buildEmergencyTrustRootMetadata({ appRoot, repoRoot }) {
   });
 }
 
+function validateGuardianBootstrapBinding(binding, { sourceHead, packageVersion } = {}) {
+  if (!binding || binding.schema !== 'metaengine.browser-guardian.machine-bootstrap-binding.v1') {
+    throw new Error('guardian_bootstrap_binding_schema_invalid');
+  }
+  const head = String(binding.source_head || '').trim().toLowerCase();
+  const version = String(binding.package_version || '').trim();
+  const name = String(binding.bootstrap_name || '');
+  const sha256 = String(binding.bootstrap_sha256 || '').trim().toLowerCase();
+  const size = Number(binding.bootstrap_size);
+  if (!BUILD_SHA_RE.test(head) || head !== String(sourceHead || '').trim().toLowerCase()) {
+    throw new Error('guardian_bootstrap_binding_source_head_mismatch');
+  }
+  if (!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(version) || version !== String(packageVersion || '')) {
+    throw new Error('guardian_bootstrap_binding_package_version_mismatch');
+  }
+  if (name !== `METAENGINE-Guardian-Bootstrap-${version}-x64.exe`) {
+    throw new Error('guardian_bootstrap_binding_name_invalid');
+  }
+  if (!/^[0-9a-f]{64}$/.test(sha256) || !Number.isSafeInteger(size) || size < 64 * 1024 || size > 32 * 1024 * 1024) {
+    throw new Error('guardian_bootstrap_binding_bytes_invalid');
+  }
+  for (const field of ['guardian_manifest_sha256', 'service_sha256', 'configurator_sha256']) {
+    if (!/^[0-9a-f]{64}$/.test(String(binding[field] || '').trim().toLowerCase())) {
+      throw new Error(`guardian_bootstrap_binding_${field}_invalid`);
+    }
+  }
+  if (!/^[0-9a-f]{16}-[0-9a-f]{16}$/.test(String(binding.slot_id || '').trim().toLowerCase())
+      || binding.embedded_assets_only !== true
+      || binding.explicit_elevated_install_required !== true
+      || binding.automatic_retry_allowed !== false
+      || binding.authority_effect !== false) {
+    throw new Error('guardian_bootstrap_binding_contract_invalid');
+  }
+  return Object.freeze({
+    ...binding,
+    source_head: head,
+    package_version: version,
+    bootstrap_name: name,
+    bootstrap_sha256: sha256,
+    bootstrap_size: size,
+  });
+}
+
 async function metaengineGuardianNativeBeforePack(context) {
   if (!context || context.electronPlatformName !== 'win32') return;
   if (process.platform !== 'win32') {
@@ -107,6 +150,22 @@ async function metaengineGuardianNativeBeforePack(context) {
   if (bootstrapResult.error) throw bootstrapResult.error;
   if (bootstrapResult.status !== 0) throw new Error(`guardian_machine_bootstrap_build_failed:${bootstrapResult.status}`);
 
+  const packageVersion = String(require(path.join(appRoot, 'package.json')).version || '');
+  const bootstrapBindingPath = path.join(appRoot, 'native-dist', 'guardian-bootstrap', 'guardian-machine-bootstrap-binding.json');
+  let bootstrapBinding;
+  try {
+    bootstrapBinding = validateGuardianBootstrapBinding(
+      JSON.parse(fs.readFileSync(bootstrapBindingPath, 'utf8')),
+      { sourceHead: trustRoot.build_sha, packageVersion },
+    );
+  } catch (error) {
+    throw new Error(`guardian_machine_bootstrap_binding_invalid:${String(error?.message || error)}`);
+  }
+  context.packager.config.extraMetadata = {
+    ...(context.packager.config.extraMetadata || {}),
+    metaengineGuardianBootstrapBinding: bootstrapBinding,
+  };
+
   const daemonResult = spawnSync(
     powershell,
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', daemonBuildScript, '-ExpectedSourceHead', trustRoot.build_sha],
@@ -120,3 +179,4 @@ async function metaengineGuardianNativeBeforePack(context) {
 
 module.exports = metaengineGuardianNativeBeforePack;
 module.exports.buildEmergencyTrustRootMetadata = buildEmergencyTrustRootMetadata;
+module.exports.validateGuardianBootstrapBinding = validateGuardianBootstrapBinding;
