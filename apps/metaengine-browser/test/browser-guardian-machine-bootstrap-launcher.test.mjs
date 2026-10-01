@@ -266,6 +266,7 @@ test('launcher contract exposes no renderer path/args and no startup elevation o
 for (const error of [
   new Error('guardian_update_actuator_pipe_timeout'),
   new Error('guardian_update_actuator_pipe_ended_without_result'),
+  new Error('guardian_update_actuator_pipe_closed_without_result'),
   new Error('guardian_update_actuator_pipe_error:ENOENT'),
   Object.assign(new Error('guardian_update_actuator_pipe_error:EACCES'), { code: 'GUARDIAN_PIPE_IO_ERROR' }),
   Object.assign(new Error('guardian_update_actuator_pipe_error:ECONNRESET'), { code: 'GUARDIAN_PIPE_IO_ERROR' }),

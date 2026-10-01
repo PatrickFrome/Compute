@@ -105,19 +105,26 @@ export function requestGuardianUpdatePipe(wireRequest, {
     let total = 0;
     let settled = false;
     let connected = false;
+    let deadlineTimer;
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadlineTimer);
       try { socket.destroy(); } catch {}
       if (error) reject(error);
       else resolve(value);
     };
-    socket.setTimeout(Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
+    const timeout = Math.max(1_000, Math.min(DEFAULT_TIMEOUT_MS, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
+    // Inactivity timeout alone can be prolonged indefinitely by partial data.
+    deadlineTimer = setTimeout(() => finish(new Error('guardian_update_actuator_pipe_timeout')), timeout);
+    socket.setTimeout(timeout);
     socket.once('connect', () => {
+      if (settled) return;
       connected = true;
       socket.write(request, 'utf8');
     });
     socket.on('data', (chunk) => {
+      if (settled) return;
       total += chunk.length;
       if (total > MAX_WIRE_BYTES) return finish(new Error('guardian_update_actuator_response_too_large'));
       chunks.push(Buffer.from(chunk));
@@ -128,12 +135,16 @@ export function requestGuardianUpdatePipe(wireRequest, {
       let parsed;
       try { parsed = JSON.parse(text.slice(0, newline)); }
       catch { return finish(new Error('guardian_update_actuator_response_json_invalid')); }
-      return finish(null, normalizeResult(parsed));
+      try { return finish(null, normalizeResult(parsed)); }
+      catch (error) { return finish(error); }
     });
     socket.once('timeout', () => finish(new Error('guardian_update_actuator_pipe_timeout')));
     socket.once('error', (error) => finish(guardianUpdatePipeConnectionError(error, { connected })));
     socket.once('end', () => {
       if (!settled) finish(new Error('guardian_update_actuator_pipe_ended_without_result'));
+    });
+    socket.once('close', () => {
+      if (!settled) finish(new Error('guardian_update_actuator_pipe_closed_without_result'));
     });
   });
 }
