@@ -32,6 +32,13 @@
       ]
     },
     {
+      "from": "native-dist/guardian-bootstrap",
+      "to": "guardian-bootstrap",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
       "from": "devos-source-snapshot",
       "to": "devos-source-snapshot",
       "filter": [

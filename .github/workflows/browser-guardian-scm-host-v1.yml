@@ -41,26 +41,16 @@ jobs:
         shell: powershell
         run: node --test test/browser-guardian-scm-host-contract.test.mjs
 
-      - name: Compile exact-head native SCM service
+      - name: Compile exact production Guardian staging bundle
+        working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
-          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
-          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
-          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
-
-          $source = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-scm-service.cpp').Path
           $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-scm'
-          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          & ./scripts/build-guardian-native-staging.ps1 -OutputDir $outDir
+          if ($LASTEXITCODE -ne 0) { throw "guardian_staging_build_exit_$LASTEXITCODE" }
           $exe = Join-Path $outDir 'METAENGINEBrowserGuardian.exe'
-
-          $command = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib' -f $vcvars, $source, $exe
-          & $env:ComSpec /d /s /c $command
-          if ($LASTEXITCODE -ne 0) { throw "guardian_native_compile_exit_$LASTEXITCODE" }
-          if (-not (Test-Path $exe)) { throw 'guardian_native_exe_missing' }
+          if (-not (Test-Path $exe -PathType Leaf)) { throw 'guardian_native_exe_missing' }
           $digest = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($digest -notmatch '^[0-9a-f]{64}$') { throw 'guardian_native_digest_invalid' }
           "GUARDIAN_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -76,10 +66,17 @@ jobs:
           if ($row.schema -ne 'metaengine.browser-guardian.scm-host.v1') { throw 'guardian_contract_schema_invalid' }
           if ($row.service_name -ne 'METAENGINEBrowserGuardian') { throw 'guardian_contract_service_name_invalid' }
           if ($row.service_type -ne 'SERVICE_WIN32_OWN_PROCESS') { throw 'guardian_contract_service_type_invalid' }
-          foreach ($field in @('browser_authority','task_authority','scheduler_authority','page_model_text_authority','release_authority','process_effect_authority','automatic_retry_allowed','authority_effect')) {
+          foreach ($field in @('browser_authority','task_authority','scheduler_authority','page_model_text_authority','release_authority','process_effect_policy_authority','automatic_retry_allowed','authority_effect')) {
             if ($row.$field -ne $false) { throw "guardian_contract_authority_invalid_$field" }
           }
-          if ($row.child_process_dispatch_implemented -ne $false) { throw 'guardian_child_dispatch_unexpected' }
+          if ($row.bounded_process_effect_adapter -ne $true -or $row.child_process_dispatch_implemented -ne $true -or $row.native_write_ahead_effect_barrier -ne $true) { throw 'guardian_bounded_adapter_contract_missing' }
+          $actuator = (& $env:GUARDIAN_EXE --update-actuator-contract-json | ConvertFrom-Json)
+          foreach ($field in @('native_write_ahead_effect_barrier','at_most_one_dispatch_per_effect_id','enrolled_p256_challenge_required','first_binding_requires_server_admin_ticket','ticket_single_use_server_revalidation_required')) {
+            if ($actuator.$field -ne $true) { throw "guardian_actuator_fence_missing_$field" }
+          }
+          foreach ($field in @('caller_supplied_path_allowed','caller_supplied_url_allowed','caller_supplied_shell_allowed','automatic_retry_allowed')) {
+            if ($actuator.$field -ne $false) { throw "guardian_actuator_authority_invalid_$field" }
+          }
           if ($row.service_installation_implemented -ne $false) { throw 'guardian_service_install_authority_unexpected' }
 
       - name: Prove real Windows SCM lifecycle
@@ -130,7 +127,9 @@ jobs:
               service_name = $serviceName
               running_readback = $running
               stopped_readback = $stopped
-              child_process_dispatch_implemented = $false
+              bounded_process_effect_adapter = $true
+              native_write_ahead_effect_barrier = $true
+              installer_dispatch_exercised = $false
               authority_effect = $false
             } | ConvertTo-Json -Depth 4 | Write-Host
           }

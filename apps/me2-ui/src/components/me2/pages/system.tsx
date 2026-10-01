@@ -38,6 +38,21 @@ type SuT = {
   check: { ok: boolean; verdict: string; local_head: string | null; remote_head: string | null; behind: number | null; ahead: number | null; dirty_files: number; version: string; error?: string };
   journal: Array<{ id: number; op: string; result: string; detail: string | null; at: number }>;
 };
+type GuardianStatusT = {
+  schema: "metaengine.browser-guardian.machine-bootstrap-launcher.v1";
+  state: "READY" | "ACTIVATION_REQUIRED" | "OWNER_ENROLLMENT_REQUIRED" | "HOLD" | "AMBIGUOUS" | "UNAVAILABLE" | "NO_EFFECT_PROVEN";
+  reason: string;
+  ready: boolean;
+  guardian_service_ready?: boolean;
+  owner_binding_proven?: boolean;
+  device_binding_proven?: boolean;
+  source_head?: string;
+  package_version?: string;
+  error?: string;
+  uac_consent_required?: boolean;
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
 const suState = (v: string): SysState =>
   v === "UP_TO_DATE" ? "Completed" : v === "DIVERGED" ? "Failed" : "Degraded";
 const SHORT7 = (h: string | null) => (h ? h.slice(0, 7) : "—");
@@ -79,6 +94,8 @@ export function SystemPage() {
   const [policy, setPolicy] = useState<PolicyT | null>(null);
   const [su, setSu] = useState<SuT | null>(null);
   const [suBusy, setSuBusy] = useState(false);
+  const [guardian, setGuardian] = useState<GuardianStatusT | null>(null);
+  const [guardianBusy, setGuardianBusy] = useState(false);
 
   // ── загрузчики ──
   const loadTokens = useCallback(async () => {
@@ -90,6 +107,20 @@ export function SystemPage() {
   const loadSu = useCallback(async () => {
     const r = await me2Fetch<SuT>("/selfupdate?XTransformPort=3041"); setSu(r?.ok ? r : null); return r?.ok === true;
   }, []);
+  const loadGuardian = useCallback(async () => {
+    const bridge = (window as Window & { metaengineClient?: {
+      guardianStatus?: () => Promise<GuardianStatusT>;
+    } }).metaengineClient;
+    if (!bridge?.guardianStatus) { setGuardian(null); return false; }
+    try {
+      const next = await bridge.guardianStatus();
+      setGuardian(next);
+      return next?.schema === "metaengine.browser-guardian.machine-bootstrap-launcher.v1";
+    } catch {
+      setGuardian(null);
+      return false;
+    }
+  }, []);
   // Hidden areas neither mount their controls nor poll their resources.
   const loadCurrent = useCallback(async () => {
     if (readsInFlight.current.has(area)) return;
@@ -97,13 +128,13 @@ export function SystemPage() {
     setLoadState("LOADING");
     try {
       const loaders = area === "access" ? [loadTokens] : area === "policy" ? [loadPolicy]
-        : area === "recovery" ? [loadSu] : [];
+        : area === "recovery" ? [loadSu] : area === "runtime" ? [loadGuardian] : [];
       const results = await Promise.all(loaders.map((load) => load()));
       if (activeArea.current === area) setLoadState(results.every(Boolean) ? "LIVE" : "UNAVAILABLE");
     } catch {
       if (activeArea.current === area) setLoadState("UNAVAILABLE");
     } finally { readsInFlight.current.delete(area); }
-  }, [area, loadPolicy, loadSu, loadTokens]);
+  }, [area, loadGuardian, loadPolicy, loadSu, loadTokens]);
   useEffect(() => {
     let current = true;
     const load = () => { if (current && document.visibilityState === "visible") void loadCurrent(); };
@@ -175,6 +206,33 @@ export function SystemPage() {
       toast({ title: `selfupdate ${op} ✗ daemon недоступен`, variant: "destructive" });
     } finally { setSuBusy(false); }
   }, [loadSu, toast]);
+
+  const activateGuardian = useCallback(async () => {
+    const bridge = (window as Window & { metaengineClient?: {
+      activateGuardian?: () => Promise<GuardianStatusT>;
+    } }).metaengineClient;
+    if (!bridge?.activateGuardian) {
+      toast({ title: "Guardian недоступен", description: "Этот Browser не предоставляет защищённый bootstrap bridge.", variant: "destructive" });
+      return;
+    }
+    setGuardianBusy(true);
+    try {
+      const next = await bridge.activateGuardian();
+      setGuardian(next);
+      if (next.state === "READY") {
+        toast({ title: "Guardian готов", description: "Служба и owner/device binding подтверждены независимым readback." });
+      } else if (next.state === "AMBIGUOUS") {
+        toast({ title: "Результат Guardian неоднозначен", description: "Повтор эффекта заблокирован. Обновите статус после независимого readback.", variant: "destructive" });
+      } else {
+        toast({ title: "Guardian не готов", description: next.reason, variant: "destructive" });
+      }
+      await refreshClientRuntimeStatus().catch(() => {});
+    } catch (error) {
+      toast({ title: "Guardian activation failed", description: String(error instanceof Error ? error.message : error).slice(0, 120), variant: "destructive" });
+    } finally {
+      setGuardianBusy(false);
+    }
+  }, [toast]);
 
   // ── опасная зона ──
   const budgetFlushOp = useCallback(async () => {
@@ -408,6 +466,48 @@ export function SystemPage() {
               <dt className="text-zinc-500">Verified agents</dt><dd>{workReadiness?.proven_agent_count ?? "Unavailable"}</dd>
               <dt className="text-zinc-500">Generation</dt><dd>{workReadiness ? `${workReadiness.generation_floor ?? "?"} / profile ${workReadiness.local_generation_floor ?? "?"}` : "Unavailable"}</dd>
             </dl>
+          </section> : null}
+          {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="guardian-runtime-status" aria-labelledby="guardian-runtime-title">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 id="guardian-runtime-title" className="text-[13px] font-medium text-zinc-200">Machine Guardian</h2>
+                <p className="mt-1 text-[12px] text-zinc-400">Privileged recovery/update service. Activation always requires an explicit user action; paths and arguments are fixed by the packaged Browser.</p>
+              </div>
+              <button type="button" onClick={() => void loadGuardian()} disabled={guardianBusy}
+                className="h-7 shrink-0 border border-zinc-700 px-2 text-[12px] text-zinc-300 disabled:opacity-40">Read status</button>
+            </div>
+            <p role="status" className={`mt-3 text-[13px] ${guardian?.state === "READY" ? "text-emerald-300" : guardian?.state === "AMBIGUOUS" ? "text-rose-300" : "text-amber-200"}`}>
+              {guardian?.state || "UNAVAILABLE"} · {guardian?.reason || "No Guardian readback yet"}
+            </p>
+            <dl className="mt-2 grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 text-[12px]">
+              <dt className="text-zinc-500">Service</dt><dd>{guardian?.guardian_service_ready === true ? "Reachable" : guardian?.state === "ACTIVATION_REQUIRED" ? "Not installed / not reachable" : "Unproven"}</dd>
+              <dt className="text-zinc-500">Owner binding</dt><dd>{guardian?.owner_binding_proven === true ? "Proven" : "Not proven"}</dd>
+              <dt className="text-zinc-500">Device binding</dt><dd>{guardian?.device_binding_proven === true ? "Proven" : "Not proven"}</dd>
+              <dt className="text-zinc-500">Package</dt><dd className="font-mono">{guardian?.package_version || "—"}{guardian?.source_head ? ` · ${guardian.source_head.slice(0, 10)}…` : ""}</dd>
+            </dl>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="guardian-activate"
+                disabled={guardianBusy
+                  || nativeRuntime.readback?.connection.admin_ready !== true
+                  || !guardian
+                  || !["ACTIVATION_REQUIRED", "OWNER_ENROLLMENT_REQUIRED"].includes(guardian.state)}
+                onClick={() => void activateGuardian()}
+                className="min-h-8 border border-cyan-700 bg-cyan-950/30 px-3 text-[12px] text-cyan-200 hover:bg-cyan-950/60 disabled:border-zinc-800 disabled:bg-transparent disabled:text-zinc-600"
+              >
+                {guardianBusy ? "Waiting for readback…"
+                  : guardian?.state === "ACTIVATION_REQUIRED" ? "Activate Guardian (Windows UAC)"
+                  : guardian?.state === "OWNER_ENROLLMENT_REQUIRED" ? "Bind approved device"
+                  : guardian?.state === "READY" ? "Guardian ready"
+                  : guardian?.state === "AMBIGUOUS" ? "Blocked: readback required"
+                  : "Activation unavailable"}
+              </button>
+              <span className="text-[11px] text-zinc-500">
+                {nativeRuntime.readback?.connection.admin_ready === true ? "ADMIN device connected" : "ADMIN connection required"}
+              </span>
+            </div>
+            {guardian?.state === "AMBIGUOUS" ? <p className="mt-2 text-[11px] text-rose-300">No automatic retry is allowed after an ambiguous owner/bootstrap effect. Use Read status after independent machine readback.</p> : null}
           </section> : null}
           {/* ОПАСНАЯ ЗОНА */}
           {area === "recovery" ? <Sec id="sys-danger" title="Recovery actions" icon={TriangleAlert} tone="rose" defaultOpen={false}>

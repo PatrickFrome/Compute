@@ -35,6 +35,10 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     to: 'guardian-native',
     filter: ['**/*'],
   }, {
+    from: 'native-dist/guardian-bootstrap',
+    to: 'guardian-bootstrap',
+    filter: ['**/*'],
+  }, {
     from: 'devos-source-snapshot',
     to: 'devos-source-snapshot',
     filter: ['**/*'],

@@ -204,20 +204,25 @@ export class SupervisorDeviceIdentity {
 
   randomNonce() { return crypto.randomBytes(24).toString('base64url'); }
 
-  async guardianOwnerChallenge({ command_id, request_nonce } = {}) {
+  async guardianOwnerChallenge({ command_id, request_nonce, enrollment_ticket_sha256 = null } = {}) {
     const state = await this.ensure();
     if (!state.device_id) throw new Error('supervisor_device_not_enrolled');
     const commandId = exactUuid(command_id, 'guardian_command_id');
     const requestNonce = exactNonce(request_nonce, 'guardian_request_nonce');
+    const ticketSha256 = enrollment_ticket_sha256 == null
+      ? null
+      : exactSha(enrollment_ticket_sha256, 64, 'guardian_enrollment_ticket_sha256');
     const material = [
       GUARDIAN_OWNER_CHALLENGE_PROFILE,
       `command_id:${commandId}`,
       `request_nonce:${requestNonce}`,
+      ...(ticketSha256 ? [`enrollment_ticket_sha256:${ticketSha256}`] : []),
     ].join('\n');
     return Object.freeze({
       schema: 'metaengine.browser-guardian.owner-challenge-proof.v1',
       command_id: commandId,
       request_nonce: requestNonce,
+      enrollment_ticket_sha256: ticketSha256,
       public_jwk: structuredClone(state.public_jwk),
       key_fingerprint_sha256: state.key_fingerprint_sha256,
       signature: this.#sign(material),

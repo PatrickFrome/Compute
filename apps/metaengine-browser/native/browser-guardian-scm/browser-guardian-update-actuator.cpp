@@ -1,4 +1,6 @@
 #include "browser-guardian-update-actuator.hpp"
+#include "browser-guardian-enrollment-ticket-client.hpp"
+#include "browser-guardian-owner-enrollment-reconciler.hpp"
 
 #include <bcrypt.h>
 #include <sddl.h>
@@ -45,6 +47,11 @@ constexpr char kContractJson[] =
     "\"caller_identity_source\":\"IMPERSONATED_PIPE_CLIENT_TOKEN\","
     "\"durable_owner_store_required\":true,"
     "\"enrolled_p256_challenge_required\":true,"
+    "\"first_binding_requires_server_admin_ticket\":true,"
+    "\"ticket_single_use_server_revalidation_required\":true,"
+    "\"owner_sid_from_impersonated_token_only\":true,"
+    "\"owner_enrollment_create_if_absent_cas\":true,"
+    "\"owner_enrollment_ambiguous_retry_allowed\":false,"
     "\"caller_supplied_owner_sid_allowed\":false,"
     "\"caller_supplied_session_id_allowed\":false,"
     "\"caller_supplied_path_allowed\":false,"
@@ -104,6 +111,8 @@ struct CoTaskMemory {
 struct ProbeRequest {
     std::string command_id;
     std::string request_nonce;
+    std::string enrollment_ticket;
+    std::string enrollment_ticket_sha256;
     std::string public_jwk_x;
     std::string public_jwk_y;
     std::string signature;
@@ -207,12 +216,20 @@ bool parseProbe(std::string_view wire, ProbeRequest* out) {
     ProbeRequest parsed;
     if (!takeLine(&wire, "wire_schema=", &schema)
         || !takeLine(&wire, "command_id=", &parsed.command_id)
-        || !takeLine(&wire, "request_nonce=", &parsed.request_nonce)
-        || !takeLine(&wire, "public_jwk_x=", &parsed.public_jwk_x)
+        || !takeLine(&wire, "request_nonce=", &parsed.request_nonce)) return false;
+    if (wire.starts_with("enrollment_ticket=")) {
+        if (!takeLine(&wire, "enrollment_ticket=", &parsed.enrollment_ticket)
+            || !takeLine(&wire, "enrollment_ticket_sha256=", &parsed.enrollment_ticket_sha256)) return false;
+    }
+    if (!takeLine(&wire, "public_jwk_x=", &parsed.public_jwk_x)
         || !takeLine(&wire, "public_jwk_y=", &parsed.public_jwk_y)
         || !takeLine(&wire, "signature=", &parsed.signature)
         || !wire.empty()) return false;
+    const bool ticketAbsent = parsed.enrollment_ticket.empty() && parsed.enrollment_ticket_sha256.empty();
+    const bool ticketExact = base64UrlText(parsed.enrollment_ticket, 43)
+        && lowerHex(parsed.enrollment_ticket_sha256, 64);
     if (schema != kProbeSchema || !uuid(parsed.command_id) || !safeNonce(parsed.request_nonce)
+        || (!ticketAbsent && !ticketExact)
         || !base64UrlText(parsed.public_jwk_x, 43) || !base64UrlText(parsed.public_jwk_y, 43)
         || !base64UrlText(parsed.signature, 86)) return false;
     *out = std::move(parsed);
@@ -358,9 +375,13 @@ std::string canonicalJwk(std::string_view x, std::string_view y) {
 }
 
 std::string probeMaterial(const ProbeRequest& request) {
-    return std::string(kProbeProfile)
+    std::string material = std::string(kProbeProfile)
         + "\ncommand_id:" + request.command_id
         + "\nrequest_nonce:" + request.request_nonce;
+    if (!request.enrollment_ticket_sha256.empty()) {
+        material += "\nenrollment_ticket_sha256:" + request.enrollment_ticket_sha256;
+    }
+    return material;
 }
 
 std::string updateMaterial(const UpdateRequest& request) {
@@ -436,15 +457,8 @@ std::string narrowAscii(const std::wstring& text) {
     return out;
 }
 
-bool ownerAndClientExact(
-    const OwnerEnrollmentObservation& client,
-    const OwnerEnrollmentStoreResult& owner) {
-    return owner.root_trusted
-        && owner.present
-        && owner.exact
-        && owner.provenance_exact
-        && !owner.corrupt
-        && client.local_only
+bool clientTransportExact(const OwnerEnrollmentObservation& client) {
+    return client.local_only
         && client.pipe_reject_remote_clients
         && client.explicit_dacl
         && !client.default_dacl_used
@@ -458,8 +472,41 @@ bool ownerAndClientExact(
         && client.token_session_id_readback
         && client.client_pid > 0
         && client.session_id > 0
-        && !client.user_sid.empty()
+        && !client.user_sid.empty();
+}
+
+bool ownerAndClientExact(
+    const OwnerEnrollmentObservation& client,
+    const OwnerEnrollmentStoreResult& owner) {
+    // A bare store.read() has no expected candidate, so exact/provenance_exact are
+    // intentionally unset. EFFECT_EXACT proves a trusted, valid durable record;
+    // exact SID and device key are independently checked against the pipe token
+    // and P-256 proof below.
+    return owner.root_trusted
+        && owner.present
+        && owner.outcome == OwnerEnrollmentStoreOutcome::EffectExact
+        && !owner.corrupt
+        && clientTransportExact(client)
         && _wcsicmp(client.user_sid.c_str(), owner.record.expected_owner_sid.c_str()) == 0;
+}
+
+std::string deviceFingerprint(std::string_view x, std::string_view y) {
+    return sha256Text(canonicalJwk(x, y));
+}
+
+bool unsignedDeviceProofExact(
+    const ProbeRequest& request,
+    std::string* fingerprint) {
+    if (fingerprint == nullptr) return false;
+    const std::string value = deviceFingerprint(request.public_jwk_x, request.public_jwk_y);
+    if (value.empty()
+        || !verifyP256Signature(
+            request.public_jwk_x,
+            request.public_jwk_y,
+            request.signature,
+            probeMaterial(request))) return false;
+    *fingerprint = value;
+    return true;
 }
 
 bool deviceProofExact(
@@ -468,10 +515,24 @@ bool deviceProofExact(
     std::string_view signature,
     std::string_view material,
     const OwnerEnrollmentStoreResult& owner) {
-    const std::string fingerprint = sha256Text(canonicalJwk(x, y));
+    const std::string fingerprint = deviceFingerprint(x, y);
     return !fingerprint.empty()
         && fingerprint == owner.record.device_key_fingerprint_sha256
         && verifyP256Signature(x, y, signature, material);
+}
+
+std::string ownerEnrollmentEvidence(
+    const GuardianEnrollmentTicketRedemption& redemption,
+    std::string_view ownerSidSha256,
+    std::string_view fingerprint) {
+    return sha256Text(
+        std::string("METAENGINE_GUARDIAN_OWNER_ENROLLMENT_V1")
+        + "\nticket_id:" + redemption.ticket_id
+        + "\nclient_id:" + redemption.client_id
+        + "\ndevice_id:" + redemption.device_id
+        + "\nadmin_grant_epoch:" + std::to_string(redemption.admin_grant_epoch)
+        + "\nowner_sid_sha256:" + std::string(ownerSidSha256)
+        + "\ndevice_key_fingerprint_sha256:" + std::string(fingerprint));
 }
 
 GuardianUpdateActuatorResult baseResult(const char* state, const char* reason, DWORD error = ERROR_SUCCESS) {
@@ -978,17 +1039,96 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     const std::string& wireRequest,
     const OwnerEnrollmentObservation& client,
     const OwnerEnrollmentStoreResult& owner) {
-    if (!ownerAndClientExact(client, owner)) return baseResult("NO_EFFECT_PROVEN", "OWNER_SESSION_BINDING_UNPROVEN", ERROR_ACCESS_DENIED);
-
     ProbeRequest probe;
     if (parseProbe(wireRequest, &probe)) {
-        if (!deviceProofExact(probe.public_jwk_x, probe.public_jwk_y, probe.signature, probeMaterial(probe), owner)) {
-            return baseResult("NO_EFFECT_PROVEN", "ENROLLED_DEVICE_CHALLENGE_INVALID", ERROR_ACCESS_DENIED);
+        if (!clientTransportExact(client)) {
+            return baseResult("NO_EFFECT_PROVEN", "OWNER_SESSION_TRANSPORT_UNPROVEN", ERROR_ACCESS_DENIED);
         }
-        GuardianUpdateActuatorResult out = baseResult("OWNER_BOUND", "DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT");
-        attachOwnerProof(&out, client, owner);
-        out.effect_absent_proven = true;
+
+        if (ownerAndClientExact(client, owner)) {
+            if (!deviceProofExact(probe.public_jwk_x, probe.public_jwk_y, probe.signature, probeMaterial(probe), owner)) {
+                return baseResult("NO_EFFECT_PROVEN", "ENROLLED_DEVICE_CHALLENGE_INVALID", ERROR_ACCESS_DENIED);
+            }
+            GuardianUpdateActuatorResult out = baseResult("OWNER_BOUND", "DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT");
+            attachOwnerProof(&out, client, owner);
+            out.effect_absent_proven = true;
+            return out;
+        }
+
+        if (!owner.root_trusted || owner.corrupt) {
+            return baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_ROOT_UNAVAILABLE", ERROR_ACCESS_DENIED);
+        }
+        if (owner.present || owner.outcome != OwnerEnrollmentStoreOutcome::NoEffectProven) {
+            return baseResult("NO_EFFECT_PROVEN", "OWNER_SESSION_BINDING_UNPROVEN", ERROR_ACCESS_DENIED);
+        }
+
+        std::string fingerprint;
+        if (!unsignedDeviceProofExact(probe, &fingerprint)) {
+            return baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_DEVICE_PROOF_INVALID", ERROR_ACCESS_DENIED);
+        }
+        if (probe.enrollment_ticket.empty()) {
+            GuardianUpdateActuatorResult out = baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_TICKET_REQUIRED");
+            out.effect_absent_proven = true;
+            return out;
+        }
+        if (sha256Text(probe.enrollment_ticket) != probe.enrollment_ticket_sha256) {
+            GuardianUpdateActuatorResult out = baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_TICKET_DIGEST_MISMATCH", ERROR_ACCESS_DENIED);
+            out.effect_absent_proven = true;
+            return out;
+        }
+
+        const std::string ownerSid = narrowAscii(client.user_sid);
+        const std::string ownerSidSha256 = sha256Text(ownerSid);
+        if (ownerSid.empty() || ownerSidSha256.empty()) {
+            return baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_SID_INVALID", ERROR_ACCESS_DENIED);
+        }
+        const GuardianEnrollmentTicketRedemption redemption =
+            redeemBrowserGuardianEnrollmentTicket(probe.enrollment_ticket, fingerprint, ownerSidSha256);
+        if (!redemption.transport_proven) {
+            return baseResult("AMBIGUOUS", "OWNER_ENROLLMENT_TICKET_REDEMPTION_TRANSPORT_UNKNOWN");
+        }
+        if (!redemption.accepted) {
+            GuardianUpdateActuatorResult out = baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_TICKET_REJECTED", ERROR_ACCESS_DENIED);
+            out.effect_absent_proven = true;
+            return out;
+        }
+
+        OwnerEnrollmentDurableRecord candidate;
+        candidate.expected_owner_sid = client.user_sid;
+        candidate.device_key_fingerprint_sha256 = fingerprint;
+        candidate.enrollment_evidence_sha256 = ownerEnrollmentEvidence(redemption, ownerSidSha256, fingerprint);
+        if (candidate.enrollment_evidence_sha256.empty()) {
+            return baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_EVIDENCE_DIGEST_FAILED");
+        }
+
+        const OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
+        const OwnerEnrollmentStoreResult effect = store.createIfAbsent(candidate);
+        const OwnerEnrollmentStoreResult readback = store.read();
+        const OwnerEnrollmentReconcileResult reconciled = reconcileOwnerEnrollmentReadback(readback, candidate);
+        if (reconciled.state == OwnerEnrollmentReconcileState::AmbiguousReadback
+            || effect.outcome == OwnerEnrollmentStoreOutcome::Ambiguous) {
+            return baseResult("AMBIGUOUS", "OWNER_ENROLLMENT_DURABLE_RESULT_UNKNOWN");
+        }
+        if (reconciled.state != OwnerEnrollmentReconcileState::DurableOwnerExact) {
+            GuardianUpdateActuatorResult out = baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_DURABLE_BINDING_REJECTED", ERROR_ACCESS_DENIED);
+            out.effect_absent_proven = reconciled.no_durable_owner_effect_proven;
+            return out;
+        }
+
+        GuardianUpdateActuatorResult out = baseResult("OWNER_BOUND", "DURABLE_OWNER_AND_ADMIN_DEVICE_ENROLLMENT_EXACT");
+        out.session_id = client.session_id;
+        out.client_pid = client.client_pid;
+        out.expected_owner_sid = ownerSid;
+        out.enrollment_evidence_sha256 = candidate.enrollment_evidence_sha256;
+        out.device_key_fingerprint_sha256 = fingerprint;
+        out.owner_binding_proven = true;
+        out.device_binding_proven = true;
+        out.effect_absent_proven = false;
         return out;
+    }
+
+    if (!ownerAndClientExact(client, owner)) {
+        return baseResult("NO_EFFECT_PROVEN", "OWNER_SESSION_BINDING_UNPROVEN", ERROR_ACCESS_DENIED);
     }
 
     UpdateRequest request;

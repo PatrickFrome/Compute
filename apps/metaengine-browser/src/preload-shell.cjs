@@ -256,6 +256,8 @@ const clientGoalStatus = (requestId) => ipcRenderer.invoke(
 );
 const clientConnectionStatus = () => ipcRenderer.invoke('metaengine:client:connection-status');
 const clientWorkReadiness = () => ipcRenderer.invoke('metaengine:client:work-readiness');
+const clientGuardianStatus = () => ipcRenderer.invoke('metaengine:client:guardian-status');
+const activateClientGuardian = () => ipcRenderer.invoke('metaengine:client:activate-guardian');
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
@@ -284,10 +286,15 @@ if (isPrimaryMe2PresentationDocument()) {
     goalStatus: clientGoalStatus,
     connectionStatus: clientConnectionStatus,
     workReadiness: clientWorkReadiness,
+    guardianStatus: clientGuardianStatus,
+    activateGuardian: activateClientGuardian,
     typed_positive_api: true,
     generic_command_exposed: false,
     scheduler_authority: false,
     browser_actuation_authority: false,
+    guardian_activation_requires_explicit_user_action: true,
+    guardian_activation_accepts_caller_path: false,
+    guardian_activation_accepts_caller_arguments: false,
     update_authority: false,
     release_authority: false,
     automatic_retry_allowed: false,

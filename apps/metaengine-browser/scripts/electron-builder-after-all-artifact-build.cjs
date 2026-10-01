@@ -19,6 +19,38 @@ function exactGitHead(repoRoot) {
   return head;
 }
 
+function assertPackagedGuardianBootstrapBinding(binding, { expectedHead, packageVersion, resourcesDir }) {
+  if (!binding || binding.schema !== 'metaengine.browser-guardian.machine-bootstrap-binding.v1') {
+    throw new Error('packaged_guardian_bootstrap_binding_missing');
+  }
+  const head = String(binding.source_head || '').trim().toLowerCase();
+  const version = String(binding.package_version || '').trim();
+  const name = String(binding.bootstrap_name || '');
+  const digest = String(binding.bootstrap_sha256 || '').trim().toLowerCase();
+  const size = Number(binding.bootstrap_size);
+  if (head !== expectedHead) throw new Error('packaged_guardian_bootstrap_source_head_mismatch');
+  if (version !== packageVersion) throw new Error('packaged_guardian_bootstrap_version_mismatch');
+  if (name !== `METAENGINE-Guardian-Bootstrap-${version}-x64.exe`) throw new Error('packaged_guardian_bootstrap_name_invalid');
+  if (!/^[0-9a-f]{64}$/.test(digest) || !Number.isSafeInteger(size) || size <= 0) {
+    throw new Error('packaged_guardian_bootstrap_identity_invalid');
+  }
+  if (binding.embedded_assets_only !== true
+      || binding.explicit_elevated_install_required !== true
+      || binding.automatic_retry_allowed !== false
+      || binding.authority_effect !== false) {
+    throw new Error('packaged_guardian_bootstrap_contract_invalid');
+  }
+  const bootstrapPath = path.join(resourcesDir, 'guardian-bootstrap', name);
+  if (!fs.existsSync(bootstrapPath) || !fs.statSync(bootstrapPath).isFile()) {
+    throw new Error('packaged_guardian_bootstrap_executable_missing');
+  }
+  const actual = fs.readFileSync(bootstrapPath);
+  if (actual.length !== size || crypto.createHash('sha256').update(actual).digest('hex') !== digest) {
+    throw new Error('packaged_guardian_bootstrap_bytes_mismatch');
+  }
+  return { name, digest, size };
+}
+
 function assertPackagedTrustRoot(metadata, expectedHead) {
   if (!metadata || metadata.schema !== TRUST_ROOT_SCHEMA) {
     throw new Error('packaged_emergency_trust_root_missing');
@@ -67,6 +99,11 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
   const packageJson = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'));
   const expectedHead = exactGitHead(repoRoot);
   const fingerprint = assertPackagedTrustRoot(packageJson.metaengineEmergencyTrustRoot, expectedHead);
+  const bootstrap = assertPackagedGuardianBootstrapBinding(packageJson.metaengineGuardianBootstrapBinding, {
+    expectedHead,
+    packageVersion: String(packageJson.version || ''),
+    resourcesDir,
+  });
 
   const fuses = await import('@electron/fuses');
   const wire = await fuses.getCurrentFuseWire(executable);
@@ -84,9 +121,14 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     embedded_asar_integrity_validation: true,
     only_load_app_from_asar: true,
     private_signing_key_packaged: false,
+    guardian_bootstrap_protected_binding_present: true,
+    guardian_bootstrap_name: bootstrap.name,
+    guardian_bootstrap_sha256: bootstrap.digest,
+    guardian_bootstrap_size: bootstrap.size,
     authority_effect: false,
   }));
   return [];
 };
 
 module.exports.assertPackagedTrustRoot = assertPackagedTrustRoot;
+module.exports.assertPackagedGuardianBootstrapBinding = assertPackagedGuardianBootstrapBinding;

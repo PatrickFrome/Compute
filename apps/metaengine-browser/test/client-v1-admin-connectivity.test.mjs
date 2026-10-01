@@ -38,6 +38,9 @@ const r83Manifest = JSON.parse(await readFile(
   new URL('../../../coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json', import.meta.url),
   'utf8',
 ));
+const r83Binding = JSON.parse(await readFile(
+  new URL('../../../coordination/convergence/R83_EDGE_V14_CANARY_SOURCE_BINDING_V1.json', import.meta.url), 'utf8',
+));
 
 test('ADMIN is device-bound and revocable without embedding infrastructure secrets', () => {
   assert.match(migration, /add column if not exists access_tier text not null default 'ADMIN'/i);
@@ -285,10 +288,28 @@ test('OIDC qualifier and Windows runner both require the same one-run nonce hash
 
 test('ADMIN connectivity qualification is bound to the deployed R83 canary source substrate', () => {
   assert.equal(r83Manifest.schema, 'metaengine.r83.edge-canary-qualification.v1');
-  assert.equal(r83Manifest.candidate.deployed_version, 25);
-  assert.equal(r83Manifest.candidate.source_pin, '9b935a3dbd2c2722c0ff72a624d98b1c3a5542de');
-  assert.equal(r83Manifest.candidate.ezbr_sha256, 'bfab94d1acb6a55ef5e2c55bbfa561dfce94c8f4aaadc56064b556b91475c4fb');
+  assert.equal(r83Manifest.candidate.deployed_version, r83Binding.candidate.observed_function_version);
+  assert.equal(r83Manifest.candidate.source_pin, r83Binding.candidate.source_commit);
+  assert.equal(r83Manifest.candidate.ezbr_sha256, r83Binding.candidate.observed_ezbr_sha256);
+  assert.match(r83Manifest.candidate.source_pin, /^[0-9a-f]{40}$/);
+  assert.match(r83Manifest.candidate.ezbr_sha256, /^[0-9a-f]{64}$/);
+  assert.match(edge, /path==='\/v1\/device\/guardian-enrollment\/ticket'/);
+  assert.match(edge, /path==='\/v1\/guardian\/enrollment\/redeem'/);
   assert.equal(r83Manifest.live_qualification.completed, false);
   assert.equal(r83Manifest.promotion_authorized, false);
   assert.equal(r83Manifest.authority_effect, false);
+});
+
+
+test('Guardian activation bridge is typed, pathless and explicit-user-only', () => {
+  assert.match(main, /metaengine:client:guardian-status/);
+  assert.match(main, /metaengine:client:activate-guardian/);
+  assert.match(main, /connection\?\.admin_ready !== true \|\| connection\?\.access_tier !== 'ADMIN'/);
+  assert.match(main, /openPath: \(fixedExecutable\) => shell\.openPath\(fixedExecutable\)/);
+  assert.match(preload, /guardianStatus: clientGuardianStatus/);
+  assert.match(preload, /activateGuardian: activateClientGuardian/);
+  assert.match(preload, /guardian_activation_requires_explicit_user_action: true/);
+  assert.match(preload, /guardian_activation_accepts_caller_path: false/);
+  assert.match(preload, /guardian_activation_accepts_caller_arguments: false/);
+  assert.doesNotMatch(preload, /activateGuardian:\s*\([^)]/);
 });

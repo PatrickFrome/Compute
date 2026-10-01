@@ -1,13 +1,13 @@
 {
   "schema": "metaengine.r83.edge-canary-qualification.v1",
-  "captured_at": "2026-09-30",
+  "captured_at": "2026-10-01",
   "project_ref": "jhriwwsryeqsvvvufkok",
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 25,
-    "ezbr_sha256": "bfab94d1acb6a55ef5e2c55bbfa561dfce94c8f4aaadc56064b556b91475c4fb",
-    "source_pin": "9b935a3dbd2c2722c0ff72a624d98b1c3a5542de"
+    "deployed_version": 26,
+    "ezbr_sha256": "878bb81e59109e93aa49492655c6d856668495c9e85d21c323978b59d9b46eb1",
+    "source_pin": "5aaae3e6696eeee07c09a65ff467857aab67732b"
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",

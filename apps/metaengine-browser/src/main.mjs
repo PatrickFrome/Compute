@@ -1,4 +1,4 @@
-import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, utilityProcess } from 'electron';
+import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
 import { AGENT_PLATFORM_HOME_URL, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -61,6 +61,7 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { ClientGoalJournal } from './client-goal-journal.mjs';
+import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -91,6 +92,8 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+let supervisorIdentity = null;
+let guardianBootstrapLauncher = null;
 let clientGoalJournal = null;
 
 function canonicalTabRuntimeIdentity(tabId) {
@@ -1796,9 +1799,33 @@ function rsiOutcomeAttributionForCommand(command) {
   });
 }
 
+function ensureSupervisorIdentity() {
+  if (!supervisorIdentity) {
+    supervisorIdentity = new SupervisorDeviceIdentity({
+      statePath: supervisorIdentityPath(),
+      secureStorage: safeStorage,
+    });
+  }
+  return supervisorIdentity;
+}
+
+function ensureGuardianBootstrapLauncher() {
+  if (!guardianBootstrapLauncher) {
+    guardianBootstrapLauncher = createBrowserGuardianMachineBootstrapLauncher({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      version: app.getVersion(),
+      identity: ensureSupervisorIdentity(),
+      openPath: (fixedExecutable) => shell.openPath(fixedExecutable),
+    });
+  }
+  return guardianBootstrapLauncher;
+}
+
 async function initNativeSupervisor() {
   if (!nativeSupervisor) {
-    const identity = new SupervisorDeviceIdentity({ statePath: supervisorIdentityPath(), secureStorage: safeStorage });
+    const identity = ensureSupervisorIdentity();
     const observeLocalTarget = createFleetTargetLocalObserver({
       lookupView: (tabId) => views.get(String(tabId)) || null,
     });
@@ -2350,6 +2377,31 @@ ipcMain.handle('metaengine:client:connection-status', async (event) => {
     legacy_daemon_feed_is_authority: false,
     authority_effect: false,
   });
+});
+ipcMain.handle('metaengine:client:guardian-status', async (event) => {
+  assertShellSender(event);
+  return ensureGuardianBootstrapLauncher().status();
+});
+ipcMain.handle('metaengine:client:activate-guardian', async (event) => {
+  assertShellSender(event);
+  const connection = nativeSupervisor?.connectionStatus?.() || null;
+  if (connection?.admin_ready !== true || connection?.access_tier !== 'ADMIN') {
+    return Object.freeze({
+      schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
+      state: 'HOLD',
+      reason: 'ADMIN_CONNECTION_REQUIRED',
+      ready: false,
+      explicit_user_action_required: true,
+      uac_consent_required: false,
+      fixed_packaged_bootstrap: true,
+      caller_supplied_path_used: false,
+      caller_supplied_arguments_used: false,
+      arbitrary_shell_used: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+  return ensureGuardianBootstrapLauncher().activate();
 });
 ipcMain.handle('metaengine:client:work-readiness', async (event) => {
   assertShellSender(event);

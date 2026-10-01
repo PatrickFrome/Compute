@@ -29,7 +29,11 @@ test('R83 v14 canary binding is exact and cannot silently authorize promotion', 
   const value = await binding();
   assert.equal(value.schema, 'metaengine.r83.edge-canary-source-binding.v1');
   assert.equal(value.candidate.slug, 'a2-browser-native-supervisor-v14-canary');
-  assert.equal(value.candidate.observed_function_version, 1);
+  const manifest = JSON.parse(await fs.readFile(path.join(REPO_ROOT, 'coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json'), 'utf8'));
+  assert.equal(value.candidate.observed_function_version, manifest.candidate.deployed_version);
+  assert.equal(value.candidate.source_commit, manifest.candidate.source_pin);
+  assert.equal(value.candidate.observed_ezbr_sha256, manifest.candidate.ezbr_sha256);
+  assert.ok(Number.isSafeInteger(value.candidate.observed_function_version) && value.candidate.observed_function_version > 0);
   assert.match(value.candidate.observed_ezbr_sha256, /^[a-f0-9]{64}$/);
   assert.match(value.candidate.source_commit, /^[a-f0-9]{40}$/);
   assert.equal(value.candidate.source_binding, 'PINNED_RAW_GITHUB_IMPORT_CLOSURE');
@@ -42,7 +46,9 @@ test('R83 v14 canary binding is exact and cannot silently authorize promotion', 
 
 test('R83 deployed v14 binding classifies source drift as requalification-required without rewriting evidence', async () => {
   const value = await binding();
-  assert.equal(value.candidate.imports.length, 10);
+  const source = await fs.readFile(path.join(APP_ROOT, 'supabase/a2-browser-native-supervisor-v1/index.ts'), 'utf8');
+  const imports = [...source.matchAll(/from '\.\/([^']+)'/g)].map(m => 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/' + m[1]);
+  assert.deepEqual(value.candidate.imports.map(row => row.path).sort(), imports.sort(), 'all deployed local import edges must be bound');
 
   const seen = new Set();
   const drift = [];

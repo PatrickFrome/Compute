@@ -79,8 +79,8 @@ function intake() {
 function createHarness({ dispatch, observe, resolvedRelease = release(), intakeResult = intake() } = {}) {
   const calls = [];
   const actuator = {
-    probeOwner: async (input) => {
-      calls.push(['probeOwner', structuredClone(input)]);
+    ensureOwnerBound: async (input) => {
+      calls.push(['ensureOwnerBound', structuredClone(input)]);
       return ownerProbe();
     },
     dispatch: async (input) => {
@@ -140,7 +140,7 @@ test('native emergency controller binds command id to one Guardian effect and co
   assert.equal(result.electron_updater_fallback_used, false);
 
   assert.deepEqual(calls.map(([name]) => name), [
-    'probeOwner',
+    'ensureOwnerBound',
     'releaseResolver',
     'intakeStager',
     'dispatch',
@@ -155,6 +155,38 @@ test('native emergency controller binds command id to one Guardian effect and co
   assert.deepEqual(observe, dispatch);
 });
 
+test('ambiguous owner enrollment blocks release discovery and installer dispatch', async () => {
+  const calls = [];
+  const ambiguousError = new Error('ticket_pipe_lost_after_write');
+  ambiguousError.code = 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS';
+  const actuator = {
+    ensureOwnerBound: async () => {
+      calls.push(['ensureOwnerBound']);
+      throw ambiguousError;
+    },
+    dispatch: async () => { calls.push(['dispatch']); throw new Error('must_not_dispatch'); },
+    observe: async () => { calls.push(['observe']); throw new Error('must_not_observe'); },
+  };
+  const controller = createNativeGuardianDeveloperEmergencyUpdateController({
+    identity: {},
+    currentVersion: '0.7.0-dev.2.1',
+    platform: 'win32',
+    actuator,
+    releaseResolver: async () => { calls.push(['releaseResolver']); return release(); },
+    intakeStager: async () => { calls.push(['intakeStager']); return intake(); },
+  });
+
+  const result = await controller(command(CANDIDATE_SHA));
+  assert.equal(result.state, 'AMBIGUOUS');
+  assert.equal(result.reason, 'GUARDIAN_OWNER_ENROLLMENT_RESULT_UNKNOWN');
+  assert.equal(result.effect_outcome, 'AMBIGUOUS');
+  assert.equal(result.owner_enrollment_effect_ambiguous, true);
+  assert.equal(result.physical_dispatch_count, 0);
+  assert.equal(result.physical_dispatch_upper_bound, 0);
+  assert.equal(result.installer_dispatch_attempted, false);
+  assert.deepEqual(calls.map(([name]) => name), ['ensureOwnerBound']);
+});
+
 test('expected git sha mismatch proves zero effect before intake or native dispatch', async () => {
   const { controller, calls } = createHarness();
   const result = await controller(command('a'.repeat(40)));
@@ -164,7 +196,7 @@ test('expected git sha mismatch proves zero effect before intake or native dispa
   assert.equal(result.physical_dispatch_count, 0);
   assert.equal(result.reason, 'VERIFIED_IMMUTABLE_RELEASE_REQUIRED');
   assert.match(String(result.error || ''), /emergency_expected_git_sha_mismatch/);
-  assert.deepEqual(calls.map(([name]) => name), ['probeOwner', 'releaseResolver']);
+  assert.deepEqual(calls.map(([name]) => name), ['ensureOwnerBound', 'releaseResolver']);
 });
 
 test('ambiguous native dispatch is never observed or retried by the controller', async () => {
@@ -248,6 +280,10 @@ test('native emergency controller contract forbids retry, arbitrary execution an
   const contract = nativeGuardianDeveloperEmergencyUpdateContract();
   assert.equal(contract.command_id_is_native_effect_id, true);
   assert.equal(contract.native_write_ahead_effect_barrier_required, true);
+  assert.equal(contract.read_only_owner_probe_precedes_enrollment, true);
+  assert.equal(contract.first_owner_binding_requires_single_use_admin_ticket, true);
+  assert.equal(contract.owner_enrollment_ambiguity_blocks_installer_dispatch, true);
+  assert.equal(contract.owner_enrollment_automatic_retry_allowed, false);
   assert.equal(contract.caller_supplied_path_allowed, false);
   assert.equal(contract.caller_supplied_url_allowed, false);
   assert.equal(contract.caller_supplied_shell_allowed, false);

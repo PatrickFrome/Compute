@@ -11,8 +11,10 @@ $serviceSource = Join-Path $sourceDir 'browser-guardian-scm-service.cpp'
 $actuatorSource = Join-Path $sourceDir 'browser-guardian-update-actuator.cpp'
 $ownerObserverSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-observer.cpp'
 $ownerStoreSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-store.cpp'
+$ownerReconcilerSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-reconciler.cpp'
+$ticketClientSource = Join-Path $sourceDir 'browser-guardian-enrollment-ticket-client.cpp'
 $configuratorSource = Join-Path $sourceDir 'browser-guardian-scm-configure.cpp'
-foreach ($path in @($serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$configuratorSource)) {
+foreach ($path in @($serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$configuratorSource)) {
   if (-not (Test-Path $path -PathType Leaf)) { throw "guardian_native_source_missing:$path" }
 }
 
@@ -29,10 +31,10 @@ New-Item -ItemType Directory -Path $resolvedOut -Force | Out-Null
 
 $service = Join-Path $resolvedOut 'METAENGINEBrowserGuardian.exe'
 $configurator = Join-Path $resolvedOut 'METAENGINEBrowserGuardianConfigure.exe'
-$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib' -f $vcvars,$serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$service
+$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" /Fe:"{7}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib' -f $vcvars,$serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service
 & $env:ComSpec /d /s /c $serviceCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
-$configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
+$configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
 & $env:ComSpec /d /s /c $configCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_configurator_compile_exit_$LASTEXITCODE" }
 
@@ -42,6 +44,11 @@ $actuatorContract = $actuatorContractRaw | ConvertFrom-Json
 if ($actuatorContract.schema -ne 'metaengine.browser-guardian.update-actuator.v1' `
     -or $actuatorContract.native_write_ahead_effect_barrier -ne $true `
     -or $actuatorContract.at_most_one_dispatch_per_effect_id -ne $true `
+    -or $actuatorContract.first_binding_requires_server_admin_ticket -ne $true `
+    -or $actuatorContract.ticket_single_use_server_revalidation_required -ne $true `
+    -or $actuatorContract.owner_sid_from_impersonated_token_only -ne $true `
+    -or $actuatorContract.owner_enrollment_create_if_absent_cas -ne $true `
+    -or $actuatorContract.owner_enrollment_ambiguous_retry_allowed -ne $false `
     -or $actuatorContract.caller_supplied_path_allowed -ne $false `
     -or $actuatorContract.caller_supplied_url_allowed -ne $false `
     -or $actuatorContract.caller_supplied_shell_allowed -ne $false `
@@ -100,6 +107,11 @@ $manifest = [ordered]@{
   update_actuator_native_write_ahead_effect_barrier = $true
   update_actuator_at_most_one_dispatch_per_effect_id = $true
   update_actuator_enrolled_device_challenge_required = $true
+  update_actuator_first_binding_requires_server_admin_ticket = $true
+  update_actuator_ticket_single_use_server_revalidation_required = $true
+  update_actuator_owner_sid_from_impersonated_token_only = $true
+  update_actuator_owner_enrollment_create_if_absent_cas = $true
+  update_actuator_owner_enrollment_ambiguous_retry_allowed = $false
   update_actuator_caller_supplied_path_allowed = $false
   update_actuator_caller_supplied_url_allowed = $false
   update_actuator_caller_supplied_shell_allowed = $false
