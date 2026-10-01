@@ -7,12 +7,13 @@ const source = read('native/browser-guardian-scm/browser-guardian-machine-bootst
 const build = read('scripts/build-guardian-machine-bootstrap.ps1');
 const producer = read('../../.github/workflows/browser-windows-package-smoke.yml');
 
-test('machine bootstrap has only an explicit privileged embedded-asset install boundary', () => {
+test('machine bootstrap has only explicit no-arg UAC or --install embedded-asset boundaries', () => {
   assert.match(build, /requireAdministrator/);
   assert.match(build, /\/MT/);
   assert.match(build, /201 RCDATA/);
   assert.match(build, /202 RCDATA/);
   assert.match(build, /203 RCDATA/);
+  assert.match(source, /if \(argc == 1\) return installEmbedded\(\)/);
   assert.match(source, /argc == 2[^\n]+L"--install"/);
   assert.match(source, /CheckTokenMembership/);
   assert.doesNotMatch(source, /ShellExecute|CreateProcess|WinHttp|URLDownload|std::system|\bargv\[2\]/);
