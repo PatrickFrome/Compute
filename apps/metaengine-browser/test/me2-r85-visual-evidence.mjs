@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeShellLayoutState, planShellLayout } from '../src/shell-layout.mjs';
+import { projectClientWorkReadiness } from '../src/client-work-readiness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -32,6 +33,30 @@ const blockedRemoteBrowserPorts = new Set();
 let geometryFixture = null;
 let rejectNextAgentSelection = false;
 let goalSubmitCount = 0;
+let runtimeFixtureMode = 'RECOVERY';
+
+// Controlled presentation fixtures, never a claim of live Agent execution.
+function fixtureWorkReadiness() {
+  if (runtimeFixtureMode === 'UNAVAILABLE') throw new Error('visual_native_readback_unavailable');
+  const paused = runtimeFixtureMode === 'PAUSED';
+  return projectClientWorkReadiness({
+    connection: { local_runtime_ready: true, admin_ready: true, cloud_control_state: 'CONNECTED' },
+    snapshot: {
+      last_heartbeat_at: new Date().toISOString(),
+      continuous_service: { runtime_control: { state: paused ? 'CLOSED' : 'OPEN', authoritative: true,
+        generation_floor: 28, refill_enabled: !paused, supervisor_admission_enabled: !paused,
+        continuous_service_allowed: !paused, authority_effect: false } },
+      lifecycle: { keepalive: { state: runtimeFixtureMode === 'RECOVERY' ? 'ROLLOVER_AMBIGUOUS' : 'WAITING',
+        admission_state: 'OPEN', admission_generation_floor: 28, cycle_seq: 2109,
+        tab_id: 'tab_supervisor_visual', conversation_url: 'https://chat.z.ai/c/visual-fixture' } },
+    },
+    fleet: { counts: { ACTIVE: 1, BOUND_UNVERIFIED: 0 }, agents: [{ lifecycle_state: 'ACTIVE',
+      tab_id: 'tab_planner_visual', target_id: 'target_planner_visual', generation_epoch: 28,
+      transport_proof: { tab_id: 'tab_planner_visual', target_id: 'target_planner_visual', generation_epoch: 28,
+        agent_surface_sha256: 'a'.repeat(64), conversation_url_sha256: 'b'.repeat(64) } }] },
+    isCurrentBinding: () => true,
+  });
+}
 
 function installRemoteBrowserTransportFence() {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
@@ -128,6 +153,12 @@ function registerPresentationIpc() {
   let overlay = false;
   let selectedActor = 'supervisor:sup_visual';
   let latestGoal = null;
+
+  ipcMain.handle('metaengine:client:connection-status', () => Object.freeze({
+    schema: 'metaengine.client.connection-status.v1', local_runtime_ready: true,
+    admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
+  }));
+  ipcMain.handle('metaengine:client:work-readiness', () => fixtureWorkReadiness());
 
   ipcMain.handle('metaengine:shell:primary-page', (_event, rawPage) => {
     page = String(rawPage || 'browser');
@@ -318,6 +349,11 @@ async function metrics(contents) {
       settings_area_count: document.querySelectorAll('[data-testid="settings-areas"] [role="tab"]').length,
       settings_route_count: document.querySelectorAll('[data-testid^="settings-open-"]').length,
       task_details: document.querySelector('[data-testid="client-goal-status-dialog"]')?.textContent || null,
+      native_work_readiness: document.querySelector('[data-testid="native-work-readiness"]')?.textContent || null,
+      work_badge: (() => { const badge = document.querySelector('[data-testid="admin-connection-badge"]');
+        return badge ? { text: badge.textContent, admin_ready: badge.getAttribute('data-admin-ready'),
+          state: badge.getAttribute('data-work-state'), reason: badge.getAttribute('data-work-reason') } : null; })(),
+      legacy_runtime_panels_present: Boolean(document.querySelector('#sys-mech, #sys-contract, [data-testid="me-matrix"]')),
       horizontal_overflow: document.documentElement.scrollWidth > innerWidth,
       body_background: getComputedStyle(document.body).backgroundColor,
     };
@@ -433,10 +469,22 @@ async function main() {
 
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=primary-chat-fleet]')");
     await waitFor(shellView.webContents, "document.querySelectorAll('[data-testid=chat-agent-row]').length === 2");
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-admin-ready') === 'true' && document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-reason') === 'SUPERVISOR_RECOVERY_REQUIRED'");
     const mainCapture = await capture(shellView, 'r97-chat-fleet-main-1440x960');
     assertMain(mainCapture);
+    if (mainCapture.metrics.work_badge?.state !== 'BLOCKED' || mainCapture.metrics.work_badge?.text !== 'Recovery required') throw new Error('ui1_admin_connection_masquerades_as_execution_ready');
     evidence.captures.push(mainCapture);
     evidence.exact_main_workspace = true;
+    evidence.connected_not_ready_verified = true;
+    evidence.readiness_subject = { kind: 'CONTROLLED_NATIVE_IPC_FIXTURE', live_agent_execution: false };
+
+    markPhase('POSITIVE_READINESS_READBACK');
+    runtimeFixtureMode = 'READY';
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'READY'");
+    const readyCapture = await capture(shellView, 'ui1-readiness-ready-1440x960');
+    if (readyCapture.metrics.work_badge?.text !== 'Ready for work') throw new Error('ui1_positive_readiness_label_missing');
+    evidence.captures.push(readyCapture);
+    evidence.positive_readiness_verified = true;
 
     markPhase('NATIVE_COMPOSER_GEOMETRY');
     geometryFixture = new WebContentsView({ webPreferences:{ nodeIntegration:false, contextIsolation:true, sandbox:true } });
@@ -527,9 +575,21 @@ async function main() {
 
     markPhase('SETTINGS_OFFLINE_READBACK');
     await shellView.webContents.executeJavaScript(`document.getElementById('settings-tab-runtime')?.click(); true`);
-    await waitFor(shellView.webContents, "document.body.textContent.includes('Some runtime data is unavailable')");
-    evidence.captures.push(await capture(shellView, 'ui1-settings-runtime-unavailable-1440x960'));
+    runtimeFixtureMode = 'PAUSED';
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'PAUSED' && document.querySelector('[data-testid=native-work-readiness]')?.textContent.includes('Execution paused')");
+    const pausedCapture = await capture(shellView, 'ui1-settings-runtime-paused-1440x960');
+    if (!pausedCapture.metrics.native_work_readiness?.includes('Connected') || pausedCapture.metrics.legacy_runtime_panels_present) throw new Error('ui1_native_runtime_owner_not_distinct');
+    evidence.captures.push(pausedCapture);
+    evidence.paused_readiness_verified = true;
+    runtimeFixtureMode = 'UNAVAILABLE';
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'UNAVAILABLE' && document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-admin-ready') === 'false' && document.querySelector('[data-testid=native-work-readiness]')?.textContent.includes('Status unavailable')");
+    const unavailableCapture = await capture(shellView, 'ui1-settings-runtime-unavailable-1440x960');
+    if (unavailableCapture.metrics.native_work_readiness?.includes('Ready for work') || unavailableCapture.metrics.native_work_readiness?.includes('profile 28') || unavailableCapture.metrics.legacy_runtime_panels_present) throw new Error('ui1_stale_native_readiness_retained');
+    evidence.captures.push(unavailableCapture);
+    evidence.stale_readiness_cleared = true;
     evidence.settings_loading_bounded = true;
+    runtimeFixtureMode = 'RECOVERY';
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-reason') === 'SUPERVISOR_RECOVERY_REQUIRED'");
 
     markPhase('RETURN_MAIN_AND_OPEN_SEARCH');
     await shellView.webContents.executeJavaScript(

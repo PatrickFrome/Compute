@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.0';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -107,6 +107,7 @@ function freshState() {
     rollover_reason: null,
     rollover_release_at: null,
     rollover_attempt: null,
+    last_rollover_no_effect: null,
     updated_at: null,
     authority_effect: false,
   };
@@ -174,6 +175,9 @@ function sanitize(input) {
     rollover_reason: input.rollover_reason ? String(input.rollover_reason).slice(0, 160) : null,
     rollover_release_at: input.rollover_release_at || null,
     rollover_attempt: input.rollover_attempt && typeof input.rollover_attempt === 'object' ? clone(input.rollover_attempt) : null,
+    last_rollover_no_effect: input.last_rollover_no_effect && typeof input.last_rollover_no_effect === 'object'
+      ? clone(input.last_rollover_no_effect)
+      : null,
     updated_at: input.updated_at || null,
   };
 }
@@ -606,6 +610,65 @@ export class SupervisorKeepalive {
       this.#state.rollover_attempt.ambiguous_reason = String(reason).slice(0, 200);
       this.#state.rollover_attempt.automatic_retry_allowed = false;
     }
+    await this.#persist();
+    return this.snapshot();
+  }
+
+  async settleRolloverNoEffect({
+    reason = 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT',
+    expected_attempt_id = null,
+  } = {}) {
+    if (String(reason) !== 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT') {
+      throw new Error('keepalive_rollover_no_effect_reason_invalid');
+    }
+    if (!['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
+      throw new Error('keepalive_rollover_no_effect_state_invalid');
+    }
+    const attempt = this.#state.rollover_attempt;
+    if (!attempt?.attempt_id) throw new Error('keepalive_rollover_attempt_missing');
+    if (expected_attempt_id != null && String(attempt.attempt_id) !== String(expected_attempt_id)) {
+      throw new Error('keepalive_rollover_attempt_binding_mismatch');
+    }
+    // This settlement is intentionally narrower than generic "pre-effect"
+    // recovery. A bound tab proves the rollover attempt crossed the allocation
+    // barrier, so it must stay on the ambiguity/reconciliation path.
+    if (String(attempt.tab_id || '') !== '') {
+      throw new Error('keepalive_rollover_no_effect_tab_already_bound');
+    }
+    if (this.#state.state === 'ROLLOVER_AMBIGUOUS') {
+      const ambiguousReason = String(attempt.ambiguous_reason || this.#state.rollover_reason || '');
+      if (ambiguousReason !== 'ROLLOVER_ERROR:tab_capacity_exceeded'
+        && ambiguousReason !== 'tab_capacity_exceeded') {
+        throw new Error('keepalive_rollover_no_effect_proof_invalid');
+      }
+    }
+
+    const settledAt = iso(this.#clock);
+    this.#state.last_rollover_no_effect = {
+      attempt_id: String(attempt.attempt_id),
+      reason: 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT',
+      proof: 'TAB_REGISTRY_CAPACITY_GUARD_BEFORE_TAB_ID_ALLOCATION',
+      settled_at: settledAt,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+    this.#state.rollover_attempt = null;
+
+    if (this.#state.admission_state === 'CLOSED') {
+      this.#state.rollover_reason = null;
+      this.#state.rollover_release_at = null;
+      this.#state.parked_at = settledAt;
+      this.#state.parked_reason = String(
+        this.#state.admission_reason || 'CONTINUOUS_SERVICE_ADMISSION_FENCED',
+      ).slice(0, 160);
+      this.#state.state = this.#state.paused ? 'PAUSED' : 'PARKED';
+    } else {
+      // Preserve the already-released rollover intent. The lifecycle's
+      // read-only tab census gates the next attempt until physical headroom
+      // exists, so this is not an automatic physical retry loop.
+      this.#state.state = 'ROLLOVER_REQUIRED';
+    }
+
     await this.#persist();
     return this.snapshot();
   }

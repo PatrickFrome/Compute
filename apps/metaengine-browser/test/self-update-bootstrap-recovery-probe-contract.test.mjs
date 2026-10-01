@@ -10,10 +10,16 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(here, '../scripts/self-update-bootstrap-recovery-probe.ps1');
-// GitHub-hosted Windows runners can occasionally spend more than 15 s in cold
-// PowerShell startup. Keep the probe strictly bounded without coupling this
-// read-only evidence contract to transient runner startup latency.
-const WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS = 45_000;
+// The probe hashes only tiny local fixtures in this contract. Observed >45 s
+// failures therefore come from cold powershell.exe / endpoint-security startup,
+// not from the read/hash workload itself. Keep a hard finite bound while giving
+// hosted Windows enough startup headroom; assertions below remain unchanged.
+const WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS = 120_000;
+assert.ok(
+  WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS >= 60_000
+    && WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS <= 120_000,
+  'bootstrap recovery probe timeout must stay bounded to <=120s',
+);
 
 function digest(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');

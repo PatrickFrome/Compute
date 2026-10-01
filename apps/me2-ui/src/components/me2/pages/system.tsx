@@ -6,12 +6,13 @@
 // напрямую в daemon (POST /tokens) и не логируется.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileJson, GitMerge, KeyRound, ListChecks, RefreshCw, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { GitMerge, KeyRound, RefreshCw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { sendCommand, me2Fetch, hhmmss } from "@/lib/me2-bus";
 import { PageHeader, Sec, Chip, StateBadge, type SysState } from "@/components/me2/ui/primitives";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
+import { useClientRuntimeStatus, refreshClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type TokensT = {
@@ -37,26 +38,8 @@ type SuT = {
   check: { ok: boolean; verdict: string; local_head: string | null; remote_head: string | null; behind: number | null; ahead: number | null; dirty_files: number; version: string; error?: string };
   journal: Array<{ id: number; op: string; result: string; detail: string | null; at: number }>;
 };
-type MechT = {
-  ok: boolean; verdict: string; version: string;
-  mechanics: Array<{ id: string; name: string; verdict: string; evidence: string; cursor_ref?: string; parity?: string }>;
-  gaps: Array<{ id: string; title: string; status: string; closure: string }>;
-};
-type StateT = {
-  ok: boolean; ts: string;
-  meta: { version: string; boot: string };
-  contract?: string;
-  capabilities?: {
-    ops: string[]; transport: Record<string, unknown>;
-    rest: { read: string[]; write: string[] };
-    memory?: unknown; ui?: string;
-    compat: Record<string, unknown>;
-  };
-};
-
 const suState = (v: string): SysState =>
   v === "UP_TO_DATE" ? "Completed" : v === "DIVERGED" ? "Failed" : "Degraded";
-const mechState = (v: string): SysState => (v === "WORKS" ? "Completed" : v === "CAVEAT" ? "Degraded" : "Failed");
 const SHORT7 = (h: string | null) => (h ? h.slice(0, 7) : "—");
 
 const ADVANCED_SURFACES: ReadonlyArray<{ page: PageKey; label: string; description: string }> = [
@@ -75,6 +58,8 @@ const SETTINGS_AREAS = [
 type SettingsArea = typeof SETTINGS_AREAS[number]["id"];
 
 export function SystemPage() {
+  const nativeRuntime = useClientRuntimeStatus();
+  const workReadiness = nativeRuntime.readback?.work;
   const { toast } = useToast();
   const setDialog = useMe2((s) => s.setDialog);
   const setPage = useMe2((s) => s.setPage);
@@ -94,8 +79,6 @@ export function SystemPage() {
   const [policy, setPolicy] = useState<PolicyT | null>(null);
   const [su, setSu] = useState<SuT | null>(null);
   const [suBusy, setSuBusy] = useState(false);
-  const [mech, setMech] = useState<MechT | null>(null);
-  const [stateData, setStateData] = useState<StateT | null>(null);
 
   // ── загрузчики ──
   const loadTokens = useCallback(async () => {
@@ -107,33 +90,25 @@ export function SystemPage() {
   const loadSu = useCallback(async () => {
     const r = await me2Fetch<SuT>("/selfupdate?XTransformPort=3041"); setSu(r?.ok ? r : null); return r?.ok === true;
   }, []);
-  const loadMech = useCallback(async () => {
-    const r = await me2Fetch<MechT>("/mechanics?XTransformPort=3041"); setMech(r?.ok ? r : null); return r?.ok === true;
-  }, []);
-  const loadContract = useCallback(async () => {
-    const r = await me2Fetch<StateT>("/state?XTransformPort=3041"); setStateData(r?.ok ? r : null); return r?.ok === true;
-  }, []);
-
   // Hidden areas neither mount their controls nor poll their resources.
   const loadCurrent = useCallback(async () => {
     if (readsInFlight.current.has(area)) return;
     readsInFlight.current.add(area);
     setLoadState("LOADING");
     try {
-      const loaders = area === "runtime" ? [loadMech, loadContract]
-        : area === "access" ? [loadTokens] : area === "policy" ? [loadPolicy]
+      const loaders = area === "access" ? [loadTokens] : area === "policy" ? [loadPolicy]
         : area === "recovery" ? [loadSu] : [];
       const results = await Promise.all(loaders.map((load) => load()));
       if (activeArea.current === area) setLoadState(results.every(Boolean) ? "LIVE" : "UNAVAILABLE");
     } catch {
       if (activeArea.current === area) setLoadState("UNAVAILABLE");
     } finally { readsInFlight.current.delete(area); }
-  }, [area, loadMech, loadPolicy, loadContract, loadSu, loadTokens]);
+  }, [area, loadPolicy, loadSu, loadTokens]);
   useEffect(() => {
     let current = true;
     const load = () => { if (current && document.visibilityState === "visible") void loadCurrent(); };
     load();
-    const timer = area === "tools" ? null : window.setInterval(load, 60_000);
+    const timer = area === "tools" || area === "runtime" ? null : window.setInterval(load, 60_000);
     return () => { current = false; if (timer !== null) window.clearInterval(timer); };
   }, [area, loadCurrent]);
 
@@ -207,20 +182,6 @@ export function SystemPage() {
     await sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" });
   }, []);
 
-  // контракт → монокроп JSON
-  const caps = stateData?.capabilities;
-  const contractJson = caps ? JSON.stringify({
-    contract: stateData?.contract ?? "—",
-    daemon_version: stateData?.meta.version ?? "—",
-    boot: stateData?.meta.boot ?? "—",
-    ops: { count: caps.ops.length, list: caps.ops },
-    transport: caps.transport,
-    rest: { read_count: caps.rest.read.length, write_count: caps.rest.write.length },
-    memory: caps.memory ?? "—",
-    ui: caps.ui ?? "—",
-    compat: caps.compat,
-  }, null, 1) : null;
-
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-system" data-panel-system>
       <PageHeader title="Settings" sub="Tools and client configuration" />
@@ -260,9 +221,9 @@ export function SystemPage() {
           ))}
         </div>
       </div> : null}
-      {area !== "tools" ? <div className="mx-auto mb-3 flex max-w-[960px] items-center justify-between gap-3 text-[12px]" role="status">
+      {area !== "tools" && area !== "runtime" ? <div className="mx-auto mb-3 flex max-w-[960px] items-center justify-between gap-3 text-[12px]" role="status">
         <span className={loadState === "UNAVAILABLE" ? "text-amber-300" : "text-zinc-400"}>
-          {loadState === "LOADING" ? "Reading runtime data…" : loadState === "UNAVAILABLE" ? "Some runtime data is unavailable. Check the daemon connection, then refresh." : "Runtime data received"}
+          {loadState === "LOADING" ? "Reading diagnostic data…" : loadState === "UNAVAILABLE" ? "Compatibility diagnostics are unavailable. Native execution status is shown separately." : "Diagnostic data received"}
         </span><button type="button" onClick={() => void loadCurrent()} className="h-8 shrink-0 border border-zinc-700 px-3 text-zinc-200">Refresh</button>
       </div> : null}
       <div className="mx-auto flex max-w-[960px] flex-col gap-3">
@@ -432,63 +393,22 @@ export function SystemPage() {
         {/* ── КОЛОНКА 2 ── */}
         <div className="flex min-w-0 flex-col gap-2">
           {/* ME-МАТРИЦА */}
-          {area === "runtime" ? <Sec id="sys-mech" title="Mechanics health" icon={ListChecks} tone="emerald"
-            right={mech ? (
-              <span className={`font-mono text-[9px] ${mech.mechanics.every((m) => m.verdict === "WORKS") ? "text-emerald-400" : "text-amber-400"}`}
-                title="живые пробы механик · порт M1–M18">{mech.verdict}</span>
-            ) : undefined}
-          >
-            <div className="space-y-1.5" data-testid="me-matrix">
-              <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 mc-scroll" role="list" aria-label="Реестр механик ME1–ME30">
-                {(mech?.mechanics ?? []).map((m) => (
-                  <div key={m.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]"
-                    title={`${m.name} — ${m.evidence}${m.cursor_ref ? ` · Cursor: ${m.cursor_ref}` : ""}`}>
-                    <span className="w-9 shrink-0 font-semibold text-zinc-400">{m.id}</span>
-                    <span className="min-w-0 flex-1 truncate text-zinc-500">{m.name}</span>
-                    {m.parity && (
-                      <span className={`hidden shrink-0 rounded px-1 py-px text-[8px] font-semibold uppercase tracking-wide sm:inline ${m.parity === "PARITY" ? "bg-emerald-500/15 text-emerald-400" : m.parity === "PARTIAL" ? "bg-amber-500/15 text-amber-400" : m.parity === "MISSING" ? "bg-rose-500/15 text-rose-400" : m.parity === "SUPERIOR" ? "bg-cyan-500/15 text-cyan-300" : "bg-zinc-500/15 text-zinc-500"}`}
-                        title={`Cursor: ${m.cursor_ref ?? "—"} · перенос из корпуса R61`}>{m.parity}</span>
-                    )}
-                    <StateBadge state={mechState(m.verdict)} size="xs" />
-                  </div>
-                ))}
-                {!mech && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">Mechanics data is not available.</div>}
-              </div>
-              {(mech?.gaps ?? []).length > 0 && (
-                <div className="space-y-0.5">
-                  {mech!.gaps.map((g) => (
-                    <p key={g.id} className="truncate rounded border border-amber-900/40 bg-amber-950/20 px-1.5 py-0.5 font-mono text-[9px] text-amber-300/90"
-                      title={`${g.title} · ${g.status} — ${g.closure}`}>
-                      gap {g.id}: {g.title} · {g.status}
-                    </p>
-                  ))}
-                </div>
-              )}
+          {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="native-work-readiness" aria-labelledby="native-work-readiness-title">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="native-work-readiness-title" className="text-[13px] font-medium text-zinc-200">Execution readiness</h2>
+              <button type="button" onClick={() => void refreshClientRuntimeStatus()} className="h-7 border border-zinc-700 px-2 text-[12px] text-zinc-300">Refresh status</button>
             </div>
-          </Sec> : null}
-
-          {/* CONTRACT·CAPABILITIES */}
-          {area === "runtime" ? <Sec id="sys-contract" title="Runtime capabilities" icon={FileJson} tone="cyan" defaultOpen={false}
-            right={stateData ? <Chip label="daemon" value={stateData.meta.version} title={`boot ${hhmmss(stateData.meta.boot)}`} /> : undefined}
-          >
-            <div className="space-y-1.5">
-              {contractJson ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
-                    <Chip label="ops" value={caps!.ops.length} title={`каталог ops: ${caps!.ops.join(", ")}`} />
-                    <Chip label="rest.read" value={caps!.rest.read.length} />
-                    <Chip label="rest.write" value={caps!.rest.write.length} />
-                    <Chip label="transport" value={String((caps!.transport as { socket?: string })?.socket ?? "—")} title="agentchat: мутации только через socket ack" />
-                    <Chip label="ui" value={typeof caps!.ui === "string" ? caps!.ui : "—"} />
-                  </div>
-                  <pre className="max-h-64 overflow-auto rounded bg-zinc-950/80 p-2 font-mono text-[9px] leading-relaxed text-zinc-400 mc-scroll">{contractJson}</pre>
-                </>
-              ) : (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">Runtime capabilities are not available.</div>
-              )}
-            </div>
-          </Sec> : null}
-
+            <p role="status" className={`mt-2 text-[13px] ${workReadiness?.execution_ready === true ? "text-emerald-300" : "text-amber-200"}`}>
+              {workReadiness?.label || "Status unavailable"}
+            </p>
+            <p className="mt-1 text-[12px] text-zinc-400">{workReadiness?.detail || "Waiting for a current readback from the Native Supervisor."}</p>
+            <dl className="mt-3 grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 text-[12px]">
+              <dt className="text-zinc-500">Admin connection</dt><dd>{nativeRuntime.readback?.connection.admin_ready === true ? "Connected" : "Unavailable"}</dd>
+              <dt className="text-zinc-500">Supervisor</dt><dd>{workReadiness?.supervisor_state || "Unavailable"}</dd>
+              <dt className="text-zinc-500">Verified agents</dt><dd>{workReadiness?.proven_agent_count ?? "Unavailable"}</dd>
+              <dt className="text-zinc-500">Generation</dt><dd>{workReadiness ? `${workReadiness.generation_floor ?? "?"} / profile ${workReadiness.local_generation_floor ?? "?"}` : "Unavailable"}</dd>
+            </dl>
+          </section> : null}
           {/* ОПАСНАЯ ЗОНА */}
           {area === "recovery" ? <Sec id="sys-danger" title="Recovery actions" icon={TriangleAlert} tone="rose" defaultOpen={false}>
             <div className="space-y-1.5 rounded-md border border-rose-900/50 bg-rose-950/20 p-2" data-testid="danger-zone">

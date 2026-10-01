@@ -1306,6 +1306,45 @@ export class SupervisorLifecycleRuntime {
     return true;
   }
 
+  async #settleProvenNoEffectRollover() {
+    const snapshot = this.#keepalive.snapshot();
+    const attempt = snapshot?.rollover_attempt;
+    if (snapshot?.state !== 'ROLLOVER_AMBIGUOUS' || !attempt?.attempt_id) return false;
+    if (String(attempt.tab_id || '') !== '') return false;
+    const reason = String(attempt.ambiguous_reason || snapshot.rollover_reason || '');
+    if (reason !== 'ROLLOVER_ERROR:tab_capacity_exceeded'
+      && reason !== 'tab_capacity_exceeded') return false;
+
+    await this.#keepalive.settleRolloverNoEffect({
+      reason: 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT',
+      expected_attempt_id: attempt.attempt_id,
+    });
+    this.#rolloverNoProgressCycles = 0;
+    this.#lastRecovery = {
+      action: 'ROLLOVER_CAPACITY_PRE_EFFECT_SETTLED',
+      rollover_attempt_id: String(attempt.attempt_id),
+      proof: 'TAB_REGISTRY_CAPACITY_GUARD_BEFORE_TAB_ID_ALLOCATION',
+      confirmed: true,
+      ambiguous: false,
+      automatic_retry_allowed: false,
+      at: new Date().toISOString(),
+      authority_effect: false,
+    };
+    return true;
+  }
+
+  #rolloverCapacityBlocked(state) {
+    const census = state?.tab_census;
+    if (!census || census.schema !== 'metaengine.browser.tab-census.v1') return false;
+    const total = Number(census.total_tabs);
+    const max = Number(census.max_tabs);
+    return census.total_at_wall === true
+      && Number.isSafeInteger(total)
+      && Number.isSafeInteger(max)
+      && max > 0
+      && total >= max;
+  }
+
   async #rollover() {
     if (this.#canActuate() !== true) return false;
     const before = this.#keepalive.snapshot();
@@ -1347,9 +1386,34 @@ export class SupervisorLifecycleRuntime {
       await this.#keepalive.markRolloverAmbiguous('ROLLOVER_WITHOUT_POSITIVE_READBACK');
       await this.#markRolloverTabLeaked(tab.tab_id);
     } catch (e) {
-      if (attempt) await this.#keepalive.markRolloverAmbiguous(`ROLLOVER_ERROR:${String(e?.message || e)}`).catch(() => {});
+      const message = String(e?.message || e);
+      const durableAttempt = this.#keepalive.snapshot()?.rollover_attempt;
+      if (attempt
+        && !tab?.tab_id
+        && !durableAttempt?.tab_id
+        && message === 'tab_capacity_exceeded') {
+        try {
+          await this.#keepalive.settleRolloverNoEffect({
+            reason: 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT',
+            expected_attempt_id: attempt.attempt_id,
+          });
+          this.#lastRecovery = {
+            action: 'ROLLOVER_CAPACITY_PRE_EFFECT_SETTLED',
+            rollover_attempt_id: String(attempt.attempt_id),
+            proof: 'TAB_REGISTRY_CAPACITY_GUARD_BEFORE_TAB_ID_ALLOCATION',
+            confirmed: true,
+            ambiguous: false,
+            automatic_retry_allowed: false,
+            at: new Date().toISOString(),
+            authority_effect: false,
+          };
+          this.#lastError = 'rollover_capacity_pre_effect:tab_capacity_exceeded';
+          return false;
+        } catch {}
+      }
+      if (attempt) await this.#keepalive.markRolloverAmbiguous(`ROLLOVER_ERROR:${message}`).catch(() => {});
       if (tab?.tab_id) await this.#markRolloverTabLeaked(tab.tab_id);
-      this.#lastError = String(e?.message || e).slice(0, 240);
+      this.#lastError = message.slice(0, 240);
     }
     return false;
   }
@@ -1415,6 +1479,7 @@ export class SupervisorLifecycleRuntime {
       if (this.#requireAuthoritativeAdmission && this.#runtimeControl.authoritative !== true) return this.snapshot();
       const admissionOpen = !this.#requireAuthoritativeAdmission
         || devosRuntimeControlAllowsContinuousService(this.#runtimeControl);
+      const settledNoEffectRollover = await this.#settleProvenNoEffectRollover();
       if (!admissionOpen) {
         const keepalive = this.#keepalive.snapshot();
         const unresolved = keepalive.pending_wake
@@ -1422,6 +1487,7 @@ export class SupervisorLifecycleRuntime {
           || ['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(keepalive.state);
         if (!unresolved || !keepalive.conversation_url) return this.snapshot();
       }
+      if (settledNoEffectRollover && !admissionOpen) return this.snapshot();
       let state = await this.#getState();
       await this.#observeWorkers(state);
       if (admissionOpen) await this.#queueResearch();
@@ -1595,7 +1661,23 @@ export class SupervisorLifecycleRuntime {
               await this.#settleRolloverBlockedAmbiguousWake(supervisor, observed);
             }
             keepalive = this.#keepalive.snapshot();
-            if (keepalive.state === 'ROLLOVER_REQUIRED') await this.#rollover();
+            if (keepalive.state === 'ROLLOVER_REQUIRED') {
+              if (this.#rolloverCapacityBlocked(state)) {
+                this.#lastRecovery = {
+                  action: 'ROLLOVER_CAPACITY_WAIT',
+                  proof: 'READ_ONLY_TAB_CENSUS_TOTAL_AT_WALL',
+                  total_tabs: Number(state?.tab_census?.total_tabs),
+                  max_tabs: Number(state?.tab_census?.max_tabs),
+                  confirmed: true,
+                  ambiguous: false,
+                  automatic_retry_allowed: false,
+                  at: new Date().toISOString(),
+                  authority_effect: false,
+                };
+              } else {
+                await this.#rollover();
+              }
+            }
           }
           else if (['STALLED','INTERRUPTED'].includes(observed.row.state)) {
             if (this.#activeRequest && this.#activeRequest.blocked_ambiguous !== true) await this.#recoverSupervisor(supervisor, observed.frame, observed.row);

@@ -2,7 +2,7 @@ import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTh
 import { AGENT_PLATFORM_HOME_URL, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
@@ -19,6 +19,7 @@ import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { AgentObservationPlane } from './agent-observation-plane.mjs';
+import { projectNativeRuntimeObservation, projectClientWorkReadiness } from './client-work-readiness.mjs';
 import { TabNetworkActivityRegistry } from './tab-network-activity.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { boundedNavigation } from './bounded-navigation.mjs';
@@ -1585,6 +1586,7 @@ async function nativeSupervisorState() {
   const perception = await perceptionForSelected();
   const compute = await currentComputeHealth();
   return {
+    ...projectNativeRuntimeObservation(nativeSupervisor?.snapshot?.() || {}, app.getVersion()),
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
     tab_census: snap.census,
     active_tab: selected,
@@ -2347,6 +2349,22 @@ ipcMain.handle('metaengine:client:connection-status', async (event) => {
     cloud_health: reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN',
     legacy_daemon_feed_is_authority: false,
     authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:client:work-readiness', async (event) => {
+  assertShellSender(event);
+  return projectClientWorkReadiness({
+    connection: nativeSupervisor?.connectionStatus?.() || {},
+    snapshot: nativeSupervisor?.snapshot?.() || {},
+    fleet: fleet?.snapshot?.() || {},
+    isCurrentBinding: (binding) => {
+      const current = canonicalTabRuntimeIdentity(binding.tab_id);
+      const url = registry.get(binding.tab_id)?.url || '';
+      return Boolean(current?.runtime_binding_live === true && current.runtime_identity_complete === true
+        && (!binding.target_id || current.target_id === binding.target_id)
+        && (!binding.conversation_url || url === binding.conversation_url)
+        && (!binding.conversation_url_sha256 || createHash('sha256').update(url).digest('hex') === binding.conversation_url_sha256));
+    },
   });
 });
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {

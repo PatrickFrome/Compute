@@ -116,10 +116,12 @@ test('top bar no longer treats legacy Socket.IO feed as product connection autho
   assert.doesNotMatch(topbar, /ws-badge/);
   assert.doesNotMatch(topbar, /useMe2\(\(s\) => s\.connected\)/);
   assert.match(topbar, /data-testid="admin-connection-badge"/);
-  assert.match(topbar, /Admin connected/);
-  assert.match(topbar, /Admin reconnecting/);
-  assert.match(topbar, /Enrollment/);
-  assert.match(topbar, /connectionStatus/);
+  assert.match(topbar, /useClientRuntimeStatus/);
+  assert.match(topbar, /data-admin-ready/);
+  assert.match(topbar, /data-work-state/);
+  assert.match(topbar, /data-work-reason/);
+  assert.match(topbar, /work\?\.execution_ready === true/);
+  assert.doesNotMatch(topbar, /useEffect|setInterval|Socket\.IO/);
 });
 
 

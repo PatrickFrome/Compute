@@ -1,0 +1,79 @@
+{
+  "schema": "metaengine.client.workspace-authority-recovery-evidence.v1",
+  "project_id": "jhriwwsryeqsvvvufkok",
+  "source_base": "93c64424525e00444a97abc151ef05bd386da3d7",
+  "qualification": {
+    "cases": 22,
+    "fixture_rollback": true,
+    "atomic_with_ddl": true,
+    "fixtures_remaining": 0
+  },
+  "sql_function_readback": [
+    {
+      "proname": "devos_environment_bootstrap_v1",
+      "source_sha256": "a884b4065331f207e41a4e532420f14fc38834c47ef7c1fc16fef78475c8e825",
+      "args": "p_workspace uuid, p_client_id text, p_expected_generation_floor bigint, p_expected_process_incarnation text"
+    },
+    {
+      "proname": "devos_environment_resume_v1",
+      "source_sha256": "19e7deb6e444f40c4cc8efdced6ddc78e71490e24898b609f148d4481dcb5b23",
+      "args": "p_workspace uuid, p_expected_generation_floor bigint"
+    },
+    {
+      "proname": "devos_environment_state_v1",
+      "source_sha256": "8369d967d919842d53c8c07a2bb7edef6f2d810a28f239d2b064707e4df2390e",
+      "args": "p_workspace uuid"
+    },
+    {
+      "proname": "devos_fleet_lease_v1",
+      "source_sha256": "3556d033af805c0e20df58e06dff10cb32b72ca7d7bdd4427b198babb9a48cb5",
+      "args": "p_workspace uuid, p_agent text, p_role text, p_tab text, p_target text, p_epoch bigint, p_seconds integer"
+    }
+  ],
+  "live_readback": {
+    "tasks": {
+      "FENCED": 8
+    },
+    "claims": 0,
+    "admission": {
+      "authoritative": true,
+      "authority_effect": false,
+      "generation_floor": 28,
+      "actuation_allowed": false,
+      "runtime_control_state": "CLOSED",
+      "runtime_control_reason": "CONTINUOUS_SERVICE_ADMISSION_FENCED",
+      "supervisor_admission_enabled": false
+    },
+    "cycle_seq": 2109,
+    "checked_at": "2026-10-01T00:13:51.959377+00:00",
+    "last_seen_at": "2026-10-01T00:13:51.837373+00:00",
+    "keepalive_floor": 28,
+    "keepalive_state": "ROLLOVER_AMBIGUOUS",
+    "runtime_control": {
+      "state": "CLOSED",
+      "reason": null,
+      "schema": "metaengine.devos.environment-state.v1",
+      "reset_at": null,
+      "reset_reason": "SIGNED_PROFILE_BOOTSTRAP_CLOSED",
+      "workspace_id": "2de9f84b-7c0a-4091-911c-894ff1d6eaf4",
+      "authoritative": true,
+      "refill_enabled": false,
+      "authority_effect": false,
+      "generation_floor": 28,
+      "authority_present": true,
+      "supervisor_admission_enabled": false
+    },
+    "installed_version": "0.7.0-dev.36760350225.1",
+    "qualification_rows": 0,
+    "keepalive_admission_reason": "CONTINUOUS_SERVICE_ADMISSION_FENCED"
+  },
+  "scope": {
+    "admission_opened": false,
+    "task_history_reset": false,
+    "floor_lowered": false,
+    "effects_replayed": false,
+    "edge_redeployed": false,
+    "installed_client_replaced": false
+  },
+  "authority_effect": false
+}
