@@ -130,7 +130,7 @@ jobs:
                   raise SystemExit('historical_manifest_proof_missing:'+key)
           if int(manifest.get('target_build_count') or 0)!=1:
               raise SystemExit('historical_manifest_target_build_count_invalid')
-          if int(manifest.get('consumer_target_build_count') or -1)!=0:
+          if manifest.get('consumer_target_build_count') != 0:
               raise SystemExit('historical_manifest_consumer_rebuild_detected')
           if manifest.get('target_installer_source')!='PACKAGE_SMOKE_ARTIFACT':
               raise SystemExit('historical_manifest_installer_source_invalid')
