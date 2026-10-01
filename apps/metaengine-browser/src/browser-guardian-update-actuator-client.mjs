@@ -80,6 +80,16 @@ function normalizeResult(value) {
   });
 }
 
+export function guardianUpdatePipeConnectionError(error, { connected = false } = {}) {
+  const failure = new Error(`guardian_update_actuator_pipe_error:${String(error?.message || error).slice(0, 180)}`);
+  // A message mentioning ENOENT, access denial, timeout or disconnect is not
+  // endpoint absence. Only the structured OS code before connect qualifies.
+  failure.code = connected === false && error?.code === 'ENOENT'
+    ? 'GUARDIAN_PIPE_NOT_FOUND'
+    : 'GUARDIAN_PIPE_IO_ERROR';
+  return failure;
+}
+
 export function requestGuardianUpdatePipe(wireRequest, {
   pipeName = BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -94,6 +104,7 @@ export function requestGuardianUpdatePipe(wireRequest, {
     const chunks = [];
     let total = 0;
     let settled = false;
+    let connected = false;
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
@@ -102,7 +113,10 @@ export function requestGuardianUpdatePipe(wireRequest, {
       else resolve(value);
     };
     socket.setTimeout(Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
-    socket.once('connect', () => socket.write(request, 'utf8'));
+    socket.once('connect', () => {
+      connected = true;
+      socket.write(request, 'utf8');
+    });
     socket.on('data', (chunk) => {
       total += chunk.length;
       if (total > MAX_WIRE_BYTES) return finish(new Error('guardian_update_actuator_response_too_large'));
@@ -117,7 +131,7 @@ export function requestGuardianUpdatePipe(wireRequest, {
       return finish(null, normalizeResult(parsed));
     });
     socket.once('timeout', () => finish(new Error('guardian_update_actuator_pipe_timeout')));
-    socket.once('error', (error) => finish(new Error(`guardian_update_actuator_pipe_error:${String(error?.message || error).slice(0, 180)}`)));
+    socket.once('error', (error) => finish(guardianUpdatePipeConnectionError(error, { connected })));
     socket.once('end', () => {
       if (!settled) finish(new Error('guardian_update_actuator_pipe_ended_without_result'));
     });

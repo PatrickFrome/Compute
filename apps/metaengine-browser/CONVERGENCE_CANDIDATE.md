@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36832190273.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36891107801.1`.
+
+Qualified Guardian candidate `5b585ae3` physically built `0.7.0-dev.36832190273.1`; that identity is consumed and now installed live. The pipe-observation successor reserves the higher observed workflow namespace `36891107801`, preserving monotonic installer identity.
 
 Candidate `11a3857e` physically built `0.7.0-dev.36814827922.1`; this identity is consumed. The SCM policy readback/physical-drift successor advances again.
 
