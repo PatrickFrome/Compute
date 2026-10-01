@@ -78,7 +78,7 @@ async function tempState(seed) {
   return { dir, statePath };
 }
 
-test('exact live capacity false-ambiguity heals to PARKED without Browser observation or effect', async () => {
+test('exact live capacity false-ambiguity heals to PARKED with one bounded read-only prefetch and zero Browser effects', async () => {
   const attemptId = 'rollover_d07ce473-31aa-4dad-a2f9-b62d40bf03e3';
   const { dir, statePath } = await tempState(keepaliveSeed({
     state: 'ROLLOVER_AMBIGUOUS',
@@ -103,7 +103,7 @@ test('exact live capacity false-ambiguity heals to PARKED without Browser observ
     requireAuthoritativeAdmission: true,
     getState: async () => {
       stateReads += 1;
-      throw new Error('state read must not be required to settle exact no-effect proof');
+      return { tabs: [], fleet: { agents: [] } };
     },
     executeCommand: async () => {
       effects += 1;
@@ -123,7 +123,9 @@ test('exact live capacity false-ambiguity heals to PARKED without Browser observ
     assert.equal(snap.keepalive.last_rollover_no_effect.attempt_id, attemptId);
     assert.equal(snap.last_recovery.action, 'ROLLOVER_CAPACITY_PRE_EFFECT_SETTLED');
     assert.equal(snap.last_recovery.ambiguous, false);
-    assert.equal(stateReads, readsBeforeRecovery);
+    assert.equal(stateReads, readsBeforeRecovery + 1, 'wrapper may perform exactly one bounded read-only fleet prefetch');
+    assert.equal(snap.worker_observation_prefetch.read_only, true);
+    assert.equal(snap.worker_observation_prefetch.authority_effect, false);
     assert.equal(effects, 0);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

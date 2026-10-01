@@ -8,7 +8,7 @@ const candidateDoc = await readFile(new URL('../CONVERGENCE_CANDIDATE.md', impor
 const reserved = candidateDoc.match(/Reserved package identity is \`([^\`]+)\`\./)?.[1] ?? null;
 const priorInstalledVersion = candidateDoc.match(/Previous installed package identity is \`([^\`]+)\`\./)?.[1] ?? null;
 const priorQualifiedVersion = candidateDoc.match(/Previous qualified package identity is \`([^\`]+)\`/)?.[1] ?? null;
-const priorEphemeralVersion = candidateDoc.match(/intermediate a7ee919c runner also physically built \(but did not publish\/upload\) \`([^\`]+)\`/)?.[1] ?? null;
+const priorEphemeralVersions = [...candidateDoc.matchAll(/(?:physically built \(but did not publish\/upload\)|reached physical NSIS build with) \`([^\`]+)\`/g)].map((match) => match[1]);
 
 test('convergence candidate package identity matches the reserved exact source candidate', () => {
   assert.ok(reserved, 'reserved package identity must be declared in CONVERGENCE_CANDIDATE.md');
@@ -24,11 +24,11 @@ test('convergence candidate package identity matches the reserved exact source c
   assert.ok(Number.isSafeInteger(parsed.build));
   const priorInstalled = parseMetaengineDevVersion(priorInstalledVersion);
   const priorQualified = parseMetaengineDevVersion(priorQualifiedVersion);
-  const priorEphemeral = parseMetaengineDevVersion(priorEphemeralVersion);
+  const priorEphemeral = priorEphemeralVersions.map((version) => parseMetaengineDevVersion(version));
   assert.ok(priorInstalled, 'the actual installed predecessor must have a trusted package identity');
   assert.ok(priorQualified, 'the last materialized qualified package must have a trusted package identity');
-  assert.ok(priorEphemeral, 'an intermediate physically built package identity must be treated as consumed');
+  assert.ok(priorEphemeral.length >= 2 && priorEphemeral.every(Boolean), 'every intermediate physically built package identity must be treated as consumed');
   assert.ok(parsed.build > priorInstalled.build, 'source-changing convergence candidate must advance above its installed predecessor');
   assert.ok(parsed.build > priorQualified.build, 'source-changing convergence candidate must advance above the last materialized package bytes');
-  assert.ok(parsed.build > priorEphemeral.build, 'final candidate must advance above any intermediate physically built package bytes');
+  assert.ok(priorEphemeral.every((row) => parsed.build > row.build), 'final candidate must advance above every intermediate physically built package identity');
 });
