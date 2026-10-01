@@ -191,9 +191,20 @@ export class BrowserGuardianUpdateActuatorClient {
     return result;
   }
 
-  async probeOwner({ command_id, request_nonce } = {}) {
+  async observeOwner({ command_id, request_nonce } = {}) {
     const { result, proof } = await this.#ownerProbeRaw({ command_id, request_nonce });
-    return this.#assertOwnerBound(result, proof);
+    if (result.state === 'OWNER_BOUND') return this.#assertOwnerBound(result, proof);
+    if (result.state === 'NO_EFFECT_PROVEN' && result.effect_absent_proven === true) return result;
+    if (result.state === 'AMBIGUOUS') return result;
+    throw new Error(`guardian_owner_observation_invalid:${result.state}:${result.reason}`);
+  }
+
+  async probeOwner({ command_id, request_nonce } = {}) {
+    const result = await this.observeOwner({ command_id, request_nonce });
+    if (result.state !== 'OWNER_BOUND') {
+      throw new Error(`guardian_owner_probe_unproven:${result.state}:${result.reason}`);
+    }
+    return result;
   }
 
   async ensureOwnerBound({ command_id, request_nonce } = {}) {
@@ -290,6 +301,7 @@ export function browserGuardianUpdateActuatorClientContract() {
     fixed_pipe_name: BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE,
     enrolled_device_signature_required: true,
     read_only_owner_probe_precedes_enrollment: true,
+    read_only_owner_observation_exposed: true,
     exact_ticket_required_reason: 'OWNER_ENROLLMENT_TICKET_REQUIRED',
     single_use_admin_ticket_required_for_first_binding: true,
     ticket_bound_device_signature_required: true,
