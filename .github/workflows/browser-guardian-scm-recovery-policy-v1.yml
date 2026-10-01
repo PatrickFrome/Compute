@@ -41,31 +41,18 @@ jobs:
         shell: powershell
         run: node --test test/browser-guardian-scm-configurator-contract.test.mjs
 
-      - name: Compile native SCM host and secure configurator
+      - name: Compile exact production Guardian staging bundle
+        working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
-          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
-          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
-          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
-          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
           $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-scm-recovery'
-          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          & ./scripts/build-guardian-native-staging.ps1 -OutputDir $outDir
+          if ($LASTEXITCODE -ne 0) { throw "guardian_staging_build_exit_$LASTEXITCODE" }
           $service = Join-Path $outDir 'METAENGINEBrowserGuardian.exe'
           $configure = Join-Path $outDir 'METAENGINEBrowserGuardianConfigure.exe'
-
-          $serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib' -f $vcvars, (Join-Path $sourceDir 'browser-guardian-scm-service.cpp'), $service
-          & $env:ComSpec /d /s /c $serviceCmd
-          if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
-
-          $configureCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars, (Join-Path $sourceDir 'browser-guardian-scm-configure.cpp'), $configure
-          & $env:ComSpec /d /s /c $configureCmd
-          if ($LASTEXITCODE -ne 0) { throw "guardian_configure_compile_exit_$LASTEXITCODE" }
           foreach ($binary in @($service,$configure)) {
-            if (-not (Test-Path $binary)) { throw "native_binary_missing:$binary" }
+            if (-not (Test-Path $binary -PathType Leaf)) { throw "native_binary_missing:$binary" }
             if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -notmatch '^[0-9a-f]{64}$') { throw "native_binary_digest_invalid:$binary" }
           }
           "GUARDIAN_SERVICE_EXE=$service" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
