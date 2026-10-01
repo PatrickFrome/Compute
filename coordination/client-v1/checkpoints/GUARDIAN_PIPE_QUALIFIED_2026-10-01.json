@@ -1,0 +1,235 @@
+{
+  "schema": "metaengine.guardian-pipe-observation-qualification.v1",
+  "qualified_source_head": "4f66a5afc7d6dd6ab36262effac6ac199c9b68e1",
+  "source_tree": "cbf7693fb232b5e48bfa4294c3ccc497bf6c8dec",
+  "branch": "work/guardian-pipe-observation-v1",
+  "pr": 1088,
+  "qualified_at": "2026-10-01T19:11:39.329Z",
+  "base_head": "5b585ae301cdc273f58d01963e54b5b6f539181d",
+  "changes": [
+    "Only structured pre-connect ENOENT can offer explicit activation",
+    "Malformed receipts reject inside the event callback",
+    "Closed/incomplete replies and slow partial data are bounded",
+    "Late connect/data after settlement cannot write/resolve",
+    "Fixed 2s read-only / 30s ticket enrollment / 2s independent readback",
+    "Restart/lost owner acknowledgement recovers without second ticket"
+  ],
+  "node_suite": {
+    "tests": 3851,
+    "pass": 3851,
+    "fail": 0,
+    "skipped": 0,
+    "job_id": 110529453073
+  },
+  "workflows": [
+    {
+      "id": 36909837082,
+      "name": "METAENGINE Browser Shell V1",
+      "run_number": 3526,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837121,
+      "name": "Browser Workspace Reincarnation V1",
+      "run_number": 543,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837055,
+      "name": "METAENGINE Browser Host Resilience Login Start V1",
+      "run_number": 491,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837050,
+      "name": "METAENGINE Browser Critical Audit V1",
+      "run_number": 2579,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837065,
+      "name": "METAENGINE Browser Shell-First Dirty Profile V1",
+      "run_number": 1014,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837047,
+      "name": "Browser Windows Installed Chat Qualification",
+      "run_number": 2403,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837049,
+      "name": "METAENGINE Browser Final Runtime Activation V1",
+      "run_number": 1986,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837077,
+      "name": "METAENGINE Browser Windows Autonomous Soak V1",
+      "run_number": 2655,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837046,
+      "name": "Browser Windows Package Smoke",
+      "run_number": 3110,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 36909837083,
+      "name": "METAENGINE Browser Self Update E2E",
+      "run_number": 3574,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "installer": {
+    "schema": "metaengine.browser.installer-provenance.v1",
+    "provenance_id": "2de62ffb-6203-4b78-9faa-29d013d42e87",
+    "source_head": "4f66a5afc7d6dd6ab36262effac6ac199c9b68e1",
+    "workflow": "browser-windows-package-smoke.yml",
+    "run_id": "36909837046",
+    "run_number": 3110,
+    "run_attempt": 1,
+    "package_version": "0.7.0-dev.36908273822.1",
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36908273822.1-x64.exe",
+    "installer_sha256": "dc77ca4cabb4406aed761385ca42adde1fd6490e530653814dd9a577291a284a",
+    "installer_bytes": 159808744,
+    "blockmap_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36908273822.1-x64.exe.blockmap",
+    "blockmap_sha256": "7acbfa01deac90cef62fdb32f577b732d4b64b1fbabe7c78a349546e40d6d574",
+    "config_path": "electron-builder.test.json",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "builder_version": null,
+    "built_at": "2026-10-01T18:55:41.089Z",
+    "signed": false,
+    "promotion_authorized": false
+  },
+  "artifact": {
+    "id": 11185889900,
+    "run_id": 36909837046,
+    "bytes": 161263079,
+    "sha256": "5d0acc9ea91a02eaf74dd647c1d2cfe325fd797584ea5c9f9a1abfb0fd8d1bd8",
+    "url": "https://github.com/PatrickFrome/Compute/actions/runs/36909837046/artifacts/11185889900"
+  },
+  "package_evidence": {
+    "id": 11187170606,
+    "bytes": 469463,
+    "sha256": "2ef8fb565be461fcf76260ace3bf868302e147c3a4664a6bcc55cb6656f86462",
+    "normal_ui_boot_verified": true,
+    "second_instance_activation_verified": true,
+    "startup_grace_survival_seconds": 190
+  },
+  "guardian_bootstrap": {
+    "schema": "metaengine.browser-guardian.machine-bootstrap-binding.v1",
+    "source_head": "4f66a5afc7d6dd6ab36262effac6ac199c9b68e1",
+    "package_version": "0.7.0-dev.36908273822.1",
+    "slot_id": "4f66a5afc7d6dd6a-fd16db68f1bd1eb0",
+    "bootstrap_name": "METAENGINE-Guardian-Bootstrap-0.7.0-dev.36908273822.1-x64.exe",
+    "bootstrap_sha256": "b0aa78ab22d536be07fa43a7ac660bb0fed66b06b76c4b539df8f48d969f4142",
+    "bootstrap_size": 1283584,
+    "guardian_manifest_sha256": "fd16db68f1bd1eb065868a3ab586dbf32014871f35bf84edb43e86d403328a48",
+    "service_sha256": "d0c9428e49ba08e58efa69be19f94adb55000ccb0b8f1ab7de1a83f38c7f2928",
+    "configurator_sha256": "144a996e864664d1b34479a9c825cba5a9e86c82916efa3dfcb0402d383f5512",
+    "embedded_assets_only": true,
+    "explicit_elevated_install_required": true,
+    "automatic_retry_allowed": false,
+    "authority_effect": false
+  },
+  "physical_bootstrap": {
+    "source": "terminal-success Windows physical script assertions",
+    "exact_machine_copy_verified": true,
+    "scm_running_readback_verified": true,
+    "owner_enrollment_executed": false,
+    "installer_dispatch_executed": false,
+    "user_machine_qualified": false
+  },
+  "installed_chat": {
+    "schema": "metaengine.browser.windows-installed-chat-qualification.v2",
+    "source_head": "4f66a5afc7d6dd6ab36262effac6ac199c9b68e1",
+    "package_version": "0.7.0-dev.36908273822.1",
+    "admin_connection_verified": true,
+    "oidc_enrollment_qualification_verified": true,
+    "installer_sha256": "dc77ca4cabb4406aed761385ca42adde1fd6490e530653814dd9a577291a284a"
+  },
+  "resident_upgrade": {
+    "schema": "metaengine.browser.installer-resident-upgrade-proof.v1",
+    "legacy_version": "0.7.0-dev.34759310781.1",
+    "legacy_installer_sha256": "0b636b691e4d05d360298036e0fc43f6db1238a3e8ec41aee995484894137e55",
+    "legacy_primary_pid": 3744,
+    "legacy_sentinel_pid": 1632,
+    "resident_upgrade_installer_exit": 0,
+    "legacy_primary_gone": true,
+    "legacy_sentinel_gone": true,
+    "target_version": "0.7.0-dev.36908273822.1",
+    "target_installer_sha256": "dc77ca4cabb4406aed761385ca42adde1fd6490e530653814dd9a577291a284a",
+    "expected_installed_executable_sha256": "f8922bb1c224a3cffa637d3f610643c2539f93fe2a0af372bd4a5a65abaad33a",
+    "installed_executable_sha256": "f8922bb1c224a3cffa637d3f610643c2539f93fe2a0af372bd4a5a65abaad33a",
+    "new_primary_pid": 4688,
+    "new_sentinel_pid": 7956,
+    "new_primary_started": true,
+    "new_sentinel_started": true,
+    "planned_shutdown_signal_exit": 0,
+    "planned_shutdown_verified": true,
+    "retry_dialog_required": false,
+    "authority_effect": false
+  },
+  "producer_gate": {
+    "schema": "metaengine.browser.qualified-installer-producer-gate.v1",
+    "source_head": "4f66a5afc7d6dd6ab36262effac6ac199c9b68e1",
+    "producer_run_id": 36909837046,
+    "producer_run_number": 3110,
+    "producer_run_attempt": 1,
+    "producer_terminal_success": true,
+    "authority_effect": false
+  },
+  "live_user_snapshot": {
+    "client_id": "2a60d6a2-c7c2-4dcc-b4c9-99de768443c9",
+    "observed_at": "2026-10-01T18:58:56.962893Z",
+    "version": "0.7.0-dev.36832190273.1",
+    "compute": "HEALTHY",
+    "development_plane": "READY",
+    "admin_ready": true,
+    "supervisor": "PARKED",
+    "admission": "CLOSED",
+    "generation_floor": 28,
+    "reset_reason": "SIGNED_PROFILE_BOOTSTRAP_CLOSED",
+    "guardian_tickets_observed": 0,
+    "owner_binding_qualified": false
+  },
+  "roadmap_authority": {
+    "key": "METAENGINE_CLIENT_V1",
+    "active_milestone": "C4_TYPED_PRODUCT_CONTROL",
+    "baseline_sha": "1fde1e53549eafefd6c28b50cdcd384e86d14512",
+    "alignment_epoch": 3,
+    "modified": false
+  },
+  "limits": {
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false,
+    "live_uac_issued": false,
+    "live_owner_enrollment_issued": false,
+    "live_emergency_update_issued": false,
+    "admission_overridden": false,
+    "useful_live_agent_task_qualified": false
+  },
+  "next": [
+    "Explicit native Guardian activation and independent owner/device proof; restart readback",
+    "Bounded user goal → lease → real z.ai Agent-origin → readback → durable accepted result",
+    "Recovery/rollover proof before continuous admission through existing authority"
+  ],
+  "research": [
+    "https://nodejs.org/api/net.html",
+    "https://nodejs.org/api/errors.html"
+  ]
+}
