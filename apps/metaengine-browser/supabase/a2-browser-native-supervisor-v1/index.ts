@@ -59,6 +59,8 @@ const TOOL_TAB_RE=/^tab_[0-9a-f-]{36}$/i;
 const TOOL_TASK_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EFFECT_BINDING_SCHEMAS=new Set(['metaengine.native-supervisor.effect-binding.v1','metaengine.native-supervisor.effect-binding.v2']);
 const ACTIVATE_RPC='h205f22_a2_browser_device_activate_approved_v1';
+const GUARDIAN_TICKET_ISSUE_RPC='client_v1_guardian_enrollment_ticket_issue_v1';
+const GUARDIAN_TICKET_CONSUME_RPC='client_v1_guardian_enrollment_ticket_consume_v1';
 const MESH_SYNC_RPC='h205f22_a2_supervisor_mesh_sync_v1';
 const HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS=1500;
 const MAX_REALTIME_WAIT_MS=15000;
@@ -167,6 +169,7 @@ async function statusRows(){
 }
 
 async function sha256(v:string){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return[...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+function randomGuardianTicket(){const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
 function b64urlBytes(v:string){if(!/^[A-Za-z0-9_-]+$/.test(v))throw new Error('signature_encoding_invalid');const pad='='.repeat((4-v.length%4)%4);const bin=atob(v.replace(/-/g,'+').replace(/_/g,'/')+pad);return Uint8Array.from(bin,c=>c.charCodeAt(0))}
 function canonicalJwk(value:any){if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('jwk_invalid');const jwk={crv:String(value.crv||''),ext:value.ext===true,key_ops:Array.isArray(value.key_ops)?value.key_ops.map(String):[],kty:String(value.kty||''),x:String(value.x||''),y:String(value.y||'')};if(jwk.kty!=='EC'||jwk.crv!=='P-256'||!jwk.ext||jwk.key_ops.length!==1||jwk.key_ops[0]!=='verify'||!/^[A-Za-z0-9_-]{43}$/.test(jwk.x)||!/^[A-Za-z0-9_-]{43}$/.test(jwk.y))throw new Error('jwk_invalid');return jwk}
 async function verifyP256(jwk:any,material:string,signatureText:string){const sig=b64urlBytes(signatureText);if(sig.byteLength!==64)return false;const key=await crypto.subtle.importKey('jwk',jwk,{name:'ECDSA',namedCurve:'P-256'},false,['verify']);return crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},key,sig,new TextEncoder().encode(material)).catch(()=>false)}
@@ -257,6 +260,54 @@ async function adminStatus(identity:any){
     automatic_effect_retry_allowed:false,
     authority_effect:false,
   };
+}
+async function issueGuardianEnrollmentTicket(identity:any){
+  if(identity?.admin_ready!==true||identity?.access_tier!=='ADMIN')return json(403,{accepted:false,error:'admin_device_required',authority_effect:false});
+  const ticket=randomGuardianTicket();
+  const ticketSha256=await sha256(ticket);
+  const issued=await rpc(GUARDIAN_TICKET_ISSUE_RPC,{
+    p_client_id:identity.id,
+    p_device_id:identity.device_id,
+    p_key_fingerprint_sha256:identity.key_fingerprint_sha256,
+    p_admin_grant_epoch:Number(identity.admin_grant_epoch),
+    p_ticket_sha256:ticketSha256,
+    p_ttl_seconds:90,
+  });
+  if(issued?.accepted!==true)return json(409,{accepted:false,error:'guardian_enrollment_ticket_issue_rejected',authority_effect:false});
+  return json(200,{
+    ...issued,
+    ticket,
+    ticket_sha256:ticketSha256,
+    ticket_transport:'HTTPS_BODY_ONLY',
+    ticket_persisted_server_side:false,
+    owner_sid_supplied_by_server:false,
+    owner_sid_must_come_from_impersonated_pipe_token:true,
+    authority_effect:false,
+  });
+}
+async function redeemGuardianEnrollmentTicket(body:any){
+  const ticket=String(body?.ticket||'');
+  const fingerprint=String(body?.key_fingerprint_sha256||'').trim().toLowerCase();
+  const ownerSidSha256=String(body?.owner_sid_sha256||'').trim().toLowerCase();
+  if(!/^[A-Za-z0-9_-]{43}$/.test(ticket)
+      || !/^[0-9a-f]{64}$/.test(fingerprint)
+      || !/^[0-9a-f]{64}$/.test(ownerSidSha256)){
+    return json(400,{schema:'metaengine.guardian-enrollment-ticket-redemption.v1',accepted:false,reason:'REDEMPTION_INPUT_INVALID',authority_effect:false});
+  }
+  const redeemed=await rpc(GUARDIAN_TICKET_CONSUME_RPC,{
+    p_ticket_sha256:await sha256(ticket),
+    p_key_fingerprint_sha256:fingerprint,
+    p_owner_sid_sha256:ownerSidSha256,
+  });
+  const accepted=redeemed?.accepted===true;
+  return json(accepted?200:409,{
+    ...redeemed,
+    plaintext_ticket_returned:false,
+    owner_sid_plaintext_returned:false,
+    service_role_exposed:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  });
 }
 // P1-2 multi-writer repair: plane ownership semantics for the persisted state.
 // /v1/state accepts three writers (bootstrap heartbeat, 5s supervisor heartbeat,
@@ -388,7 +439,7 @@ async function issueTool(req:Request,body:any){
     return json(409,{accepted:false,error:'agent_tool_issue_failed',reason:String((error as any)?.message||error).slice(0,160),authority_effect:false});
   }
 }
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,profile:PROFILE,approval_enrollment:true,admin_device_grant_required:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,authority_effect:false,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,profile:PROFILE,approval_enrollment:true,admin_device_grant_required:true,guardian_enrollment_ticket_v1:true,guardian_enrollment_ticket_single_use:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
 async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,device_auth_required:true,admin_device_grant_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
@@ -439,10 +490,15 @@ Deno.serve(async(req:Request)=>{
     if(body===null)return json(400,{error:'invalid_json'});
     if(req.method==='POST'&&path==='/v1/device/enrollment/request')return enrollmentRequest(req,bodyText,body);
     if(req.method==='POST'&&path==='/v1/device/enrollment/status')return enrollmentStatus(req,bodyText,body);
+    // Guardian LocalSystem has no Browser private key. This one route is protected
+    // by the 256-bit, <=120s, single-use ticket whose digest is stored server-side.
+    // The consume RPC revalidates the exact ADMIN grant before atomically burning it.
+    if(req.method==='POST'&&path==='/v1/guardian/enrollment/redeem')return redeemGuardianEnrollmentTicket(body);
     const canonicalPath=`${SERVICE_MARKER}${path}`;
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
     if(req.method==='GET'&&path==='/v1/admin/status')return json(200,await adminStatus(identity));
+    if(req.method==='POST'&&path==='/v1/device/guardian-enrollment/ticket')return issueGuardianEnrollmentTicket(identity);
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
     const emergency=await emergencyRoutes({req,path,body,clientId:identity.id});if(emergency)return emergency;
     const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
