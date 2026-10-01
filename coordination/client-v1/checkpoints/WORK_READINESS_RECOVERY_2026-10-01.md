@@ -24,6 +24,10 @@ Server source and atomic qualification: `coordination/client-v1/sql/WORKSPACE_AU
 
 Local full suite has ten Unix socket failures due sandbox EPERM; Windows exact-head full regression and compiled/package/install gates are required. They must not be inferred from local partial success.
 
+First published candidate `763732b4a951e081d5205a948560a688042602a1` compiled the production Next UI successfully. Shell, Critical Audit, dirty-profile, typed-workspace, desktop, orchestrator and goal-contract workflows passed. Package producer `36796496836` failed at physical visual qualification: its harness had no typed connection/readiness fixtures and still awaited the removed legacy daemon banner. Installer creation was skipped; four consumer workflows therefore had no qualified producer. This was not a qualified package or four independent runtime failures.
+
+The follow-up preserves every existing geometry, selection, goal, focus, IME and palette gate. It adds real Electron captures of connected/BLOCKED, READY and connected/PAUSED fixture states, then deliberately rejects the observation IPC and verifies that both the badge and Runtime Settings remove previous positive readback. Eleven captures are required; evidence explicitly identifies controlled Native IPC fixtures, not live z.ai execution. Source parse, whitespace and 73 directly related regressions passed before publication. The new exact-head package/consumer matrix remains mandatory.
+
 Stable/canary Edge and installed 93c binary are not changed by this slice. SQL recovery is live; new renderer/native code is not yet installed on the user's machine. Current Supervisor remains ROLLOVER_AMBIGUOUS at cycle 2109 and Agent execution remains unproven. Closed initialization is deliberately distinct from resume.
 
 Next proof: terminal/ambiguity reconciliation of the old Supervisor binding → one genuine z.ai Agent-origin session → useful task/verified result, followed by restart/update continuation. No freeze reset, forced Agent activation, ordinary Chat fallback or blind resend.

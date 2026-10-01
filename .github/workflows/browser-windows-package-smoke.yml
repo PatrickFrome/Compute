@@ -170,6 +170,10 @@ jobs:
               -or $evidence.goal_status_focus_verified -ne $true `
               -or $evidence.settings_routes_verified -ne $true `
               -or $evidence.settings_loading_bounded -ne $true `
+              -or $evidence.connected_not_ready_verified -ne $true `
+              -or $evidence.positive_readiness_verified -ne $true `
+              -or $evidence.paused_readiness_verified -ne $true `
+              -or $evidence.stale_readiness_cleared -ne $true `
               -or $evidence.selection_fail_closed -ne $true `
               -or $evidence.ime_submission_guard_verified -ne $true `
               -or $evidence.goal_submit_once_verified -ne $true `
@@ -177,7 +181,8 @@ jobs:
               -or $evidence.authority_effect -ne $false) {
             throw 'r97_visual_evidence_contract_invalid'
           }
-          if (@($evidence.captures).Count -ne 9) { throw 'ui1_visual_evidence_capture_count_invalid' }
+          if ($evidence.readiness_subject.kind -ne 'CONTROLLED_NATIVE_IPC_FIXTURE' -or $evidence.readiness_subject.live_agent_execution -ne $false) { throw 'ui1_readiness_evidence_subject_invalid' }
+          if (@($evidence.captures).Count -ne 11) { throw 'ui1_visual_evidence_capture_count_invalid' }
           if (-not (@($evidence.captures).name -contains 'r97-chat-fleet-main-1440x960')) { throw 'r97_visual_evidence_main_capture_missing' }
           if (-not (@($evidence.captures).name -contains 'r97-client-goal-admitted-1440x960')) { throw 'r97_visual_evidence_client_goal_capture_missing' }
           if (-not (@($evidence.captures).name -contains 'r97-chat-fleet-agent-selected-1440x960')) { throw 'r97_visual_evidence_agent_selection_capture_missing' }
