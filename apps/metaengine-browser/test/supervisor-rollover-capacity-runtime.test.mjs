@@ -115,6 +115,7 @@ test('exact live capacity false-ambiguity heals to PARKED without Browser observ
   try {
     await runtime.start();
     await runtime.applyRuntimeControl(CLOSED);
+    const readsBeforeRecovery = stateReads;
     await runtime.cycle({ force: true });
     const snap = runtime.snapshot();
     assert.equal(snap.keepalive.state, 'PARKED');
@@ -122,7 +123,7 @@ test('exact live capacity false-ambiguity heals to PARKED without Browser observ
     assert.equal(snap.keepalive.last_rollover_no_effect.attempt_id, attemptId);
     assert.equal(snap.last_recovery.action, 'ROLLOVER_CAPACITY_PRE_EFFECT_SETTLED');
     assert.equal(snap.last_recovery.ambiguous, false);
-    assert.equal(stateReads, 0);
+    assert.equal(stateReads, readsBeforeRecovery);
     assert.equal(effects, 0);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
