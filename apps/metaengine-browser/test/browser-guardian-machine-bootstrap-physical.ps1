@@ -19,7 +19,9 @@ New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 function Invoke-Bootstrap([string]$path, [string]$argument, [string]$label) {
   $out = Join-Path $scratch ($label + '.out')
   $err = Join-Path $scratch ($label + '.err')
-  $process = Start-Process -FilePath $path -ArgumentList $argument -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+  $start = @{ FilePath=$path; PassThru=$true; RedirectStandardOutput=$out; RedirectStandardError=$err }
+  if ($argument) { $start.ArgumentList = $argument }
+  $process = Start-Process @start
   # Retain the native handle before a short-lived child exits. PowerShell's
   # Start-Process adapter can otherwise leave ExitCode unavailable after wait.
   $nativeHandle = $process.Handle
@@ -35,7 +37,10 @@ function Invoke-Bootstrap([string]$path, [string]$argument, [string]$label) {
 try {
   $invalid = Invoke-Bootstrap $exe '--service-binary=C:\arbitrary.exe' 'invalid'
   if ($invalid.exit -eq 0 -or $invalid.row.state -ne 'NO_EFFECT_PROVEN' -or (Get-Service $name -ErrorAction SilentlyContinue)) { throw 'bootstrap_arbitrary_input_fence_failed' }
-  $first = Invoke-Bootstrap $exe '--install' 'first'
+  # Product path: shell.openPath launches this requireAdministrator EXE with no
+  # caller arguments. The CI process is already elevated, so this proves the same
+  # native entry point without depending on interactive UAC UI availability.
+  $first = Invoke-Bootstrap $exe '' 'first'
   if ($first.exit -ne 0 -or $first.row.state -ne 'READY' -or $first.row.authority_effect -ne $true) { throw "bootstrap_first_install_unproven:exit=$($first.exit):state=$($first.row.state):effect=$($first.row.authority_effect):reason=$($first.row.reason)" }
   $service = Get-CimInstance Win32_Service -Filter "Name='$name'"
   $slot = Join-Path $root ('slots\' + [string]$binding.slot_id)
@@ -106,6 +111,7 @@ try {
     bootstrap_sha256=[string]$binding.bootstrap_sha256
     service_sha256=[string]$binding.service_sha256
     slot_id=[string]$binding.slot_id
+    no_argument_product_entry_verified=$true
     exact_machine_copy_verified=$true
     scm_running_readback_verified=$true
     programdata_owner_store_root_secure=$true
