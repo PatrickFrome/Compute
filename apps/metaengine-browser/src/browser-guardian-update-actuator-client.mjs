@@ -199,7 +199,11 @@ export class BrowserGuardianUpdateActuatorClient {
       `public_jwk_y=${jwk.y}`,
       `signature=${exactSignature(proof.signature)}`,
     ]);
-    const result = normalizeResult(await this.#transport(request));
+    const result = normalizeResult(await this.#transport(request, {
+      // Enrollment includes bounded native HTTPS redemption and durable CAS.
+      // Do not give this effect the shorter read-only observation deadline.
+      timeoutMs: ticket == null ? 2_000 : 30_000,
+    }));
     return { result, proof };
   }
 
@@ -327,6 +331,8 @@ export function browserGuardianUpdateActuatorClientContract() {
     enrolled_device_signature_required: true,
     read_only_owner_probe_precedes_enrollment: true,
     read_only_owner_observation_exposed: true,
+    read_only_owner_pipe_timeout_ms: 2_000,
+    owner_enrollment_pipe_timeout_ms: 30_000,
     exact_ticket_required_reason: 'OWNER_ENROLLMENT_TICKET_REQUIRED',
     single_use_admin_ticket_required_for_first_binding: true,
     ticket_bound_device_signature_required: true,

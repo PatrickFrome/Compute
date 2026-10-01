@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36907623240.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36908273822.1`.
+
+Pipe response candidate `f799cbef` physically built `0.7.0-dev.36907623240.1`; that identity is consumed. The native enrollment deadline successor reserves higher observed workflow namespace `36908273822`.
 
 Pipe classification candidate `1379e0c3` reserves `0.7.0-dev.36891107801.1`; this attempted identity is conservatively consumed. The malformed-receipt/deadline successor reserves higher observed workflow namespace `36907623240`.
 

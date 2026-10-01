@@ -224,3 +224,29 @@ test('new client rejects a persisted owner for another device without requesting
     /guardian_owner_probe_device_fingerprint_mismatch/);
   assert.equal(tickets, 0);
 });
+
+test('ticket-bound enrollment has a longer fixed deadline than independent read-only probes', async () => {
+  const deadlines = [];
+  let calls = 0;
+  const client = new BrowserGuardianUpdateActuatorClient({
+    identity: identity(),
+    enrollmentTicketProvider: async () => ({
+      ticket: TICKET, ticket_sha256: TICKET_SHA, single_use: true, persisted_locally: false,
+    }),
+    transport: async (wire, options) => {
+      deadlines.push(options.timeoutMs);
+      calls += 1;
+      if (calls === 1) return result('NO_EFFECT_PROVEN', 'OWNER_ENROLLMENT_TICKET_REQUIRED', { effect_absent_proven: true });
+      assert.equal(wire.includes('enrollment_ticket='), calls === 2);
+      return result('OWNER_BOUND', 'DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT', {
+        effect_absent_proven: calls === 3,
+        owner_binding_proven: true, device_binding_proven: true,
+        device_key_fingerprint_sha256: FINGERPRINT,
+      });
+    },
+  });
+  assert.equal((await client.ensureOwnerBound({
+    command_id: COMMAND_ID, request_nonce: NONCE, timeoutMs: 999999,
+  })).state, 'OWNER_BOUND');
+  assert.deepEqual(deadlines, [2000, 30000, 2000]);
+});

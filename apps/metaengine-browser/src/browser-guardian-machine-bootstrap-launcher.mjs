@@ -273,7 +273,7 @@ export function createBrowserGuardianMachineBootstrapLauncher({
     if (typeof actuatorFactory === 'function') return actuatorFactory();
     return new BrowserGuardianUpdateActuatorClient({
       identity,
-      transport: (wire) => requestGuardianUpdatePipe(wire, { timeoutMs: 2_000 }),
+      transport: (wire, options) => requestGuardianUpdatePipe(wire, options),
     });
   }
 
