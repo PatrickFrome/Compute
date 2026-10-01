@@ -8,6 +8,11 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/src/lib/client-runtime-resource.ts'
+      - 'apps/me2-ui/src/hooks/use-client-runtime-status.ts'
+      - 'apps/me2-ui/src/components/me2/shell/topbar.tsx'
+      - 'apps/me2-ui/src/components/me2/pages/system.tsx'
+      - 'coordination/client-v1/sql/WORKSPACE_AUTHORITY_RECOVERY*_V1.sql'
       - 'sql/browser_control_plane_realtime_wake_v1.sql'
       - 'supabase/migrations/**'
       - '.github/workflows/browser-critical-audit-v1.yml'
@@ -70,6 +75,8 @@ jobs:
           test/browser-db-effect-integrity-contract.test.mjs
           test/native-supervisor-command-lanes.test.mjs
           test/browser-brain-continuous-coordinator.test.mjs
+          test/client-work-readiness.test.mjs
+          test/client-runtime-resource.test.mjs
 
   full-browser-regression:
     name: full-browser-node-test-suite

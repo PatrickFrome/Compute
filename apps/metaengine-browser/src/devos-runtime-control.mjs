@@ -25,6 +25,9 @@ export function normalizeDevosRuntimeControl(value, { workspaceId = null } = {})
   if (String(value.schema || '') !== DEVOS_ENVIRONMENT_STATE_SCHEMA || value.authority_effect !== false) {
     return unavailableDevosRuntimeControl('READBACK_SCHEMA_INVALID');
   }
+  if (value.authority_present === false) {
+    return unavailableDevosRuntimeControl('WORKSPACE_AUTHORITY_MISSING');
+  }
   const observedWorkspace = String(value.workspace_id || '').toLowerCase();
   const expectedWorkspace = workspaceId == null ? null : String(workspaceId).toLowerCase();
   const generationFloor = value.generation_floor;
