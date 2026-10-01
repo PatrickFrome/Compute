@@ -20,16 +20,23 @@ function Invoke-Bootstrap([string]$path, [string]$argument, [string]$label) {
   $out = Join-Path $scratch ($label + '.out')
   $err = Join-Path $scratch ($label + '.err')
   $process = Start-Process -FilePath $path -ArgumentList $argument -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+  # Retain the native handle before a short-lived child exits. PowerShell's
+  # Start-Process adapter can otherwise leave ExitCode unavailable after wait.
+  $nativeHandle = $process.Handle
   if (-not $process.WaitForExit(20000)) { throw "bootstrap_physical_deadline:$label" }
+  # Complete redirected-stream processing only after bounded termination proof.
+  $process.WaitForExit()
+  $exitCode = $process.ExitCode
+  if ($null -eq $exitCode -or $nativeHandle -eq [IntPtr]::Zero) { throw "bootstrap_physical_exit_unavailable:$label" }
   $line = Get-Content $out | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1
   if (-not $line) { throw "bootstrap_physical_receipt_missing:$label" }
-  return @{ exit=$process.ExitCode; row=($line | ConvertFrom-Json) }
+  return @{ exit=[int]$exitCode; row=($line | ConvertFrom-Json) }
 }
 try {
   $invalid = Invoke-Bootstrap $exe '--service-binary=C:\arbitrary.exe' 'invalid'
   if ($invalid.exit -eq 0 -or $invalid.row.state -ne 'NO_EFFECT_PROVEN' -or (Get-Service $name -ErrorAction SilentlyContinue)) { throw 'bootstrap_arbitrary_input_fence_failed' }
   $first = Invoke-Bootstrap $exe '--install' 'first'
-  if ($first.exit -ne 0 -or $first.row.state -ne 'READY' -or $first.row.authority_effect -ne $true) { throw "bootstrap_first_install_unproven:$($first.row.reason)" }
+  if ($first.exit -ne 0 -or $first.row.state -ne 'READY' -or $first.row.authority_effect -ne $true) { throw "bootstrap_first_install_unproven:exit=$($first.exit):state=$($first.row.state):effect=$($first.row.authority_effect):reason=$($first.row.reason)" }
   $service = Get-CimInstance Win32_Service -Filter "Name='$name'"
   $slot = Join-Path $root ('slots\' + [string]$binding.slot_id)
   $serviceExe = Join-Path $slot 'METAENGINEBrowserGuardian.exe'
@@ -50,6 +57,29 @@ try {
   if ($second.exit -ne 0 -or $second.row.state -ne 'READY' -or $second.row.authority_effect -ne $false `
       -or $after.ProcessId -ne $service.ProcessId `
       -or (Get-FileHash (Join-Path $root 'bootstrap.intent') -Algorithm SHA256).Hash -ne $intentHash) { throw 'bootstrap_repeat_must_only_observe' }
+  # Existing terminal markers cannot hide a changed recovery policy. Only this
+  # isolated CI fixture changes/restores the policy; bootstrap must not repair it.
+  & sc.exe failureflag $name 0 | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'bootstrap_policy_drift_fixture_failed' }
+  $drifted = Invoke-Bootstrap $exe '--install' 'policy-drift'
+  $failureFlag = (& sc.exe qfailureflag $name | Out-String)
+  if ($drifted.exit -eq 0 -or $drifted.row.state -ne 'HOLD' -or $drifted.row.authority_effect -ne $false `
+      -or $failureFlag -notmatch 'FAILURE_ACTIONS_ON_NONCRASH_FAILURES\s*:\s*FALSE' `
+      -or (Get-CimInstance Win32_Service -Filter "Name='$name'").ProcessId -ne $service.ProcessId) { throw 'bootstrap_policy_drift_was_repaired_or_ignored' }
+  & sc.exe failureflag $name 1 | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'bootstrap_policy_fixture_restore_failed' }
+  $originalAcl = Get-Acl $root
+  $originalSddl = $originalAcl.Sddl
+  $users = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+  $writeRule = [System.Security.AccessControl.FileSystemAccessRule]::new($users,'Write','Allow')
+  $originalAcl.AddAccessRule($writeRule)
+  Set-Acl $root $originalAcl
+  $driftedAclSddl = (Get-Acl $root).Sddl
+  $aclDrift = Invoke-Bootstrap $exe '--install' 'acl-drift'
+  if ($aclDrift.exit -eq 0 -or $aclDrift.row.reason -ne 'MACHINE_DIRECTORY_TRUST_UNPROVEN' `
+      -or $aclDrift.row.authority_effect -ne $false -or (Get-Acl $root).Sddl -ne $driftedAclSddl) { throw 'bootstrap_ancestor_acl_drift_was_repaired_or_ignored' }
+  $originalAcl.SetSecurityDescriptorSddlForm($originalSddl)
+  Set-Acl $root $originalAcl
   # Mutate an embedded manifest byte without changing the executable/PE layout.
   $raw = [System.IO.File]::ReadAllBytes($exe)
   $needle = [System.Text.Encoding]::UTF8.GetBytes('metaengine.browser.guardian-native-staging-manifest.v1')
@@ -81,6 +111,8 @@ try {
     programdata_owner_store_root_secure=$true
     low_privilege_write_forbidden=$true
     repeat_observation_only=$true
+    scm_policy_drift_held_without_repair=$true
+    ancestor_acl_drift_held_without_repair=$true
     arbitrary_path_rejected=$true
     embedded_tamper_rejected=$true
     stopped_service_replay_held=$true

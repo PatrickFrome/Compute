@@ -673,6 +673,8 @@ jobs:
           path: |
             ${{ runner.temp }}/windows-package-proof.json
             ${{ runner.temp }}/guardian-machine-bootstrap-physical-proof.json
+            ${{ runner.temp }}/guardian-bootstrap-physical/*.out
+            ${{ runner.temp }}/guardian-bootstrap-physical/*.err
             ${{ runner.temp }}/guardian-machine-bootstrap-binding.json
             ${{ runner.temp }}/installed-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json

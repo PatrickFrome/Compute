@@ -119,6 +119,30 @@ bool exactService(SC_HANDLE service, const std::wstring& path, bool running) {
     const auto config = queryConfig(service);
     if (config.empty()) return false;
     const auto* row = reinterpret_cast<const QUERY_SERVICE_CONFIGW*>(config.data());
+    // Terminal markers never substitute for current SCM policy readback.
+    // A repeated invocation must detect drift without repairing/restarting it.
+    const auto privileges = queryConfig2(service, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO);
+    const auto sid = queryConfig2(service, SERVICE_CONFIG_SERVICE_SID_INFO);
+    const auto actions = queryConfig2(service, SERVICE_CONFIG_FAILURE_ACTIONS);
+    const auto flag = queryConfig2(service, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG);
+    if (privileges.size() < sizeof(SERVICE_REQUIRED_PRIVILEGES_INFOW)
+        || sid.size() < sizeof(SERVICE_SID_INFO)
+        || actions.size() < sizeof(SERVICE_FAILURE_ACTIONSW)
+        || flag.size() < sizeof(SERVICE_FAILURE_ACTIONS_FLAG)) return false;
+    const auto* required = reinterpret_cast<const SERVICE_REQUIRED_PRIVILEGES_INFOW*>(privileges.data());
+    const auto* serviceSid = reinterpret_cast<const SERVICE_SID_INFO*>(sid.data());
+    const auto* recovery = reinterpret_cast<const SERVICE_FAILURE_ACTIONSW*>(actions.data());
+    const auto* failureFlag = reinterpret_cast<const SERVICE_FAILURE_ACTIONS_FLAG*>(flag.data());
+    if (!requiredPrivilegesMatch(required->pmszRequiredPrivileges)
+        || serviceSid->dwServiceSidType != SERVICE_SID_TYPE_UNRESTRICTED
+        || recovery->dwResetPeriod != INFINITE || recovery->cActions != 3 || recovery->lpsaActions == nullptr
+        || failureFlag->fFailureActionsOnNonCrashFailures != TRUE
+        || (recovery->lpCommand != nullptr && recovery->lpCommand[0] != L'\0')
+        || (recovery->lpRebootMsg != nullptr && recovery->lpRebootMsg[0] != L'\0')) return false;
+    for (DWORD i = 0; i < 3; ++i) {
+        if (recovery->lpsaActions[i].Type != SC_ACTION_RESTART
+            || recovery->lpsaActions[i].Delay != kRestartDelaysMs[i]) return false;
+    }
     SERVICE_STATUS_PROCESS status{}; DWORD needed = 0;
     return row->dwServiceType == SERVICE_WIN32_OWN_PROCESS && row->dwStartType == SERVICE_AUTO_START
         && localSystemAccount(row->lpServiceStartName) && imagePathMatches(row->lpBinaryPathName, path)
@@ -165,6 +189,13 @@ int installEmbedded() {
     if (scm.value == nullptr) return bootstrapResult("NO_EFFECT_PROVEN", "SCM_ACCESS_UNAVAILABLE", false);
     ServiceHandle existing(OpenServiceW(scm.value, kServiceName, SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS));
     if (existing.value != nullptr) {
+        std::vector<Fence> fences;
+        for (const std::wstring& path : {pf + L"\\METAENGINE", root, root + L"\\slots", slot,
+                pd + L"\\METAENGINE", pd + L"\\METAENGINE\\Guardian"}) {
+            auto fence = directoryFence(path);
+            if (!fence) return bootstrapResult("HOLD", "MACHINE_DIRECTORY_TRUST_UNPROVEN", false);
+            fences.push_back(std::move(fence));
+        }
         if (exactService(existing.value, binary, true) && exactFile(binary, serviceBytes)
             && exactFile(configurator, configBytes) && exactFile(manifest, manifestBytes)
             && exactFile(intent, marker) && exactFile(result, marker))
