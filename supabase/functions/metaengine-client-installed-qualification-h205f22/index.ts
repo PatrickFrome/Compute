@@ -10,9 +10,14 @@ const REPOSITORY_ID = "1341371143";
 const OWNER_ID = "20597814";
 const WORKFLOW_PATH = ".github/workflows/browser-windows-installed-chat-qualification.yml";
 const WORKFLOW_REF_PREFIX = `${REPO}/${WORKFLOW_PATH}@`;
-const LEGACY_SUBJECT = `repo:${REPO}:pull_request`;
-const IMMUTABLE_SUBJECT = `repo:PatrickFrome@${OWNER_ID}/Compute@${REPOSITORY_ID}:pull_request`;
-const ALLOWED_SUBJECTS = new Set([LEGACY_SUBJECT, IMMUTABLE_SUBJECT]);
+const RELEASE_BRANCH = "release/self-update-ambiguity-live-v2";
+const RELEASE_REF = `refs/heads/${RELEASE_BRANCH}`;
+const LEGACY_PR_SUBJECT = `repo:${REPO}:pull_request`;
+const IMMUTABLE_PR_SUBJECT = `repo:PatrickFrome@${OWNER_ID}/Compute@${REPOSITORY_ID}:pull_request`;
+const LEGACY_RELEASE_SUBJECT = `repo:${REPO}:ref:${RELEASE_REF}`;
+const IMMUTABLE_RELEASE_SUBJECT = `repo:PatrickFrome@${OWNER_ID}/Compute@${REPOSITORY_ID}:ref:${RELEASE_REF}`;
+const PR_SUBJECTS = new Set([LEGACY_PR_SUBJECT, IMMUTABLE_PR_SUBJECT]);
+const RELEASE_SUBJECTS = new Set([LEGACY_RELEASE_SUBJECT, IMMUTABLE_RELEASE_SUBJECT]);
 const SHA40 = /^[0-9a-f]{40}$/;
 
 const SUPABASE_URL = String(Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
@@ -170,9 +175,16 @@ Deno.serve(async (req: Request) => {
     if (payload.repository !== REPO) throw new Error("repository_forbidden");
     if (String(payload.repository_id || "") !== REPOSITORY_ID) throw new Error("repository_id_forbidden");
     if (String(payload.repository_owner_id || "") !== OWNER_ID) throw new Error("repository_owner_id_forbidden");
-    if (payload.event_name !== "pull_request") throw new Error("event_forbidden");
     if (payload.runner_environment !== "github-hosted") throw new Error("runner_environment_forbidden");
-    if (!ALLOWED_SUBJECTS.has(String(payload.sub || ""))) throw new Error("subject_forbidden");
+
+    const eventName = String(payload.event_name || "");
+    const subject = String(payload.sub || "");
+    const isPullRequest = eventName === "pull_request" && PR_SUBJECTS.has(subject);
+    const isReleasePush = eventName === "push"
+      && String(payload.ref || "") === RELEASE_REF
+      && RELEASE_SUBJECTS.has(subject);
+    if (!isPullRequest && !isReleasePush) throw new Error("event_or_subject_forbidden");
+
     if (!String(payload.workflow_ref || "").startsWith(WORKFLOW_REF_PREFIX)) {
       throw new Error("workflow_ref_forbidden");
     }
@@ -196,15 +208,21 @@ Deno.serve(async (req: Request) => {
 
     if (String(run?.repository?.full_name || "") !== REPO) throw new Error("run_repository_invalid");
     if (String(run?.path || "") !== WORKFLOW_PATH) throw new Error("run_workflow_path_invalid");
-    if (String(run?.event || "") !== "pull_request") throw new Error("run_event_invalid");
     if (String(run?.head_sha || "").toLowerCase() !== sourceHead) throw new Error("run_head_sha_invalid");
     if (Number(run?.run_attempt || 0) !== runAttempt) throw new Error("run_attempt_drift");
     if (!["queued", "in_progress", "completed"].includes(String(run?.status || ""))) {
       throw new Error("run_status_invalid");
     }
-    const exactPr = Array.isArray(run?.pull_requests)
-      && run.pull_requests.some((row: any) => String(row?.head?.sha || "").toLowerCase() === sourceHead);
-    if (!exactPr) throw new Error("run_pr_head_binding_missing");
+
+    if (isPullRequest) {
+      if (String(run?.event || "") !== "pull_request") throw new Error("run_event_invalid");
+      const exactPr = Array.isArray(run?.pull_requests)
+        && run.pull_requests.some((row: any) => String(row?.head?.sha || "").toLowerCase() === sourceHead);
+      if (!exactPr) throw new Error("run_pr_head_binding_missing");
+    } else {
+      if (String(run?.event || "") !== "push") throw new Error("run_event_invalid");
+      if (String(run?.head_branch || "") !== RELEASE_BRANCH) throw new Error("run_release_branch_invalid");
+    }
 
     // Nonce preflight fails closed before approval and the SQL RPC repeats
     // the same exact tuple under an advisory transaction lock. The weaker V1
