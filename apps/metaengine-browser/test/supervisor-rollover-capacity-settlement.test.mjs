@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 
-const URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const CHAT_URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 function harness(seed = null) {
   let stored = seed == null ? null : structuredClone(seed);
@@ -52,7 +52,7 @@ test('tab capacity guard remains before WebContents allocation and matches nativ
 test('capacity no-effect settlement clears only an unbound rollover attempt', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: URL, tab_id: 'tab_old' });
+  await h.keepalive.bindConversation({ url: CHAT_URL, tab_id: 'tab_old' });
   await h.keepalive.applyAdmissionOpen(OPEN);
   await h.keepalive.requestRollover('CAPACITY_TEST', { autoRelease: true });
   const attempt = await h.keepalive.beginRolloverAttempt();
@@ -134,7 +134,7 @@ test('the exact live false-ambiguity signature parks under CLOSED admission', as
 test('other ambiguous rollover reasons remain fenced', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: URL, tab_id: 'tab_old' });
+  await h.keepalive.bindConversation({ url: CHAT_URL, tab_id: 'tab_old' });
   await h.keepalive.applyAdmissionOpen(OPEN);
   await h.keepalive.requestRollover('OTHER', { autoRelease: true });
   const attempt = await h.keepalive.beginRolloverAttempt();
