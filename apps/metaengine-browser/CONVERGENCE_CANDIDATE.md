@@ -1,8 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36797279067.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36800636112.1`.
 
-Previous installed package identity is `0.7.0-dev.36760350225.1`. The recovery candidate changes packaged runtime/UI bytes and must advance above that installed identity. It restores CLOSED workspace authority and truthful execution readiness; it does not claim that Supervisor rollover, Agent-origin execution or useful-work completion is already qualified live.
+Previous installed package identity is `0.7.0-dev.36760350225.1`. Previous qualified package identity is `0.7.0-dev.36797279067.1` (d1bad828 installer SHA-256 `6564140d0f0fdaa6367ccfe8793a0b2de772c6252e7b420b10fcdb46bc14ee3a`). The recovery candidate changes packaged runtime/UI bytes and must advance above both identities. It restores CLOSED workspace authority and truthful execution readiness; it does not claim that Supervisor rollover, Agent-origin execution or useful-work completion is already qualified live.
 
 Historical ADMIN.1 changed packaged runtime bytes above UI.1 `0.7.0-dev.36719340135.1`, R109 `0.7.0-dev.36516587173.1` and R97/live `0.7.0-dev.36336130139.1`. The current candidate reserves a higher observed workflow namespace with the canonical `.1` suffix before building; the final producer run, installer SHA-256 and released artifact identity must still be recorded separately on the exact final source SHA.
 
