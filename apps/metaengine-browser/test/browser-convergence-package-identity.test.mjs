@@ -6,7 +6,7 @@ import { parseMetaengineDevVersion } from '../src/trusted-dev-release-resolver.m
 
 const candidateDoc = await readFile(new URL('../CONVERGENCE_CANDIDATE.md', import.meta.url), 'utf8');
 const reserved = candidateDoc.match(/Reserved package identity is \`([^\`]+)\`\./)?.[1] ?? null;
-const priorLiveBuild = 36336130139;
+const priorInstalledVersion = candidateDoc.match(/Previous installed package identity is \`([^\`]+)\`\./)?.[1] ?? null;
 
 test('convergence candidate package identity matches the reserved exact source candidate', () => {
   assert.ok(reserved, 'reserved package identity must be declared in CONVERGENCE_CANDIDATE.md');
@@ -20,5 +20,7 @@ test('convergence candidate package identity matches the reserved exact source c
     build: parsed.build,
   });
   assert.ok(Number.isSafeInteger(parsed.build));
-  assert.ok(parsed.build > priorLiveBuild, 'source-changing convergence candidate must not reuse prior live package identity');
+  const priorInstalled = parseMetaengineDevVersion(priorInstalledVersion);
+  assert.ok(priorInstalled, 'the actual installed predecessor must have a trusted package identity');
+  assert.ok(parsed.build > priorInstalled.build, 'source-changing convergence candidate must advance above its installed predecessor');
 });
