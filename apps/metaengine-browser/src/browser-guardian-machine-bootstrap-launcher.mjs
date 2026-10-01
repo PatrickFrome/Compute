@@ -219,6 +219,7 @@ export function createBrowserGuardianMachineBootstrapLauncher({
   bindingLoader = loadPackagedGuardianMachineBootstrapBinding,
   trustRootLoader = loadPackagedEmergencyMaintenanceTrustRoot,
   actuatorFactory = null,
+  launchTimeoutMs = 60_000,
   readbackTimeoutMs = 30_000,
   pollIntervalMs = 300,
   now = () => Date.now(),
@@ -233,6 +234,9 @@ export function createBrowserGuardianMachineBootstrapLauncher({
   if (typeof openPath !== 'function') throw new Error('guardian_machine_bootstrap_open_path_required');
   if (bindingLoader != null && typeof bindingLoader !== 'function') throw new Error('guardian_machine_bootstrap_binding_loader_invalid');
   if (trustRootLoader != null && typeof trustRootLoader !== 'function') throw new Error('guardian_machine_bootstrap_trust_root_loader_invalid');
+  if (!Number.isSafeInteger(launchTimeoutMs) || launchTimeoutMs < 1 || launchTimeoutMs > 120_000) {
+    throw new Error('guardian_machine_bootstrap_launch_timeout_invalid');
+  }
   const timeout = Math.max(2_000, Math.min(60_000, Number(readbackTimeoutMs) || 30_000));
   const poll = Math.max(100, Math.min(2_000, Number(pollIntervalMs) || 300));
   let inFlight = null;
@@ -344,22 +348,34 @@ export function createBrowserGuardianMachineBootstrapLauncher({
       }
 
       let openError;
+      let launchTimer;
       try {
-        openError = await openPath(p.executable.executable);
+        // A stalled/lost OS acknowledgement cannot hold IPC forever or prove
+        // that elevation never happened. A late completion is not a retry.
+        openError = await Promise.race([
+          Promise.resolve().then(() => openPath(p.executable.executable)),
+          new Promise((_, reject) => {
+            launchTimer = setTimeout(() => reject(new Error('guardian_bootstrap_uac_launch_deadline')), launchTimeoutMs);
+          }),
+        ]);
       } catch (error) {
-        return state('NO_EFFECT_PROVEN', 'GUARDIAN_BOOTSTRAP_UAC_LAUNCH_FAILED', {
+        return state('AMBIGUOUS', 'GUARDIAN_BOOTSTRAP_UAC_LAUNCH_OUTCOME_UNKNOWN', {
           source_head: p.binding.source_head,
           package_version: p.binding.package_version,
           error: String(error?.message || error).slice(0, 240),
           uac_launch_requested: true,
+          physical_effect_outcome: 'UNPROVEN',
         });
+      } finally {
+        clearTimeout(launchTimer);
       }
       if (String(openError || '')) {
-        return state('NO_EFFECT_PROVEN', 'GUARDIAN_BOOTSTRAP_UAC_LAUNCH_REJECTED', {
+        return state('HOLD', 'GUARDIAN_BOOTSTRAP_UAC_LAUNCH_REJECTED', {
           source_head: p.binding.source_head,
           package_version: p.binding.package_version,
           error: String(openError).slice(0, 240),
           uac_launch_requested: true,
+          physical_effect_outcome: 'UNPROVEN',
         });
       }
 
@@ -405,6 +421,8 @@ export function browserGuardianMachineBootstrapLauncherContract() {
     single_owner_enrollment_attempt_after_service_readback: true,
     automatic_effect_retry_allowed: false,
     ambiguous_owner_enrollment_retry_allowed: false,
+    bounded_uac_acknowledgement_required: true,
+    lost_uac_acknowledgement_proves_no_effect: false,
     authority_effect: false,
   });
 }

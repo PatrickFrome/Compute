@@ -217,6 +217,38 @@ test('tampered packaged bootstrap holds before UAC', async (t) => {
   assert.equal(openCount, 0);
 });
 
+for (const scenario of [
+  { name: 'lost OS launch response', open: () => { throw new Error('response lost after dispatch'); }, state: 'AMBIGUOUS' },
+  { name: 'stalled OS launch response', open: () => new Promise(() => {}), state: 'AMBIGUOUS' },
+  { name: 'opaque OS failure message', open: () => 'The operation failed', state: 'HOLD' },
+]) {
+  test(`${scenario.name} is bounded and cannot prove physical effect absence or cause retries`, async (t) => {
+    const fx = await fixture(t);
+    let launches = 0;
+    let enrollments = 0;
+    const launcher = createBrowserGuardianMachineBootstrapLauncher({
+      platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
+      identity: identity(),
+      launchTimeoutMs: 20,
+      openPath: () => { launches += 1; return scenario.open(); },
+      trustRootLoader: () => ({ build_sha: HEAD }), bindingLoader: () => fx.binding,
+      actuatorFactory: () => ({
+        observeOwner: async () => { throw new Error('guardian_update_actuator_pipe_error:ENOENT'); },
+        ensureOwnerBound: async () => { enrollments += 1; throw new Error('must_not_enroll'); },
+      }),
+    });
+    const results = await Promise.all([launcher.activate(), launcher.activate()]);
+    for (const result of results) {
+      assert.equal(result.state, scenario.state);
+      assert.equal(result.physical_effect_outcome, 'UNPROVEN');
+      assert.equal(result.ready, false);
+      assert.equal(result.automatic_retry_allowed, false);
+    }
+    assert.equal(launches, 1);
+    assert.equal(enrollments, 0);
+  });
+}
+
 test('launcher contract exposes no renderer path/args and no startup elevation or retry', () => {
   const contract = browserGuardianMachineBootstrapLauncherContract();
   assert.equal(contract.explicit_user_action_required, true);
@@ -227,4 +259,6 @@ test('launcher contract exposes no renderer path/args and no startup elevation o
   assert.equal(contract.exact_sha256_and_size_required, true);
   assert.equal(contract.automatic_effect_retry_allowed, false);
   assert.equal(contract.ambiguous_owner_enrollment_retry_allowed, false);
+  assert.equal(contract.bounded_uac_acknowledgement_required, true);
+  assert.equal(contract.lost_uac_acknowledgement_proves_no_effect, false);
 });

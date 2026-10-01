@@ -16,7 +16,8 @@ test('machine bootstrap has only explicit no-arg UAC or --install embedded-asset
   assert.match(source, /if \(argc == 1\) return installEmbedded\(\)/);
   assert.match(source, /argc == 2[^\n]+L"--install"/);
   assert.match(source, /CheckTokenMembership/);
-  assert.doesNotMatch(source, /ShellExecute|CreateProcess|WinHttp|URLDownload|std::system|\bargv\[2\]/);
+  // Reject API invocations, rather than harmless API names in explanatory text.
+  assert.doesNotMatch(source, /\b(?:ShellExecute(?:Ex)?[AW]?|CreateProcess\w*|WinHttp\w*|URLDownload\w*|std::system)\s*\(|\bargv\[2\]/);
 });
 
 test('all embedded bytes are digest-checked before durable machine effects', () => {

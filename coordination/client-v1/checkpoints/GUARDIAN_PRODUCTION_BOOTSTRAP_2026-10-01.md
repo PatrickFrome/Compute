@@ -44,3 +44,13 @@ Edge source changes require a new immutable canary pin/deployment and source-equ
 - Supabase API security: combine restricted EXECUTE/table grants with RLS and explicit privileged function authorization. https://supabase.com/docs/guides/api/securing-your-api
 
 The companion is a development candidate pending exact Windows evidence, not a production seal or permission to bypass HOLD.
+
+## 16:17 UTC continuation — current UAC boundary
+
+Remote PR #1087 advanced from `38f71e0c` (20/20 workflow SUCCESS) to `06c8ef6440f57975e70aeaa72988133c07e04261`. The donor added protected packaged bootstrap metadata, an explicit SYSTEM activation bridge and a no-argument UAC executable entry. Package Smoke `36832190273` physically proved that entry, exact machine copy, Running SCM, repeat observation-only, policy/ancestor ACL drift HOLD, embedded tamper rejection and stopped-service HOLD. Proof explicitly keeps owner enrollment, installer dispatch and user-machine qualification false.
+
+The current-head three red workflows share two exact causes: package version `0.7.0-dev.36832129848.1` differs from the stale reserved identity in this document's companion manifest; the bootstrap API-ban assertion matches the explanatory word `ShellExecute` instead of an API invocation. The successor keeps exact version equality and the API invocation ban, and reserves `0.7.0-dev.36832190273.1` above the consumed installer.
+
+Critical launcher audit found an unbounded OS launch acknowledgement and a false `NO_EFFECT_PROVEN` classification after a thrown/lost response. Activation now bounds OS acknowledgement to 60 seconds (maximum internal configuration 120 seconds), returns AMBIGUOUS on a lost/deadline response and HOLD for an opaque failure message. Neither proves effect absence or causes automatic retry/enrollment. Concurrent activation calls share one launch. Three injected fault cases and all focused identity/launcher/IPC contracts passed (34/34).
+
+Research: Electron `shell.openPath` reports OS integration failure/success, not a durable SCM/owner receipt: https://www.electronjs.org/docs/latest/api/shell . READY still requires independent native owner/device readback. No model API, second scheduler or remote privileged executor was added. New exact Windows qualification remains mandatory.
