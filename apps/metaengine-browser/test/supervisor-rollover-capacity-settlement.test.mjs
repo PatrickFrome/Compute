@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 
@@ -28,6 +29,24 @@ const OPEN = Object.freeze({
   continuous_service_allowed: true,
   automatic_retry_allowed: false,
   authority_effect: false,
+});
+
+test('tab capacity guard remains before WebContents allocation and matches native outcome policy', async () => {
+  const [main, registry, nativeClient] = await Promise.all([
+    fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../src/tab-registry.mjs', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8'),
+  ]);
+  const createStart = main.indexOf('async function createTab');
+  const createEnd = main.indexOf('async function loadTab', createStart);
+  const block = main.slice(createStart, createEnd);
+  const registryCreate = block.indexOf('registry.create(');
+  const rendererCreate = block.indexOf('new WebContentsView(');
+  assert.ok(createStart >= 0 && createEnd > createStart);
+  assert.ok(registryCreate >= 0 && rendererCreate > registryCreate,
+    'capacity registry guard must run before WebContents allocation');
+  assert.match(registry, /if \(this\.\#tabs\.size >= MAX_TABS\) throw new Error\('tab_capacity_exceeded'\)/);
+  assert.match(nativeClient, /action === 'NEW_TAB' && message === 'tab_capacity_exceeded'\) return 'NO_EFFECT_PROVEN'/);
 });
 
 test('capacity no-effect settlement clears only an unbound rollover attempt', async () => {
