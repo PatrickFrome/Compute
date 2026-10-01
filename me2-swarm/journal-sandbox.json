@@ -1,5 +1,5 @@
 {
-  "savedAt": "2026-10-01T00:20:06.504Z",
+  "savedAt": "2026-10-01T00:27:46.136Z",
   "version": "2.0.0-restore",
   "lessons": [
     {
@@ -689,14 +689,6 @@
   ],
   "milestones": [
     {
-      "ts": "2026-09-30T23:33:33.768Z",
-      "payload": "{\"population\":17711}"
-    },
-    {
-      "ts": "2026-09-30T23:38:00.434Z",
-      "payload": "{\"population\":17819}"
-    },
-    {
       "ts": "2026-09-30T23:42:52.190Z",
       "payload": "{\"population\":17935}"
     },
@@ -727,6 +719,14 @@
     {
       "ts": "2026-10-01T00:17:34.296Z",
       "payload": "{\"population\":18740}"
+    },
+    {
+      "ts": "2026-10-01T00:21:47.284Z",
+      "payload": "{\"population\":18840}"
+    },
+    {
+      "ts": "2026-10-01T00:26:23.803Z",
+      "payload": "{\"population\":18952}"
     }
   ],
   "kv": {
@@ -736,7 +736,7 @@
     "op_goal": "ресёрч бесплатных LLM-каналов и интеграция лучшего в цепочку (обновлено из консоли)",
     "host": "dataforge-sandbox (chat 4e7a8a53)",
     "restored_from": "journal-latest.json @ Compute main (внешний рой жив)",
-    "total_born": 8600,
-    "cycles": 711
+    "total_born": 8764,
+    "cycles": 724
   }
 }
