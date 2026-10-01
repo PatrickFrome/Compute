@@ -199,8 +199,8 @@ export function createNativeGuardianDeveloperEmergencyUpdateController({
   if (typeof fetchImpl !== 'function') throw new Error('emergency_native_fetch_required');
   if (typeof releaseResolver !== 'function') throw new Error('emergency_native_release_resolver_required');
   if (typeof intakeStager !== 'function') throw new Error('emergency_native_intake_stager_required');
-  const actuatorClient = actuator || new BrowserGuardianUpdateActuatorClient({ identity });
-  if (typeof actuatorClient?.probeOwner !== 'function'
+  const actuatorClient = actuator || new BrowserGuardianUpdateActuatorClient({ identity, fetchImpl });
+  if (typeof actuatorClient?.ensureOwnerBound !== 'function'
       || typeof actuatorClient?.dispatch !== 'function'
       || typeof actuatorClient?.observe !== 'function') {
     throw new Error('emergency_native_actuator_required');
@@ -216,11 +216,24 @@ export function createNativeGuardianDeveloperEmergencyUpdateController({
 
     let ownerProbe;
     try {
-      ownerProbe = await actuatorClient.probeOwner({
+      ownerProbe = await actuatorClient.ensureOwnerBound({
         command_id: context.commandId,
         request_nonce: context.requestNonce,
       });
     } catch (error) {
+      if (error?.code === 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS') {
+        return baseReceipt('AMBIGUOUS', 'GUARDIAN_OWNER_ENROLLMENT_RESULT_UNKNOWN', {
+          command_id: context.commandId,
+          request_nonce: context.requestNonce,
+          owner_enrollment_effect_ambiguous: true,
+          owner_binding_proven: false,
+          physical_dispatch_count: 0,
+          physical_dispatch_count_known: true,
+          physical_dispatch_upper_bound: 0,
+          installer_dispatch_attempted: false,
+          error: String(error?.message || error).slice(0, 300),
+        });
+      }
       return hold('DEVELOPER_OWNER_DEVICE_BINDING_REQUIRED', {
         command_id: context.commandId,
         request_nonce: context.requestNonce,
@@ -378,6 +391,10 @@ export function nativeGuardianDeveloperEmergencyUpdateContract() {
     effect_generation: 1,
     durable_owner_binding_required: true,
     enrolled_device_challenge_required: true,
+    read_only_owner_probe_precedes_enrollment: true,
+    first_owner_binding_requires_single_use_admin_ticket: true,
+    owner_enrollment_ambiguity_blocks_installer_dispatch: true,
+    owner_enrollment_automatic_retry_allowed: false,
     trusted_release_resolver_required: true,
     trusted_release_installer_digest_required: true,
     trusted_release_manifest_digest_required: true,
