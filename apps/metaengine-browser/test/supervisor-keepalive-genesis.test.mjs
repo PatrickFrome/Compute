@@ -15,7 +15,7 @@ test('fresh keepalive genesis records current incarnation without fabricating pr
 
   const snapshot = await keepalive.init();
 
-  assert.equal(snapshot.version, '1.5.0');
+  assert.equal(snapshot.version, '1.5.1');
   assert.equal(snapshot.state, 'RECOVERING');
   assert.equal(snapshot.admission_state, 'UNKNOWN');
   assert.equal(snapshot.admission_reason, 'NOT_OBSERVED');
