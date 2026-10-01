@@ -1,0 +1,302 @@
+name: METAENGINE Browser Historical Installed Trust Anchor V1
+
+on:
+  push:
+    branches:
+      - work/browser-historical-installed-trust-anchor-v1
+    paths:
+      - '.github/workflows/browser-historical-installed-trust-anchor-v1.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-historical-installed-trust-anchor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SOURCE_SHA: 93c64424525e00444a97abc151ef05bd386da3d7
+      TARGET_VERSION: 0.7.0-dev.36760350225.1
+      PACKAGE_RUN_ID: '36765836910'
+      E2E_RUN_ID: '36765836906'
+      INSTALLED_CHAT_RUN_ID: '36765836702'
+      E2E_ARTIFACT_ID: '11122950624'
+      E2E_ARTIFACT_NAME: metaengine-browser-self-update-e2e-93c64424525e00444a97abc151ef05bd386da3d7-1
+      E2E_ARTIFACT_SHA256: a5c7fe51162b23a13ea472e9b69c4fea485f7a85c353fc5abe314def76baa499
+
+    steps:
+      - name: Prove historical source and physical runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tuple in             "$PACKAGE_RUN_ID:.github/workflows/browser-windows-package-smoke.yml"             "$E2E_RUN_ID:.github/workflows/metaengine-browser-self-update-e2e.yml"             "$INSTALLED_CHAT_RUN_ID:.github/workflows/browser-windows-installed-chat-qualification.yml"; do
+            run_id="${tuple%%:*}"
+            workflow_path="${tuple#*:}"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "run-${run_id}.json"
+            RUN_ID="$run_id" WORKFLOW_PATH="$workflow_path" python3 - <<'PY'
+          import json, os
+          row=json.load(open(f"run-{os.environ['RUN_ID']}.json",encoding='utf-8'))
+          if row.get('head_sha') != os.environ['TARGET_SOURCE_SHA']:
+              raise SystemExit('historical_run_head_mismatch:'+str(row.get('id')))
+          if row.get('path') != os.environ['WORKFLOW_PATH']:
+              raise SystemExit('historical_run_workflow_mismatch:'+str(row.get('id')))
+          if row.get('status') != 'completed' or row.get('conclusion') != 'success':
+              raise SystemExit('historical_run_not_success:'+str(row.get('id')))
+          if row.get('event') != 'pull_request':
+              raise SystemExit('historical_run_event_invalid:'+str(row.get('id')))
+          PY
+          done
+
+      - name: Acquire immutable historical E2E artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${E2E_ARTIFACT_ID}" > artifact.json
+          python3 - <<'PY'
+          import json, os
+          a=json.load(open('artifact.json',encoding='utf-8'))
+          if str(a.get('id')) != os.environ['E2E_ARTIFACT_ID']:
+              raise SystemExit('historical_artifact_id_mismatch')
+          if a.get('name') != os.environ['E2E_ARTIFACT_NAME']:
+              raise SystemExit('historical_artifact_name_mismatch')
+          if a.get('expired') is not False:
+              raise SystemExit('historical_artifact_expired')
+          if str(a.get('digest') or '').lower() != 'sha256:'+os.environ['E2E_ARTIFACT_SHA256']:
+              raise SystemExit('historical_artifact_digest_metadata_mismatch')
+          run=a.get('workflow_run') or {}
+          if str(run.get('id')) != os.environ['E2E_RUN_ID'] or run.get('head_sha') != os.environ['TARGET_SOURCE_SHA']:
+              raise SystemExit('historical_artifact_run_binding_mismatch')
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${E2E_ARTIFACT_ID}/zip" > historical.zip
+          test "$(sha256sum historical.zip | awk '{print $1}')" = "$E2E_ARTIFACT_SHA256"
+          mkdir evidence
+          unzip -q historical.zip -d evidence
+
+      - name: Verify exact historical bytes and seal installed executable proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, re
+
+          root=pathlib.Path('evidence')
+          version=os.environ['TARGET_VERSION']
+          source=os.environ['TARGET_SOURCE_SHA']
+          installer_name=f'METAENGINE-Browser-Test-Setup-{version}-x64.exe'
+          required=[
+              installer_name,
+              installer_name+'.blockmap',
+              'dev.yml',
+              'verified-self-update-manifest.json',
+              'guardian-native-staging-manifest.json',
+              'METAENGINEBrowserGuardian.exe',
+              'METAENGINEBrowserGuardianConfigure.exe',
+              'installer-resident-upgrade-proof.json',
+          ]
+          for name in required:
+              p=root/name
+              if not p.is_file() or p.stat().st_size <= 0:
+                  raise SystemExit('historical_evidence_missing:'+name)
+
+          def sha256(path):
+              h=hashlib.sha256()
+              with open(path,'rb') as f:
+                  for chunk in iter(lambda:f.read(1024*1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          installer=root/installer_name
+          manifest_path=root/'verified-self-update-manifest.json'
+          manifest=json.loads(manifest_path.read_text(encoding='utf-8-sig'))
+          if manifest.get('schema')!='metaengine.browser.self-update-e2e-manifest.v2':
+              raise SystemExit('historical_manifest_schema_invalid')
+          if manifest.get('version')!=version or manifest.get('git_sha')!=source or manifest.get('source_head')!=source:
+              raise SystemExit('historical_manifest_source_binding_invalid')
+          if str(manifest.get('run_id')) != os.environ['E2E_RUN_ID']:
+              raise SystemExit('historical_manifest_run_id_invalid')
+          if int(manifest.get('producer_run_id') or 0) != int(os.environ['PACKAGE_RUN_ID']):
+              raise SystemExit('historical_manifest_producer_run_invalid')
+          for key in (
+              'physical_n_to_n_plus_1','durable_successor_binding','forced_successor',
+              'profile_continuity','single_install_directory','physical_singleton',
+              'development_channel','published_baseline_reused',
+              'guardian_native_staging_present','guardian_native_staging_verified',
+              'guardian_native_no_activation','guardian_native_requires_machine_secure_copy',
+              'guardian_native_release_assets_verified','producer_terminal_success',
+          ):
+              if manifest.get(key) is not True:
+                  raise SystemExit('historical_manifest_proof_missing:'+key)
+          if int(manifest.get('target_build_count') or 0)!=1:
+              raise SystemExit('historical_manifest_target_build_count_invalid')
+          if int(manifest.get('consumer_target_build_count') or -1)!=0:
+              raise SystemExit('historical_manifest_consumer_rebuild_detected')
+          if manifest.get('target_installer_source')!='PACKAGE_SMOKE_ARTIFACT':
+              raise SystemExit('historical_manifest_installer_source_invalid')
+          if manifest.get('production_safe') is not False or manifest.get('update_channel')!='dev':
+              raise SystemExit('historical_manifest_channel_invalid')
+          if manifest.get('installer_name')!=installer_name:
+              raise SystemExit('historical_manifest_installer_name_invalid')
+          installer_sha=sha256(installer)
+          if installer_sha != str(manifest.get('installer_sha256') or '').lower():
+              raise SystemExit('historical_installer_digest_mismatch')
+          if manifest.get('installed_executable_sha256') not in (None,''):
+              raise SystemExit('historical_manifest_already_sealed_unexpectedly')
+
+          dev=(root/'dev.yml').read_text(encoding='utf-8-sig').replace('\r','')
+          lines=[x for x in dev.split('\n') if x.strip()]
+          def one(pattern):
+              vals=[re.sub(pattern,'',x).strip() for x in lines if re.match(pattern,x)]
+              if len(vals)!=1: raise SystemExit('historical_dev_yml_shape_invalid:'+pattern)
+              return vals[0]
+          y_version=one(r'^version:\s*')
+          y_path=one(r'^path:\s*')
+          top_sha=one(r'^sha512:\s*')
+          urls=[re.sub(r'^\s+- url:\s*','',x).strip() for x in lines if re.match(r'^\s+- url:\s*',x)]
+          nested=[re.sub(r'^\s+sha512:\s*','',x).strip() for x in lines if re.match(r'^\s+sha512:\s*',x)]
+          sizes=[re.sub(r'^\s+size:\s*','',x).strip() for x in lines if re.match(r'^\s+size:\s*',x)]
+          if y_version!=version or y_path!=installer_name or urls!=[installer_name] or len(nested)!=1 or len(sizes)!=1:
+              raise SystemExit('historical_dev_yml_binding_invalid')
+          data=installer.read_bytes()
+          expected_sha512=base64.b64encode(hashlib.sha512(data).digest()).decode()
+          if top_sha!=expected_sha512 or nested[0]!=expected_sha512 or int(sizes[0])!=installer.stat().st_size:
+              raise SystemExit('historical_dev_yml_installer_proof_invalid')
+
+          guardian_path=root/'guardian-native-staging-manifest.json'
+          guardian=json.loads(guardian_path.read_text(encoding='utf-8-sig'))
+          if guardian.get('schema')!='metaengine.browser.guardian-native-staging-manifest.v1':
+              raise SystemExit('historical_guardian_schema_invalid')
+          if guardian.get('source_head')!=source or guardian.get('package_version')!=version:
+              raise SystemExit('historical_guardian_source_binding_invalid')
+          if guardian.get('staging_only') is not True or guardian.get('requires_machine_secure_copy') is not True:
+              raise SystemExit('historical_guardian_staging_boundary_invalid')
+          for k in ('service_activation_authorized','service_installation_authorized','service_start_authorized','authority_effect'):
+              if guardian.get(k) is not False:
+                  raise SystemExit('historical_guardian_forbidden_authority:'+k)
+          if guardian.get('user_writable_service_activation_forbidden') is not True:
+              raise SystemExit('historical_guardian_user_write_fence_missing')
+          guardian_sha=sha256(guardian_path)
+          if guardian_sha != str(manifest.get('guardian_native_manifest_sha256') or '').lower():
+              raise SystemExit('historical_guardian_manifest_digest_mismatch')
+          rows=guardian.get('binaries') or []
+          by_name={str(x.get('name')):x for x in rows}
+          if set(by_name)!= {'METAENGINEBrowserGuardian.exe','METAENGINEBrowserGuardianConfigure.exe'} or len(rows)!=2:
+              raise SystemExit('historical_guardian_binary_set_invalid')
+          for name,row in by_name.items():
+              p=root/name
+              if sha256(p)!=str(row.get('sha256') or '').lower() or p.stat().st_size!=int(row.get('size') or 0):
+                  raise SystemExit('historical_guardian_binary_proof_invalid:'+name)
+
+          resident=json.loads((root/'installer-resident-upgrade-proof.json').read_text(encoding='utf-8-sig'))
+          if resident.get('schema')!='metaengine.browser.installer-resident-upgrade-proof.v1':
+              raise SystemExit('historical_resident_proof_schema_invalid')
+          if resident.get('target_version')!=version or str(resident.get('target_installer_sha256') or '').lower()!=installer_sha:
+              raise SystemExit('historical_resident_target_binding_invalid')
+          installed=str(resident.get('installed_executable_sha256') or '').lower()
+          expected=str(resident.get('expected_installed_executable_sha256') or '').lower()
+          if not re.fullmatch(r'[0-9a-f]{64}',installed) or installed!=expected:
+              raise SystemExit('historical_installed_executable_proof_invalid')
+          for key in ('legacy_primary_gone','legacy_sentinel_gone','new_primary_started','new_sentinel_started','planned_shutdown_verified'):
+              if resident.get(key) is not True:
+                  raise SystemExit('historical_resident_proof_missing:'+key)
+          if resident.get('retry_dialog_required') is not False or resident.get('authority_effect') is not False:
+              raise SystemExit('historical_resident_authority_boundary_invalid')
+
+          manifest['installed_executable_sha256']=installed
+          manifest_path.write_text(json.dumps(manifest,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+          sealed=json.loads(manifest_path.read_text(encoding='utf-8'))
+          if sealed.get('installed_executable_sha256')!=installed:
+              raise SystemExit('historical_manifest_seal_readback_invalid')
+
+          pathlib.Path('historical.env').write_text(
+              f"INSTALLER_SHA256={installer_sha}\n"
+              f"INSTALLED_EXECUTABLE_SHA256={installed}\n"
+              f"SEALED_MANIFEST_SHA256={sha256(manifest_path)}\n"
+              f"GUARDIAN_MANIFEST_SHA256={guardian_sha}\n",
+              encoding='utf-8',
+          )
+          print(json.dumps({
+              'schema':'metaengine.browser.historical-installed-trust-anchor-proof.v1',
+              'source_head':source,
+              'version':version,
+              'installer_sha256':installer_sha,
+              'installed_executable_sha256':installed,
+              'sealed_manifest_sha256':sha256(manifest_path),
+              'guardian_manifest_sha256':guardian_sha,
+              'physical_installer_launch_count':0,
+              'rebuild_count':0,
+              'authority_effect':False,
+          },separators=(',',':')))
+          PY
+          cat historical.env >> "$GITHUB_ENV"
+
+      - name: Create exact historical recovery draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${TARGET_VERSION}"
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
+            echo "historical_release_already_exists:${TAG}" >&2
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "historical_tag_already_exists:${TAG}" >&2
+            exit 1
+          fi
+          INSTALLER="evidence/METAENGINE-Browser-Test-Setup-${TARGET_VERSION}-x64.exe"
+          gh release create "$TAG"             "$INSTALLER"             "${INSTALLER}.blockmap"             evidence/dev.yml             evidence/verified-self-update-manifest.json             evidence/guardian-native-staging-manifest.json             evidence/METAENGINEBrowserGuardian.exe             evidence/METAENGINEBrowserGuardianConfigure.exe             --repo "$GITHUB_REPOSITORY"             --target "$TARGET_SOURCE_SHA"             --title "METAENGINE Browser $TAG"             --notes "Historical installed trust anchor reconstructed only from immutable SUCCESS artifacts for exact source $TARGET_SOURCE_SHA. Installer and native assets are unchanged; verified-self-update-manifest.json receives only the post-qualification installed executable SHA-256 already proven by installer-resident-upgrade-proof.json. No rebuild, reinstall, journal mutation, or authority advance is performed."             --prerelease --draft
+
+      - name: Validate draft asset identity and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${TARGET_VERSION}"
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/releases" -f per_page=100 > releases.json
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          rows=json.load(open('releases.json',encoding='utf-8'))
+          matches=[r for r in rows if r.get('tag_name')=='v'+os.environ['TARGET_VERSION'] and r.get('draft') is True]
+          if len(matches)!=1: raise SystemExit('historical_draft_cardinality_invalid:'+str(len(matches)))
+          r=matches[0]
+          if r.get('name')!='METAENGINE Browser v'+os.environ['TARGET_VERSION']:
+              raise SystemExit('historical_draft_name_invalid')
+          if r.get('target_commitish')!=os.environ['TARGET_SOURCE_SHA'] or r.get('prerelease') is not True:
+              raise SystemExit('historical_draft_binding_invalid')
+          expected_names={
+              f"METAENGINE-Browser-Test-Setup-{os.environ['TARGET_VERSION']}-x64.exe",
+              f"METAENGINE-Browser-Test-Setup-{os.environ['TARGET_VERSION']}-x64.exe.blockmap",
+              'dev.yml','verified-self-update-manifest.json','guardian-native-staging-manifest.json',
+              'METAENGINEBrowserGuardian.exe','METAENGINEBrowserGuardianConfigure.exe',
+          }
+          assets=r.get('assets') or []
+          if len(assets)!=7 or {a.get('name') for a in assets}!=expected_names:
+              raise SystemExit('historical_draft_asset_set_invalid')
+          root=pathlib.Path('evidence')
+          for a in assets:
+              p=root/a['name']
+              digest='sha256:'+hashlib.sha256(p.read_bytes()).hexdigest()
+              if str(a.get('digest') or '').lower()!=digest:
+                  raise SystemExit('historical_draft_asset_digest_mismatch:'+a['name'])
+              if int(a.get('size') or 0)!=p.stat().st_size or a.get('state')!='uploaded':
+                  raise SystemExit('historical_draft_asset_state_mismatch:'+a['name'])
+          pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
+          PY
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" -f draft=false > published.json
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > readback.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('readback.json',encoding='utf-8'))
+          if r.get('draft') is not False or r.get('prerelease') is not True:
+              raise SystemExit('historical_release_state_invalid')
+          if r.get('tag_name')!='v'+os.environ['TARGET_VERSION'] or r.get('target_commitish')!=os.environ['TARGET_SOURCE_SHA']:
+              raise SystemExit('historical_release_readback_binding_invalid')
+          if len(r.get('assets') or [])!=7:
+              raise SystemExit('historical_release_asset_cardinality_invalid')
+          print('HISTORICAL_INSTALLED_TRUST_ANCHOR_PUBLISHED',
+                'version='+os.environ['TARGET_VERSION'],
+                'source='+os.environ['TARGET_SOURCE_SHA'],
+                'installer_sha256='+os.environ['INSTALLER_SHA256'],
+                'installed_executable_sha256='+os.environ['INSTALLED_EXECUTABLE_SHA256'],
+                'manifest_sha256='+os.environ['SEALED_MANIFEST_SHA256'])
+          PY
