@@ -281,8 +281,10 @@ jobs:
             '--custom-trusted-root',$trustedRoot,
             '--predicate-type','https://metaengine.dev/attestations/browser-release-qualification/v1',
             '--signer-workflow',$signerWorkflow,
+            '--signer-digest',$env:GITHUB_SHA,
             '--source-digest',$env:GITHUB_SHA,
             '--source-ref',$env:GITHUB_REF,
+            '--cert-oidc-issuer','https://token.actions.githubusercontent.com',
             '--deny-self-hosted-runners',
             '--format','json'
           )
@@ -297,8 +299,10 @@ jobs:
             '--custom-trusted-root',$trustedRoot,
             '--predicate-type','https://cyclonedx.org/bom',
             '--signer-workflow',$signerWorkflow,
+            '--signer-digest',$env:GITHUB_SHA,
             '--source-digest',$env:GITHUB_SHA,
             '--source-ref',$env:GITHUB_REF,
+            '--cert-oidc-issuer','https://token.actions.githubusercontent.com',
             '--deny-self-hosted-runners',
             '--format','json'
           )
@@ -307,7 +311,7 @@ jobs:
           $sbomJson | Set-Content -LiteralPath $sbomVerification -Encoding utf8
 
           $nodeArgs = @(
-            "$env:GITHUB_WORKSPACE\apps\metaengine-browser\scripts\release-attestation-verification.mjs",
+            "$env:GITHUB_WORKSPACE\scripts\release-attestation-verification.mjs",
             '--qualification-verification',$qualificationVerification,
             '--sbom-verification',$sbomVerification,
             '--predicate','${{ steps.prepare.outputs.predicate_path }}',
