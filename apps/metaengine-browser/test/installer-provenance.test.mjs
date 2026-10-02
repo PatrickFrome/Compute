@@ -104,8 +104,24 @@ function writeRunsResponse(response, runs) {
   response.end(JSON.stringify({ total_count: runs.length, workflow_runs: runs }));
 }
 
-function runShape({ runNumber, headSha = HEAD, status = 'completed', conclusion = 'success', id = 5000 + runNumber }) {
-  return { id, run_number: runNumber, head_sha: headSha, status, conclusion, name: 'Browser Windows Package Smoke' };
+function runShape({
+  runNumber,
+  headSha = HEAD,
+  status = 'completed',
+  conclusion = 'success',
+  id = 5000 + runNumber,
+  event = 'pull_request',
+}) {
+  return {
+    id,
+    run_number: runNumber,
+    head_sha: headSha,
+    status,
+    conclusion,
+    event,
+    name: 'Browser Windows Package Smoke',
+    path: '.github/workflows/browser-windows-package-smoke.yml',
+  };
 }
 
 const RESOLVE_BASE = {
@@ -333,6 +349,67 @@ test('resolve picks newest successful Package Smoke run for exact head', async (
     assert.ok(seen.paths[0].includes(`head_sha=${HEAD}`));
   });
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('resolve with exact producer event ignores newer same-SHA runs from other events', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  await withServer((request, response) => {
+    if (request.url.includes('/actions/workflows/browser-windows-package-smoke.yml/runs')) {
+      writeRunsResponse(response, [
+        runShape({ runNumber: 41, event: 'push', id: 5041 }),
+        runShape({ runNumber: 42, event: 'pull_request', id: 5042 }),
+      ]);
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase, seen }) => {
+    const resolved = await resolveRun({
+      ...RESOLVE_BASE,
+      'api-base': apiBase,
+      event: 'push',
+    });
+    assert.equal(resolved.run_id, '5041');
+    assert.equal(resolved.run_number, 41);
+    assert.equal(resolved.producer_event, 'push');
+    assert.ok(seen.paths[0].includes('event=push'));
+  });
+});
+
+test('resolve exact producer event fails absent rather than falling back to another event', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  await withServer((request, response) => {
+    if (request.url.includes('/actions/workflows/browser-windows-package-smoke.yml/runs')) {
+      writeRunsResponse(response, [runShape({ runNumber: 52, event: 'pull_request', id: 5052 })]);
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase }) => {
+    await assert.rejects(
+      () => resolveRun({
+        ...RESOLVE_BASE,
+        'api-base': apiBase,
+        event: 'push',
+        'timeout-min': '5',
+        'absent-grace-min': '0',
+      }),
+      (error) => error instanceof ProvenanceError
+        && error.code === 'installer_provenance_run_absent'
+        && error.details?.event === 'push',
+    );
+  });
+});
+
+test('unsupported producer event is rejected before any network call', async () => {
+  await assert.rejects(
+    () => resolveRun({ ...RESOLVE_BASE, event: 'schedule' }),
+    (error) => error instanceof ProvenanceError && error.code === 'producer_event_invalid',
+  );
 });
 
 test('resolve fails fast when newest run for head failed', async (t) => {
@@ -909,6 +986,46 @@ test('wait requires the exact bound producer run to finish success', async (t) =
     assert.equal(qualified.conclusion, 'success');
   });
   assert.equal(reads, 2);
+});
+
+test('wait rechecks the exact bound producer event', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  await withServer((request, response) => {
+    if (request.url === '/repos/me2/local/actions/runs/5044') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        id: 5044,
+        run_number: 44,
+        run_attempt: 1,
+        head_sha: HEAD,
+        path: '.github/workflows/browser-windows-package-smoke.yml',
+        name: 'Browser Windows Package Smoke',
+        event: 'pull_request',
+        status: 'completed',
+        conclusion: 'success',
+      }));
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase }) => {
+    await assert.rejects(
+      () => waitRun({
+        ...RESOLVE_BASE,
+        'api-base': apiBase,
+        'run-id': '5044',
+        'run-number': '44',
+        'run-attempt': '1',
+        event: 'push',
+      }),
+      (error) => error instanceof ProvenanceError
+        && error.code === 'producer_event_mismatch'
+        && error.details?.expected === 'push'
+        && error.details?.actual === 'pull_request',
+    );
+  });
 });
 
 test('wait fails closed when exact producer finishes red or identity drifts', async (t) => {
