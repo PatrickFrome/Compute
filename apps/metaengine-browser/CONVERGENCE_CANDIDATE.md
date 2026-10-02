@@ -1,8 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36909837122.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36963586969.1`.
 
-Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. The Edge multi-writer state merge preserves the new `guardian` plane alongside `host_resilience`, including partial realtime observation pushes. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
+Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
 Pipe response candidate `f799cbef` physically built `0.7.0-dev.36907623240.1`; that identity is consumed. The native enrollment deadline successor reserves higher observed workflow namespace `36908273822`.
 
@@ -48,3 +48,6 @@ Release safety invariants:
 - full Self Update E2E consumes and re-verifies the same Package Smoke installer, records zero consumer target builds and waits for its exact producer terminal success;
 - concurrent fresh startup shares one durable device identity initialization and never changes the signing key under an enrollment request;
 - promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update z.ai Agent E2E evidence.
+
+
+Attempted successor identity `0.7.0-dev.36909837122.1` was consumed by the first CI matrix (Package Smoke #3111 started). R83 static canary correctly rejected its temporary Edge-source drift. The correction reuses the existing qualified `host_resilience` plane and reserves `0.7.0-dev.36963586969.1`; no canary manifest or deployed Edge is advanced by this client-only diagnostic slice.
