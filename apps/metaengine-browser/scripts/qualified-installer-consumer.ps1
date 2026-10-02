@@ -10,6 +10,8 @@ param(
   [string]$ConfigPath,
   [string]$BindingPath,
   [string]$ProofPath,
+  [ValidateSet('push', 'pull_request', 'workflow_dispatch')]
+  [string]$ExpectedProducerEvent,
   [int]$TimeoutMinutes = 45,
   [int]$AcquireIntervalSeconds = 30,
   [int]$WaitIntervalSeconds = 10
@@ -63,6 +65,9 @@ if ($Mode -eq 'Acquire') {
     '--absent-grace-min', '10',
     '--allow-in-progress', 'true'
   )
+  if ($ExpectedProducerEvent) {
+    $acquireArgs += @('--event', $ExpectedProducerEvent)
+  }
   & node @acquireArgs
   if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_acquire_failed' }
 
@@ -73,7 +78,8 @@ if ($Mode -eq 'Acquire') {
     [string]$resolved.head_sha -ne $ExpectedHead -or
     [int64]$resolved.run_id -le 0 -or
     [int64]$resolved.run_number -le 0 -or
-    [int64]$resolved.run_attempt -le 0
+    [int64]$resolved.run_attempt -le 0 -or
+    ($ExpectedProducerEvent -and [string]$resolved.producer_event -ne $ExpectedProducerEvent)
   )
   if ($resolvedInvalid) { throw 'qualified_installer_resolved_binding_invalid' }
 
@@ -141,6 +147,7 @@ if ($Mode -eq 'Acquire') {
     producer_run_id = [int64]$resolved.run_id
     producer_run_number = [int64]$resolved.run_number
     producer_run_attempt = [int64]$resolved.run_attempt
+    producer_event = [string]$resolved.producer_event
     producer_completed_at_acquire = [bool]$resolved.producer_completed
     provenance_path = [string]$acquired.provenance_path
     provenance_schema = [string]$acquired.provenance_schema
@@ -170,6 +177,7 @@ if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding
     [int64]$binding.producer_run_id -le 0 -or
     [int64]$binding.producer_run_number -le 0 -or
     [int64]$binding.producer_run_attempt -le 0 -or
+    ($ExpectedProducerEvent -and [string]$binding.producer_event -ne $ExpectedProducerEvent) -or
     [string]$binding.provenance_schema -notin @(
       'metaengine.browser.installer-provenance.v2',
       'metaengine.browser.installer-provenance.v3'
@@ -257,6 +265,9 @@ $waitArgs = @(
   '--timeout-min', [string]$TimeoutMinutes,
   '--interval-sec', [string]$WaitIntervalSeconds
 )
+if ($ExpectedProducerEvent) {
+  $waitArgs += @('--event', $ExpectedProducerEvent)
+}
 & node @waitArgs
 if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_producer_not_qualified' }
 
@@ -264,6 +275,9 @@ $proof | Add-Member -NotePropertyName producer_terminal_success -NotePropertyVal
 $proof | Add-Member -NotePropertyName producer_terminal_qualified_at -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
 $proof | Add-Member -NotePropertyName build_identity_sha256 -NotePropertyValue ([string]$binding.build_identity_sha256) -Force
 $proof | Add-Member -NotePropertyName dependency_resolution_sha256 -NotePropertyValue ([string]$binding.dependency_resolution_sha256) -Force
+if ($binding.PSObject.Properties.Name -contains 'producer_event' -and [string]$binding.producer_event) {
+  $proof | Add-Member -NotePropertyName producer_event -NotePropertyValue ([string]$binding.producer_event) -Force
+}
 if ([string]$binding.provenance_schema -eq 'metaengine.browser.installer-provenance.v3') {
   $proof | Add-Member -NotePropertyName package_lock_sha256 -NotePropertyValue ([string]$binding.package_lock_sha256) -Force
   $proof | Add-Member -NotePropertyName npm_version -NotePropertyValue ([string]$binding.npm_version) -Force
@@ -280,6 +294,7 @@ $result = [ordered]@{
   producer_run_id = [int64]$binding.producer_run_id
   producer_run_number = [int64]$binding.producer_run_number
   producer_run_attempt = [int64]$binding.producer_run_attempt
+  producer_event = if ($binding.PSObject.Properties.Name -contains 'producer_event') { [string]$binding.producer_event } else { '' }
   build_identity_sha256 = [string]$binding.build_identity_sha256
   dependency_resolution_sha256 = [string]$binding.dependency_resolution_sha256
   producer_terminal_success = $true
