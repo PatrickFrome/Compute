@@ -1,0 +1,33 @@
+{
+  "schema": "metaengine.browser.composed-sbom-source-qualified.v1",
+  "qualified_at": "2026-10-02T11:19:09Z",
+  "source_head": "0c116b613053e4b55b30633704d050abfecb2174",
+  "implementation_branch": "work/build-composed-sbom-v1",
+  "workflow": {
+    "run_id": 37000279803,
+    "run_number": 1,
+    "success": true
+  },
+  "tests": {
+    "tests": 5,
+    "pass": 5,
+    "fail": 0,
+    "skipped": 0,
+    "linux": true,
+    "windows": true
+  },
+  "coverage": [
+    "BROWSER_NPM_INVENTORY",
+    "ME2_UI",
+    "ME2_DAEMON",
+    "GUARDIAN_SERVICE",
+    "GUARDIAN_CONFIGURATOR",
+    "GUARDIAN_MACHINE_BOOTSTRAP"
+  ],
+  "composition_aggregate": "incomplete",
+  "complete_claim": false,
+  "physical_package_integration": false,
+  "attestation_authority": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
