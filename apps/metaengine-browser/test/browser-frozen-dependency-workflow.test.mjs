@@ -82,3 +82,12 @@ test('Package Smoke pins Bun and consumes the committed ME2 UI lock', () => {
   assert.match(source, /me2-ui-bun\.lock/);
   assert.match(uiAttributes, /^bun\.lock text eol=lf$/m);
 });
+
+
+test('source qualification isolates the ME2 UI build from the tracked checkout', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-build-identity-v3-source-qualification.yml'), 'utf8');
+  assert.match(source, /\$uiRoot = Join-Path \$env:RUNNER_TEMP 'me2-ui-source'/);
+  assert.match(source, /Copy-Item -Recurse -Force apps\/me2-ui \$uiRoot/);
+  assert.match(source, /Push-Location \$uiRoot/);
+  assert.doesNotMatch(source, /Push-Location apps\/me2-ui/);
+});

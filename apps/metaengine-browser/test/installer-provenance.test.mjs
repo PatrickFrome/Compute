@@ -1030,7 +1030,8 @@ test('R90/R91 workflow topology builds NSIS once, overlaps physical consumers, t
   const early = packageSmoke.indexOf('name: Publish immutable candidate for parallel downstream qualification');
   const packageProof = packageSmoke.indexOf('name: Install exact-head package and prove Browser plus inert Guardian payload');
   assert.ok(early >= 0 && packageProof > early);
-  assert.equal((packageSmoke.match(/electron-builder@26\.15\.7 --win nsis/g) || []).length, 1);
+  assert.equal((packageSmoke.match(/& \$builder --win nsis --x64 --config electron-builder\.test\.json --publish never/g) || []).length, 1);
+  assert.equal((packageSmoke.match(/npx\s+--yes\s+electron-builder/g) || []).length, 0);
   assert.equal((packageSmoke.match(/name: metaengine-browser-windows-candidate-/g) || []).length, 1);
   assert.equal((packageSmoke.match(/name: metaengine-browser-windows-package-evidence-/g) || []).length, 1);
   assert.match(packageSmoke.slice(early, packageProof), /METAENGINE-Browser-Test-Setup-\*-x64\.exe\.blockmap/);
