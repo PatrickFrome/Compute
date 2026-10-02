@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36908273822.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36909837122.1`.
+
+Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. The Edge multi-writer state merge preserves the new `guardian` plane alongside `host_resilience`, including partial realtime observation pushes. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
 Pipe response candidate `f799cbef` physically built `0.7.0-dev.36907623240.1`; that identity is consumed. The native enrollment deadline successor reserves higher observed workflow namespace `36908273822`.
 
