@@ -237,6 +237,6 @@ test('npm version probe uses cmd.exe on Windows and direct npm elsewhere', () =>
 
 
 test('package-lock checkout bytes are normalized to LF across Windows and Linux', () => {
-  const attributes = fs.readFileSync(path.join(root, '.gitattributes'), 'utf8');
+  const attributes = fs.readFileSync(new URL('../.gitattributes', import.meta.url), 'utf8');
   assert.match(attributes, /^package-lock\.json text eol=lf$/m);
 });
