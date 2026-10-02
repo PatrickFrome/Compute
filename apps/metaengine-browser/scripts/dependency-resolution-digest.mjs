@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { writeFileSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
@@ -109,7 +110,7 @@ async function main() {
   process.stdout.write(JSON.stringify(proof) + '\n');
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replaceAll('\\\\', '/')}`).href;
+const invokedDirectly = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   main().catch((error) => {
     process.stderr.write(JSON.stringify({
