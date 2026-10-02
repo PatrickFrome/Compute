@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createPackageLockMaterial } from '../scripts/package-lock-material.mjs';
+import {
+  createPackageLockMaterial,
+  npmVersionInvocation,
+} from '../scripts/package-lock-material.mjs';
 
 function withFixture({ packageJson, packageLock }, fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-lock-material-'));
@@ -205,4 +208,29 @@ test('missing lockfile and invalid lockfile root fail closed', () => {
       /package_lock_root_entry_missing/,
     );
   });
+});
+
+
+test('top-level lock identity drift fails closed', () => {
+  const lock = baseLock();
+  lock.version = '0.7.0-dev.1.1';
+  withFixture({ packageJson: basePackage(), packageLock: lock }, ({ packageJsonPath, packageLockPath }) => {
+    assert.throws(
+      () => createPackageLockMaterial({ packageJsonPath, packageLockPath }),
+      /package_lock_top_level_version_mismatch/,
+    );
+  });
+});
+
+test('npm version probe uses cmd.exe on Windows and direct npm elsewhere', () => {
+  const win = npmVersionInvocation({
+    platform: 'win32',
+    env: { SystemRoot: 'C:\\Windows' },
+  });
+  assert.equal(win.command, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(win.args, ['/d', '/s', '/c', 'npm.cmd', '--version']);
+
+  const linux = npmVersionInvocation({ platform: 'linux', env: {} });
+  assert.equal(linux.command, 'npm');
+  assert.deepEqual(linux.args, ['--version']);
 });
