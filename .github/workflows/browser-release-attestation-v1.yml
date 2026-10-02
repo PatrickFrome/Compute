@@ -20,9 +20,19 @@ concurrency:
   group: browser-release-attestation-${{ inputs.source_head }}
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   attest:
     name: release-boundary-attestation
+    outputs:
+      material_artifact_id: ${{ steps.upload_material.outputs.artifact-id }}
+      installer_name: ${{ steps.prepare.outputs.installer_name }}
+      installer_sha256: ${{ steps.prepare.outputs.installer_sha256 }}
+      qualification_attestation_id: ${{ steps.qualification_attestation.outputs.attestation-id }}
+      qualification_attestation_url: ${{ steps.qualification_attestation.outputs.attestation-url }}
+      sbom_attestation_id: ${{ steps.sbom_attestation.outputs.attestation-id }}
+      sbom_attestation_url: ${{ steps.sbom_attestation.outputs.attestation-url }}
     runs-on: windows-2025
     permissions:
       actions: read
@@ -241,7 +251,141 @@ jobs:
           subject-path: ${{ steps.prepare.outputs.installer_path }}
           sbom-path: ${{ steps.prepare.outputs.sbom_path }}
 
-      - name: Snapshot trusted roots and self-verify exact attestations
+      - name: Materialize portable attestation material
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $materialRoot = "$env:RUNNER_TEMP\release-attestation-material"
+          New-Item -ItemType Directory -Path $materialRoot -Force | Out-Null
+
+          $qualificationBundle = '${{ steps.qualification_attestation.outputs.bundle-path }}'
+          $sbomBundle = '${{ steps.sbom_attestation.outputs.bundle-path }}'
+          foreach ($path in @(
+            $qualificationBundle,
+            $sbomBundle,
+            '${{ steps.prepare.outputs.predicate_path }}',
+            '${{ steps.prepare.outputs.matrix_path }}',
+            '${{ steps.prepare.outputs.sbom_path }}'
+          )) {
+            if (-not (Test-Path $path -PathType Leaf)) { throw "release_attestation_material_missing:$path" }
+          }
+
+          Copy-Item $qualificationBundle (Join-Path $materialRoot 'release-qualification-attestation.bundle.json') -Force
+          Copy-Item $sbomBundle (Join-Path $materialRoot 'release-sbom-attestation.bundle.json') -Force
+          Copy-Item '${{ steps.prepare.outputs.predicate_path }}' (Join-Path $materialRoot 'release-attestation-predicate.json') -Force
+          Copy-Item '${{ steps.prepare.outputs.matrix_path }}' (Join-Path $materialRoot 'release-attestation-qualification-matrix.json') -Force
+          Copy-Item '${{ steps.prepare.outputs.sbom_path }}' (Join-Path $materialRoot 'browser-composed-sbom.cdx.json') -Force
+
+          @{
+            schema='metaengine.browser.release-attestation-material.v1'
+            repository=$env:GITHUB_REPOSITORY
+            signer_source_sha=$env:GITHUB_SHA
+            signer_source_ref=$env:GITHUB_REF
+            source_head='${{ inputs.source_head }}'
+            package_version='${{ inputs.package_version }}'
+            producer_run_id=[int64]'${{ inputs.producer_run_id }}'
+            installer_name='${{ steps.prepare.outputs.installer_name }}'
+            installer_sha256='${{ steps.prepare.outputs.installer_sha256 }}'
+            qualification_attestation_id='${{ steps.qualification_attestation.outputs.attestation-id }}'
+            sbom_attestation_id='${{ steps.sbom_attestation.outputs.attestation-id }}'
+            cryptographic_verification=$false
+            promotion_authorized=$false
+            release_published=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $materialRoot 'release-attestation-material.json') -Encoding utf8
+
+      - name: Upload immutable attestation material for independent verification
+        id: upload_material
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-release-attestation-material-${{ inputs.source_head }}
+          path: ${{ runner.temp }}/release-attestation-material/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  verify:
+    name: release-boundary-independent-verification
+    needs: attest
+    runs-on: windows-2025
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact verifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout exact physically-qualified source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.source_head }}
+          path: candidate-src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact verification Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Download exact attestation material by immutable artifact id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.attest.outputs.material_artifact_id }}
+          path: material
+          digest-mismatch: error
+
+      - name: Reacquire and reverify exact one-built installer
+        id: candidate
+        working-directory: candidate-src/apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $sourceHead = '${{ inputs.source_head }}'.Trim().ToLowerInvariant()
+          $expectedName = '${{ needs.attest.outputs.installer_name }}'
+          $expectedSha = '${{ needs.attest.outputs.installer_sha256 }}'
+          $workRoot = Join-Path $env:RUNNER_TEMP 'release-attestation-verify-candidate'
+          $bindingPath = Join-Path $workRoot 'consumer-binding.json'
+
+          .\scripts\qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead $sourceHead -WorkRoot $workRoot -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json') -BindingPath $bindingPath
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_verify_candidate_acquire_failed' }
+          .\scripts\qualified-installer-consumer.ps1 -Mode Verify -ExpectedHead $sourceHead -BindingPath $bindingPath -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json')
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_verify_candidate_reverify_failed' }
+
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if (
+            [string]$binding.installer_name -ne $expectedName -or
+            [string]$binding.installer_sha256 -ne $expectedSha -or
+            [int64]$binding.producer_run_id -ne [int64]'${{ inputs.producer_run_id }}' -or
+            [int64]$binding.producer_run_attempt -ne 1 -or
+            $binding.authority_effect -ne $false
+          ) {
+            throw 'release_attestation_verify_candidate_binding_drift'
+          }
+
+          $producerProofPath = Join-Path $env:RUNNER_TEMP 'release-attestation-verify-producer-proof.json'
+          @{
+            schema='metaengine.browser.release-attestation-verify-producer-proof.v1'
+            source_head=$sourceHead
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content $producerProofPath -Encoding utf8
+          .\scripts\qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead $sourceHead -BindingPath $bindingPath -ProofPath $producerProofPath -TimeoutMinutes 5 -WaitIntervalSeconds 10
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_verify_producer_not_terminal_success' }
+
+          "installer_path=$([string]$binding.installer_path)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Snapshot trusted roots and independently verify exact attestations
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -249,30 +393,48 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
-          $installer = '${{ steps.prepare.outputs.installer_path }}'
-          $installerName = '${{ steps.prepare.outputs.installer_name }}'
-          $installerSha = '${{ steps.prepare.outputs.installer_sha256 }}'
-          $qualificationBundle = '${{ steps.qualification_attestation.outputs.bundle-path }}'
-          $sbomBundle = '${{ steps.sbom_attestation.outputs.bundle-path }}'
-          $trustedRoot = "$env:RUNNER_TEMP\release-attestation-trusted-root.jsonl"
-          $qualificationVerification = "$env:RUNNER_TEMP\release-qualification-verification.json"
-          $sbomVerification = "$env:RUNNER_TEMP\release-sbom-verification.json"
-          $verificationProof = "$env:RUNNER_TEMP\release-attestation-verification-proof.json"
-          $signerWorkflow = "$env:GITHUB_REPOSITORY/.github/workflows/browser-release-attestation-v1.yml"
+          $installer = '${{ steps.candidate.outputs.installer_path }}'
+          $installerName = '${{ needs.attest.outputs.installer_name }}'
+          $installerSha = '${{ needs.attest.outputs.installer_sha256 }}'
+          $qualificationBundle = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'release-qualification-attestation.bundle.json' | Select-Object -First 1).FullName
+          $sbomBundle = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'release-sbom-attestation.bundle.json' | Select-Object -First 1).FullName
+          $predicatePath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'release-attestation-predicate.json' | Select-Object -First 1).FullName
+          $sbomPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'browser-composed-sbom.cdx.json' | Select-Object -First 1).FullName
+          $materialReceiptPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'release-attestation-material.json' | Select-Object -First 1).FullName
+          foreach ($path in @($installer,$qualificationBundle,$sbomBundle,$predicatePath,$sbomPath,$materialReceiptPath)) {
+            if (-not $path -or -not (Test-Path $path -PathType Leaf)) { throw "release_attestation_independent_verify_material_missing:$path" }
+          }
 
-          foreach ($path in @($installer,$qualificationBundle,$sbomBundle)) {
-            if (-not (Test-Path $path -PathType Leaf)) { throw "release_attestation_self_verify_material_missing:$path" }
+          $materialReceipt = Get-Content $materialReceiptPath -Raw | ConvertFrom-Json
+          if (
+            $materialReceipt.schema -ne 'metaengine.browser.release-attestation-material.v1' -or
+            [string]$materialReceipt.signer_source_sha -ne $env:GITHUB_SHA -or
+            [string]$materialReceipt.signer_source_ref -ne $env:GITHUB_REF -or
+            [string]$materialReceipt.source_head -ne '${{ inputs.source_head }}' -or
+            [string]$materialReceipt.installer_sha256 -ne $installerSha -or
+            $materialReceipt.cryptographic_verification -ne $false -or
+            $materialReceipt.promotion_authorized -ne $false -or
+            $materialReceipt.release_published -ne $false -or
+            $materialReceipt.authority_effect -ne $false
+          ) {
+            throw 'release_attestation_material_receipt_invalid'
           }
 
           $ghVersion = [string]((& gh --version | Select-Object -First 1))
           if (-not $ghVersion) { throw 'release_attestation_gh_cli_version_missing' }
 
+          $trustedRoot = "$env:RUNNER_TEMP\release-attestation-trusted-root.jsonl"
           $trustedRootLines = & gh attestation trusted-root
           if ($LASTEXITCODE -ne 0) { throw 'release_attestation_trusted_root_fetch_failed' }
           $trustedRootLines | Set-Content -LiteralPath $trustedRoot -Encoding utf8
           if (-not (Test-Path $trustedRoot -PathType Leaf) -or [int64](Get-Item $trustedRoot).Length -le 0) {
             throw 'release_attestation_trusted_root_missing'
           }
+
+          $signerWorkflow = "$env:GITHUB_REPOSITORY/.github/workflows/browser-release-attestation-v1.yml"
+          $qualificationVerification = "$env:RUNNER_TEMP\release-qualification-verification.json"
+          $sbomVerification = "$env:RUNNER_TEMP\release-sbom-verification.json"
+          $verificationProof = "$env:RUNNER_TEMP\release-attestation-verification-proof.json"
 
           $qualificationArgs = @(
             'attestation','verify',$installer,
@@ -314,8 +476,8 @@ jobs:
             "$env:GITHUB_WORKSPACE\scripts\release-attestation-verification.mjs",
             '--qualification-verification',$qualificationVerification,
             '--sbom-verification',$sbomVerification,
-            '--predicate','${{ steps.prepare.outputs.predicate_path }}',
-            '--sbom','${{ steps.prepare.outputs.sbom_path }}',
+            '--predicate',$predicatePath,
+            '--sbom',$sbomPath,
             '--trusted-root',$trustedRoot,
             '--expected-installer-name',$installerName,
             '--expected-installer-sha256',$installerSha,
@@ -326,7 +488,7 @@ jobs:
             '--out',$verificationProof
           )
           & node @nodeArgs
-          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_semantic_self_verify_failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_semantic_independent_verify_failed' }
 
           $proof = Get-Content $verificationProof -Raw | ConvertFrom-Json
           if (
@@ -341,58 +503,42 @@ jobs:
             $proof.release_published -ne $false -or
             $proof.authority_effect -ne $false
           ) {
-            throw 'release_attestation_self_verify_proof_invalid'
+            throw 'release_attestation_independent_verify_proof_invalid'
           }
 
-      - name: Seal zero-promotion attestation evidence
-        shell: powershell
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = 'Stop'
-          $qualificationBundle = '${{ steps.qualification_attestation.outputs.bundle-path }}'
-          $sbomBundle = '${{ steps.sbom_attestation.outputs.bundle-path }}'
-          if (-not (Test-Path $qualificationBundle -PathType Leaf)) { throw 'release_qualification_attestation_bundle_missing' }
-          if (-not (Test-Path $sbomBundle -PathType Leaf)) { throw 'release_sbom_attestation_bundle_missing' }
-          $verificationProofPath = "$env:RUNNER_TEMP\release-attestation-verification-proof.json"
-          if (-not (Test-Path $verificationProofPath -PathType Leaf)) { throw 'release_attestation_verification_proof_missing' }
-          $verificationProof = Get-Content $verificationProofPath -Raw | ConvertFrom-Json
-          if ($verificationProof.cryptographic_verification -ne $true -or $verificationProof.semantic_binding_verified -ne $true) {
-            throw 'release_attestation_verification_not_terminal'
-          }
-          Copy-Item $qualificationBundle "$env:RUNNER_TEMP\release-qualification-attestation.bundle.json" -Force
-          Copy-Item $sbomBundle "$env:RUNNER_TEMP\release-sbom-attestation.bundle.json" -Force
           @{
-            schema='metaengine.browser.release-attestation-result.v1'
+            schema='metaengine.browser.release-attestation-result.v2'
             repository=$env:GITHUB_REPOSITORY
+            signer_source_sha=$env:GITHUB_SHA
+            signer_source_ref=$env:GITHUB_REF
             source_head='${{ inputs.source_head }}'
             package_version='${{ inputs.package_version }}'
             producer_run_id=[int64]'${{ inputs.producer_run_id }}'
-            installer_sha256='${{ steps.prepare.outputs.installer_sha256 }}'
-            qualification_attestation_id='${{ steps.qualification_attestation.outputs.attestation-id }}'
-            qualification_attestation_url='${{ steps.qualification_attestation.outputs.attestation-url }}'
-            sbom_attestation_id='${{ steps.sbom_attestation.outputs.attestation-id }}'
-            sbom_attestation_url='${{ steps.sbom_attestation.outputs.attestation-url }}'
-            trusted_root_sha256=[string]$verificationProof.trusted_root_sha256
-            qualification_statement_sha256=[string]$verificationProof.qualification_statement_sha256
-            sbom_statement_sha256=[string]$verificationProof.sbom_statement_sha256
+            installer_sha256=$installerSha
+            attestation_material_artifact_id=[int64]'${{ needs.attest.outputs.material_artifact_id }}'
+            qualification_attestation_id='${{ needs.attest.outputs.qualification_attestation_id }}'
+            qualification_attestation_url='${{ needs.attest.outputs.qualification_attestation_url }}'
+            sbom_attestation_id='${{ needs.attest.outputs.sbom_attestation_id }}'
+            sbom_attestation_url='${{ needs.attest.outputs.sbom_attestation_url }}'
+            trusted_root_sha256=[string]$proof.trusted_root_sha256
+            qualification_statement_sha256=[string]$proof.qualification_statement_sha256
+            sbom_statement_sha256=[string]$proof.sbom_statement_sha256
             cryptographic_verification=$true
+            independent_verifier_no_signing_authority=$true
             signer_identity_verified=$true
             semantic_binding_verified=$true
             promotion_authorized=$false
             release_published=$false
             authority_effect=$false
-          } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\release-attestation-result.json" -Encoding utf8
+          } | ConvertTo-Json -Depth 7 | Set-Content "$env:RUNNER_TEMP\release-attestation-result.json" -Encoding utf8
 
-      - name: Upload attestation evidence only
+      - name: Upload independently verified release-attestation evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: metaengine-browser-release-attestation-${{ inputs.source_head }}
+          name: metaengine-browser-release-attestation-verified-${{ inputs.source_head }}
           path: |
-            ${{ steps.prepare.outputs.predicate_path }}
-            ${{ steps.prepare.outputs.matrix_path }}
+            material/**
             ${{ runner.temp }}/release-attestation-result.json
-            ${{ runner.temp }}/release-qualification-attestation.bundle.json
-            ${{ runner.temp }}/release-sbom-attestation.bundle.json
             ${{ runner.temp }}/release-attestation-trusted-root.jsonl
             ${{ runner.temp }}/release-qualification-verification.json
             ${{ runner.temp }}/release-sbom-verification.json
