@@ -1,6 +1,12 @@
 name: METAENGINE Browser Shell-First Dirty Profile V1
 
 on:
+  push:
+    branches:
+      - 'physical/build-slsa-provenance-v1'
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/main.mjs'
@@ -11,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-shell-first-dirty-profile:
@@ -47,22 +54,50 @@ jobs:
           node --check src/main.mjs
           node --test test/shell-first-startup-boundary.test.mjs
 
-      - name: Build exact-head NSIS candidate
+      - name: Acquire one-built exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = [string](node -p "require('./package.json').version")
-          if (-not $version) { throw 'package_version_missing' }
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $expectedEvent = '${{ github.event_name }}'
+          if ($expectedEvent -notin @('push','pull_request')) { throw "shell_first_producer_event_unsupported:$expectedEvent" }
+          $work = Join-Path $env:RUNNER_TEMP 'shell-first-qualified-installer'
+          $bindingPath = Join-Path $work 'consumer-binding.json'
+          .\scripts\qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead $expectedHead -ExpectedProducerEvent $expectedEvent -WorkRoot $work -BindingPath $bindingPath -ConfigPath './electron-builder.test.json'
+          if ($LASTEXITCODE -ne 0) { throw 'shell_first_qualified_installer_acquire_failed' }
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding.v1' `
+              -or [string]$binding.source_head -ne $expectedHead `
+              -or [string]$binding.producer_event -ne $expectedEvent `
+              -or [string]$binding.installer_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or $binding.authority_effect -ne $false) {
+            throw 'shell_first_qualified_installer_binding_invalid'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_INSTALLER_BINDING_PATH=$bindingPath" -Encoding utf8
+          $installer = Get-Item ([string]$binding.installer_path)
           if (-not $installer) { throw 'shell_first_installer_missing' }
-          Copy-Item $installer.FullName "$env:RUNNER_TEMP\shell-first-candidate.exe"
-
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\shell-first-candidate.exe" -Force
+          @{
+            schema='metaengine.browser.shell-first-dirty-profile-proof.v2'
+            source_head=$expectedHead
+            package_version=[string](node -p "require('./package.json').version")
+            installer_sha256=[string]$binding.installer_sha256
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            producer_event=[string]$binding.producer_event
+            producer_completed_at_acquire=[bool]$binding.producer_completed_at_acquire
+            stable_visible=$false
+            fleet_degraded=$false
+            remote_transport_required_for_shell=$false
+            producer_terminal_success=$false
+            automatic_retry_allowed=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\shell-first-dirty-profile-proof.json" -Encoding utf8
       - name: Install candidate and resolve exact packaged profile
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -166,7 +201,13 @@ jobs:
               Write-Host $stderr
               throw 'shell_first_fleet_degradation_evidence_missing'
             }
-            Write-Host '{"schema":"metaengine.browser.shell-first-dirty-profile-proof.v1","stable_visible":true,"fleet_degraded":true,"remote_transport_required_for_shell":false,"authority_effect":false}'
+            $proofPath = "$env:RUNNER_TEMP\shell-first-dirty-profile-proof.json"
+            $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+            $proof.stable_visible = $true
+            $proof.fleet_degraded = $true
+            $proof.remote_transport_required_for_shell = $false
+            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+            Write-Host ($proof | ConvertTo-Json -Compress -Depth 6)
           } finally {
             $env:METAENGINE_DISABLE_CRASH_SENTINEL = $priorSentinel
             $env:METAENGINE_DISABLE_LOGIN_START = $priorLogin
@@ -176,6 +217,25 @@ jobs:
             foreach ($t in $fleetTempDirs) {
               Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue
             }
+          }
+
+      - name: Require exact Package Smoke producer terminal success
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $expectedEvent = '${{ github.event_name }}'
+          $proofPath = "$env:RUNNER_TEMP\shell-first-dirty-profile-proof.json"
+          .\scripts\qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead $expectedHead -ExpectedProducerEvent $expectedEvent -BindingPath $env:ME2_INSTALLER_BINDING_PATH -ProofPath $proofPath
+          if ($LASTEXITCODE -ne 0) { throw 'shell_first_package_producer_not_terminal_success' }
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          if ($proof.producer_terminal_success -ne $true `
+              -or [string]$proof.producer_event -ne $expectedEvent `
+              -or $proof.stable_visible -ne $true `
+              -or $proof.fleet_degraded -ne $true `
+              -or $proof.authority_effect -ne $false) {
+            throw 'shell_first_terminal_proof_invalid'
           }
 
       - name: Prove tracked Browser source checkout unchanged
