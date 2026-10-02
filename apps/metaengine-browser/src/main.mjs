@@ -1593,6 +1593,7 @@ async function nativeSupervisorState() {
   const guardianObserver = ensureGuardianStatusObserver();
   guardianObserver.refreshIfDue();
   const guardian = guardianObserver.snapshot();
+  const hostResilience = globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__?.snapshot?.() || null;
   return {
     ...projectNativeRuntimeObservation(nativeSupervisor?.snapshot?.() || {}, app.getVersion()),
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
@@ -1621,6 +1622,14 @@ async function nativeSupervisorState() {
     loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
     compute,
     guardian,
+    host_resilience: {
+      ...(hostResilience || {
+        schema: 'metaengine.browser.host-resilience-observation.v1',
+        state: 'UNAVAILABLE',
+        authority_effect: false,
+      }),
+      guardian,
+    },
     perception,
   };
 }
