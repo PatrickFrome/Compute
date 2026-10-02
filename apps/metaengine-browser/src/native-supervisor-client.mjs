@@ -27,6 +27,23 @@ export const NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH = '/v1/cognitive/deltas';
 const hostResilienceRuntime = () => globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || null;
 const hostResilienceSnapshot = () => hostResilienceRuntime()?.snapshot?.() || null;
 
+export function mergeHostResilienceGuardianObservation(hostResilience, sourceState = {}) {
+  const host = hostResilience && typeof hostResilience === 'object' && !Array.isArray(hostResilience)
+    ? hostResilience
+    : {
+        schema: 'metaengine.browser.host-resilience-observation.v1',
+        state: 'UNAVAILABLE',
+        authority_effect: false,
+      };
+  const guardian = sourceState?.guardian ?? sourceState?.host_resilience?.guardian ?? null;
+  return Object.freeze({
+    ...host,
+    guardian: guardian && typeof guardian === 'object' && !Array.isArray(guardian)
+      ? structuredClone(guardian)
+      : null,
+  });
+}
+
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) return fallback;
@@ -299,12 +316,15 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       : executeCommand;
 
     const getStateWithHostResilience = typeof sourceGetState === 'function'
-      ? async () => ({
-          ...(await sourceGetState()),
-          host_resilience: hostResilienceSnapshot(),
-          realtime_process_plane: realtimeProcessPlane?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY'),
-          control_latency: controlLatencySnapshot(),
-        })
+      ? async () => {
+          const sourceState = await sourceGetState();
+          return {
+            ...sourceState,
+            host_resilience: mergeHostResilienceGuardianObservation(hostResilienceSnapshot(), sourceState),
+            realtime_process_plane: realtimeProcessPlane?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY'),
+            control_latency: controlLatencySnapshot(),
+          };
+        }
       : sourceGetState;
 
     const beforeSelfUpdateInstall = async (receipt) => {
@@ -502,7 +522,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           self_update: base?.self_update || null,
           realtime_process_plane: processPlane,
           control_latency: this.#controlLatencySnapshot?.() || null,
-          host_resilience: hostResilienceSnapshot(),
+          // Keep Guardian diagnostic readback inside the existing qualified
+          // host_resilience plane in the realtime writer too. Both writers use
+          // the same pure merge so neither can erase or reinterpret freshness.
+          host_resilience: mergeHostResilienceGuardianObservation(hostResilienceSnapshot(), sourceState),
           realtime_observation_push: true,
           authority_effect: false,
         },

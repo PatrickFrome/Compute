@@ -1,0 +1,96 @@
+{
+  "schema": "metaengine.guardian-heartbeat-observation-checkpoint.v1",
+  "created_at": "2026-10-02",
+  "branch": "work/guardian-heartbeat-observation-v1",
+  "pr": 1089,
+  "qualified_parent": "4f66a5afc7d6dd6ab36262effac6ac199c9b68e1",
+  "runtime_research_source_before_checkpoint": "a567de00a6d9c432a521e53f1126610cd0904f40",
+  "markdown_checkpoint_commit": "b1d0a4486a985ad3f6dc0e34b1a15cd1f0a86c29",
+  "reserved_package_identity": "0.7.0-dev.36965151413.1",
+  "consumed_or_tainted_identities": [
+    {
+      "version": "0.7.0-dev.36963586969.1",
+      "first_source": "3bf5583b52922e6a236eea7da333718d077b2f50",
+      "package_smoke_run": 36963873220,
+      "installer_sha256": "62d01c10f5dfb9456036cb7f25edfccee449f87e4609d789e51a40e704e67b91",
+      "artifact_id": 11208958467,
+      "artifact_sha256": "069abc38d63c8d006b44b8651adcce61cf36db373709fa171f482890e1bfd967",
+      "later_same_version_source": "c92079198be68fba7cce5e86c76450ad044f5c5c",
+      "later_attempt_tainted": true,
+      "promotable": false
+    },
+    {
+      "version": "0.7.0-dev.36964688887.1",
+      "status": "RETIRED_DURING_RAPID_SOURCE_CHECKPOINT_CI_CHURN",
+      "package_smoke_runs": [
+        3123,
+        3124,
+        3125
+      ],
+      "physical_success_proven": false,
+      "promotable": false
+    }
+  ],
+  "live": {
+    "project_id": "jhriwwsryeqsvvvufkok",
+    "observed_at": "2026-10-02T04:32:15.609473Z",
+    "client_version": "0.7.0-dev.36908273822.1",
+    "admin_ready": true,
+    "access_tier": "ADMIN",
+    "compute": "HEALTHY",
+    "development_plane": "READY",
+    "host_resilience": "ACTIVE",
+    "supervisor": "PARKED",
+    "admission": "CLOSED",
+    "generation_floor": 28,
+    "guardian": null,
+    "guardian_ticket_rows": 0,
+    "guardian_null_interpretation": "INSTALLED_VERSION_PRE_DATES_HEARTBEAT_GUARDIAN_DIAGNOSTIC",
+    "admission_modified": false
+  },
+  "implementation": {
+    "shared_single_flight_observer": true,
+    "observation_ttl_ms": 10000,
+    "bounded_read_deadline_ms": 2500,
+    "stale_ready_positive": false,
+    "activation_generation_fence": true,
+    "late_prior_read_overwrite_allowed": false,
+    "host_resilience_plane_reused": true,
+    "ordinary_heartbeat_merge_helper": true,
+    "realtime_push_merge_helper": true,
+    "edge_source_changed": false,
+    "supervisor_admission_authority": false,
+    "automatic_retry_allowed": false,
+    "authority_effect": false,
+    "observation_revision_local_monotonic": true,
+    "discarded_late_read_advances_revision": false,
+    "durable_server_cas": false
+  },
+  "research": {
+    "note": "research/GUARDIAN_HEARTBEAT_OBSERVABILITY_RESEARCH_2026-10-02.md",
+    "patterns": [
+      "KUBERNETES_LEASE_FRESHNESS",
+      "KUBERNETES_OBSERVED_GENERATION",
+      "RFC7396_ABSENT_VS_PRESENT_MERGE",
+      "ETCD_REVISION_CAS_FOR_FUTURE_AUTHORITY",
+      "SPIFFE_NODE_AND_WORKLOAD_ATTESTATION_SEPARATION",
+      "NIST_ZERO_TRUST_AUTHN_AUTHZ_SEPARATION",
+      "AWS_COMPONENT_SCOPED_HEALTH"
+    ]
+  },
+  "remaining_gates": [
+    "EXACT_HEAD_WINDOWS_CI_TERMINAL_GREEN",
+    "ONE_EXACT_INSTALLER_PROVENANCE",
+    "INSTALLED_CHAT_RUNTIME_SOAK_SELF_UPDATE_SAME_LINEAGE",
+    "LIVE_INSTALL",
+    "LIVE_HOST_RESILIENCE_GUARDIAN_READBACK",
+    "RESTART_OWNER_DEVICE_REPROOF",
+    "EXISTING_AUTHORITATIVE_ADMISSION_AND_USEFUL_WORK_GATES"
+  ],
+  "future_boundary": {
+    "same_plane_out_of_order_write_possible": true,
+    "acceptable_while_diagnostic_only": true,
+    "before_authority_required": "DURABLE_MONOTONIC_OBSERVATION_REVISION_AND_SERVER_CAS_BOUND_TO_DEVICE_AND_BROWSER_INCARNATION"
+  },
+  "promotion_authorized": false
+}
