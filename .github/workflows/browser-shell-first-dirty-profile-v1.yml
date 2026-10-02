@@ -32,14 +32,19 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
-      - name: Setup Node 24
+      - name: Setup frozen Browser Node toolchain
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
 
-      - name: Install package dependencies
+      - name: Setup frozen Bun toolchain
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.3.3'
+
+      - name: Install exact frozen package dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
 
       - name: Prove shell-first source boundary
         working-directory: apps/metaengine-browser
@@ -52,13 +57,22 @@ jobs:
         shell: powershell
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_BUN_VERSION: '1.3.3'
         run: |
           $ErrorActionPreference = 'Stop'
           $version = [string](node -p "require('./package.json').version")
           if (-not $version) { throw 'package_version_missing' }
+          if ([string](node --version) -ne 'v24.21.0') { throw 'shell_first_node_version_drift' }
+          if ([string](npm --version) -ne '11.19.0') { throw 'shell_first_npm_version_drift' }
+          if ([string](bun --version) -ne '1.3.3') { throw 'shell_first_bun_version_drift' }
+          $builderVersion = [string](node -p "require('electron-builder/package.json').version")
+          if ($builderVersion -ne '26.15.7') { throw "shell_first_builder_version_drift:$builderVersion" }
+          $builder = Join-Path (Get-Location) 'node_modules\.bin\electron-builder.cmd'
+          if (-not (Test-Path $builder -PathType Leaf)) { throw 'shell_first_builder_binary_missing' }
           Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          & $builder --win nsis --x64 --config electron-builder.test.json --publish never
+          if ($LASTEXITCODE -ne 0) { throw "shell_first_builder_exit_$LASTEXITCODE" }
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
           if (-not $installer) { throw 'shell_first_installer_missing' }
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\shell-first-candidate.exe"

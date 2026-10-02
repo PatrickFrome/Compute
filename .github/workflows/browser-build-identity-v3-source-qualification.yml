@@ -23,6 +23,7 @@ on:
       - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
       - 'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs'
       - 'apps/metaengine-browser/test/browser-frozen-dependency-workflow.test.mjs'
+      - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
       - '.github/workflows/browser-windows-package-smoke.yml'
       - '.github/workflows/browser-windows-installed-chat-qualification.yml'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'

@@ -112,3 +112,25 @@ test('Package Smoke binds the locally verified builder version into installer pr
   assert.match(source, /electron_builder_version_drift/);
   assert.doesNotMatch(source, /--builder latest/);
 });
+
+
+test('daemon staging forbids implicit remote Bun fallback', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'apps', 'metaengine-browser', 'scripts', 'build-me2-daemon-staging.ps1'), 'utf8');
+  assert.match(source, /me2_daemon_required_bun_missing/);
+  assert.match(source, /me2_daemon_bun_version_mismatch/);
+  assert.match(source, /build_bun_remote_fallback_allowed = \$false/);
+  assert.doesNotMatch(source, /bunPrefix/);
+  assert.doesNotMatch(source, /'npx'/);
+  assert.doesNotMatch(source, /bun@\$expectedBunVersion/);
+});
+
+test('Dirty Profile uses the same frozen local Browser build toolchain', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-shell-first-dirty-profile-v1.yml'), 'utf8');
+  assert.match(source, /node-version: '24\.21\.0'/);
+  assert.match(source, /oven-sh\/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6/);
+  assert.match(source, /bun-version: '1\.3\.3'/);
+  assert.match(source, /npm ci --no-audit --no-fund/);
+  assert.match(source, /node_modules\\\.bin\\electron-builder\.cmd/);
+  assert.doesNotMatch(source, /npm install --no-audit --no-fund --no-package-lock/);
+  assert.doesNotMatch(source, /npx\s+--yes\s+electron-builder/);
+});

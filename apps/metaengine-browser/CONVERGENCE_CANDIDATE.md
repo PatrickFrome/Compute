@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36990000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36991000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -126,3 +126,10 @@ Build Identity V3 physical-qualification correction (2026-10-02):
 - V3 verification remains strict, but V2 historical compatibility now avoids all V3-only field dereferences; the terminal producer-gate projection likewise emits V3 lock/Bun fields only for V3 provenance.
 - the exact PowerShell V2 compatibility fixture is now part of the source-only Windows qualification, so this class of regression must fail before another physical PR is opened.
 - corrected successor reserves `0.7.0-dev.36990000001.1`, above all Actions run ids observed before this correction. No further source/checkpoint commit may land before its source qualification completes; after its next Package Smoke runner starts, this identity is consumed.
+
+
+Hermetic build-toolchain successor (2026-10-02):
+- qualified V3 predecessor `d283150bc8a3338a76b98c369b67fb7e846b207b` physically produced and qualified `0.7.0-dev.36990000001.1`; that identity is consumed and never reused;
+- daemon staging no longer has an implicit `npx bun` network fallback: a local Bun binary is mandatory and must exactly match the bounded `ME2_BUN_VERSION` (default 1.3.3);
+- Dirty Profile now uses Node 24.21.0 + npm 11.19.0 + pinned setup-bun 1.3.3 + committed npm lock + local electron-builder 26.15.7, matching the qualified producer toolchain instead of `npm install` / remote `npx` resolution;
+- successor reserves `0.7.0-dev.36991000001.1`; it remains unconsumed until a physical Package Smoke producer starts.
