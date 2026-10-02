@@ -611,7 +611,7 @@ function readProvenance(provenancePath) {
       ['source_head', parsed.source_head, exact.source_head],
       ['workflow', parsed.workflow, exact.workflow],
       ['run_id', parsed.run_id, exact.run_id],
-      ['run_attempt', Number(parsed.run_attempt || 1), Number(exact.run_attempt)],
+      ['run_attempt', Number(parsed.run_attempt), Number(exact.run_attempt)],
       ['package_version', parsed.package_version, exact.package_version],
       ['config_sha256', parsed.config_sha256, exact.builder_config_sha256],
     ];
