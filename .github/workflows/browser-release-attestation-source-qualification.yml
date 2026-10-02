@@ -112,7 +112,7 @@ jobs:
               raise SystemExit('release_attestation_verifier_signing_authority_present')
           if 'actions: read' not in verify or 'contents: read' not in verify:
               raise SystemExit('release_attestation_verifier_read_authority_missing')
-          if verify.index('actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c') > verify.index('gh attestation verify'):
+          if verify.index('actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c') > verify.index("'attestation','verify'"):
               raise SystemExit('release_attestation_verify_before_material_readback')
           for token in (
               '--bundle',
