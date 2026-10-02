@@ -57,6 +57,7 @@ try {
     producer_run_id = 424242
     producer_run_number = 42
     producer_run_attempt = 2
+    authority_effect = $false
   }
   $binding | ConvertTo-Json | Set-Content $bindingPath -Encoding utf8
   & $helper -Mode Verify -ExpectedHead $head -BindingPath $bindingPath -ConfigPath $config | Out-Null
