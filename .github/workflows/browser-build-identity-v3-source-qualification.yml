@@ -146,3 +146,90 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'windows_source_diff_detected' }
           git diff --cached --exit-code
           if ($LASTEXITCODE -ne 0) { throw 'windows_source_cached_diff_detected' }
+
+
+  windows-frozen-install-contract:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Browser toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Prove exact Windows npm toolchain
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string](node --version) -ne 'v24.21.0') { throw 'windows_node_version_drift' }
+          if ([string](npm --version) -ne '11.19.0') { throw 'windows_npm_version_drift' }
+
+      - name: First clean frozen install
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'windows_first_npm_ci_failed' }
+          node scripts/package-lock-material.mjs --root . --out "$env:RUNNER_TEMP\package-lock-material-1.json"
+          node scripts/dependency-resolution-digest.mjs --out "$env:RUNNER_TEMP\dependency-resolution-1.json"
+          if ($LASTEXITCODE -ne 0) { throw 'windows_first_dependency_digest_failed' }
+
+      - name: Second clean frozen install and compare
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'windows_second_npm_ci_failed' }
+          node scripts/package-lock-material.mjs --root . --out "$env:RUNNER_TEMP\package-lock-material-2.json"
+          node scripts/dependency-resolution-digest.mjs --out "$env:RUNNER_TEMP\dependency-resolution-2.json"
+          if ($LASTEXITCODE -ne 0) { throw 'windows_second_dependency_digest_failed' }
+          $lock1 = Get-Content "$env:RUNNER_TEMP\package-lock-material-1.json" -Raw | ConvertFrom-Json
+          $lock2 = Get-Content "$env:RUNNER_TEMP\package-lock-material-2.json" -Raw | ConvertFrom-Json
+          $dep1 = Get-Content "$env:RUNNER_TEMP\dependency-resolution-1.json" -Raw | ConvertFrom-Json
+          $dep2 = Get-Content "$env:RUNNER_TEMP\dependency-resolution-2.json" -Raw | ConvertFrom-Json
+          if ([string]$lock1.package_lock_sha256 -ne [string]$lock2.package_lock_sha256) {
+            throw 'windows_lockfile_digest_not_stable'
+          }
+          if ([string]$dep1.dependency_resolution_sha256 -ne [string]$dep2.dependency_resolution_sha256) {
+            throw 'windows_dependency_resolution_not_stable'
+          }
+          if ([int]$dep1.dependency_count -ne [int]$dep2.dependency_count) {
+            throw 'windows_dependency_count_not_stable'
+          }
+          Write-Host (@{
+            schema='metaengine.browser.windows-frozen-dependency-proof.v1'
+            package_lock_sha256=[string]$lock2.package_lock_sha256
+            dependency_resolution_sha256=[string]$dep2.dependency_resolution_sha256
+            dependency_count=[int]$dep2.dependency_count
+            node_version=[string]$dep2.node_version
+            npm_version=[string]$dep2.npm_version
+            authority_effect=$false
+          } | ConvertTo-Json -Compress)
+
+      - name: Run Windows focused supply-chain contracts
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm run check
+          if ($LASTEXITCODE -ne 0) { throw 'windows_browser_check_failed' }
+          node --test test/package-lock-material.test.mjs test/build-identity.test.mjs test/installer-provenance-v2.test.mjs test/installer-provenance-v3.test.mjs test/qualified-installer-consumer-contract.test.mjs test/package-build-reservation.test.mjs test/package-build-reservation-workflow.test.mjs test/browser-frozen-dependency-workflow.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'windows_supply_chain_contract_failed' }
+
+      - name: Prove tracked source checkout unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'windows_tracked_source_modified' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'windows_index_modified' }
