@@ -290,3 +290,36 @@ Do not:
 - make SBOM/attestation evidence itself a promotion signal;
 - merge or publish from an analysis/research workflow;
 - weaken one-producer or no-blind-retry fences.
+
+
+## Historical donor census
+
+Fresh branch/PR review checked the older build-once lines before proposing any new layer.
+
+### R86 — build once / provenance binding
+
+`work/r86-build-once-provenance-v1 @ 865ef8fad91e054659e52c6f112fbd272ee1705d`
+PR #990.
+
+Its core semantics were:
+
+- Package Smoke as the single NSIS producer;
+- downstream consumers resolve the exact producer for the exact source SHA;
+- immutable candidate artifact reused by Installed Chat / Final Runtime / Soak;
+- installer/blockmap/builder-config provenance verified before installation;
+- downstream consumers fail closed until the exact producer reaches terminal success.
+
+These semantics are already present in the current Package Smoke + `qualified-installer-consumer.ps1` architecture. R86 is a historical donor/evidence line, not a new merge target.
+
+### R90 — overlap convergence
+
+`work/r90-build-once-overlap-convergence-v1 @ 1ca341fc3e6f03d34bade36c8960754791a444c8`
+PR #994.
+
+Its unique convergence result was early immutable candidate publication while Package Smoke continued longer physical checks, with downstream consumers allowed to work in parallel but forbidden to become green until the exact bound producer terminated successfully.
+
+That pattern is also already absorbed in the current one-built producer/consumer contract.
+
+Conclusion:
+
+Do not revive R86/R90 as competing branches. Reuse their already-absorbed semantics and add only the missing SLSA attestation evidence at the current producer boundary.
