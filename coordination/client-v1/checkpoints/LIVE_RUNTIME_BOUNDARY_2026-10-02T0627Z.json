@@ -1,0 +1,31 @@
+{
+  "schema": "metaengine.browser.live-runtime-boundary-checkpoint.v1",
+  "observed_at": "2026-10-02T06:27:57.309485Z",
+  "project_id": "jhriwwsryeqsvvvufkok",
+  "installed_version": "0.7.0-dev.36908273822.1",
+  "supervisor_mode": "CONTROL",
+  "armed": true,
+  "compute": "HEALTHY",
+  "development_plane": "READY",
+  "host_resilience": "ACTIVE",
+  "guardian": null,
+  "guardian_interpretation": "DIAGNOSTIC_NOT_PRESENT_ON_INSTALLED_VERSION",
+  "fleet": {
+    "active": 0,
+    "bound_unverified": 4,
+    "lost": 0,
+    "provisioning_ambiguous": 0,
+    "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+    "roles": [
+      "PLANNER",
+      "RESEARCHER",
+      "IMPLEMENTER",
+      "CRITIC"
+    ],
+    "all_transport_proof_null": true,
+    "all_authority_effect_false": true,
+    "automatic_retry_allowed": false
+  },
+  "live_effects_issued": false,
+  "authority_effect": false
+}
