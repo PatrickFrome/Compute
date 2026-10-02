@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36963586969.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36964688887.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -51,3 +51,6 @@ Release safety invariants:
 
 
 Attempted successor identity `0.7.0-dev.36909837122.1` was consumed by the first CI matrix (Package Smoke #3111 started). R83 static canary correctly rejected its temporary Edge-source drift. The correction reuses the existing qualified `host_resilience` plane and reserves `0.7.0-dev.36963586969.1`; no canary manifest or deployed Edge is advanced by this client-only diagnostic slice.
+
+
+Identity discipline correction: `0.7.0-dev.36963586969.1` was already physically produced by Package Smoke #3117 on `3bf5583b…` (installer SHA-256 `62d01c10f5dfb9456036cb7f25edfccee449f87e4609d789e51a40e704e67b91`). Subsequent source head `c9207919…` inherited the same package string and started Package Smoke #3119 before the reservation advanced; those bytes are therefore collision-contaminated and must never be promoted or relabelled. The next clean source reserves `0.7.0-dev.36964688887.1`, higher than every observed workflow id at reservation time.
