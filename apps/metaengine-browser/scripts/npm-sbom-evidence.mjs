@@ -85,6 +85,15 @@ function componentKey(component) {
   ].join('|');
 }
 
+function componentPackageName(component) {
+  if (!component?.name) return null;
+  if (component.name.startsWith('@')) return component.name;
+  if (component.group && component.group.startsWith('@')) {
+    return `${component.group}/${component.name}`;
+  }
+  return component.name;
+}
+
 function normalizeDependencies(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -159,7 +168,7 @@ export function createNpmSbomEvidence({
   if (lock.npm_version !== dependency.npm_version) fail('npm_sbom_npm_version_binding_mismatch');
 
   const root = normalizeComponent(sbom.metadata?.component || {});
-  if (root.name !== packageName) fail('npm_sbom_metadata_root_name_mismatch');
+  if (componentPackageName(root) !== packageName) fail('npm_sbom_metadata_root_name_mismatch');
   if (root.version !== packageVersion) fail('npm_sbom_metadata_root_version_mismatch');
   if (root.type !== 'application') fail('npm_sbom_metadata_root_type_invalid');
 
