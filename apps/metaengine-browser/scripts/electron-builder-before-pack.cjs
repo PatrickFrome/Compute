@@ -5,6 +5,11 @@ const fs = require('node:fs');
 const { execFileSync, spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
+const {
+  createBuildIdentity,
+  loadDependencyResolutionProof,
+  sha256File,
+} = require('./build-identity.cjs');
 
 const TRUST_ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
 const BUILD_SHA_RE = /^[0-9a-f]{40}$/;
@@ -56,6 +61,40 @@ function buildEmergencyTrustRootMetadata({ appRoot, repoRoot }) {
     ed25519_public_key_pem: publicKey.pem,
     public_key_spki_sha256: publicKey.fingerprint,
   });
+}
+
+function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
+  const dependencyProofPath = String(process.env.ME2_DEPENDENCY_RESOLUTION_PATH || '').trim();
+  if (!dependencyProofPath) throw new Error('build_identity_dependency_resolution_path_missing');
+  const dependency = loadDependencyResolutionProof(dependencyProofPath);
+  const configPath = path.join(appRoot, 'electron-builder.test.json');
+  if (!fs.existsSync(configPath) || !fs.statSync(configPath).isFile()) {
+    throw new Error('build_identity_builder_config_missing');
+  }
+  const identity = createBuildIdentity({
+    repository: process.env.GITHUB_REPOSITORY,
+    repository_id: process.env.GITHUB_REPOSITORY_ID,
+    source_head: trustRoot.build_sha,
+    workflow: process.env.ME2_BUILD_WORKFLOW,
+    run_id: process.env.GITHUB_RUN_ID,
+    run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+    package_version: packageVersion,
+    platform: 'win32',
+    arch: process.env.ME2_BUILD_ARCH || 'x64',
+    builder_config_sha256: sha256File(configPath),
+    dependency_resolution_sha256: dependency.dependency_resolution_sha256,
+    electron_builder_version: process.env.ME2_ELECTRON_BUILDER_VERSION,
+    node_version: process.version,
+  });
+  const runnerTemp = String(process.env.RUNNER_TEMP || '').trim();
+  if (runnerTemp) {
+    fs.writeFileSync(
+      path.join(runnerTemp, 'build-identity.json'),
+      `${JSON.stringify(identity, null, 2)}\n`,
+      'utf8',
+    );
+  }
+  return identity;
 }
 
 function validateGuardianBootstrapBinding(binding, { sourceHead, packageVersion } = {}) {
@@ -161,9 +200,15 @@ async function metaengineGuardianNativeBeforePack(context) {
   } catch (error) {
     throw new Error(`guardian_machine_bootstrap_binding_invalid:${String(error?.message || error)}`);
   }
+  const buildIdentity = buildPackageIdentityMetadata({
+    appRoot,
+    trustRoot,
+    packageVersion,
+  });
   context.packager.config.extraMetadata = {
     ...(context.packager.config.extraMetadata || {}),
     metaengineGuardianBootstrapBinding: bootstrapBinding,
+    metaengineBuildIdentity: buildIdentity,
   };
 
   const daemonResult = spawnSync(
@@ -180,3 +225,4 @@ async function metaengineGuardianNativeBeforePack(context) {
 module.exports = metaengineGuardianNativeBeforePack;
 module.exports.buildEmergencyTrustRootMetadata = buildEmergencyTrustRootMetadata;
 module.exports.validateGuardianBootstrapBinding = validateGuardianBootstrapBinding;
+module.exports.buildPackageIdentityMetadata = buildPackageIdentityMetadata;
