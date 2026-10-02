@@ -1,0 +1,116 @@
+name: Browser Release Attestation Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-release-attestation-v1'
+    paths:
+      - '.github/workflows/browser-release-attestation-v1.yml'
+      - '.github/workflows/browser-release-attestation-source-qualification.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/browser-release-attestation-v1.yml'
+      - '.github/workflows/browser-release-attestation-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate release-boundary attestation contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('.github/workflows/browser-release-attestation-v1.yml')
+          text = path.read_text(encoding='utf-8')
+          lower = text.lower()
+
+          required = [
+              'workflow_dispatch:',
+              'source_head:',
+              'package_version:',
+              'producer_run_id:',
+              'actions: read',
+              'contents: read',
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'qualified-installer-consumer.ps1 -mode acquire',
+              'qualified-installer-consumer.ps1 -mode verify',
+              'qualified-installer-consumer.ps1 -mode wait',
+              'browser-composed-sbom.cdx.json',
+              'browser-composed-sbom-evidence.json',
+              'metaengine.browser.release-qualification-matrix.v1',
+              'metaengine.browser.release-qualification-attestation.v1',
+              'physical_qualification_terminal_green=$true',
+              'automatic_promotion=$false',
+              'promotion_authorized=$false',
+              'release_published=$false',
+              'authority_effect=$false',
+              'predicate-type: https://metaengine.dev/attestations/browser-release-qualification/v1',
+              'sbom-path:',
+              'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+          ]
+          for token in required:
+              if token not in lower:
+                  raise SystemExit(f'release_attestation_required_contract_missing:{token}')
+
+          if lower.count('actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6') != 2:
+              raise SystemExit('release_attestation_exact_attest_invocation_count_invalid')
+
+          forbidden = [
+              'electron-builder',
+              'npm ci',
+              'npm install',
+              'npx ',
+              'bun ci',
+              'bun install',
+              'gh release',
+              'create release',
+              'publish release',
+              'deployments: write',
+              'packages: write',
+              'contents: write',
+              'pull-requests: write',
+              'merge_pull_request',
+              'release_published=$true',
+              'promotion_authorized=$true',
+              'automatic_promotion=$true',
+          ]
+          for token in forbidden:
+              if token in lower:
+                  raise SystemExit(f'release_attestation_forbidden_capability_present:{token}')
+
+          required_workflows = [
+              'Browser Windows Package Smoke',
+              'Browser Windows Installed Chat Qualification',
+              'METAENGINE Browser Final Runtime Activation V1',
+              'METAENGINE Browser Windows Autonomous Soak V1',
+              'METAENGINE Browser Self Update E2E',
+              'METAENGINE Browser Shell V1',
+              'METAENGINE Browser Critical Audit V1',
+              'METAENGINE Browser Shell-First Dirty Profile V1',
+              'METAENGINE Browser Host Resilience Login Start V1',
+              'Browser Workspace Reincarnation V1',
+          ]
+          for workflow in required_workflows:
+              if workflow not in text:
+                  raise SystemExit(f'release_attestation_required_workflow_missing:{workflow}')
+
+          print('release_attestation_source_contract_pass')
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-release-attestation-v1.yml .github/workflows/browser-release-attestation-source-qualification.yml)"
