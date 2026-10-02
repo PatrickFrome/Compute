@@ -502,7 +502,18 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           self_update: base?.self_update || null,
           realtime_process_plane: processPlane,
           control_latency: this.#controlLatencySnapshot?.() || null,
-          host_resilience: hostResilienceSnapshot(),
+          host_resilience: {
+            ...(hostResilienceSnapshot() || {
+              schema: 'metaengine.browser.host-resilience-observation.v1',
+              state: 'UNAVAILABLE',
+              authority_effect: false,
+            }),
+            // Keep Guardian diagnostic readback inside the existing qualified
+            // host_resilience plane. Realtime pushes write this plane too, so
+            // omitting it here would erase the heartbeat's fresh Guardian
+            // observation despite the server's per-plane merge semantics.
+            guardian: sourceState?.guardian || null,
+          },
           realtime_observation_push: true,
           authority_effect: false,
         },
