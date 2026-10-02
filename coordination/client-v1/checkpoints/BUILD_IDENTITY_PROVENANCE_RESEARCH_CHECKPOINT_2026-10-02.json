@@ -3,7 +3,7 @@
   "created_at": "2026-10-02",
   "base_runtime_source": "1f6902daeae8bc201d1c493e8a413f320a80aeec",
   "research_branch": "analysis/build-identity-provenance-1f6902da",
-  "research_commit": "13ac003d14821c101ed1f569f8bf443539572ea9",
+  "research_commit": "5d5090560b364f9989134efdd8d962161f9e5dce",
   "research_document": "research/BUILD_IDENTITY_PROVENANCE_V2_RESEARCH_2026-10-02.md",
   "incident": {
     "class": "SEMANTIC_PACKAGE_VERSION_REUSED_ACROSS_DISTINCT_SOURCE_HEADS",
@@ -53,5 +53,31 @@
     "FULL_WINDOWS_ONE_ARTIFACT_QUALIFICATION"
   ],
   "authority_effect": false,
-  "production_mutation": false
+  "production_mutation": false,
+  "existing_pipeline_mapping": {
+    "provenance_module": "apps/metaengine-browser/scripts/installer-provenance.mjs",
+    "package_smoke_workflow": ".github/workflows/browser-windows-package-smoke.yml",
+    "before_pack_hook": "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs",
+    "after_artifact_hook": "apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs",
+    "current_artifact_name_source_scoped": true,
+    "current_provenance_binds_source_run_attempt_installer_blockmap_config": true,
+    "deterministic_build_identity_missing": true,
+    "semantic_version_source_collision_guard_missing": true
+  },
+  "dependency_reproducibility": {
+    "current_install_command": "npm install --no-audit --no-fund --no-package-lock",
+    "direct_browser_dependencies_exact_pinned": true,
+    "transitive_resolution_frozen_by_committed_lockfile": false,
+    "recommended_first_step": "COMMIT_LOCKFILE_AND_USE_NPM_CI_OR_BIND_CANONICAL_RESOLUTION_DIGEST"
+  },
+  "revised_minimal_successor": [
+    "EXTEND_EXISTING_INSTALLER_PROVENANCE_TO_V2",
+    "ADD_DETERMINISTIC_BUILD_IDENTITY_SHA256",
+    "INJECT_CI_SOURCE_RUN_METADATA_VIA_EXISTING_BEFORE_PACK_EXTRA_METADATA",
+    "VERIFY_PACKAGED_BUILD_IDENTITY_IN_EXISTING_AFTER_ARTIFACT_HOOK",
+    "ADD_DEPENDENCY_RESOLUTION_DIGEST",
+    "REJECT_SEMANTIC_VERSION_SOURCE_COLLISION",
+    "KEEP_EXISTING_EXACT_HEAD_ARTIFACT_ACQUISITION",
+    "NO_NEW_COORDINATION_PLANE"
+  ]
 }
