@@ -149,3 +149,23 @@ This proposal is build-safety only:
 - no Guardian authority;
 - no scheduler/task authority;
 - no automatic retry.
+
+
+## GitHub repository artifact lookup refinement
+
+GitHub's Actions Artifacts REST API supports repository-wide artifact listing with an exact `name` query and returns each artifact's workflow-run id and head SHA.
+
+Reference:
+https://docs.github.com/en/rest/actions/artifacts
+
+This makes the same-source duplicate check cheaper and more direct:
+- query exact source-scoped candidate artifact name;
+- reject any live artifact whose workflow run id differs from the current run.
+
+It also suggests a possible future lightweight version-evidence artifact, but that is **not yet sufficient as an atomic version reservation** because artifact names are scoped to runs rather than globally unique. Two concurrent runs could theoretically both observe absence before uploading their own same-name marker.
+
+Therefore:
+- repository artifact lookup is suitable as **collision evidence**;
+- it should not be mislabeled as a globally atomic semantic-version allocator.
+
+The immediate mechanizable hard gate remains `GITHUB_RUN_ATTEMPT == 1` plus prior same-source candidate-artifact refusal. Cross-head semantic-version uniqueness still requires either a stronger reservation mechanism or continued source-side reservation discipline until a bounded atomic design is qualified.
