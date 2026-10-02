@@ -350,3 +350,32 @@ The stronger qualification pattern is:
 - retain a final `git diff --exit-code` fence.
 
 This avoids teaching repository integrity tests to ignore missing tracked files and preserves their original semantics.
+
+
+## 2026-10-02 follow-up: attestation boundary confirmed by current primary docs
+
+Current GitHub documentation explicitly recommends signing software that is being released and that consumers are expected to verify, while recommending **not** signing frequent builds used only for automated testing.
+
+For a public repository, GitHub's artifact attestations use the Sigstore Public Good Instance and record the bundle in a public immutable transparency log. GitHub also supports associated SBOM attestations and verification via `gh attestation verify`.
+
+This confirms the earlier METAENGINE boundary:
+- ordinary draft Package Smoke remains unsigned qualification evidence;
+- the exact installer that has already passed the one-built physical qualification chain becomes the attestation subject at release/promotion boundary;
+- attestation verification becomes a promotion policy input, never a substitute for tests or an assertion that the binary is secure.
+
+SLSA v1.2 continues to separate:
+- `buildDefinition` — requested inputs;
+- `runDetails` — builder and execution metadata;
+- artifact subjects — output digests.
+
+For METAENGINE this preserves the non-circular split:
+- Build Identity = pre-output invocation/input identity;
+- installer SHA-256 = output subject;
+- package/build proofs and SBOM = byproducts/evidence;
+- GitHub/Sigstore attestation = external authenticity envelope.
+
+The next V4 supply-chain slice should therefore be implemented only after V3 physical qualification:
+1. deterministic npm-layer SBOM;
+2. composed METAENGINE installer SBOM;
+3. release-boundary artifact/SBOM attestations;
+4. promotion verifier that validates repository/workflow/source/subject identity.
