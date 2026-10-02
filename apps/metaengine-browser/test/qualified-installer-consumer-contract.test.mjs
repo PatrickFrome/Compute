@@ -39,6 +39,13 @@ test('R91 qualified installer consumer helper centralizes exact acquire and term
   assert.doesNotMatch(script, /Invoke-Expression|Start-Process|cmd\.exe|powershell\.exe/i);
 });
 
+test('dedicated physical SLSA branch auto-fences shared consumers to push producer', async () => {
+  const script = await source('scripts/qualified-installer-consumer.ps1');
+  assert.match(script, /GITHUB_EVENT_NAME\) -eq 'push'/);
+  assert.match(script, /GITHUB_REF\) -eq 'refs\/heads\/physical\/build-slsa-provenance-v1'/);
+  assert.match(script, /\$ExpectedProducerEvent = 'push'/);
+});
+
 test('producer-event fencing is optional for legacy consumers but exact when requested', async () => {
   const script = await source('scripts/qualified-installer-consumer.ps1');
   assert.match(script, /if \(\$ExpectedProducerEvent\) \{/);
