@@ -32,9 +32,17 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
-const PROVENANCE_SCHEMA = 'metaengine.browser.installer-provenance.v1';
+const require = createRequire(import.meta.url);
+const {
+  loadDependencyResolutionProof,
+  validateBuildIdentity,
+} = require('./build-identity.cjs');
+
+const PROVENANCE_SCHEMA_V1 = 'metaengine.browser.installer-provenance.v1';
+const PROVENANCE_SCHEMA_V2 = 'metaengine.browser.installer-provenance.v2';
 const ACQUIRED_SCHEMA = 'metaengine.browser.installer-provenance-acquired.v1';
 const RESOLVED_SCHEMA = 'metaengine.browser.installer-run-resolved.v1';
 const DOWNLOADED_SCHEMA = 'metaengine.browser.installer-artifact-downloaded.v1';
