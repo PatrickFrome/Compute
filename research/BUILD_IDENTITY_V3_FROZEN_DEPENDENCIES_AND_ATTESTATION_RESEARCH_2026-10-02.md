@@ -154,3 +154,37 @@ Avoid adding an always-on SBOM generator to every draft build until its runtime/
 The next engineering slice after Build Identity V2 qualification should be **lockfile + npm ci + lockfile SHA binding**, not artifact attestation first.
 
 Reason: attestation can prove which workflow produced bytes, but it does not itself make the dependency inputs deterministic. Frozen dependency input removes a real remaining source of build variance before adding cryptographic release provenance.
+
+
+## Cross-platform optional dependency nuance
+
+Additional npm primary-source review:
+- https://docs.npmjs.com/files/package-lock.json/
+- https://docs.npmjs.com/cli/install/
+
+The lockfile schema can represent:
+- optional dependencies;
+- packages restricted by `os` / `cpu`;
+- dependencies whose version is omitted because an optional/peer package is not installed on the current platform.
+
+This matches the Build Identity V2 lesson from the real Windows `npm ls` tree: unresolved optional placeholders are not the same thing as installed resolutions.
+
+### BI3-A implementation rule
+
+Do not derive the frozen dependency material by requiring every lockfile node to have a physical installed version.
+
+Use two separate proofs:
+
+1. **Lock material proof**
+   - hash the committed package-lock bytes exactly;
+   - optionally parse its `packages` entries for integrity auditing;
+   - allow platform/optional metadata according to npm's own schema.
+
+2. **Installed material proof**
+   - keep the current normalized actual `npm ls --all --json` tree;
+   - only installed nodes with concrete versions belong in this proof;
+   - platform-skipped optional placeholders remain absent.
+
+Therefore a Windows physical build can be checked against one committed cross-platform lockfile without pretending that every optional package in the lockfile must exist on disk.
+
+Future policy should compare the installed tree to a platform-aware projection of the lockfile only after a dedicated test demonstrates exact npm semantics. Until then, lockfile SHA + `npm ci` failure-on-drift + actual installed-tree digest are strong independent evidence and avoid inventing a second resolver.
