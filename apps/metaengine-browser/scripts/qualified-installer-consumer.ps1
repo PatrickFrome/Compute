@@ -155,7 +155,8 @@ if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding
     [string]$binding.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or
     [string]$binding.dependency_resolution_sha256 -notmatch '^[a-f0-9]{64}$' -or
     $binding.build_identity_verified -ne $true -or
-    $binding.dependency_resolution_verified -ne $true) {
+    $binding.dependency_resolution_verified -ne $true -or
+    $binding.authority_effect -ne $false) {
   throw 'qualified_installer_binding_invalid'
 }
 
@@ -214,6 +215,8 @@ if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_producer_not_qualified' }
 
 $proof | Add-Member -NotePropertyName producer_terminal_success -NotePropertyValue $true -Force
 $proof | Add-Member -NotePropertyName producer_terminal_qualified_at -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
+$proof | Add-Member -NotePropertyName build_identity_sha256 -NotePropertyValue ([string]$binding.build_identity_sha256) -Force
+$proof | Add-Member -NotePropertyName dependency_resolution_sha256 -NotePropertyValue ([string]$binding.dependency_resolution_sha256) -Force
 $proof | ConvertTo-Json -Depth 12 | Set-Content $ProofPath -Encoding utf8
 
 $result = [ordered]@{
@@ -222,6 +225,8 @@ $result = [ordered]@{
   producer_run_id = [int64]$binding.producer_run_id
   producer_run_number = [int64]$binding.producer_run_number
   producer_run_attempt = [int64]$binding.producer_run_attempt
+  build_identity_sha256 = [string]$binding.build_identity_sha256
+  dependency_resolution_sha256 = [string]$binding.dependency_resolution_sha256
   producer_terminal_success = $true
   authority_effect = $false
 }
