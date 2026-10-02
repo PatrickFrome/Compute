@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36990000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36991000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -126,3 +126,10 @@ Build Identity V3 physical-qualification correction (2026-10-02):
 - V3 verification remains strict, but V2 historical compatibility now avoids all V3-only field dereferences; the terminal producer-gate projection likewise emits V3 lock/Bun fields only for V3 provenance.
 - the exact PowerShell V2 compatibility fixture is now part of the source-only Windows qualification, so this class of regression must fail before another physical PR is opened.
 - corrected successor reserves `0.7.0-dev.36990000001.1`, above all Actions run ids observed before this correction. No further source/checkpoint commit may land before its source qualification completes; after its next Package Smoke runner starts, this identity is consumed.
+
+
+SBOM evidence successor line:
+- predecessor `d283150bc8a3338a76b98c369b67fb7e846b207b` / `0.7.0-dev.36990000001.1` is terminal V3-qualified 10/10;
+- branch `work/build-sbom-evidence-v1` adds evidence-only npm SBOM inventory before release-boundary attestation;
+- `0.7.0-dev.36991000001.1` is reserved but remains physically unconsumed until a future Package Smoke producer starts;
+- SBOM digest is not Build Identity authority and does not authorize promotion.
