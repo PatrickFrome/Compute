@@ -160,3 +160,38 @@ Final audit invariants:
 - zero authority/release/admission effect.
 
 Do not add another runtime/source commit to this branch before the first exact-head qualification outcome. Research or qualification evidence after that point belongs on a separate analysis branch.
+
+
+## First PR qualification attempt — dependency resolver pre-build failure
+
+PR #1091 opened at exact head `04fce17d3b6de1b8a5399962887bad8070d2b740` with `0.7.0-dev.36970010001.1`.
+
+Package Smoke:
+- run id: `36970396272`
+- run number: `3135`
+- job: `110722962017`
+- failed step: **Capture exact installed dependency resolution**
+- completed before failure: checkout, exact-head proof, Node setup, Browser npm install
+- skipped after failure: expected Build Identity, source parse, visual evidence, UI staging, NSIS package build, candidate upload, install/physical package tests
+- candidate installer artifact: **none**
+
+Observed diagnostic:
+`dependency_resolution_npm_ls_failed:null`
+
+Root cause:
+- on the Windows Node 24 runner, direct `spawnSync('npm.cmd', ...)` did not create a child process and returned a null status;
+- the previous code checked only `status !== 0`, so the diagnostic hid the underlying spawn-layer distinction.
+
+Repair in the next exact source:
+- add a pure `npmInvocation()` contract;
+- Windows uses `ComSpec /d /s /c npm.cmd ...` so the OS command processor resolves the npm command shim;
+- Linux/macOS keep direct `npm` execution;
+- explicit `result.error` becomes `dependency_resolution_npm_spawn_failed:<code>`;
+- add a cross-platform unit contract proving the invocation geometry.
+
+Identity discipline:
+- `0.7.0-dev.36970010001.1` is retired conservatively because Package Smoke runner #3135 started, even though packaging never began and no candidate artifact exists;
+- corrected identity: `0.7.0-dev.36972000001.1`;
+- any further runtime/source correction after the new Package Smoke starts must advance again.
+
+The failure is pre-effect for installer bytes. No blind rerun was issued; source is corrected and will receive a new exact-head qualification.

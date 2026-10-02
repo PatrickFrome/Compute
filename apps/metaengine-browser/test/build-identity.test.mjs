@@ -5,6 +5,8 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+import { npmInvocation } from '../scripts/dependency-resolution-digest.mjs';
+
 const require = createRequire(import.meta.url);
 const {
   BUILD_IDENTITY_SCHEMA,
@@ -70,6 +72,19 @@ function identity(overrides = {}) {
     ...overrides,
   });
 }
+
+test('dependency resolver invokes npm through cmd.exe on Windows and directly elsewhere', () => {
+  const windows = npmInvocation(['ls', '--all', '--json'], {
+    platform: 'win32',
+    env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+  });
+  assert.equal(windows.command, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(windows.args, ['/d', '/s', '/c', 'npm.cmd', 'ls', '--all', '--json']);
+
+  const linux = npmInvocation(['--version'], { platform: 'linux', env: {} });
+  assert.equal(linux.command, 'npm');
+  assert.deepEqual(linux.args, ['--version']);
+});
 
 test('build identity v2 is deterministic and invocation-bound', () => {
   const a = identity();

@@ -9,7 +9,7 @@
   "implementation_source_before_checkpoint": "5a75a4129e305752b868f1d0604319e9b30122e1",
   "pull_request_open": false,
   "physical_build_triggered": false,
-  "inherited_package_version_consumed": false,
+  "inherited_package_version_consumed": true,
   "build_identity": {
     "schema": "metaengine.browser.build-identity.v2",
     "inputs": [
@@ -75,8 +75,10 @@
     "AUTOMATIC_SEMANTIC_VERSION_ALLOCATOR"
   ],
   "pre_pr_gates": [
-    "OPEN_STACKED_DRAFT_PR",
-    "TREAT_RESERVED_IDENTITY_AS_CONSUMED_ON_PHYSICAL_PACKAGE_SMOKE_START",
+    "UPDATED_STACKED_PR_EXACT_HEAD",
+    "TREAT_NEW_IDENTITY_AS_CONSUMED_ON_PACKAGE_SMOKE_RUNNER_START",
+    "DEPENDENCY_RESOLUTION_WINDOWS_STEP_GREEN",
+    "BUILD_IDENTITY_EXPECTED_BEFOREPACK_PACKAGED_READBACK_EQUAL",
     "EXACT_HEAD_BROWSER_REGRESSION_GREEN",
     "ONE_EXACT_PACKAGE_SMOKE_ARTIFACT",
     "INSTALLED_CHAT_RUNTIME_SOAK_SELF_UPDATE_SAME_BUILD_IDENTITY"
@@ -84,8 +86,8 @@
   "promotion_authorized": false,
   "authority_effect": false,
   "final_freeze": {
-    "pre_reservation_source": "5a75a4129e305752b868f1d0604319e9b30122e1",
-    "reserved_package_identity": "0.7.0-dev.36970010001.1",
+    "pre_reservation_source": "04fce17d3b6de1b8a5399962887bad8070d2b740",
+    "reserved_package_identity": "0.7.0-dev.36972000001.1",
     "latest_observed_repository_workflow_id": 36968682903,
     "exact_source_frozen": true,
     "no_further_runtime_commit_before_qualification": true,
@@ -95,7 +97,9 @@
     "workflow_single_evidence_upload": true,
     "consumer_single_acquire_block": true,
     "consumer_single_verify_block": true,
-    "consumer_single_binding_block": true
+    "consumer_single_binding_block": true,
+    "prior_reserved_identity": "0.7.0-dev.36970010001.1",
+    "prior_identity_retired": true
   },
   "malformed_workflow_runs": {
     "run_numbers": [
@@ -131,5 +135,38 @@
     "package_identity_consumed": false,
     "interpretation": "WORKFLOW_PARSE_FAILURE_EVIDENCE_ONLY"
   },
-  "reserved_package_identity": "0.7.0-dev.36970010001.1"
+  "reserved_package_identity": "0.7.0-dev.36972000001.1",
+  "first_pr_qualification_attempt": {
+    "pr": 1091,
+    "source_head": "04fce17d3b6de1b8a5399962887bad8070d2b740",
+    "package_identity": "0.7.0-dev.36970010001.1",
+    "package_smoke_run_id": 36970396272,
+    "package_smoke_run_number": 3135,
+    "package_smoke_job_id": 110722962017,
+    "failure_step": "CAPTURE_EXACT_INSTALLED_DEPENDENCY_RESOLUTION",
+    "failure_code": "dependency_resolution_npm_ls_failed",
+    "failure_status": null,
+    "root_cause": "WINDOWS_NODE_DIRECT_SPAWN_OF_NPM_CMD_DID_NOT_CREATE_CHILD_PROCESS",
+    "expected_identity_computed": false,
+    "package_build_started": false,
+    "candidate_artifact_uploaded": false,
+    "installer_executed": false,
+    "physical_package_bytes_produced": false,
+    "blind_rerun_issued": false,
+    "identity_retired_conservatively": true
+  },
+  "windows_npm_spawn_fix": {
+    "windows_command_processor": "ComSpec",
+    "args_prefix": [
+      "/d",
+      "/s",
+      "/c",
+      "npm.cmd"
+    ],
+    "fixed_internal_arguments_only": true,
+    "spawn_error_explicit": true,
+    "non_windows_direct_npm": true,
+    "unit_contract_added": true,
+    "authority_effect": false
+  }
 }

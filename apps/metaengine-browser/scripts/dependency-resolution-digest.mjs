@@ -51,19 +51,67 @@ function countDependencies(tree) {
   return count;
 }
 
+export function npmInvocation(args, {
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) {
+    throw new Error('dependency_resolution_npm_args_invalid');
+  }
+  if (platform === 'win32') {
+    const comspec = String(
+      env.ComSpec
+      || env.COMSPEC
+      || (env.SystemRoot ? `${env.SystemRoot}\\System32\\cmd.exe` : 'cmd.exe'),
+    ).trim();
+    if (!comspec) throw new Error('dependency_resolution_comspec_unavailable');
+    return Object.freeze({
+      command: comspec,
+      args: Object.freeze(['/d', '/s', '/c', 'npm.cmd', ...args]),
+    });
+  }
+  return Object.freeze({
+    command: 'npm',
+    args: Object.freeze([...args]),
+  });
+}
+
+function runNpm(args, {
+  cwd = undefined,
+  platform = process.platform,
+  env = process.env,
+  maxBuffer = 4 * 1024 * 1024,
+} = {}) {
+  const invocation = npmInvocation(args, { platform, env });
+  const result = spawnSync(invocation.command, invocation.args, {
+    cwd,
+    env,
+    encoding: 'utf8',
+    windowsHide: true,
+    maxBuffer,
+  });
+  if (result.error) {
+    throw new Error(
+      `dependency_resolution_npm_spawn_failed:${String(result.error.code || 'UNKNOWN')}:${String(result.error.message || result.error).slice(0, 1000)}`,
+    );
+  }
+  return result;
+}
+
 function npmVersion() {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const result = spawnSync(npm, ['--version'], { encoding: 'utf8', windowsHide: true });
-  if (result.status !== 0) throw new Error('dependency_resolution_npm_version_unavailable');
-  return String(result.stdout || '').trim();
+  const result = runNpm(['--version']);
+  if (result.status !== 0) {
+    const message = String(result.stderr || result.stdout || '').slice(0, 1000);
+    throw new Error(`dependency_resolution_npm_version_unavailable:${result.status}:${message}`);
+  }
+  const version = String(result.stdout || '').trim();
+  if (!version) throw new Error('dependency_resolution_npm_version_unavailable');
+  return version;
 }
 
 function readInstalledTree(cwd) {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const result = spawnSync(npm, ['ls', '--all', '--json'], {
+  const result = runNpm(['ls', '--all', '--json'], {
     cwd,
-    encoding: 'utf8',
-    windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {

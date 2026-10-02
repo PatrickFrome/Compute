@@ -72,3 +72,12 @@ Build Identity V2 successor (2026-10-02):
 - Build Identity is evidence only: `authority_effect=false`, no release/promotion/admission/Guardian authority.
 
 Seven malformed-workflow push records (#3128-#3134, run ids 36968517070..36968682903) occurred during the editing incident before the workflow was reconstructed. Every one completed FAILURE with zero jobs and zero artifacts, so no installer/package physical build occurred on those heads. They are retained as parser-failure evidence, not as consumed physical package identities. After repair, branch pushes no longer created Package Smoke runs because the valid push filter does not include this branch.
+
+
+Build Identity V2 first qualification correction:
+- frozen PR #1091 head `04fce17d3b6de1b8a5399962887bad8070d2b740` started Package Smoke #3135 / run `36970396272` with reserved identity `0.7.0-dev.36970010001.1`;
+- the runner failed at the new read-only dependency-resolution step **before** expected identity computation, packaging, candidate upload or installer execution;
+- exact root cause: Node 24 on Windows returned a null spawn status when the helper attempted to execute `npm.cmd` directly through `spawnSync`; the diagnostic was `dependency_resolution_npm_ls_failed:null`;
+- no Package Smoke candidate artifact was produced on that head, but the identity is retired conservatively because the physical Package Smoke runner had started;
+- Windows npm invocation now goes through the trusted OS command processor (`ComSpec /d /s /c npm.cmd ...`) with only fixed internal npm arguments; spawn errors are explicit and bounded;
+- corrected successor reserves `0.7.0-dev.36972000001.1`; no bytes from the failed attempt may be relabelled as this version.
