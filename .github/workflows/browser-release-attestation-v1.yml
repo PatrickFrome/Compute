@@ -1,0 +1,273 @@
+name: METAENGINE Browser Release Attestation V1
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_head:
+        description: Exact physically-qualified Browser source SHA
+        required: true
+        type: string
+      package_version:
+        description: Exact physically-qualified Browser package version
+        required: true
+        type: string
+      producer_run_id:
+        description: Exact Browser Windows Package Smoke producer run id
+        required: true
+        type: string
+
+concurrency:
+  group: browser-release-attestation-${{ inputs.source_head }}
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    name: release-boundary-attestation
+    runs-on: windows-2025
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout exact physically-qualified source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.source_head }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact verification Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Reverify one-built candidate and terminal physical matrix
+        id: prepare
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $sourceHead = '${{ inputs.source_head }}'.Trim().ToLowerInvariant()
+          $packageVersion = '${{ inputs.package_version }}'.Trim()
+          $producerRunIdText = '${{ inputs.producer_run_id }}'.Trim()
+          if ($sourceHead -notmatch '^[a-f0-9]{40}$') { throw 'release_attestation_source_head_invalid' }
+          if (-not $packageVersion) { throw 'release_attestation_package_version_missing' }
+          if ($producerRunIdText -notmatch '^[0-9]+$') { throw 'release_attestation_producer_run_id_invalid' }
+          $producerRunId = [int64]$producerRunIdText
+
+          $actualHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actualHead -ne $sourceHead) { throw "release_attestation_checkout_drift:$actualHead" }
+          $actualVersion = [string](node -p "require('./package.json').version")
+          if ($actualVersion -ne $packageVersion) { throw "release_attestation_package_version_drift:$actualVersion" }
+
+          $workRoot = Join-Path $env:RUNNER_TEMP 'release-attestation-candidate'
+          $bindingPath = Join-Path $workRoot 'consumer-binding.json'
+          .\scripts\qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead $sourceHead -WorkRoot $workRoot -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json') -BindingPath $bindingPath
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_candidate_acquire_failed' }
+
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if (
+            $binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding.v1' -or
+            [string]$binding.source_head -ne $sourceHead -or
+            [int64]$binding.producer_run_id -ne $producerRunId -or
+            [int64]$binding.producer_run_attempt -ne 1 -or
+            [string]$binding.installer_sha256 -notmatch '^[a-f0-9]{64}$' -or
+            [string]$binding.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or
+            $binding.build_identity_verified -ne $true -or
+            $binding.dependency_resolution_verified -ne $true -or
+            $binding.package_lock_verified -ne $true -or
+            $binding.me2_ui_bun_lock_verified -ne $true -or
+            $binding.authority_effect -ne $false
+          ) { throw 'release_attestation_candidate_binding_invalid' }
+
+          .\scripts\qualified-installer-consumer.ps1 -Mode Verify -ExpectedHead $sourceHead -BindingPath $bindingPath -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json')
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_candidate_reverify_failed' }
+
+          $producerProofPath = Join-Path $env:RUNNER_TEMP 'release-attestation-producer-proof.json'
+          @{
+            schema='metaengine.browser.release-attestation-producer-proof.v1'
+            source_head=$sourceHead
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content $producerProofPath -Encoding utf8
+
+          .\scripts\qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead $sourceHead -BindingPath $bindingPath -ProofPath $producerProofPath -TimeoutMinutes 5 -WaitIntervalSeconds 10
+          if ($LASTEXITCODE -ne 0) { throw 'release_attestation_producer_not_terminal_success' }
+
+          $payloadRoot = Split-Path -Parent ([string]$binding.installer_path)
+          $composedSbomPath = Join-Path $payloadRoot 'browser-composed-sbom.cdx.json'
+          $composedEvidencePath = Join-Path $payloadRoot 'browser-composed-sbom-evidence.json'
+          foreach ($path in @([string]$binding.installer_path, [string]$binding.provenance_path, $composedSbomPath, $composedEvidencePath)) {
+            if (-not (Test-Path $path -PathType Leaf)) { throw "release_attestation_material_missing:$path" }
+          }
+
+          $composed = Get-Content $composedEvidencePath -Raw | ConvertFrom-Json
+          $sbom = Get-Content $composedSbomPath -Raw | ConvertFrom-Json
+          $composedRawSha = (Get-FileHash $composedSbomPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $installerRawSha = (Get-FileHash ([string]$binding.installer_path) -Algorithm SHA256).Hash.ToLowerInvariant()
+          $rootHash = [string](($sbom.metadata.component.hashes | Where-Object { $_.alg -eq 'SHA-256' } | Select-Object -First 1).content)
+          if (
+            $composed.schema -ne 'metaengine.browser.composed-sbom-evidence.v1' -or
+            [string]$composed.source_head -ne $sourceHead -or
+            [string]$composed.package_version -ne $packageVersion -or
+            [string]$composed.installer_sha256 -ne [string]$binding.installer_sha256 -or
+            [string]$composed.build_identity_sha256 -ne [string]$binding.build_identity_sha256 -or
+            [string]$composed.composed_semantic_inventory_sha256 -notmatch '^[a-f0-9]{64}$' -or
+            [string]$composed.composition_aggregate -ne 'incomplete' -or
+            $composed.authority_effect -ne $false -or
+            $installerRawSha -ne [string]$binding.installer_sha256 -or
+            $rootHash -ne [string]$binding.installer_sha256 -or
+            [string]$sbom.compositions[0].aggregate -ne 'incomplete'
+          ) { throw 'release_attestation_composed_sbom_binding_invalid' }
+
+          $headers = @{
+            Authorization = "Bearer $env:ME2_GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'metaengine-release-attestation-v1'
+          }
+          $runsUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs?head_sha=$sourceHead&per_page=100"
+          $runResponse = Invoke-RestMethod -Method Get -Uri $runsUri -Headers $headers
+          $requiredNames = @(
+            'Browser Windows Package Smoke',
+            'Browser Windows Installed Chat Qualification',
+            'METAENGINE Browser Final Runtime Activation V1',
+            'METAENGINE Browser Windows Autonomous Soak V1',
+            'METAENGINE Browser Self Update E2E',
+            'METAENGINE Browser Shell V1',
+            'METAENGINE Browser Critical Audit V1',
+            'METAENGINE Browser Shell-First Dirty Profile V1',
+            'METAENGINE Browser Host Resilience Login Start V1',
+            'Browser Workspace Reincarnation V1'
+          )
+          $matrix = @()
+          foreach ($name in $requiredNames) {
+            $candidate = @(
+              $runResponse.workflow_runs |
+              Where-Object { [string]$_.name -eq $name -and [string]$_.head_sha -eq $sourceHead } |
+              Sort-Object -Property run_number -Descending |
+              Select-Object -First 1
+            )
+            if ($candidate.Count -ne 1) { throw "release_attestation_required_workflow_missing:$name" }
+            $run = $candidate[0]
+            if ([string]$run.status -ne 'completed' -or [string]$run.conclusion -ne 'success') {
+              throw "release_attestation_required_workflow_not_success:$name:$($run.status):$($run.conclusion)"
+            }
+            if ($name -eq 'Browser Windows Package Smoke' -and [int64]$run.id -ne $producerRunId) {
+              throw "release_attestation_package_smoke_producer_drift:$($run.id):$producerRunId"
+            }
+            $matrix += [ordered]@{
+              name=[string]$run.name
+              run_id=[int64]$run.id
+              run_number=[int64]$run.run_number
+              run_attempt=[int64]$run.run_attempt
+              conclusion=[string]$run.conclusion
+            }
+          }
+
+          $matrixPath = Join-Path $env:RUNNER_TEMP 'release-attestation-qualification-matrix.json'
+          @{
+            schema='metaengine.browser.release-qualification-matrix.v1'
+            repository=$env:GITHUB_REPOSITORY
+            source_head=$sourceHead
+            package_version=$packageVersion
+            producer_run_id=$producerRunId
+            workflows=$matrix
+            terminal_green=$true
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 8 | Set-Content $matrixPath -Encoding utf8
+
+          $predicatePath = Join-Path $env:RUNNER_TEMP 'release-attestation-predicate.json'
+          @{
+            schema='metaengine.browser.release-qualification-attestation.v1'
+            repository=$env:GITHUB_REPOSITORY
+            source_head=$sourceHead
+            package_version=$packageVersion
+            installer_name=[string]$binding.installer_name
+            installer_sha256=[string]$binding.installer_sha256
+            build_identity_sha256=[string]$binding.build_identity_sha256
+            dependency_resolution_sha256=[string]$binding.dependency_resolution_sha256
+            package_lock_sha256=[string]$binding.package_lock_sha256
+            composed_sbom_raw_sha256=$composedRawSha
+            composed_sbom_semantic_inventory_sha256=[string]$composed.composed_semantic_inventory_sha256
+            composed_sbom_aggregate='incomplete'
+            producer_workflow='browser-windows-package-smoke.yml'
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            qualification_workflows=$matrix
+            physical_qualification_terminal_green=$true
+            automatic_promotion=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content $predicatePath -Encoding utf8
+
+          "installer_path=$([string]$binding.installer_path)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "installer_sha256=$([string]$binding.installer_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sbom_path=$composedSbomPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "predicate_path=$predicatePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "matrix_path=$matrixPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Attest release qualification for exact installer
+        id: qualification_attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.prepare.outputs.installer_path }}
+          predicate-type: https://metaengine.dev/attestations/browser-release-qualification/v1
+          predicate-path: ${{ steps.prepare.outputs.predicate_path }}
+
+      - name: Attest composed CycloneDX SBOM for exact installer
+        id: sbom_attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.prepare.outputs.installer_path }}
+          sbom-path: ${{ steps.prepare.outputs.sbom_path }}
+
+      - name: Seal zero-promotion attestation evidence
+        shell: powershell
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $qualificationBundle = '${{ steps.qualification_attestation.outputs.bundle-path }}'
+          $sbomBundle = '${{ steps.sbom_attestation.outputs.bundle-path }}'
+          if (-not (Test-Path $qualificationBundle -PathType Leaf)) { throw 'release_qualification_attestation_bundle_missing' }
+          if (-not (Test-Path $sbomBundle -PathType Leaf)) { throw 'release_sbom_attestation_bundle_missing' }
+          Copy-Item $qualificationBundle "$env:RUNNER_TEMP\release-qualification-attestation.bundle.json" -Force
+          Copy-Item $sbomBundle "$env:RUNNER_TEMP\release-sbom-attestation.bundle.json" -Force
+          @{
+            schema='metaengine.browser.release-attestation-result.v1'
+            repository=$env:GITHUB_REPOSITORY
+            source_head='${{ inputs.source_head }}'
+            package_version='${{ inputs.package_version }}'
+            producer_run_id=[int64]'${{ inputs.producer_run_id }}'
+            installer_sha256='${{ steps.prepare.outputs.installer_sha256 }}'
+            qualification_attestation_id='${{ steps.qualification_attestation.outputs.attestation-id }}'
+            qualification_attestation_url='${{ steps.qualification_attestation.outputs.attestation-url }}'
+            sbom_attestation_id='${{ steps.sbom_attestation.outputs.attestation-id }}'
+            sbom_attestation_url='${{ steps.sbom_attestation.outputs.attestation-url }}'
+            promotion_authorized=$false
+            release_published=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\release-attestation-result.json" -Encoding utf8
+
+      - name: Upload attestation evidence only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-release-attestation-${{ inputs.source_head }}
+          path: |
+            ${{ steps.prepare.outputs.predicate_path }}
+            ${{ steps.prepare.outputs.matrix_path }}
+            ${{ runner.temp }}/release-attestation-result.json
+            ${{ runner.temp }}/release-qualification-attestation.bundle.json
+            ${{ runner.temp }}/release-sbom-attestation.bundle.json
+          if-no-files-found: error
+          retention-days: 90
