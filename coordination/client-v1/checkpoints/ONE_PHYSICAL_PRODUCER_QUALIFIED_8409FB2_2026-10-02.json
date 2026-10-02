@@ -1,0 +1,118 @@
+{
+  "schema": "metaengine.browser.one-physical-producer-qualified.v1",
+  "qualified_at": "2026-10-02T07:10:35Z",
+  "source_head": "8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+  "pr": 1092,
+  "package_version": "0.7.0-dev.36977000001.1",
+  "workflows": {
+    "total": 10,
+    "success": 10,
+    "failure": 0
+  },
+  "shell": {
+    "tests": 3880,
+    "pass": 3878,
+    "fail": 0,
+    "skipped": 2,
+    "additional_contract_tests": 102,
+    "additional_contract_pass": 102
+  },
+  "critical_audit": {
+    "tests": 3880,
+    "pass": 3880,
+    "fail": 0,
+    "skipped": 0
+  },
+  "reservation": {
+    "artifact_id": 11212813280,
+    "sha256": "334ba15e096123c28842fbb1019dd6a1fc26676cce2ebf3c79bd512e6bd40631",
+    "bytes": 861,
+    "run_attempt": 1,
+    "prior_version_artifact_count": 0,
+    "prior_source_candidate_count": 0,
+    "physical_package_build_allowed": true
+  },
+  "package": {
+    "producer_run_id": 36975915572,
+    "producer_run_number": 3143,
+    "producer_run_attempt": 1,
+    "installer_bytes": 159811131,
+    "installer_sha256": "31daa6c9d062e21e4e1998d2d78655aa6e81ef8224ba7f7905aa83956ac614f4",
+    "blockmap_sha256": "1cd45bf005daca00192071c38751e11e66a072a554db8121ef2433b1bee909f9",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "provenance_id": "c21d9bd2-245d-435a-9ce5-1f09cf7ce89f",
+    "build_identity_sha256": "3569734f636abe900a99f6916a02eb937aa2a775f84354d2a57eb8c3f712aec5",
+    "dependency_resolution_sha256": "9affc246386338961f9f4b74f259d60304c908a28c31cc3f4510e479f8766104",
+    "dependency_count": 55,
+    "node_version": "v24.21.0",
+    "npm_version": "11.19.0",
+    "candidate_artifact": {
+      "id": 11213553858,
+      "bytes": 161278075,
+      "sha256": "8c69d3fa50dfdfd1ecc6b78032375104b7929f5f3d0a362e46453dd194b896d8"
+    },
+    "evidence_artifact": {
+      "id": 11213614199,
+      "bytes": 473746,
+      "sha256": "fa15c44d56354bc560719a66c5f26f1edc7a553e394a4542e54fe15ac1c53c3c"
+    },
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false
+  },
+  "installed_chat": {
+    "success": true,
+    "artifact_id": 11213877228,
+    "artifact_sha256": "913101544ad41489b03e5262427f218dc2f6d11fb44d23bb6e0d4d1b73e52e6c",
+    "admin_connection_verified": true,
+    "admin_access_tier": "ADMIN",
+    "oidc_token_exposed_to_browser": false
+  },
+  "final_runtime": {
+    "success": true,
+    "artifact_id": 11213264155,
+    "artifact_sha256": "115372e077defdcb92da20ac9629e720b42d08952eaf5c11f5c5b820056418de",
+    "state": "READY",
+    "host_agent_state": "READY",
+    "signer_state": "READY",
+    "host_identity_state": "WAITING_FOR_ENROLLMENT",
+    "second_scheduler": false,
+    "automatic_effect_retry_allowed": false
+  },
+  "soak": {
+    "success": true,
+    "artifact_id": 11213717889,
+    "artifact_sha256": "e03a7fb5801316b5a85a96aafa8063155f460caa7df10975f06c9c88d8982c87",
+    "activations": 72,
+    "activation_p95_ms": 313.89,
+    "working_set_growth_bytes": 0,
+    "handle_growth": 12,
+    "duplicate_runtime": false,
+    "semantic_edges": 1000000,
+    "cells": 128,
+    "agents": 128,
+    "semantic_edges_per_second": 94762,
+    "peak_parallel_mutations": 32,
+    "bounded_cell_facts": 2048
+  },
+  "self_update": {
+    "success": true,
+    "run_id": 36975915484,
+    "run_number": 3596,
+    "artifact_id": 11213009590,
+    "artifact_sha256": "ec64849202802da7d3942d94a07dc99e9f91bc8d4f7389fa60c90cffe12d8ac0",
+    "baseline": "0.7.0-dev.36806234662.1",
+    "target": "0.7.0-dev.36977000001.1",
+    "fast_self_update_pass": true,
+    "resident_legacy": "0.7.0-dev.34759310781.1",
+    "installed_executable_sha256": "42147d3373bd75b4a56b3278dac9413bb3625ead5e819f7578e6a6506d4dc716",
+    "new_browser_started": true,
+    "new_sentinel_started": true,
+    "planned_shutdown_verified": true,
+    "retry_dialog_required": false
+  },
+  "next_branch": "work/build-lockfile-material-v1",
+  "live_install_performed": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
