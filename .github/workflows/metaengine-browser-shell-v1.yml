@@ -2,7 +2,9 @@ name: METAENGINE Browser Shell V1
 
 on:
   push:
-    branches: ['work/metaengine-browser-shell-v1']
+    branches:
+      - work/metaengine-browser-shell-v1
+      - physical/build-slsa-provenance-v1
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
