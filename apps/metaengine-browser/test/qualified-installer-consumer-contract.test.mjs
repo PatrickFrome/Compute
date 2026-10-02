@@ -55,6 +55,7 @@ test('R91 installer consumers use one binding file instead of duplicating low-le
     'browser-final-runtime-activation-v1.yml',
     'browser-windows-autonomous-soak-v1.yml',
     'metaengine-browser-self-update-e2e.yml',
+    'browser-shell-first-dirty-profile-v1.yml',
   ];
 
   for (const file of cases) {
@@ -84,6 +85,21 @@ test('R91 consumer proof schemas still persist exact producer identity and termi
   assert.match(installed, /installed-chat-proof\.json/);
   assert.match(finalRuntime, /final-runtime-activation-proof\.json/);
   assert.match(soak, /windows-autonomous-soak-proof\.json/);
+});
+
+test('shell-first dirty-profile qualification consumes the one-built Package Smoke artifact', async () => {
+  const text = await workflow('browser-shell-first-dirty-profile-v1.yml');
+  assert.match(text, /qualified-installer-consumer\.ps1 -Mode Acquire/);
+  assert.match(text, /qualified-installer-consumer\.ps1 -Mode Wait/);
+  assert.match(text, /ExpectedProducerEvent/);
+  assert.match(text, /producer_event/);
+  assert.match(text, /ME2_INSTALLER_BINDING_PATH/);
+  assert.match(text, /shell-first-dirty-profile-proof\.json/);
+  assert.doesNotMatch(text, /npx\s+--yes\s+electron-builder|electron-builder@/);
+  assert.doesNotMatch(text, /Build exact-head NSIS candidate/);
+
+  const producer = await workflow('browser-windows-package-smoke.yml');
+  assert.match(producer, /browser-shell-first-dirty-profile-v1\.yml/);
 });
 
 test('R91 shared consumer helper changes schedule every workflow that executes it', async () => {
