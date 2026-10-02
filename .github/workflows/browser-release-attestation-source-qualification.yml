@@ -8,14 +8,14 @@ on:
     paths:
       - '.github/workflows/browser-release-attestation-v1.yml'
       - '.github/workflows/browser-release-attestation-source-qualification.yml'
-      - 'apps/metaengine-browser/scripts/release-attestation-verification.mjs'
-      - 'apps/metaengine-browser/test/release-attestation-verification.test.mjs'
+      - 'scripts/release-attestation-verification.mjs'
+      - 'tests/release-attestation-verification.test.mjs'
   pull_request:
     paths:
       - '.github/workflows/browser-release-attestation-v1.yml'
       - '.github/workflows/browser-release-attestation-source-qualification.yml'
-      - 'apps/metaengine-browser/scripts/release-attestation-verification.mjs'
-      - 'apps/metaengine-browser/test/release-attestation-verification.test.mjs'
+      - 'scripts/release-attestation-verification.mjs'
+      - 'tests/release-attestation-verification.test.mjs'
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
           node-version: '24.21.0'
 
       - name: Prove release-attestation semantic verifier
-        run: node --test apps/metaengine-browser/test/release-attestation-verification.test.mjs
+        run: node --test tests/release-attestation-verification.test.mjs
 
       - name: Validate release-boundary attestation contract
         shell: python
@@ -76,8 +76,10 @@ jobs:
               'gh attestation trusted-root',
               '--custom-trusted-root',
               '--signer-workflow',
+              '--signer-digest',
               '--source-digest',
               '--source-ref',
+              '--cert-oidc-issuer',
               '--deny-self-hosted-runners',
               'https://cyclonedx.org/bom',
               'release-attestation-verification.mjs',
@@ -141,4 +143,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-release-attestation-v1.yml .github/workflows/browser-release-attestation-source-qualification.yml apps/metaengine-browser/scripts/release-attestation-verification.mjs apps/metaengine-browser/test/release-attestation-verification.test.mjs)"
+          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-release-attestation-v1.yml .github/workflows/browser-release-attestation-source-qualification.yml scripts/release-attestation-verification.mjs tests/release-attestation-verification.test.mjs)"
