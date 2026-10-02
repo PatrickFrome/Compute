@@ -1,0 +1,33 @@
+{
+  "schema": "metaengine.browser.build-supply-chain-v4-research.v1",
+  "date": "2026-10-02",
+  "analysis_base": "7e58af841be1e6be840d0b1d13bc95d95af23b0f",
+  "active_branch": "work/build-lockfile-material-v1",
+  "qualified_predecessor": "8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+  "findings": {
+    "npm_ci_frozen_contract": true,
+    "lockfile_and_installed_tree_separate": true,
+    "raw_lockfile_hash_eol_sensitive": true,
+    "gitattributes_eol_fence_required": true,
+    "cache_non_authoritative": true,
+    "npm_sbom_available": true,
+    "github_attestation_recommended_at_release_boundary": true
+  },
+  "empirical": {
+    "ubuntu_pre_fence_lock_sha256": "9d398b577fbfe1ec6bce39550b69b467491dee44e08c9a253dd3e4f8427dfd69",
+    "ubuntu_pre_fence_lock_bytes": 19170,
+    "windows_pre_fence_lock_sha256": "bc105147a62bceb512f63c2a50604e7a97814377b9694ee8853c2288f9a0db9c",
+    "windows_pre_fence_lock_bytes": 19714,
+    "dependency_resolution_sha256": "e8d6611559e74091c9b9e8c2d54fd98bc456f1748c7709a5432978439a830036",
+    "dependency_count": 55
+  },
+  "proposed_stages": [
+    "V4_A_FINISH_V3_PHYSICAL_QUALIFICATION",
+    "V4_B_NPM_SBOM_EVIDENCE",
+    "V4_C_COMPOSED_INSTALLER_SBOM",
+    "V4_D_RELEASE_BOUNDARY_GITHUB_ATTESTATION",
+    "V4_E_PROMOTION_VERIFIER"
+  ],
+  "live_effects": false,
+  "authority_effect": false
+}
