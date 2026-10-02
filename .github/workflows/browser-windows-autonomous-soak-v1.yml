@@ -50,10 +50,10 @@ jobs:
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Parse exact source
         working-directory: apps/metaengine-browser
         run: npm run check
@@ -87,10 +87,10 @@ jobs:
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Parse endurance source
         working-directory: apps/metaengine-browser
         run: >-
@@ -127,10 +127,10 @@ jobs:
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Run seeded autonomous fleet chaos
         working-directory: apps/metaengine-browser
         env:
@@ -155,10 +155,10 @@ jobs:
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Run fleet scale and mesh convergence contracts
         working-directory: apps/metaengine-browser
         env:
@@ -192,10 +192,10 @@ jobs:
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Parse packaged session soak harness before expensive build
         working-directory: apps/metaengine-browser
         shell: pwsh
