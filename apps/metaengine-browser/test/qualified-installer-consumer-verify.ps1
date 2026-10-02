@@ -77,6 +77,13 @@ try {
         if ($_.Exception.Message -match [regex]::Escape($code)) { $matched = $true }
       }
       if (-not $matched) { throw }
+
+      # The refusal may be implemented by a native Node process. PowerShell
+      # preserves that native exit code in $LASTEXITCODE even though this
+      # refusal is expected and semantically handled here. Clear only the
+      # handled fixture-local native status so the enclosing CI wrapper does
+      # not misclassify the successful negative test as a step failure.
+      $global:LASTEXITCODE = 0
     }
   }
 
@@ -97,7 +104,8 @@ try {
   $dependency.dependency_resolution_sha256 = ('1' * 64)
   $dependency | ConvertTo-Json -Depth 20 | Set-Content $dependencyResolution -Encoding utf8
   Require-Refusal @('qualified_installer_reverify_failed', 'build_identity_external_invalid')
-  Write-Output '{"schema":"metaengine.browser.qualified-consumer-verify-smoke.v1","valid_binding_verified":true,"installer_tampering_rejected":true,"attempt_drift_rejected":true,"binding_digest_drift_rejected":true,"build_identity_verified":true,"dependency_resolution_tampering_rejected":true,"installer_executed":false}'
+  if ($LASTEXITCODE -ne 0) { throw "fixture_expected_refusal_exit_code_leaked:$LASTEXITCODE" }
+  Write-Output '{"schema":"metaengine.browser.qualified-consumer-verify-smoke.v1","valid_binding_verified":true,"installer_tampering_rejected":true,"attempt_drift_rejected":true,"binding_digest_drift_rejected":true,"build_identity_verified":true,"dependency_resolution_tampering_rejected":true,"handled_native_exit_state_cleared":true,"installer_executed":false}'
 } finally {
   Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
 }

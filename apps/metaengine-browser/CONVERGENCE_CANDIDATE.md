@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36973000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36974000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -91,3 +91,11 @@ Build Identity V2 second qualification correction:
 - auxiliary Windows package workflows (for example Dirty Profile) are no longer forced to provide Package-Smoke-only provenance inputs. Build Identity V2 is mandatory only when `ME2_BUILD_IDENTITY_REQUIRED=true`; the official Package Smoke producer sets that flag and still fails closed if any identity input/readback is missing.
 - the convergence reservation at the top of this file is now authoritative and matches package.json; the stale first reservation was the direct cause of the convergence package-identity regression.
 - corrected successor reserves `0.7.0-dev.36973000001.1`, above all workflow ids observed before this commit. Any later source change after its Package Smoke runner starts must retire it and advance again.
+
+
+Build Identity V2 Self Update harness correction:
+- exact source `2a0022d1e0119620f7badff4621cb5ff1ed5ab7c` physically produced Package Smoke #3137 / run `36971539452` with `0.7.0-dev.36973000001.1`; installer SHA-256 `28c3199c1accb761a412bca2eecfcb3e323fe74baa63fda263d7d8de0dd9893d`, Build Identity `2e8c125f036ee27566a5857ab5c94fe65c2d400cf7ba0af1204fee4c79ae1ee1`, dependency-resolution `e37879804789c4354b0c732f2ac7a05fdfb70bf5c82a3c6849d79265200dc7f5`;
+- 9/10 exact-head workflows passed; Self Update #3594 failed before installer acquisition/effect because the negative-test fixture correctly caught a native refusal but left its non-zero `$LASTEXITCODE` visible to the GitHub Actions PowerShell wrapper;
+- Microsoft PowerShell semantics explicitly preserve the last native exit code across directly invoked scripts unless another native/script exit replaces it; the fixture now clears only the handled expected-refusal status and asserts that no stale native exit leaks out;
+- no updater/installer failure was observed on that head and no Self Update physical effect started;
+- `0.7.0-dev.36973000001.1` is consumed because Package Smoke produced bytes; the corrected exact source reserves `0.7.0-dev.36974000001.1`.
