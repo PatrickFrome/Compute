@@ -270,5 +270,12 @@ test('physical Package Smoke wires composed SBOM after provenance into the one i
   assert.match(workflow, /composed_sbom_semantic_inventory_sha256/);
   assert.match(workflow, /composed_sbom_raw_sha256/);
   assert.match(workflow, /composition_aggregate -ne 'incomplete'/);
-  assert.doesNotMatch(workflow, /id-token:\s*write|attestations:\s*write/);
+  assert.match(workflow, /windows-nsis-package-smoke:[\s\S]*?permissions:[\s\S]*?id-token:\s*write[\s\S]*?attestations:\s*write/);
+  assert.match(workflow, /Generate exact-source SLSA build provenance for physical push candidate/);
+  assert.match(workflow, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/physical\/build-slsa-provenance-v1'/);
+  assert.match(workflow, /installer-slsa-provenance\.bundle\.json/);
+  assert.match(workflow, /metaengine\.browser\.package-slsa-provenance-receipt\.v1/);
+  assert.match(workflow, /promotion_authorized=\$false/);
+  assert.match(workflow, /release_published=\$false/);
+  assert.match(workflow, /authority_effect=\$false/);
 });
