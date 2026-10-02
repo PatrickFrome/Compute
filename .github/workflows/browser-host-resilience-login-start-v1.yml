@@ -1,6 +1,14 @@
 name: METAENGINE Browser Host Resilience Login Start V1
 
 on:
+  push:
+    branches:
+      - physical/build-slsa-provenance-v1
+    paths:
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
+      - 'apps/metaengine-browser/test/host-resilience-runtime.test.mjs'
+      - '.github/workflows/browser-host-resilience-login-start-v1.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
