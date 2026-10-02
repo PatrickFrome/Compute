@@ -119,6 +119,29 @@ test('installer provenance v2 binds build identity and dependency resolution end
   }
 });
 
+
+test('installer provenance v2 rejects zero run attempt instead of defaulting it', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    await writeProvenance({
+      installer: f.installerPath, out: f.provenancePath, 'source-head': HEAD,
+      workflow: 'browser-windows-package-smoke.yml', 'run-id': '424242', 'run-number': '3128',
+      'run-attempt': '2', 'package-version': PACKAGE_VERSION, config: f.configPath, blockmap: f.blockmapPath,
+      'build-identity': f.buildIdentityPath, 'dependency-resolution': f.dependencyPath,
+    });
+    const provenance = JSON.parse(readFileSync(f.provenancePath, 'utf8'));
+    provenance.run_attempt = 0;
+    writeFileSync(f.provenancePath, JSON.stringify(provenance, null, 2));
+    await assert.rejects(
+      () => verifyInstaller({ dir, 'expect-head': HEAD, config: f.configPath }),
+      (error) => error?.code === 'provenance_build_identity_invalid',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('installer provenance v2 rejects external build-identity tamper', async () => {
   const dir = workspace();
   try {
