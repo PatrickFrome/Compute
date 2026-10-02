@@ -28,14 +28,16 @@ test('Package Smoke reserves one source/version before dependency install or phy
   const guard = workflow.indexOf('- name: Refuse duplicate source/version physical build');
   const marker = workflow.indexOf('- name: Publish immutable package-version reservation');
   const seal = workflow.indexOf('- name: Seal package-version reservation before physical build');
-  const dependencyInstall = workflow.indexOf('- name: Install test-package dependencies');
+  const lockMaterial = workflow.indexOf('- name: Prove frozen package-lock material before dependency install');
+  const dependencyInstall = workflow.indexOf('- name: Install exact frozen Browser dependency tree');
   const electronBuilder = workflow.indexOf('npx --yes electron-builder@26.15.7');
   const candidate = workflow.indexOf('- name: Publish immutable candidate for parallel downstream qualification');
 
   assert.ok(guard >= 0);
   assert.ok(marker > guard);
   assert.ok(seal > marker);
-  assert.ok(dependencyInstall > seal);
+  assert.ok(lockMaterial > seal);
+  assert.ok(dependencyInstall > lockMaterial);
   assert.ok(electronBuilder > dependencyInstall);
   assert.ok(candidate > electronBuilder);
 
@@ -45,6 +47,10 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /reservation_artifact_digest/);
   assert.match(workflow, /artifactDigestRaw -match '\^\[a-f0-9\]\{64\}\$'/);
   assert.match(workflow, /\$artifactDigest = "sha256:\$artifactDigestRaw"/);
+  assert.match(workflow, /node-version: '24\.21\.0'/);
+  assert.match(workflow, /npm --version\) -ne '11\.19\.0'/);
+  assert.match(workflow, /npm ci --no-audit --no-fund/);
+  assert.doesNotMatch(workflow, /npm install --no-audit --no-fund --no-package-lock/);
 });
 
 test('Package Smoke has only one physical build and one candidate upload after reservation wiring', () => {

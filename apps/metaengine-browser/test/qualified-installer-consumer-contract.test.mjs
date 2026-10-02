@@ -114,3 +114,14 @@ test('full physical self-update consumes the shared artifact and seals its produ
   assert.match(physical, /source_head = \$head/);
   assert.match(physical, /producer_run_attempt = if \(\$qualifiedBinding\)/);
 });
+
+
+test('qualified consumer carries and re-verifies Build Identity V3 lockfile material', async () => {
+  const script = await source('scripts/qualified-installer-consumer.ps1');
+  assert.match(script, /installer-provenance\.v3/);
+  assert.match(script, /package_lock_sha256/);
+  assert.match(script, /npm_version/);
+  assert.match(script, /package_lock_verified/);
+  assert.match(script, /package_lock_sha256 -notmatch '\^\[a-f0-9\]\{64\}\$'/);
+  assert.match(script, /package_lock_verified -ne \$true/);
+});
