@@ -1,0 +1,84 @@
+{
+  "schema": "metaengine.browser.build-identity-v2-implementation-checkpoint.v1",
+  "created_at": "2026-10-02",
+  "branch": "work/build-identity-v2-v1",
+  "stacked_base": {
+    "source_head": "bf21d71b6dc674c376bd396487b5efc134d0a3e9",
+    "pr": 1090
+  },
+  "implementation_source_before_checkpoint": "d8e17c51155d67d54d778afa4fb79893a47a9360",
+  "pull_request_open": false,
+  "physical_build_triggered": false,
+  "inherited_package_version_consumed": false,
+  "build_identity": {
+    "schema": "metaengine.browser.build-identity.v2",
+    "inputs": [
+      "repository",
+      "repository_id",
+      "source_head",
+      "workflow",
+      "run_id",
+      "run_attempt",
+      "package_version",
+      "platform",
+      "arch",
+      "builder_config_sha256",
+      "dependency_resolution_sha256",
+      "electron_builder_version",
+      "node_version"
+    ],
+    "deterministic": true,
+    "authority_effect": false
+  },
+  "dependency_resolution": {
+    "schema": "metaengine.browser.dependency-resolution.v1",
+    "actual_installed_name_version_tree": true,
+    "node_version_bound": true,
+    "npm_version_bound": true,
+    "byte_reproducibility_claimed": false,
+    "future_lockfile_and_npm_ci_required": true
+  },
+  "packaging": {
+    "expected_identity_precomputed": true,
+    "before_pack_identity_injected": true,
+    "packaged_asar_identity_readback": true,
+    "installer_provenance_v2": true,
+    "downstream_v2_required": true,
+    "terminal_producer_gate_carries_identity": true
+  },
+  "editing_incident": {
+    "class": "JAVASCRIPT_STRING_REPLACEMENT_DOLLAR_QUOTE_SUFFIX_DUPLICATION",
+    "detected_before_ci": true,
+    "physical_effect": false,
+    "repair_commit": "43b46af227c9943099f94572ea1cd3745bffa8cb",
+    "post_repair_single_build_step": true,
+    "post_repair_single_candidate_upload": true,
+    "post_repair_single_consumer_acquire": true,
+    "post_repair_single_consumer_verify": true
+  },
+  "tests_added": [
+    "BUILD_IDENTITY_DETERMINISM_AND_INVOCATION_BINDING",
+    "DEPENDENCY_RESOLUTION_TAMPER_EVIDENCE",
+    "INSTALLER_PROVENANCE_V2_ROUNDTRIP",
+    "EXTERNAL_BUILD_IDENTITY_TAMPER_REJECTION",
+    "DEPENDENCY_PROOF_TAMPER_REJECTION",
+    "QUALIFIED_CONSUMER_V2_BINDING"
+  ],
+  "deferred": [
+    "COMMITTED_BROWSER_PACKAGE_LOCK",
+    "NPM_CI",
+    "PACKAGE_INTEGRITY_BYTE_REPRODUCIBILITY",
+    "RELEASE_BOUNDARY_GITHUB_ARTIFACT_ATTESTATION",
+    "AUTOMATIC_SEMANTIC_VERSION_ALLOCATOR"
+  ],
+  "pre_pr_gates": [
+    "FINAL_SOURCE_AUDIT",
+    "DOWNSTREAM_V1_ONLY_CONSUMER_AUDIT",
+    "FREEZE_SOURCE",
+    "RESERVE_FRESH_PACKAGE_VERSION",
+    "FINAL_CONVERGENCE_AND_CHECKPOINT_COMMIT",
+    "OPEN_STACKED_DRAFT_PR"
+  ],
+  "promotion_authorized": false,
+  "authority_effect": false
+}
