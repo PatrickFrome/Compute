@@ -1,0 +1,57 @@
+{
+  "schema": "metaengine.guardian-status-semantic-hardening-checkpoint.v1",
+  "created_at": "2026-10-02",
+  "branch": "work/guardian-status-semantic-hardening-v1",
+  "stacked_base": {
+    "branch": "work/guardian-heartbeat-observation-v1",
+    "source_head": "1f6902daeae8bc201d1c493e8a413f320a80aeec",
+    "pr": 1089
+  },
+  "reserved_package_identity": "0.7.0-dev.36965253139.1",
+  "changes": {
+    "stale_current_proof_flags_cleared": true,
+    "historical_proof_fields_explicit": true,
+    "activation_invalidation_clears_current_cached_proof": true,
+    "launcher_state_allowlist": true,
+    "ready_requires_service_owner_device_proof": true,
+    "nonready_positive_owner_or_device_proof_rejected": true,
+    "owner_enrollment_required_semantics_validated": true,
+    "activation_required_semantics_validated": true,
+    "process_local_observation_revision_preserved": true,
+    "edge_source_changed": false,
+    "supervisor_admission_authority": false,
+    "automatic_retry_allowed": false,
+    "authority_effect": false
+  },
+  "parent_package_evidence": {
+    "source_head": "1f6902daeae8bc201d1c493e8a413f320a80aeec",
+    "run_id": 36965253082,
+    "run_number": 3126,
+    "package_version": "0.7.0-dev.36965151413.1",
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36965151413.1-x64.exe",
+    "installer_bytes": 159810130,
+    "installer_sha256": "ebbd8c281cd5b2eb2b1434657b90d5518f0637aa7bb89fc0c41abf58a7806c92",
+    "blockmap_sha256": "30048e11c42e57f7d550a47fe3e5adfa0443f39501639b6a3d65ba550db472b4",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "candidate_artifact_id": 11209696186,
+    "candidate_artifact_sha256": "a23cd7f86c807bbb06e2af0a6522675331d8300ac19205bceb0e48905288fb6e",
+    "evidence_artifact_id": 11210230865,
+    "evidence_artifact_sha256": "436de1926fe7cbb4fb824b2a2017774bbfe283740dfde81ad04384691b187185",
+    "package_smoke_success": true,
+    "normal_ui_boot_verified": true,
+    "second_instance_activation_verified": true,
+    "startup_grace_survival_seconds": 190,
+    "promotion_authorized": false
+  },
+  "qualification_required": [
+    "EXACT_HEAD_STATIC_AND_NODE_REGRESSION_GREEN",
+    "WINDOWS_PACKAGE_SMOKE_ONE_BUILD",
+    "WINDOWS_INSTALLED_CHAT",
+    "FINAL_RUNTIME_ACTIVATION",
+    "AUTONOMOUS_SOAK",
+    "SELF_UPDATE_E2E",
+    "NO_EDGE_CANARY_DRIFT"
+  ],
+  "live_effects_issued": false,
+  "promotion_authorized": false
+}
