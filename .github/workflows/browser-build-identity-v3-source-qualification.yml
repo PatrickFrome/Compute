@@ -101,3 +101,48 @@ jobs:
           git diff --exit-code
           git diff --cached --exit-code
           test -z "$(git status --porcelain --untracked-files=no)"
+
+
+  windows-regression:
+    needs: source-contract
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Browser toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen Browser dependency tree
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string](node --version) -ne 'v24.21.0') { throw 'windows_source_node_version_drift' }
+          if ([string](npm --version) -ne '11.19.0') { throw 'windows_source_npm_version_drift' }
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_npm_ci_failed' }
+
+      - name: Run full Browser Node regression
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_regression_failed' }
+
+      - name: Prove tracked source checkout unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_diff_detected' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_cached_diff_detected' }
