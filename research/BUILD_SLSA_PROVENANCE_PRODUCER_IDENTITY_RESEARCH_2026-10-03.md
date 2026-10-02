@@ -314,3 +314,180 @@ Source Qualification:
 - exact-head run `37070823699`: SUCCESS.
 
 This closes the producer-discovery race before any fresh package identity is consumed.
+
+
+## Live GitHub attestation runtime proof
+
+The source-only design has now been exercised against the real GitHub attestation service without consuming a Browser package identity.
+
+Probe branch:
+
+`work/build-slsa-attest-runtime-probe-v1`
+
+### Ubuntu proof
+
+Run:
+`37074394998` — SUCCESS
+
+Exact source:
+`7b615bb63915bed3ee0ce60e3505fb5b01e04c88`
+
+A deterministic non-release text subject was attested with the immutable action pin:
+
+`actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6`
+
+The workflow then verified the portable bundle with `gh attestation verify` and passed the project's exact semantic verifier.
+
+Observed attestation:
+`52309047`
+
+Observed subject SHA-256:
+`c76902f1f228d50f3805fd3212a13f3c98ca882c25df849eba96b1fa2c6742be`
+
+The resulting evidence was exactly:
+
+`metaengine.browser-fabric.provenance-evidence.v1`
+
+with `verified=true`, `builder_trusted=true`, and `authority_effect=false`.
+
+### Windows producer proof
+
+The same path was then exercised on `windows-2025`.
+
+Run:
+`37074940435` — SUCCESS
+
+Exact source:
+`ebf7affadd85832cf295283b844a14624b241b9c`
+
+Both Ubuntu and Windows jobs were terminal SUCCESS in the same workflow run.
+
+Windows attestation:
+`52309904`
+
+Windows subject:
+`metaengine-slsa-runtime-probe-windows.txt`
+
+Windows subject SHA-256:
+`420dbcb36613459b379fb498c765fabe106de26c573c10a3e66fd19942e627c0`
+
+Windows evidence artifact:
+- artifact id `11256585039`
+- digest `sha256:50a24a828de4011610b0a3c2b4a7500de030d69aca244c351c36cd3c4b38836d`
+- not expired at observation
+
+The runner exposed GitHub CLI `2.101.0`.
+
+The Windows logs confirmed:
+- Public Good Sigstore certificate signing;
+- upload to the Rekor transparency log;
+- repository attestation publication;
+- local bundle verification;
+- exact source SHA verification;
+- exact signer workflow verification;
+- self-hosted runner denial;
+- semantic mapping into the existing Browser Fabric provenance evidence schema.
+
+This removes the remaining uncertainty that the chosen `actions/attest` + portable bundle + `gh attestation verify` sequence behaves differently on the actual Windows build runner.
+
+## One physical installer producer convergence
+
+A fresh physical-workflow audit found that Shell-First Dirty Profile was still invoking its own `electron-builder` NSIS build.
+
+That violated the one-producer / one-built-bytes invariant even though the main installed-chat, final-runtime, soak and self-update consumers had already converged on `qualified-installer-consumer.ps1`.
+
+The duplicate producer was removed on:
+
+`work/build-one-producer-dirty-profile-v1 @ 8a03e0f8f2e70dcf6d3870ef050ceed49aaccf8b`
+
+Dirty Profile now:
+- acquires the exact Package Smoke candidate;
+- carries exact producer run id/number/attempt;
+- binds `producer_event`;
+- runs its physical dirty-profile test on those bytes;
+- waits for the exact Package Smoke producer to reach terminal success;
+- performs no independent NSIS build.
+
+Package Smoke trigger closure now includes the Dirty Profile workflow.
+
+Source qualification:
+`37074686671` — SUCCESS
+
+No physical Browser package was built by this source-only branch.
+
+## Physical SLSA source preparation
+
+The next source-only preparation line is:
+
+`work/build-slsa-physical-prep-v1 @ d45b0f0b8d40320f4b0c3ad5646541ecccf73d46`
+
+The Browser package version remains unchanged:
+
+`0.7.0-dev.37006000001.1`
+
+The preparation adds the dedicated future physical branch:
+
+`physical/build-slsa-provenance-v1`
+
+to the complete ten-workflow physical matrix.
+
+Package Smoke now has the source contract for:
+- exact push-only SLSA creation;
+- job-local `id-token: write` + `attestations: write`;
+- immutable `actions/attest` pin;
+- one exact installer subject;
+- portable Sigstore bundle retained with the immutable candidate artifact;
+- zero-authority package SLSA receipt;
+- independent post-producer `gh attestation verify`;
+- exact signer workflow, source SHA and source ref enforcement;
+- `--deny-self-hosted-runners`;
+- semantic projection into `metaengine.browser-fabric.provenance-evidence.v1`.
+
+Shared physical consumers automatically set their Package Smoke producer event fence to `push` only when running on the dedicated physical branch. Legacy PR-produced evidence remains backward compatible elsewhere.
+
+Source qualification:
+
+`37075932409` — SUCCESS
+
+It proved:
+- YAML syntax for all modified workflow files;
+- Node and PowerShell parser validity;
+- SLSA semantic verifier tests;
+- producer-event resolver tests;
+- qualified installer consumer tests;
+- complete ten-workflow physical topology;
+- one Package Smoke NSIS build invocation;
+- unchanged current package identity;
+- zero-authority/source-only preparation boundary.
+
+### Defect caught during preparation
+
+An attempted exact-subject refactor accidentally expanded JavaScript replacement-string `$'` semantics while programmatically editing the YAML, duplicating workflow content and making Package Smoke invalid.
+
+GitHub surfaced the corrupted revisions as zero-job failed workflow runs:
+- `37075682592`
+- `37075850189`
+- `37075896292`
+
+No Package Smoke job started and no package identity was reserved or built in those runs.
+
+The workflow was reconstructed from the last known-good source and the edit was reapplied with function-based replacement semantics.
+
+Final source:
+`d45b0f0b8d40320f4b0c3ad5646541ecccf73d46`
+
+The final source qualification is green and there is exactly one `slsa-provenance-verify` job and exactly one SLSA attestation step.
+
+## Upstream SLSA horizon
+
+Fresh GitHub guidance still places ordinary artifact attestations at SLSA Build Level 2.
+
+GitHub documents a reusable workflow containing both build and attestation generation as a route toward SLSA Build Level 3 because the reusable builder can be isolated from the caller.
+
+That remains P1 rather than P0.
+
+P0 should first finish one exact-source physical candidate using the already-qualified single producer topology.
+
+After that proof, move Package Smoke's build+attest core into a separately vetted reusable builder workflow and tighten verification from same-repository workflow identity to the reusable builder identity.
+
+This ordering avoids mixing a build-system refactor with the first physical SLSA evidence transition.
