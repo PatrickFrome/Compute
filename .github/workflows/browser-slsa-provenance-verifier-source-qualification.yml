@@ -44,7 +44,8 @@ jobs:
 
           verifier = Path('scripts/browser-slsa-provenance-verification.mjs').read_text(encoding='utf-8')
           workflow = Path('.github/workflows/browser-slsa-provenance-verifier-source-qualification.yml').read_text(encoding='utf-8')
-          lower = (verifier + '\n' + workflow).lower()
+          runtime_workflow = workflow.split("      - name: Validate zero-authority verifier contract", 1)[0]
+          lower = (verifier + '\n' + runtime_workflow).lower()
 
           required = [
               'metaengine.browser-fabric.provenance-evidence.v1',
