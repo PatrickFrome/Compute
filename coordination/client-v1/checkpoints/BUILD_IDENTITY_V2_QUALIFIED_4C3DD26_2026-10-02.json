@@ -1,0 +1,116 @@
+{
+  "schema": "metaengine.browser.build-identity-v2-qualified.v1",
+  "qualified_at": "2026-10-02",
+  "source_head": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+  "pr": 1091,
+  "workflows": {
+    "total": 10,
+    "success": 10,
+    "failure": 0
+  },
+  "browser_shell": {
+    "tests": 3870,
+    "pass": 3868,
+    "fail": 0,
+    "skipped": 2
+  },
+  "critical_audit": {
+    "tests": 3870,
+    "pass": 3870,
+    "fail": 0,
+    "skipped": 0
+  },
+  "package": {
+    "version": "0.7.0-dev.36974000001.1",
+    "producer_run_id": 36973286796,
+    "producer_run_number": 3138,
+    "producer_run_attempt": 1,
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36974000001.1-x64.exe",
+    "installer_bytes": 159811185,
+    "installer_sha256": "f37a5a9604c0dfbb5bf86fba2042ba2e211ac5064a9ac3efeb8e5896a37638bd",
+    "blockmap_sha256": "53ed3791511572040c361f59a09601ca48398442298ccf52d9214ddcb304f640",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "provenance_id": "782fa136-66b6-4b02-88ed-a54bb70bbcb4",
+    "provenance_schema": "metaengine.browser.installer-provenance.v2",
+    "build_identity_sha256": "52d075fee4a9fe9729836481743857f75dc90566150b15d93137dc829290eeb2",
+    "dependency_resolution_sha256": "d1b2a4df4cdf9faab60a66bd8c3b9dfa54cb9d2c1d836f3bc89309b7c32e8588",
+    "dependency_count": 55,
+    "node_version": "v24.21.0",
+    "npm_version": "11.19.0",
+    "electron_builder_version": "26.15.7",
+    "candidate_artifact": {
+      "id": 11212566508,
+      "sha256": "1e19c4374f31d3e19cef9d68eefe0122fa53d5e3c06b1c292dff71f8c06ad9f1",
+      "bytes": 161276515
+    },
+    "evidence_artifact": {
+      "id": 11213061104,
+      "sha256": "794b1f843080cce90db42325e7417efd6b316476f5fef0856d902a1085a2f1a8",
+      "bytes": 472772
+    },
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false
+  },
+  "consumers": {
+    "installed_chat": {
+      "success": true,
+      "artifact_id": 11212472584,
+      "artifact_sha256": "f2e8584aa9bd47f1e351444739142566c433da9a0a2f2fc7cd247affef2caae2",
+      "admin_connection_verified": true,
+      "admin_access_tier": "ADMIN",
+      "oidc_token_exposed_to_browser": false
+    },
+    "final_runtime": {
+      "success": true,
+      "artifact_id": 11212527347,
+      "artifact_sha256": "c10a52331ecfa5243ca7dff8590f273c92187fad37e8ec21215c739e3faac66c",
+      "state": "READY",
+      "host_agent_state": "READY",
+      "signer_state": "READY",
+      "host_identity_state": "WAITING_FOR_ENROLLMENT",
+      "second_scheduler": false,
+      "automatic_effect_retry_allowed": false
+    },
+    "soak": {
+      "success": true,
+      "artifact_id": 11212765865,
+      "artifact_sha256": "6c0725c787ecd933101ad7f8e72986629dfb0290f969b3cc20508635b7554537",
+      "activations": 72,
+      "activation_p95_ms": 491.94,
+      "working_set_growth_bytes": 0,
+      "handle_growth": 12,
+      "duplicate_runtime": false,
+      "semantic_edges": 1000000,
+      "cells": 128,
+      "agents": 128,
+      "semantic_edges_per_second": 96844,
+      "peak_parallel_mutations": 32
+    },
+    "self_update": {
+      "success": true,
+      "run_id": 36973286528,
+      "run_number": 3595,
+      "artifact_id": 11213430672,
+      "artifact_sha256": "68f55e6edbbad32147e0b78e64e4249a48c4c55586cecc9ee161535e3af7a07f",
+      "baseline": "0.7.0-dev.36806234662.1",
+      "target": "0.7.0-dev.36974000001.1",
+      "fast_self_update_pass": true,
+      "resident_legacy": "0.7.0-dev.34759310781.1",
+      "installed_executable_sha256": "340354cc103b9234e82bace907907526bdc5947cf1c3b25e970e5522511e55a8",
+      "new_browser_started": true,
+      "new_sentinel_started": true,
+      "planned_shutdown_verified": true,
+      "retry_dialog_required": false
+    }
+  },
+  "next_priority": [
+    "ONE_SOURCE_ONE_VERSION_ONE_PHYSICAL_BUILD_FENCE",
+    "COMMITTED_BROWSER_PACKAGE_LOCK_AND_NPM_CI",
+    "LOCKFILE_SHA_BOUND_IN_BUILD_IDENTITY",
+    "RELEASE_BOUNDARY_ARTIFACT_ATTESTATION_AND_SBOM"
+  ],
+  "live_install_performed": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
