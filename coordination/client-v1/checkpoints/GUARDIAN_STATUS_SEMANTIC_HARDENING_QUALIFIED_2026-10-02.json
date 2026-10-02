@@ -1,0 +1,85 @@
+{
+  "schema": "metaengine.guardian-status-semantic-hardening-qualified.v1",
+  "qualified_at": "2026-10-02",
+  "runtime_source": "bf21d71b6dc674c376bd396487b5efc134d0a3e9",
+  "runtime_pr": 1090,
+  "workflows": {
+    "total": 10,
+    "success": 10,
+    "failure": 0
+  },
+  "browser_shell_suite": {
+    "tests": 3859,
+    "pass": 3857,
+    "fail": 0,
+    "skipped": 2
+  },
+  "critical_audit_suite": {
+    "tests": 3859,
+    "pass": 3859,
+    "fail": 0,
+    "skipped": 0
+  },
+  "package": {
+    "producer_run_id": 36966356240,
+    "producer_run_number": 3127,
+    "producer_run_attempt": 1,
+    "version": "0.7.0-dev.36965253139.1",
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36965253139.1-x64.exe",
+    "installer_bytes": 159810808,
+    "installer_sha256": "d59ca94853ac7f7749d84a526849f369137ca34698e7987a5f7fd6a03d79262a",
+    "blockmap_sha256": "036ec3714b50bfc3321f1a89ee6431dbdd0b69da29eb4067afdb148ce2b8d884",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "provenance_id": "f50ef06d-ee09-4f20-9fe7-86ce7fe933cf",
+    "candidate_artifact_id": 11209524202,
+    "candidate_archive_sha256": "98a7ab28d5faeb1e5e15447813358e3e2642909d4efc8177db06f62819341435",
+    "evidence_artifact_id": 11210347430,
+    "evidence_archive_sha256": "d30cbc867898bed9f50b080bf00c2dbe94ca442006c944a5cf2a53aa237ecb8b",
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false
+  },
+  "semantics": {
+    "stale_current_proof_scrubbed": true,
+    "historical_proof_explicit": true,
+    "activation_invalidation_clears_current_cache": true,
+    "false_ready_rejected": true,
+    "contradictory_nonready_proof_rejected": true,
+    "supervisor_admission_authority": false,
+    "automatic_retry_allowed": false,
+    "authority_effect": false
+  },
+  "soak": {
+    "activations_verified": 72,
+    "activation_latency_p95_ms": 643.57,
+    "working_set_growth_bytes": 0,
+    "handle_growth": 9,
+    "duplicate_runtime": false,
+    "semantic_edges": 1000000,
+    "cells": 128,
+    "agents": 128,
+    "semantic_edges_per_second": 127357,
+    "peak_parallel_mutations": 32,
+    "scale_tasks": 2000,
+    "scale_peers": 2048,
+    "artifact_id": 11210072991,
+    "artifact_sha256": "5fb57670b162e719d5eee09771d122363defc0c2215d480ae14a4c13de4a3858"
+  },
+  "self_update": {
+    "run_id": 36966356412,
+    "run_number": 3591,
+    "conclusion": "success",
+    "baseline": "0.7.0-dev.36806234662.1",
+    "target": "0.7.0-dev.36965253139.1",
+    "resident_legacy": "0.7.0-dev.34759310781.1",
+    "target_installer_sha256": "d59ca94853ac7f7749d84a526849f369137ca34698e7987a5f7fd6a03d79262a",
+    "installed_executable_sha256": "e3b2e0c306170e0ab6da2d1ec5defc314d0e63f330348d9b7b25e38505878a32",
+    "planned_shutdown_verified": true,
+    "retry_dialog_required": false,
+    "artifact_id": 11209687376,
+    "artifact_sha256": "4814bd8916bb685130036d5772cdbe12e19c1bc4f0cf7e8c9838d0fc03349595"
+  },
+  "next_slice": "BUILD_IDENTITY_V2_SUCCESSOR",
+  "live_effects_issued": false,
+  "promotion_authorized": false
+}
