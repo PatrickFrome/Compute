@@ -1,0 +1,86 @@
+name: Browser Composed SBOM Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-composed-sbom-v1'
+    paths:
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/scripts/composed-sbom-evidence.mjs'
+      - 'apps/metaengine-browser/test/composed-sbom-evidence.test.mjs'
+      - '.github/workflows/browser-composed-sbom-source-qualification.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-composed-sbom-source-qualification
+  cancel-in-progress: true
+
+jobs:
+  linux-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse and test composed SBOM contract
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/composed-sbom-evidence.mjs
+          node --test test/composed-sbom-evidence.test.mjs
+
+      - name: Prove tracked source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+
+  windows-contract:
+    needs: linux-contract
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse and test composed SBOM contract
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check scripts/composed-sbom-evidence.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'composed_sbom_parse_failed' }
+          node --test test/composed-sbom-evidence.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'composed_sbom_contract_failed' }
+
+      - name: Prove tracked source unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'composed_sbom_source_modified' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'composed_sbom_index_modified' }
