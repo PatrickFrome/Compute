@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36977000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36980000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -111,3 +111,10 @@ One-physical-producer fence successor (2026-10-02):
 - corrected workflow source after parser repair produced no push-triggered runner on this non-matching branch, confirming the valid trigger filter is restored;
 - upload-artifact digest output is normalized from its documented raw SHA-256 form into canonical `sha256:<hex>` reservation evidence;
 - frozen successor reserves `0.7.0-dev.36977000001.1`, chosen above latest observed repository Actions run id `36975111718`; once its Package Smoke runner starts this identity is consumed even if the run fails before NSIS.
+
+
+Frozen npm dependency material successor:
+- qualified one-producer predecessor is `8409fb249887dd4636b3bd6fab40bfe30fa4b085` / `0.7.0-dev.36977000001.1`;
+- this branch adds a package-lock material verifier before wiring any physical build;
+- `0.7.0-dev.36980000001.1` is reserved but unconsumed until a Package Smoke producer starts;
+- no PR/physical Package Smoke should start until a committed lockfile and clean npm-ci proof exist.
