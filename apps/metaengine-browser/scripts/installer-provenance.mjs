@@ -53,6 +53,7 @@ const RESOLVED_SCHEMA = 'metaengine.browser.installer-run-resolved.v1';
 const DOWNLOADED_SCHEMA = 'metaengine.browser.installer-artifact-downloaded.v1';
 const ERROR_SCHEMA = 'metaengine.browser.installer-provenance-error.v1';
 const API_VERSION = '2022-11-28';
+const PRODUCER_EVENTS = new Set(['push', 'pull_request', 'workflow_dispatch']);
 
 class ProvenanceError extends Error {
   constructor(code, details = {}) {
@@ -137,6 +138,17 @@ function apiBaseFrom(options) {
   return (options['api-base'] || 'https://api.github.com').replace(/\/+$/, '');
 }
 
+function producerEventFrom(options) {
+  const raw = options.event;
+  if (raw === undefined || raw === null || raw === false || raw === '') return null;
+  if (raw === true) throw new ProvenanceError('producer_event_invalid', { event: null });
+  const event = String(raw).trim();
+  if (!PRODUCER_EVENTS.has(event)) {
+    throw new ProvenanceError('producer_event_invalid', { event });
+  }
+  return event;
+}
+
 async function githubJson(path, token, apiBase) {
   let response;
   try {
@@ -158,8 +170,11 @@ async function githubJson(path, token, apiBase) {
   return response.json();
 }
 
-function pickNewestRun(runs, head) {
-  const mine = (Array.isArray(runs) ? runs : []).filter((run) => String(run.head_sha || '').toLowerCase() === head);
+function pickNewestRun(runs, head, expectedEvent = null) {
+  const mine = (Array.isArray(runs) ? runs : []).filter((run) => (
+    String(run.head_sha || '').toLowerCase() === head
+    && (expectedEvent === null || String(run.event || '') === expectedEvent)
+  ));
   if (mine.length === 0) {
     return null;
   }
@@ -216,6 +231,7 @@ async function resolveRun(options) {
   const workflow = requireOption(options, 'workflow');
   const artifactName = options.artifact && options.artifact !== true ? String(options.artifact) : null;
   const allowInProgress = booleanOption(options['allow-in-progress']);
+  const expectedEvent = producerEventFrom(options);
   const token = tokenFrom(options);
   const repository = repositoryFrom(options);
   const apiBase = apiBaseFrom(options);
@@ -237,12 +253,13 @@ async function resolveRun(options) {
   for (;;) {
     let newest = null;
     try {
+      const eventQuery = expectedEvent === null ? '' : `&event=${encodeURIComponent(expectedEvent)}`;
       const payload = await githubJson(
-        `/repos/${repository}/actions/workflows/${workflow}/runs?head_sha=${head}&per_page=30`,
+        `/repos/${repository}/actions/workflows/${workflow}/runs?head_sha=${head}${eventQuery}&per_page=30`,
         token,
         apiBase,
       );
-      newest = pickNewestRun(payload.workflow_runs, head);
+      newest = pickNewestRun(payload.workflow_runs, head, expectedEvent);
       consecutiveApiErrors = 0;
 
       if (newest) {
@@ -263,6 +280,7 @@ async function resolveRun(options) {
             run_id: String(newest.id),
             run_number: Number(newest.run_number),
             run_attempt: Number(newest.run_attempt || 1),
+            producer_event: String(newest.event || '') || null,
             producer_completed: true,
             producer_conclusion: 'success',
             resolved_at: new Date().toISOString(),
@@ -291,6 +309,7 @@ async function resolveRun(options) {
               run_id: String(newest.id),
               run_number: Number(newest.run_number),
               run_attempt: Number(newest.run_attempt || 1),
+              producer_event: String(newest.event || '') || null,
               producer_completed: false,
               producer_conclusion: null,
               artifact_id: String(artifact.id),
@@ -302,7 +321,7 @@ async function resolveRun(options) {
       } else {
         if (absentSince === null) absentSince = Date.now();
         if (Date.now() - absentSince > absentGraceMin * 60000) {
-          throw new ProvenanceError('installer_provenance_run_absent', { head, workflow });
+          throw new ProvenanceError('installer_provenance_run_absent', { head, workflow, event: expectedEvent });
         }
       }
     } catch (error) {
@@ -334,6 +353,7 @@ async function waitRun(options) {
   const expectedRunAttempt = options['run-attempt'] !== undefined && options['run-attempt'] !== true
     ? Number(options['run-attempt'])
     : null;
+  const expectedEvent = producerEventFrom(options);
   const token = tokenFrom(options);
   const repository = repositoryFrom(options);
   const apiBase = apiBaseFrom(options);
@@ -355,6 +375,9 @@ async function waitRun(options) {
       }
       if (String(run.path || '').split('/').pop() !== workflow && String(run.name || '') !== 'Browser Windows Package Smoke') {
         throw new ProvenanceError('producer_workflow_mismatch', { workflow, actual_path: run.path || null, actual_name: run.name || null });
+      }
+      if (expectedEvent !== null && String(run.event || '') !== expectedEvent) {
+        throw new ProvenanceError('producer_event_mismatch', { expected: expectedEvent, actual: run.event || null });
       }
       if (expectedRunNumber !== null && Number(run.run_number) !== expectedRunNumber) {
         throw new ProvenanceError('producer_run_number_mismatch', { expected: expectedRunNumber, actual: Number(run.run_number) });
@@ -379,6 +402,7 @@ async function waitRun(options) {
           run_id: String(run.id),
           run_number: Number(run.run_number),
           run_attempt: Number(run.run_attempt || 1),
+          producer_event: String(run.event || '') || null,
           conclusion: 'success',
           qualified_at: new Date().toISOString(),
         };
