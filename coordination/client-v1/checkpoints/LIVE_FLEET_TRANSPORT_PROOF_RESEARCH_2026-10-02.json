@@ -1,0 +1,23 @@
+{
+  "schema": "metaengine.browser.live-fleet-transport-proof-research.v1",
+  "date": "2026-10-02",
+  "base_source": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+  "live_installed_version": "0.7.0-dev.36908273822.1",
+  "live_fleet": {
+    "active": 0,
+    "bound_unverified": 4,
+    "transport_proof_required": true
+  },
+  "existing_architecture": {
+    "preconversation_root_stage": true,
+    "conversation_stage": true,
+    "promotion_lease": true,
+    "semantic_bootstrap": true,
+    "exact_tab_target_generation_binding": true,
+    "task_admission_requires_active_conversation_proof": true,
+    "blind_retry_allowed": false
+  },
+  "recommendation": "REUSE_EXISTING_PROMOTION_PATH_AFTER_QUALIFIED_UPDATE_AND_EXPLICIT_LIVE_AUTHORIZATION",
+  "live_effects_issued": false,
+  "authority_effect": false
+}
