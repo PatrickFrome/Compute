@@ -21,6 +21,9 @@ test('Package Smoke reserves one source/version before dependency install or phy
     /group: browser-windows-package-version-\$\{\{ needs\.package_identity_preflight\.outputs\.package_version \}\}/,
   );
   assert.match(workflow, /cancel-in-progress: false/);
+  assert.doesNotMatch(workflow, /^concurrency:/m);
+  assert.doesNotMatch(workflow, /browser-windows-package-smoke-\$\{\{ github\.ref \}\}/);
+  assert.equal((workflow.match(/^\s{4}timeout-minutes:/gm) || []).length, 1);
 
   const guard = workflow.indexOf('- name: Refuse duplicate source/version physical build');
   const marker = workflow.indexOf('- name: Publish immutable package-version reservation');

@@ -30,10 +30,6 @@ on:
       - '.github/workflows/metaengine-browser-self-update-e2e.yml'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
-concurrency:
-  group: browser-windows-package-smoke-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   actions: read
   contents: read
@@ -79,7 +75,6 @@ jobs:
     concurrency:
       group: browser-windows-package-version-${{ needs.package_identity_preflight.outputs.package_version }}
       cancel-in-progress: false
-    timeout-minutes: 35
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
