@@ -121,7 +121,10 @@ test('qualified consumer carries and re-verifies Build Identity V3 lockfile mate
   assert.match(script, /installer-provenance\.v3/);
   assert.match(script, /package_lock_sha256/);
   assert.match(script, /npm_version/);
+  assert.match(script, /bun_version/);
+  assert.match(script, /me2_ui_bun_lock_sha256/);
   assert.match(script, /package_lock_verified/);
+  assert.match(script, /me2_ui_bun_lock_verified/);
   assert.match(script, /package_lock_sha256 -notmatch '\^\[a-f0-9\]\{64\}\$'/);
   assert.match(script, /package_lock_verified -ne \$true/);
 });

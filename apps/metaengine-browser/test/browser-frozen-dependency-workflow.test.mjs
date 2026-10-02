@@ -67,3 +67,18 @@ test('Package Smoke uses only the locally locked electron-builder toolchain', ()
   assert.match(source, /node_modules\\\.bin\\electron-builder\.cmd/);
   assert.doesNotMatch(source, /npx\s+--yes\s+electron-builder/);
 });
+
+
+test('Package Smoke pins Bun and consumes the committed ME2 UI lock', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-windows-package-smoke.yml'), 'utf8');
+  const uiAttributes = fs.readFileSync(path.join(repoRoot, 'apps', 'me2-ui', '.gitattributes'), 'utf8');
+
+  assert.match(source, /oven-sh\/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6/);
+  assert.match(source, /bun-version: '1\.3\.3'/);
+  assert.match(source, /bun ci/);
+  assert.doesNotMatch(source, /npm install --no-audit --no-fund --global bun/);
+  assert.match(source, /ME2_BUN_VERSION: '1\.3\.3'/);
+  assert.match(source, /ME2_UI_BUN_LOCK_PATH/);
+  assert.match(source, /me2-ui-bun\.lock/);
+  assert.match(uiAttributes, /^bun\.lock text eol=lf$/m);
+});

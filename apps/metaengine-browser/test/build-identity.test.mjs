@@ -365,3 +365,23 @@ test('build identity v3 fails closed on Bun or UI lock drift', () => {
     /build_identity_me2_ui_bun_lock_sha256_invalid/,
   );
 });
+
+
+test('V3 packaging binds pinned Bun and the ME2 UI lock', () => {
+  const cli = read('scripts/build-identity-cli.mjs');
+  const before = read('scripts/electron-builder-before-pack.cjs');
+  const after = read('scripts/electron-builder-after-all-artifact-build.cjs');
+  const provenance = read('scripts/installer-provenance.mjs');
+  const workflow = read('../../.github/workflows/browser-windows-package-smoke.yml');
+
+  assert.match(cli, /me2-ui-bun-lock/);
+  assert.match(cli, /bun-version/);
+  assert.match(before, /ME2_BUN_VERSION/);
+  assert.match(before, /ME2_UI_BUN_LOCK_PATH/);
+  assert.match(after, /ME2_BUN_VERSION/);
+  assert.match(after, /ME2_UI_BUN_LOCK_PATH/);
+  assert.match(provenance, /me2_ui_bun_lock_sha256/);
+  assert.match(provenance, /me2_ui_bun_lock_verified/);
+  assert.match(workflow, /bun-version: '1\.3\.3'/);
+  assert.match(workflow, /me2-ui-bun\.lock/);
+});
