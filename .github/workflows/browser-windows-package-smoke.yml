@@ -5,6 +5,7 @@ on:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
       - 'release/self-update-ambiguity-live-v2'
+      - 'physical/build-slsa-provenance-v1'
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
@@ -73,6 +74,11 @@ jobs:
     needs: package_identity_preflight
     runs-on: windows-2025
     timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
     concurrency:
       group: browser-windows-package-version-${{ needs.package_identity_preflight.outputs.package_version }}
       cancel-in-progress: false
@@ -570,6 +576,51 @@ jobs:
           Copy-Item package-lock.json "$env:RUNNER_TEMP\package-lock.json" -Force
           Copy-Item "$env:GITHUB_WORKSPACE\apps\me2-ui\bun.lock" "$env:RUNNER_TEMP\me2-ui-bun.lock" -Force
 
+      - name: Generate exact-source SLSA build provenance for physical push candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/physical/build-slsa-provenance-v1'
+        id: slsa_attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+
+      - name: Seal portable SLSA bundle into immutable candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/physical/build-slsa-provenance-v1'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -ne 'push') { throw 'slsa_package_event_not_push' }
+          if ($env:GITHUB_REF -ne 'refs/heads/physical/build-slsa-provenance-v1') { throw 'slsa_package_ref_invalid' }
+          $expectedHead = '${{ needs.package_identity_preflight.outputs.source_head }}'
+          if ($env:GITHUB_SHA -ne $expectedHead) { throw "slsa_package_oidc_source_head_drift:$env:GITHUB_SHA:$expectedHead" }
+          $installer = Get-ChildItem $env:RUNNER_TEMP -Filter 'METAENGINE-Browser-Test-Setup-*-x64.exe' -File | Select-Object -First 1
+          if (-not $installer) { throw 'slsa_package_installer_missing' }
+          $installerSha = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $bundle = [string]'${{ steps.slsa_attest.outputs.bundle-path }}'
+          if (-not (Test-Path $bundle -PathType Leaf)) { throw 'slsa_package_bundle_missing' }
+          $dir = Join-Path $env:RUNNER_TEMP 'browser-slsa-provenance'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $stableBundle = Join-Path $dir 'installer-slsa-provenance.bundle.json'
+          Copy-Item $bundle $stableBundle -Force
+          @{
+            schema='metaengine.browser.package-slsa-provenance-receipt.v1'
+            source_head=$expectedHead
+            source_ref=$env:GITHUB_REF
+            event=$env:GITHUB_EVENT_NAME
+            workflow='.github/workflows/browser-windows-package-smoke.yml'
+            run_id=[int64]$env:GITHUB_RUN_ID
+            run_number=[int64]$env:GITHUB_RUN_NUMBER
+            run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
+            package_version='${{ needs.package_identity_preflight.outputs.package_version }}'
+            installer_name=$installer.Name
+            installer_sha256=$installerSha
+            attestation_id='${{ steps.slsa_attest.outputs.attestation-id }}'
+            attestation_url='${{ steps.slsa_attest.outputs.attestation-url }}'
+            bundle_name='installer-slsa-provenance.bundle.json'
+            promotion_authorized=$false
+            release_published=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $dir 'installer-slsa-provenance-receipt.json') -Encoding utf8
+
       - name: Publish immutable candidate for parallel downstream qualification
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -595,6 +646,7 @@ jobs:
             ${{ runner.temp }}/package-version-reservation-seal.json
             ${{ runner.temp }}/METAENGINE-Guardian-Bootstrap-*-x64.exe
             ${{ runner.temp }}/guardian-machine-bootstrap-binding.json
+            ${{ runner.temp }}/browser-slsa-provenance/**
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -1044,3 +1096,121 @@ jobs:
             ${{ runner.temp }}/r85-primary-visual.stderr.log
           if-no-files-found: warn
           retention-days: 30
+
+  slsa-provenance-verify:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/physical/build-slsa-provenance-v1'
+    needs:
+      - package_identity_preflight
+      - windows-nsis-package-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact physical candidate source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Download exact current-run immutable candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: metaengine-browser-windows-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/qualified-candidate
+
+      - name: Verify GitHub SLSA bundle and emit Browser Fabric provenance evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/physical/build-slsa-provenance-v1
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_SHA" = '${{ needs.package_identity_preflight.outputs.source_head }}'
+
+          candidate="$RUNNER_TEMP/qualified-candidate"
+          installer_count="$(find "$candidate" -maxdepth 1 -type f -name 'METAENGINE-Browser-Test-Setup-*-x64.exe' | wc -l | tr -d ' ')"
+          test "$installer_count" = 1
+          installer="$(find "$candidate" -maxdepth 1 -type f -name 'METAENGINE-Browser-Test-Setup-*-x64.exe' -print -quit)"
+          bundle="$candidate/browser-slsa-provenance/installer-slsa-provenance.bundle.json"
+          receipt="$candidate/browser-slsa-provenance/installer-slsa-provenance-receipt.json"
+          test -f "$installer"
+          test -f "$bundle"
+          test -f "$receipt"
+          installer_name="$(basename "$installer")"
+          installer_sha="$(sha256sum "$installer" | awk '{print $1}')"
+
+          node - "$receipt" "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$installer_name" "$installer_sha" <<'NODE'
+          const fs = require('node:fs');
+          const [path, sha, ref, runId, attempt, name, digest] = process.argv.slice(2);
+          const r = JSON.parse(fs.readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
+          const ok = r.schema === 'metaengine.browser.package-slsa-provenance-receipt.v1'
+            && r.source_head === sha
+            && r.source_ref === ref
+            && r.event === 'push'
+            && String(r.run_id) === String(runId)
+            && String(r.run_attempt) === String(attempt)
+            && r.installer_name === name
+            && r.installer_sha256 === digest
+            && r.promotion_authorized === false
+            && r.release_published === false
+            && r.authority_effect === false;
+          if (!ok) process.exit(2);
+          NODE
+
+          gh attestation verify "$installer" \
+            --repo "$GITHUB_REPOSITORY" \
+            --bundle "$bundle" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/browser-windows-package-smoke.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/browser-package-slsa-verification.json"
+
+          node scripts/browser-slsa-provenance-verification.mjs \
+            --verification "$RUNNER_TEMP/browser-package-slsa-verification.json" \
+            --expected-source-sha "$GITHUB_SHA" \
+            --expected-source-ref "$GITHUB_REF" \
+            --expected-installer-name "$installer_name" \
+            --expected-installer-sha256 "$installer_sha" \
+            --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-workflow-path '.github/workflows/browser-windows-package-smoke.yml' \
+            --verifier-id "github-slsa-package-smoke:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/browser-package-slsa-provenance-evidence.json"
+
+          node - "$RUNNER_TEMP/browser-package-slsa-provenance-evidence.json" <<'NODE'
+          const fs = require('node:fs');
+          const p = process.argv[2];
+          const e = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (e.schema !== 'metaengine.browser-fabric.provenance-evidence.v1'
+              || e.verified !== true || e.builder_trusted !== true || e.authority_effect !== false) process.exit(2);
+          NODE
+
+      - name: Upload independently verified SLSA evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-package-slsa-verification-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/browser-package-slsa-verification.json
+            ${{ runner.temp }}/browser-package-slsa-provenance-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: Prove exact verifier checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- scripts/browser-slsa-provenance-verification.mjs .github/workflows/browser-windows-package-smoke.yml)"
