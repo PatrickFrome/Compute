@@ -4,6 +4,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
+const {
+  loadDependencyResolutionProof,
+  sha256File,
+  validateBuildIdentity,
+} = require('./build-identity.cjs');
 
 const TRUST_ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
 const BUILD_SHA_RE = /^[0-9a-f]{40}$/;
@@ -74,6 +79,55 @@ function assertPackagedTrustRoot(metadata, expectedHead) {
   return actual;
 }
 
+function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageVersion }) {
+  const dependencyProofPath = String(process.env.ME2_DEPENDENCY_RESOLUTION_PATH || '').trim();
+  if (!dependencyProofPath) throw new Error('packaged_build_identity_dependency_resolution_path_missing');
+  const dependency = loadDependencyResolutionProof(dependencyProofPath);
+  const configPath = path.join(appRoot, 'electron-builder.test.json');
+  const exact = validateBuildIdentity(metadata, {
+    repository: process.env.GITHUB_REPOSITORY,
+    repository_id: process.env.GITHUB_REPOSITORY_ID,
+    source_head: expectedHead,
+    workflow: process.env.ME2_BUILD_WORKFLOW,
+    run_id: process.env.GITHUB_RUN_ID,
+    run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+    package_version: packageVersion,
+    platform: 'win32',
+    arch: process.env.ME2_BUILD_ARCH || 'x64',
+    builder_config_sha256: sha256File(configPath),
+    dependency_resolution_sha256: dependency.dependency_resolution_sha256,
+    electron_builder_version: process.env.ME2_ELECTRON_BUILDER_VERSION,
+    node_version: process.version,
+  });
+  const proof = Object.freeze({
+    schema: 'metaengine.browser.packaged-build-identity-proof.v1',
+    source_head: expectedHead,
+    package_version: packageVersion,
+    build_identity_sha256: exact.build_identity_sha256,
+    dependency_resolution_sha256: exact.dependency_resolution_sha256,
+    builder_config_sha256: exact.builder_config_sha256,
+    repository: exact.repository,
+    repository_id: exact.repository_id,
+    workflow: exact.workflow,
+    run_id: exact.run_id,
+    run_attempt: exact.run_attempt,
+    platform: exact.platform,
+    arch: exact.arch,
+    electron_builder_version: exact.electron_builder_version,
+    node_version: exact.node_version,
+    authority_effect: false,
+  });
+  const runnerTemp = String(process.env.RUNNER_TEMP || '').trim();
+  if (runnerTemp) {
+    fs.writeFileSync(
+      path.join(runnerTemp, 'packaged-build-identity-proof.json'),
+      `${JSON.stringify(proof, null, 2)}\n`,
+      'utf8',
+    );
+  }
+  return proof;
+}
+
 module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
   if (process.platform !== 'win32') return [];
   const appRoot = path.resolve(__dirname, '..');
@@ -99,10 +153,16 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
   const packageJson = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'));
   const expectedHead = exactGitHead(repoRoot);
   const fingerprint = assertPackagedTrustRoot(packageJson.metaengineEmergencyTrustRoot, expectedHead);
+  const packageVersion = String(packageJson.version || '');
   const bootstrap = assertPackagedGuardianBootstrapBinding(packageJson.metaengineGuardianBootstrapBinding, {
     expectedHead,
-    packageVersion: String(packageJson.version || ''),
+    packageVersion,
     resourcesDir,
+  });
+  const buildIdentity = assertPackagedBuildIdentity(packageJson.metaengineBuildIdentity, {
+    appRoot,
+    expectedHead,
+    packageVersion,
   });
 
   const fuses = await import('@electron/fuses');
@@ -125,6 +185,11 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     guardian_bootstrap_name: bootstrap.name,
     guardian_bootstrap_sha256: bootstrap.digest,
     guardian_bootstrap_size: bootstrap.size,
+    build_identity_sha256: buildIdentity.build_identity_sha256,
+    dependency_resolution_sha256: buildIdentity.dependency_resolution_sha256,
+    builder_config_sha256: buildIdentity.builder_config_sha256,
+    build_identity_run_id: buildIdentity.run_id,
+    build_identity_run_attempt: buildIdentity.run_attempt,
     authority_effect: false,
   }));
   return [];
@@ -132,3 +197,4 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
 
 module.exports.assertPackagedTrustRoot = assertPackagedTrustRoot;
 module.exports.assertPackagedGuardianBootstrapBinding = assertPackagedGuardianBootstrapBinding;
+module.exports.assertPackagedBuildIdentity = assertPackagedBuildIdentity;
