@@ -51,6 +51,8 @@ test('shared Guardian observer coalesces concurrent Settings and heartbeat reads
   assert.equal(b.state, 'READY');
   assert.equal(a.stale, false);
   assert.equal(b.stale, false);
+  assert.equal(a.observation_revision, 1);
+  assert.equal(b.observation_revision, 1);
 });
 
 test('expired READY observation fails closed instead of remaining green', () => {
@@ -64,6 +66,7 @@ test('expired READY observation fails closed instead of remaining green', () => 
   const fresh = observer.record(guardianStatus());
   assert.equal(fresh.state, 'READY');
   assert.equal(fresh.stale, false);
+  assert.equal(fresh.observation_revision, 1);
 
   nowMs = 11_001;
   const stale = observer.snapshot();
@@ -91,6 +94,7 @@ test('activation generation invalidation discards a late prior READY read', asyn
   const afterLate = observer.snapshot();
   assert.equal(afterLate.state, 'HOLD');
   assert.equal(afterLate.reason, 'GUARDIAN_ACTIVATION_STARTED');
+  assert.equal(afterLate.observation_revision, 0);
 
   const enrolled = observer.record(guardianStatus(
     'OWNER_ENROLLMENT_REQUIRED',
@@ -98,6 +102,7 @@ test('activation generation invalidation discards a late prior READY read', asyn
   ));
   assert.equal(enrolled.state, 'OWNER_ENROLLMENT_REQUIRED');
   assert.equal(enrolled.stale, false);
+  assert.equal(enrolled.observation_revision, 1);
 });
 
 test('hung or malformed Guardian observation cannot become positive', async () => {
@@ -121,6 +126,31 @@ test('hung or malformed Guardian observation cannot become positive', async () =
   assert.equal(bad.state, 'HOLD');
   assert.equal(bad.reason, 'GUARDIAN_OBSERVATION_FAILED');
   assert.match(String(bad.observation_error), /schema_invalid/);
+});
+
+test('accepted Guardian reads advance revision while cached reads and invalidation do not', async () => {
+  let calls = 0;
+  const observer = createBrowserGuardianStatusObserver({
+    readStatus: async () => {
+      calls += 1;
+      return guardianStatus(calls === 1 ? 'READY' : 'OWNER_ENROLLMENT_REQUIRED',
+        calls === 1 ? 'GUARDIAN_OWNER_AND_DEVICE_BOUND' : 'GUARDIAN_SERVICE_READY_OWNER_BINDING_REQUIRED');
+    },
+  });
+
+  const first = await observer.observe({ force: true });
+  assert.equal(first.observation_revision, 1);
+  const cached = await observer.observe();
+  assert.equal(cached.observation_revision, 1);
+  assert.equal(calls, 1);
+
+  const invalidated = observer.invalidate('TEST_INVALIDATION');
+  assert.equal(invalidated.observation_revision, 1);
+
+  const second = await observer.observe({ force: true });
+  assert.equal(second.observation_revision, 2);
+  assert.equal(second.state, 'OWNER_ENROLLMENT_REQUIRED');
+  assert.equal(calls, 2);
 });
 
 test('host resilience merge preserves fresh Guardian diagnostic without changing authority', () => {
