@@ -268,3 +268,103 @@ After PR #1089 reaches terminal exact-head green:
 - No rebuild during release promotion.
 - A collision is terminal for that package identity; never relabel bytes.
 - Failed/cancelled physical build effects remain evidence, not justification for blind retries.
+
+
+## Exact implementation mapping in the current repository
+
+A source audit after the general research materially narrows the required successor.
+
+### Existing provenance machinery is already strong
+
+`apps/metaengine-browser/scripts/installer-provenance.mjs` already records and verifies:
+- exact `source_head`;
+- workflow;
+- `run_id`;
+- `run_number`;
+- `run_attempt`;
+- package version;
+- installer name/hash/bytes;
+- blockmap name/hash;
+- builder-config hash;
+- producer exact-head/run/attempt matching.
+
+Downstream resolution is also exact-head scoped and can pin an artifact id while a producer is still in progress. Therefore Build Identity V2 should **evolve this existing provenance module**, not create a parallel provenance database or second resolver.
+
+The current random `provenance_id` is useful as a record id but must not be treated as build identity. The new deterministic build identity should be an additional field.
+
+### Current artifact naming already prevents one class of mix-up
+
+The uploaded candidate artifact is named:
+
+`metaengine-browser-windows-candidate-<exact-source-sha>`
+
+Thus different source heads already get different GitHub artifact names. The observed collision is narrower:
+- installer filename and runtime semantic version may be identical across two source heads;
+- updater/version-oriented consumers can therefore be confused even though the GitHub Actions artifact container is source-scoped.
+
+This confirms that the next fix belongs at the packaged build identity / semantic-version binding layer, not in artifact discovery.
+
+### Exact injection point already exists
+
+`electron-builder-before-pack.cjs` already injects source-bound metadata into packaged `package.json` through `context.packager.config.extraMetadata`:
+- emergency-maintenance trust root;
+- Guardian bootstrap binding.
+
+Build Identity V2 can use the same trusted packaging hook. It should validate CI identity against `git rev-parse HEAD` and inject a bounded build manifest, rather than mutating checked-in package.json.
+
+The after-artifact hook already extracts packaged package.json and proves exact source trust-root identity, so it is the natural independent packaging readback point for the new build manifest.
+
+### Package Smoke is already the correct single producer
+
+`.github/workflows/browser-windows-package-smoke.yml`:
+- checks out exact PR head;
+- proves checkout SHA;
+- builds NSIS once;
+- writes installer provenance with run id/number/attempt;
+- uploads one exact-head candidate artifact;
+- installs and physically checks those bytes;
+- downstream workflows are designed to acquire rather than rebuild.
+
+Build Identity V2 therefore requires incremental strengthening, not a new build service.
+
+### Dependency reproducibility remains a separate weakness
+
+Package Smoke currently runs:
+
+`npm install --no-audit --no-fund --no-package-lock`
+
+Direct dependencies in Browser package.json are exact-pinned, but transitive resolution is not cryptographically frozen by this command. A source+config+run identity alone therefore does not imply byte reproducibility across time.
+
+Successor options, in priority order:
+1. introduce and verify a committed lockfile for the Browser package;
+2. if monorepo constraints make that unsuitable, produce a deterministic resolved-dependency digest from the installed dependency tree and bind it into provenance;
+3. never claim bit-reproducibility merely from exact source SHA.
+
+The build identity should include a `dependency_resolution_sha256`, whether that comes from a lockfile or a canonical resolved tree.
+
+### Circularity rule
+
+Do **not** put installer SHA-256 into the pre-package build identity. The installer hash is only known after packaging, and injecting it would alter the package itself.
+
+Use two distinct identities, matching the SLSA model:
+- **build invocation identity**: deterministic from source + builder inputs + CI invocation;
+- **artifact subject identity**: final installer/blockmap hashes recorded after build.
+
+The provenance record binds both.
+
+## Revised minimal successor
+
+The smallest high-value implementation after Guardian qualification is:
+
+1. Extend existing installer-provenance schema to v2, retaining v1 verification compatibility.
+2. Add deterministic `build_identity_sha256`.
+3. Add `repository_id`, `workflow_id`, `run_id`, `run_attempt`, exact source and dependency-resolution digest to the build identity inputs.
+4. Inject those bounded values using the existing before-pack `extraMetadata` hook.
+5. Independently extract/read them in the existing after-artifact hook.
+6. Fail Package Smoke if packaged metadata differs from checkout/CI identity.
+7. Preserve the final installer hash as the separate artifact subject.
+8. Add a semantic-version/source collision guard.
+9. Keep exact-head artifact acquisition unchanged unless tests reveal a gap.
+10. Only then consider changing how semantic prerelease numbers are allocated.
+
+This preserves the project’s existing one-builder/one-artifact architecture and avoids another coordination plane.
