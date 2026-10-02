@@ -1,0 +1,69 @@
+{
+  "schema": "metaengine.browser.build-identity-v2-partial-qualification.v1",
+  "created_at": "2026-10-02",
+  "source_head": "2a0022d1e0119620f7badff4621cb5ff1ed5ab7c",
+  "pr": 1091,
+  "workflows": {
+    "total": 10,
+    "success": 9,
+    "failure": 1,
+    "self_update_failure": true
+  },
+  "package": {
+    "version": "0.7.0-dev.36973000001.1",
+    "producer_run_id": 36971539452,
+    "producer_run_number": 3137,
+    "run_attempt": 1,
+    "installer_bytes": 159811161,
+    "installer_sha256": "28c3199c1accb761a412bca2eecfcb3e323fe74baa63fda263d7d8de0dd9893d",
+    "blockmap_sha256": "cd9bd768e3cae62fc6870b9a9fa44e0caf8e3093d1a0091a3ef725493661f395",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "provenance_id": "dc05f2b6-cab2-4da2-8781-24bbd4bcc500",
+    "build_identity_sha256": "2e8c125f036ee27566a5857ab5c94fe65c2d400cf7ba0af1204fee4c79ae1ee1",
+    "dependency_resolution_sha256": "e37879804789c4354b0c732f2ac7a05fdfb70bf5c82a3c6849d79265200dc7f5",
+    "dependency_count": 55,
+    "candidate_artifact_id": 11211928176,
+    "candidate_artifact_sha256": "1a59ead187faa585085310fc4ff2f1fc4fa6bc812e409850ebe1bf4022c12e31",
+    "evidence_artifact_id": 11212390898,
+    "evidence_artifact_sha256": "bccd8773f37fc76de93f918dd116df93093078571c35cda2dd57f6bbf6f72822",
+    "consumed": true,
+    "promotion_authorized": false
+  },
+  "downstream": {
+    "installed_chat": {
+      "success": true,
+      "artifact_id": 11211704448,
+      "artifact_sha256": "9743ff1f465d85f6055c0083001d67083e81ae0caed2b305f925bd71c49cd956"
+    },
+    "final_runtime": {
+      "success": true,
+      "artifact_id": 11212057896,
+      "artifact_sha256": "f66a0009acfb5d1f13f75af6a9d8f46c9d02bac7148684094da50a15bdbf845a"
+    },
+    "soak": {
+      "success": true,
+      "artifact_id": 11211463363,
+      "artifact_sha256": "b9d921f262f7b08d15ecd7688a1f614137ca7b9b9d24702927a691608be5d6d3",
+      "activation_p95_ms": 153.01,
+      "working_set_growth_bytes": 0,
+      "handle_growth": 14
+    },
+    "self_update": {
+      "success": false,
+      "run_id": 36971539420,
+      "job_id": 110726803976,
+      "physical_update_reached": false,
+      "root_cause": "EXPECTED_REFUSAL_LEFT_NONZERO_POWERSHELL_LASTEXITCODE"
+    }
+  },
+  "brain": {
+    "semantic_edges": 1000000,
+    "cells": 128,
+    "agents": 128,
+    "semantic_edges_per_second": 93463,
+    "peak_parallel_mutations": 32,
+    "bounded_cell_facts": 2048
+  },
+  "authority_effect": false,
+  "promotion_authorized": false
+}
