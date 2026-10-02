@@ -234,3 +234,9 @@ test('npm version probe uses cmd.exe on Windows and direct npm elsewhere', () =>
   assert.equal(linux.command, 'npm');
   assert.deepEqual(linux.args, ['--version']);
 });
+
+
+test('package-lock checkout bytes are normalized to LF across Windows and Linux', () => {
+  const attributes = fs.readFileSync(path.join(root, '.gitattributes'), 'utf8');
+  assert.match(attributes, /^package-lock\.json text eol=lf$/m);
+});
