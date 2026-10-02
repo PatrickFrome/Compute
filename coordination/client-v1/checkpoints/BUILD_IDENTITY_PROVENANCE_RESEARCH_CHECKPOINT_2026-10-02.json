@@ -1,0 +1,57 @@
+{
+  "schema": "metaengine.build-identity-provenance-research-checkpoint.v1",
+  "created_at": "2026-10-02",
+  "base_runtime_source": "1f6902daeae8bc201d1c493e8a413f320a80aeec",
+  "research_branch": "analysis/build-identity-provenance-1f6902da",
+  "research_commit": "13ac003d14821c101ed1f569f8bf443539572ea9",
+  "research_document": "research/BUILD_IDENTITY_PROVENANCE_V2_RESEARCH_2026-10-02.md",
+  "incident": {
+    "class": "SEMANTIC_PACKAGE_VERSION_REUSED_ACROSS_DISTINCT_SOURCE_HEADS",
+    "observed_versions": [
+      "0.7.0-dev.36963586969.1",
+      "0.7.0-dev.36964688887.1"
+    ],
+    "policy": "COLLISION_OR_UNPROVEN_IDENTITY_IS_NON_PROMOTABLE_AND_MUST_NOT_BE_RELABELED"
+  },
+  "findings": {
+    "github_run_id_repository_unique": true,
+    "github_run_attempt_distinguishes_reruns": true,
+    "github_run_number_workflow_scoped": true,
+    "electron_builder_extra_metadata_supported": true,
+    "electron_builder_artifact_env_macros_supported": true,
+    "slsa_invocation_identity_and_subject_digest_model": true,
+    "github_artifact_attestation_available_for_public_repo": true,
+    "immutable_release_locks_tag_and_assets": true
+  },
+  "proposed": {
+    "schema": "metaengine.browser.build-identity.v2",
+    "identity_inputs": [
+      "repository_id",
+      "source_sha",
+      "workflow_id",
+      "github_run_id",
+      "github_run_attempt",
+      "platform",
+      "arch",
+      "builder_config_sha256",
+      "dependency_digest"
+    ],
+    "package_time_metadata_injection": true,
+    "downstream_consumers_must_not_rebuild": true,
+    "semantic_version_source_collision_rejected": true,
+    "build_identity_digest_collision_rejected": true,
+    "github_attestation_is_corroborating_evidence_only": true,
+    "release_promotion_authority": false
+  },
+  "next_after_guardian_pr_green": [
+    "OPEN_SUCCESSOR_BRANCH",
+    "IMPLEMENT_BUILD_IDENTITY_V2_MANIFEST",
+    "INJECT_RUN_AND_SOURCE_METADATA_AT_PACKAGE_TIME",
+    "ADD_VERSION_SOURCE_AND_IDENTITY_DIGEST_COLLISION_TESTS",
+    "BIND_DOWNSTREAM_CONSUMERS_TO_EXACT_PRODUCER_RUN_ATTEMPT_AND_BUILD_IDENTITY",
+    "OPTIONALLY_ADD_GITHUB_ARTIFACT_ATTESTATION",
+    "FULL_WINDOWS_ONE_ARTIFACT_QUALIFICATION"
+  ],
+  "authority_effect": false,
+  "production_mutation": false
+}
