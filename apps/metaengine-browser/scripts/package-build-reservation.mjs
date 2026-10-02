@@ -78,8 +78,7 @@ export function evaluatePackageBuildReservation({
     .map(normalizeArtifact)
     .filter(Boolean)
     .filter((artifact) =>
-      artifact.expired !== true
-      && artifact.name === reservationArtifactName(version)
+      artifact.name === reservationArtifactName(version)
       && artifact.run_id !== currentRunId
     );
 
@@ -102,8 +101,7 @@ export function evaluatePackageBuildReservation({
     .map(normalizeArtifact)
     .filter(Boolean)
     .filter((artifact) =>
-      artifact.expired !== true
-      && artifact.name === candidateArtifactName(head)
+      artifact.name === candidateArtifactName(head)
       && artifact.run_id !== currentRunId
     );
 

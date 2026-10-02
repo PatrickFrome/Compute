@@ -93,16 +93,28 @@ test('existing source candidate from another run fails closed even without versi
   );
 });
 
-test('expired artifacts and current-run artifacts do not create false collisions', () => {
+test('expired prior artifact metadata remains collision evidence while current-run metadata is ignored', () => {
+  assert.throws(
+    () => evaluate({
+      versionArtifacts: [
+        artifact({ name: reservationArtifactName(VERSION), runId: RUN_ID - 1, expired: true }),
+      ],
+    }),
+    (error) => error?.code === 'PACKAGE_IDENTITY_VERSION_ALREADY_RESERVED',
+  );
+
+  assert.throws(
+    () => evaluate({
+      sourceArtifacts: [
+        artifact({ name: candidateArtifactName(HEAD), runId: RUN_ID - 1, head: HEAD, expired: true }),
+      ],
+    }),
+    (error) => error?.code === 'PACKAGE_IDENTITY_SOURCE_ALREADY_BUILT',
+  );
+
   const proof = evaluate({
-    versionArtifacts: [
-      artifact({ name: reservationArtifactName(VERSION), runId: RUN_ID - 1, expired: true }),
-      artifact({ name: reservationArtifactName(VERSION), runId: RUN_ID, head: HEAD }),
-    ],
-    sourceArtifacts: [
-      artifact({ name: candidateArtifactName(HEAD), runId: RUN_ID - 1, head: HEAD, expired: true }),
-      artifact({ name: candidateArtifactName(HEAD), runId: RUN_ID, head: HEAD }),
-    ],
+    versionArtifacts: [artifact({ name: reservationArtifactName(VERSION), runId: RUN_ID, head: HEAD })],
+    sourceArtifacts: [artifact({ name: candidateArtifactName(HEAD), runId: RUN_ID, head: HEAD })],
   });
   assert.equal(proof.physical_package_build_allowed, true);
 });

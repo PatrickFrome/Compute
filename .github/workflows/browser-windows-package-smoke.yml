@@ -65,10 +65,10 @@ jobs:
             exit 1
           fi
           version="$(node -p "require('./apps/metaengine-browser/package.json').version")"
-          case "$version" in
-            0.7.0-dev.*.1) ;;
-            *) echo "package_identity_version_invalid:$version" >&2; exit 1 ;;
-          esac
+          if [[ ! "$version" =~ ^0\.7\.0-dev\.[0-9]+\.1$ ]]; then
+            echo "package_identity_version_invalid:$version" >&2
+            exit 1
+          fi
           echo "package_version=$version" >> "$GITHUB_OUTPUT"
           echo "source_head=$EXPECTED_HEAD" >> "$GITHUB_OUTPUT"
 
