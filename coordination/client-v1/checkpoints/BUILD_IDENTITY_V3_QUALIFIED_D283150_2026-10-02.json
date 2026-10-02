@@ -1,0 +1,135 @@
+{
+  "schema": "metaengine.browser.build-identity-v3-qualified.v1",
+  "qualified_at": "2026-10-02T09:38:54Z",
+  "source_head": "d283150bc8a3338a76b98c369b67fb7e846b207b",
+  "pr": 1094,
+  "package_version": "0.7.0-dev.36990000001.1",
+  "workflows": {
+    "total": 10,
+    "success": 10,
+    "failure": 0
+  },
+  "shell": {
+    "tests": 3911,
+    "pass": 3909,
+    "fail": 0,
+    "skipped": 2,
+    "additional_contract_tests": 102,
+    "additional_contract_pass": 102
+  },
+  "critical_audit": {
+    "tests": 3911,
+    "pass": 3911,
+    "fail": 0,
+    "skipped": 0
+  },
+  "source_qualification": {
+    "run_id": 36988959137,
+    "success": true,
+    "focused_tests": 58,
+    "focused_pass": 58,
+    "windows_tests": 3911,
+    "windows_pass": 3911
+  },
+  "package": {
+    "producer_run_id": 36989661754,
+    "producer_run_number": 3145,
+    "producer_run_attempt": 1,
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.36990000001.1-x64.exe",
+    "installer_bytes": 156364287,
+    "installer_sha256": "b68b71767cd32d147c2d62325be9ab9ff794c7aaa2a2460daee89d7021252473",
+    "blockmap_sha256": "b27ba75c89fbe09b7e9d698053ffd1c09a3e69cf248858dbc3d046034b0f5901",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "provenance_id": "f792965b-de24-4f28-bbc2-1e9227e7f808",
+    "build_identity_sha256": "cb275d3997c284d2f849d532f6e474c135018229ecbcdae82150d5038e4319e2",
+    "dependency_resolution_sha256": "44db8c97004e4655d85cd0f775ad5df136841dc1f1b1cd55a2ec816a461cda51",
+    "package_lock_sha256": "a167e95a1d41d5afcb13861669ce61887fe64c14a3466a186535d901ef9bb0f3",
+    "dependency_count": 501,
+    "node_version": "v24.21.0",
+    "npm_version": "11.19.0",
+    "bun_version": "1.3.3",
+    "me2_ui_bun_lock_sha256": "a81d5c2c173747ba19a5461f16485895fabb7aa5f740b95645cb01891547ba81",
+    "electron_builder_version": "26.15.7",
+    "reservation_artifact": {
+      "id": 11219371368,
+      "bytes": 861,
+      "sha256": "abece6a8f063a1187379ce2cc0e85d8ef7970c10ec0abf2e9b724409e781b2d5"
+    },
+    "candidate_artifact": {
+      "id": 11219141925,
+      "bytes": 158406424,
+      "sha256": "06b41a1c20f89dadbfc2740b64d842b9d301044412b355122f16ab6753771d7c"
+    },
+    "evidence_artifact": {
+      "id": 11219765616,
+      "bytes": 622671,
+      "sha256": "24f8f9832a1456ea00d6c67399b73664ae0d013ccb41b9486f462b760d3eb582"
+    },
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false
+  },
+  "installed_chat": {
+    "success": true,
+    "artifact_id": 11219337999,
+    "artifact_bytes": 156293593,
+    "artifact_sha256": "f0ba5848c005f7b6357f083c3dea7982ac0c1cbcfa2622fe710c93ca1452b71a",
+    "clean_genesis": true,
+    "oidc_qualification": true,
+    "oidc_token_exposed_to_browser": false,
+    "admin_connection_verified": true,
+    "admin_access_tier": "ADMIN"
+  },
+  "final_runtime": {
+    "success": true,
+    "artifact_id": 11219601766,
+    "artifact_bytes": 156291128,
+    "artifact_sha256": "84d349085652073148e71fc64a0612e21bdb09303f3dcadbb01dd11ec4e1ca82",
+    "state": "READY",
+    "host_agent_state": "READY",
+    "signer_state": "READY",
+    "host_runtime_state": "READY",
+    "host_identity_state": "WAITING_FOR_ENROLLMENT",
+    "second_scheduler": false,
+    "automatic_effect_retry_allowed": false
+  },
+  "soak": {
+    "success": true,
+    "artifact_id": 11219099079,
+    "artifact_bytes": 156351671,
+    "artifact_sha256": "17467cf41a50cbd8ed072900f5c95fa644baff6b7ec8f5d9a622441f8be5b773",
+    "activations": 72,
+    "activation_p95_ms": 143.87,
+    "burst_elapsed_ms": 491.67,
+    "working_set_growth_bytes": 0,
+    "handle_growth": 10,
+    "duplicate_runtime": false,
+    "semantic_edges": 1000000,
+    "cells": 128,
+    "agents": 128,
+    "semantic_edges_per_second": 126376,
+    "peak_parallel_mutations": 32,
+    "bounded_cell_facts": 2048
+  },
+  "self_update": {
+    "success": true,
+    "run_id": 36989661499,
+    "run_number": 3598,
+    "artifact_id": 11219731724,
+    "artifact_bytes": 157459373,
+    "artifact_sha256": "848876964fc36d54e99e630f7816c9360dc06fdc83d29874c59aecaac4e9e1f3",
+    "baseline": "0.7.0-dev.36806234662.1",
+    "target": "0.7.0-dev.36990000001.1",
+    "fast_self_update_pass": true,
+    "resident_legacy": "0.7.0-dev.34759310781.1",
+    "installed_executable_sha256": "ab5e8f1e6ba6133a5173c266d4873458ee0f8e9c5a0087134827f53da8f7ac9d",
+    "new_browser_started": true,
+    "new_sentinel_started": true,
+    "planned_shutdown_verified": true,
+    "retry_dialog_required": false
+  },
+  "hermetic_build_claim": false,
+  "live_install_performed": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
