@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   candidateArtifactName,
   evaluatePackageBuildReservation,
+  observeAndEvaluatePackageBuildReservation,
   reservationArtifactName,
 } from '../scripts/package-build-reservation.mjs';
 
@@ -125,4 +126,60 @@ test('malformed repository, source, version, run, or attempt fails before proof 
   assert.throws(() => evaluate({ packageVersion: '0.7.0' }), /version_invalid/);
   assert.throws(() => evaluate({ runId: 'x' }), /run_id_invalid/);
   assert.throws(() => evaluate({ runAttempt: 0 }), /run_attempt_invalid/);
+});
+
+
+test('repository artifact API ambiguity fails closed before packaging', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({}),
+  });
+  try {
+    await assert.rejects(
+      () => observeAndEvaluatePackageBuildReservation({
+        repository: 'PatrickFrome/Compute',
+        sourceHead: HEAD,
+        packageVersion: VERSION,
+        runId: RUN_ID,
+        runAttempt: 1,
+        token: 'test-token',
+        apiBase: 'https://api.github.test',
+      }),
+      (error) => error?.code === 'PACKAGE_BUILD_RESERVATION_API_UNAVAILABLE',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('repository artifact API uses exact version and source artifact names', async () => {
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ total_count: 0, artifacts: [] }),
+    };
+  };
+  try {
+    const proof = await observeAndEvaluatePackageBuildReservation({
+      repository: 'PatrickFrome/Compute',
+      sourceHead: HEAD,
+      packageVersion: VERSION,
+      runId: RUN_ID,
+      runAttempt: 1,
+      token: 'test-token',
+      apiBase: 'https://api.github.test',
+    });
+    assert.equal(proof.physical_package_build_allowed, true);
+    assert.equal(seen.length, 2);
+    assert.ok(seen.some((url) => url.includes(encodeURIComponent(reservationArtifactName(VERSION)))));
+    assert.ok(seen.some((url) => url.includes(encodeURIComponent(candidateArtifactName(HEAD)))));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
