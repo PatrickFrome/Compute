@@ -91,3 +91,16 @@ test('source qualification isolates the ME2 UI build from the tracked checkout',
   assert.match(source, /Push-Location \$uiRoot/);
   assert.doesNotMatch(source, /Push-Location apps\/me2-ui/);
 });
+
+
+test('physical Package Smoke isolates ME2 UI build from the tracked checkout', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-windows-package-smoke.yml'), 'utf8');
+  assert.match(source, /\$uiRoot = Join-Path \$env:RUNNER_TEMP 'me2-ui-package-source'/);
+  assert.match(source, /Copy-Item -Recurse -Force \$sourceUi \$uiRoot/);
+  assert.match(source, /me2_ui_temp_lock_copy_drift/);
+  assert.match(source, /me2_ui_bun_ci_lock_mutation/);
+  assert.match(source, /me2_ui_bun_ci_failed/);
+  assert.match(source, /me2_ui_build_failed/);
+  assert.match(source, /me2_ui_pack_failed/);
+  assert.doesNotMatch(source, /Push-Location apps\/me2-ui/);
+});

@@ -263,14 +263,36 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string](bun --version) -ne '1.3.3') { throw 'me2_ui_bun_version_drift' }
-          Push-Location apps/me2-ui
+
+          $sourceUi = Join-Path $env:GITHUB_WORKSPACE 'apps\me2-ui'
+          $sourceLock = Join-Path $sourceUi 'bun.lock'
+          $sourceLockSha = (Get-FileHash $sourceLock -Algorithm SHA256).Hash.ToLowerInvariant()
+          $uiRoot = Join-Path $env:RUNNER_TEMP 'me2-ui-package-source'
+          Remove-Item $uiRoot -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force $sourceUi $uiRoot
+          $tempLock = Join-Path $uiRoot 'bun.lock'
+          $tempLockSha = (Get-FileHash $tempLock -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($tempLockSha -ne $sourceLockSha) { throw 'me2_ui_temp_lock_copy_drift' }
+
+          Push-Location $uiRoot
           try {
             bun ci
+            if ($LASTEXITCODE -ne 0) { throw 'me2_ui_bun_ci_failed' }
+            $afterCiLockSha = (Get-FileHash $tempLock -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($afterCiLockSha -ne $sourceLockSha) { throw 'me2_ui_bun_ci_lock_mutation' }
+
             bun run build
+            if ($LASTEXITCODE -ne 0) { throw 'me2_ui_build_failed' }
             node scripts/pack-me2-ui.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'me2_ui_pack_failed' }
           } finally { Pop-Location }
+
+          $uiDist = Join-Path $uiRoot 'me2-ui-dist'
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root $uiDist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'package_smoke_temp_me2_ui_invalid' }
+
           Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          Copy-Item -Recurse -Force $uiDist apps/metaengine-browser/me2-ui-dist
           node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
           if ($LASTEXITCODE -ne 0) { throw 'package_smoke_staged_me2_ui_invalid' }
 
