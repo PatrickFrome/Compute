@@ -157,7 +157,7 @@ function validateDependencyTree(tree, expectedName = null) {
   }
   let count = 0;
   for (const [childName, child] of Object.entries(tree.dependencies)) {
-    count += 1 + validateDependencyTree(child, childName);
+    count += 1 + validateDependencyTree(child, childName).count;
   }
   return Object.freeze({ name, version, count });
 }

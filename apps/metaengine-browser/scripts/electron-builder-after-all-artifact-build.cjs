@@ -79,6 +79,10 @@ function assertPackagedTrustRoot(metadata, expectedHead) {
   return actual;
 }
 
+function buildIdentityRequired() {
+  return String(process.env.ME2_BUILD_IDENTITY_REQUIRED || '').trim().toLowerCase() === 'true';
+}
+
 function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageVersion }) {
   const dependencyProofPath = String(process.env.ME2_DEPENDENCY_RESOLUTION_PATH || '').trim();
   if (!dependencyProofPath) throw new Error('packaged_build_identity_dependency_resolution_path_missing');
@@ -159,11 +163,14 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     packageVersion,
     resourcesDir,
   });
-  const buildIdentity = assertPackagedBuildIdentity(packageJson.metaengineBuildIdentity, {
-    appRoot,
-    expectedHead,
-    packageVersion,
-  });
+  const requireBuildIdentity = buildIdentityRequired();
+  const buildIdentity = requireBuildIdentity
+    ? assertPackagedBuildIdentity(packageJson.metaengineBuildIdentity, {
+        appRoot,
+        expectedHead,
+        packageVersion,
+      })
+    : null;
 
   const fuses = await import('@electron/fuses');
   const wire = await fuses.getCurrentFuseWire(executable);
@@ -185,11 +192,12 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     guardian_bootstrap_name: bootstrap.name,
     guardian_bootstrap_sha256: bootstrap.digest,
     guardian_bootstrap_size: bootstrap.size,
-    build_identity_sha256: buildIdentity.build_identity_sha256,
-    dependency_resolution_sha256: buildIdentity.dependency_resolution_sha256,
-    builder_config_sha256: buildIdentity.builder_config_sha256,
-    build_identity_run_id: buildIdentity.run_id,
-    build_identity_run_attempt: buildIdentity.run_attempt,
+    build_identity_required: requireBuildIdentity,
+    build_identity_sha256: buildIdentity?.build_identity_sha256 || null,
+    dependency_resolution_sha256: buildIdentity?.dependency_resolution_sha256 || null,
+    builder_config_sha256: buildIdentity?.builder_config_sha256 || null,
+    build_identity_run_id: buildIdentity?.run_id || null,
+    build_identity_run_attempt: buildIdentity?.run_attempt || null,
     authority_effect: false,
   }));
   return [];
@@ -198,3 +206,4 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
 module.exports.assertPackagedTrustRoot = assertPackagedTrustRoot;
 module.exports.assertPackagedGuardianBootstrapBinding = assertPackagedGuardianBootstrapBinding;
 module.exports.assertPackagedBuildIdentity = assertPackagedBuildIdentity;
+module.exports.buildIdentityRequired = buildIdentityRequired;

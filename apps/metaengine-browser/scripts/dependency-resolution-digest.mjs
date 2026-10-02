@@ -32,15 +32,33 @@ function parseArgs(argv) {
 }
 
 function normalizeNode(node, name = null) {
+  const nodeName = String(name || node?.name || '').trim();
+  const version = String(node?.version || '').trim();
+
+  // npm ls may expose unresolved optional/peer placeholders with no installed
+  // version (for example bufferutil / utf-8-validate under ws). They are not
+  // installed package resolutions, so exclude them from the installed tree
+  // instead of manufacturing a version or accepting an empty one.
+  if (name !== null && !version) return null;
+
   const dependencies = {};
   for (const depName of Object.keys(node?.dependencies || {}).sort()) {
-    dependencies[depName] = normalizeNode(node.dependencies[depName], depName);
+    const child = normalizeNode(node.dependencies[depName], depName);
+    if (child) dependencies[depName] = child;
   }
   return {
-    name: String(name || node?.name || ''),
-    version: String(node?.version || ''),
+    name: nodeName,
+    version,
     dependencies,
   };
+}
+
+export function normalizeInstalledTree(installed) {
+  const tree = normalizeNode(installed);
+  if (!tree || !tree.name || !tree.version) {
+    throw new Error('dependency_resolution_root_invalid');
+  }
+  return canonicalize(tree);
 }
 
 function countDependencies(tree) {
@@ -129,7 +147,7 @@ function readInstalledTree(cwd) {
 
 export function createDependencyResolutionProof({ cwd = process.cwd() } = {}) {
   const installed = readInstalledTree(cwd);
-  const tree = canonicalize(normalizeNode(installed));
+  const tree = normalizeInstalledTree(installed);
   const payload = {
     schema: DEPENDENCY_RESOLUTION_SCHEMA,
     root_name: String(installed.name || tree.name || ''),

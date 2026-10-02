@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36965253139.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36973000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -81,3 +81,13 @@ Build Identity V2 first qualification correction:
 - no Package Smoke candidate artifact was produced on that head, but the identity is retired conservatively because the physical Package Smoke runner had started;
 - Windows npm invocation now goes through the trusted OS command processor (`ComSpec /d /s /c npm.cmd ...`) with only fixed internal npm arguments; spawn errors are explicit and bounded;
 - corrected successor reserves `0.7.0-dev.36972000001.1`; no bytes from the failed attempt may be relabelled as this version.
+
+
+Build Identity V2 second qualification correction:
+- PR #1091 head `53fe4cb128fd4dc7cb525201d80a23924f8a997d` started Package Smoke #3136 / run `36970617815` with `0.7.0-dev.36972000001.1`; that identity is retired conservatively and will not be reused.
+- Package Smoke reached only dependency observation / expected-identity preparation. It produced no candidate installer artifact and did not run NSIS because the expected identity rejected two concrete proof defects first.
+- defect 1: recursive dependency validation accidentally added the returned object instead of its numeric `.count`, so every non-empty tree failed `dependency_resolution_count_mismatch`;
+- defect 2: npm's installed-tree JSON can contain unresolved optional placeholders such as `bufferutil` / `utf-8-validate` with no installed version. Those placeholders are now excluded from the installed name/version tree rather than accepted with an empty synthetic version;
+- auxiliary Windows package workflows (for example Dirty Profile) are no longer forced to provide Package-Smoke-only provenance inputs. Build Identity V2 is mandatory only when `ME2_BUILD_IDENTITY_REQUIRED=true`; the official Package Smoke producer sets that flag and still fails closed if any identity input/readback is missing.
+- the convergence reservation at the top of this file is now authoritative and matches package.json; the stale first reservation was the direct cause of the convergence package-identity regression.
+- corrected successor reserves `0.7.0-dev.36973000001.1`, above all workflow ids observed before this commit. Any later source change after its Package Smoke runner starts must retire it and advance again.

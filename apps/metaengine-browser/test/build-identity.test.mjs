@@ -5,7 +5,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-import { npmInvocation } from '../scripts/dependency-resolution-digest.mjs';
+import { normalizeInstalledTree, npmInvocation } from '../scripts/dependency-resolution-digest.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -72,6 +72,28 @@ function identity(overrides = {}) {
     ...overrides,
   });
 }
+
+test('installed dependency normalization omits unresolved npm placeholders without versions', () => {
+  const tree = normalizeInstalledTree({
+    name: '@metaengine/browser-shell',
+    version: '0.7.0-dev.1.1',
+    dependencies: {
+      ws: {
+        version: '8.21.3',
+        dependencies: {
+          bufferutil: { dependencies: {} },
+          'utf-8-validate': { version: '', dependencies: {} },
+        },
+      },
+      'electron-updater': {
+        version: '6.8.9',
+        dependencies: {},
+      },
+    },
+  });
+  assert.deepEqual(Object.keys(tree.dependencies), ['electron-updater', 'ws']);
+  assert.deepEqual(Object.keys(tree.dependencies.ws.dependencies), []);
+});
 
 test('dependency resolver invokes npm through cmd.exe on Windows and directly elsewhere', () => {
   const windows = npmInvocation(['ls', '--all', '--json'], {
@@ -212,7 +234,10 @@ test('packaging hooks and Package Smoke bind the same build identity evidence', 
   assert.match(workflow, /build-identity-cli\.mjs/);
   assert.match(workflow, /expected-build-identity\.json/);
   assert.match(workflow, /build_identity_independent_readback_mismatch/);
+  assert.match(workflow, /ME2_BUILD_IDENTITY_REQUIRED: 'true'/);
   assert.match(workflow, /ME2_BUILD_WORKFLOW: browser-windows-package-smoke\.yml/);
+  assert.match(before, /buildIdentityRequired\(\)/);
+  assert.match(after, /buildIdentityRequired\(\)/);
   assert.match(workflow, /--build-identity \$buildIdentityPath/);
   assert.match(workflow, /build-identity\.json/);
   assert.match(workflow, /dependency-resolution\.json/);

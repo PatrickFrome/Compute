@@ -237,6 +237,7 @@ jobs:
         shell: powershell
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_BUILD_IDENTITY_REQUIRED: 'true'
           ME2_DEPENDENCY_RESOLUTION_PATH: ${{ runner.temp }}\dependency-resolution.json
           ME2_BUILD_WORKFLOW: browser-windows-package-smoke.yml
           ME2_BUILD_ARCH: x64

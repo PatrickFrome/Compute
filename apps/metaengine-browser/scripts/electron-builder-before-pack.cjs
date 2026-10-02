@@ -63,6 +63,10 @@ function buildEmergencyTrustRootMetadata({ appRoot, repoRoot }) {
   });
 }
 
+function buildIdentityRequired() {
+  return String(process.env.ME2_BUILD_IDENTITY_REQUIRED || '').trim().toLowerCase() === 'true';
+}
+
 function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
   const dependencyProofPath = String(process.env.ME2_DEPENDENCY_RESOLUTION_PATH || '').trim();
   if (!dependencyProofPath) throw new Error('build_identity_dependency_resolution_path_missing');
@@ -200,15 +204,13 @@ async function metaengineGuardianNativeBeforePack(context) {
   } catch (error) {
     throw new Error(`guardian_machine_bootstrap_binding_invalid:${String(error?.message || error)}`);
   }
-  const buildIdentity = buildPackageIdentityMetadata({
-    appRoot,
-    trustRoot,
-    packageVersion,
-  });
+  const buildIdentity = buildIdentityRequired()
+    ? buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion })
+    : null;
   context.packager.config.extraMetadata = {
     ...(context.packager.config.extraMetadata || {}),
     metaengineGuardianBootstrapBinding: bootstrapBinding,
-    metaengineBuildIdentity: buildIdentity,
+    ...(buildIdentity ? { metaengineBuildIdentity: buildIdentity } : {}),
   };
 
   const daemonResult = spawnSync(
@@ -226,3 +228,4 @@ module.exports = metaengineGuardianNativeBeforePack;
 module.exports.buildEmergencyTrustRootMetadata = buildEmergencyTrustRootMetadata;
 module.exports.validateGuardianBootstrapBinding = validateGuardianBootstrapBinding;
 module.exports.buildPackageIdentityMetadata = buildPackageIdentityMetadata;
+module.exports.buildIdentityRequired = buildIdentityRequired;
