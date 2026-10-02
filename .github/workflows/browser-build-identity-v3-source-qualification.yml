@@ -1,0 +1,96 @@
+name: Browser Build Identity V3 Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-lockfile-material-v1'
+    paths:
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - 'apps/metaengine-browser/scripts/build-identity.cjs'
+      - 'apps/metaengine-browser/scripts/build-identity-cli.mjs'
+      - 'apps/metaengine-browser/scripts/package-lock-material.cjs'
+      - 'apps/metaengine-browser/scripts/package-lock-material.mjs'
+      - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
+      - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
+      - 'apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs'
+      - 'apps/metaengine-browser/test/build-identity.test.mjs'
+      - 'apps/metaengine-browser/test/package-lock-material.test.mjs'
+      - 'apps/metaengine-browser/test/installer-provenance-v2.test.mjs'
+      - 'apps/metaengine-browser/test/installer-provenance-v3.test.mjs'
+      - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
+      - 'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs'
+      - '.github/workflows/browser-windows-package-smoke.yml'
+      - '.github/workflows/browser-build-identity-v3-source-qualification.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-build-identity-v3-source-qualification
+  cancel-in-progress: true
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Browser toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install exact frozen dependency tree without lifecycle effects
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Recompute frozen lockfile material
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/package-lock-material.mjs --root . --out "$RUNNER_TEMP/package-lock-material.json"
+          node scripts/dependency-resolution-digest.mjs --out "$RUNNER_TEMP/dependency-resolution.json"
+
+      - name: Parse Browser source
+        working-directory: apps/metaengine-browser
+        run: npm run check
+
+      - name: Run focused V2/V3 supply-chain contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test             test/package-lock-material.test.mjs             test/build-identity.test.mjs             test/installer-provenance-v2.test.mjs             test/installer-provenance-v3.test.mjs             test/qualified-installer-consumer-contract.test.mjs             test/package-build-reservation.test.mjs             test/package-build-reservation-workflow.test.mjs
+
+      - name: Parse PowerShell qualified consumer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = Resolve-Path 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if (@($errors).Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'qualified_installer_consumer_parse_failed'
+          }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
