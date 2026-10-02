@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'work/build-lockfile-material-v1'
+      - 'work/build-hermetic-toolchain-v1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/.gitattributes'
