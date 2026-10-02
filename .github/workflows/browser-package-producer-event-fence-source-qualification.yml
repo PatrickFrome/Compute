@@ -71,7 +71,7 @@ jobs:
               "validateset('push', 'pull_request', 'workflow_dispatch')",
               'expectedproducerevent',
               "'--event'",
-              'qualified_installer_consumer_binding.v1',
+              'metaengine.browser.qualified-installer-consumer-binding.v1',
           ]
           for token in required:
               if token not in runtime:
