@@ -185,6 +185,14 @@ jobs:
             authority_effect=$false
           } | ConvertTo-Json -Compress)
 
+      - name: Prove qualified installer V2/V3 compatibility boundary
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./test/qualified-installer-consumer-verify.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_compatibility_fixture_failed' }
+
       - name: Build ME2 UI and daemon with frozen Bun
         shell: powershell
         env:

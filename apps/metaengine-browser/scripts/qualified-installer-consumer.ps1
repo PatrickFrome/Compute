@@ -204,19 +204,28 @@ if ($Mode -eq 'Verify') {
     '--config' $ConfigPath
   if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_reverify_failed' }
   $acquired = Read-JsonFile -Path (Join-Path $payloadPath 'acquired.json') -MissingCode 'qualified_installer_acquired_missing'
-  if ([string]$acquired.installer_sha256 -ne [string]$binding.installer_sha256 -or
-      [string]$acquired.installer_path -ne [string]$binding.installer_path -or
-      [string]$acquired.provenance_path -ne [string]$binding.provenance_path -or
-      [string]$acquired.build_identity_sha256 -ne [string]$binding.build_identity_sha256 -or
-      [string]$acquired.dependency_resolution_sha256 -ne [string]$binding.dependency_resolution_sha256 -or
+  $reverifyBindingDrift = (
+    [string]$acquired.installer_sha256 -ne [string]$binding.installer_sha256 -or
+    [string]$acquired.installer_path -ne [string]$binding.installer_path -or
+    [string]$acquired.provenance_path -ne [string]$binding.provenance_path -or
+    [string]$acquired.build_identity_sha256 -ne [string]$binding.build_identity_sha256 -or
+    [string]$acquired.dependency_resolution_sha256 -ne [string]$binding.dependency_resolution_sha256 -or
+    $acquired.build_identity_verified -ne $true -or
+    $acquired.dependency_resolution_verified -ne $true -or
+    $acquired.blockmap_verified -ne $true -or
+    $acquired.config_verified -ne $true
+  )
+  if (-not $reverifyBindingDrift -and [string]$binding.provenance_schema -eq 'metaengine.browser.installer-provenance.v3') {
+    $reverifyBindingDrift = (
       [string]$acquired.package_lock_sha256 -ne [string]$binding.package_lock_sha256 -or
       [string]$acquired.npm_version -ne [string]$binding.npm_version -or
       [string]$acquired.bun_version -ne [string]$binding.bun_version -or
       [string]$acquired.me2_ui_bun_lock_sha256 -ne [string]$binding.me2_ui_bun_lock_sha256 -or
-      $acquired.build_identity_verified -ne $true -or $acquired.dependency_resolution_verified -ne $true -or
       [bool]$acquired.package_lock_verified -ne [bool]$binding.package_lock_verified -or
-      [bool]$acquired.me2_ui_bun_lock_verified -ne [bool]$binding.me2_ui_bun_lock_verified -or
-      $acquired.blockmap_verified -ne $true -or $acquired.config_verified -ne $true) {
+      [bool]$acquired.me2_ui_bun_lock_verified -ne [bool]$binding.me2_ui_bun_lock_verified
+    )
+  }
+  if ($reverifyBindingDrift) {
     throw 'qualified_installer_reverify_binding_drift'
   }
   return
@@ -273,13 +282,15 @@ $result = [ordered]@{
   producer_run_attempt = [int64]$binding.producer_run_attempt
   build_identity_sha256 = [string]$binding.build_identity_sha256
   dependency_resolution_sha256 = [string]$binding.dependency_resolution_sha256
-  package_lock_sha256 = [string]$binding.package_lock_sha256
-  npm_version = [string]$binding.npm_version
-  bun_version = [string]$binding.bun_version
-  me2_ui_bun_lock_sha256 = [string]$binding.me2_ui_bun_lock_sha256
-  package_lock_verified = [bool]$binding.package_lock_verified
-  me2_ui_bun_lock_verified = [bool]$binding.me2_ui_bun_lock_verified
   producer_terminal_success = $true
   authority_effect = $false
+}
+if ([string]$binding.provenance_schema -eq 'metaengine.browser.installer-provenance.v3') {
+  $result.package_lock_sha256 = [string]$binding.package_lock_sha256
+  $result.npm_version = [string]$binding.npm_version
+  $result.bun_version = [string]$binding.bun_version
+  $result.me2_ui_bun_lock_sha256 = [string]$binding.me2_ui_bun_lock_sha256
+  $result.package_lock_verified = [bool]$binding.package_lock_verified
+  $result.me2_ui_bun_lock_verified = [bool]$binding.me2_ui_bun_lock_verified
 }
 Write-Output ($result | ConvertTo-Json -Compress -Depth 5)

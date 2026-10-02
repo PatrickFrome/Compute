@@ -1,0 +1,25 @@
+{
+  "schema": "metaengine.browser.build-identity-v3-physical-correction.v1",
+  "date": "2026-10-02",
+  "failed_head": "245920c1a45851a1d30c25341ce2ca33457bc5c7",
+  "pr_number": 1093,
+  "package_smoke": {
+    "run_id": 36988305577,
+    "run_number": 3144,
+    "reservation_artifact_id": 11218079311,
+    "reservation_artifact_digest": "sha256:8c9bea4e65699be2e54fa6053985224dc50db68fd8c187783df0620c2cc72d0b"
+  },
+  "self_update": {
+    "run_id": 36988305490,
+    "run_number": 3597,
+    "failure_stage": "QUALIFIED_INSTALLER_V2_COMPATIBILITY_FIXTURE",
+    "installer_acquired": false,
+    "update_effect_started": false
+  },
+  "root_cause": "V3_ONLY_BINDING_PROPERTIES_DEREFERENCED_FOR_V2_UNDER_POWERSHELL_STRICTMODE",
+  "consumed_package_version": "0.7.0-dev.36980000001.1",
+  "successor_package_version": "0.7.0-dev.36990000001.1",
+  "source_only_fixture_added": true,
+  "authority_effect": false,
+  "live_install_effect": false
+}
