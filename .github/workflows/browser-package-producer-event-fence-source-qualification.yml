@@ -1,0 +1,111 @@
+name: Browser Package Producer Event Fence Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-package-producer-event-fence-v1'
+    paths:
+      - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
+      - 'apps/metaengine-browser/test/installer-provenance.test.mjs'
+      - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
+      - '.github/workflows/browser-package-producer-event-fence-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse event-fence implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/scripts/installer-provenance.mjs
+          pwsh -NoProfile -Command '
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path "apps/metaengine-browser/scripts/qualified-installer-consumer.ps1").Path,
+              [ref]$tokens,[ref]$errors
+            )
+            if($errors.Count -ne 0){ throw $errors[0].Message }
+          '
+
+      - name: Prove producer-event resolver and shared consumer contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test             apps/metaengine-browser/test/installer-provenance.test.mjs             apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs
+
+      - name: Validate source-only event-fence boundary
+        shell: python
+        run: |
+          from pathlib import Path
+
+          provenance = Path('apps/metaengine-browser/scripts/installer-provenance.mjs').read_text(encoding='utf-8')
+          consumer = Path('apps/metaengine-browser/scripts/qualified-installer-consumer.ps1').read_text(encoding='utf-8')
+          workflow = Path('.github/workflows/browser-package-producer-event-fence-source-qualification.yml').read_text(encoding='utf-8')
+          runtime = (provenance + '\n' + consumer + '\n' + workflow.split('      - name: Validate source-only event-fence boundary',1)[0]).lower()
+
+          required = [
+              "producer_events = new set(['push', 'pull_request', 'workflow_dispatch'])",
+              'producer_event_invalid',
+              '&event=',
+              'picknewestrun(payload.workflow_runs, head, expectedevent)',
+              'producer_event:',
+              'producer_event_mismatch',
+              "validateset('push', 'pull_request', 'workflow_dispatch')",
+              'expectedproducerevent',
+              "'--event'",
+              'qualified_installer_consumer_binding.v1',
+          ]
+          for token in required:
+              if token not in runtime:
+                  raise SystemExit(f'producer_event_fence_contract_missing:{token}')
+
+          forbidden = [
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'contents: write',
+              'actions: write',
+              'gh release',
+              'electron-builder.cmd --',
+              'npm install',
+              'npm ci',
+              'bun install',
+              'promotion_authorized=true',
+              'authority_effect=true',
+          ]
+          for token in forbidden:
+              if token in runtime:
+                  raise SystemExit(f'producer_event_fence_forbidden_capability:{token}')
+
+          version = __import__('json').loads(
+              Path('apps/metaengine-browser/package.json').read_text(encoding='utf-8')
+          )['version']
+          if version != '0.7.0-dev.37006000001.1':
+              raise SystemExit(f'producer_event_fence_package_version_drift:{version}')
+
+          print('producer_event_fence_source_contract_pass')
+
+      - name: Prove exact checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/scripts/installer-provenance.mjs apps/metaengine-browser/scripts/qualified-installer-consumer.ps1 apps/metaengine-browser/test/installer-provenance.test.mjs apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs .github/workflows/browser-package-producer-event-fence-source-qualification.yml)"
