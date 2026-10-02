@@ -78,7 +78,11 @@ function buildIdentityPayload(input = {}) {
     repository_id: repositoryId,
     source_head: normalizeSourceHead(input.source_head ?? input.sourceHead),
     workflow,
-    run_id: requiredString(input.run_id ?? input.runId, 'build_identity_run_id_invalid'),
+    run_id: (() => {
+      const runId = requiredString(input.run_id ?? input.runId, 'build_identity_run_id_invalid');
+      if (!DIGITS.test(runId)) throw new Error('build_identity_run_id_invalid');
+      return runId;
+    })(),
     run_attempt: requiredPositiveInt(input.run_attempt ?? input.runAttempt, 'build_identity_run_attempt_invalid'),
     package_version: packageVersion,
     platform,
