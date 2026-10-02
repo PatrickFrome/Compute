@@ -211,6 +211,10 @@ jobs:
         shell: powershell
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_DEPENDENCY_RESOLUTION_PATH: ${{ runner.temp }}\dependency-resolution.json
+          ME2_BUILD_WORKFLOW: browser-windows-package-smoke.yml
+          ME2_BUILD_ARCH: x64
+          ME2_ELECTRON_BUILDER_VERSION: 26.15.7
         run: |
           $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
           $version = [string](node -p "require('./package.json').version")
