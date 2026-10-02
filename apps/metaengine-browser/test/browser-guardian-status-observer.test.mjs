@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import {
   createBrowserGuardianStatusObserver,
 } from '../src/browser-guardian-status-observer.mjs';
+import {
+  mergeHostResilienceGuardianObservation,
+} from '../src/native-supervisor-client.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -120,7 +123,32 @@ test('hung or malformed Guardian observation cannot become positive', async () =
   assert.match(String(bad.observation_error), /schema_invalid/);
 });
 
-test('product wiring preserves Guardian in both host_resilience writers without Edge drift', () => {
+test('host resilience merge preserves fresh Guardian diagnostic without changing authority', () => {
+  const host = Object.freeze({
+    schema: 'metaengine.browser.host-resilience.v1',
+    state: 'RUNNING',
+    sentinel_ready: true,
+    authority_effect: false,
+  });
+  const ready = guardianStatus();
+  const merged = mergeHostResilienceGuardianObservation(host, { guardian: ready });
+  assert.equal(merged.state, 'RUNNING');
+  assert.equal(merged.sentinel_ready, true);
+  assert.deepEqual(merged.guardian, ready);
+  assert.equal(merged.authority_effect, false);
+
+  const nested = mergeHostResilienceGuardianObservation(host, {
+    host_resilience: { guardian: guardianStatus('HOLD', 'GUARDIAN_OBSERVATION_STALE') },
+  });
+  assert.equal(nested.guardian.state, 'HOLD');
+  assert.equal(nested.guardian.reason, 'GUARDIAN_OBSERVATION_STALE');
+
+  const absent = mergeHostResilienceGuardianObservation(host, {});
+  assert.equal(absent.guardian, null);
+  assert.equal(absent.state, 'RUNNING');
+});
+
+test('product wiring uses the same host-resilience merge in heartbeat and realtime paths without Edge drift', () => {
   const main = fs.readFileSync(path.join(APP_ROOT, 'src', 'main.mjs'), 'utf8');
   const nativeSupervisor = fs.readFileSync(path.join(APP_ROOT, 'src', 'native-supervisor-client.mjs'), 'utf8');
   const edge = fs.readFileSync(path.join(APP_ROOT, 'supabase', 'a2-browser-native-supervisor-v1', 'index.ts'), 'utf8');
@@ -131,7 +159,10 @@ test('product wiring preserves Guardian in both host_resilience writers without 
   assert.match(main, /guardian-status'[\s\S]{0,240}observe\(\{ force: true \}\)/);
   assert.match(main, /invalidate\('GUARDIAN_ACTIVATION_STARTED'\)[\s\S]{0,240}quiesce\(\)[\s\S]{0,320}observer\.record\(result\)/);
 
-  assert.match(nativeSupervisor, /host_resilience:\s*\{[\s\S]{0,520}guardian:\s*sourceState\?\.guardian\s*\|\|\s*null/);
+  const mergeCalls = nativeSupervisor.match(/mergeHostResilienceGuardianObservation\(hostResilienceSnapshot\(\), sourceState\)/g) || [];
+  assert.equal(mergeCalls.length, 2);
+  assert.match(nativeSupervisor, /const getStateWithHostResilience[\s\S]{0,700}const sourceState = await sourceGetState\(\)/);
+  assert.match(nativeSupervisor, /#pushRealtimeState\(\)[\s\S]{0,5000}host_resilience:\s*mergeHostResilienceGuardianObservation/);
 
   // R83 canary equivalence must remain deploy/readback-gated. This slice reuses
   // the already-qualified host_resilience plane instead of silently advancing
