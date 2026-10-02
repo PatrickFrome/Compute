@@ -1,0 +1,43 @@
+{
+  "schema": "metaengine.browser.one-physical-producer-implementation-checkpoint.v1",
+  "date": "2026-10-02",
+  "branch": "work/build-one-physical-producer-fence-v1",
+  "qualified_base": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+  "implementation_source_before_reservation": "12ac3757e2a3868d4516a402ad51dd39e453b277",
+  "reserved_package_version": "0.7.0-dev.36977000001.1",
+  "latest_observed_actions_run_id": 36975111718,
+  "producer_fence": {
+    "rerun_attempt_must_equal_one": true,
+    "job_concurrency_keyed_by_package_version": true,
+    "cancel_in_progress": false,
+    "prior_version_artifact_refuses_build": true,
+    "prior_source_candidate_refuses_build": true,
+    "api_ambiguity_fail_closed": true,
+    "immutable_version_marker_before_dependency_install": true,
+    "reservation_artifact_id_sealed": true,
+    "reservation_artifact_digest_sealed": true
+  },
+  "parser_incident": {
+    "runs": [
+      36974979671,
+      36975051625,
+      36975082570,
+      36975111718
+    ],
+    "jobs": 0,
+    "artifacts": 0,
+    "physical_effect": false,
+    "root_cause": "DUPLICATE_TIMEOUT_MINUTES_YAML_KEY",
+    "corrective_commit": "98b60bbca79b1e4fa5c7843a952f495588e2ff1c"
+  },
+  "predecessor": {
+    "version": "0.7.0-dev.36974000001.1",
+    "source": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+    "installer_sha256": "f37a5a9604c0dfbb5bf86fba2042ba2e211ac5064a9ac3efeb8e5896a37638bd",
+    "build_identity_sha256": "52d075fee4a9fe9729836481743857f75dc90566150b15d93137dc829290eeb2",
+    "consumed": true
+  },
+  "physical_build_started": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
