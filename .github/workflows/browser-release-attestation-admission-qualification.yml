@@ -1,0 +1,181 @@
+name: Browser Release Attestation Admission Qualification
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/browser-release-attestation-v1.yml'
+      - '.github/workflows/browser-release-attestation-admission-qualification.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  admission:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout exact physically-qualified base candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact verification Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Prove release-attestation admission against the exact one-built base
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.base.sha }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $sourceHead = [string]$env:EXPECTED_HEAD
+          if ($sourceHead -notmatch '^[a-f0-9]{40}$') { throw 'attestation_admission_source_head_invalid' }
+          if ((git rev-parse HEAD).Trim().ToLowerInvariant() -ne $sourceHead) { throw 'attestation_admission_checkout_drift' }
+
+          $packageVersion = [string](node -p "require('./package.json').version")
+          if (-not $packageVersion) { throw 'attestation_admission_package_version_missing' }
+
+          $workRoot = Join-Path $env:RUNNER_TEMP 'attestation-admission-candidate'
+          $bindingPath = Join-Path $workRoot 'consumer-binding.json'
+          .\scripts\qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead $sourceHead -WorkRoot $workRoot -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json') -BindingPath $bindingPath
+          if ($LASTEXITCODE -ne 0) { throw 'attestation_admission_acquire_failed' }
+
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if (
+            $binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding.v1' -or
+            [string]$binding.source_head -ne $sourceHead -or
+            [int64]$binding.producer_run_id -le 0 -or
+            [int64]$binding.producer_run_attempt -ne 1 -or
+            [string]$binding.installer_sha256 -notmatch '^[a-f0-9]{64}$' -or
+            [string]$binding.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or
+            $binding.build_identity_verified -ne $true -or
+            $binding.dependency_resolution_verified -ne $true -or
+            $binding.package_lock_verified -ne $true -or
+            $binding.me2_ui_bun_lock_verified -ne $true -or
+            $binding.authority_effect -ne $false
+          ) { throw 'attestation_admission_binding_invalid' }
+
+          .\scripts\qualified-installer-consumer.ps1 -Mode Verify -ExpectedHead $sourceHead -BindingPath $bindingPath -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json')
+          if ($LASTEXITCODE -ne 0) { throw 'attestation_admission_reverify_failed' }
+
+          $producerProofPath = Join-Path $env:RUNNER_TEMP 'attestation-admission-producer-proof.json'
+          @{
+            schema='metaengine.browser.release-attestation-admission-producer-proof.v1'
+            source_head=$sourceHead
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content $producerProofPath -Encoding utf8
+
+          .\scripts\qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead $sourceHead -BindingPath $bindingPath -ProofPath $producerProofPath -TimeoutMinutes 5 -WaitIntervalSeconds 10
+          if ($LASTEXITCODE -ne 0) { throw 'attestation_admission_producer_not_terminal_success' }
+
+          $payloadRoot = Split-Path -Parent ([string]$binding.installer_path)
+          $composedSbomPath = Join-Path $payloadRoot 'browser-composed-sbom.cdx.json'
+          $composedEvidencePath = Join-Path $payloadRoot 'browser-composed-sbom-evidence.json'
+          foreach ($path in @([string]$binding.installer_path, [string]$binding.provenance_path, $composedSbomPath, $composedEvidencePath)) {
+            if (-not (Test-Path $path -PathType Leaf)) { throw "attestation_admission_material_missing:$path" }
+          }
+
+          $composed = Get-Content $composedEvidencePath -Raw | ConvertFrom-Json
+          $sbom = Get-Content $composedSbomPath -Raw | ConvertFrom-Json
+          $installerRawSha = (Get-FileHash ([string]$binding.installer_path) -Algorithm SHA256).Hash.ToLowerInvariant()
+          $composedRawSha = (Get-FileHash $composedSbomPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $rootHash = [string](($sbom.metadata.component.hashes | Where-Object { $_.alg -eq 'SHA-256' } | Select-Object -First 1).content)
+          if (
+            $composed.schema -ne 'metaengine.browser.composed-sbom-evidence.v1' -or
+            [string]$composed.source_head -ne $sourceHead -or
+            [string]$composed.package_version -ne $packageVersion -or
+            [string]$composed.installer_sha256 -ne [string]$binding.installer_sha256 -or
+            [string]$composed.build_identity_sha256 -ne [string]$binding.build_identity_sha256 -or
+            [string]$composed.composed_semantic_inventory_sha256 -notmatch '^[a-f0-9]{64}$' -or
+            [string]$composed.composition_aggregate -ne 'incomplete' -or
+            $composed.authority_effect -ne $false -or
+            $installerRawSha -ne [string]$binding.installer_sha256 -or
+            $rootHash -ne [string]$binding.installer_sha256 -or
+            [string]$sbom.compositions[0].aggregate -ne 'incomplete'
+          ) { throw 'attestation_admission_composed_sbom_binding_invalid' }
+
+          $headers = @{
+            Authorization = "Bearer $env:ME2_GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'metaengine-release-attestation-admission-v1'
+          }
+          $runsUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs?head_sha=$sourceHead&per_page=100"
+          $runResponse = Invoke-RestMethod -Method Get -Uri $runsUri -Headers $headers
+          $requiredNames = @(
+            'Browser Windows Package Smoke',
+            'Browser Windows Installed Chat Qualification',
+            'METAENGINE Browser Final Runtime Activation V1',
+            'METAENGINE Browser Windows Autonomous Soak V1',
+            'METAENGINE Browser Self Update E2E',
+            'METAENGINE Browser Shell V1',
+            'METAENGINE Browser Critical Audit V1',
+            'METAENGINE Browser Shell-First Dirty Profile V1',
+            'METAENGINE Browser Host Resilience Login Start V1',
+            'Browser Workspace Reincarnation V1'
+          )
+
+          $matrix = @()
+          foreach ($name in $requiredNames) {
+            $matches = @(
+              $runResponse.workflow_runs |
+              Where-Object { [string]$_.name -eq $name -and [string]$_.head_sha -eq $sourceHead } |
+              Sort-Object -Property run_number -Descending |
+              Select-Object -First 1
+            )
+            if ($matches.Count -ne 1) { throw "attestation_admission_required_workflow_missing:$name" }
+            $run = $matches[0]
+            if ([string]$run.status -ne 'completed' -or [string]$run.conclusion -ne 'success') {
+              throw "attestation_admission_required_workflow_not_success:$name"
+            }
+            if ($name -eq 'Browser Windows Package Smoke' -and [int64]$run.id -ne [int64]$binding.producer_run_id) {
+              throw 'attestation_admission_package_smoke_producer_drift'
+            }
+            $matrix += [ordered]@{
+              name=[string]$run.name
+              run_id=[int64]$run.id
+              run_number=[int64]$run.run_number
+              run_attempt=[int64]$run.run_attempt
+              conclusion=[string]$run.conclusion
+            }
+          }
+
+          $proof = [ordered]@{
+            schema='metaengine.browser.release-attestation-admission-qualification.v1'
+            source_head=$sourceHead
+            package_version=$packageVersion
+            installer_sha256=[string]$binding.installer_sha256
+            build_identity_sha256=[string]$binding.build_identity_sha256
+            composed_sbom_raw_sha256=$composedRawSha
+            composed_sbom_semantic_inventory_sha256=[string]$composed.composed_semantic_inventory_sha256
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            qualification_workflows=$matrix
+            terminal_green=$true
+            attestation_created=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          }
+          $proofPath = Join-Path $env:RUNNER_TEMP 'release-attestation-admission-proof.json'
+          $proof | ConvertTo-Json -Depth 8 | Set-Content $proofPath -Encoding utf8
+          Write-Host ($proof | ConvertTo-Json -Compress -Depth 8)
+
+      - name: Upload read-only admission evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-release-attestation-admission-${{ github.event.pull_request.base.sha }}
+          path: ${{ runner.temp }}/release-attestation-admission-proof.json
+          if-no-files-found: error
+          retention-days: 30
