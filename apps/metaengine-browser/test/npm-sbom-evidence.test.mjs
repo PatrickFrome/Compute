@@ -261,3 +261,18 @@ test('raw SBOM digest is exact bytes', () => {
     fs.rmSync(files.root, { recursive: true, force: true });
   }
 });
+
+
+test('npm scoped root group/name encoding binds to scoped package identity', () => {
+  const value = sbom();
+  value.metadata.component.group = '@metaengine';
+  value.metadata.component.name = 'browser-shell';
+  const files = fixture({ sbomValue: value });
+  try {
+    const proof = evidence(files);
+    assert.equal(proof.package_name, NAME);
+    assert.equal(proof.component_count, 2);
+  } finally {
+    fs.rmSync(files.root, { recursive: true, force: true });
+  }
+});
