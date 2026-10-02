@@ -133,6 +133,41 @@ test('dependency resolution proof is canonical and tamper-evident', () => {
   );
 });
 
+test('dependency resolution rejects internally contradictory metadata even with a recomputed digest', () => {
+  const proof = dependencyProof();
+  const countPayload = {
+    schema: proof.schema,
+    root_name: proof.root_name,
+    root_version: proof.root_version,
+    node_version: proof.node_version,
+    npm_version: proof.npm_version,
+    dependency_count: 3,
+    tree: proof.tree,
+  };
+  assert.throws(
+    () => validateDependencyResolutionProof({
+      ...countPayload,
+      dependency_resolution_sha256: sha256String(canonicalJson(countPayload)),
+      authority_effect: false,
+    }),
+    /dependency_resolution_count_mismatch/,
+  );
+
+  const rootPayload = {
+    ...countPayload,
+    dependency_count: 2,
+    root_version: '9.9.9',
+  };
+  assert.throws(
+    () => validateDependencyResolutionProof({
+      ...rootPayload,
+      dependency_resolution_sha256: sha256String(canonicalJson(rootPayload)),
+      authority_effect: false,
+    }),
+    /dependency_resolution_root_tree_mismatch/,
+  );
+});
+
 test('packaging hooks and Package Smoke bind the same build identity evidence', () => {
   const before = read('scripts/electron-builder-before-pack.cjs');
   const after = read('scripts/electron-builder-after-all-artifact-build.cjs');
