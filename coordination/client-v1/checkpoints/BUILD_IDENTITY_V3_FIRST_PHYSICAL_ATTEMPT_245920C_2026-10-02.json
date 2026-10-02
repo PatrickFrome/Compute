@@ -1,0 +1,73 @@
+{
+  "schema": "metaengine.browser.build-identity-v3-first-physical-attempt.v1",
+  "date": "2026-10-02",
+  "failed_source": "245920c1a45851a1d30c25341ce2ca33457bc5c7",
+  "closed_pr": 1093,
+  "consumed_package_version": "0.7.0-dev.36980000001.1",
+  "successor_source": "d283150bc8a3338a76b98c369b67fb7e846b207b",
+  "successor_reserved_package_version": "0.7.0-dev.36990000001.1",
+  "matrix": {
+    "success": 8,
+    "failure": 2
+  },
+  "package_smoke": {
+    "success": true,
+    "run_id": 36988305577,
+    "run_number": 3144,
+    "reservation_artifact": {
+      "id": 11218079311,
+      "sha256": "8c9bea4e65699be2e54fa6053985224dc50db68fd8c187783df0620c2cc72d0b",
+      "bytes": 861
+    },
+    "candidate_artifact": {
+      "id": 11219075285,
+      "sha256": "0bd562397864a8d2be5b6929b2051d27545271b35219fdd65ce7700a5df1969b",
+      "bytes": 158406516
+    },
+    "evidence_artifact": {
+      "id": 11218329600,
+      "sha256": "3695822543bf9a85280308c2d2118ab20950f4c6385ae93f6b44a211f74e70ca",
+      "bytes": 622590
+    },
+    "installer_sha256": "95b13e17777c9ca9dd70f8d7ad0d2ae493960631e85e63cf6d07de0d1e2cffa3",
+    "installer_bytes": 156364343,
+    "blockmap_sha256": "8cc5fafbd328945c58ec930b17d186c48950b88c8fa8cdbd9b66fa8dce530c9c",
+    "build_identity_sha256": "fada9ffb64f5863062edbce54090e32d30e87f61dfd113c791477130cc6df128",
+    "dependency_resolution_sha256": "1e68dcc723bdf3aabb5af6bcc3e3a7e31cc03a9e8c8523498069350b0054e8cf",
+    "package_lock_sha256": "0e90ce9b7928debfbbda537104411fb4d8d98dfb0e21e1816335a4460ad73be3",
+    "dependency_count": 501,
+    "npm_version": "11.19.0",
+    "bun_version": "1.3.3",
+    "electron_builder_version": "26.15.7",
+    "me2_ui_bun_lock_sha256": "a81d5c2c173747ba19a5461f16485895fabb7aa5f740b95645cb01891547ba81"
+  },
+  "self_update": {
+    "success": false,
+    "run_id": 36988305490,
+    "run_number": 3597,
+    "root_cause": "V3_ONLY_BINDING_PROPERTIES_DEREFERENCED_FOR_V2_UNDER_POWERSHELL_STRICTMODE",
+    "installer_acquired": false,
+    "update_effect_started": false
+  },
+  "installed_chat": {
+    "success": false,
+    "run_id": 36988305565,
+    "run_number": 2426,
+    "package_acquired_and_verified": true,
+    "failure": "OIDC_HTTP_403_AFTER_PR_CLOSED",
+    "pr_closed_before_oidc": true
+  },
+  "final_runtime": {
+    "success": true,
+    "artifact_id": 11218299915,
+    "artifact_sha256": "c5e70e0bb280214f1eda9f7ff2d0cb1a79428206c433829498e283504dd500b8"
+  },
+  "soak": {
+    "success": true,
+    "artifact_id": 11219205604,
+    "artifact_sha256": "96e74d72ac7fcc628ad8bf845f2ee2f23f95f41e2f52ead1461ba1276d23cb94"
+  },
+  "promotion_authorized": false,
+  "live_install_effect": false,
+  "authority_effect": false
+}
