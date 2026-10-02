@@ -1,0 +1,103 @@
+name: Browser One Producer Dirty Profile Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-one-producer-dirty-profile-v1'
+    paths:
+      - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
+      - '.github/workflows/browser-windows-package-smoke.yml'
+      - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
+      - '.github/workflows/browser-one-producer-dirty-profile-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Prove one-producer consumer contract
+        run: node --test apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs
+
+      - name: Validate dirty-profile convergence boundary
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          dirty = Path('.github/workflows/browser-shell-first-dirty-profile-v1.yml').read_text(encoding='utf-8')
+          producer = Path('.github/workflows/browser-windows-package-smoke.yml').read_text(encoding='utf-8')
+          qualifier = Path('.github/workflows/browser-one-producer-dirty-profile-source-qualification.yml').read_text(encoding='utf-8')
+          runtime = (dirty + '\n' + producer + '\n' + qualifier.split('      - name: Validate dirty-profile convergence boundary', 1)[0]).lower()
+
+          required_dirty = [
+              "actions: read",
+              "physical/build-slsa-provenance-v1",
+              "qualified-installer-consumer.ps1 -mode acquire",
+              "qualified-installer-consumer.ps1 -mode wait",
+              "-expectedproducerevent $expectedevent",
+              "producer_event",
+              "me2_installer_binding_path",
+              "shell-first-dirty-profile-proof.json",
+              "producer_terminal_success",
+              "automatic_retry_allowed=$false",
+              "promotion_authorized=$false",
+              "authority_effect=$false",
+          ]
+          for token in required_dirty:
+              if token not in dirty.lower():
+                  raise SystemExit(f'dirty_profile_one_producer_contract_missing:{token}')
+
+          forbidden_dirty = [
+              "npx --yes electron-builder",
+              "electron-builder@26.15.7",
+              "build exact-head nsis candidate",
+              "dist-test -filter",
+          ]
+          for token in forbidden_dirty:
+              if token in dirty.lower():
+                  raise SystemExit(f'dirty_profile_duplicate_producer_present:{token}')
+
+          if "'.github/workflows/browser-shell-first-dirty-profile-v1.yml'" not in producer:
+              raise SystemExit('dirty_profile_package_smoke_trigger_closure_missing')
+
+          version = json.loads(Path('apps/metaengine-browser/package.json').read_text(encoding='utf-8'))['version']
+          if version != '0.7.0-dev.37006000001.1':
+              raise SystemExit(f'dirty_profile_source_only_package_version_drift:{version}')
+
+          forbidden_runtime = [
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'contents: write',
+              'actions: write',
+              'gh release',
+              'promotion_authorized=true',
+              'authority_effect=true',
+          ]
+          for token in forbidden_runtime:
+              if token in runtime:
+                  raise SystemExit(f'dirty_profile_source_qualification_forbidden:{token}')
+
+          print('dirty_profile_one_producer_source_contract_pass')
+
+      - name: Prove exact checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-shell-first-dirty-profile-v1.yml .github/workflows/browser-windows-package-smoke.yml apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs .github/workflows/browser-one-producer-dirty-profile-source-qualification.yml)"
