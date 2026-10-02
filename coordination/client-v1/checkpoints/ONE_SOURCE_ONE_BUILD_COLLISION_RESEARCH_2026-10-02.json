@@ -1,0 +1,25 @@
+{
+  "schema": "metaengine.browser.one-build-collision-research.v1",
+  "date": "2026-10-02",
+  "base_source": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+  "risk": {
+    "build_identity_contains_run_id": true,
+    "build_identity_contains_run_attempt": true,
+    "build_identity_embedded_in_packaged_bytes": true,
+    "rerun_same_source_version_can_change_bytes": true
+  },
+  "proposed_gates": [
+    "GITHUB_RUN_ATTEMPT_MUST_EQUAL_1",
+    "NO_PRIOR_CANDIDATE_ARTIFACT_FOR_SAME_SOURCE_OTHER_RUN",
+    "NO_PRIOR_PHYSICAL_PROVENANCE_FOR_SAME_VERSION_DIFFERENT_SOURCE",
+    "API_AMBIGUITY_FAILS_BEFORE_PACKAGE"
+  ],
+  "roadmap_order": [
+    "QUALIFY_BUILD_IDENTITY_V2",
+    "ONE_SOURCE_ONE_VERSION_ONE_BUILD_FENCE",
+    "LOCKFILE_NPM_CI_LOCK_SHA",
+    "RELEASE_ATTESTATION_AND_SBOM"
+  ],
+  "implementation_authorized": false,
+  "authority_effect": false
+}
