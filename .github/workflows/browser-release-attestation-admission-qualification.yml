@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   admission:
+    if: ${{ github.event.pull_request.base.ref == 'work/build-composed-sbom-v1' }}
     runs-on: windows-2025
     steps:
       - name: Checkout exact physically-qualified base candidate
