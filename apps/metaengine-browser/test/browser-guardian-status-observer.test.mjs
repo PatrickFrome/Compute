@@ -15,13 +15,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
 
 function guardianStatus(state = 'READY', reason = 'GUARDIAN_OWNER_AND_DEVICE_BOUND') {
+  const ready = state === 'READY';
+  const enrollment = state === 'OWNER_ENROLLMENT_REQUIRED';
+  const activation = state === 'ACTIVATION_REQUIRED';
+  const serviceReady = ready || enrollment || state === 'AMBIGUOUS';
   return Object.freeze({
     schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
     state,
     reason,
-    ready: state === 'READY',
-    explicit_user_action_required: state !== 'READY',
-    uac_consent_required: state === 'ACTIVATION_REQUIRED',
+    ready,
+    guardian_service_ready: serviceReady,
+    owner_binding_proven: ready,
+    device_binding_proven: ready,
+    explicit_user_action_required: !ready,
+    uac_consent_required: activation,
     fixed_packaged_bootstrap: true,
     caller_supplied_path_used: false,
     caller_supplied_arguments_used: false,
@@ -53,9 +60,11 @@ test('shared Guardian observer coalesces concurrent Settings and heartbeat reads
   assert.equal(b.stale, false);
   assert.equal(a.observation_revision, 1);
   assert.equal(b.observation_revision, 1);
+  assert.equal(a.owner_binding_proven, true);
+  assert.equal(a.device_binding_proven, true);
 });
 
-test('expired READY observation fails closed instead of remaining green', () => {
+test('expired READY fails closed and moves positive proof to historical fields', () => {
   let nowMs = 1_000;
   const observer = createBrowserGuardianStatusObserver({
     readStatus: async () => guardianStatus(),
@@ -67,6 +76,7 @@ test('expired READY observation fails closed instead of remaining green', () => 
   assert.equal(fresh.state, 'READY');
   assert.equal(fresh.stale, false);
   assert.equal(fresh.observation_revision, 1);
+  assert.equal(fresh.owner_binding_proven, true);
 
   nowMs = 11_001;
   const stale = observer.snapshot();
@@ -75,6 +85,14 @@ test('expired READY observation fails closed instead of remaining green', () => 
   assert.equal(stale.last_confirmed_state, 'READY');
   assert.equal(stale.ready, false);
   assert.equal(stale.stale, true);
+  assert.equal(stale.guardian_service_ready, false);
+  assert.equal(stale.owner_binding_proven, false);
+  assert.equal(stale.device_binding_proven, false);
+  assert.equal(stale.explicit_user_action_required, true);
+  assert.equal(stale.uac_consent_required, false);
+  assert.equal(stale.last_confirmed_guardian_service_ready, true);
+  assert.equal(stale.last_confirmed_owner_binding_proven, true);
+  assert.equal(stale.last_confirmed_device_binding_proven, true);
 });
 
 test('activation generation invalidation discards a late prior READY read', async () => {
@@ -87,6 +105,7 @@ test('activation generation invalidation discards a late prior READY read', asyn
   await Promise.resolve();
   const invalidated = observer.invalidate('GUARDIAN_ACTIVATION_STARTED');
   assert.equal(invalidated.state, 'HOLD');
+  assert.equal(invalidated.reason, 'GUARDIAN_ACTIVATION_STARTED');
   assert.equal(invalidated.stale, true);
 
   release(guardianStatus('READY'));
@@ -95,6 +114,8 @@ test('activation generation invalidation discards a late prior READY read', asyn
   assert.equal(afterLate.state, 'HOLD');
   assert.equal(afterLate.reason, 'GUARDIAN_ACTIVATION_STARTED');
   assert.equal(afterLate.observation_revision, 0);
+  assert.equal(afterLate.owner_binding_proven, false);
+  assert.equal(afterLate.device_binding_proven, false);
 
   const enrolled = observer.record(guardianStatus(
     'OWNER_ENROLLMENT_REQUIRED',
@@ -105,7 +126,26 @@ test('activation generation invalidation discards a late prior READY read', asyn
   assert.equal(enrolled.observation_revision, 1);
 });
 
-test('hung or malformed Guardian observation cannot become positive', async () => {
+test('invalidation clears an already cached current proof but retains bounded history', () => {
+  const observer = createBrowserGuardianStatusObserver({
+    readStatus: async () => guardianStatus(),
+  });
+  const ready = observer.record(guardianStatus());
+  assert.equal(ready.owner_binding_proven, true);
+
+  const invalidated = observer.invalidate('GUARDIAN_ACTIVATION_STARTED');
+  assert.equal(invalidated.state, 'HOLD');
+  assert.equal(invalidated.reason, 'GUARDIAN_ACTIVATION_STARTED');
+  assert.equal(invalidated.guardian_service_ready, false);
+  assert.equal(invalidated.owner_binding_proven, false);
+  assert.equal(invalidated.device_binding_proven, false);
+  assert.equal(invalidated.last_confirmed_state, 'READY');
+  assert.equal(invalidated.last_confirmed_owner_binding_proven, true);
+  assert.equal(invalidated.last_confirmed_device_binding_proven, true);
+  assert.equal(invalidated.observation_revision, 1);
+});
+
+test('hung, malformed, or false-positive Guardian observations cannot become positive', async () => {
   let fireDeadline;
   const hung = createBrowserGuardianStatusObserver({
     readStatus: () => new Promise(() => {}),
@@ -126,6 +166,29 @@ test('hung or malformed Guardian observation cannot become positive', async () =
   assert.equal(bad.state, 'HOLD');
   assert.equal(bad.reason, 'GUARDIAN_OBSERVATION_FAILED');
   assert.match(String(bad.observation_error), /schema_invalid/);
+
+  const falseReady = createBrowserGuardianStatusObserver({
+    readStatus: async () => ({
+      ...guardianStatus('READY'),
+      owner_binding_proven: false,
+      device_binding_proven: false,
+    }),
+  });
+  const rejectedReady = await falseReady.observe({ force: true });
+  assert.equal(rejectedReady.state, 'HOLD');
+  assert.equal(rejectedReady.owner_binding_proven, false);
+  assert.equal(rejectedReady.device_binding_proven, false);
+  assert.match(String(rejectedReady.observation_error), /ready_proof_invalid/);
+
+  const contradictoryNonReady = createBrowserGuardianStatusObserver({
+    readStatus: async () => ({
+      ...guardianStatus('HOLD', 'TEST_HOLD'),
+      owner_binding_proven: true,
+    }),
+  });
+  const rejectedNonReady = await contradictoryNonReady.observe({ force: true });
+  assert.equal(rejectedNonReady.state, 'HOLD');
+  assert.match(String(rejectedNonReady.observation_error), /nonready_proof_invalid/);
 });
 
 test('accepted Guardian reads advance revision while cached reads and invalidation do not', async () => {
