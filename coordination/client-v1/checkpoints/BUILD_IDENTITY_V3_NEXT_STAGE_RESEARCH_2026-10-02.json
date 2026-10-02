@@ -1,0 +1,45 @@
+{
+  "schema": "metaengine.browser.supply-chain-next-stage-research.v1",
+  "date": "2026-10-02",
+  "base_source": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+  "current_build_identity_v2": true,
+  "next_slice": "BI3_A_FROZEN_DEPENDENCY_INPUT",
+  "recommendations": {
+    "commit_browser_package_lock": true,
+    "use_npm_ci": true,
+    "bind_lockfile_sha256": true,
+    "retain_installed_tree_sha256": true,
+    "fail_on_package_lock_drift": true,
+    "release_attestation_after_bi3a": true,
+    "release_sbom_after_lockfile": true
+  },
+  "slsa_mapping": {
+    "build_definition_inputs": [
+      "source_sha",
+      "builder_config_sha256",
+      "package_lock_sha256",
+      "package_version"
+    ],
+    "run_details": [
+      "repository_id",
+      "workflow",
+      "run_id",
+      "run_attempt",
+      "node_version",
+      "electron_builder_version"
+    ],
+    "artifact_subjects": [
+      "installer_sha256",
+      "blockmap_sha256"
+    ]
+  },
+  "non_goals": [
+    "SECOND_PROVENANCE_PLANE",
+    "AUTO_RELEASE_AUTHORITY",
+    "SUPERVISOR_AUTHORITY",
+    "GUARDIAN_AUTHORITY",
+    "REPRODUCIBLE_INSTALLER_CLAIM"
+  ],
+  "implementation_authorized": false,
+  "authority_effect": false
+}
