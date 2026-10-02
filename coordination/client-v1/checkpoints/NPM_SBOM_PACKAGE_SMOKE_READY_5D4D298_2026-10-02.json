@@ -1,0 +1,55 @@
+{
+  "schema": "metaengine.browser.npm-sbom-package-smoke-source-ready.v1",
+  "created_at": "2026-10-02T11:12:28Z",
+  "source_head": "5d4d2981b5c1ddab4d9a3249118e596d84688b3b",
+  "implementation_branch": "work/build-sbom-evidence-v1",
+  "qualified_predecessor": "d283150bc8a3338a76b98c369b67fb7e846b207b",
+  "reserved_package_version": "0.7.0-dev.36991000001.1",
+  "package_identity_consumed": false,
+  "source_qualification": {
+    "run_id": 36999438370,
+    "run_number": 7,
+    "success": true,
+    "linux": {
+      "sbom_tests": 12,
+      "package_smoke_wiring_tests": 2
+    },
+    "windows": {
+      "sbom_tests": 12,
+      "package_smoke_wiring_tests": 2,
+      "browser_tests": 3925,
+      "pass": 3925,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "dependency_material": {
+    "package_lock_sha256": "d81d8d75c3facf27654e13439e005710f358705b2dde2baf6266512f45ce928b",
+    "package_lock_bytes": 144647,
+    "dependency_resolution_sha256": "6a7fa9676a94bebc3d19c22396feefa1cf48a4879fbca9d5542f76a4d66da098",
+    "dependency_count": 501,
+    "node": "v24.21.0",
+    "npm": "11.19.0"
+  },
+  "sbom": {
+    "format": "CycloneDX",
+    "spec_version": "1.5",
+    "semantic_inventory_sha256": "5ce48b0944a97809e8cc93de7b42b1df8ac466fb655b65da8321463019f21cf8",
+    "component_count": 286,
+    "dependency_node_count": 287,
+    "dependency_relation_count": 448,
+    "raw_hash_authoritative_for_content_identity": false
+  },
+  "package_smoke": {
+    "sbom_generated_after_dependency_resolution": true,
+    "sbom_before_build_identity": true,
+    "sbom_in_candidate_artifact": true,
+    "sbom_in_package_evidence": true,
+    "second_installer_build": false,
+    "attestations_permission": false,
+    "id_token_permission": false
+  },
+  "promotion_authorized": false,
+  "live_install_authorized": false,
+  "authority_effect": false
+}
