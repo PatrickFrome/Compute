@@ -89,8 +89,10 @@ jobs:
             throw 'qualified_installer_consumer_parse_failed'
           }
 
-      - name: Prove source checkout unchanged
+      - name: Prove tracked source checkout unchanged
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(git status --porcelain)"
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
