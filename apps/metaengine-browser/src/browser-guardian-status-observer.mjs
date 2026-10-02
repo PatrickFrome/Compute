@@ -52,6 +52,7 @@ export function createBrowserGuardianStatusObserver({
   const deadline = Math.max(500, Math.min(5_000, Number(deadlineMs) || BROWSER_GUARDIAN_STATUS_OBSERVATION_DEADLINE_MS));
 
   let generation = 0;
+  let revision = 0;
   let cached = null;
   let observedAtMs = 0;
   let lastError = null;
@@ -70,6 +71,7 @@ export function createBrowserGuardianStatusObserver({
         stale: true,
         refresh_in_flight: inFlight != null,
         observation_generation: generation,
+        observation_revision: revision,
         observation_error: lastError,
       });
     }
@@ -88,6 +90,7 @@ export function createBrowserGuardianStatusObserver({
         stale: true,
         refresh_in_flight: inFlight != null,
         observation_generation: generation,
+        observation_revision: revision,
         observation_error: lastError,
         invalidated_reason: invalidatedReason,
         automatic_retry_allowed: false,
@@ -101,6 +104,7 @@ export function createBrowserGuardianStatusObserver({
       stale: false,
       refresh_in_flight: inFlight != null,
       observation_generation: generation,
+      observation_revision: revision,
       observation_error: lastError,
       invalidated_reason: invalidatedReason,
       automatic_retry_allowed: false,
@@ -123,6 +127,7 @@ export function createBrowserGuardianStatusObserver({
       if (capturedGeneration !== generation) return projected();
       cached = validateStatus(result);
       observedAtMs = now();
+      revision += 1;
       lastError = null;
       invalidatedReason = null;
       return projected();
@@ -171,6 +176,7 @@ export function createBrowserGuardianStatusObserver({
     generation += 1;
     cached = validateStatus(status);
     observedAtMs = now();
+    revision += 1;
     lastError = null;
     invalidatedReason = null;
     return projected();
@@ -194,6 +200,8 @@ export function browserGuardianStatusObserverContract() {
     freshness_ttl_ms: BROWSER_GUARDIAN_STATUS_OBSERVATION_TTL_MS,
     stale_ready_is_positive: false,
     activation_invalidates_prior_read_generation: true,
+    accepted_observation_revision_monotonic_within_process: true,
+    discarded_late_read_advances_revision: false,
     late_prior_read_can_overwrite_post_activation_state: false,
     supervisor_admission_authority: false,
     automatic_retry_allowed: false,
