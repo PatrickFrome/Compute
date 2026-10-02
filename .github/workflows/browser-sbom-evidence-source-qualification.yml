@@ -1,0 +1,162 @@
+name: Browser SBOM Evidence Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-sbom-evidence-v1'
+    paths:
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - 'apps/metaengine-browser/scripts/npm-sbom-evidence.mjs'
+      - 'apps/metaengine-browser/test/npm-sbom-evidence.test.mjs'
+      - '.github/workflows/browser-sbom-evidence-source-qualification.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-sbom-evidence-source-qualification
+  cancel-in-progress: true
+
+jobs:
+  linux-sbom-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install exact frozen dependency tree without lifecycle effects
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
+          npm ci --ignore-scripts --no-audit --no-fund
+          node scripts/package-lock-material.mjs --root . --out "$RUNNER_TEMP/package-lock-material.json"
+          node scripts/dependency-resolution-digest.mjs --out "$RUNNER_TEMP/dependency-resolution.json"
+
+      - name: Generate two npm CycloneDX SBOM observations
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm sbom --sbom-format=cyclonedx --sbom-type=application > "$RUNNER_TEMP/npm-sbom-1.cdx.json"
+          npm sbom --sbom-format=cyclonedx --sbom-type=application > "$RUNNER_TEMP/npm-sbom-2.cdx.json"
+
+          node scripts/npm-sbom-evidence.mjs             --sbom "$RUNNER_TEMP/npm-sbom-1.cdx.json"             --package-json package.json             --package-lock-material "$RUNNER_TEMP/package-lock-material.json"             --dependency-resolution "$RUNNER_TEMP/dependency-resolution.json"             --source-head "$GITHUB_SHA"             --out "$RUNNER_TEMP/npm-sbom-evidence-1.json"
+
+          node scripts/npm-sbom-evidence.mjs             --sbom "$RUNNER_TEMP/npm-sbom-2.cdx.json"             --package-json package.json             --package-lock-material "$RUNNER_TEMP/package-lock-material.json"             --dependency-resolution "$RUNNER_TEMP/dependency-resolution.json"             --source-head "$GITHUB_SHA"             --out "$RUNNER_TEMP/npm-sbom-evidence-2.json"
+
+          node - "$RUNNER_TEMP/npm-sbom-evidence-1.json" "$RUNNER_TEMP/npm-sbom-evidence-2.json" <<'NODE'
+          const fs = require('node:fs');
+          const a = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const b = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+          if (a.semantic_inventory_sha256 !== b.semantic_inventory_sha256) throw new Error('npm_sbom_semantic_inventory_not_stable');
+          if (a.component_count !== b.component_count) throw new Error('npm_sbom_component_count_not_stable');
+          if (a.package_lock_sha256 !== b.package_lock_sha256) throw new Error('npm_sbom_lock_binding_not_stable');
+          if (a.dependency_resolution_sha256 !== b.dependency_resolution_sha256) throw new Error('npm_sbom_dependency_binding_not_stable');
+          console.log(JSON.stringify({
+            schema: 'metaengine.browser.npm-sbom-repeatability-proof.v1',
+            semantic_inventory_sha256: a.semantic_inventory_sha256,
+            first_raw_sbom_sha256: a.raw_sbom_sha256,
+            second_raw_sbom_sha256: b.raw_sbom_sha256,
+            component_count: a.component_count,
+            dependency_node_count: a.dependency_node_count,
+            dependency_relation_count: a.dependency_relation_count,
+            package_lock_sha256: a.package_lock_sha256,
+            dependency_resolution_sha256: a.dependency_resolution_sha256,
+            authority_effect: false,
+          }));
+          NODE
+
+      - name: Run SBOM evidence tests and syntax gates
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          node --test test/npm-sbom-evidence.test.mjs
+
+      - name: Prove tracked source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+  windows-regression:
+    needs: linux-sbom-contract
+    runs-on: windows-2025
+    timeout-minutes: 28
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install and prove frozen dependency material
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string](node --version) -ne 'v24.21.0') { throw 'sbom_windows_node_version_drift' }
+          if ([string](npm --version) -ne '11.19.0') { throw 'sbom_windows_npm_version_drift' }
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_npm_ci_failed' }
+          node scripts/package-lock-material.mjs --root . --out "$env:RUNNER_TEMP\package-lock-material.json"
+          node scripts/dependency-resolution-digest.mjs --out "$env:RUNNER_TEMP\dependency-resolution.json"
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_dependency_proof_failed' }
+
+      - name: Generate and verify Windows npm CycloneDX SBOM
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm sbom --sbom-format=cyclonedx --sbom-type=application | Set-Content "$env:RUNNER_TEMP\npm-sbom.cdx.json" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_generation_failed' }
+          node scripts/npm-sbom-evidence.mjs `
+            --sbom "$env:RUNNER_TEMP\npm-sbom.cdx.json" `
+            --package-json package.json `
+            --package-lock-material "$env:RUNNER_TEMP\package-lock-material.json" `
+            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json" `
+            --source-head "$env:GITHUB_SHA" `
+            --out "$env:RUNNER_TEMP\npm-sbom-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_evidence_failed' }
+
+      - name: Run SBOM tests and complete Browser Node regression
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test test/npm-sbom-evidence.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_contract_failed' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_browser_regression_failed' }
+
+      - name: Prove tracked source unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_tracked_source_modified' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'sbom_windows_index_modified' }
