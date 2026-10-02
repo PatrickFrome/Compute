@@ -107,6 +107,9 @@ export function createPackageLockMaterial({
   if (!name) fail('package_lock_package_name_invalid');
   if (!version) fail('package_lock_package_version_invalid');
 
+  if (String(lock.name || '').trim() !== name) fail('package_lock_top_level_name_mismatch');
+  if (String(lock.version || '').trim() !== version) fail('package_lock_top_level_version_mismatch');
+
   const lockfileVersion = Number(lock.lockfileVersion);
   if (!Number.isSafeInteger(lockfileVersion) || lockfileVersion < 2 || lockfileVersion > 3) {
     fail('package_lock_lockfile_version_invalid');
@@ -166,9 +169,32 @@ function parseArgs(argv) {
   return out;
 }
 
+export function npmVersionInvocation({
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  if (platform === 'win32') {
+    const comspec = String(
+      env.ComSpec
+      || env.COMSPEC
+      || (env.SystemRoot ? `${env.SystemRoot}\\System32\\cmd.exe` : 'cmd.exe'),
+    ).trim();
+    if (!comspec) fail('package_lock_comspec_unavailable');
+    return Object.freeze({
+      command: comspec,
+      args: Object.freeze(['/d', '/s', '/c', 'npm.cmd', '--version']),
+    });
+  }
+  return Object.freeze({
+    command: 'npm',
+    args: Object.freeze(['--version']),
+  });
+}
+
 async function npmVersion() {
   const { spawnSync } = await import('node:child_process');
-  const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--version'], {
+  const invocation = npmVersionInvocation();
+  const result = spawnSync(invocation.command, invocation.args, {
     encoding: 'utf8',
     windowsHide: true,
   });
