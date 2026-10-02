@@ -104,3 +104,11 @@ test('physical Package Smoke isolates ME2 UI build from the tracked checkout', (
   assert.match(source, /me2_ui_pack_failed/);
   assert.doesNotMatch(source, /Push-Location apps\/me2-ui/);
 });
+
+
+test('Package Smoke binds the locally verified builder version into installer provenance', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-windows-package-smoke.yml'), 'utf8');
+  assert.match(source, /--builder 26\.15\.7/);
+  assert.match(source, /electron_builder_version_drift/);
+  assert.doesNotMatch(source, /--builder latest/);
+});

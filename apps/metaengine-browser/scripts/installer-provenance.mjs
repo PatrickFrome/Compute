@@ -576,6 +576,9 @@ async function writeProvenance(options) {
       ['builder_config_sha256', buildIdentity.builder_config_sha256, configSha256],
       ['dependency_resolution_sha256', buildIdentity.dependency_resolution_sha256, dependencyResolution.dependency_resolution_sha256],
     ];
+    if (buildIdentity.schema === BUILD_IDENTITY_SCHEMA_V3) {
+      checks.push(['electron_builder_version', buildIdentity.electron_builder_version, options.builder || null]);
+    }
     for (const [field, actual, expected] of checks) {
       if (expected === null || expected === undefined || String(actual) !== String(expected)) {
         throw new ProvenanceError('build_identity_binding_mismatch', { field, actual, expected });
@@ -685,7 +688,8 @@ function readProvenance(provenancePath) {
           || String(parsed.package_lock_sha256 || '') !== String(exact.package_lock_sha256 || '')
           || String(parsed.npm_version || '') !== String(exact.npm_version || '')
           || String(parsed.bun_version || '') !== String(exact.bun_version || '')
-          || String(parsed.me2_ui_bun_lock_sha256 || '') !== String(exact.me2_ui_bun_lock_sha256 || '')) {
+          || String(parsed.me2_ui_bun_lock_sha256 || '') !== String(exact.me2_ui_bun_lock_sha256 || '')
+          || String(parsed.builder_version || '') !== String(exact.electron_builder_version || '')) {
         throw new ProvenanceError('provenance_build_identity_invalid', { field: 'package_lock_material' });
       }
     }

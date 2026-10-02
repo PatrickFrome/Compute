@@ -167,6 +167,7 @@ function writeOptions(f) {
     'run-attempt': '1',
     'package-version': PACKAGE_VERSION,
     config: f.configPath,
+    builder: '26.15.7',
     blockmap: f.blockmapPath,
     'build-identity': f.buildIdentityPath,
     'dependency-resolution': f.dependencyPath,
@@ -189,6 +190,7 @@ test('installer provenance v3 binds installer, installed tree, lockfile bytes, a
     assert.equal(written.npm_version, '11.19.0');
     assert.equal(written.bun_version, '1.3.3');
     assert.equal(written.me2_ui_bun_lock_sha256, f.identity.me2_ui_bun_lock_sha256);
+    assert.equal(written.builder_version, '26.15.7');
 
     const acquired = await verifyInstaller({
       dir,
@@ -324,6 +326,21 @@ test('installer provenance v3 rejects ME2 UI bun.lock byte tampering', async () 
     await assert.rejects(
       () => verifyInstaller({ dir, 'expect-head': HEAD, config: f.configPath }),
       (error) => error?.code === 'package_lock_material_binding_mismatch',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('installer provenance v3 rejects electron-builder version drift at provenance write', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    await assert.rejects(
+      () => writeProvenance({ ...writeOptions(f), builder: '26.15.6' }),
+      (error) => error?.code === 'build_identity_binding_mismatch'
+        && error?.details?.field === 'electron_builder_version',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

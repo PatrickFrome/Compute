@@ -447,6 +447,7 @@ jobs:
             --workflow browser-windows-package-smoke.yml `
             --package-version $version `
             --config electron-builder.test.json `
+            --builder 26.15.7 `
             --blockmap $blockmap.FullName `
             --build-identity $buildIdentityPath `
             --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json" `
