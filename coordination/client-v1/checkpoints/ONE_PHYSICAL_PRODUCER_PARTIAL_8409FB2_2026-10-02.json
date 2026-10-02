@@ -1,0 +1,59 @@
+{
+  "schema": "metaengine.browser.one-physical-producer-partial-qualification.v1",
+  "observed_at": "2026-10-02T07:06:08.895183Z",
+  "source_head": "8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+  "pr": 1092,
+  "package_version": "0.7.0-dev.36977000001.1",
+  "workflows": {
+    "success": [
+      "Browser Shell #3548",
+      "Critical Audit #2601",
+      "Shell-First Dirty Profile #1036",
+      "Host Resilience Login Start #513",
+      "Workspace Reincarnation #565"
+    ],
+    "in_progress": [
+      "Package Smoke #3143",
+      "Installed Chat #2425",
+      "Final Runtime #2008",
+      "Autonomous Soak #2677",
+      "Self Update #3596"
+    ],
+    "failure": []
+  },
+  "reservation": {
+    "artifact_id": 11212813280,
+    "artifact_name": "metaengine-browser-package-version-0.7.0-dev.36977000001.1",
+    "zip_bytes": 861,
+    "zip_sha256": "334ba15e096123c28842fbb1019dd6a1fc26676cce2ebf3c79bd512e6bd40631",
+    "consumed": true
+  },
+  "candidate": {
+    "artifact_id": 11213553858,
+    "artifact_name": "metaengine-browser-windows-candidate-8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+    "zip_bytes": 161278075,
+    "zip_sha256": "8c69d3fa50dfdfd1ecc6b78032375104b7929f5f3d0a362e46453dd194b896d8",
+    "producer_run_id": 36975915572,
+    "producer_run_number": 3143,
+    "terminal_qualified": false
+  },
+  "live": {
+    "installed_version": "0.7.0-dev.36908273822.1",
+    "supervisor_mode": "CONTROL",
+    "armed": true,
+    "compute": "HEALTHY",
+    "development_plane": "READY",
+    "host_resilience": "ACTIVE",
+    "guardian": null,
+    "fleet": {
+      "active": 0,
+      "bound_unverified": 4,
+      "lost": 0,
+      "readiness_contract": "TRANSPORT_PROOF_REQUIRED"
+    }
+  },
+  "next_research_branch": "analysis/npm-ci-lockfile-rollout-v1",
+  "live_effects_issued": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
