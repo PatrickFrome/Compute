@@ -87,6 +87,11 @@ jobs:
               'cryptographic_verification=$true',
               'signer_identity_verified=$true',
               'semantic_binding_verified=$true',
+              'permissions: {}',
+              'release-boundary-independent-verification',
+              'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c',
+              'digest-mismatch: error',
+              'independent_verifier_no_signing_authority=$true',
           ]
           for token in required:
               if token not in lower:
@@ -94,6 +99,33 @@ jobs:
 
           if lower.count('actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6') != 2:
               raise SystemExit('release_attestation_exact_attest_invocation_count_invalid')
+
+          try:
+              attest = text.split('\n  attest:', 1)[1].split('\n  verify:', 1)[0]
+              verify = text.split('\n  verify:', 1)[1]
+          except IndexError:
+              raise SystemExit('release_attestation_trust_split_missing')
+
+          if 'id-token: write' not in attest or 'attestations: write' not in attest:
+              raise SystemExit('release_attestation_signer_authority_missing')
+          if 'id-token: write' in verify or 'attestations: write' in verify or 'artifact-metadata: write' in verify:
+              raise SystemExit('release_attestation_verifier_signing_authority_present')
+          if 'actions: read' not in verify or 'contents: read' not in verify:
+              raise SystemExit('release_attestation_verifier_read_authority_missing')
+          if verify.index('actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c') > verify.index('gh attestation verify'):
+              raise SystemExit('release_attestation_verify_before_material_readback')
+          for token in (
+              '--bundle',
+              '--custom-trusted-root',
+              '--signer-workflow',
+              '--signer-digest',
+              '--source-digest',
+              '--source-ref',
+              '--cert-oidc-issuer',
+              '--deny-self-hosted-runners',
+          ):
+              if token not in verify:
+                  raise SystemExit(f'release_attestation_verifier_policy_missing:{token}')
 
           forbidden = [
               'electron-builder@',
