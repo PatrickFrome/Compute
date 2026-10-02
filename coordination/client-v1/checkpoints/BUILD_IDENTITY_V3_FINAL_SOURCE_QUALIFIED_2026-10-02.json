@@ -1,0 +1,50 @@
+{
+  "schema": "metaengine.browser.build-identity-v3-final-source-qualification.v1",
+  "date": "2026-10-02",
+  "exact_head": "245920c1a45851a1d30c25341ce2ca33457bc5c7",
+  "implementation_branch": "work/build-lockfile-material-v1",
+  "stack_base_sha": "8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+  "package_version": "0.7.0-dev.36980000001.1",
+  "physical_package_consumed": false,
+  "workflow": {
+    "name": "Browser Build Identity V3 Source Qualification",
+    "run_id": 36987601247,
+    "run_number": 19,
+    "conclusion": "SUCCESS"
+  },
+  "tests": {
+    "linux_focused": {
+      "tests": 58,
+      "pass": 58,
+      "fail": 0,
+      "skipped": 0
+    },
+    "windows_full_browser": {
+      "tests": 3911,
+      "pass": 3911,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "toolchain": {
+    "node_version": "v24.21.0",
+    "npm_version": "11.19.0",
+    "electron_version": "44.0.0",
+    "electron_builder_version": "26.15.7",
+    "bun_version": "1.3.3",
+    "bun_revision": "1.3.3+274e01c73"
+  },
+  "material": {
+    "package_lock_sha256": "0e90ce9b7928debfbbda537104411fb4d8d98dfb0e21e1816335a4460ad73be3",
+    "package_lock_bytes": 144647,
+    "package_entries": 317,
+    "dependency_count": 501,
+    "dependency_resolution_sha256": "1e68dcc723bdf3aabb5af6bcc3e3a7e31cc03a9e8c8523498069350b0054e8cf"
+  },
+  "physical_ui_build_isolated": true,
+  "electron_builder_provenance_bound": true,
+  "source_checkout_unchanged": true,
+  "authority_effect": false,
+  "live_install_effect": false,
+  "next_step": "OPEN_STACKED_DRAFT_PR_AND_QUALIFY_ONE_PHYSICAL_PACKAGE"
+}
