@@ -1,0 +1,143 @@
+name: Browser SLSA Physical Prep Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-slsa-physical-prep-v1'
+    paths:
+      - '.github/workflows/browser-windows-package-smoke.yml'
+      - '.github/workflows/browser-windows-installed-chat-qualification.yml'
+      - '.github/workflows/browser-final-runtime-activation-v1.yml'
+      - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
+      - '.github/workflows/metaengine-browser-self-update-e2e.yml'
+      - '.github/workflows/metaengine-browser-shell-v1.yml'
+      - '.github/workflows/browser-critical-audit-v1.yml'
+      - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
+      - '.github/workflows/browser-host-resilience-login-start-v1.yml'
+      - '.github/workflows/browser-workspace-reincarnation-v1.yml'
+      - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
+      - 'apps/metaengine-browser/test/installer-provenance.test.mjs'
+      - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
+      - 'scripts/browser-slsa-provenance-verification.mjs'
+      - 'tests/browser-slsa-provenance-verification.test.mjs'
+      - 'tests/browser-slsa-physical-topology.test.mjs'
+      - '.github/workflows/browser-slsa-physical-prep-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact preparation source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse changed workflow YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; %w[
+            .github/workflows/browser-windows-package-smoke.yml
+            .github/workflows/browser-windows-installed-chat-qualification.yml
+            .github/workflows/browser-final-runtime-activation-v1.yml
+            .github/workflows/browser-windows-autonomous-soak-v1.yml
+            .github/workflows/metaengine-browser-self-update-e2e.yml
+            .github/workflows/metaengine-browser-shell-v1.yml
+            .github/workflows/browser-critical-audit-v1.yml
+            .github/workflows/browser-shell-first-dirty-profile-v1.yml
+            .github/workflows/browser-host-resilience-login-start-v1.yml
+            .github/workflows/browser-workspace-reincarnation-v1.yml
+            .github/workflows/browser-slsa-physical-prep-source-qualification.yml
+          ].each { |p| YAML.load_file(p, aliases: true); puts p }"
+
+      - name: Parse exact producer and consumer sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/scripts/installer-provenance.mjs
+          node --check scripts/browser-slsa-provenance-verification.mjs
+          pwsh -NoProfile -Command '
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path "apps/metaengine-browser/scripts/qualified-installer-consumer.ps1").Path,
+              [ref]$tokens,[ref]$errors
+            )
+            if($errors.Count -ne 0){ throw $errors[0].Message }
+          '
+
+      - name: Prove SLSA verifier producer-event fence and physical topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test             tests/browser-slsa-provenance-verification.test.mjs             tests/browser-slsa-physical-topology.test.mjs             apps/metaengine-browser/test/installer-provenance.test.mjs             apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs
+
+      - name: Validate preparation is source-only and package identity is untouched
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          pkg = json.loads(Path('apps/metaengine-browser/package.json').read_text(encoding='utf-8'))
+          if pkg.get('version') != '0.7.0-dev.37006000001.1':
+              raise SystemExit(f"physical_prep_package_version_consumed:{pkg.get('version')}")
+
+          producer = Path('.github/workflows/browser-windows-package-smoke.yml').read_text(encoding='utf-8')
+          required = [
+              "physical/build-slsa-provenance-v1",
+              "id-token: write",
+              "attestations: write",
+              "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
+              "metaengine.browser.package-slsa-provenance-receipt.v1",
+              "installer-slsa-provenance.bundle.json",
+              "slsa-provenance-verify:",
+              "gh attestation verify",
+              "--signer-workflow",
+              "--source-digest",
+              "--source-ref",
+              "--deny-self-hosted-runners",
+              "browser-slsa-provenance-verification.mjs",
+          ]
+          for token in required:
+              if token not in producer:
+                  raise SystemExit(f"physical_prep_contract_missing:{token}")
+
+          if producer.count("& $builder --win nsis --x64 --config electron-builder.test.json --publish never") != 1:
+              raise SystemExit('physical_prep_package_smoke_builder_count_invalid')
+
+          qualifier = Path('.github/workflows/browser-slsa-physical-prep-source-qualification.yml').read_text(encoding='utf-8').lower()
+          runtime = qualifier.split('      - name: Validate preparation is source-only and package identity is untouched', 1)[0]
+          forbidden = [
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'contents: write',
+              'actions: write',
+              'gh release',
+              'electron-builder',
+              'promotion_authorized=true',
+              'authority_effect=true',
+          ]
+          for token in forbidden:
+              if token in runtime:
+                  raise SystemExit(f"physical_prep_source_qualification_forbidden:{token}")
+
+          print('browser_slsa_physical_prep_source_contract_pass')
+
+      - name: Prove exact preparation checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- .github/workflows apps/metaengine-browser/scripts/installer-provenance.mjs apps/metaengine-browser/scripts/qualified-installer-consumer.ps1 apps/metaengine-browser/test/installer-provenance.test.mjs apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs scripts/browser-slsa-provenance-verification.mjs tests/browser-slsa-provenance-verification.test.mjs tests/browser-slsa-physical-topology.test.mjs)"
