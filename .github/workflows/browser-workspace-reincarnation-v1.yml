@@ -16,6 +16,7 @@ on:
   push:
     branches:
       - 'work/browser-workspace-reincarnation-v1'
+      - 'physical/build-slsa-provenance-v1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
