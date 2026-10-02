@@ -22,6 +22,10 @@ test('R91 qualified installer consumer helper centralizes exact acquire and term
   assert.match(script, /installer-provenance\.mjs/);
   assert.match(script, /'acquire'/);
   assert.match(script, /'--allow-in-progress', 'true'/);
+  assert.match(script, /ValidateSet\('push', 'pull_request', 'workflow_dispatch'\)/);
+  assert.match(script, /ExpectedProducerEvent/);
+  assert.match(script, /'--event'/);
+  assert.match(script, /producer_event/);
   assert.match(script, /'verify'/);
   assert.match(script, /'--expect-run-id'/);
   assert.match(script, /'--expect-run-number'/);
@@ -33,6 +37,16 @@ test('R91 qualified installer consumer helper centralizes exact acquire and term
   assert.match(script, /producer_terminal_success/);
   assert.match(script, /qualified_installer_terminal_binding_drift/);
   assert.doesNotMatch(script, /Invoke-Expression|Start-Process|cmd\.exe|powershell\.exe/i);
+});
+
+test('producer-event fencing is optional for legacy consumers but exact when requested', async () => {
+  const script = await source('scripts/qualified-installer-consumer.ps1');
+  assert.match(script, /if \(\$ExpectedProducerEvent\) \{/);
+  assert.match(script, /\$acquireArgs \+= @\('--event', \$ExpectedProducerEvent\)/);
+  assert.match(script, /\$waitArgs \+= @\('--event', \$ExpectedProducerEvent\)/);
+  assert.match(script, /\[string\]\$resolved\.producer_event -ne \$ExpectedProducerEvent/);
+  assert.match(script, /\[string\]\$binding\.producer_event -ne \$ExpectedProducerEvent/);
+  assert.doesNotMatch(script, /Mandatory\s*=\s*\$true[^\n]*ExpectedProducerEvent/);
 });
 
 test('R91 installer consumers use one binding file instead of duplicating low-level provenance plumbing', async () => {
