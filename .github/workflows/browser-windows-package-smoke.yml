@@ -192,6 +192,36 @@ jobs:
           if ($proof.schema -ne 'metaengine.browser.dependency-resolution.v1' -or [string]$proof.dependency_resolution_sha256 -notmatch '^[a-f0-9]{64}$' -or [int]$proof.dependency_count -lt 1 -or $proof.authority_effect -ne $false) { throw 'dependency_resolution_proof_invalid' }
           Write-Host ($proof | Select-Object schema,root_name,root_version,node_version,npm_version,dependency_count,dependency_resolution_sha256,authority_effect | ConvertTo-Json -Compress)
 
+      - name: Generate npm CycloneDX SBOM evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm sbom --sbom-format=cyclonedx --sbom-type=application | Set-Content "$env:RUNNER_TEMP\npm-sbom.cdx.json" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'package_npm_sbom_generation_failed' }
+          node scripts/npm-sbom-evidence.mjs `
+            --sbom "$env:RUNNER_TEMP\npm-sbom.cdx.json" `
+            --package-json package.json `
+            --package-lock-material "$env:RUNNER_TEMP\package-lock-material.json" `
+            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json" `
+            --source-head "${{ github.event.pull_request.head.sha || github.sha }}" `
+            --out "$env:RUNNER_TEMP\npm-sbom-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw 'package_npm_sbom_evidence_failed' }
+          $sbom = Get-Content "$env:RUNNER_TEMP\npm-sbom-evidence.json" -Raw | ConvertFrom-Json
+          $lock = Get-Content "$env:RUNNER_TEMP\package-lock-material.json" -Raw | ConvertFrom-Json
+          $dep = Get-Content "$env:RUNNER_TEMP\dependency-resolution.json" -Raw | ConvertFrom-Json
+          if ($sbom.schema -ne 'metaengine.browser.npm-sbom-evidence.v1' `
+              -or [string]$sbom.semantic_inventory_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or [string]$sbom.raw_sbom_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or [string]$sbom.package_lock_sha256 -ne [string]$lock.package_lock_sha256 `
+              -or [string]$sbom.dependency_resolution_sha256 -ne [string]$dep.dependency_resolution_sha256 `
+              -or [string]$sbom.package_version -ne '${{ needs.package_identity_preflight.outputs.package_version }}' `
+              -or [int]$sbom.component_count -lt 1 `
+              -or $sbom.authority_effect -ne $false) {
+            throw 'package_npm_sbom_contract_invalid'
+          }
+          Write-Host ($sbom | ConvertTo-Json -Compress -Depth 4)
+
       - name: Compute expected Build Identity V3 before packaging
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -465,6 +495,9 @@ jobs:
             blockmap_name=$blockmap.Name
             build_identity_sha256=[string]$buildIdentity.build_identity_sha256
             dependency_resolution_sha256=[string]$buildIdentity.dependency_resolution_sha256
+            npm_sbom_semantic_inventory_sha256=[string]((Get-Content "$env:RUNNER_TEMP\npm-sbom-evidence.json" -Raw | ConvertFrom-Json).semantic_inventory_sha256)
+            npm_sbom_raw_sha256=[string]((Get-Content "$env:RUNNER_TEMP\npm-sbom-evidence.json" -Raw | ConvertFrom-Json).raw_sbom_sha256)
+            npm_sbom_component_count=[int]((Get-Content "$env:RUNNER_TEMP\npm-sbom-evidence.json" -Raw | ConvertFrom-Json).component_count)
             package_lock_sha256=[string]$buildIdentity.package_lock_sha256
             npm_version=[string]$buildIdentity.npm_version
             bun_version=[string]$buildIdentity.bun_version
@@ -502,6 +535,8 @@ jobs:
             ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/build-identity.json
             ${{ runner.temp }}/dependency-resolution.json
+            ${{ runner.temp }}/npm-sbom.cdx.json
+            ${{ runner.temp }}/npm-sbom-evidence.json
             ${{ runner.temp }}/package-lock-material.json
             ${{ runner.temp }}/package.json
             ${{ runner.temp }}/package-lock.json
@@ -923,6 +958,8 @@ jobs:
             ${{ runner.temp }}/expected-build-identity.json
             ${{ runner.temp }}/build-identity.json
             ${{ runner.temp }}/dependency-resolution.json
+            ${{ runner.temp }}/npm-sbom.cdx.json
+            ${{ runner.temp }}/npm-sbom-evidence.json
             ${{ runner.temp }}/package-lock-material.json
             ${{ runner.temp }}/package.json
             ${{ runner.temp }}/package-lock.json
