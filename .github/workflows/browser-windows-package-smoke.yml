@@ -586,7 +586,8 @@ jobs:
           if ($matches.Count -ne 1) { throw "slsa_package_installer_cardinality_invalid:$($matches.Count)" }
           $installer = $matches[0]
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($digest -notmatch '^[a-f0-9]{64}
+          if ($digest.Length -ne 64) { throw 'slsa_package_installer_digest_invalid' }
+          if ($digest -notmatch '^[a-f0-9]+
         if: github.event_name == 'push' && github.ref == 'refs/heads/physical/build-slsa-provenance-v1'
         id: slsa_attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -605,7 +606,8 @@ jobs:
           $installer = Get-Item ([string]'${{ steps.slsa_subject.outputs.path }}')
           if (-not $installer) { throw 'slsa_package_installer_missing' }
           $installerSha = [string]'${{ steps.slsa_subject.outputs.sha256 }}'
-          if ($installer.Name -ne [string]'${{ steps.slsa_subject.outputs.name }}' -or $installerSha -notmatch '^[a-f0-9]{64}
+          if ($installer.Name -ne [string]'${{ steps.slsa_subject.outputs.name }}') { throw 'slsa_package_subject_name_drift' }
+          if ($installerSha.Length -ne 64 -or $installerSha -notmatch '^[a-f0-9]+
           $bundle = [string]'${{ steps.slsa_attest.outputs.bundle-path }}'
           if (-not (Test-Path $bundle -PathType Leaf)) { throw 'slsa_package_bundle_missing' }
           $dir = Join-Path $env:RUNNER_TEMP 'browser-slsa-provenance'
@@ -1868,7 +1870,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git diff --name-only HEAD -- scripts/browser-slsa-provenance-verification.mjs .github/workflows/browser-windows-package-smoke.yml)"
-) { throw 'slsa_package_subject_binding_invalid' }
+) { throw 'slsa_package_subject_digest_invalid' }
           $bundle = [string]'${{ steps.slsa_attest.outputs.bundle-path }}'
           if (-not (Test-Path $bundle -PathType Leaf)) { throw 'slsa_package_bundle_missing' }
           $dir = Join-Path $env:RUNNER_TEMP 'browser-slsa-provenance'
