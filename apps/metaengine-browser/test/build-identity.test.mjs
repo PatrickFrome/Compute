@@ -158,8 +158,16 @@ test('packaging hooks and Package Smoke bind the same build identity evidence', 
   assert.match(consumer, /dependency_resolution_verified/);
 
   assert.match(workflow, /dependency-resolution-digest\.mjs/);
+  assert.match(workflow, /Compute expected Build Identity V2 before packaging/);
+  assert.match(workflow, /build-identity-cli\.mjs/);
+  assert.match(workflow, /expected-build-identity\.json/);
+  assert.match(workflow, /build_identity_independent_readback_mismatch/);
   assert.match(workflow, /ME2_BUILD_WORKFLOW: browser-windows-package-smoke\.yml/);
   assert.match(workflow, /--build-identity \$buildIdentityPath/);
   assert.match(workflow, /build-identity\.json/);
   assert.match(workflow, /dependency-resolution\.json/);
+
+  assert.match(consumer, /build_identity_sha256/);
+  assert.match(consumer, /dependency_resolution_sha256/);
+  assert.match(consumer, /producer_terminal_success/);
 });
