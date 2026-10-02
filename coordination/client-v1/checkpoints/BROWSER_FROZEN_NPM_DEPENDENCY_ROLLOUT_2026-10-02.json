@@ -1,0 +1,38 @@
+{
+  "schema": "metaengine.browser.frozen-npm-dependency-rollout-research.v1",
+  "date": "2026-10-02",
+  "base_source": "8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+  "package_lock_present": false,
+  "npmrc_present": false,
+  "current_package_smoke_install": "npm install --no-audit --no-fund --no-package-lock",
+  "qualified_toolchain_reference": {
+    "node": "24",
+    "npm": "11.19.0"
+  },
+  "target": {
+    "package_lock_committed": true,
+    "npm_ci": true,
+    "package_lock_sha_bound_to_build_identity": true,
+    "installed_dependency_resolution_sha_retained": true,
+    "node_modules_cache": false,
+    "optional_npm_cache": true
+  },
+  "stages": [
+    "BI3_A1_LOCKFILE_GENERATION_AND_CLEAN_INSTALL_PROOF",
+    "BI3_A2_BUILD_IDENTITY_LOCK_SHA_BINDING",
+    "BI3_A3_PACKAGE_SMOKE_NPM_CI",
+    "BI3_A4_ALL_BROWSER_CI_CONVERGENCE"
+  ],
+  "required_order": [
+    "PACKAGE_IDENTITY_RESERVATION",
+    "LOCKFILE_SHA_READBACK",
+    "NPM_CI",
+    "INSTALLED_DEPENDENCY_RESOLUTION_DIGEST",
+    "BUILD_IDENTITY",
+    "ELECTRON_BUILDER",
+    "ONE_CANDIDATE",
+    "PHYSICAL_CONSUMERS"
+  ],
+  "implementation_on_current_qualification_branch": false,
+  "authority_effect": false
+}
