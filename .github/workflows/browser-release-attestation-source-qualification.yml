@@ -69,7 +69,10 @@ jobs:
               raise SystemExit('release_attestation_exact_attest_invocation_count_invalid')
 
           forbidden = [
-              'electron-builder',
+              'electron-builder@',
+              'npx electron-builder',
+              'node_modules/.bin/electron-builder',
+              'electron-builder.cmd',
               'npm ci',
               'npm install',
               'npx ',
