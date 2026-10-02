@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 
 const BUILD_IDENTITY_SCHEMA = 'metaengine.browser.build-identity.v2';
+const BUILD_IDENTITY_SCHEMA_V3 = 'metaengine.browser.build-identity.v3';
 const DEPENDENCY_RESOLUTION_SCHEMA = 'metaengine.browser.dependency-resolution.v1';
 
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -108,6 +109,72 @@ function createBuildIdentity(input = {}) {
     build_identity_sha256: buildIdentitySha256,
     authority_effect: false,
   });
+}
+
+function buildIdentityV3Payload(input = {}) {
+  const base = buildIdentityPayload(input);
+  return Object.freeze({
+    ...base,
+    schema: BUILD_IDENTITY_SCHEMA_V3,
+    package_lock_sha256: requiredSha256(
+      input.package_lock_sha256 ?? input.packageLockSha256,
+      'build_identity_package_lock_sha256_invalid',
+    ),
+    npm_version: requiredString(
+      input.npm_version ?? input.npmVersion,
+      'build_identity_npm_version_invalid',
+    ),
+  });
+}
+
+function createBuildIdentityV3(input = {}) {
+  const payload = buildIdentityV3Payload(input);
+  const buildIdentitySha256 = sha256String(canonicalJson(payload));
+  return Object.freeze({
+    ...payload,
+    build_identity_sha256: buildIdentitySha256,
+    authority_effect: false,
+  });
+}
+
+function validateBuildIdentityV3(value, expected = {}) {
+  if (!value || value.schema !== BUILD_IDENTITY_SCHEMA_V3) {
+    throw new Error('build_identity_v3_schema_invalid');
+  }
+  if (value.authority_effect !== false) throw new Error('build_identity_authority_invalid');
+  const exact = createBuildIdentityV3(value);
+  if (String(value.build_identity_sha256 || '').toLowerCase() !== exact.build_identity_sha256) {
+    throw new Error('build_identity_digest_invalid');
+  }
+  const checks = {
+    repository: expected.repository,
+    repository_id: expected.repository_id ?? expected.repositoryId,
+    source_head: expected.source_head ?? expected.sourceHead,
+    workflow: expected.workflow,
+    run_id: expected.run_id ?? expected.runId,
+    run_attempt: expected.run_attempt ?? expected.runAttempt,
+    package_version: expected.package_version ?? expected.packageVersion,
+    platform: expected.platform,
+    arch: expected.arch,
+    builder_config_sha256: expected.builder_config_sha256 ?? expected.builderConfigSha256,
+    dependency_resolution_sha256: expected.dependency_resolution_sha256 ?? expected.dependencyResolutionSha256,
+    package_lock_sha256: expected.package_lock_sha256 ?? expected.packageLockSha256,
+    electron_builder_version: expected.electron_builder_version ?? expected.electronBuilderVersion,
+    node_version: expected.node_version ?? expected.nodeVersion,
+    npm_version: expected.npm_version ?? expected.npmVersion,
+  };
+  for (const [field, expectedValue] of Object.entries(checks)) {
+    if (expectedValue === undefined || expectedValue === null) continue;
+    const actual = field === 'run_attempt' ? Number(exact[field]) : String(exact[field]);
+    const wanted = field === 'run_attempt' ? Number(expectedValue) : String(expectedValue);
+    if (actual !== wanted) throw new Error(`build_identity_${field}_mismatch`);
+  }
+  return exact;
+}
+
+function validateBuildIdentityAny(value, expected = {}) {
+  if (value?.schema === BUILD_IDENTITY_SCHEMA_V3) return validateBuildIdentityV3(value, expected);
+  return validateBuildIdentity(value, expected);
 }
 
 function validateBuildIdentity(value, expected = {}) {
@@ -220,13 +287,17 @@ function loadDependencyResolutionProof(filePath) {
 
 module.exports = Object.freeze({
   BUILD_IDENTITY_SCHEMA,
+  BUILD_IDENTITY_SCHEMA_V3,
   DEPENDENCY_RESOLUTION_SCHEMA,
   canonicalize,
   canonicalJson,
   sha256String,
   sha256File,
   createBuildIdentity,
+  createBuildIdentityV3,
   validateBuildIdentity,
+  validateBuildIdentityV3,
+  validateBuildIdentityAny,
   validateDependencyResolutionProof,
   validateDependencyTree,
   loadDependencyResolutionProof,
