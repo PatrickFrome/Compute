@@ -5,10 +5,14 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const {
+  BUILD_IDENTITY_SCHEMA_V3,
   loadDependencyResolutionProof,
   sha256File,
-  validateBuildIdentity,
+  validateBuildIdentityAny,
 } = require('./build-identity.cjs');
+const {
+  loadPackageLockMaterialProof,
+} = require('./package-lock-material.cjs');
 
 const TRUST_ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
 const BUILD_SHA_RE = /^[0-9a-f]{40}$/;
@@ -83,12 +87,18 @@ function buildIdentityRequired() {
   return String(process.env.ME2_BUILD_IDENTITY_REQUIRED || '').trim().toLowerCase() === 'true';
 }
 
+function buildIdentityVersion() {
+  const version = String(process.env.ME2_BUILD_IDENTITY_VERSION || '2').trim();
+  if (!['2', '3'].includes(version)) throw new Error('packaged_build_identity_version_invalid');
+  return version;
+}
+
 function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageVersion }) {
   const dependencyProofPath = String(process.env.ME2_DEPENDENCY_RESOLUTION_PATH || '').trim();
   if (!dependencyProofPath) throw new Error('packaged_build_identity_dependency_resolution_path_missing');
   const dependency = loadDependencyResolutionProof(dependencyProofPath);
   const configPath = path.join(appRoot, 'electron-builder.test.json');
-  const exact = validateBuildIdentity(metadata, {
+  const expected = {
     repository: process.env.GITHUB_REPOSITORY,
     repository_id: process.env.GITHUB_REPOSITORY_ID,
     source_head: expectedHead,
@@ -102,13 +112,35 @@ function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageV
     dependency_resolution_sha256: dependency.dependency_resolution_sha256,
     electron_builder_version: process.env.ME2_ELECTRON_BUILDER_VERSION,
     node_version: process.version,
-  });
+  };
+  let material = null;
+  if (buildIdentityVersion() === '3') {
+    if (metadata?.schema !== BUILD_IDENTITY_SCHEMA_V3) throw new Error('packaged_build_identity_v3_required');
+    const materialPath = String(process.env.ME2_PACKAGE_LOCK_MATERIAL_PATH || '').trim();
+    const expectedNpmVersion = String(process.env.ME2_NPM_VERSION || '').trim();
+    if (!materialPath) throw new Error('packaged_build_identity_package_lock_material_path_missing');
+    if (!expectedNpmVersion) throw new Error('packaged_build_identity_npm_version_missing');
+    material = loadPackageLockMaterialProof(materialPath, {
+      packageJsonPath: path.join(appRoot, 'package.json'),
+      packageLockPath: path.join(appRoot, 'package-lock.json'),
+    });
+    if (material.package_version !== packageVersion) throw new Error('packaged_build_identity_package_lock_version_mismatch');
+    if (material.node_version !== process.version) throw new Error('packaged_build_identity_package_lock_node_version_mismatch');
+    if (material.npm_version !== expectedNpmVersion) throw new Error('packaged_build_identity_package_lock_npm_version_mismatch');
+    expected.package_lock_sha256 = material.package_lock_sha256;
+    expected.npm_version = material.npm_version;
+  }
+  const exact = validateBuildIdentityAny(metadata, expected);
   const proof = Object.freeze({
-    schema: 'metaengine.browser.packaged-build-identity-proof.v1',
+    schema: exact.schema === BUILD_IDENTITY_SCHEMA_V3
+      ? 'metaengine.browser.packaged-build-identity-proof.v2'
+      : 'metaengine.browser.packaged-build-identity-proof.v1',
     source_head: expectedHead,
     package_version: packageVersion,
     build_identity_sha256: exact.build_identity_sha256,
     dependency_resolution_sha256: exact.dependency_resolution_sha256,
+    package_lock_sha256: exact.package_lock_sha256 || null,
+    npm_version: exact.npm_version || null,
     builder_config_sha256: exact.builder_config_sha256,
     repository: exact.repository,
     repository_id: exact.repository_id,
@@ -195,6 +227,8 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     build_identity_required: requireBuildIdentity,
     build_identity_sha256: buildIdentity?.build_identity_sha256 || null,
     dependency_resolution_sha256: buildIdentity?.dependency_resolution_sha256 || null,
+    package_lock_sha256: buildIdentity?.package_lock_sha256 || null,
+    npm_version: buildIdentity?.npm_version || null,
     builder_config_sha256: buildIdentity?.builder_config_sha256 || null,
     build_identity_run_id: buildIdentity?.run_id || null,
     build_identity_run_attempt: buildIdentity?.run_attempt || null,
@@ -207,3 +241,4 @@ module.exports.assertPackagedTrustRoot = assertPackagedTrustRoot;
 module.exports.assertPackagedGuardianBootstrapBinding = assertPackagedGuardianBootstrapBinding;
 module.exports.assertPackagedBuildIdentity = assertPackagedBuildIdentity;
 module.exports.buildIdentityRequired = buildIdentityRequired;
+module.exports.buildIdentityVersion = buildIdentityVersion;
