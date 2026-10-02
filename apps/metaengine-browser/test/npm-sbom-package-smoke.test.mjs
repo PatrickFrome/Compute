@@ -36,6 +36,11 @@ test('SBOM evidence is carried by the one-built candidate and package evidence o
   assert.equal((source.match(/Generate npm CycloneDX SBOM evidence/g) || []).length, 1);
   assert.equal((source.match(/Publish immutable candidate for parallel downstream qualification/g) || []).length, 1);
   assert.equal((source.match(/electron-builder\.cmd/g) || []).length >= 1, true);
-  assert.doesNotMatch(source, /attestations:\s*write/);
-  assert.doesNotMatch(source, /id-token:\s*write/);
+  assert.match(source, /windows-nsis-package-smoke:[\s\S]*?permissions:[\s\S]*?id-token:\s*write[\s\S]*?attestations:\s*write/);
+  assert.match(source, /Generate exact-source SLSA build provenance for physical push candidate/);
+  assert.match(source, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/physical\/build-slsa-provenance-v1'/);
+  assert.match(source, /actions\/attest@1e69f48acb82d1966a394da916b4c1698aa569d6/);
+  assert.match(source, /metaengine\.browser\.package-slsa-provenance-receipt\.v1/);
+  assert.match(source, /promotion_authorized=\$false/);
+  assert.match(source, /authority_effect=\$false/);
 });
