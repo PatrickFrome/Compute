@@ -12,9 +12,17 @@ $exePath = Join-Path $stageRoot 'me2-daemon.exe'
 $manifestPath = Join-Path $stageRoot 'me2-daemon-manifest.json'
 
 if (-not (Test-Path $daemonRoot -PathType Container)) { throw 'me2_daemon_source_missing' }
+$bunToolchainRequired = ([string]$env:ME2_BUN_TOOLCHAIN_REQUIRED).Trim().ToLowerInvariant() -eq 'true'
+$expectedBunVersion = if ([string]$env:ME2_BUN_VERSION) { ([string]$env:ME2_BUN_VERSION).Trim() } else { '1.3.3' }
 $bun = Get-Command bun -ErrorAction SilentlyContinue
+if ($bunToolchainRequired -and -not $bun) { throw 'me2_daemon_required_bun_missing' }
 $bunCommand = if ($bun) { $bun.Source } else { 'npx' }
-$bunPrefix = if ($bun) { @() } else { @('--yes', 'bun@1.3.3') }
+$bunPrefix = if ($bun) { @() } else { @('--yes', "bun@$expectedBunVersion") }
+$bunVersion = if ($bun) { [string](& $bun.Source --version | Select-Object -Last 1) } else { $expectedBunVersion }
+$bunVersion = $bunVersion.Trim()
+if ($bunToolchainRequired -and $bunVersion -ne $expectedBunVersion) {
+  throw "me2_daemon_bun_version_mismatch:${bunVersion}:${expectedBunVersion}"
+}
 
 $sourceHead = (git -C $repoRoot rev-parse HEAD).Trim().ToLowerInvariant()
 if ($sourceHead -notmatch '^[0-9a-f]{40}$') { throw 'me2_daemon_source_head_invalid' }
@@ -61,6 +69,8 @@ $manifest = [ordered]@{
   schema = 'metaengine.browser.me2-daemon-package.v1'
   source_head = $sourceHead
   daemon_version = $runtimeVersion
+  build_bun_version = $bunVersion
+  build_bun_toolchain_required = $bunToolchainRequired
   executable = 'me2-daemon.exe'
   executable_sha256 = $sha
   executable_bytes = [int64]$bytes

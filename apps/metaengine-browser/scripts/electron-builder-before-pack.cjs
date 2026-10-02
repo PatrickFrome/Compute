@@ -7,9 +7,13 @@ const path = require('node:path');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
 const {
   createBuildIdentity,
+  createBuildIdentityV3,
   loadDependencyResolutionProof,
   sha256File,
 } = require('./build-identity.cjs');
+const {
+  loadPackageLockMaterialProof,
+} = require('./package-lock-material.cjs');
 
 const TRUST_ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
 const BUILD_SHA_RE = /^[0-9a-f]{40}$/;
@@ -67,6 +71,12 @@ function buildIdentityRequired() {
   return String(process.env.ME2_BUILD_IDENTITY_REQUIRED || '').trim().toLowerCase() === 'true';
 }
 
+function buildIdentityVersion() {
+  const version = String(process.env.ME2_BUILD_IDENTITY_VERSION || '2').trim();
+  if (!['2', '3'].includes(version)) throw new Error('build_identity_version_invalid');
+  return version;
+}
+
 function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
   const dependencyProofPath = String(process.env.ME2_DEPENDENCY_RESOLUTION_PATH || '').trim();
   if (!dependencyProofPath) throw new Error('build_identity_dependency_resolution_path_missing');
@@ -75,7 +85,7 @@ function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
   if (!fs.existsSync(configPath) || !fs.statSync(configPath).isFile()) {
     throw new Error('build_identity_builder_config_missing');
   }
-  const identity = createBuildIdentity({
+  const base = {
     repository: process.env.GITHUB_REPOSITORY,
     repository_id: process.env.GITHUB_REPOSITORY_ID,
     source_head: trustRoot.build_sha,
@@ -89,7 +99,50 @@ function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
     dependency_resolution_sha256: dependency.dependency_resolution_sha256,
     electron_builder_version: process.env.ME2_ELECTRON_BUILDER_VERSION,
     node_version: process.version,
-  });
+  };
+  let identity;
+  if (buildIdentityVersion() === '3') {
+    const materialPath = String(process.env.ME2_PACKAGE_LOCK_MATERIAL_PATH || '').trim();
+    const expectedNpmVersion = String(process.env.ME2_NPM_VERSION || '').trim();
+    const expectedBunVersion = String(process.env.ME2_BUN_VERSION || '').trim();
+    const me2UiBunLockPath = String(process.env.ME2_UI_BUN_LOCK_PATH || '').trim();
+    if (!materialPath) throw new Error('build_identity_package_lock_material_path_missing');
+    if (!expectedNpmVersion) throw new Error('build_identity_npm_version_missing');
+    if (!expectedBunVersion) throw new Error('build_identity_bun_version_missing');
+    if (!me2UiBunLockPath) throw new Error('build_identity_me2_ui_bun_lock_path_missing');
+    const material = loadPackageLockMaterialProof(materialPath, {
+      packageJsonPath: path.join(appRoot, 'package.json'),
+      packageLockPath: path.join(appRoot, 'package-lock.json'),
+    });
+    if (material.package_version !== packageVersion) throw new Error('build_identity_package_lock_version_mismatch');
+    if (material.node_version !== process.version) throw new Error('build_identity_package_lock_node_version_mismatch');
+    if (material.npm_version !== expectedNpmVersion) throw new Error('build_identity_package_lock_npm_version_mismatch');
+    if (dependency.node_version !== process.version) throw new Error('build_identity_dependency_node_version_mismatch');
+    if (dependency.npm_version !== material.npm_version) throw new Error('build_identity_dependency_npm_version_mismatch');
+    let actualBunVersion;
+    try {
+      actualBunVersion = String(execFileSync('bun', ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }) || '').trim();
+    } catch {
+      throw new Error('build_identity_bun_version_unavailable');
+    }
+    if (actualBunVersion !== expectedBunVersion) throw new Error('build_identity_bun_version_mismatch');
+    if (!fs.existsSync(me2UiBunLockPath) || !fs.statSync(me2UiBunLockPath).isFile()) {
+      throw new Error('build_identity_me2_ui_bun_lock_missing');
+    }
+    identity = createBuildIdentityV3({
+      ...base,
+      package_lock_sha256: material.package_lock_sha256,
+      npm_version: material.npm_version,
+      bun_version: actualBunVersion,
+      me2_ui_bun_lock_sha256: sha256File(me2UiBunLockPath),
+    });
+  } else {
+    identity = createBuildIdentity(base);
+  }
   const runnerTemp = String(process.env.RUNNER_TEMP || '').trim();
   if (runnerTemp) {
     fs.writeFileSync(
@@ -229,3 +282,4 @@ module.exports.buildEmergencyTrustRootMetadata = buildEmergencyTrustRootMetadata
 module.exports.validateGuardianBootstrapBinding = validateGuardianBootstrapBinding;
 module.exports.buildPackageIdentityMetadata = buildPackageIdentityMetadata;
 module.exports.buildIdentityRequired = buildIdentityRequired;
+module.exports.buildIdentityVersion = buildIdentityVersion;

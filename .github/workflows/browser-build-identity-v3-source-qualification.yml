@@ -1,0 +1,240 @@
+name: Browser Build Identity V3 Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-lockfile-material-v1'
+    paths:
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/.gitattributes'
+      - 'apps/metaengine-browser/package-lock.json'
+      - 'apps/metaengine-browser/scripts/build-identity.cjs'
+      - 'apps/metaengine-browser/scripts/build-identity-cli.mjs'
+      - 'apps/metaengine-browser/scripts/package-lock-material.cjs'
+      - 'apps/metaengine-browser/scripts/package-lock-material.mjs'
+      - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
+      - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
+      - 'apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs'
+      - 'apps/metaengine-browser/test/build-identity.test.mjs'
+      - 'apps/metaengine-browser/test/package-lock-material.test.mjs'
+      - 'apps/metaengine-browser/test/installer-provenance-v2.test.mjs'
+      - 'apps/metaengine-browser/test/installer-provenance-v3.test.mjs'
+      - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
+      - 'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs'
+      - 'apps/metaengine-browser/test/browser-frozen-dependency-workflow.test.mjs'
+      - '.github/workflows/browser-windows-package-smoke.yml'
+      - '.github/workflows/browser-windows-installed-chat-qualification.yml'
+      - '.github/workflows/browser-final-runtime-activation-v1.yml'
+      - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
+      - '.github/workflows/metaengine-browser-self-update-e2e.yml'
+      - 'apps/me2-ui/package.json'
+      - 'apps/me2-ui/bun.lock'
+      - 'apps/me2-ui/.gitattributes'
+      - 'apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1'
+      - '.github/workflows/browser-build-identity-v3-source-qualification.yml'
+      - '.github/workflows/browser-lockfile-refresh-v3.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-build-identity-v3-source-qualification
+  cancel-in-progress: true
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Browser toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Setup frozen Bun toolchain
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.3.3'
+
+      - name: Install exact frozen dependency tree without lifecycle effects
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
+          test "$(bun --version)" = "1.3.3"
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Prove frozen ME2 UI install contract
+        working-directory: apps/me2-ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(bun --version)" = "1.3.3"
+          bun ci
+          git diff --exit-code -- package.json bun.lock
+
+      - name: Recompute frozen lockfile material
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/package-lock-material.mjs --root . --out "$RUNNER_TEMP/package-lock-material.json"
+          node scripts/dependency-resolution-digest.mjs --out "$RUNNER_TEMP/dependency-resolution.json"
+
+      - name: Parse Browser source
+        working-directory: apps/metaengine-browser
+        run: npm run check
+
+      - name: Run focused V2/V3 supply-chain contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test             test/package-lock-material.test.mjs             test/build-identity.test.mjs             test/installer-provenance-v2.test.mjs             test/installer-provenance-v3.test.mjs             test/qualified-installer-consumer-contract.test.mjs             test/package-build-reservation.test.mjs             test/package-build-reservation-workflow.test.mjs             test/browser-frozen-dependency-workflow.test.mjs
+
+      - name: Parse PowerShell qualified consumer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = Resolve-Path 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if (@($errors).Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'qualified_installer_consumer_parse_failed'
+          }
+
+      - name: Prove tracked source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+
+  windows-regression:
+    needs: source-contract
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Browser toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Setup frozen Bun toolchain
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.3.3'
+
+      - name: Prove frozen Browser dependency determinism
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string](node --version) -ne 'v24.21.0') { throw 'windows_source_node_version_drift' }
+          if ([string](npm --version) -ne '11.19.0') { throw 'windows_source_npm_version_drift' }
+          if ([string](bun --version) -ne '1.3.3') { throw 'windows_source_bun_version_drift' }
+
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'windows_first_npm_ci_failed' }
+          node scripts/package-lock-material.mjs --root . --out "$env:RUNNER_TEMP\package-lock-material-1.json"
+          node scripts/dependency-resolution-digest.mjs --out "$env:RUNNER_TEMP\dependency-resolution-1.json"
+          if ($LASTEXITCODE -ne 0) { throw 'windows_first_dependency_digest_failed' }
+
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'windows_second_npm_ci_failed' }
+          node scripts/package-lock-material.mjs --root . --out "$env:RUNNER_TEMP\package-lock-material-2.json"
+          node scripts/dependency-resolution-digest.mjs --out "$env:RUNNER_TEMP\dependency-resolution-2.json"
+          if ($LASTEXITCODE -ne 0) { throw 'windows_second_dependency_digest_failed' }
+
+          $lock1 = Get-Content "$env:RUNNER_TEMP\package-lock-material-1.json" -Raw | ConvertFrom-Json
+          $lock2 = Get-Content "$env:RUNNER_TEMP\package-lock-material-2.json" -Raw | ConvertFrom-Json
+          $dep1 = Get-Content "$env:RUNNER_TEMP\dependency-resolution-1.json" -Raw | ConvertFrom-Json
+          $dep2 = Get-Content "$env:RUNNER_TEMP\dependency-resolution-2.json" -Raw | ConvertFrom-Json
+          if ([string]$lock1.package_lock_sha256 -ne [string]$lock2.package_lock_sha256) { throw 'windows_lockfile_digest_not_stable' }
+          if ([string]$dep1.dependency_resolution_sha256 -ne [string]$dep2.dependency_resolution_sha256) { throw 'windows_dependency_resolution_not_stable' }
+          if ([int]$dep1.dependency_count -ne [int]$dep2.dependency_count) { throw 'windows_dependency_count_not_stable' }
+
+          Write-Host (@{
+            schema='metaengine.browser.windows-frozen-dependency-proof.v1'
+            package_lock_sha256=[string]$lock2.package_lock_sha256
+            dependency_resolution_sha256=[string]$dep2.dependency_resolution_sha256
+            dependency_count=[int]$dep2.dependency_count
+            node_version=[string]$dep2.node_version
+            npm_version=[string]$dep2.npm_version
+            authority_effect=$false
+          } | ConvertTo-Json -Compress)
+
+      - name: Prove qualified installer V2/V3 compatibility boundary
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./test/qualified-installer-consumer-verify.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_compatibility_fixture_failed' }
+
+      - name: Build ME2 UI and daemon with frozen Bun
+        shell: powershell
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+          ME2_BUN_TOOLCHAIN_REQUIRED: 'true'
+          ME2_BUN_VERSION: '1.3.3'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $uiRoot = Join-Path $env:RUNNER_TEMP 'me2-ui-source'
+          Remove-Item $uiRoot -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force apps/me2-ui $uiRoot
+          Push-Location $uiRoot
+          try {
+            bun ci
+            if ($LASTEXITCODE -ne 0) { throw 'windows_me2_ui_bun_ci_failed' }
+            bun run build
+            if ($LASTEXITCODE -ne 0) { throw 'windows_me2_ui_build_failed' }
+            node scripts/pack-me2-ui.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'windows_me2_ui_pack_failed' }
+          } finally { Pop-Location }
+          $verifyUi = Join-Path $env:GITHUB_WORKSPACE 'apps\metaengine-browser\scripts\verify-me2-ui-bundle.mjs'
+          $uiDist = Join-Path $uiRoot 'me2-ui-dist'
+          node $verifyUi --root $uiDist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'windows_me2_ui_bundle_invalid' }
+
+          & apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1 -ExpectedSourceHead $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'windows_me2_daemon_build_failed' }
+
+      - name: Run full Browser Node regression
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_regression_failed' }
+
+      - name: Prove tracked source checkout unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_diff_detected' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'windows_source_cached_diff_detected' }
+

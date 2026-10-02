@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36977000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36990000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -111,3 +111,18 @@ One-physical-producer fence successor (2026-10-02):
 - corrected workflow source after parser repair produced no push-triggered runner on this non-matching branch, confirming the valid trigger filter is restored;
 - upload-artifact digest output is normalized from its documented raw SHA-256 form into canonical `sha256:<hex>` reservation evidence;
 - frozen successor reserves `0.7.0-dev.36977000001.1`, chosen above latest observed repository Actions run id `36975111718`; once its Package Smoke runner starts this identity is consumed even if the run fails before NSIS.
+
+
+Frozen npm dependency material successor:
+- qualified one-producer predecessor is `8409fb249887dd4636b3bd6fab40bfe30fa4b085` / `0.7.0-dev.36977000001.1`;
+- this branch adds a package-lock material verifier before wiring any physical build;
+- `0.7.0-dev.36980000001.1` is reserved but unconsumed until a Package Smoke producer starts;
+- no PR/physical Package Smoke should start until a committed lockfile and clean npm-ci proof exist.
+
+
+Build Identity V3 physical-qualification correction (2026-10-02):
+- draft PR #1093 exact head `245920c1a45851a1d30c25341ce2ca33457bc5c7` started Package Smoke #3144 / run `36988305577` with `0.7.0-dev.36980000001.1`; immutable package-version reservation artifact `11218079311` was created, so this identity is consumed and will never be reused.
+- Self Update #3597 failed in the read-only qualified-installer compatibility fixture before installer acquisition or update effect. Under `Set-StrictMode -Version Latest`, the shared consumer's Verify path dereferenced V3-only `package_lock_sha256` fields on a valid historical V2 binding that intentionally does not contain them.
+- V3 verification remains strict, but V2 historical compatibility now avoids all V3-only field dereferences; the terminal producer-gate projection likewise emits V3 lock/Bun fields only for V3 provenance.
+- the exact PowerShell V2 compatibility fixture is now part of the source-only Windows qualification, so this class of regression must fail before another physical PR is opened.
+- corrected successor reserves `0.7.0-dev.36990000001.1`, above all Actions run ids observed before this correction. No further source/checkpoint commit may land before its source qualification completes; after its next Package Smoke runner starts, this identity is consumed.

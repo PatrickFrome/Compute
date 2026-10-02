@@ -1,0 +1,50 @@
+{
+  "schema": "metaengine.browser.package-lock-materialization-checkpoint.v1",
+  "date": "2026-10-02",
+  "branch": "work/build-lockfile-material-v1",
+  "qualified_base": "8409fb249887dd4636b3bd6fab40bfe30fa4b085",
+  "current_head": "6a667a2f01686ac7eacb550d5fb86599367fd5be",
+  "reserved_package_version": "0.7.0-dev.36980000001.1",
+  "physical_package_started": false,
+  "lockfile": {
+    "path": "apps/metaengine-browser/package-lock.json",
+    "generated_commit": "d6964416de8b3413b4f90fb7ad4c3a1db1b8b6d8",
+    "lockfile_version": 3,
+    "sha256": "9d398b577fbfe1ec6bce39550b69b467491dee44e08c9a253dd3e4f8427dfd69",
+    "bytes": 19170,
+    "package_entry_count": 43,
+    "integrity_entry_count": 43,
+    "resolved_entry_count": 43,
+    "optional_entry_count": 1
+  },
+  "toolchain": {
+    "node": "v24.21.0",
+    "npm": "11.19.0"
+  },
+  "clean_npm_ci": {
+    "run_id": 36977511250,
+    "success": true,
+    "dependency_count": 55,
+    "dependency_resolution_sha256": "e8d6611559e74091c9b9e8c2d54fd98bc456f1748c7709a5432978439a830036",
+    "ignore_scripts": true
+  },
+  "tests": {
+    "package_lock_material": {
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "one_shot_materializer_removed": true,
+  "next": [
+    "BUILD_IDENTITY_SUCCESSOR_BINDS_PACKAGE_LOCK_SHA",
+    "BUILD_IDENTITY_BINDS_NPM_VERSION",
+    "PACKAGE_SMOKE_SWITCHES_TO_NPM_CI",
+    "INSTALLER_PROVENANCE_CARRIES_LOCK_SHA",
+    "DOWNSTREAM_CONSUMERS_REVERIFY_LOCK_SHA",
+    "PHYSICAL_CHAIN_CONVERGES_TO_NPM_CI"
+  ],
+  "promotion_authorized": false,
+  "authority_effect": false
+}

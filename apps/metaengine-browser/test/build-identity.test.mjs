@@ -10,11 +10,14 @@ import { normalizeInstalledTree, npmInvocation } from '../scripts/dependency-res
 const require = createRequire(import.meta.url);
 const {
   BUILD_IDENTITY_SCHEMA,
+  BUILD_IDENTITY_SCHEMA_V3,
   DEPENDENCY_RESOLUTION_SCHEMA,
   canonicalJson,
   createBuildIdentity,
+  createBuildIdentityV3,
   sha256String,
   validateBuildIdentity,
+  validateBuildIdentityV3,
   validateDependencyResolutionProof,
 } = require('../scripts/build-identity.cjs');
 
@@ -67,6 +70,29 @@ function identity(overrides = {}) {
     arch: 'x64',
     builder_config_sha256: 'b'.repeat(64),
     dependency_resolution_sha256: dependencyProof().dependency_resolution_sha256,
+    electron_builder_version: '26.15.7',
+    node_version: 'v24.21.0',
+    ...overrides,
+  });
+}
+
+function identityV3(overrides = {}) {
+  return createBuildIdentityV3({
+    repository: 'PatrickFrome/Compute',
+    repository_id: '1341371143',
+    source_head: 'a'.repeat(40),
+    workflow: 'browser-windows-package-smoke.yml',
+    run_id: '36970000001',
+    run_attempt: 1,
+    package_version: '0.7.0-dev.36970000001.1',
+    platform: 'win32',
+    arch: 'x64',
+    builder_config_sha256: 'b'.repeat(64),
+    dependency_resolution_sha256: dependencyProof().dependency_resolution_sha256,
+    package_lock_sha256: 'c'.repeat(64),
+    npm_version: '11.19.0',
+    bun_version: '1.3.3',
+    me2_ui_bun_lock_sha256: 'd'.repeat(64),
     electron_builder_version: '26.15.7',
     node_version: 'v24.21.0',
     ...overrides,
@@ -147,6 +173,48 @@ test('build identity validation fails closed on digest or exact binding drift', 
   );
 });
 
+test('build identity v3 independently binds frozen lockfile and npm toolchain', () => {
+  const a = identityV3();
+  const b = identityV3();
+  assert.equal(a.schema, BUILD_IDENTITY_SCHEMA_V3);
+  assert.equal(a.build_identity_sha256, b.build_identity_sha256);
+  assert.equal(a.package_lock_sha256, 'c'.repeat(64));
+  assert.equal(a.npm_version, '11.19.0');
+  assert.equal(a.bun_version, '1.3.3');
+  assert.equal(a.me2_ui_bun_lock_sha256, 'd'.repeat(64));
+  assert.equal(a.authority_effect, false);
+
+  assert.notEqual(identityV3({ package_lock_sha256: 'e'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ npm_version: '11.20.0' }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ bun_version: '1.3.4' }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ me2_ui_bun_lock_sha256: 'f'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ dependency_resolution_sha256: '0'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
+});
+
+test('build identity v3 validation fails closed on lockfile or npm drift', () => {
+  const exact = identityV3();
+  assert.equal(validateBuildIdentityV3(exact, {
+    source_head: 'a'.repeat(40),
+    package_lock_sha256: 'c'.repeat(64),
+    npm_version: '11.19.0',
+    bun_version: '1.3.3',
+    me2_ui_bun_lock_sha256: 'd'.repeat(64),
+  }).build_identity_sha256, exact.build_identity_sha256);
+
+  assert.throws(
+    () => validateBuildIdentityV3(exact, { package_lock_sha256: 'f'.repeat(64) }),
+    /build_identity_package_lock_sha256_mismatch/,
+  );
+  assert.throws(
+    () => validateBuildIdentityV3(exact, { npm_version: '10.9.0' }),
+    /build_identity_npm_version_mismatch/,
+  );
+  assert.throws(
+    () => createBuildIdentityV3({ ...exact, package_lock_sha256: 'not-a-sha' }),
+    /build_identity_package_lock_sha256_invalid/,
+  );
+});
+
 test('dependency resolution proof is canonical and tamper-evident', () => {
   const proof = dependencyProof();
   const exact = validateDependencyResolutionProof(proof);
@@ -212,37 +280,108 @@ test('packaging hooks and Package Smoke bind the same build identity evidence', 
   const consumer = read('scripts/qualified-installer-consumer.ps1');
   const workflow = read('../../.github/workflows/browser-windows-package-smoke.yml');
 
-  assert.match(before, /createBuildIdentity/);
+  assert.match(before, /createBuildIdentityV3/);
   assert.match(before, /metaengineBuildIdentity/);
   assert.match(before, /ME2_DEPENDENCY_RESOLUTION_PATH/);
+  assert.match(before, /ME2_PACKAGE_LOCK_MATERIAL_PATH/);
+  assert.match(before, /ME2_NPM_VERSION/);
   assert.match(before, /build-identity\.json/);
 
-  assert.match(after, /validateBuildIdentity/);
+  assert.match(after, /validateBuildIdentityAny/);
+  assert.match(after, /package_lock_sha256/);
+  assert.match(after, /packaged-build-identity-proof\.v2/);
   assert.match(after, /packaged-build-identity-proof\.json/);
   assert.match(after, /metaengineBuildIdentity/);
 
   assert.match(provenance, /installer-provenance\.v2/);
+  assert.match(provenance, /installer-provenance\.v3/);
   assert.match(provenance, /build_identity_verified/);
   assert.match(provenance, /dependency_resolution_verified/);
+  assert.match(provenance, /package_lock_verified/);
 
   assert.match(consumer, /installer-provenance\.v2/);
+  assert.match(consumer, /installer-provenance\.v3/);
   assert.match(consumer, /build_identity_verified/);
   assert.match(consumer, /dependency_resolution_verified/);
+  assert.match(consumer, /package_lock_verified/);
 
+  assert.match(workflow, /package-lock-material\.mjs/);
+  assert.match(workflow, /npm ci --no-audit --no-fund/);
   assert.match(workflow, /dependency-resolution-digest\.mjs/);
-  assert.match(workflow, /Compute expected Build Identity V2 before packaging/);
+  assert.match(workflow, /Compute expected Build Identity V3 before packaging/);
   assert.match(workflow, /build-identity-cli\.mjs/);
   assert.match(workflow, /expected-build-identity\.json/);
   assert.match(workflow, /build_identity_independent_readback_mismatch/);
   assert.match(workflow, /ME2_BUILD_IDENTITY_REQUIRED: 'true'/);
+  assert.match(workflow, /ME2_BUILD_IDENTITY_VERSION: '3'/);
+  assert.match(workflow, /ME2_PACKAGE_LOCK_MATERIAL_PATH/);
+  assert.match(workflow, /ME2_NPM_VERSION: '11\.19\.0'/);
   assert.match(workflow, /ME2_BUILD_WORKFLOW: browser-windows-package-smoke\.yml/);
   assert.match(before, /buildIdentityRequired\(\)/);
   assert.match(after, /buildIdentityRequired\(\)/);
   assert.match(workflow, /--build-identity \$buildIdentityPath/);
   assert.match(workflow, /build-identity\.json/);
   assert.match(workflow, /dependency-resolution\.json/);
+  assert.match(workflow, /package-lock-material\.json/);
+  assert.match(workflow, /package-lock\.json/);
 
   assert.match(consumer, /build_identity_sha256/);
   assert.match(consumer, /dependency_resolution_sha256/);
+  assert.match(consumer, /package_lock_sha256/);
+  assert.match(consumer, /npm_version/);
   assert.match(consumer, /producer_terminal_success/);
+});
+
+
+test('V3 packaging rejects split-brain Node/npm dependency evidence', () => {
+  const cli = read('scripts/build-identity-cli.mjs');
+  const before = read('scripts/electron-builder-before-pack.cjs');
+  const after = read('scripts/electron-builder-after-all-artifact-build.cjs');
+  const provenance = read('scripts/installer-provenance.mjs');
+
+  assert.match(cli, /build_identity_cli_dependency_node_version_mismatch/);
+  assert.match(cli, /build_identity_cli_dependency_npm_version_mismatch/);
+  assert.match(before, /build_identity_dependency_node_version_mismatch/);
+  assert.match(before, /build_identity_dependency_npm_version_mismatch/);
+  assert.match(after, /packaged_build_identity_dependency_node_version_mismatch/);
+  assert.match(after, /packaged_build_identity_dependency_npm_version_mismatch/);
+  assert.match(provenance, /build_identity_dependency_node_version_mismatch/);
+  assert.match(provenance, /build_identity_dependency_npm_version_mismatch/);
+});
+
+
+test('build identity v3 fails closed on Bun or UI lock drift', () => {
+  const exact = identityV3();
+  assert.throws(
+    () => validateBuildIdentityV3(exact, { bun_version: '1.3.4' }),
+    /build_identity_bun_version_mismatch/,
+  );
+  assert.throws(
+    () => validateBuildIdentityV3(exact, { me2_ui_bun_lock_sha256: 'f'.repeat(64) }),
+    /build_identity_me2_ui_bun_lock_sha256_mismatch/,
+  );
+  assert.throws(
+    () => createBuildIdentityV3({ ...exact, me2_ui_bun_lock_sha256: 'not-a-sha' }),
+    /build_identity_me2_ui_bun_lock_sha256_invalid/,
+  );
+});
+
+
+test('V3 packaging binds pinned Bun and the ME2 UI lock', () => {
+  const cli = read('scripts/build-identity-cli.mjs');
+  const before = read('scripts/electron-builder-before-pack.cjs');
+  const after = read('scripts/electron-builder-after-all-artifact-build.cjs');
+  const provenance = read('scripts/installer-provenance.mjs');
+  const workflow = read('../../.github/workflows/browser-windows-package-smoke.yml');
+
+  assert.match(cli, /me2-ui-bun-lock/);
+  assert.match(cli, /bun-version/);
+  assert.match(before, /ME2_BUN_VERSION/);
+  assert.match(before, /ME2_UI_BUN_LOCK_PATH/);
+  assert.match(after, /ME2_BUN_VERSION/);
+  assert.match(after, /ME2_UI_BUN_LOCK_PATH/);
+  assert.match(provenance, /me2_ui_bun_lock_sha256/);
+  assert.match(provenance, /me2_ui_bun_lock_verified/);
+  assert.match(workflow, /bun-version: '1\.3\.3'/);
+  assert.match(workflow, /me2-ui-bun\.lock/);
 });

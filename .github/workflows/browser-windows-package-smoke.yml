@@ -91,10 +91,15 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
-      - name: Setup Node 24
+      - name: Setup frozen Browser Node toolchain
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
+
+      - name: Setup frozen Bun toolchain
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.3.3'
 
       - name: Refuse duplicate source/version physical build
         working-directory: apps/metaengine-browser
@@ -149,9 +154,32 @@ jobs:
             authority_effect=$false
           } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP\package-version-reservation-seal.json" -Encoding utf8
 
-      - name: Install test-package dependencies
+      - name: Prove frozen package-lock material before dependency install
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string](node --version) -ne 'v24.21.0') { throw 'package_lock_node_version_drift' }
+          if ([string](npm --version) -ne '11.19.0') { throw 'package_lock_npm_version_drift' }
+          if ([string](bun --version) -ne '1.3.3') { throw 'package_bun_version_drift' }
+          $uiBunLock = "$env:GITHUB_WORKSPACE\apps\me2-ui\bun.lock"
+          if (-not (Test-Path $uiBunLock -PathType Leaf)) { throw 'package_me2_ui_bun_lock_missing' }
+          node scripts/package-lock-material.mjs --root . --out "$env:RUNNER_TEMP\package-lock-material.json"
+          if ($LASTEXITCODE -ne 0) { throw 'package_lock_material_capture_failed' }
+          $material = Get-Content "$env:RUNNER_TEMP\package-lock-material.json" -Raw | ConvertFrom-Json
+          if ($material.schema -ne 'metaengine.browser.package-lock-material.v1' `
+              -or [string]$material.package_lock_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or [string]$material.package_version -ne '${{ needs.package_identity_preflight.outputs.package_version }}' `
+              -or [string]$material.node_version -ne 'v24.21.0' `
+              -or [string]$material.npm_version -ne '11.19.0' `
+              -or $material.authority_effect -ne $false) {
+            throw 'package_lock_material_contract_invalid'
+          }
+          Write-Host ($material | ConvertTo-Json -Compress -Depth 5)
+
+      - name: Install exact frozen Browser dependency tree
+        working-directory: apps/metaengine-browser
+        run: npm ci --no-audit --no-fund
 
       - name: Capture exact installed dependency resolution
         working-directory: apps/metaengine-browser
@@ -164,7 +192,7 @@ jobs:
           if ($proof.schema -ne 'metaengine.browser.dependency-resolution.v1' -or [string]$proof.dependency_resolution_sha256 -notmatch '^[a-f0-9]{64}$' -or [int]$proof.dependency_count -lt 1 -or $proof.authority_effect -ne $false) { throw 'dependency_resolution_proof_invalid' }
           Write-Host ($proof | Select-Object schema,root_name,root_version,node_version,npm_version,dependency_count,dependency_resolution_sha256,authority_effect | ConvertTo-Json -Compress)
 
-      - name: Compute expected Build Identity V2 before packaging
+      - name: Compute expected Build Identity V3 before packaging
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
@@ -184,6 +212,11 @@ jobs:
             --arch x64 `
             --config electron-builder.test.json `
             --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json" `
+            --package-lock-material "$env:RUNNER_TEMP\package-lock-material.json" `
+            --me2-ui-bun-lock "$env:GITHUB_WORKSPACE\apps\me2-ui\bun.lock" `
+            --package-json package.json `
+            --package-lock package-lock.json `
+            --bun-version 1.3.3 `
             --electron-builder-version 26.15.7
           if ($LASTEXITCODE -ne 0) { throw 'expected_build_identity_create_failed' }
 
@@ -229,15 +262,37 @@ jobs:
           ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          npm install --no-audit --no-fund --global bun
-          Push-Location apps/me2-ui
+          if ([string](bun --version) -ne '1.3.3') { throw 'me2_ui_bun_version_drift' }
+
+          $sourceUi = Join-Path $env:GITHUB_WORKSPACE 'apps\me2-ui'
+          $sourceLock = Join-Path $sourceUi 'bun.lock'
+          $sourceLockSha = (Get-FileHash $sourceLock -Algorithm SHA256).Hash.ToLowerInvariant()
+          $uiRoot = Join-Path $env:RUNNER_TEMP 'me2-ui-package-source'
+          Remove-Item $uiRoot -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force $sourceUi $uiRoot
+          $tempLock = Join-Path $uiRoot 'bun.lock'
+          $tempLockSha = (Get-FileHash $tempLock -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($tempLockSha -ne $sourceLockSha) { throw 'me2_ui_temp_lock_copy_drift' }
+
+          Push-Location $uiRoot
           try {
-            bun install --frozen-lockfile
+            bun ci
+            if ($LASTEXITCODE -ne 0) { throw 'me2_ui_bun_ci_failed' }
+            $afterCiLockSha = (Get-FileHash $tempLock -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($afterCiLockSha -ne $sourceLockSha) { throw 'me2_ui_bun_ci_lock_mutation' }
+
             bun run build
+            if ($LASTEXITCODE -ne 0) { throw 'me2_ui_build_failed' }
             node scripts/pack-me2-ui.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'me2_ui_pack_failed' }
           } finally { Pop-Location }
+
+          $uiDist = Join-Path $uiRoot 'me2-ui-dist'
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root $uiDist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'package_smoke_temp_me2_ui_invalid' }
+
           Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          Copy-Item -Recurse -Force $uiDist apps/metaengine-browser/me2-ui-dist
           node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
           if ($LASTEXITCODE -ne 0) { throw 'package_smoke_staged_me2_ui_invalid' }
 
@@ -325,7 +380,13 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           ME2_BUILD_IDENTITY_REQUIRED: 'true'
+          ME2_BUILD_IDENTITY_VERSION: '3'
           ME2_DEPENDENCY_RESOLUTION_PATH: ${{ runner.temp }}\dependency-resolution.json
+          ME2_PACKAGE_LOCK_MATERIAL_PATH: ${{ runner.temp }}\package-lock-material.json
+          ME2_NPM_VERSION: '11.19.0'
+          ME2_BUN_VERSION: '1.3.3'
+          ME2_BUN_TOOLCHAIN_REQUIRED: 'true'
+          ME2_UI_BUN_LOCK_PATH: ${{ github.workspace }}\apps\me2-ui\bun.lock
           ME2_BUILD_WORKFLOW: browser-windows-package-smoke.yml
           ME2_BUILD_ARCH: x64
           ME2_ELECTRON_BUILDER_VERSION: 26.15.7
@@ -335,7 +396,12 @@ jobs:
           if (-not $version) { throw 'package_version_missing' }
           Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $builderVersion = [string](node -p "require('electron-builder/package.json').version")
+          if ($builderVersion -ne '26.15.7') { throw "electron_builder_version_drift:$builderVersion" }
+          $builder = Join-Path (Get-Location) 'node_modules\.bin\electron-builder.cmd'
+          if (-not (Test-Path $builder -PathType Leaf)) { throw 'electron_builder_locked_binary_missing' }
+          & $builder --win nsis --x64 --config electron-builder.test.json --publish never
+          if ($LASTEXITCODE -ne 0) { throw "electron_builder_exit_$LASTEXITCODE" }
           $buildIdentityPath = "$env:RUNNER_TEMP\build-identity.json"
           $packagedBuildIdentityProofPath = "$env:RUNNER_TEMP\packaged-build-identity-proof.json"
           if (-not (Test-Path $buildIdentityPath -PathType Leaf)) { throw 'build_identity_not_emitted' }
@@ -344,8 +410,27 @@ jobs:
           $expectedBuildIdentity = Get-Content "$env:RUNNER_TEMP\expected-build-identity.json" -Raw | ConvertFrom-Json
           $packagedBuildIdentity = Get-Content $packagedBuildIdentityProofPath -Raw | ConvertFrom-Json
           if ([string]$expectedBuildIdentity.build_identity_sha256 -ne [string]$buildIdentity.build_identity_sha256) { throw 'build_identity_independent_readback_mismatch' }
-          if ($buildIdentity.schema -ne 'metaengine.browser.build-identity.v2' -or [string]$buildIdentity.source_head -ne $sourceHead -or [string]$buildIdentity.package_version -ne $version -or [string]$buildIdentity.run_id -ne [string]$env:GITHUB_RUN_ID -or [int]$buildIdentity.run_attempt -ne [int]$env:GITHUB_RUN_ATTEMPT -or [string]$buildIdentity.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or $buildIdentity.authority_effect -ne $false) { throw 'build_identity_contract_invalid' }
-          if ($packagedBuildIdentity.schema -ne 'metaengine.browser.packaged-build-identity-proof.v1' -or [string]$packagedBuildIdentity.build_identity_sha256 -ne [string]$buildIdentity.build_identity_sha256 -or [string]$packagedBuildIdentity.dependency_resolution_sha256 -ne [string]$buildIdentity.dependency_resolution_sha256 -or $packagedBuildIdentity.authority_effect -ne $false) { throw 'packaged_build_identity_contract_invalid' }
+          $lockMaterial = Get-Content "$env:RUNNER_TEMP\package-lock-material.json" -Raw | ConvertFrom-Json
+          $uiBunLockSha = (Get-FileHash "$env:GITHUB_WORKSPACE\apps\me2-ui\bun.lock" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($buildIdentity.schema -ne 'metaengine.browser.build-identity.v3' `
+              -or [string]$buildIdentity.source_head -ne $sourceHead `
+              -or [string]$buildIdentity.package_version -ne $version `
+              -or [string]$buildIdentity.run_id -ne [string]$env:GITHUB_RUN_ID `
+              -or [int]$buildIdentity.run_attempt -ne [int]$env:GITHUB_RUN_ATTEMPT `
+              -or [string]$buildIdentity.package_lock_sha256 -ne [string]$lockMaterial.package_lock_sha256 `
+              -or [string]$buildIdentity.npm_version -ne [string]$lockMaterial.npm_version `
+              -or [string]$buildIdentity.bun_version -ne '1.3.3' `
+              -or [string]$buildIdentity.me2_ui_bun_lock_sha256 -ne $uiBunLockSha `
+              -or [string]$buildIdentity.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or $buildIdentity.authority_effect -ne $false) { throw 'build_identity_contract_invalid' }
+          if ($packagedBuildIdentity.schema -ne 'metaengine.browser.packaged-build-identity-proof.v2' `
+              -or [string]$packagedBuildIdentity.build_identity_sha256 -ne [string]$buildIdentity.build_identity_sha256 `
+              -or [string]$packagedBuildIdentity.dependency_resolution_sha256 -ne [string]$buildIdentity.dependency_resolution_sha256 `
+              -or [string]$packagedBuildIdentity.package_lock_sha256 -ne [string]$buildIdentity.package_lock_sha256 `
+              -or [string]$packagedBuildIdentity.npm_version -ne [string]$buildIdentity.npm_version `
+              -or [string]$packagedBuildIdentity.bun_version -ne [string]$buildIdentity.bun_version `
+              -or [string]$packagedBuildIdentity.me2_ui_bun_lock_sha256 -ne [string]$buildIdentity.me2_ui_bun_lock_sha256 `
+              -or $packagedBuildIdentity.authority_effect -ne $false) { throw 'packaged_build_identity_contract_invalid' }
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
           $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
           if (-not $installer -or -not $blockmap) { throw 'package_assets_missing' }
@@ -362,9 +447,14 @@ jobs:
             --workflow browser-windows-package-smoke.yml `
             --package-version $version `
             --config electron-builder.test.json `
+            --builder 26.15.7 `
             --blockmap $blockmap.FullName `
             --build-identity $buildIdentityPath `
-            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json"
+            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json" `
+            --package-lock-material "$env:RUNNER_TEMP\package-lock-material.json" `
+            --me2-ui-bun-lock "$env:GITHUB_WORKSPACE\apps\me2-ui\bun.lock" `
+            --package-json package.json `
+            --package-lock package-lock.json
           if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_write_failed' }
           @{
             schema='metaengine.browser.windows-package-smoke.v3'
@@ -375,6 +465,12 @@ jobs:
             blockmap_name=$blockmap.Name
             build_identity_sha256=[string]$buildIdentity.build_identity_sha256
             dependency_resolution_sha256=[string]$buildIdentity.dependency_resolution_sha256
+            package_lock_sha256=[string]$buildIdentity.package_lock_sha256
+            npm_version=[string]$buildIdentity.npm_version
+            bun_version=[string]$buildIdentity.bun_version
+            me2_ui_bun_lock_sha256=[string]$buildIdentity.me2_ui_bun_lock_sha256
+            package_lock_verified=$true
+            me2_ui_bun_lock_verified=$true
             guardian_native_staging_required=$true
             guardian_native_built_by_before_pack=$true
             version_probe_verified=$false
@@ -392,6 +488,9 @@ jobs:
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\candidate-setup.exe"
           Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name)
           Copy-Item $blockmap.FullName (Join-Path $env:RUNNER_TEMP $blockmap.Name)
+          Copy-Item package.json "$env:RUNNER_TEMP\package.json" -Force
+          Copy-Item package-lock.json "$env:RUNNER_TEMP\package-lock.json" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\apps\me2-ui\bun.lock" "$env:RUNNER_TEMP\me2-ui-bun.lock" -Force
 
       - name: Publish immutable candidate for parallel downstream qualification
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -403,6 +502,10 @@ jobs:
             ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/build-identity.json
             ${{ runner.temp }}/dependency-resolution.json
+            ${{ runner.temp }}/package-lock-material.json
+            ${{ runner.temp }}/package.json
+            ${{ runner.temp }}/package-lock.json
+            ${{ runner.temp }}/me2-ui-bun.lock
             ${{ runner.temp }}/package-build-reservation.json
             ${{ runner.temp }}/package-version-reservation-seal.json
             ${{ runner.temp }}/METAENGINE-Guardian-Bootstrap-*-x64.exe
@@ -807,7 +910,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json apps/me2-daemon)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
 
       - name: Upload exact-head Windows qualification evidence
         if: always()
@@ -820,6 +923,10 @@ jobs:
             ${{ runner.temp }}/expected-build-identity.json
             ${{ runner.temp }}/build-identity.json
             ${{ runner.temp }}/dependency-resolution.json
+            ${{ runner.temp }}/package-lock-material.json
+            ${{ runner.temp }}/package.json
+            ${{ runner.temp }}/package-lock.json
+            ${{ runner.temp }}/me2-ui-bun.lock
             ${{ runner.temp }}/package-build-reservation.json
             ${{ runner.temp }}/package-version-reservation-seal.json
             ${{ runner.temp }}/guardian-machine-bootstrap-physical-proof.json
