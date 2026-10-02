@@ -146,3 +146,133 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git diff --name-only HEAD -- .github/workflows/browser-slsa-attest-runtime-probe.yml scripts/browser-slsa-provenance-verification.mjs)"
+
+  probe-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact Windows probe source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Create deterministic Windows non-release probe subject
+        id: subject_windows
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:RUNNER_TEMP 'metaengine-slsa-runtime-probe-windows.txt'
+          @(
+            'schema=metaengine.browser.slsa-runtime-probe.v1'
+            "source_sha=$env:GITHUB_SHA"
+            "workflow=$env:GITHUB_WORKFLOW_REF"
+            "run_id=$env:GITHUB_RUN_ID"
+            "run_attempt=$env:GITHUB_RUN_ATTEMPT"
+            'platform=windows'
+            'authority_effect=false'
+          ) | Set-Content $probe -Encoding utf8
+          $digest = (Get-FileHash $probe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -notmatch '^[a-f0-9]{64}$') { throw 'slsa_windows_probe_digest_invalid' }
+          "path=$probe" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "name=$([IO.Path]::GetFileName($probe))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Generate GitHub SLSA provenance Windows probe
+        id: attest_windows
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subject_windows.outputs.path }}
+
+      - name: Verify Windows signed bundle and exact producer identity
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = [string]'${{ steps.attest_windows.outputs.bundle-path }}'
+          if (-not (Test-Path $bundle -PathType Leaf)) { throw 'slsa_windows_probe_bundle_missing' }
+          $stableBundle = Join-Path $env:RUNNER_TEMP 'metaengine-slsa-runtime-probe-windows.bundle.json'
+          Copy-Item $bundle $stableBundle -Force
+          gh --version
+          $verification = Join-Path $env:RUNNER_TEMP 'metaengine-slsa-runtime-probe-windows-verification.json'
+          gh attestation verify '${{ steps.subject_windows.outputs.path }}' `
+            --repo "$env:GITHUB_REPOSITORY" `
+            --bundle $bundle `
+            --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/browser-slsa-attest-runtime-probe.yml" `
+            --source-digest "$env:GITHUB_SHA" `
+            --source-ref "$env:GITHUB_REF" `
+            --deny-self-hosted-runners `
+            --format json | Set-Content $verification -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'slsa_windows_probe_gh_verify_failed' }
+
+          node scripts/browser-slsa-provenance-verification.mjs `
+            --verification $verification `
+            --expected-source-sha "$env:GITHUB_SHA" `
+            --expected-source-ref "$env:GITHUB_REF" `
+            --expected-installer-name '${{ steps.subject_windows.outputs.name }}' `
+            --expected-installer-sha256 '${{ steps.subject_windows.outputs.sha256 }}' `
+            --expected-run-id "$env:GITHUB_RUN_ID" `
+            --expected-run-attempt "$env:GITHUB_RUN_ATTEMPT" `
+            --expected-repository "$env:GITHUB_REPOSITORY" `
+            --expected-workflow-path '.github/workflows/browser-slsa-attest-runtime-probe.yml' `
+            --verifier-id "github-slsa-runtime-probe-windows:$env:GITHUB_RUN_ID:$env:GITHUB_RUN_ATTEMPT" `
+            --out "$env:RUNNER_TEMP\metaengine-slsa-runtime-probe-windows-evidence.json"
+          if ($LASTEXITCODE -ne 0) { throw 'slsa_windows_probe_semantic_verify_failed' }
+
+      - name: Seal Windows zero-authority probe receipt
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Get-Content "$env:RUNNER_TEMP\metaengine-slsa-runtime-probe-windows-evidence.json" -Raw | ConvertFrom-Json
+          if ($evidence.schema -ne 'metaengine.browser-fabric.provenance-evidence.v1' `
+              -or $evidence.verified -ne $true `
+              -or $evidence.builder_trusted -ne $true `
+              -or $evidence.authority_effect -ne $false) {
+            throw 'slsa_windows_probe_evidence_invalid'
+          }
+          @{
+            schema='metaengine.browser.slsa-runtime-probe-receipt.v1'
+            source_head=$env:GITHUB_SHA
+            source_ref=$env:GITHUB_REF
+            event=$env:GITHUB_EVENT_NAME
+            workflow='.github/workflows/browser-slsa-attest-runtime-probe.yml'
+            run_id=[int64]$env:GITHUB_RUN_ID
+            run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
+            platform='windows'
+            subject_name='${{ steps.subject_windows.outputs.name }}'
+            subject_sha256='${{ steps.subject_windows.outputs.sha256 }}'
+            attestation_id='${{ steps.attest_windows.outputs.attestation-id }}'
+            attestation_url='${{ steps.attest_windows.outputs.attestation-url }}'
+            verified=$true
+            promotion_authorized=$false
+            release_published=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\metaengine-slsa-runtime-probe-windows-receipt.json" -Encoding utf8
+
+      - name: Upload Windows probe evidence only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-slsa-runtime-probe-windows-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-windows.txt
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-windows.bundle.json
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-windows-verification.json
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-windows-evidence.json
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-windows-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Prove exact Windows checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-slsa-attest-runtime-probe.yml scripts/browser-slsa-provenance-verification.mjs)"
