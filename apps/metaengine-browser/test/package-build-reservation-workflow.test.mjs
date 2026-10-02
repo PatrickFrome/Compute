@@ -43,6 +43,8 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /package-version-reservation-seal\.json/);
   assert.match(workflow, /reservation_artifact_id/);
   assert.match(workflow, /reservation_artifact_digest/);
+  assert.match(workflow, /artifactDigestRaw -match '\^\[a-f0-9\]\{64\}\$'/);
+  assert.match(workflow, /\$artifactDigest = "sha256:\$artifactDigestRaw"/);
 });
 
 test('Package Smoke has only one physical build and one candidate upload after reservation wiring', () => {

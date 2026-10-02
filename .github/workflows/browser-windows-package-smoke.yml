@@ -127,9 +127,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $artifactId = [string]'${{ steps.version_reservation.outputs.artifact-id }}'
-          $artifactDigest = [string]'${{ steps.version_reservation.outputs.artifact-digest }}'
+          $artifactDigestRaw = ([string]'${{ steps.version_reservation.outputs.artifact-digest }}').Trim().ToLowerInvariant()
           if ($artifactId -notmatch '^[0-9]+$') { throw 'package_version_reservation_artifact_id_missing' }
-          if ($artifactDigest -notmatch '^sha256:[a-f0-9]{64}$') { throw 'package_version_reservation_artifact_digest_invalid' }
+          if ($artifactDigestRaw -match '^[a-f0-9]{64}$') {
+            $artifactDigest = "sha256:$artifactDigestRaw"
+          } elseif ($artifactDigestRaw -match '^sha256:[a-f0-9]{64}$') {
+            $artifactDigest = $artifactDigestRaw
+          } else {
+            throw 'package_version_reservation_artifact_digest_invalid'
+          }
           @{
             schema='metaengine.browser.package-version-reservation-seal.v1'
             source_head='${{ needs.package_identity_preflight.outputs.source_head }}'
