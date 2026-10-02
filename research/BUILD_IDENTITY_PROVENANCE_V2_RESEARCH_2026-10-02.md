@@ -336,9 +336,15 @@ Package Smoke currently runs:
 Direct dependencies in Browser package.json are exact-pinned, but transitive resolution is not cryptographically frozen by this command. A source+config+run identity alone therefore does not imply byte reproducibility across time.
 
 Successor options, in priority order:
-1. introduce and verify a committed lockfile for the Browser package;
+1. introduce and verify a committed lockfile for the Browser package and use `npm ci` in CI;
 2. if monorepo constraints make that unsuitable, produce a deterministic resolved-dependency digest from the installed dependency tree and bind it into provenance;
 3. never claim bit-reproducibility merely from exact source SHA.
+
+npm's own documentation says package-lock describes the exact generated dependency tree and is intended to make CI/deployment install the same tree. `npm ci` requires an existing lockfile, refuses package.json/lockfile drift, removes an existing node_modules tree, and does not rewrite package metadata.
+
+References:
+https://docs.npmjs.com/files/package-lock.json/
+https://docs.npmjs.com/cli/commands/npm-ci/
 
 The build identity should include a `dependency_resolution_sha256`, whether that comes from a lockfile or a canonical resolved tree.
 
