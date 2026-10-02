@@ -29,6 +29,7 @@ on:
       - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
       - '.github/workflows/metaengine-browser-self-update-e2e.yml'
       - '.github/workflows/browser-build-identity-v3-source-qualification.yml'
+      - '.github/workflows/browser-lockfile-refresh-v3.yml'
 
 permissions:
   contents: read

@@ -127,6 +127,8 @@ function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageV
     if (material.package_version !== packageVersion) throw new Error('packaged_build_identity_package_lock_version_mismatch');
     if (material.node_version !== process.version) throw new Error('packaged_build_identity_package_lock_node_version_mismatch');
     if (material.npm_version !== expectedNpmVersion) throw new Error('packaged_build_identity_package_lock_npm_version_mismatch');
+    if (dependency.node_version !== process.version) throw new Error('packaged_build_identity_dependency_node_version_mismatch');
+    if (dependency.npm_version !== material.npm_version) throw new Error('packaged_build_identity_dependency_npm_version_mismatch');
     expected.package_lock_sha256 = material.package_lock_sha256;
     expected.npm_version = material.npm_version;
   }

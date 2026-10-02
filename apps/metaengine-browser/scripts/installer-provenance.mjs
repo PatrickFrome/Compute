@@ -540,6 +540,14 @@ async function writeProvenance(options) {
         if (packageLockMaterial.package_version !== buildIdentity.package_version) {
           throw new Error('build_identity_package_lock_version_mismatch');
         }
+        if (dependencyResolution.node_version !== buildIdentity.node_version
+            || dependencyResolution.node_version !== packageLockMaterial.node_version) {
+          throw new Error('build_identity_dependency_node_version_mismatch');
+        }
+        if (dependencyResolution.npm_version !== buildIdentity.npm_version
+            || dependencyResolution.npm_version !== packageLockMaterial.npm_version) {
+          throw new Error('build_identity_dependency_npm_version_mismatch');
+        }
       } else if (packageLockMaterialPath) {
         throw new Error('build_identity_v2_package_lock_material_unexpected');
       }
@@ -845,7 +853,11 @@ async function verifyInstaller(options) {
           || material.package_lock_sha256 !== provenance.package_lock_sha256
           || material.npm_version !== externalIdentity.npm_version
           || material.npm_version !== provenance.npm_version
-          || material.package_version !== externalIdentity.package_version) {
+          || material.package_version !== externalIdentity.package_version
+          || dependencyProof.node_version !== externalIdentity.node_version
+          || dependencyProof.node_version !== material.node_version
+          || dependencyProof.npm_version !== externalIdentity.npm_version
+          || dependencyProof.npm_version !== material.npm_version) {
         throw new ProvenanceError('package_lock_material_binding_mismatch', {
           material_sha256: material.package_lock_sha256,
           identity_sha256: externalIdentity.package_lock_sha256 || null,

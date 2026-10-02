@@ -323,3 +323,20 @@ test('packaging hooks and Package Smoke bind the same build identity evidence', 
   assert.match(consumer, /npm_version/);
   assert.match(consumer, /producer_terminal_success/);
 });
+
+
+test('V3 packaging rejects split-brain Node/npm dependency evidence', () => {
+  const cli = read('scripts/build-identity-cli.mjs');
+  const before = read('scripts/electron-builder-before-pack.cjs');
+  const after = read('scripts/electron-builder-after-all-artifact-build.cjs');
+  const provenance = read('scripts/installer-provenance.mjs');
+
+  assert.match(cli, /build_identity_cli_dependency_node_version_mismatch/);
+  assert.match(cli, /build_identity_cli_dependency_npm_version_mismatch/);
+  assert.match(before, /build_identity_dependency_node_version_mismatch/);
+  assert.match(before, /build_identity_dependency_npm_version_mismatch/);
+  assert.match(after, /packaged_build_identity_dependency_node_version_mismatch/);
+  assert.match(after, /packaged_build_identity_dependency_npm_version_mismatch/);
+  assert.match(provenance, /build_identity_dependency_node_version_mismatch/);
+  assert.match(provenance, /build_identity_dependency_npm_version_mismatch/);
+});

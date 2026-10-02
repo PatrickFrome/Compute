@@ -37,7 +37,7 @@ test('Package Smoke binds frozen lock input separately from installed tree outpu
   const npmCi = source.indexOf('- name: Install exact frozen Browser dependency tree');
   const resolution = source.indexOf('- name: Capture exact installed dependency resolution');
   const identity = source.indexOf('- name: Compute expected Build Identity V3 before packaging');
-  const builder = source.indexOf('npx --yes electron-builder@26.15.7');
+  const builder = source.indexOf('node_modules\\.bin\\electron-builder.cmd');
 
   assert.ok(reservation >= 0);
   assert.ok(lockMaterial > reservation);
@@ -52,4 +52,18 @@ test('Package Smoke binds frozen lock input separately from installed tree outpu
   assert.match(source, /package-lock-material\.json/);
   assert.match(source, /package-lock\.json/);
   assert.match(source, /dependency-resolution\.json/);
+});
+
+
+test('Package Smoke uses only the locally locked electron-builder toolchain', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-windows-package-smoke.yml'), 'utf8');
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'apps', 'metaengine-browser', 'package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(repoRoot, 'apps', 'metaengine-browser', 'package-lock.json'), 'utf8'));
+
+  assert.equal(packageJson.devDependencies?.['electron-builder'], '26.15.7');
+  assert.equal(lock.packages?.['']?.devDependencies?.['electron-builder'], '26.15.7');
+  assert.equal(lock.packages?.['node_modules/electron-builder']?.version, '26.15.7');
+  assert.match(source, /require\('electron-builder\/package\.json'\)\.version/);
+  assert.match(source, /node_modules\\\.bin\\electron-builder\.cmd/);
+  assert.doesNotMatch(source, /npx\s+--yes\s+electron-builder/);
 });

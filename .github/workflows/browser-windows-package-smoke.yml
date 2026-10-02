@@ -361,7 +361,12 @@ jobs:
           if (-not $version) { throw 'package_version_missing' }
           Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $builderVersion = [string](node -p "require('electron-builder/package.json').version")
+          if ($builderVersion -ne '26.15.7') { throw "electron_builder_version_drift:$builderVersion" }
+          $builder = Join-Path (Get-Location) 'node_modules\.bin\electron-builder.cmd'
+          if (-not (Test-Path $builder -PathType Leaf)) { throw 'electron_builder_locked_binary_missing' }
+          & $builder --win nsis --x64 --config electron-builder.test.json --publish never
+          if ($LASTEXITCODE -ne 0) { throw "electron_builder_exit_$LASTEXITCODE" }
           $buildIdentityPath = "$env:RUNNER_TEMP\build-identity.json"
           $packagedBuildIdentityProofPath = "$env:RUNNER_TEMP\packaged-build-identity-proof.json"
           if (-not (Test-Path $buildIdentityPath -PathType Leaf)) { throw 'build_identity_not_emitted' }

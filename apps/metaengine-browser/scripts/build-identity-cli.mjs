@@ -75,6 +75,12 @@ export function createBuildIdentityFromArgs(args) {
     if (material.node_version !== process.version) {
       throw new Error('build_identity_cli_package_lock_node_version_mismatch');
     }
+    if (dependency.node_version !== process.version) {
+      throw new Error('build_identity_cli_dependency_node_version_mismatch');
+    }
+    if (dependency.npm_version !== material.npm_version) {
+      throw new Error('build_identity_cli_dependency_npm_version_mismatch');
+    }
     return createBuildIdentityV3({
       ...base,
       package_lock_sha256: material.package_lock_sha256,

@@ -240,3 +240,64 @@ test('installer provenance v3 rejects npm toolchain drift inside the lock materi
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('installer provenance v3 rejects installed dependency npm version drift', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    const dependency = JSON.parse(readFileSync(f.dependencyPath, 'utf8'));
+    const payload = {
+      schema: dependency.schema,
+      root_name: dependency.root_name,
+      root_version: dependency.root_version,
+      node_version: dependency.node_version,
+      npm_version: '11.20.0',
+      dependency_count: dependency.dependency_count,
+      tree: dependency.tree,
+    };
+    writeFileSync(f.dependencyPath, JSON.stringify({
+      ...payload,
+      dependency_resolution_sha256: sha256String(canonicalJson(payload)),
+      authority_effect: false,
+    }, null, 2) + '\n');
+
+    await assert.rejects(
+      () => writeProvenance(writeOptions(f)),
+      (error) => error?.code === 'build_identity_invalid'
+        && /build_identity_dependency_npm_version_mismatch/.test(String(error?.details?.message || '')),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('installer provenance v3 rejects installed dependency Node version drift', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    const dependency = JSON.parse(readFileSync(f.dependencyPath, 'utf8'));
+    const payload = {
+      schema: dependency.schema,
+      root_name: dependency.root_name,
+      root_version: dependency.root_version,
+      node_version: 'v24.99.0',
+      npm_version: dependency.npm_version,
+      dependency_count: dependency.dependency_count,
+      tree: dependency.tree,
+    };
+    writeFileSync(f.dependencyPath, JSON.stringify({
+      ...payload,
+      dependency_resolution_sha256: sha256String(canonicalJson(payload)),
+      authority_effect: false,
+    }, null, 2) + '\n');
+
+    await assert.rejects(
+      () => writeProvenance(writeOptions(f)),
+      (error) => error?.code === 'build_identity_invalid'
+        && /build_identity_dependency_node_version_mismatch/.test(String(error?.details?.message || '')),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
