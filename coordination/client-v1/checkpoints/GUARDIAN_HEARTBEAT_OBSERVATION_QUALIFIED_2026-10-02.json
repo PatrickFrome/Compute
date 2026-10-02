@@ -1,0 +1,79 @@
+{
+  "schema": "metaengine.guardian-heartbeat-observation-qualified.v1",
+  "qualified_at": "2026-10-02",
+  "runtime_source": "1f6902daeae8bc201d1c493e8a413f320a80aeec",
+  "runtime_pr": 1089,
+  "workflows": {
+    "total": 18,
+    "success": 18,
+    "failure": 0
+  },
+  "browser_node_suite": {
+    "tests": 3858,
+    "pass": 3856,
+    "fail": 0,
+    "skipped": 2
+  },
+  "package": {
+    "producer_run_id": 36965253082,
+    "producer_run_number": 3126,
+    "producer_run_attempt": 1,
+    "version": "0.7.0-dev.36965151413.1",
+    "installer_bytes": 159810130,
+    "installer_sha256": "ebbd8c281cd5b2eb2b1434657b90d5518f0637aa7bb89fc0c41abf58a7806c92",
+    "blockmap_sha256": "30048e11c42e57f7d550a47fe3e5adfa0443f39501639b6a3d65ba550db472b4",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "candidate_artifact_id": 11209696186,
+    "candidate_archive_sha256": "a23cd7f86c807bbb06e2af0a6522675331d8300ac19205bceb0e48905288fb6e",
+    "evidence_artifact_id": 11210230865,
+    "evidence_archive_sha256": "436de1926fe7cbb4fb824b2a2017774bbfe283740dfde81ad04384691b187185",
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false
+  },
+  "soak": {
+    "second_instance_activations_verified": 72,
+    "activation_latency_p95_ms": 124.58,
+    "working_set_growth_bytes": 0,
+    "handle_growth": 2,
+    "duplicate_browser_runtime": false,
+    "semantic_edges": 1000000,
+    "browser_cells": 128,
+    "agents": 128,
+    "semantic_edges_per_second": 128494,
+    "peak_parallel_mutations": 32,
+    "scale_tasks": 2000,
+    "scale_peers": 2048
+  },
+  "self_update": {
+    "run_id": 36965253107,
+    "run_number": 3590,
+    "conclusion": "success",
+    "baseline": "0.7.0-dev.36806234662.1",
+    "target": "0.7.0-dev.36965151413.1",
+    "resident_legacy": "0.7.0-dev.34759310781.1",
+    "target_installer_sha256": "ebbd8c281cd5b2eb2b1434657b90d5518f0637aa7bb89fc0c41abf58a7806c92",
+    "installed_executable_sha256": "fc1c9d987dbf3e98aa5c1b5858c896700d38f4bfdca97e9099c1aa019aca4221",
+    "planned_shutdown_verified": true,
+    "retry_dialog_required": false,
+    "evidence_artifact_id": 11210400837
+  },
+  "live_boundary": {
+    "installed_version": "0.7.0-dev.36908273822.1",
+    "admin_ready": true,
+    "compute": "HEALTHY",
+    "development_plane": "READY",
+    "host_resilience": "ACTIVE",
+    "supervisor": "PARKED",
+    "admission": "CLOSED",
+    "generation_floor": 28,
+    "heartbeat_guardian": null,
+    "heartbeat_guardian_null_reason": "INSTALLED_VERSION_PREDATES_DIAGNOSTIC"
+  },
+  "successor": {
+    "pr": 1090,
+    "reason": "STALE_PROOF_SEMANTIC_HARDENING",
+    "must_qualify_independently": true
+  },
+  "authority_effect": false
+}
