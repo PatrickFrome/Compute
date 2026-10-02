@@ -486,6 +486,45 @@ jobs:
             --package-json package.json `
             --package-lock package-lock.json
           if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_write_failed' }
+          $composedSbomPath = "$env:RUNNER_TEMP\browser-composed-sbom.cdx.json"
+          $composedEvidencePath = "$env:RUNNER_TEMP\browser-composed-sbom-evidence.json"
+          $uiManifestPath = Join-Path (Get-Location) 'me2-ui-dist\me2-ui-manifest.json'
+          $daemonManifestPath = Join-Path (Get-Location) 'me2-daemon-dist\me2-daemon-manifest.json'
+          $bootstrapBindingPath = Join-Path (Get-Location) 'native-dist\guardian-bootstrap\guardian-machine-bootstrap-binding.json'
+          foreach ($materialPath in @($uiManifestPath,$daemonManifestPath,$stagedManifest,$bootstrapBindingPath,"$env:RUNNER_TEMP\installer-provenance.json")) {
+            if (-not (Test-Path $materialPath -PathType Leaf)) { throw "browser_composed_sbom_material_missing:$materialPath" }
+          }
+          node scripts/composed-sbom-evidence.mjs `
+            --npm-sbom "$env:RUNNER_TEMP\npm-sbom.cdx.json" `
+            --npm-evidence "$env:RUNNER_TEMP\npm-sbom-evidence.json" `
+            --ui-manifest $uiManifestPath `
+            --daemon-manifest $daemonManifestPath `
+            --guardian-manifest $stagedManifest `
+            --bootstrap-binding $bootstrapBindingPath `
+            --provenance "$env:RUNNER_TEMP\installer-provenance.json" `
+            --source-head $sourceHead `
+            --package-version $version `
+            --out $composedSbomPath `
+            --evidence $composedEvidencePath
+          if ($LASTEXITCODE -ne 0) { throw 'browser_composed_sbom_generation_failed' }
+          $composed = Get-Content $composedEvidencePath -Raw | ConvertFrom-Json
+          $composedRawSha = (Get-FileHash $composedSbomPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($composed.schema -ne 'metaengine.browser.composed-sbom-evidence.v1' `
+              -or [string]$composed.source_head -ne $sourceHead `
+              -or [string]$composed.package_version -ne $version `
+              -or [string]$composed.installer_sha256 -ne $digest `
+              -or [string]$composed.build_identity_sha256 -ne [string]$buildIdentity.build_identity_sha256 `
+              -or [string]$composed.composed_semantic_inventory_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or $composedRawSha -notmatch '^[a-f0-9]{64}$' `
+              -or [string]$composed.composition_aggregate -ne 'incomplete' `
+              -or [int]$composed.first_party_component_count -ne 5 `
+              -or [int]$composed.total_component_count -le [int]$composed.npm_component_count `
+              -or $composed.authority_effect -ne $false) {
+            throw 'browser_composed_sbom_contract_invalid'
+          }
+          Copy-Item $uiManifestPath "$env:RUNNER_TEMP\me2-ui-manifest.json" -Force
+          Copy-Item $daemonManifestPath "$env:RUNNER_TEMP\me2-daemon-manifest.json" -Force
+          Copy-Item $stagedManifest "$env:RUNNER_TEMP\guardian-native-manifest.json" -Force
           @{
             schema='metaengine.browser.windows-package-smoke.v3'
             source_head=$sourceHead
@@ -499,6 +538,11 @@ jobs:
             npm_sbom_raw_sha256=[string]((Get-Content "$env:RUNNER_TEMP\npm-sbom-evidence.json" -Raw | ConvertFrom-Json).raw_sbom_sha256)
             npm_sbom_component_count=[int]((Get-Content "$env:RUNNER_TEMP\npm-sbom-evidence.json" -Raw | ConvertFrom-Json).component_count)
             package_lock_sha256=[string]$buildIdentity.package_lock_sha256
+            composed_sbom_semantic_inventory_sha256=[string]$composed.composed_semantic_inventory_sha256
+            composed_sbom_raw_sha256=[string]$composedRawSha
+            composed_sbom_total_component_count=[int]$composed.total_component_count
+            composed_sbom_first_party_component_count=[int]$composed.first_party_component_count
+            composed_sbom_composition_aggregate=[string]$composed.composition_aggregate
             npm_version=[string]$buildIdentity.npm_version
             bun_version=[string]$buildIdentity.bun_version
             me2_ui_bun_lock_sha256=[string]$buildIdentity.me2_ui_bun_lock_sha256
@@ -537,6 +581,11 @@ jobs:
             ${{ runner.temp }}/dependency-resolution.json
             ${{ runner.temp }}/npm-sbom.cdx.json
             ${{ runner.temp }}/npm-sbom-evidence.json
+            ${{ runner.temp }}/browser-composed-sbom.cdx.json
+            ${{ runner.temp }}/browser-composed-sbom-evidence.json
+            ${{ runner.temp }}/me2-ui-manifest.json
+            ${{ runner.temp }}/me2-daemon-manifest.json
+            ${{ runner.temp }}/guardian-native-manifest.json
             ${{ runner.temp }}/package-lock-material.json
             ${{ runner.temp }}/package.json
             ${{ runner.temp }}/package-lock.json
@@ -960,6 +1009,11 @@ jobs:
             ${{ runner.temp }}/dependency-resolution.json
             ${{ runner.temp }}/npm-sbom.cdx.json
             ${{ runner.temp }}/npm-sbom-evidence.json
+            ${{ runner.temp }}/browser-composed-sbom.cdx.json
+            ${{ runner.temp }}/browser-composed-sbom-evidence.json
+            ${{ runner.temp }}/me2-ui-manifest.json
+            ${{ runner.temp }}/me2-daemon-manifest.json
+            ${{ runner.temp }}/guardian-native-manifest.json
             ${{ runner.temp }}/package-lock-material.json
             ${{ runner.temp }}/package.json
             ${{ runner.temp }}/package-lock.json
