@@ -586,8 +586,7 @@ jobs:
           if ($matches.Count -ne 1) { throw "slsa_package_installer_cardinality_invalid:$($matches.Count)" }
           $installer = $matches[0]
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($digest.Length -ne 64) { throw 'slsa_package_installer_digest_invalid' }
-          if ($digest -notmatch '^[a-f0-9]+
+          if ($digest.Length -ne 64 -or $digest -notmatch '^[a-f0-9]+
         if: github.event_name == 'push' && github.ref == 'refs/heads/physical/build-slsa-provenance-v1'
         id: slsa_attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
