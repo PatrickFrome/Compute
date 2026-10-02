@@ -34,6 +34,7 @@ function createFixture(dir) {
   const packageJsonPath = join(dir, 'package.json');
   const packageLockPath = join(dir, 'package-lock.json');
   const packageLockMaterialPath = join(dir, 'package-lock-material.json');
+  const me2UiBunLockPath = join(dir, 'me2-ui-bun.lock');
   const buildIdentityPath = join(dir, 'build-identity.json');
   const provenancePath = join(dir, 'installer-provenance.json');
 
@@ -92,6 +93,7 @@ function createFixture(dir) {
     npmVersion: '11.19.0',
   });
   writeFileSync(packageLockMaterialPath, JSON.stringify(material, null, 2) + '\n');
+  writeFileSync(me2UiBunLockPath, '{"lockfileVersion":1,"packages":{}}\n');
 
   const dependencyPayload = {
     schema: 'metaengine.browser.dependency-resolution.v1',
@@ -130,6 +132,8 @@ function createFixture(dir) {
     dependency_resolution_sha256: dependency.dependency_resolution_sha256,
     package_lock_sha256: material.package_lock_sha256,
     npm_version: material.npm_version,
+    bun_version: '1.3.3',
+    me2_ui_bun_lock_sha256: createHash('sha256').update(readFileSync(me2UiBunLockPath)).digest('hex'),
     electron_builder_version: '26.15.7',
     node_version: process.version,
   });
@@ -143,6 +147,7 @@ function createFixture(dir) {
     packageJsonPath,
     packageLockPath,
     packageLockMaterialPath,
+    me2UiBunLockPath,
     buildIdentityPath,
     provenancePath,
     dependency,
@@ -166,6 +171,7 @@ function writeOptions(f) {
     'build-identity': f.buildIdentityPath,
     'dependency-resolution': f.dependencyPath,
     'package-lock-material': f.packageLockMaterialPath,
+    'me2-ui-bun-lock': f.me2UiBunLockPath,
     'package-json': f.packageJsonPath,
     'package-lock': f.packageLockPath,
   };
@@ -181,6 +187,8 @@ test('installer provenance v3 binds installer, installed tree, lockfile bytes, a
     assert.equal(written.dependency_resolution_sha256, f.dependency.dependency_resolution_sha256);
     assert.equal(written.package_lock_sha256, f.material.package_lock_sha256);
     assert.equal(written.npm_version, '11.19.0');
+    assert.equal(written.bun_version, '1.3.3');
+    assert.equal(written.me2_ui_bun_lock_sha256, f.identity.me2_ui_bun_lock_sha256);
 
     const acquired = await verifyInstaller({
       dir,
@@ -196,9 +204,12 @@ test('installer provenance v3 binds installer, installed tree, lockfile bytes, a
     assert.equal(acquired.dependency_resolution_sha256, f.dependency.dependency_resolution_sha256);
     assert.equal(acquired.package_lock_sha256, f.material.package_lock_sha256);
     assert.equal(acquired.npm_version, '11.19.0');
+    assert.equal(acquired.bun_version, '1.3.3');
+    assert.equal(acquired.me2_ui_bun_lock_sha256, f.identity.me2_ui_bun_lock_sha256);
     assert.equal(acquired.build_identity_verified, true);
     assert.equal(acquired.dependency_resolution_verified, true);
     assert.equal(acquired.package_lock_verified, true);
+    assert.equal(acquired.me2_ui_bun_lock_verified, true);
     assert.equal(acquired.blockmap_verified, true);
     assert.equal(acquired.config_verified, true);
   } finally {
@@ -296,6 +307,23 @@ test('installer provenance v3 rejects installed dependency Node version drift', 
       () => writeProvenance(writeOptions(f)),
       (error) => error?.code === 'build_identity_invalid'
         && /build_identity_dependency_node_version_mismatch/.test(String(error?.details?.message || '')),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('installer provenance v3 rejects ME2 UI bun.lock byte tampering', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    await writeProvenance(writeOptions(f));
+    writeFileSync(f.me2UiBunLockPath, '{"lockfileVersion":1,"packages":{"tampered":true}}\n');
+
+    await assert.rejects(
+      () => verifyInstaller({ dir, 'expect-head': HEAD, config: f.configPath }),
+      (error) => error?.code === 'package_lock_material_binding_mismatch',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

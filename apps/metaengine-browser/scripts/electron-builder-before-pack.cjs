@@ -104,8 +104,12 @@ function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
   if (buildIdentityVersion() === '3') {
     const materialPath = String(process.env.ME2_PACKAGE_LOCK_MATERIAL_PATH || '').trim();
     const expectedNpmVersion = String(process.env.ME2_NPM_VERSION || '').trim();
+    const expectedBunVersion = String(process.env.ME2_BUN_VERSION || '').trim();
+    const me2UiBunLockPath = String(process.env.ME2_UI_BUN_LOCK_PATH || '').trim();
     if (!materialPath) throw new Error('build_identity_package_lock_material_path_missing');
     if (!expectedNpmVersion) throw new Error('build_identity_npm_version_missing');
+    if (!expectedBunVersion) throw new Error('build_identity_bun_version_missing');
+    if (!me2UiBunLockPath) throw new Error('build_identity_me2_ui_bun_lock_path_missing');
     const material = loadPackageLockMaterialProof(materialPath, {
       packageJsonPath: path.join(appRoot, 'package.json'),
       packageLockPath: path.join(appRoot, 'package-lock.json'),
@@ -115,10 +119,26 @@ function buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion }) {
     if (material.npm_version !== expectedNpmVersion) throw new Error('build_identity_package_lock_npm_version_mismatch');
     if (dependency.node_version !== process.version) throw new Error('build_identity_dependency_node_version_mismatch');
     if (dependency.npm_version !== material.npm_version) throw new Error('build_identity_dependency_npm_version_mismatch');
+    let actualBunVersion;
+    try {
+      actualBunVersion = String(execFileSync('bun', ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }) || '').trim();
+    } catch {
+      throw new Error('build_identity_bun_version_unavailable');
+    }
+    if (actualBunVersion !== expectedBunVersion) throw new Error('build_identity_bun_version_mismatch');
+    if (!fs.existsSync(me2UiBunLockPath) || !fs.statSync(me2UiBunLockPath).isFile()) {
+      throw new Error('build_identity_me2_ui_bun_lock_missing');
+    }
     identity = createBuildIdentityV3({
       ...base,
       package_lock_sha256: material.package_lock_sha256,
       npm_version: material.npm_version,
+      bun_version: actualBunVersion,
+      me2_ui_bun_lock_sha256: sha256File(me2UiBunLockPath),
     });
   } else {
     identity = createBuildIdentity(base);

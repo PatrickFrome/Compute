@@ -124,6 +124,14 @@ function buildIdentityV3Payload(input = {}) {
       input.npm_version ?? input.npmVersion,
       'build_identity_npm_version_invalid',
     ),
+    bun_version: requiredString(
+      input.bun_version ?? input.bunVersion,
+      'build_identity_bun_version_invalid',
+    ),
+    me2_ui_bun_lock_sha256: requiredSha256(
+      input.me2_ui_bun_lock_sha256 ?? input.me2UiBunLockSha256,
+      'build_identity_me2_ui_bun_lock_sha256_invalid',
+    ),
   });
 }
 
@@ -162,6 +170,8 @@ function validateBuildIdentityV3(value, expected = {}) {
     electron_builder_version: expected.electron_builder_version ?? expected.electronBuilderVersion,
     node_version: expected.node_version ?? expected.nodeVersion,
     npm_version: expected.npm_version ?? expected.npmVersion,
+    bun_version: expected.bun_version ?? expected.bunVersion,
+    me2_ui_bun_lock_sha256: expected.me2_ui_bun_lock_sha256 ?? expected.me2UiBunLockSha256,
   };
   for (const [field, expectedValue] of Object.entries(checks)) {
     if (expectedValue === undefined || expectedValue === null) continue;

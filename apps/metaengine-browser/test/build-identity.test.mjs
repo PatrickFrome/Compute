@@ -91,6 +91,8 @@ function identityV3(overrides = {}) {
     dependency_resolution_sha256: dependencyProof().dependency_resolution_sha256,
     package_lock_sha256: 'c'.repeat(64),
     npm_version: '11.19.0',
+    bun_version: '1.3.3',
+    me2_ui_bun_lock_sha256: 'd'.repeat(64),
     electron_builder_version: '26.15.7',
     node_version: 'v24.21.0',
     ...overrides,
@@ -178,11 +180,15 @@ test('build identity v3 independently binds frozen lockfile and npm toolchain', 
   assert.equal(a.build_identity_sha256, b.build_identity_sha256);
   assert.equal(a.package_lock_sha256, 'c'.repeat(64));
   assert.equal(a.npm_version, '11.19.0');
+  assert.equal(a.bun_version, '1.3.3');
+  assert.equal(a.me2_ui_bun_lock_sha256, 'd'.repeat(64));
   assert.equal(a.authority_effect, false);
 
-  assert.notEqual(identityV3({ package_lock_sha256: 'd'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ package_lock_sha256: 'e'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
   assert.notEqual(identityV3({ npm_version: '11.20.0' }).build_identity_sha256, a.build_identity_sha256);
-  assert.notEqual(identityV3({ dependency_resolution_sha256: 'e'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ bun_version: '1.3.4' }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ me2_ui_bun_lock_sha256: 'f'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
+  assert.notEqual(identityV3({ dependency_resolution_sha256: '0'.repeat(64) }).build_identity_sha256, a.build_identity_sha256);
 });
 
 test('build identity v3 validation fails closed on lockfile or npm drift', () => {
@@ -191,6 +197,8 @@ test('build identity v3 validation fails closed on lockfile or npm drift', () =>
     source_head: 'a'.repeat(40),
     package_lock_sha256: 'c'.repeat(64),
     npm_version: '11.19.0',
+    bun_version: '1.3.3',
+    me2_ui_bun_lock_sha256: 'd'.repeat(64),
   }).build_identity_sha256, exact.build_identity_sha256);
 
   assert.throws(
@@ -339,4 +347,21 @@ test('V3 packaging rejects split-brain Node/npm dependency evidence', () => {
   assert.match(after, /packaged_build_identity_dependency_npm_version_mismatch/);
   assert.match(provenance, /build_identity_dependency_node_version_mismatch/);
   assert.match(provenance, /build_identity_dependency_npm_version_mismatch/);
+});
+
+
+test('build identity v3 fails closed on Bun or UI lock drift', () => {
+  const exact = identityV3();
+  assert.throws(
+    () => validateBuildIdentityV3(exact, { bun_version: '1.3.4' }),
+    /build_identity_bun_version_mismatch/,
+  );
+  assert.throws(
+    () => validateBuildIdentityV3(exact, { me2_ui_bun_lock_sha256: 'f'.repeat(64) }),
+    /build_identity_me2_ui_bun_lock_sha256_mismatch/,
+  );
+  assert.throws(
+    () => createBuildIdentityV3({ ...exact, me2_ui_bun_lock_sha256: 'not-a-sha' }),
+    /build_identity_me2_ui_bun_lock_sha256_invalid/,
+  );
 });

@@ -119,7 +119,10 @@ if ($Mode -eq 'Acquire') {
       [string]$acquired.provenance_schema -eq 'metaengine.browser.installer-provenance.v3' -and (
         [string]$acquired.package_lock_sha256 -notmatch '^[a-f0-9]{64}$' -or
         -not [string]$acquired.npm_version -or
-        $acquired.package_lock_verified -ne $true
+        -not [string]$acquired.bun_version -or
+        [string]$acquired.me2_ui_bun_lock_sha256 -notmatch '^[a-f0-9]{64}$' -or
+        $acquired.package_lock_verified -ne $true -or
+        $acquired.me2_ui_bun_lock_verified -ne $true
       )
     )
   )
@@ -145,9 +148,12 @@ if ($Mode -eq 'Acquire') {
     dependency_resolution_sha256 = [string]$acquired.dependency_resolution_sha256
     package_lock_sha256 = [string]$acquired.package_lock_sha256
     npm_version = [string]$acquired.npm_version
+    bun_version = [string]$acquired.bun_version
+    me2_ui_bun_lock_sha256 = [string]$acquired.me2_ui_bun_lock_sha256
     build_identity_verified = [bool]$acquired.build_identity_verified
     dependency_resolution_verified = [bool]$acquired.dependency_resolution_verified
     package_lock_verified = [bool]$acquired.package_lock_verified
+    me2_ui_bun_lock_verified = [bool]$acquired.me2_ui_bun_lock_verified
     blockmap_verified = [bool]$acquired.blockmap_verified
     config_verified = [bool]$acquired.config_verified
     authority_effect = $false
@@ -176,7 +182,10 @@ if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding
       [string]$binding.provenance_schema -eq 'metaengine.browser.installer-provenance.v3' -and (
         [string]$binding.package_lock_sha256 -notmatch '^[a-f0-9]{64}$' -or
         -not [string]$binding.npm_version -or
-        $binding.package_lock_verified -ne $true
+        -not [string]$binding.bun_version -or
+        [string]$binding.me2_ui_bun_lock_sha256 -notmatch '^[a-f0-9]{64}$' -or
+        $binding.package_lock_verified -ne $true -or
+        $binding.me2_ui_bun_lock_verified -ne $true
       )
     ) -or
     $binding.authority_effect -ne $false) {
@@ -202,8 +211,11 @@ if ($Mode -eq 'Verify') {
       [string]$acquired.dependency_resolution_sha256 -ne [string]$binding.dependency_resolution_sha256 -or
       [string]$acquired.package_lock_sha256 -ne [string]$binding.package_lock_sha256 -or
       [string]$acquired.npm_version -ne [string]$binding.npm_version -or
+      [string]$acquired.bun_version -ne [string]$binding.bun_version -or
+      [string]$acquired.me2_ui_bun_lock_sha256 -ne [string]$binding.me2_ui_bun_lock_sha256 -or
       $acquired.build_identity_verified -ne $true -or $acquired.dependency_resolution_verified -ne $true -or
       [bool]$acquired.package_lock_verified -ne [bool]$binding.package_lock_verified -or
+      [bool]$acquired.me2_ui_bun_lock_verified -ne [bool]$binding.me2_ui_bun_lock_verified -or
       $acquired.blockmap_verified -ne $true -or $acquired.config_verified -ne $true) {
     throw 'qualified_installer_reverify_binding_drift'
   }
@@ -246,7 +258,10 @@ $proof | Add-Member -NotePropertyName dependency_resolution_sha256 -NoteProperty
 if ([string]$binding.provenance_schema -eq 'metaengine.browser.installer-provenance.v3') {
   $proof | Add-Member -NotePropertyName package_lock_sha256 -NotePropertyValue ([string]$binding.package_lock_sha256) -Force
   $proof | Add-Member -NotePropertyName npm_version -NotePropertyValue ([string]$binding.npm_version) -Force
+  $proof | Add-Member -NotePropertyName bun_version -NotePropertyValue ([string]$binding.bun_version) -Force
+  $proof | Add-Member -NotePropertyName me2_ui_bun_lock_sha256 -NotePropertyValue ([string]$binding.me2_ui_bun_lock_sha256) -Force
   $proof | Add-Member -NotePropertyName package_lock_verified -NotePropertyValue $true -Force
+  $proof | Add-Member -NotePropertyName me2_ui_bun_lock_verified -NotePropertyValue $true -Force
 }
 $proof | ConvertTo-Json -Depth 12 | Set-Content $ProofPath -Encoding utf8
 
@@ -260,7 +275,10 @@ $result = [ordered]@{
   dependency_resolution_sha256 = [string]$binding.dependency_resolution_sha256
   package_lock_sha256 = [string]$binding.package_lock_sha256
   npm_version = [string]$binding.npm_version
+  bun_version = [string]$binding.bun_version
+  me2_ui_bun_lock_sha256 = [string]$binding.me2_ui_bun_lock_sha256
   package_lock_verified = [bool]$binding.package_lock_verified
+  me2_ui_bun_lock_verified = [bool]$binding.me2_ui_bun_lock_verified
   producer_terminal_success = $true
   authority_effect = $false
 }

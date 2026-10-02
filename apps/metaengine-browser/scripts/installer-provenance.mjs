@@ -498,6 +498,7 @@ async function writeProvenance(options) {
   let buildIdentity = null;
   let dependencyResolution = null;
   let packageLockMaterial = null;
+  let me2UiBunLockSha256 = null;
   const buildIdentityPath = options['build-identity'] && options['build-identity'] !== true
     ? resolve(String(options['build-identity']))
     : null;
@@ -547,6 +548,16 @@ async function writeProvenance(options) {
         if (dependencyResolution.npm_version !== buildIdentity.npm_version
             || dependencyResolution.npm_version !== packageLockMaterial.npm_version) {
           throw new Error('build_identity_dependency_npm_version_mismatch');
+        }
+        const me2UiBunLockPath = options['me2-ui-bun-lock'] && options['me2-ui-bun-lock'] !== true
+          ? resolve(String(options['me2-ui-bun-lock']))
+          : null;
+        if (!me2UiBunLockPath || !existsSync(me2UiBunLockPath) || !statSync(me2UiBunLockPath).isFile()) {
+          throw new Error('build_identity_me2_ui_bun_lock_missing');
+        }
+        me2UiBunLockSha256 = await sha256File(me2UiBunLockPath);
+        if (me2UiBunLockSha256 !== buildIdentity.me2_ui_bun_lock_sha256) {
+          throw new Error('build_identity_me2_ui_bun_lock_sha256_mismatch');
         }
       } else if (packageLockMaterialPath) {
         throw new Error('build_identity_v2_package_lock_material_unexpected');
@@ -602,6 +613,8 @@ async function writeProvenance(options) {
     dependency_resolution_sha256: dependencyResolution?.dependency_resolution_sha256 || null,
     package_lock_sha256: packageLockMaterial?.package_lock_sha256 || null,
     npm_version: packageLockMaterial?.npm_version || null,
+    bun_version: buildIdentity?.bun_version || null,
+    me2_ui_bun_lock_sha256: me2UiBunLockSha256,
     build_identity: buildIdentity,
     built_at: options['built-at'] || new Date().toISOString(),
     signed: false,
@@ -670,7 +683,9 @@ function readProvenance(provenancePath) {
     if (parsed.schema === PROVENANCE_SCHEMA_V3) {
       if (exact.schema !== BUILD_IDENTITY_SCHEMA_V3
           || String(parsed.package_lock_sha256 || '') !== String(exact.package_lock_sha256 || '')
-          || String(parsed.npm_version || '') !== String(exact.npm_version || '')) {
+          || String(parsed.npm_version || '') !== String(exact.npm_version || '')
+          || String(parsed.bun_version || '') !== String(exact.bun_version || '')
+          || String(parsed.me2_ui_bun_lock_sha256 || '') !== String(exact.me2_ui_bun_lock_sha256 || '')) {
         throw new ProvenanceError('provenance_build_identity_invalid', { field: 'package_lock_material' });
       }
     }
@@ -768,8 +783,11 @@ async function verifyInstaller(options) {
   let buildIdentityVerified = false;
   let dependencyResolutionVerified = false;
   let packageLockVerified = false;
+  let me2UiBunLockVerified = false;
   let verifiedPackageLockSha256 = null;
   let verifiedNpmVersion = null;
+  let verifiedBunVersion = null;
+  let verifiedMe2UiBunLockSha256 = null;
   if ([PROVENANCE_SCHEMA_V2, PROVENANCE_SCHEMA_V3].includes(provenance.schema)) {
     const buildIdentityPath = options['build-identity']
       ? resolve(String(options['build-identity']))
@@ -848,6 +866,15 @@ async function verifyInstaller(options) {
           message: String(error?.message || error).slice(0, 240),
         });
       }
+      const me2UiBunLockPath = options['me2-ui-bun-lock']
+        ? resolve(String(options['me2-ui-bun-lock']))
+        : payloadDir
+          ? join(payloadDir, 'me2-ui-bun.lock')
+          : null;
+      if (!me2UiBunLockPath || !existsSync(me2UiBunLockPath) || !statSync(me2UiBunLockPath).isFile()) {
+        throw new ProvenanceError('me2_ui_bun_lock_missing', { me2_ui_bun_lock: me2UiBunLockPath });
+      }
+      const actualMe2UiBunLockSha256 = await sha256File(me2UiBunLockPath);
       if (externalIdentity.schema !== BUILD_IDENTITY_SCHEMA_V3
           || material.package_lock_sha256 !== externalIdentity.package_lock_sha256
           || material.package_lock_sha256 !== provenance.package_lock_sha256
@@ -857,7 +884,10 @@ async function verifyInstaller(options) {
           || dependencyProof.node_version !== externalIdentity.node_version
           || dependencyProof.node_version !== material.node_version
           || dependencyProof.npm_version !== externalIdentity.npm_version
-          || dependencyProof.npm_version !== material.npm_version) {
+          || dependencyProof.npm_version !== material.npm_version
+          || String(provenance.bun_version || '') !== String(externalIdentity.bun_version || '')
+          || actualMe2UiBunLockSha256 !== externalIdentity.me2_ui_bun_lock_sha256
+          || actualMe2UiBunLockSha256 !== provenance.me2_ui_bun_lock_sha256) {
         throw new ProvenanceError('package_lock_material_binding_mismatch', {
           material_sha256: material.package_lock_sha256,
           identity_sha256: externalIdentity.package_lock_sha256 || null,
@@ -865,8 +895,11 @@ async function verifyInstaller(options) {
         });
       }
       packageLockVerified = true;
+      me2UiBunLockVerified = true;
       verifiedPackageLockSha256 = material.package_lock_sha256;
       verifiedNpmVersion = material.npm_version;
+      verifiedBunVersion = externalIdentity.bun_version;
+      verifiedMe2UiBunLockSha256 = actualMe2UiBunLockSha256;
     }
 
     buildIdentityVerified = true;
@@ -891,9 +924,12 @@ async function verifyInstaller(options) {
     dependency_resolution_sha256: provenance.dependency_resolution_sha256 || null,
     package_lock_sha256: provenance.package_lock_sha256 || verifiedPackageLockSha256,
     npm_version: provenance.npm_version || verifiedNpmVersion,
+    bun_version: provenance.bun_version || verifiedBunVersion,
+    me2_ui_bun_lock_sha256: provenance.me2_ui_bun_lock_sha256 || verifiedMe2UiBunLockSha256,
     build_identity_verified: buildIdentityVerified,
     dependency_resolution_verified: dependencyResolutionVerified,
     package_lock_verified: packageLockVerified,
+    me2_ui_bun_lock_verified: me2UiBunLockVerified,
     blockmap_verified: blockmapVerified,
     config_verified: configVerified,
     provenance_path: resolve(provenancePath),

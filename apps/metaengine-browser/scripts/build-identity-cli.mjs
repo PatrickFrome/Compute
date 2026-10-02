@@ -81,10 +81,13 @@ export function createBuildIdentityFromArgs(args) {
     if (dependency.npm_version !== material.npm_version) {
       throw new Error('build_identity_cli_dependency_npm_version_mismatch');
     }
+    const me2UiBunLockPath = resolve(required(args, 'me2-ui-bun-lock'));
     return createBuildIdentityV3({
       ...base,
       package_lock_sha256: material.package_lock_sha256,
       npm_version: material.npm_version,
+      bun_version: required(args, 'bun-version'),
+      me2_ui_bun_lock_sha256: sha256File(me2UiBunLockPath),
     });
   }
 

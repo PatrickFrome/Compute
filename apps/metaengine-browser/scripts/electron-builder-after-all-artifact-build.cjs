@@ -118,8 +118,12 @@ function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageV
     if (metadata?.schema !== BUILD_IDENTITY_SCHEMA_V3) throw new Error('packaged_build_identity_v3_required');
     const materialPath = String(process.env.ME2_PACKAGE_LOCK_MATERIAL_PATH || '').trim();
     const expectedNpmVersion = String(process.env.ME2_NPM_VERSION || '').trim();
+    const expectedBunVersion = String(process.env.ME2_BUN_VERSION || '').trim();
+    const me2UiBunLockPath = String(process.env.ME2_UI_BUN_LOCK_PATH || '').trim();
     if (!materialPath) throw new Error('packaged_build_identity_package_lock_material_path_missing');
     if (!expectedNpmVersion) throw new Error('packaged_build_identity_npm_version_missing');
+    if (!expectedBunVersion) throw new Error('packaged_build_identity_bun_version_missing');
+    if (!me2UiBunLockPath) throw new Error('packaged_build_identity_me2_ui_bun_lock_path_missing');
     material = loadPackageLockMaterialProof(materialPath, {
       packageJsonPath: path.join(appRoot, 'package.json'),
       packageLockPath: path.join(appRoot, 'package-lock.json'),
@@ -129,8 +133,24 @@ function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageV
     if (material.npm_version !== expectedNpmVersion) throw new Error('packaged_build_identity_package_lock_npm_version_mismatch');
     if (dependency.node_version !== process.version) throw new Error('packaged_build_identity_dependency_node_version_mismatch');
     if (dependency.npm_version !== material.npm_version) throw new Error('packaged_build_identity_dependency_npm_version_mismatch');
+    let actualBunVersion;
+    try {
+      actualBunVersion = String(execFileSync('bun', ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }) || '').trim();
+    } catch {
+      throw new Error('packaged_build_identity_bun_version_unavailable');
+    }
+    if (actualBunVersion !== expectedBunVersion) throw new Error('packaged_build_identity_bun_version_mismatch');
+    if (!fs.existsSync(me2UiBunLockPath) || !fs.statSync(me2UiBunLockPath).isFile()) {
+      throw new Error('packaged_build_identity_me2_ui_bun_lock_missing');
+    }
     expected.package_lock_sha256 = material.package_lock_sha256;
     expected.npm_version = material.npm_version;
+    expected.bun_version = actualBunVersion;
+    expected.me2_ui_bun_lock_sha256 = sha256File(me2UiBunLockPath);
   }
   const exact = validateBuildIdentityAny(metadata, expected);
   const proof = Object.freeze({
@@ -143,6 +163,8 @@ function assertPackagedBuildIdentity(metadata, { appRoot, expectedHead, packageV
     dependency_resolution_sha256: exact.dependency_resolution_sha256,
     package_lock_sha256: exact.package_lock_sha256 || null,
     npm_version: exact.npm_version || null,
+    bun_version: exact.bun_version || null,
+    me2_ui_bun_lock_sha256: exact.me2_ui_bun_lock_sha256 || null,
     builder_config_sha256: exact.builder_config_sha256,
     repository: exact.repository,
     repository_id: exact.repository_id,
@@ -231,6 +253,8 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     dependency_resolution_sha256: buildIdentity?.dependency_resolution_sha256 || null,
     package_lock_sha256: buildIdentity?.package_lock_sha256 || null,
     npm_version: buildIdentity?.npm_version || null,
+    bun_version: buildIdentity?.bun_version || null,
+    me2_ui_bun_lock_sha256: buildIdentity?.me2_ui_bun_lock_sha256 || null,
     builder_config_sha256: buildIdentity?.builder_config_sha256 || null,
     build_identity_run_id: buildIdentity?.run_id || null,
     build_identity_run_attempt: buildIdentity?.run_attempt || null,
