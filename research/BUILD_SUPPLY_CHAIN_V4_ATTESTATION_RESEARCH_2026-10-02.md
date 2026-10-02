@@ -302,3 +302,51 @@ Required correction before V3 physical qualification:
 This changes the meaning of the V3 lockfile from “application dependency graph frozen” to “application + package-build JS toolchain graph frozen”.
 
 Remaining external inputs still exist (for example Electron runtime downloads, hosted runner image, OS tooling and NSIS resources). Therefore even after this correction METAENGINE should claim **stronger frozen provenance**, not hermetic or bit-reproducible builds.
+
+
+## Research finding: Bun CI is frozen only when both runtime and lock are pinned
+
+Primary sources:
+- https://bun.sh/docs/pm/cli/install
+- https://bun.sh/docs/pm/lockfile
+- https://github.com/oven-sh/setup-bun/tree/0c5077e51419868618aeaa5fe8019c62421857d6
+
+Bun documents that `bun ci` is equivalent to `bun install --frozen-lockfile`: it installs the exact versions from the committed `bun.lock` and fails when `package.json` and the lockfile disagree.
+
+The setup-bun action also makes an important distinction that METAENGINE should preserve:
+- `bun-version` is the requested semantic version;
+- `bun-revision` is the runtime revision reported by the executable;
+- `bun-path` is the exact downloaded executable;
+- `bun-download-url` identifies the source of that executable.
+
+Current V3 implementation pins:
+- setup-bun action commit `0c5077e51419868618aeaa5fe8019c62421857d6`;
+- Bun `1.3.3`;
+- ME2 UI raw `bun.lock` SHA-256;
+- `bun ci` rather than mutable `bun install`.
+
+This closes version/lock drift, but it is not yet a hermetic runtime-byte proof.
+
+Recommended V4 runtime-material extension:
+- record `bun --revision`;
+- hash the exact Bun executable path on the Windows package runner;
+- hash the exact Electron runtime executable used by packaging;
+- treat those as builder/runtime material evidence;
+- keep them separate from source dependency lock semantics.
+
+Do not retrofit these additional binary digests into Build Identity V3 after a V3 physical artifact exists. Introduce them as a versioned V4 material proof or before the first V3 physical producer if the schema is intentionally re-opened.
+
+## Source-qualification workspace isolation
+
+A Windows source qualification run exposed a useful distinction between build outputs and repository evidence.
+
+The ME2 UI build writes `.next` output. This repository historically contains tracked generated UI files, so running `bun run build` in the same checkout can delete or replace paths that repository-wide integrity tests expect to inspect.
+
+The stronger qualification pattern is:
+- keep the exact checked-out source immutable;
+- copy the ME2 UI source into `RUNNER_TEMP`;
+- run `bun ci`, build, pack and bundle verification there;
+- run the full Browser regression against the untouched source checkout;
+- retain a final `git diff --exit-code` fence.
+
+This avoids teaching repository integrity tests to ignore missing tracked files and preserves their original semantics.
