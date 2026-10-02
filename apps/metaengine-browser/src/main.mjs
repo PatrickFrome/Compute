@@ -62,6 +62,7 @@ import {
 } from './client-control-contract.mjs';
 import { ClientGoalJournal } from './client-goal-journal.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
+import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -94,6 +95,7 @@ let rsiOperatorSteering = null;
 let nativeSupervisor = null;
 let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
+let guardianStatusObserver = null;
 let clientGoalJournal = null;
 
 function canonicalTabRuntimeIdentity(tabId) {
@@ -1588,6 +1590,9 @@ async function nativeSupervisorState() {
   const selected = registry.selected();
   const perception = await perceptionForSelected();
   const compute = await currentComputeHealth();
+  const guardianObserver = ensureGuardianStatusObserver();
+  guardianObserver.refreshIfDue();
+  const guardian = guardianObserver.snapshot();
   return {
     ...projectNativeRuntimeObservation(nativeSupervisor?.snapshot?.() || {}, app.getVersion()),
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
@@ -1615,6 +1620,7 @@ async function nativeSupervisorState() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
     compute,
+    guardian,
     perception,
   };
 }
@@ -1821,6 +1827,15 @@ function ensureGuardianBootstrapLauncher() {
     });
   }
   return guardianBootstrapLauncher;
+}
+
+function ensureGuardianStatusObserver() {
+  if (!guardianStatusObserver) {
+    guardianStatusObserver = createBrowserGuardianStatusObserver({
+      readStatus: () => ensureGuardianBootstrapLauncher().status(),
+    });
+  }
+  return guardianStatusObserver;
 }
 
 async function initNativeSupervisor() {
@@ -2380,7 +2395,7 @@ ipcMain.handle('metaengine:client:connection-status', async (event) => {
 });
 ipcMain.handle('metaengine:client:guardian-status', async (event) => {
   assertShellSender(event);
-  return ensureGuardianBootstrapLauncher().status();
+  return ensureGuardianStatusObserver().observe({ force: true });
 });
 ipcMain.handle('metaengine:client:activate-guardian', async (event) => {
   assertShellSender(event);
@@ -2401,7 +2416,11 @@ ipcMain.handle('metaengine:client:activate-guardian', async (event) => {
       authority_effect: false,
     });
   }
-  return ensureGuardianBootstrapLauncher().activate();
+  const observer = ensureGuardianStatusObserver();
+  observer.invalidate('GUARDIAN_ACTIVATION_STARTED');
+  await observer.quiesce();
+  const result = await ensureGuardianBootstrapLauncher().activate();
+  return observer.record(result);
 });
 ipcMain.handle('metaengine:client:work-readiness', async (event) => {
   assertShellSender(event);
