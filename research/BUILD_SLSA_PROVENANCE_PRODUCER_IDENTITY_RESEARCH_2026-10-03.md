@@ -250,3 +250,67 @@ The new verifier branch is now source-qualified:
 - no physical workflow fan-out
 
 This establishes the expected SLSA statement contract before consuming a fresh package identity.
+
+
+## Producer-event fence implementation result
+
+The event ambiguity is now closed in a source-qualified successor without starting a physical package build.
+
+Implementation branch:
+
+`work/build-package-producer-event-fence-v1 @ ebc8db27304b06e8e08163b04498726d9201785d`
+
+Changes relative to the SLSA verifier base are limited to:
+
+- `apps/metaengine-browser/scripts/installer-provenance.mjs`
+- `apps/metaengine-browser/scripts/qualified-installer-consumer.ps1`
+- `apps/metaengine-browser/test/installer-provenance.test.mjs`
+- `apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs`
+- source-only qualification workflow.
+
+No package version or Package Smoke workflow changed.
+
+### Resolver semantics
+
+`installer-provenance.mjs` now accepts an optional exact producer event:
+
+`--event push|pull_request|workflow_dispatch`
+
+When present it:
+
+1. sends both `head_sha` and `event` to GitHub's list-workflow-runs endpoint;
+2. independently filters returned rows by both exact head SHA and exact event before newest-run selection;
+3. persists the observed `producer_event` in resolved evidence;
+4. makes `wait` re-read the exact run and reject event drift with `producer_event_mismatch`.
+
+The GitHub REST documentation explicitly supports both `event` and `head_sha` as narrowing parameters for "List workflow runs for a workflow". Local filtering remains in place as defense in depth rather than trusting query filtering alone.
+
+### Shared consumer semantics
+
+`qualified-installer-consumer.ps1` now exposes optional:
+
+`-ExpectedProducerEvent push|pull_request|workflow_dispatch`
+
+If supplied, both Acquire and Wait carry the exact event fence and the consumer binding persists `producer_event`.
+
+If omitted, existing consumers retain their previous behavior. This preserves compatibility with the already-qualified PR-produced `694b106...` installer while allowing the future SLSA line to require `push`.
+
+### Tests
+
+The hermetic installer-provenance suite now proves:
+
+- a newer same-SHA pull-request run cannot eclipse an older valid push producer when `event=push`;
+- no fallback to a different event occurs when the requested event is absent;
+- unsupported producer events fail before network access;
+- Wait rejects an exact run whose event drifts;
+- existing resolver/download/wait/provenance tests remain green.
+
+The shared consumer contract also proves event fencing is optional by default but exact when requested.
+
+Source Qualification:
+
+- first run `37070756887`: implementation tests PASS; static contract failed on an incorrect checker literal only;
+- checker source corrected without rerunning the failed attempt;
+- exact-head run `37070823699`: SUCCESS.
+
+This closes the producer-discovery race before any fresh package identity is consumed.
