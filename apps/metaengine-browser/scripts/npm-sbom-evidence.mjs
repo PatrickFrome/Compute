@@ -94,6 +94,23 @@ function componentPackageName(component) {
   return component.name;
 }
 
+function parseNpmPurlIdentity(purl) {
+  const text = optionalString(purl);
+  if (!text || !text.startsWith('pkg:npm/')) return null;
+  const withoutPrefix = text.slice('pkg:npm/'.length).split('?')[0].split('#')[0];
+  const at = withoutPrefix.lastIndexOf('@');
+  if (at <= 0 || at === withoutPrefix.length - 1) return null;
+  let name;
+  let version;
+  try {
+    name = decodeURIComponent(withoutPrefix.slice(0, at));
+    version = decodeURIComponent(withoutPrefix.slice(at + 1));
+  } catch {
+    return null;
+  }
+  return name && version ? { name, version } : null;
+}
+
 function normalizeDependencies(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -168,7 +185,10 @@ export function createNpmSbomEvidence({
   if (lock.npm_version !== dependency.npm_version) fail('npm_sbom_npm_version_binding_mismatch');
 
   const root = normalizeComponent(sbom.metadata?.component || {});
-  if (componentPackageName(root) !== packageName) fail('npm_sbom_metadata_root_name_mismatch');
+  const rootPurl = parseNpmPurlIdentity(root.purl);
+  const rootNameMatches = componentPackageName(root) === packageName
+    || (rootPurl?.name === packageName && rootPurl?.version === packageVersion);
+  if (!rootNameMatches) fail('npm_sbom_metadata_root_name_mismatch');
   if (root.version !== packageVersion) fail('npm_sbom_metadata_root_version_mismatch');
   if (root.type !== 'application') fail('npm_sbom_metadata_root_type_invalid');
 
