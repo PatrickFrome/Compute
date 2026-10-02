@@ -1,0 +1,57 @@
+{
+  "schema": "metaengine.browser.npm-sbom-source-qualified.v1",
+  "qualified_at": "2026-10-02T11:07:07Z",
+  "source_head": "eae271e1eaa6a3d790cfdf872c639a2b2569f45a",
+  "implementation_branch": "work/build-sbom-evidence-v1",
+  "run_id": 36998959402,
+  "run_number": 6,
+  "package_version": "0.7.0-dev.36991000001.1",
+  "package_lock": {
+    "sha256": "d81d8d75c3facf27654e13439e005710f358705b2dde2baf6266512f45ce928b",
+    "bytes": 144647,
+    "package_entries": 317,
+    "integrity_entries": 317,
+    "resolved_entries": 317
+  },
+  "dependency_resolution": {
+    "sha256": "6a7fa9676a94bebc3d19c22396feefa1cf48a4879fbca9d5542f76a4d66da098",
+    "dependency_count": 501,
+    "node": "v24.21.0",
+    "npm": "11.19.0"
+  },
+  "sbom": {
+    "format": "CycloneDX",
+    "spec_version": "1.5",
+    "semantic_inventory_sha256": "5ce48b0944a97809e8cc93de7b42b1df8ac466fb655b65da8321463019f21cf8",
+    "component_count": 286,
+    "dependency_node_count": 287,
+    "dependency_relation_count": 448,
+    "linux_raw_sha256": [
+      "916cfa8031fe51087d7b68b0c3e62812c2962a5342cc331f1d54741572321320",
+      "ee754dc8ee392507b9f4bf02d68552146f3827f6cebe507b91855d183b369a48"
+    ],
+    "windows_raw_sha256": "63043b683348091ceb31ff773b1a5c2d0cd2c018a5e33c1b2f463142c1f982e5"
+  },
+  "tests": {
+    "focused_linux": {
+      "tests": 12,
+      "pass": 12,
+      "fail": 0,
+      "skipped": 0
+    },
+    "focused_windows": {
+      "tests": 12,
+      "pass": 12,
+      "fail": 0,
+      "skipped": 0
+    },
+    "browser_windows": {
+      "tests": 3923,
+      "pass": 3923,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "promotion_authorized": false,
+  "authority_effect": false
+}
