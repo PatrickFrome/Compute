@@ -1,0 +1,43 @@
+{
+  "schema": "metaengine.browser.package-build-reservation-parser-incident.v1",
+  "date": "2026-10-02",
+  "qualified_base": "4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b",
+  "development_branch": "work/build-one-physical-producer-fence-v1",
+  "invalid_runs": [
+    {
+      "run_id": 36974979671,
+      "run_number": 3139,
+      "head": "0da7ab77901fc3cc806e5d176fda0a3ef659462f",
+      "jobs": 0,
+      "artifacts": 0
+    },
+    {
+      "run_id": 36975051625,
+      "run_number": 3140,
+      "head": "71edf96202dd53c4f43ae7cc1446b6da17b36d71",
+      "jobs": 0,
+      "artifacts": 0
+    },
+    {
+      "run_id": 36975082570,
+      "run_number": 3141,
+      "head": "4ff3bbd1fd033c80d669106a91a67ac2e2c4ccac",
+      "jobs": 0,
+      "artifacts": 0
+    },
+    {
+      "run_id": 36975111718,
+      "run_number": 3142,
+      "head": "2d8a083c70ce8556f336cf4d0349aec259224429",
+      "jobs": 0,
+      "artifacts": 0
+    }
+  ],
+  "root_cause": "DUPLICATE_WINDOWS_JOB_TIMEOUT_MINUTES_YAML_KEY",
+  "corrective_commit": "98b60bbca79b1e4fa5c7843a952f495588e2ff1c",
+  "workflow_level_cancel_in_progress_removed": true,
+  "package_version_job_concurrency_retained": true,
+  "physical_effect": false,
+  "successor_version_consumed": false,
+  "authority_effect": false
+}
