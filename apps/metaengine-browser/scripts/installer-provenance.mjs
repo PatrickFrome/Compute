@@ -37,12 +37,17 @@ import { pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const {
+  BUILD_IDENTITY_SCHEMA_V3,
   loadDependencyResolutionProof,
-  validateBuildIdentity,
+  validateBuildIdentityAny,
 } = require('./build-identity.cjs');
+const {
+  loadPackageLockMaterialProof,
+} = require('./package-lock-material.cjs');
 
 const PROVENANCE_SCHEMA_V1 = 'metaengine.browser.installer-provenance.v1';
 const PROVENANCE_SCHEMA_V2 = 'metaengine.browser.installer-provenance.v2';
+const PROVENANCE_SCHEMA_V3 = 'metaengine.browser.installer-provenance.v3';
 const ACQUIRED_SCHEMA = 'metaengine.browser.installer-provenance-acquired.v1';
 const RESOLVED_SCHEMA = 'metaengine.browser.installer-run-resolved.v1';
 const DOWNLOADED_SCHEMA = 'metaengine.browser.installer-artifact-downloaded.v1';
@@ -492,22 +497,52 @@ async function writeProvenance(options) {
 
   let buildIdentity = null;
   let dependencyResolution = null;
+  let packageLockMaterial = null;
   const buildIdentityPath = options['build-identity'] && options['build-identity'] !== true
     ? resolve(String(options['build-identity']))
     : null;
   const dependencyResolutionPath = options['dependency-resolution'] && options['dependency-resolution'] !== true
     ? resolve(String(options['dependency-resolution']))
     : null;
+  const packageLockMaterialPath = options['package-lock-material'] && options['package-lock-material'] !== true
+    ? resolve(String(options['package-lock-material']))
+    : null;
 
-  if (buildIdentityPath || dependencyResolutionPath) {
+  if (buildIdentityPath || dependencyResolutionPath || packageLockMaterialPath) {
     if (!buildIdentityPath || !dependencyResolutionPath) {
       throw new ProvenanceError('build_identity_inputs_incomplete', {});
     }
     let rawBuildIdentity;
     try {
       rawBuildIdentity = JSON.parse(readFileSync(buildIdentityPath, 'utf8'));
-      buildIdentity = validateBuildIdentity(rawBuildIdentity);
+      buildIdentity = validateBuildIdentityAny(rawBuildIdentity);
       dependencyResolution = loadDependencyResolutionProof(dependencyResolutionPath);
+      if (buildIdentity.schema === BUILD_IDENTITY_SCHEMA_V3) {
+        const packageJsonPath = options['package-json'] && options['package-json'] !== true
+          ? resolve(String(options['package-json']))
+          : null;
+        const packageLockPath = options['package-lock'] && options['package-lock'] !== true
+          ? resolve(String(options['package-lock']))
+          : null;
+        if (!packageLockMaterialPath || !packageJsonPath || !packageLockPath) {
+          throw new Error('build_identity_v3_package_lock_inputs_incomplete');
+        }
+        packageLockMaterial = loadPackageLockMaterialProof(packageLockMaterialPath, {
+          packageJsonPath,
+          packageLockPath,
+        });
+        if (packageLockMaterial.package_lock_sha256 !== buildIdentity.package_lock_sha256) {
+          throw new Error('build_identity_package_lock_sha256_mismatch');
+        }
+        if (packageLockMaterial.npm_version !== buildIdentity.npm_version) {
+          throw new Error('build_identity_npm_version_mismatch');
+        }
+        if (packageLockMaterial.package_version !== buildIdentity.package_version) {
+          throw new Error('build_identity_package_lock_version_mismatch');
+        }
+      } else if (packageLockMaterialPath) {
+        throw new Error('build_identity_v2_package_lock_material_unexpected');
+      }
     } catch (error) {
       throw new ProvenanceError('build_identity_invalid', { message: String(error?.message || error).slice(0, 240) });
     }
@@ -537,7 +572,9 @@ async function writeProvenance(options) {
   }
 
   const provenance = {
-    schema: buildIdentity ? PROVENANCE_SCHEMA_V2 : PROVENANCE_SCHEMA_V1,
+    schema: buildIdentity
+      ? (buildIdentity.schema === BUILD_IDENTITY_SCHEMA_V3 ? PROVENANCE_SCHEMA_V3 : PROVENANCE_SCHEMA_V2)
+      : PROVENANCE_SCHEMA_V1,
     provenance_id: randomUUID(),
     source_head: sourceHead,
     workflow: options.workflow || null,
@@ -555,6 +592,8 @@ async function writeProvenance(options) {
     builder_version: options.builder || null,
     build_identity_sha256: buildIdentity?.build_identity_sha256 || null,
     dependency_resolution_sha256: dependencyResolution?.dependency_resolution_sha256 || null,
+    package_lock_sha256: packageLockMaterial?.package_lock_sha256 || null,
+    npm_version: packageLockMaterial?.npm_version || null,
     build_identity: buildIdentity,
     built_at: options['built-at'] || new Date().toISOString(),
     signed: false,
@@ -578,7 +617,7 @@ function readProvenance(provenancePath) {
       message: String(error && error.message ? error.message : error),
     });
   }
-  if (!parsed || ![PROVENANCE_SCHEMA_V1, PROVENANCE_SCHEMA_V2].includes(parsed.schema)) {
+  if (!parsed || ![PROVENANCE_SCHEMA_V1, PROVENANCE_SCHEMA_V2, PROVENANCE_SCHEMA_V3].includes(parsed.schema)) {
     throw new ProvenanceError('provenance_schema_invalid', {
       provenance: provenancePath,
       schema: parsed ? parsed.schema : null,
@@ -592,10 +631,10 @@ function readProvenance(provenancePath) {
   if (!/^[0-9a-f]{64}$/.test(String(parsed.installer_sha256))) {
     throw new ProvenanceError('provenance_field_invalid', { field: 'installer_sha256' });
   }
-  if (parsed.schema === PROVENANCE_SCHEMA_V2) {
+  if ([PROVENANCE_SCHEMA_V2, PROVENANCE_SCHEMA_V3].includes(parsed.schema)) {
     let exact;
     try {
-      exact = validateBuildIdentity(parsed.build_identity);
+      exact = validateBuildIdentityAny(parsed.build_identity);
     } catch (error) {
       throw new ProvenanceError('provenance_build_identity_invalid', {
         message: String(error?.message || error).slice(0, 240),
@@ -618,6 +657,13 @@ function readProvenance(provenancePath) {
     for (const [field, actual, expected] of bindings) {
       if (actual === null || actual === undefined || String(actual) !== String(expected)) {
         throw new ProvenanceError('provenance_build_identity_invalid', { field, actual, expected });
+      }
+    }
+    if (parsed.schema === PROVENANCE_SCHEMA_V3) {
+      if (exact.schema !== BUILD_IDENTITY_SCHEMA_V3
+          || String(parsed.package_lock_sha256 || '') !== String(exact.package_lock_sha256 || '')
+          || String(parsed.npm_version || '') !== String(exact.npm_version || '')) {
+        throw new ProvenanceError('provenance_build_identity_invalid', { field: 'package_lock_material' });
       }
     }
   }
@@ -713,7 +759,10 @@ async function verifyInstaller(options) {
 
   let buildIdentityVerified = false;
   let dependencyResolutionVerified = false;
-  if (provenance.schema === PROVENANCE_SCHEMA_V2) {
+  let packageLockVerified = false;
+  let verifiedPackageLockSha256 = null;
+  let verifiedNpmVersion = null;
+  if ([PROVENANCE_SCHEMA_V2, PROVENANCE_SCHEMA_V3].includes(provenance.schema)) {
     const buildIdentityPath = options['build-identity']
       ? resolve(String(options['build-identity']))
       : payloadDir
@@ -733,7 +782,7 @@ async function verifyInstaller(options) {
     let externalIdentity;
     let dependencyProof;
     try {
-      externalIdentity = validateBuildIdentity(JSON.parse(readFileSync(buildIdentityPath, 'utf8')));
+      externalIdentity = validateBuildIdentityAny(JSON.parse(readFileSync(buildIdentityPath, 'utf8')));
       dependencyProof = loadDependencyResolutionProof(dependencyResolutionPath);
     } catch (error) {
       throw new ProvenanceError('build_identity_external_invalid', {
@@ -754,6 +803,60 @@ async function verifyInstaller(options) {
         external_sha256: dependencyProof.dependency_resolution_sha256,
       });
     }
+
+    if (provenance.schema === PROVENANCE_SCHEMA_V3) {
+      const packageLockMaterialPath = options['package-lock-material']
+        ? resolve(String(options['package-lock-material']))
+        : payloadDir
+          ? join(payloadDir, 'package-lock-material.json')
+          : null;
+      const packageJsonPath = options['package-json']
+        ? resolve(String(options['package-json']))
+        : payloadDir
+          ? join(payloadDir, 'package.json')
+          : null;
+      const packageLockPath = options['package-lock']
+        ? resolve(String(options['package-lock']))
+        : payloadDir
+          ? join(payloadDir, 'package-lock.json')
+          : null;
+      if (!packageLockMaterialPath || !existsSync(packageLockMaterialPath) || !statSync(packageLockMaterialPath).isFile()) {
+        throw new ProvenanceError('package_lock_material_missing', { package_lock_material: packageLockMaterialPath });
+      }
+      if (!packageJsonPath || !existsSync(packageJsonPath) || !statSync(packageJsonPath).isFile()) {
+        throw new ProvenanceError('package_json_material_missing', { package_json: packageJsonPath });
+      }
+      if (!packageLockPath || !existsSync(packageLockPath) || !statSync(packageLockPath).isFile()) {
+        throw new ProvenanceError('package_lock_missing', { package_lock: packageLockPath });
+      }
+      let material;
+      try {
+        material = loadPackageLockMaterialProof(packageLockMaterialPath, {
+          packageJsonPath,
+          packageLockPath,
+        });
+      } catch (error) {
+        throw new ProvenanceError('package_lock_material_invalid', {
+          message: String(error?.message || error).slice(0, 240),
+        });
+      }
+      if (externalIdentity.schema !== BUILD_IDENTITY_SCHEMA_V3
+          || material.package_lock_sha256 !== externalIdentity.package_lock_sha256
+          || material.package_lock_sha256 !== provenance.package_lock_sha256
+          || material.npm_version !== externalIdentity.npm_version
+          || material.npm_version !== provenance.npm_version
+          || material.package_version !== externalIdentity.package_version) {
+        throw new ProvenanceError('package_lock_material_binding_mismatch', {
+          material_sha256: material.package_lock_sha256,
+          identity_sha256: externalIdentity.package_lock_sha256 || null,
+          provenance_sha256: provenance.package_lock_sha256 || null,
+        });
+      }
+      packageLockVerified = true;
+      verifiedPackageLockSha256 = material.package_lock_sha256;
+      verifiedNpmVersion = material.npm_version;
+    }
+
     buildIdentityVerified = true;
     dependencyResolutionVerified = true;
   }
@@ -774,8 +877,11 @@ async function verifyInstaller(options) {
     provenance_schema: provenance.schema,
     build_identity_sha256: provenance.build_identity_sha256 || null,
     dependency_resolution_sha256: provenance.dependency_resolution_sha256 || null,
+    package_lock_sha256: provenance.package_lock_sha256 || verifiedPackageLockSha256,
+    npm_version: provenance.npm_version || verifiedNpmVersion,
     build_identity_verified: buildIdentityVerified,
     dependency_resolution_verified: dependencyResolutionVerified,
+    package_lock_verified: packageLockVerified,
     blockmap_verified: blockmapVerified,
     config_verified: configVerified,
     provenance_path: resolve(provenancePath),
