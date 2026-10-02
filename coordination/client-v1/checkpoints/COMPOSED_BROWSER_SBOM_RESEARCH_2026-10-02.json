@@ -1,0 +1,27 @@
+{
+  "schema": "metaengine.browser.composed-sbom-architecture-research.v1",
+  "date": "2026-10-02",
+  "analysis_base": "eae271e1eaa6a3d790cfdf872c639a2b2569f45a",
+  "qualified_v3": "d283150bc8a3338a76b98c369b67fb7e846b207b",
+  "component_sources": [
+    "BROWSER_NPM_SBOM",
+    "ME2_UI_MANIFEST",
+    "ME2_DAEMON_MANIFEST",
+    "GUARDIAN_SERVICE_BINARY",
+    "GUARDIAN_CONFIGURATOR_BINARY",
+    "GUARDIAN_MACHINE_BOOTSTRAP",
+    "INSTALLER_PROVENANCE"
+  ],
+  "cyclone_dx": {
+    "initial_spec_version": "1.5",
+    "composition_aggregate": "incomplete",
+    "deterministic_first_party_bom_refs": true,
+    "raw_and_semantic_hashes_separate": true
+  },
+  "excluded_from_complete_claim": [
+    "EXHAUSTIVE_ELECTRON_CHROMIUM_INTERNAL_COMPONENTS",
+    "OS_PROVIDED_COMPONENTS"
+  ],
+  "attestation_boundary": "RELEASE_CANDIDATE_OR_PUBLISHED_RELEASE_ONLY",
+  "authority_effect": false
+}
