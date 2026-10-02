@@ -1,0 +1,52 @@
+{
+  "schema": "metaengine.browser.build-identity-v3-physical-retry-launch.v1",
+  "date": "2026-10-02",
+  "source_head": "d283150bc8a3338a76b98c369b67fb7e846b207b",
+  "pr": 1094,
+  "package_version": "0.7.0-dev.36990000001.1",
+  "source_qualification": {
+    "run_id": 36988959137,
+    "run_number": 20,
+    "success": true,
+    "focused_tests": 58,
+    "focused_pass": 58,
+    "windows_tests": 3911,
+    "windows_pass": 3911,
+    "package_lock_sha256": "a167e95a1d41d5afcb13861669ce61887fe64c14a3466a186535d901ef9bb0f3",
+    "dependency_resolution_sha256": "44db8c97004e4655d85cd0f775ad5df136841dc1f1b1cd55a2ec816a461cda51",
+    "dependency_count": 501,
+    "node_version": "v24.21.0",
+    "npm_version": "11.19.0",
+    "bun_version": "1.3.3"
+  },
+  "physical_runs": {
+    "package_smoke": {
+      "id": 36989661754,
+      "run_number": 3145,
+      "status": "queued"
+    },
+    "installed_chat": {
+      "id": 36989661580,
+      "run_number": 2427,
+      "status": "queued"
+    },
+    "final_runtime": {
+      "id": 36989661249,
+      "run_number": 2010,
+      "status": "in_progress"
+    },
+    "soak": {
+      "id": 36989661490,
+      "run_number": 2679,
+      "status": "queued"
+    },
+    "self_update": {
+      "id": 36989661499,
+      "run_number": 3598,
+      "status": "queued"
+    }
+  },
+  "package_identity_consumed": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
