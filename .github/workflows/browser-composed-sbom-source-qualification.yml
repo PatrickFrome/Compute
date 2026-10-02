@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'work/build-composed-sbom-v1'
+      - 'work/build-composed-sbom-v2'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'

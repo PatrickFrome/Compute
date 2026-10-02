@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36991000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37006000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -133,3 +133,10 @@ SBOM evidence successor line:
 - branch `work/build-sbom-evidence-v1` adds evidence-only npm SBOM inventory before release-boundary attestation;
 - `0.7.0-dev.36991000001.1` is reserved but remains physically unconsumed until a future Package Smoke producer starts;
 - SBOM digest is not Build Identity authority and does not authorize promotion.
+
+
+Composed SBOM physical-successor correction (2026-10-02):
+- exact source `5d3c8ac80934df60db9753cf709bf6eba2daeb33` started Package Smoke #3148 / run `37005013624` with `0.7.0-dev.37002000001.1`; the immutable reservation artifact was created, so that identity is consumed and MUST NOT be reused even though the broader matrix exposed a source-contract failure;
+- Shell/Critical/Self Update contract gates correctly found that `CONVERGENCE_CANDIDATE.md` still reserved the predecessor `0.7.0-dev.36991000001.1` while package.json had advanced. This is an evidence/governance mismatch, not permission to relabel the running physical producer;
+- the isolated source-only successor reserves `0.7.0-dev.37006000001.1`, updates package.json + package-lock + this convergence reservation together, and must complete source qualification before it can replace the physical PR head;
+- no automatic retry, release, promotion, live install, Guardian enrollment, Supervisor admission, or task dispatch is authorized by this correction.
