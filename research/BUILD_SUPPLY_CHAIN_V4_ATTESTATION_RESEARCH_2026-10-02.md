@@ -392,3 +392,53 @@ For a later V4 release-boundary implementation, current v3 tags resolve to these
 These are research candidates, not yet adopted dependencies. Re-resolve and re-review them at implementation time because the release-boundary slice intentionally follows V3 physical qualification.
 
 METAENGINE should pin immutable action commits rather than floating major tags, consistent with the existing source-supply-chain policy.
+
+
+## 2026-10-02 current GitHub attestation action update
+
+Fresh primary-source check after V3 qualification changes the recommended implementation detail.
+
+GitHub's current `actions/attest-build-provenance` README states that, as of v4, it is a wrapper over `actions/attest`, and new implementations should use `actions/attest` directly.
+
+Current `actions/attest` release observed:
+- tag: `v4.2.2`
+- exact commit: `1e69f48acb82d1966a394da916b4c1698aa569d6`
+
+For METAENGINE, pin the exact commit rather than the floating `@v4`.
+
+Current required permissions documented by the action:
+- `id-token: write`
+- `attestations: write`
+- `artifact-metadata: write`
+
+The action supports:
+- default SLSA build provenance when given a subject;
+- SBOM attestation when `sbom-path` is supplied;
+- custom predicates when a predicate type/body is supplied.
+
+### METAENGINE adoption refinement
+
+Do not add these write permissions to Package Smoke.
+
+Create a separate release-boundary attestation workflow/job which:
+1. has no package/build steps;
+2. downloads the already-qualified exact installer subject;
+3. verifies the internal installer provenance / Build Identity / physical qualification checkpoint;
+4. grants the attestation permissions only in the attestation job;
+5. invokes `actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6`;
+6. records returned attestation id/url/bundle path in release evidence;
+7. performs no release/promotion automatically merely because attestation succeeded.
+
+This preserves least privilege and ensures a failing draft candidate is never given release-style authenticity merely by reaching Package Smoke.
+
+### SLSA interpretation
+
+SLSA Provenance keeps `buildDefinition`, `runDetails`, and the attested subject separate.
+
+METAENGINE should preserve the same split:
+- Build Identity V3 = exact bounded build request/invocation identity;
+- GitHub hosted workflow/run identity = execution context;
+- installer SHA-256 = subject;
+- SBOM = byproduct/attested inventory.
+
+Artifact attestation strengthens authenticity of the already-qualified subject; it does not make the build hermetic or reproducible.
