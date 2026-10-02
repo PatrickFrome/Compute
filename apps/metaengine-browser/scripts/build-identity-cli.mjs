@@ -8,9 +8,13 @@ import { writeFileSync } from 'node:fs';
 const require = createRequire(import.meta.url);
 const {
   createBuildIdentity,
+  createBuildIdentityV3,
   loadDependencyResolutionProof,
   sha256File,
 } = require('./build-identity.cjs');
+const {
+  loadPackageLockMaterialProof,
+} = require('./package-lock-material.cjs');
 
 function parseArgs(argv) {
   const out = {};
@@ -41,7 +45,7 @@ export function createBuildIdentityFromArgs(args) {
   const dependencyPath = resolve(required(args, 'dependency-resolution'));
   const configPath = resolve(required(args, 'config'));
   const dependency = loadDependencyResolutionProof(dependencyPath);
-  return createBuildIdentity({
+  const base = {
     repository: required(args, 'repository'),
     repository_id: required(args, 'repository-id'),
     source_head: required(args, 'source-head'),
@@ -55,7 +59,30 @@ export function createBuildIdentityFromArgs(args) {
     dependency_resolution_sha256: dependency.dependency_resolution_sha256,
     electron_builder_version: required(args, 'electron-builder-version'),
     node_version: process.version,
-  });
+  };
+
+  if (typeof args['package-lock-material'] === 'string' && args['package-lock-material'].trim()) {
+    const material = loadPackageLockMaterialProof(
+      resolve(args['package-lock-material']),
+      {
+        packageJsonPath: resolve(String(args['package-json'] || 'package.json')),
+        packageLockPath: resolve(String(args['package-lock'] || 'package-lock.json')),
+      },
+    );
+    if (material.package_version !== base.package_version) {
+      throw new Error('build_identity_cli_package_lock_version_mismatch');
+    }
+    if (material.node_version !== process.version) {
+      throw new Error('build_identity_cli_package_lock_node_version_mismatch');
+    }
+    return createBuildIdentityV3({
+      ...base,
+      package_lock_sha256: material.package_lock_sha256,
+      npm_version: material.npm_version,
+    });
+  }
+
+  return createBuildIdentity(base);
 }
 
 async function main() {
