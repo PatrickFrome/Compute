@@ -1149,7 +1149,7 @@ test('R90/R91 workflow topology builds NSIS once, overlaps physical consumers, t
   assert.ok(early >= 0 && packageProof > early);
   assert.equal((packageSmoke.match(/& \$builder --win nsis --x64 --config electron-builder\.test\.json --publish never/g) || []).length, 1);
   assert.equal((packageSmoke.match(/npx\s+--yes\s+electron-builder/g) || []).length, 0);
-  assert.equal((packageSmoke.match(/name: metaengine-browser-windows-candidate-/g) || []).length, 1);
+  assert.equal((packageSmoke.match(/uses: actions\/upload-artifact@[^\n]+\n\s+with:\n\s+name: metaengine-browser-windows-candidate-/g) || []).length, 1);
   assert.equal((packageSmoke.match(/name: metaengine-browser-windows-package-evidence-/g) || []).length, 1);
   assert.match(packageSmoke.slice(early, packageProof), /METAENGINE-Browser-Test-Setup-\*-x64\.exe\.blockmap/);
   assert.match(packageSmoke.slice(early, packageProof), /installer-provenance\.json/);
