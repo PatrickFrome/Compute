@@ -276,3 +276,29 @@ Guardrail:
 6. Add GitHub artifact attestation only at release/promotion boundary.
 
 Do not combine attestation with the current V3 physical qualification slice.
+
+
+## Research finding: npx builder resolution is another unfrozen input
+
+Primary sources:
+- https://docs.npmjs.com/cli/v11/commands/npx/
+- https://www.electron.build/v26/docs/
+
+Before this finding, Package Smoke invoked:
+
+`npx --yes electron-builder@26.15.7`
+
+npm documents that when the requested package is not already present locally, npx installs it into the npm cache and places it on PATH. Pinning only the top-level version therefore does **not** freeze electron-builder's own transitive dependency graph in the Browser package-lock.
+
+electron-builder's v26 documentation recommends installing electron-builder as a development dependency.
+
+Required correction before V3 physical qualification:
+- add `electron-builder: 26.15.7` to Browser devDependencies;
+- regenerate the same committed package-lock under Node 24.21.0/npm 11.19.0;
+- run the builder from `node_modules/.bin`, never an npx remote fallback;
+- verify the installed builder package version equals the Build Identity field;
+- include builder transitive dependencies in the same observed dependency-resolution digest.
+
+This changes the meaning of the V3 lockfile from “application dependency graph frozen” to “application + package-build JS toolchain graph frozen”.
+
+Remaining external inputs still exist (for example Electron runtime downloads, hosted runner image, OS tooling and NSIS resources). Therefore even after this correction METAENGINE should claim **stronger frozen provenance**, not hermetic or bit-reproducible builds.
