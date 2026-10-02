@@ -195,3 +195,58 @@ https://github.com/actions/attest
 
 SLSA provenance:
 https://slsa.dev/spec/v1.2/provenance
+
+
+## Downstream consumer compatibility research
+
+Fresh readback of the current immutable-installer consumer found a second event-identity issue that must be fixed in the physical rollout.
+
+`apps/metaengine-browser/scripts/installer-provenance.mjs` resolves Package Smoke with:
+
+`/actions/workflows/<workflow>/runs?head_sha=<head>&per_page=30`
+
+and `pickNewestRun()` selects the highest `run_number` for that head SHA.
+
+It does **not** filter by event.
+
+This matters because the intended P0 SLSA producer is a `push` run. If a PR for the same source SHA later creates a newer Package Smoke workflow run, even a deliberately skipped/fail-closed PR producer can eclipse the valid push producer simply because its run number is newer.
+
+Current `qualified-installer-consumer.ps1` carries exact run id/number/attempt once resolved, so the ambiguity exists only at initial producer discovery.
+
+### Required P0 repair
+
+Do not rely on "newest run for SHA" for a dual-event workflow.
+
+The physical SLSA slice should extend producer resolution with an **optional exact producer-event fence**:
+
+- add `--event <push|pull_request|workflow_dispatch>` to `installer-provenance.mjs resolve/acquire`;
+- filter workflow runs by exact event before selecting the newest run;
+- persist `producer_event` in `resolved.json` and the consumer binding;
+- make `wait` re-check the exact run event as well as SHA/workflow/run number/attempt;
+- expose an optional `ExpectedProducerEvent` through `qualified-installer-consumer.ps1`;
+- retain backward compatibility when the option is omitted so the already-qualified PR-produced `694b106...` installer remains consumable by current release-attestation evidence workflows;
+- require `ExpectedProducerEvent=push` for the new SLSA physical line.
+
+This is preferable to creating a second Package Smoke workflow or proxy artifact because it preserves one producer workflow and one candidate artifact naming contract.
+
+### PR workflow implication
+
+A newer pull-request Package Smoke run for the same SHA must not be allowed to hijack consumers of the push producer.
+
+The event fence makes that structurally impossible even if GitHub creates another workflow run for the same head SHA.
+
+A separate optimization may later skip unnecessary duplicate PR producer work, but correctness must come from exact run-event binding, not from assuming the duplicate run never exists.
+
+## Source-only verifier result
+
+The new verifier branch is now source-qualified:
+
+- branch `work/build-slsa-provenance-verifier-v1`
+- exact head `db73c387130d80755271ed8492e5183c68fabe63`
+- push Source Qualification run `37070014769`: SUCCESS
+- PR #1099 Source Qualification run `37070117772`: SUCCESS
+- 10 adversarial semantic tests: PASS
+- no Browser product subtree change
+- no physical workflow fan-out
+
+This establishes the expected SLSA statement contract before consuming a fresh package identity.
