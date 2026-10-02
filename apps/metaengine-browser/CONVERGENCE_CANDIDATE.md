@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36974000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36977000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -99,3 +99,15 @@ Build Identity V2 Self Update harness correction:
 - Microsoft PowerShell semantics explicitly preserve the last native exit code across directly invoked scripts unless another native/script exit replaces it; the fixture now clears only the handled expected-refusal status and asserts that no stale native exit leaks out;
 - no updater/installer failure was observed on that head and no Self Update physical effect started;
 - `0.7.0-dev.36973000001.1` is consumed because Package Smoke produced bytes; the corrected exact source reserves `0.7.0-dev.36974000001.1`.
+
+
+One-physical-producer fence successor (2026-10-02):
+- qualified Build Identity V2 base `4c3dd26f9d89bb5e5b04c1eb4a21a5c434dba86b` physically produced and fully qualified `0.7.0-dev.36974000001.1`; installer SHA-256 `f37a5a9604c0dfbb5bf86fba2042ba2e211ac5064a9ac3efeb8e5896a37638bd`; Build Identity `52d075fee4a9fe9729836481743857f75dc90566150b15d93137dc829290eeb2`; that version is consumed and is never reused;
+- Build Identity V2 embeds GitHub run id/attempt into packaged bytes, so an Actions rerun of an unchanged source/version could otherwise manufacture different bytes under the same updater version;
+- Package Smoke now refuses any `GITHUB_RUN_ATTEMPT != 1`, serializes the physical producer job by package version without canceling an in-progress producer, queries immutable GitHub artifact history for prior version/source evidence, and fails closed on API ambiguity;
+- an immutable `metaengine-browser-package-version-<version>` reservation marker is uploaded and its artifact id/digest sealed before dependency install and electron-builder;
+- old PR/ref-level `cancel-in-progress:true` was removed from Package Smoke because canceling a physical producer is incompatible with one-build evidence;
+- early workflow-parser attempts #3139-#3142 had zero jobs and zero artifacts due a duplicate YAML `timeout-minutes` key; no physical bytes were created by those records;
+- corrected workflow source after parser repair produced no push-triggered runner on this non-matching branch, confirming the valid trigger filter is restored;
+- upload-artifact digest output is normalized from its documented raw SHA-256 form into canonical `sha256:<hex>` reservation evidence;
+- frozen successor reserves `0.7.0-dev.36977000001.1`, chosen above latest observed repository Actions run id `36975111718`; once its Package Smoke runner starts this identity is consumed even if the run fails before NSIS.
