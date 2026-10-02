@@ -490,8 +490,54 @@ async function writeProvenance(options) {
     blockmapSha256 = await sha256File(blockmapPath);
   }
 
+  let buildIdentity = null;
+  let dependencyResolution = null;
+  const buildIdentityPath = options['build-identity'] && options['build-identity'] !== true
+    ? resolve(String(options['build-identity']))
+    : null;
+  const dependencyResolutionPath = options['dependency-resolution'] && options['dependency-resolution'] !== true
+    ? resolve(String(options['dependency-resolution']))
+    : null;
+
+  if (buildIdentityPath || dependencyResolutionPath) {
+    if (!buildIdentityPath || !dependencyResolutionPath) {
+      throw new ProvenanceError('build_identity_inputs_incomplete', {});
+    }
+    let rawBuildIdentity;
+    try {
+      rawBuildIdentity = JSON.parse(readFileSync(buildIdentityPath, 'utf8'));
+      buildIdentity = validateBuildIdentity(rawBuildIdentity);
+      dependencyResolution = loadDependencyResolutionProof(dependencyResolutionPath);
+    } catch (error) {
+      throw new ProvenanceError('build_identity_invalid', { message: String(error?.message || error).slice(0, 240) });
+    }
+    const exactRunAttempt = options['run-attempt'] !== undefined && options['run-attempt'] !== true
+      ? Number(options['run-attempt'])
+      : null;
+    const checks = [
+      ['source_head', buildIdentity.source_head, sourceHead],
+      ['workflow', buildIdentity.workflow, options.workflow || null],
+      ['run_id', buildIdentity.run_id, options['run-id'] || null],
+      ['package_version', buildIdentity.package_version, options['package-version'] || null],
+      ['builder_config_sha256', buildIdentity.builder_config_sha256, configSha256],
+      ['dependency_resolution_sha256', buildIdentity.dependency_resolution_sha256, dependencyResolution.dependency_resolution_sha256],
+    ];
+    for (const [field, actual, expected] of checks) {
+      if (expected === null || expected === undefined || String(actual) !== String(expected)) {
+        throw new ProvenanceError('build_identity_binding_mismatch', { field, actual, expected });
+      }
+    }
+    if (exactRunAttempt === null || Number(buildIdentity.run_attempt) !== exactRunAttempt) {
+      throw new ProvenanceError('build_identity_binding_mismatch', {
+        field: 'run_attempt',
+        actual: buildIdentity.run_attempt,
+        expected: exactRunAttempt,
+      });
+    }
+  }
+
   const provenance = {
-    schema: PROVENANCE_SCHEMA,
+    schema: buildIdentity ? PROVENANCE_SCHEMA_V2 : PROVENANCE_SCHEMA_V1,
     provenance_id: randomUUID(),
     source_head: sourceHead,
     workflow: options.workflow || null,
@@ -507,6 +553,9 @@ async function writeProvenance(options) {
     config_path: options.config || null,
     config_sha256: configSha256,
     builder_version: options.builder || null,
+    build_identity_sha256: buildIdentity?.build_identity_sha256 || null,
+    dependency_resolution_sha256: dependencyResolution?.dependency_resolution_sha256 || null,
+    build_identity: buildIdentity,
     built_at: options['built-at'] || new Date().toISOString(),
     signed: false,
     promotion_authorized: false,
@@ -524,10 +573,16 @@ function readProvenance(provenancePath) {
   try {
     parsed = JSON.parse(readFileSync(provenancePath, 'utf8'));
   } catch (error) {
-    throw new ProvenanceError('provenance_schema_invalid', { provenance: provenancePath, message: String(error && error.message ? error.message : error) });
+    throw new ProvenanceError('provenance_schema_invalid', {
+      provenance: provenancePath,
+      message: String(error && error.message ? error.message : error),
+    });
   }
-  if (!parsed || parsed.schema !== PROVENANCE_SCHEMA) {
-    throw new ProvenanceError('provenance_schema_invalid', { provenance: provenancePath, schema: parsed ? parsed.schema : null });
+  if (!parsed || ![PROVENANCE_SCHEMA_V1, PROVENANCE_SCHEMA_V2].includes(parsed.schema)) {
+    throw new ProvenanceError('provenance_schema_invalid', {
+      provenance: provenancePath,
+      schema: parsed ? parsed.schema : null,
+    });
   }
   for (const field of ['installer_name', 'installer_sha256', 'installer_bytes']) {
     if (typeof parsed[field] !== 'string' && typeof parsed[field] !== 'number') {
@@ -536,6 +591,35 @@ function readProvenance(provenancePath) {
   }
   if (!/^[0-9a-f]{64}$/.test(String(parsed.installer_sha256))) {
     throw new ProvenanceError('provenance_field_invalid', { field: 'installer_sha256' });
+  }
+  if (parsed.schema === PROVENANCE_SCHEMA_V2) {
+    let exact;
+    try {
+      exact = validateBuildIdentity(parsed.build_identity);
+    } catch (error) {
+      throw new ProvenanceError('provenance_build_identity_invalid', {
+        message: String(error?.message || error).slice(0, 240),
+      });
+    }
+    if (String(parsed.build_identity_sha256 || '') !== exact.build_identity_sha256) {
+      throw new ProvenanceError('provenance_build_identity_invalid', { field: 'build_identity_sha256' });
+    }
+    if (String(parsed.dependency_resolution_sha256 || '') !== exact.dependency_resolution_sha256) {
+      throw new ProvenanceError('provenance_build_identity_invalid', { field: 'dependency_resolution_sha256' });
+    }
+    const bindings = [
+      ['source_head', parsed.source_head, exact.source_head],
+      ['workflow', parsed.workflow, exact.workflow],
+      ['run_id', parsed.run_id, exact.run_id],
+      ['run_attempt', Number(parsed.run_attempt || 1), Number(exact.run_attempt)],
+      ['package_version', parsed.package_version, exact.package_version],
+      ['config_sha256', parsed.config_sha256, exact.builder_config_sha256],
+    ];
+    for (const [field, actual, expected] of bindings) {
+      if (actual === null || actual === undefined || String(actual) !== String(expected)) {
+        throw new ProvenanceError('provenance_build_identity_invalid', { field, actual, expected });
+      }
+    }
   }
   return parsed;
 }
