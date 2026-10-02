@@ -59,3 +59,16 @@ Final reservation discipline before the next qualification: `0.7.0-dev.369646888
 
 
 Guardian semantic-hardening successor: stale/invalidated observations no longer carry current positive service/owner/device proof, historical proof is explicitly namespaced as last-confirmed evidence, and observer validation rejects contradictory or proof-less READY states. This remains diagnostic-only and adds no admission/retry authority. Parent heartbeat source `1f6902da…` physically produced `0.7.0-dev.36965151413.1`; that identity is consumed and is never reused by this successor.
+
+
+Build Identity V2 successor (2026-10-02):
+- stacked qualified base: `bf21d71b6dc674c376bd396487b5efc134d0a3e9` / Guardian semantic hardening PR #1090;
+- frozen implementation source before reservation: `5a75a4129e305752b868f1d0604319e9b30122e1`;
+- reserved one-build package identity: `0.7.0-dev.36970010001.1`, chosen above the latest observed repository workflow id `36968682903`;
+- deterministic `metaengine.browser.build-identity.v2` binds repository/repository-id, exact source, Package Smoke workflow, run id + rerun attempt, package version, platform/arch, builder config, installed dependency-resolution digest, electron-builder version and Node version;
+- Package Smoke computes an expected identity before packaging, beforePack recomputes/injects it, afterAllArtifactBuild independently reads it back from packaged app.asar, and installer-provenance v2 binds it to installer/blockmap bytes;
+- downstream Installed Chat / Final Runtime / Soak / Self Update continue consuming the single exact Package Smoke artifact and now require v2 build/dependency proof;
+- dependency resolution currently proves the actual installed npm name/version tree, not byte-level reproducibility; a reviewed lockfile + npm ci remains the next supply-chain hardening boundary;
+- Build Identity is evidence only: `authority_effect=false`, no release/promotion/admission/Guardian authority.
+
+Seven malformed-workflow push records (#3128-#3134, run ids 36968517070..36968682903) occurred during the editing incident before the workflow was reconstructed. Every one completed FAILURE with zero jobs and zero artifacts, so no installer/package physical build occurred on those heads. They are retained as parser-failure evidence, not as consumed physical package identities. After repair, branch pushes no longer created Package Smoke runs because the valid push filter does not include this branch.

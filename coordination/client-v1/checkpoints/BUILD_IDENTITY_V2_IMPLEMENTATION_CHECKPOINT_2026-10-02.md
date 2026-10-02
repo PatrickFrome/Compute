@@ -75,7 +75,7 @@ Post-repair:
 - consumer Verify block = 1;
 - consumer binding block = 1.
 
-No CI/package effect occurred while files were duplicated because the branch had no PR and no matching push trigger.
+GitHub did create seven push workflow records while the YAML was malformed: Package Smoke #3128-#3134 (run ids 36968517070, 36968531131, 36968549520, 36968565590, 36968618998, 36968649385, 36968682903). All seven completed FAILURE with **zero jobs and zero artifacts**. Therefore no runner reached dependency install, packaging, installer creation or artifact upload, and no physical package identity was consumed by those malformed heads. After the exact full-file repair, later pushes produced no Package Smoke run because the valid workflow push filter does not include this branch.
 
 ## Current source changes vs qualified base
 
@@ -118,15 +118,21 @@ Deferred:
 
 ## Remaining pre-PR gates
 
-1. Perform final source audit for syntax/schema/wiring drift.
-2. Ensure no existing downstream workflow requires v1-only provenance.
-3. Freeze source.
-4. Re-read current GitHub workflow ids.
-5. Reserve one fresh package version higher than observed physical build sequence.
-6. Update `CONVERGENCE_CANDIDATE.md` and machine checkpoint in the same final commit.
-7. Open stacked draft PR against `work/guardian-status-semantic-hardening-v1`.
-8. After Package Smoke begins, treat that package identity as consumed.
-9. Require exact-head Browser tests, Package Smoke, Installed Chat, Runtime, Soak and Self Update to all pass on one producer artifact.
+Completed before this reservation:
+1. Final source/diff audit: expected bounded file set; no duplicated workflow/consumer blocks.
+2. Downstream audit: physical workflows use the central qualified-installer consumer and contain no v1-only provenance requirement.
+3. Re-read latest repository workflow id: `36968682903`.
+4. Frozen implementation source before reservation: `5a75a4129e305752b868f1d0604319e9b30122e1`.
+
+Final reservation in this commit:
+- package identity: `0.7.0-dev.36970010001.1`;
+- no further runtime/source commit is allowed before qualification without retiring this identity.
+
+Remaining:
+1. Open stacked draft PR against `work/guardian-status-semantic-hardening-v1`.
+2. Once its exact Package Smoke runner starts, conservatively treat `0.7.0-dev.36970010001.1` as consumed.
+3. Require exact-head Browser tests, Package Smoke, Installed Chat, Runtime, Soak and Self Update to all pass on one producer artifact.
+4. If source changes after physical build begins, advance package identity; never relabel bytes.
 
 ## Future hardening boundary
 
@@ -135,3 +141,22 @@ The current dependency digest proves which name/version tree npm actually instal
 GitHub attestations should be added only at release-candidate/published-release boundary, not used as a substitute for physical Windows qualification or installer SHA-256.
 
 Promotion authority remains false.
+
+
+## Final freeze and reservation
+
+Pre-reservation implementation source: `5a75a4129e305752b868f1d0604319e9b30122e1`.
+
+The final source reservation is `0.7.0-dev.36970010001.1`. This value is intentionally above the latest observed repository workflow id at freeze time and does not reuse the fixture identity `0.7.0-dev.36970000001.1` used only inside tests.
+
+Final audit invariants:
+- Package Smoke build step count: 1;
+- candidate artifact upload count: 1;
+- qualification evidence upload count: 1;
+- qualified consumer Acquire block count: 1;
+- qualified consumer Verify block count: 1;
+- qualified consumer binding block count: 1;
+- v1 provenance remains read-compatible for historical evidence, but new physical consumers require v2;
+- zero authority/release/admission effect.
+
+Do not add another runtime/source commit to this branch before the first exact-head qualification outcome. Research or qualification evidence after that point belongs on a separate analysis branch.

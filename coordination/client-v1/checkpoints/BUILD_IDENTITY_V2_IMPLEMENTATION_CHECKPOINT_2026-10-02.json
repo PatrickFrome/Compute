@@ -6,7 +6,7 @@
     "source_head": "bf21d71b6dc674c376bd396487b5efc134d0a3e9",
     "pr": 1090
   },
-  "implementation_source_before_checkpoint": "d8e17c51155d67d54d778afa4fb79893a47a9360",
+  "implementation_source_before_checkpoint": "5a75a4129e305752b868f1d0604319e9b30122e1",
   "pull_request_open": false,
   "physical_build_triggered": false,
   "inherited_package_version_consumed": false,
@@ -62,7 +62,10 @@
     "INSTALLER_PROVENANCE_V2_ROUNDTRIP",
     "EXTERNAL_BUILD_IDENTITY_TAMPER_REJECTION",
     "DEPENDENCY_PROOF_TAMPER_REJECTION",
-    "QUALIFIED_CONSUMER_V2_BINDING"
+    "QUALIFIED_CONSUMER_V2_BINDING",
+    "ZERO_RUN_ATTEMPT_REJECTION",
+    "DEPENDENCY_TREE_COUNT_AND_ROOT_CONSISTENCY",
+    "INDEPENDENT_PREBUILD_VS_PACKAGED_IDENTITY_READBACK"
   ],
   "deferred": [
     "COMMITTED_BROWSER_PACKAGE_LOCK",
@@ -72,13 +75,61 @@
     "AUTOMATIC_SEMANTIC_VERSION_ALLOCATOR"
   ],
   "pre_pr_gates": [
-    "FINAL_SOURCE_AUDIT",
-    "DOWNSTREAM_V1_ONLY_CONSUMER_AUDIT",
-    "FREEZE_SOURCE",
-    "RESERVE_FRESH_PACKAGE_VERSION",
-    "FINAL_CONVERGENCE_AND_CHECKPOINT_COMMIT",
-    "OPEN_STACKED_DRAFT_PR"
+    "OPEN_STACKED_DRAFT_PR",
+    "TREAT_RESERVED_IDENTITY_AS_CONSUMED_ON_PHYSICAL_PACKAGE_SMOKE_START",
+    "EXACT_HEAD_BROWSER_REGRESSION_GREEN",
+    "ONE_EXACT_PACKAGE_SMOKE_ARTIFACT",
+    "INSTALLED_CHAT_RUNTIME_SOAK_SELF_UPDATE_SAME_BUILD_IDENTITY"
   ],
   "promotion_authorized": false,
-  "authority_effect": false
+  "authority_effect": false,
+  "final_freeze": {
+    "pre_reservation_source": "5a75a4129e305752b868f1d0604319e9b30122e1",
+    "reserved_package_identity": "0.7.0-dev.36970010001.1",
+    "latest_observed_repository_workflow_id": 36968682903,
+    "exact_source_frozen": true,
+    "no_further_runtime_commit_before_qualification": true,
+    "downstream_v1_only_consumer_found": false,
+    "workflow_single_build_step": true,
+    "workflow_single_candidate_upload": true,
+    "workflow_single_evidence_upload": true,
+    "consumer_single_acquire_block": true,
+    "consumer_single_verify_block": true,
+    "consumer_single_binding_block": true
+  },
+  "malformed_workflow_runs": {
+    "run_numbers": [
+      3128,
+      3129,
+      3130,
+      3131,
+      3132,
+      3133,
+      3134
+    ],
+    "run_ids": [
+      36968517070,
+      36968531131,
+      36968549520,
+      36968565590,
+      36968618998,
+      36968649385,
+      36968682903
+    ],
+    "conclusions": [
+      "failure",
+      "failure",
+      "failure",
+      "failure",
+      "failure",
+      "failure",
+      "failure"
+    ],
+    "jobs_total": 0,
+    "artifacts_total": 0,
+    "physical_build_effect": false,
+    "package_identity_consumed": false,
+    "interpretation": "WORKFLOW_PARSE_FAILURE_EVIDENCE_ONLY"
+  },
+  "reserved_package_identity": "0.7.0-dev.36970010001.1"
 }
