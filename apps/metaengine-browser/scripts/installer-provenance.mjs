@@ -711,6 +711,53 @@ async function verifyInstaller(options) {
     configVerified = true;
   }
 
+  let buildIdentityVerified = false;
+  let dependencyResolutionVerified = false;
+  if (provenance.schema === PROVENANCE_SCHEMA_V2) {
+    const buildIdentityPath = options['build-identity']
+      ? resolve(String(options['build-identity']))
+      : payloadDir
+        ? join(payloadDir, 'build-identity.json')
+        : null;
+    const dependencyResolutionPath = options['dependency-resolution']
+      ? resolve(String(options['dependency-resolution']))
+      : payloadDir
+        ? join(payloadDir, 'dependency-resolution.json')
+        : null;
+    if (!buildIdentityPath || !existsSync(buildIdentityPath) || !statSync(buildIdentityPath).isFile()) {
+      throw new ProvenanceError('build_identity_missing', { build_identity: buildIdentityPath });
+    }
+    if (!dependencyResolutionPath || !existsSync(dependencyResolutionPath) || !statSync(dependencyResolutionPath).isFile()) {
+      throw new ProvenanceError('dependency_resolution_missing', { dependency_resolution: dependencyResolutionPath });
+    }
+    let externalIdentity;
+    let dependencyProof;
+    try {
+      externalIdentity = validateBuildIdentity(JSON.parse(readFileSync(buildIdentityPath, 'utf8')));
+      dependencyProof = loadDependencyResolutionProof(dependencyResolutionPath);
+    } catch (error) {
+      throw new ProvenanceError('build_identity_external_invalid', {
+        message: String(error?.message || error).slice(0, 240),
+      });
+    }
+    if (externalIdentity.build_identity_sha256 !== provenance.build_identity_sha256
+        || externalIdentity.build_identity_sha256 !== provenance.build_identity?.build_identity_sha256) {
+      throw new ProvenanceError('build_identity_sha_mismatch', {
+        provenance_sha256: provenance.build_identity_sha256,
+        external_sha256: externalIdentity.build_identity_sha256,
+      });
+    }
+    if (dependencyProof.dependency_resolution_sha256 !== provenance.dependency_resolution_sha256
+        || dependencyProof.dependency_resolution_sha256 !== externalIdentity.dependency_resolution_sha256) {
+      throw new ProvenanceError('dependency_resolution_sha_mismatch', {
+        provenance_sha256: provenance.dependency_resolution_sha256,
+        external_sha256: dependencyProof.dependency_resolution_sha256,
+      });
+    }
+    buildIdentityVerified = true;
+    dependencyResolutionVerified = true;
+  }
+
   const acquired = {
     schema: ACQUIRED_SCHEMA,
     installer_path: isAbsolute(installerPath) ? installerPath : resolve(installerPath),
@@ -724,6 +771,11 @@ async function verifyInstaller(options) {
     provenance_run_number: provenance.run_number || null,
     provenance_run_attempt: provenance.run_attempt || 1,
     provenance_workflow: provenance.workflow || null,
+    provenance_schema: provenance.schema,
+    build_identity_sha256: provenance.build_identity_sha256 || null,
+    dependency_resolution_sha256: provenance.dependency_resolution_sha256 || null,
+    build_identity_verified: buildIdentityVerified,
+    dependency_resolution_verified: dependencyResolutionVerified,
     blockmap_verified: blockmapVerified,
     config_verified: configVerified,
     provenance_path: resolve(provenancePath),
