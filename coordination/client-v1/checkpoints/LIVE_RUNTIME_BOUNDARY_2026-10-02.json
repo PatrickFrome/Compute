@@ -1,0 +1,46 @@
+{
+  "schema": "metaengine.client-v1.live-runtime-boundary.v1",
+  "observed_at": "2026-10-02",
+  "supabase_project": "jhriwwsryeqsvvvufkok",
+  "installed_client": {
+    "version": "0.7.0-dev.36908273822.1",
+    "access_tier": "ADMIN",
+    "admin_ready": true,
+    "compute": "HEALTHY",
+    "development_plane": "READY",
+    "host_resilience": "ACTIVE",
+    "supervisor": "PARKED",
+    "heartbeat_guardian": null,
+    "heartbeat_guardian_interpretation": "INSTALLED_VERSION_PREDATES_GUARDIAN_HEARTBEAT_DIAGNOSTIC"
+  },
+  "runtime_control": {
+    "generation_floor": 28,
+    "refill_enabled": false,
+    "supervisor_admission_enabled": false,
+    "reset_reason": "SIGNED_PROFILE_BOOTSTRAP_CLOSED"
+  },
+  "fleet": {
+    "tasks_total": 8,
+    "tasks_fenced": 8,
+    "tasks_ready": 0,
+    "tasks_leased": 0,
+    "tasks_running": 0,
+    "tasks_ambiguous": 0,
+    "claims_total": 0,
+    "claims_active": 0,
+    "claims_unexpired": 0
+  },
+  "guardian": {
+    "enrollment_ticket_rows": 0,
+    "service_presence_proven": false,
+    "owner_device_binding_proven": false,
+    "live_activation_issued": false
+  },
+  "interpretation": {
+    "useful_agent_execution_available": false,
+    "reason": "AUTHORITATIVE_ADMISSION_CLOSED_AND_ZERO_ACTIVE_CLAIMS",
+    "reopening_historical_fenced_tasks_allowed": false,
+    "next_positive_live_evidence": "INSTALL_QUALIFIED_DIAGNOSTIC_BUILD_THEN_READ_FRESH_GUARDIAN_STATUS"
+  },
+  "authority_effect": false
+}
