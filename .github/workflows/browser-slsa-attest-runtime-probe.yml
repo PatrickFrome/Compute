@@ -1,0 +1,148 @@
+name: Browser SLSA Attest Runtime Probe
+
+on:
+  push:
+    branches:
+      - 'work/build-slsa-attest-runtime-probe-v1'
+    paths:
+      - '.github/workflows/browser-slsa-attest-runtime-probe.yml'
+      - 'scripts/browser-slsa-provenance-verification.mjs'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact probe source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Create deterministic non-release probe subject
+        id: subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/metaengine-slsa-runtime-probe.txt"
+          printf 'schema=metaengine.browser.slsa-runtime-probe.v1\nsource_sha=%s\nworkflow=%s\nrun_id=%s\nrun_attempt=%s\nauthority_effect=false\n' \
+            "$GITHUB_SHA" "$GITHUB_WORKFLOW_REF" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$probe"
+          digest="$(sha256sum "$probe" | awk '{print $1}')"
+          test "${#digest}" = 64
+          echo "path=$probe" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$probe")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub SLSA provenance probe
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subject.outputs.path }}
+
+      - name: Verify signed bundle and exact producer identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bundle='${{ steps.attest.outputs.bundle-path }}'
+          test -n "$bundle"
+          test -f "$bundle"
+          cp "$bundle" "$RUNNER_TEMP/metaengine-slsa-runtime-probe.bundle.json"
+
+          gh --version
+          gh attestation verify '${{ steps.subject.outputs.path }}' \
+            --repo "$GITHUB_REPOSITORY" \
+            --bundle "$bundle" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/browser-slsa-attest-runtime-probe.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/metaengine-slsa-runtime-probe-verification.json"
+
+          node scripts/browser-slsa-provenance-verification.mjs \
+            --verification "$RUNNER_TEMP/metaengine-slsa-runtime-probe-verification.json" \
+            --expected-source-sha "$GITHUB_SHA" \
+            --expected-source-ref "$GITHUB_REF" \
+            --expected-installer-name '${{ steps.subject.outputs.name }}' \
+            --expected-installer-sha256 '${{ steps.subject.outputs.sha256 }}' \
+            --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-workflow-path '.github/workflows/browser-slsa-attest-runtime-probe.yml' \
+            --verifier-id "github-slsa-runtime-probe:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/metaengine-slsa-runtime-probe-evidence.json"
+
+      - name: Seal zero-authority probe receipt
+        shell: python
+        env:
+          ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+          SUBJECT_NAME: ${{ steps.subject.outputs.name }}
+          SUBJECT_SHA256: ${{ steps.subject.outputs.sha256 }}
+        run: |
+          import json, os
+          from pathlib import Path
+
+          evidence = json.loads(Path(os.environ['RUNNER_TEMP'], 'metaengine-slsa-runtime-probe-evidence.json').read_text())
+          if evidence.get('schema') != 'metaengine.browser-fabric.provenance-evidence.v1':
+              raise SystemExit('slsa_runtime_probe_evidence_schema_invalid')
+          if evidence.get('verified') is not True or evidence.get('builder_trusted') is not True:
+              raise SystemExit('slsa_runtime_probe_not_verified')
+          if evidence.get('authority_effect') is not False:
+              raise SystemExit('slsa_runtime_probe_authority_invalid')
+
+          receipt = {
+              'schema': 'metaengine.browser.slsa-runtime-probe-receipt.v1',
+              'source_head': os.environ['GITHUB_SHA'],
+              'source_ref': os.environ['GITHUB_REF'],
+              'event': os.environ['GITHUB_EVENT_NAME'],
+              'workflow': '.github/workflows/browser-slsa-attest-runtime-probe.yml',
+              'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'subject_name': os.environ['SUBJECT_NAME'],
+              'subject_sha256': os.environ['SUBJECT_SHA256'],
+              'attestation_id': os.environ['ATTESTATION_ID'],
+              'attestation_url': os.environ['ATTESTATION_URL'],
+              'verified': True,
+              'promotion_authorized': False,
+              'release_published': False,
+              'authority_effect': False,
+          }
+          Path(os.environ['RUNNER_TEMP'], 'metaengine-slsa-runtime-probe-receipt.json').write_text(
+              json.dumps(receipt, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(receipt, separators=(',', ':')))
+
+      - name: Upload probe evidence only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-slsa-runtime-probe-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe.txt
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe.bundle.json
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-verification.json
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-evidence.json
+            ${{ runner.temp }}/metaengine-slsa-runtime-probe-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Prove exact checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-slsa-attest-runtime-probe.yml scripts/browser-slsa-provenance-verification.mjs)"
