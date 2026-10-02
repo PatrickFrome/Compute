@@ -1,0 +1,91 @@
+name: Browser SLSA Provenance Verifier Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-slsa-provenance-verifier-v1'
+    paths:
+      - 'scripts/browser-slsa-provenance-verification.mjs'
+      - 'tests/browser-slsa-provenance-verification.test.mjs'
+      - '.github/workflows/browser-slsa-provenance-verifier-source-qualification.yml'
+  pull_request:
+    paths:
+      - 'scripts/browser-slsa-provenance-verification.mjs'
+      - 'tests/browser-slsa-provenance-verification.test.mjs'
+      - '.github/workflows/browser-slsa-provenance-verifier-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact verifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Prove SLSA semantic verifier
+        run: node --test tests/browser-slsa-provenance-verification.test.mjs
+
+      - name: Validate zero-authority verifier contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          verifier = Path('scripts/browser-slsa-provenance-verification.mjs').read_text(encoding='utf-8')
+          workflow = Path('.github/workflows/browser-slsa-provenance-verifier-source-qualification.yml').read_text(encoding='utf-8')
+          lower = (verifier + '\n' + workflow).lower()
+
+          required = [
+              'metaengine.browser-fabric.provenance-evidence.v1',
+              'https://slsa.dev/provenance/v1',
+              'https://actions.github.io/buildtypes/workflow/v1',
+              '.github/workflows/browser-windows-package-smoke.yml',
+              "github.event_name !== 'push'",
+              "github.runner_environment !== 'github-hosted'",
+              'browser_slsa_source_sha_mismatch',
+              'browser_slsa_builder_id_mismatch',
+              'browser_slsa_invocation_id_mismatch',
+              'authority_effect: false',
+              'node --test tests/browser-slsa-provenance-verification.test.mjs',
+          ]
+          for token in required:
+              if token not in lower:
+                  raise SystemExit(f'browser_slsa_verifier_contract_missing:{token}')
+
+          forbidden = [
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'contents: write',
+              'actions: write',
+              'pull-requests: write',
+              'gh release',
+              'electron-builder',
+              'npm install',
+              'npm ci',
+              'bun install',
+              'promotion_authorized=true',
+              'authority_effect=true',
+          ]
+          for token in forbidden:
+              if token in lower:
+                  raise SystemExit(f'browser_slsa_verifier_forbidden_capability:{token}')
+
+          print('browser_slsa_verifier_source_contract_pass')
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git diff --name-only HEAD -- scripts/browser-slsa-provenance-verification.mjs tests/browser-slsa-provenance-verification.test.mjs .github/workflows/browser-slsa-provenance-verifier-source-qualification.yml)"
