@@ -67,8 +67,13 @@ Adoption now:
 - No new DB authority in this slice.
 - Keep Guardian diagnostic-only and expose freshness metadata.
 
-Planned only if/when admission consumes Guardian:
-- persist a Guardian observation revision;
+Implemented locally in this diagnostic slice:
+- every accepted Guardian probe/result increments a process-local `observation_revision`;
+- cached reads and generation invalidation do not increment it;
+- a discarded late pre-activation read does not advance the revision.
+
+Still deferred until admission consumes Guardian:
+- persist the observation revision durably;
 - accept update only when revision is newer than the stored revision;
 - bind revision to exact device fingerprint / Browser incarnation;
 - stale or duplicate writes become no-op readback, never an admission transition.
@@ -135,9 +140,8 @@ CI found two useful defects:
 
 Do not implement these as authority changes until the current diagnostic slice is physically green:
 
-1. **Observation revision** — add a monotonic local revision to Guardian diagnostics.
-2. **Server CAS** — only if Guardian becomes an admission input, reject out-of-order same-plane writes by exact device/incarnation + observation revision.
-3. **Independent live proof** — after installing a qualified build, read back one of:
+1. **Server CAS** — only if Guardian becomes an admission input, reject out-of-order same-plane writes by exact device/incarnation + the now-exposed local observation revision.
+2. **Independent live proof** — after installing a qualified build, read back one of:
    `ACTIVATION_REQUIRED`, `OWNER_ENROLLMENT_REQUIRED`, `READY`, `HOLD`, `AMBIGUOUS`, or stale.
-4. **Restart continuity** — READY must survive Browser restart through a new independent probe; cached state is not continuity proof.
-5. **Admission composition** — any future admission decision must conjunct authoritative generation, fresh ADMIN identity, exact Guardian owner/device proof, fresh Agent capacity, and useful result evidence. Heartbeat by itself remains non-authoritative.
+3. **Restart continuity** — READY must survive Browser restart through a new independent probe; cached state is not continuity proof.
+4. **Admission composition** — any future admission decision must conjunct authoritative generation, fresh ADMIN identity, exact Guardian owner/device proof, fresh Agent capacity, and useful result evidence. Heartbeat by itself remains non-authoritative.

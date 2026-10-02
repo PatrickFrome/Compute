@@ -10,7 +10,7 @@ Draft PR: #1089
 Qualified parent: `4f66a5afc7d6dd6ab36262effac6ac199c9b68e1` (PR #1088)
 
 Current reserved clean package identity:
-`0.7.0-dev.36964688887.1`
+`0.7.0-dev.36965151413.1`
 
 No production promotion, admission override, automatic physical retry, live UAC, owner mutation, or release publication is authorized by this checkpoint.
 
@@ -145,3 +145,11 @@ PR #1089 remains intentionally diagnostic-only:
 Current server merge is top-level plane granularity. Two in-flight writes to the same `host_resilience` plane can theoretically arrive out of order. This is acceptable only because Guardian remains non-authoritative diagnostic evidence.
 
 Before using Guardian heartbeat status as a direct admission condition, implement and prove a durable monotonic observation revision / server CAS bound to exact device fingerprint and Browser incarnation. Do not solve this by trusting arrival time.
+
+## Delta after research checkpoint
+
+- Added process-local `observation_revision` to Guardian diagnostics. It increments only when a probe/result is accepted; cached reads, invalidation, and discarded late reads do not advance it.
+- Added semantic tests for monotonic revision behavior.
+- Fixed the ordinary heartbeat overwrite path by routing both heartbeat and realtime host-resilience state through `mergeHostResilienceGuardianObservation()`.
+- Previous reservation `0.7.0-dev.36964688887.1` was retired during rapid CI cancellation/queue churn. New clean reservation: `0.7.0-dev.36965151413.1`.
+- This revision remains diagnostic-only. Durable server CAS is still required before Guardian heartbeat state can become an admission input.
