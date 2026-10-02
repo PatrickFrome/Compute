@@ -276,3 +276,18 @@ test('npm scoped root group/name encoding binds to scoped package identity', () 
     fs.rmSync(files.root, { recursive: true, force: true });
   }
 });
+
+
+test('exact npm PURL can bind a scoped root when npm display name differs', () => {
+  const value = sbom();
+  value.metadata.component.name = 'browser-shell';
+  delete value.metadata.component.group;
+  const files = fixture({ sbomValue: value });
+  try {
+    const proof = evidence(files);
+    assert.equal(proof.package_name, NAME);
+    assert.match(proof.semantic_inventory_sha256, /^[a-f0-9]{64}$/);
+  } finally {
+    fs.rmSync(files.root, { recursive: true, force: true });
+  }
+});
