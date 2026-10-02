@@ -117,7 +117,7 @@ jobs:
               raise SystemExit('physical_prep_package_smoke_builder_count_invalid')
 
           qualifier = Path('.github/workflows/browser-slsa-physical-prep-source-qualification.yml').read_text(encoding='utf-8').lower()
-          runtime = qualifier.split('      - name: Validate preparation is source-only and package identity is untouched', 1)[0]
+          runtime = qualifier.split('      - name: validate preparation is source-only and package identity is untouched', 1)[0]
           forbidden = [
               'id-token: write',
               'attestations: write',
