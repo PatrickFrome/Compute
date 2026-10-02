@@ -442,3 +442,37 @@ METAENGINE should preserve the same split:
 - SBOM = byproduct/attested inventory.
 
 Artifact attestation strengthens authenticity of the already-qualified subject; it does not make the build hermetic or reproducible.
+
+
+## Research finding: latent rebuild surfaces remain outside the qualified one-built path
+
+Repository search after V3 qualification found historical/auxiliary code paths that still contain independent electron-builder invocations or local target-build helpers, including:
+
+- `apps/metaengine-browser/test/self-update-fast-physical.ps1`
+- `.github/workflows/metaengine-browser-dp2-windows.yml`
+- `.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml`
+- `.github/workflows/browser-live-supervisor-compute-convergence-repair.yml`
+- fallback build sections in Installed Chat / Final Runtime / Soak workflows
+- Dirty Profile (now being converged separately on the hermetic successor)
+
+The qualified V3 PR #1094 proved that the required physical chain consumes one exact Package Smoke artifact and does not need those legacy target-build paths for normal PR qualification.
+
+### Architecture implication
+
+A one-built release topology is stronger if downstream consumer workflows are structurally unable to create a competing installer for the same source/version.
+
+Recommended retirement sequence:
+
+1. keep Package Smoke as the only qualified Browser installer producer;
+2. convert required downstream workflows to artifact-acquisition-only and delete dormant target-build fallback blocks;
+3. retain an explicitly named standalone packaging workflow for developer diagnostics only if needed, with a distinct non-release package namespace;
+4. update fast self-update tests to accept an explicit already-built target path/artifact instead of invoking electron-builder internally;
+5. make repository tests reject electron-builder invocations outside an allowlist of producer/diagnostic workflows.
+
+This is separate from Build Identity itself. Build Identity can detect that two build invocations differ; producer-topology hardening prevents the second release-eligible invocation from existing at all.
+
+### Why not mass-delete immediately
+
+These paths are historically entangled with bootstrap/recovery tests. Removing all of them in one change would create a wide behavioral diff and obscure whether a failure comes from supply-chain cleanup or runtime semantics.
+
+The current hermetic successor therefore changes only Dirty Profile and daemon Bun fallback. Full latent-producer retirement should be a dedicated post-qualification slice with source-level call-graph/tests first.
