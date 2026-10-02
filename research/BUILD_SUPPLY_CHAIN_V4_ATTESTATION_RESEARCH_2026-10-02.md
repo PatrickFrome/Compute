@@ -476,3 +476,21 @@ This is separate from Build Identity itself. Build Identity can detect that two 
 These paths are historically entangled with bootstrap/recovery tests. Removing all of them in one change would create a wide behavioral diff and obscure whether a failure comes from supply-chain cleanup or runtime semantics.
 
 The current hermetic successor therefore changes only Dirty Profile and daemon Bun fallback. Full latent-producer retirement should be a dedicated post-qualification slice with source-level call-graph/tests first.
+
+
+## Current GitHub attestation action choice
+
+Fresh GitHub review on 2026-10-02 confirms that new implementations should use `actions/attest`; `actions/attest-build-provenance` v4 is now a compatibility wrapper around it.
+
+Observed immutable action refs:
+- `actions/attest@v4` currently resolves to commit `1e69f48acb82d1966a394da916b4c1698aa569d6`.
+- `actions/attest@v4.2.1` resolves to `508db95dd578ae2727ebd6217d5ba78e4fbda05d`.
+
+METAENGINE policy:
+- never pin release provenance to a floating tag;
+- review the desired action release;
+- pin its exact commit SHA in the release-boundary workflow;
+- keep `attestations: write` and `id-token: write` out of draft Package Smoke;
+- verify the generated attestation against the expected repository/source/workflow before promotion.
+
+GitHub explicitly recommends attesting software being released and discourages signing frequent automated test builds. This reinforces the existing separation between draft Package Smoke evidence and release-boundary attestation.
