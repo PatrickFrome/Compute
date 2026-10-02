@@ -4,13 +4,18 @@ on:
   push:
     branches:
       - 'work/build-release-attestation-v1'
+      - 'work/build-release-attestation-verification-v1'
     paths:
       - '.github/workflows/browser-release-attestation-v1.yml'
       - '.github/workflows/browser-release-attestation-source-qualification.yml'
+      - 'apps/metaengine-browser/scripts/release-attestation-verification.mjs'
+      - 'apps/metaengine-browser/test/release-attestation-verification.test.mjs'
   pull_request:
     paths:
       - '.github/workflows/browser-release-attestation-v1.yml'
       - '.github/workflows/browser-release-attestation-source-qualification.yml'
+      - 'apps/metaengine-browser/scripts/release-attestation-verification.mjs'
+      - 'apps/metaengine-browser/test/release-attestation-verification.test.mjs'
 
 permissions:
   contents: read
@@ -25,6 +30,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Setup exact verification Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Prove release-attestation semantic verifier
+        run: node --test apps/metaengine-browser/test/release-attestation-verification.test.mjs
 
       - name: Validate release-boundary attestation contract
         shell: python
@@ -60,6 +73,18 @@ jobs:
               'predicate-type: https://metaengine.dev/attestations/browser-release-qualification/v1',
               'sbom-path:',
               'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
+              'gh attestation trusted-root',
+              '--custom-trusted-root',
+              '--signer-workflow',
+              '--source-digest',
+              '--source-ref',
+              '--deny-self-hosted-runners',
+              'https://cyclonedx.org/bom',
+              'release-attestation-verification.mjs',
+              'metaengine.browser.release-attestation-verification.v1',
+              'cryptographic_verification=$true',
+              'signer_identity_verified=$true',
+              'semantic_binding_verified=$true',
           ]
           for token in required:
               if token not in lower:
@@ -116,4 +141,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-release-attestation-v1.yml .github/workflows/browser-release-attestation-source-qualification.yml)"
+          test -z "$(git diff --name-only HEAD -- .github/workflows/browser-release-attestation-v1.yml .github/workflows/browser-release-attestation-source-qualification.yml apps/metaengine-browser/scripts/release-attestation-verification.mjs apps/metaengine-browser/test/release-attestation-verification.test.mjs)"
