@@ -21,7 +21,12 @@ on:
       - 'apps/metaengine-browser/test/installer-provenance-v3.test.mjs'
       - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
       - 'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs'
+      - 'apps/metaengine-browser/test/browser-frozen-dependency-workflow.test.mjs'
       - '.github/workflows/browser-windows-package-smoke.yml'
+      - '.github/workflows/browser-windows-installed-chat-qualification.yml'
+      - '.github/workflows/browser-final-runtime-activation-v1.yml'
+      - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
+      - '.github/workflows/metaengine-browser-self-update-e2e.yml'
       - '.github/workflows/browser-build-identity-v3-source-qualification.yml'
 
 permissions:
@@ -74,7 +79,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test             test/package-lock-material.test.mjs             test/build-identity.test.mjs             test/installer-provenance-v2.test.mjs             test/installer-provenance-v3.test.mjs             test/qualified-installer-consumer-contract.test.mjs             test/package-build-reservation.test.mjs             test/package-build-reservation-workflow.test.mjs
+          node --test             test/package-lock-material.test.mjs             test/build-identity.test.mjs             test/installer-provenance-v2.test.mjs             test/installer-provenance-v3.test.mjs             test/qualified-installer-consumer-contract.test.mjs             test/package-build-reservation.test.mjs             test/package-build-reservation-workflow.test.mjs             test/browser-frozen-dependency-workflow.test.mjs
 
       - name: Parse PowerShell qualified consumer
         shell: pwsh
