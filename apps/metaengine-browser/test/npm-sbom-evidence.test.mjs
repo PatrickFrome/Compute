@@ -291,3 +291,21 @@ test('exact npm PURL can bind a scoped root when npm display name differs', () =
     fs.rmSync(files.root, { recursive: true, force: true });
   }
 });
+
+
+test('UTF-8 BOM from Windows PowerShell is accepted without changing raw-byte evidence', () => {
+  const files = fixture();
+  try {
+    const original = fs.readFileSync(files.sbom);
+    fs.writeFileSync(files.sbom, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), original]));
+    const proof = evidence(files);
+    assert.equal(proof.package_name, NAME);
+    assert.equal(
+      proof.raw_sbom_sha256,
+      crypto.createHash('sha256').update(fs.readFileSync(files.sbom)).digest('hex'),
+    );
+    assert.match(proof.semantic_inventory_sha256, /^[a-f0-9]{64}$/);
+  } finally {
+    fs.rmSync(files.root, { recursive: true, force: true });
+  }
+});

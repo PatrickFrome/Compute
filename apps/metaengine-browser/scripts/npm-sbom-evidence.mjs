@@ -162,7 +162,8 @@ export function createNpmSbomEvidence({
   const sbomBytes = fs.readFileSync(path.resolve(String(sbomPath)));
   let sbom;
   try {
-    sbom = JSON.parse(sbomBytes.toString('utf8'));
+    const text = sbomBytes.toString('utf8').replace(/^\uFEFF/, '');
+    sbom = JSON.parse(text);
   } catch {
     fail('npm_sbom_json_invalid');
   }
