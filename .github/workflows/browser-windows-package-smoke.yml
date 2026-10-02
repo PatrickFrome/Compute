@@ -244,7 +244,9 @@ jobs:
             --workflow browser-windows-package-smoke.yml `
             --package-version $version `
             --config electron-builder.test.json `
-            --blockmap $blockmap.FullName
+            --blockmap $blockmap.FullName `
+            --build-identity $buildIdentityPath `
+            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json"
           if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_write_failed' }
           @{
             schema='metaengine.browser.windows-package-smoke.v3'
@@ -253,6 +255,8 @@ jobs:
             installer_name=$installer.Name
             installer_sha256=$digest
             blockmap_name=$blockmap.Name
+            build_identity_sha256=[string]$buildIdentity.build_identity_sha256
+            dependency_resolution_sha256=[string]$buildIdentity.dependency_resolution_sha256
             guardian_native_staging_required=$true
             guardian_native_built_by_before_pack=$true
             version_probe_verified=$false
@@ -279,6 +283,8 @@ jobs:
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe.blockmap
             ${{ runner.temp }}/installer-provenance.json
+            ${{ runner.temp }}/build-identity.json
+            ${{ runner.temp }}/dependency-resolution.json
             ${{ runner.temp }}/METAENGINE-Guardian-Bootstrap-*-x64.exe
             ${{ runner.temp }}/guardian-machine-bootstrap-binding.json
           if-no-files-found: error
@@ -690,6 +696,9 @@ jobs:
           name: metaengine-browser-windows-package-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/packaged-build-identity-proof.json
+            ${{ runner.temp }}/build-identity.json
+            ${{ runner.temp }}/dependency-resolution.json
             ${{ runner.temp }}/guardian-machine-bootstrap-physical-proof.json
             ${{ runner.temp }}/guardian-bootstrap-physical/*.out
             ${{ runner.temp }}/guardian-bootstrap-physical/*.err
