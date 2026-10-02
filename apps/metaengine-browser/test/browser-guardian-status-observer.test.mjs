@@ -120,16 +120,22 @@ test('hung or malformed Guardian observation cannot become positive', async () =
   assert.match(String(bad.observation_error), /schema_invalid/);
 });
 
-test('product wiring publishes Guardian through shared state and Edge preserves the plane', () => {
+test('product wiring preserves Guardian in both host_resilience writers without Edge drift', () => {
   const main = fs.readFileSync(path.join(APP_ROOT, 'src', 'main.mjs'), 'utf8');
+  const nativeSupervisor = fs.readFileSync(path.join(APP_ROOT, 'src', 'native-supervisor-client.mjs'), 'utf8');
   const edge = fs.readFileSync(path.join(APP_ROOT, 'supabase', 'a2-browser-native-supervisor-v1', 'index.ts'), 'utf8');
 
   assert.match(main, /createBrowserGuardianStatusObserver/);
   assert.match(main, /guardianObserver\.refreshIfDue\(\)/);
-  assert.match(main, /\n\s*guardian,\n\s*perception,/);
+  assert.match(main, /host_resilience:\s*\{[\s\S]{0,420}guardian,/);
   assert.match(main, /guardian-status'[\s\S]{0,240}observe\(\{ force: true \}\)/);
   assert.match(main, /invalidate\('GUARDIAN_ACTIVATION_STARTED'\)[\s\S]{0,240}quiesce\(\)[\s\S]{0,320}observer\.record\(result\)/);
 
-  assert.match(edge, /PLANE_KEYS=\[[^\]]*'host_resilience','guardian','realtime_process_plane'/);
-  assert.match(edge, /if\('guardian'in s\)row\.guardian=boundedObject\(s\.guardian,16384\)/);
+  assert.match(nativeSupervisor, /host_resilience:\s*\{[\s\S]{0,520}guardian:\s*sourceState\?\.guardian\s*\|\|\s*null/);
+
+  // R83 canary equivalence must remain deploy/readback-gated. This slice reuses
+  // the already-qualified host_resilience plane instead of silently advancing
+  // Edge source or its manifest pin.
+  assert.doesNotMatch(edge, /'host_resilience','guardian','realtime_process_plane'/);
+  assert.match(edge, /'host_resilience','realtime_process_plane'/);
 });
