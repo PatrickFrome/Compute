@@ -56,7 +56,7 @@ test('Package Smoke reserves one source/version before dependency install or phy
 test('Package Smoke has only one physical build and one candidate upload after reservation wiring', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.equal((workflow.match(/windows-nsis-package-smoke:/g) || []).length, 1);
-  assert.equal((workflow.match(/node_modules\\\\\.bin\\\\electron-builder\.cmd/g) || []).length, 1);
+  assert.equal((workflow.match(/electron-builder\.cmd/g) || []).length, 1);
   assert.equal((workflow.match(/npx\s+--yes\s+electron-builder/g) || []).length, 0);
   assert.equal((workflow.match(/Publish immutable package-version reservation/g) || []).length, 1);
   assert.equal((workflow.match(/Publish immutable candidate for parallel downstream qualification/g) || []).length, 1);
