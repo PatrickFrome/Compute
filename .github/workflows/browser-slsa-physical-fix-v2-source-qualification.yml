@@ -1,0 +1,89 @@
+name: Browser SLSA Physical Fix V2 Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-slsa-physical-fix-v2'
+    paths:
+      - 'apps/metaengine-browser/CONVERGENCE_CANDIDATE.md'
+      - 'apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs'
+      - 'apps/metaengine-browser/test/composed-sbom-evidence.test.mjs'
+      - 'apps/metaengine-browser/test/npm-sbom-package-smoke.test.mjs'
+      - 'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs'
+      - 'tests/browser-slsa-physical-topology.test.mjs'
+      - '.github/workflows/browser-slsa-physical-fix-v2-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact fix source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install exact Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm ci --no-audit --no-fund
+
+      - name: Reproduce and close first physical SLSA matrix failures
+        working-directory: apps/metaengine-browser
+        run: |
+          node --test             test/browser-convergence-package-identity.test.mjs             test/composed-sbom-evidence.test.mjs             test/npm-sbom-package-smoke.test.mjs             test/package-build-reservation-workflow.test.mjs
+
+      - name: Prove complete Browser Node regression after SLSA contract update
+        working-directory: apps/metaengine-browser
+        run: npm test
+
+      - name: Re-prove physical SLSA topology
+        run: node --test tests/browser-slsa-physical-topology.test.mjs
+
+      - name: Prove source qualification has zero physical authority
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/browser-slsa-physical-fix-v2-source-qualification.yml').read_text(encoding='utf-8').lower()
+          runtime = workflow.split('      - name: prove source qualification has zero physical authority', 1)[0]
+          forbidden = [
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'contents: write',
+              'actions: write',
+              'gh release',
+              'electron-builder',
+              'start-process',
+              'promotion_authorized=true',
+              'authority_effect=true',
+          ]
+          for token in forbidden:
+              if token in runtime:
+                  raise SystemExit(f'slsa_physical_fix_source_forbidden:{token}')
+
+          package = json.loads(Path('apps/metaengine-browser/package.json').read_text(encoding='utf-8'))
+          lock = json.loads(Path('apps/metaengine-browser/package-lock.json').read_text(encoding='utf-8'))
+          expected = '0.7.0-dev.37076000001.1'
+          if package.get('version') != expected or lock.get('version') != expected or lock.get('packages', {}).get('', {}).get('version') != expected:
+              raise SystemExit('slsa_physical_fix_source_package_identity_drift')
+
+          print('slsa_physical_fix_v2_source_contract_pass')
+
+      - name: Prove exact source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/CONVERGENCE_CANDIDATE.md apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs apps/metaengine-browser/test/composed-sbom-evidence.test.mjs apps/metaengine-browser/test/npm-sbom-package-smoke.test.mjs apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs tests/browser-slsa-physical-topology.test.mjs .github/workflows/browser-slsa-physical-fix-v2-source-qualification.yml)"
