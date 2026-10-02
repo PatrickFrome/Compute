@@ -143,6 +143,25 @@ function validateBuildIdentity(value, expected = {}) {
   return exact;
 }
 
+function validateDependencyTree(tree, expectedName = null) {
+  if (!tree || typeof tree !== 'object' || Array.isArray(tree)) {
+    throw new Error('dependency_resolution_tree_invalid');
+  }
+  const name = requiredString(tree.name, 'dependency_resolution_tree_name_invalid');
+  const version = requiredString(tree.version, 'dependency_resolution_tree_version_invalid');
+  if (expectedName !== null && name !== expectedName) {
+    throw new Error('dependency_resolution_tree_key_mismatch');
+  }
+  if (!tree.dependencies || typeof tree.dependencies !== 'object' || Array.isArray(tree.dependencies)) {
+    throw new Error('dependency_resolution_tree_dependencies_invalid');
+  }
+  let count = 0;
+  for (const [childName, child] of Object.entries(tree.dependencies)) {
+    count += 1 + validateDependencyTree(child, childName);
+  }
+  return Object.freeze({ name, version, count });
+}
+
 function dependencyPayloadFromProof(value) {
   if (!value || value.schema !== DEPENDENCY_RESOLUTION_SCHEMA) {
     throw new Error('dependency_resolution_schema_invalid');
@@ -155,14 +174,24 @@ function dependencyPayloadFromProof(value) {
   if (!Number.isSafeInteger(dependencyCount) || dependencyCount < 0) {
     throw new Error('dependency_resolution_count_invalid');
   }
+  const rootName = requiredString(value.root_name, 'dependency_resolution_root_name_invalid');
+  const rootVersion = requiredString(value.root_version, 'dependency_resolution_root_version_invalid');
+  const tree = canonicalize(value.tree);
+  const validatedTree = validateDependencyTree(tree);
+  if (validatedTree.name !== rootName || validatedTree.version !== rootVersion) {
+    throw new Error('dependency_resolution_root_tree_mismatch');
+  }
+  if (validatedTree.count !== dependencyCount) {
+    throw new Error('dependency_resolution_count_mismatch');
+  }
   return Object.freeze({
     schema: DEPENDENCY_RESOLUTION_SCHEMA,
-    root_name: requiredString(value.root_name, 'dependency_resolution_root_name_invalid'),
-    root_version: requiredString(value.root_version, 'dependency_resolution_root_version_invalid'),
+    root_name: rootName,
+    root_version: rootVersion,
     node_version: requiredString(value.node_version, 'dependency_resolution_node_version_invalid'),
     npm_version: requiredString(value.npm_version, 'dependency_resolution_npm_version_invalid'),
     dependency_count: dependencyCount,
-    tree: canonicalize(value.tree),
+    tree,
   });
 }
 
@@ -199,5 +228,6 @@ module.exports = Object.freeze({
   createBuildIdentity,
   validateBuildIdentity,
   validateDependencyResolutionProof,
+  validateDependencyTree,
   loadDependencyResolutionProof,
 });
