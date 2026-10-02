@@ -30,7 +30,7 @@ test('Package Smoke reserves one source/version before dependency install or phy
   const seal = workflow.indexOf('- name: Seal package-version reservation before physical build');
   const lockMaterial = workflow.indexOf('- name: Prove frozen package-lock material before dependency install');
   const dependencyInstall = workflow.indexOf('- name: Install exact frozen Browser dependency tree');
-  const electronBuilder = workflow.indexOf('npx --yes electron-builder@26.15.7');
+  const electronBuilder = workflow.indexOf("node_modules\\.bin\\electron-builder.cmd");
   const candidate = workflow.indexOf('- name: Publish immutable candidate for parallel downstream qualification');
 
   assert.ok(guard >= 0);
@@ -56,7 +56,8 @@ test('Package Smoke reserves one source/version before dependency install or phy
 test('Package Smoke has only one physical build and one candidate upload after reservation wiring', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.equal((workflow.match(/windows-nsis-package-smoke:/g) || []).length, 1);
-  assert.equal((workflow.match(/npx --yes electron-builder@26\.15\.7/g) || []).length, 1);
+  assert.equal((workflow.match(/node_modules\\\\\.bin\\\\electron-builder\.cmd/g) || []).length, 1);
+  assert.equal((workflow.match(/npx\s+--yes\s+electron-builder/g) || []).length, 0);
   assert.equal((workflow.match(/Publish immutable package-version reservation/g) || []).length, 1);
   assert.equal((workflow.match(/Publish immutable candidate for parallel downstream qualification/g) || []).length, 1);
   assert.equal((workflow.match(/Upload exact-head Windows qualification evidence/g) || []).length, 1);
