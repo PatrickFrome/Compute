@@ -5,6 +5,7 @@ on:
     branches:
       - work/browser-windows-soak-optimization-v1
       - release/self-update-ambiguity-live-v2
+      - physical/build-slsa-provenance-v1
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/**'
