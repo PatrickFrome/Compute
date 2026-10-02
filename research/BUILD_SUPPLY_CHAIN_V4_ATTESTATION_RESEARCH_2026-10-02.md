@@ -379,3 +379,16 @@ The next V4 supply-chain slice should therefore be implemented only after V3 phy
 2. composed METAENGINE installer SBOM;
 3. release-boundary artifact/SBOM attestations;
 4. promotion verifier that validates repository/workflow/source/subject identity.
+
+
+## Candidate pinned GitHub attestation actions
+
+For a later V4 release-boundary implementation, current v3 tags resolve to these immutable commits:
+
+- `actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a`
+- `actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34`
+- `actions/attest@daf44fb950173508f38bd2406030372c1d1162b1`
+
+These are research candidates, not yet adopted dependencies. Re-resolve and re-review them at implementation time because the release-boundary slice intentionally follows V3 physical qualification.
+
+METAENGINE should pin immutable action commits rather than floating major tags, consistent with the existing source-supply-chain policy.
