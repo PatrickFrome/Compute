@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { createComposedSbom } from '../scripts/composed-sbom-evidence.mjs';
 
@@ -249,4 +250,25 @@ test('authority-bearing Guardian or daemon manifests are refused', () => {
   } finally {
     fs.rmSync(f2.root, { recursive: true, force: true });
   }
+});
+
+test('physical Package Smoke wires composed SBOM after provenance into the one immutable candidate', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(here, '../../..');
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/browser-windows-package-smoke.yml'), 'utf8');
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'apps/metaengine-browser/package.json'), 'utf8'));
+  const packageLock = JSON.parse(fs.readFileSync(path.join(repoRoot, 'apps/metaengine-browser/package-lock.json'), 'utf8'));
+  assert.notEqual(packageJson.version, VERSION, 'consumed npm-SBOM physical package identity must not be reused');
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages?.['']?.version, packageJson.version);
+  const provenance = workflow.indexOf("installer_provenance_write_failed");
+  const compose = workflow.indexOf("scripts/composed-sbom-evidence.mjs");
+  const publish = workflow.indexOf("Publish immutable candidate for parallel downstream qualification");
+  assert.ok(provenance >= 0 && compose > provenance && publish > compose);
+  for (const material of ['--npm-sbom','--npm-evidence','--ui-manifest','--daemon-manifest','--guardian-manifest','--bootstrap-binding','--provenance']) assert.ok(workflow.includes(material));
+  for (const artifact of ['browser-composed-sbom.cdx.json','browser-composed-sbom-evidence.json','me2-ui-manifest.json','me2-daemon-manifest.json','guardian-native-manifest.json']) assert.ok(workflow.includes(artifact));
+  assert.match(workflow, /composed_sbom_semantic_inventory_sha256/);
+  assert.match(workflow, /composed_sbom_raw_sha256/);
+  assert.match(workflow, /composition_aggregate -ne 'incomplete'/);
+  assert.doesNotMatch(workflow, /id-token:\s*write|attestations:\s*write/);
 });

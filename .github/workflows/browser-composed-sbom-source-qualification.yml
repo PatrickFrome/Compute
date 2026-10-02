@@ -6,6 +6,8 @@ on:
       - 'work/build-composed-sbom-v1'
     paths:
       - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - '.github/workflows/browser-windows-package-smoke.yml'
       - 'apps/metaengine-browser/scripts/composed-sbom-evidence.mjs'
       - 'apps/metaengine-browser/test/composed-sbom-evidence.test.mjs'
       - '.github/workflows/browser-composed-sbom-source-qualification.yml'
