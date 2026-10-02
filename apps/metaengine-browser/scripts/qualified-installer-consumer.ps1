@@ -105,6 +105,11 @@ if ($Mode -eq 'Acquire') {
     [int64]$acquired.provenance_run_number -ne [int64]$resolved.run_number -or
     [int64]$acquired.provenance_run_attempt -ne [int64]$resolved.run_attempt -or
     [string]$acquired.provenance_workflow -ne 'browser-windows-package-smoke.yml' -or
+    [string]$acquired.provenance_schema -ne 'metaengine.browser.installer-provenance.v2' -or
+    [string]$acquired.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or
+    [string]$acquired.dependency_resolution_sha256 -notmatch '^[a-f0-9]{64}$' -or
+    $acquired.build_identity_verified -ne $true -or
+    $acquired.dependency_resolution_verified -ne $true -or
     $acquired.blockmap_verified -ne $true -or
     $acquired.config_verified -ne $true
   )
@@ -125,6 +130,11 @@ if ($Mode -eq 'Acquire') {
     producer_run_attempt = [int64]$resolved.run_attempt
     producer_completed_at_acquire = [bool]$resolved.producer_completed
     provenance_path = [string]$acquired.provenance_path
+    provenance_schema = [string]$acquired.provenance_schema
+    build_identity_sha256 = [string]$acquired.build_identity_sha256
+    dependency_resolution_sha256 = [string]$acquired.dependency_resolution_sha256
+    build_identity_verified = [bool]$acquired.build_identity_verified
+    dependency_resolution_verified = [bool]$acquired.dependency_resolution_verified
     blockmap_verified = [bool]$acquired.blockmap_verified
     config_verified = [bool]$acquired.config_verified
     authority_effect = $false
@@ -140,7 +150,13 @@ if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding
     [string]$binding.source_head -ne $ExpectedHead -or
     [int64]$binding.producer_run_id -le 0 -or
     [int64]$binding.producer_run_number -le 0 -or
-    [int64]$binding.producer_run_attempt -le 0) {
+    [int64]$binding.producer_run_attempt -le 0 -or
+    [string]$binding.provenance_schema -ne 'metaengine.browser.installer-provenance.v2' -or
+    [string]$binding.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or
+    [string]$binding.dependency_resolution_sha256 -notmatch '^[a-f0-9]{64}$' -or
+    $binding.build_identity_verified -ne $true -or
+    $binding.dependency_resolution_verified -ne $true -or
+    $binding.authority_effect -ne $false) {
   throw 'qualified_installer_binding_invalid'
 }
 
@@ -159,6 +175,9 @@ if ($Mode -eq 'Verify') {
   if ([string]$acquired.installer_sha256 -ne [string]$binding.installer_sha256 -or
       [string]$acquired.installer_path -ne [string]$binding.installer_path -or
       [string]$acquired.provenance_path -ne [string]$binding.provenance_path -or
+      [string]$acquired.build_identity_sha256 -ne [string]$binding.build_identity_sha256 -or
+      [string]$acquired.dependency_resolution_sha256 -ne [string]$binding.dependency_resolution_sha256 -or
+      $acquired.build_identity_verified -ne $true -or $acquired.dependency_resolution_verified -ne $true -or
       $acquired.blockmap_verified -ne $true -or $acquired.config_verified -ne $true) {
     throw 'qualified_installer_reverify_binding_drift'
   }
@@ -196,6 +215,8 @@ if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_producer_not_qualified' }
 
 $proof | Add-Member -NotePropertyName producer_terminal_success -NotePropertyValue $true -Force
 $proof | Add-Member -NotePropertyName producer_terminal_qualified_at -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
+$proof | Add-Member -NotePropertyName build_identity_sha256 -NotePropertyValue ([string]$binding.build_identity_sha256) -Force
+$proof | Add-Member -NotePropertyName dependency_resolution_sha256 -NotePropertyValue ([string]$binding.dependency_resolution_sha256) -Force
 $proof | ConvertTo-Json -Depth 12 | Set-Content $ProofPath -Encoding utf8
 
 $result = [ordered]@{
@@ -204,6 +225,8 @@ $result = [ordered]@{
   producer_run_id = [int64]$binding.producer_run_id
   producer_run_number = [int64]$binding.producer_run_number
   producer_run_attempt = [int64]$binding.producer_run_attempt
+  build_identity_sha256 = [string]$binding.build_identity_sha256
+  dependency_resolution_sha256 = [string]$binding.dependency_resolution_sha256
   producer_terminal_success = $true
   authority_effect = $false
 }

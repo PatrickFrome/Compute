@@ -1,0 +1,29 @@
+{
+  "schema": "metaengine.browser.build-identity-v2-self-update-fixture-correction.v1",
+  "date": "2026-10-02",
+  "predecessor_source": "2a0022d1e0119620f7badff4621cb5ff1ed5ab7c",
+  "retired_package_version": "0.7.0-dev.36973000001.1",
+  "corrected_reserved_package_version": "0.7.0-dev.36974000001.1",
+  "predecessor_package": {
+    "producer_run_id": 36971539452,
+    "producer_run_number": 3137,
+    "installer_sha256": "28c3199c1accb761a412bca2eecfcb3e323fe74baa63fda263d7d8de0dd9893d",
+    "installer_bytes": 159811161,
+    "blockmap_sha256": "cd9bd768e3cae62fc6870b9a9fa44e0caf8e3093d1a0091a3ef725493661f395",
+    "config_sha256": "02e569d4797baad6252f86972d0f0a87db0d0b410c1a7d80d5cc9021d9194731",
+    "build_identity_sha256": "2e8c125f036ee27566a5857ab5c94fe65c2d400cf7ba0af1204fee4c79ae1ee1",
+    "dependency_resolution_sha256": "e37879804789c4354b0c732f2ac7a05fdfb70bf5c82a3c6849d79265200dc7f5",
+    "candidate_artifact_id": 11211928176,
+    "evidence_artifact_id": 11212390898
+  },
+  "predecessor_matrix": {
+    "success": 9,
+    "failure": 1,
+    "self_update_failure_stage": "PRE_PHYSICAL_FIXTURE"
+  },
+  "root_cause": "EXPECTED_NATIVE_REFUSAL_LASTEXITCODE_LEAKED_TO_CI_WRAPPER",
+  "production_runtime_changed": false,
+  "updater_effect_reached": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}

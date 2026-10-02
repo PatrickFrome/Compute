@@ -1,0 +1,22 @@
+{
+  "schema": "metaengine.browser.build-identity-v2-qualification-correction.v1",
+  "date": "2026-10-02",
+  "predecessor_source": "53fe4cb128fd4dc7cb525201d80a23924f8a997d",
+  "predecessor_package_smoke": {
+    "run_id": 36970617815,
+    "run_number": 3136,
+    "conclusion": "failure",
+    "candidate_artifact_produced": false,
+    "nsis_reached": false
+  },
+  "retired_package_version": "0.7.0-dev.36972000001.1",
+  "corrected_reserved_package_version": "0.7.0-dev.36973000001.1",
+  "fixes": {
+    "recursive_dependency_count_numeric": true,
+    "unresolved_non_installed_placeholders_omitted": true,
+    "package_smoke_only_identity_enforcement": true,
+    "primary_convergence_reservation_corrected": true
+  },
+  "authority_effect": false,
+  "promotion_authorized": false
+}

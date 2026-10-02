@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36965253139.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.36974000001.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -59,3 +59,43 @@ Final reservation discipline before the next qualification: `0.7.0-dev.369646888
 
 
 Guardian semantic-hardening successor: stale/invalidated observations no longer carry current positive service/owner/device proof, historical proof is explicitly namespaced as last-confirmed evidence, and observer validation rejects contradictory or proof-less READY states. This remains diagnostic-only and adds no admission/retry authority. Parent heartbeat source `1f6902da…` physically produced `0.7.0-dev.36965151413.1`; that identity is consumed and is never reused by this successor.
+
+
+Build Identity V2 successor (2026-10-02):
+- stacked qualified base: `bf21d71b6dc674c376bd396487b5efc134d0a3e9` / Guardian semantic hardening PR #1090;
+- frozen implementation source before reservation: `5a75a4129e305752b868f1d0604319e9b30122e1`;
+- reserved one-build package identity: `0.7.0-dev.36970010001.1`, chosen above the latest observed repository workflow id `36968682903`;
+- deterministic `metaengine.browser.build-identity.v2` binds repository/repository-id, exact source, Package Smoke workflow, run id + rerun attempt, package version, platform/arch, builder config, installed dependency-resolution digest, electron-builder version and Node version;
+- Package Smoke computes an expected identity before packaging, beforePack recomputes/injects it, afterAllArtifactBuild independently reads it back from packaged app.asar, and installer-provenance v2 binds it to installer/blockmap bytes;
+- downstream Installed Chat / Final Runtime / Soak / Self Update continue consuming the single exact Package Smoke artifact and now require v2 build/dependency proof;
+- dependency resolution currently proves the actual installed npm name/version tree, not byte-level reproducibility; a reviewed lockfile + npm ci remains the next supply-chain hardening boundary;
+- Build Identity is evidence only: `authority_effect=false`, no release/promotion/admission/Guardian authority.
+
+Seven malformed-workflow push records (#3128-#3134, run ids 36968517070..36968682903) occurred during the editing incident before the workflow was reconstructed. Every one completed FAILURE with zero jobs and zero artifacts, so no installer/package physical build occurred on those heads. They are retained as parser-failure evidence, not as consumed physical package identities. After repair, branch pushes no longer created Package Smoke runs because the valid push filter does not include this branch.
+
+
+Build Identity V2 first qualification correction:
+- frozen PR #1091 head `04fce17d3b6de1b8a5399962887bad8070d2b740` started Package Smoke #3135 / run `36970396272` with reserved identity `0.7.0-dev.36970010001.1`;
+- the runner failed at the new read-only dependency-resolution step **before** expected identity computation, packaging, candidate upload or installer execution;
+- exact root cause: Node 24 on Windows returned a null spawn status when the helper attempted to execute `npm.cmd` directly through `spawnSync`; the diagnostic was `dependency_resolution_npm_ls_failed:null`;
+- no Package Smoke candidate artifact was produced on that head, but the identity is retired conservatively because the physical Package Smoke runner had started;
+- Windows npm invocation now goes through the trusted OS command processor (`ComSpec /d /s /c npm.cmd ...`) with only fixed internal npm arguments; spawn errors are explicit and bounded;
+- corrected successor reserves `0.7.0-dev.36972000001.1`; no bytes from the failed attempt may be relabelled as this version.
+
+
+Build Identity V2 second qualification correction:
+- PR #1091 head `53fe4cb128fd4dc7cb525201d80a23924f8a997d` started Package Smoke #3136 / run `36970617815` with `0.7.0-dev.36972000001.1`; that identity is retired conservatively and will not be reused.
+- Package Smoke reached only dependency observation / expected-identity preparation. It produced no candidate installer artifact and did not run NSIS because the expected identity rejected two concrete proof defects first.
+- defect 1: recursive dependency validation accidentally added the returned object instead of its numeric `.count`, so every non-empty tree failed `dependency_resolution_count_mismatch`;
+- defect 2: npm's installed-tree JSON can contain unresolved optional placeholders such as `bufferutil` / `utf-8-validate` with no installed version. Those placeholders are now excluded from the installed name/version tree rather than accepted with an empty synthetic version;
+- auxiliary Windows package workflows (for example Dirty Profile) are no longer forced to provide Package-Smoke-only provenance inputs. Build Identity V2 is mandatory only when `ME2_BUILD_IDENTITY_REQUIRED=true`; the official Package Smoke producer sets that flag and still fails closed if any identity input/readback is missing.
+- the convergence reservation at the top of this file is now authoritative and matches package.json; the stale first reservation was the direct cause of the convergence package-identity regression.
+- corrected successor reserves `0.7.0-dev.36973000001.1`, above all workflow ids observed before this commit. Any later source change after its Package Smoke runner starts must retire it and advance again.
+
+
+Build Identity V2 Self Update harness correction:
+- exact source `2a0022d1e0119620f7badff4621cb5ff1ed5ab7c` physically produced Package Smoke #3137 / run `36971539452` with `0.7.0-dev.36973000001.1`; installer SHA-256 `28c3199c1accb761a412bca2eecfcb3e323fe74baa63fda263d7d8de0dd9893d`, Build Identity `2e8c125f036ee27566a5857ab5c94fe65c2d400cf7ba0af1204fee4c79ae1ee1`, dependency-resolution `e37879804789c4354b0c732f2ac7a05fdfb70bf5c82a3c6849d79265200dc7f5`;
+- 9/10 exact-head workflows passed; Self Update #3594 failed before installer acquisition/effect because the negative-test fixture correctly caught a native refusal but left its non-zero `$LASTEXITCODE` visible to the GitHub Actions PowerShell wrapper;
+- Microsoft PowerShell semantics explicitly preserve the last native exit code across directly invoked scripts unless another native/script exit replaces it; the fixture now clears only the handled expected-refusal status and asserts that no stale native exit leaks out;
+- no updater/installer failure was observed on that head and no Self Update physical effect started;
+- `0.7.0-dev.36973000001.1` is consumed because Package Smoke produced bytes; the corrected exact source reserves `0.7.0-dev.36974000001.1`.

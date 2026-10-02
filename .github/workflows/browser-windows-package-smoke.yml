@@ -66,6 +66,40 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund --no-package-lock
 
+      - name: Capture exact installed dependency resolution
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/dependency-resolution-digest.mjs --out "$env:RUNNER_TEMP\dependency-resolution.json"
+          if ($LASTEXITCODE -ne 0) { throw 'dependency_resolution_capture_failed' }
+          $proof = Get-Content "$env:RUNNER_TEMP\dependency-resolution.json" -Raw | ConvertFrom-Json
+          if ($proof.schema -ne 'metaengine.browser.dependency-resolution.v1' -or [string]$proof.dependency_resolution_sha256 -notmatch '^[a-f0-9]{64}$' -or [int]$proof.dependency_count -lt 1 -or $proof.authority_effect -ne $false) { throw 'dependency_resolution_proof_invalid' }
+          Write-Host ($proof | Select-Object schema,root_name,root_version,node_version,npm_version,dependency_count,dependency_resolution_sha256,authority_effect | ConvertTo-Json -Compress)
+
+      - name: Compute expected Build Identity V2 before packaging
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $version = [string](node -p "require('./package.json').version")
+          node scripts/build-identity-cli.mjs `
+            --out "$env:RUNNER_TEMP\expected-build-identity.json" `
+            --repository "$env:GITHUB_REPOSITORY" `
+            --repository-id "$env:GITHUB_REPOSITORY_ID" `
+            --source-head $sourceHead `
+            --workflow browser-windows-package-smoke.yml `
+            --run-id "$env:GITHUB_RUN_ID" `
+            --run-attempt "$env:GITHUB_RUN_ATTEMPT" `
+            --package-version $version `
+            --platform win32 `
+            --arch x64 `
+            --config electron-builder.test.json `
+            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json" `
+            --electron-builder-version 26.15.7
+          if ($LASTEXITCODE -ne 0) { throw 'expected_build_identity_create_failed' }
+
       - name: Parse exact source before packaging
         working-directory: apps/metaengine-browser
         run: npm run check
@@ -203,6 +237,11 @@ jobs:
         shell: powershell
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_BUILD_IDENTITY_REQUIRED: 'true'
+          ME2_DEPENDENCY_RESOLUTION_PATH: ${{ runner.temp }}\dependency-resolution.json
+          ME2_BUILD_WORKFLOW: browser-windows-package-smoke.yml
+          ME2_BUILD_ARCH: x64
+          ME2_ELECTRON_BUILDER_VERSION: 26.15.7
         run: |
           $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
           $version = [string](node -p "require('./package.json').version")
@@ -210,6 +249,16 @@ jobs:
           Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
           npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $buildIdentityPath = "$env:RUNNER_TEMP\build-identity.json"
+          $packagedBuildIdentityProofPath = "$env:RUNNER_TEMP\packaged-build-identity-proof.json"
+          if (-not (Test-Path $buildIdentityPath -PathType Leaf)) { throw 'build_identity_not_emitted' }
+          if (-not (Test-Path $packagedBuildIdentityProofPath -PathType Leaf)) { throw 'packaged_build_identity_proof_missing' }
+          $buildIdentity = Get-Content $buildIdentityPath -Raw | ConvertFrom-Json
+          $expectedBuildIdentity = Get-Content "$env:RUNNER_TEMP\expected-build-identity.json" -Raw | ConvertFrom-Json
+          $packagedBuildIdentity = Get-Content $packagedBuildIdentityProofPath -Raw | ConvertFrom-Json
+          if ([string]$expectedBuildIdentity.build_identity_sha256 -ne [string]$buildIdentity.build_identity_sha256) { throw 'build_identity_independent_readback_mismatch' }
+          if ($buildIdentity.schema -ne 'metaengine.browser.build-identity.v2' -or [string]$buildIdentity.source_head -ne $sourceHead -or [string]$buildIdentity.package_version -ne $version -or [string]$buildIdentity.run_id -ne [string]$env:GITHUB_RUN_ID -or [int]$buildIdentity.run_attempt -ne [int]$env:GITHUB_RUN_ATTEMPT -or [string]$buildIdentity.build_identity_sha256 -notmatch '^[a-f0-9]{64}$' -or $buildIdentity.authority_effect -ne $false) { throw 'build_identity_contract_invalid' }
+          if ($packagedBuildIdentity.schema -ne 'metaengine.browser.packaged-build-identity-proof.v1' -or [string]$packagedBuildIdentity.build_identity_sha256 -ne [string]$buildIdentity.build_identity_sha256 -or [string]$packagedBuildIdentity.dependency_resolution_sha256 -ne [string]$buildIdentity.dependency_resolution_sha256 -or $packagedBuildIdentity.authority_effect -ne $false) { throw 'packaged_build_identity_contract_invalid' }
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
           $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
           if (-not $installer -or -not $blockmap) { throw 'package_assets_missing' }
@@ -226,7 +275,9 @@ jobs:
             --workflow browser-windows-package-smoke.yml `
             --package-version $version `
             --config electron-builder.test.json `
-            --blockmap $blockmap.FullName
+            --blockmap $blockmap.FullName `
+            --build-identity $buildIdentityPath `
+            --dependency-resolution "$env:RUNNER_TEMP\dependency-resolution.json"
           if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_write_failed' }
           @{
             schema='metaengine.browser.windows-package-smoke.v3'
@@ -235,6 +286,8 @@ jobs:
             installer_name=$installer.Name
             installer_sha256=$digest
             blockmap_name=$blockmap.Name
+            build_identity_sha256=[string]$buildIdentity.build_identity_sha256
+            dependency_resolution_sha256=[string]$buildIdentity.dependency_resolution_sha256
             guardian_native_staging_required=$true
             guardian_native_built_by_before_pack=$true
             version_probe_verified=$false
@@ -261,6 +314,8 @@ jobs:
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe.blockmap
             ${{ runner.temp }}/installer-provenance.json
+            ${{ runner.temp }}/build-identity.json
+            ${{ runner.temp }}/dependency-resolution.json
             ${{ runner.temp }}/METAENGINE-Guardian-Bootstrap-*-x64.exe
             ${{ runner.temp }}/guardian-machine-bootstrap-binding.json
           if-no-files-found: error
@@ -672,6 +727,10 @@ jobs:
           name: metaengine-browser-windows-package-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/packaged-build-identity-proof.json
+            ${{ runner.temp }}/expected-build-identity.json
+            ${{ runner.temp }}/build-identity.json
+            ${{ runner.temp }}/dependency-resolution.json
             ${{ runner.temp }}/guardian-machine-bootstrap-physical-proof.json
             ${{ runner.temp }}/guardian-bootstrap-physical/*.out
             ${{ runner.temp }}/guardian-bootstrap-physical/*.err
