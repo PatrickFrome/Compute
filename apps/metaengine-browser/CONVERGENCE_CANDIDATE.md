@@ -149,3 +149,14 @@ SLSA physical closure successor (2026-10-03):
 - installed qualification backend: Meta `jhriwwsryeqsvvvufkok`, function V8 pinned to the qualified source; exact physical push workflow/ref/source/run/attempt binding, nonce approval unchanged;
 - one Package Smoke producer, existing Sigstore/Rekor attestation and independent verifier, exact downstream producer event fencing retained;
 - new source qualification and all ten physical workflows must pass on this successor before it is offered for installation; no claim of production release or real z.ai Agent task/result closure follows from packaging evidence.
+
+
+Self Update V3 physical closure successor (2026-10-03):
+- consumed predecessor: `c80e0fb46dc8c701462beb7f74dd8ff45867ac74` / `0.7.0-dev.37084599153.1`; Package Smoke and 8 other workflow families passed, while Self Update #3605 / run `37085197258` failed before installer acquisition/effect in the local re-verification fixture;
+- exact failure: under PowerShell StrictMode, ambient physical-branch auto-fencing inferred `ExpectedProducerEvent=push` during `Mode Verify`, then dereferenced the synthetic legacy fixture's intentionally absent `producer_event` property;
+- V3 fix keeps automatic physical push event fencing for `Acquire` and `Wait`, while local `Verify` remains branch-agnostic unless a caller explicitly supplies an event;
+- source-fix head `e91b483c0bca90a2f7699b2553b11720b37fc06a` passed Linux and Windows source qualification run `37086632570`, including the exact PowerShell fixture under simulated physical push environment plus full Browser Node regression;
+- Installed Chat on the predecessor physically proved Supabase installed-qualification function V8: function logs show the expected 202 waiting response followed by 200 approval on deployment `jhriwwsryeqsvvvufkok_add28328-d282-4942-9fa1-c2302da1e23f_8`;
+- fresh monotonic package reservation: `0.7.0-dev.37086632570.1`, derived from the final qualified source run namespace and never previously physically started;
+- the next exact candidate must source-qualify at its own versioned head before `physical/build-slsa-provenance-v1` is advanced; all ten workflows must again consume one Package Smoke installer and run at attempt 1;
+- no rerun of the consumed predecessor, release, promotion, live user install, Guardian enrollment, Supervisor admission, or task dispatch is authorized by this reservation.
