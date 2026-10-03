@@ -50,3 +50,58 @@ test('activation latency boundary excludes post-ACK harness journal parsing', ()
   assert.match(source, /SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT/);
   assert.doesNotMatch(source.slice(journalRead, addLatency), /\$activationStarted\.Stop\(\)/);
 });
+
+
+test('activation evidence records distribution shape instead of a lone p95 sample', () => {
+  for (const field of [
+    'activation_latency_sample_count',
+    'activation_latency_min_ms',
+    'activation_latency_p50_ms',
+    'activation_latency_p90_ms',
+    'activation_latency_p95_ms',
+    'activation_latency_p99_ms',
+    'activation_latency_max_ms',
+    'activation_latency_mean_ms',
+    'concurrent_activation_individual_p95_ms',
+  ]) assert.match(source, new RegExp(field));
+
+  const sort = source.indexOf('$latencySorted = @($activationLatencies | Sort-Object)');
+  const p50 = source.indexOf('$p50Index =', sort);
+  const p90 = source.indexOf('$p90Index =', p50);
+  const p95 = source.indexOf('$p95Index =', p90);
+  const p99 = source.indexOf('$p99Index =', p95);
+  const mean = source.indexOf('Measure-Object -Average', p99);
+  const persist = source.indexOf('activation_latency_sample_count', mean);
+  const enforce = source.indexOf('soak_activation_p95_budget_exceeded', persist);
+  assert.ok(sort >= 0 && p50 > sort && p90 > p50 && p95 > p90 && p99 > p95);
+  assert.ok(mean > p99 && persist > mean && enforce > persist, 'distribution evidence must persist before the unchanged p95 gate');
+});
+
+
+test('activation evidence fingerprints the hosted measurement environment without changing the gate', () => {
+  for (const field of [
+    'measurement_runner_os',
+    'measurement_runner_arch',
+    'measurement_image_os',
+    'measurement_image_version',
+    'measurement_processor_identifier',
+    'measurement_processor_count',
+  ]) assert.match(source, new RegExp(field));
+
+  const boundary = source.indexOf('activation_latency_measurement_boundary');
+  const fingerprint = source.indexOf('measurement_runner_os', boundary);
+  const gate = source.indexOf('soak_activation_p95_budget_exceeded', fingerprint);
+  assert.ok(boundary >= 0 && fingerprint > boundary && gate > fingerprint);
+  assert.match(source, /\[Environment\]::ProcessorCount/);
+});
+
+
+test('activation evidence retains bounded raw samples for paired same-runner analysis', () => {
+  assert.match(source, /activation_latency_samples_ms/);
+  assert.match(source, /concurrent_activation_individual_samples_ms/);
+  assert.match(source, /\$activationLatencies \| ForEach-Object/);
+  assert.match(source, /\$burstIndividualSamplesMs = @\(/);
+  const sequentialSamples = source.indexOf('activation_latency_samples_ms');
+  const p95Gate = source.indexOf('soak_activation_p95_budget_exceeded', sequentialSamples);
+  assert.ok(sequentialSamples >= 0 && p95Gate > sequentialSamples, 'raw samples are evidence only and must precede unchanged gates');
+});

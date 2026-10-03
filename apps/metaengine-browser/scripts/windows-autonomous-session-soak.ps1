@@ -300,6 +300,8 @@ try {
   }
 
   $burstElapsedMs = 0.0
+  $burstIndividualP95Ms = 0.0
+  $burstIndividualSamplesMs = @()
   if ($ConcurrentBurstSize -gt 0) {
     $burstWatch = [Diagnostics.Stopwatch]::StartNew()
     $burst = New-Object 'System.Collections.Generic.List[object]'
@@ -336,6 +338,10 @@ try {
     }
     $burstWatch.Stop()
     $burstElapsedMs = [double]$burstWatch.Elapsed.TotalMilliseconds
+    $burstIndividualSorted = @($burstAcks | ForEach-Object { [double]$_.ElapsedMs } | Sort-Object)
+    $burstP95Index = [Math]::Max(0, [Math]::Min($burstIndividualSorted.Count - 1, [Math]::Ceiling($burstIndividualSorted.Count * 0.95) - 1))
+    $burstIndividualP95Ms = if ($burstIndividualSorted.Count -gt 0) { [double]$burstIndividualSorted[$burstP95Index] } else { 0.0 }
+    $burstIndividualSamplesMs = @($burstIndividualSorted | ForEach-Object { [Math]::Round([double]$_, 2) })
 
     $startup = Get-Content $journal -Raw | ConvertFrom-Json
     foreach ($row in $burstAcks) {
@@ -369,8 +375,17 @@ try {
 
   $procAfter = Get-Process -Id $normal.Id
   $latencySorted = @($activationLatencies | Sort-Object)
+  $p50Index = [Math]::Max(0, [Math]::Min($latencySorted.Count - 1, [Math]::Ceiling($latencySorted.Count * 0.50) - 1))
+  $p90Index = [Math]::Max(0, [Math]::Min($latencySorted.Count - 1, [Math]::Ceiling($latencySorted.Count * 0.90) - 1))
   $p95Index = [Math]::Max(0, [Math]::Min($latencySorted.Count - 1, [Math]::Ceiling($latencySorted.Count * 0.95) - 1))
+  $p99Index = [Math]::Max(0, [Math]::Min($latencySorted.Count - 1, [Math]::Ceiling($latencySorted.Count * 0.99) - 1))
+  $p50Ms = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$p50Index] } else { 0.0 }
+  $p90Ms = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$p90Index] } else { 0.0 }
   $p95Ms = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$p95Index] } else { 0.0 }
+  $p99Ms = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$p99Index] } else { 0.0 }
+  $latencyMinMs = if ($latencySorted.Count -gt 0) { [double]$latencySorted[0] } else { 0.0 }
+  $latencyMaxMs = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$latencySorted.Count - 1] } else { 0.0 }
+  $latencyMeanMs = if ($latencySorted.Count -gt 0) { [double](($activationLatencies | Measure-Object -Average).Average) } else { 0.0 }
   $workingSetAfter = [int64]$procAfter.WorkingSet64
   $handlesAfter = [int64]$procAfter.HandleCount
   $workingSetGrowth = [Math]::Max([int64]0, $workingSetAfter - $workingSetBefore)
@@ -407,11 +422,27 @@ try {
   $proof | Add-Member -NotePropertyName automatic_initial_tab_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
   $proof | Add-Member -NotePropertyName automatic_initial_remote_load_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
+  $proof | Add-Member -NotePropertyName activation_latency_sample_count -NotePropertyValue $latencySorted.Count -Force
+  $proof | Add-Member -NotePropertyName activation_latency_samples_ms -NotePropertyValue @($activationLatencies | ForEach-Object { [Math]::Round([double]$_, 2) }) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_min_ms -NotePropertyValue ([Math]::Round($latencyMinMs, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_p50_ms -NotePropertyValue ([Math]::Round($p50Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_p90_ms -NotePropertyValue ([Math]::Round($p90Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_ms -NotePropertyValue ([Math]::Round($p95Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_p99_ms -NotePropertyValue ([Math]::Round($p99Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_max_ms -NotePropertyValue ([Math]::Round($latencyMaxMs, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_mean_ms -NotePropertyValue ([Math]::Round($latencyMeanMs, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
   $proof | Add-Member -NotePropertyName activation_latency_measurement_boundary -NotePropertyValue 'SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT' -Force
+  $proof | Add-Member -NotePropertyName measurement_runner_os -NotePropertyValue ([string]$env:RUNNER_OS) -Force
+  $proof | Add-Member -NotePropertyName measurement_runner_arch -NotePropertyValue ([string]$env:RUNNER_ARCH) -Force
+  $proof | Add-Member -NotePropertyName measurement_image_os -NotePropertyValue ([string]$env:ImageOS) -Force
+  $proof | Add-Member -NotePropertyName measurement_image_version -NotePropertyValue ([string]$env:ImageVersion) -Force
+  $proof | Add-Member -NotePropertyName measurement_processor_identifier -NotePropertyValue ([string]$env:PROCESSOR_IDENTIFIER) -Force
+  $proof | Add-Member -NotePropertyName measurement_processor_count -NotePropertyValue ([Environment]::ProcessorCount) -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_size -NotePropertyValue $ConcurrentBurstSize -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_elapsed_ms -NotePropertyValue ([Math]::Round($burstElapsedMs, 2)) -Force
+  $proof | Add-Member -NotePropertyName concurrent_activation_individual_p95_ms -NotePropertyValue ([Math]::Round($burstIndividualP95Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName concurrent_activation_individual_samples_ms -NotePropertyValue @($burstIndividualSamplesMs) -Force
   $proof | Add-Member -NotePropertyName post_activation_hold_seconds -NotePropertyValue $PostActivationHoldSeconds -Force
   $proof | Add-Member -NotePropertyName working_set_before_bytes -NotePropertyValue $workingSetBefore -Force
   $proof | Add-Member -NotePropertyName working_set_after_bytes -NotePropertyValue $workingSetAfter -Force
