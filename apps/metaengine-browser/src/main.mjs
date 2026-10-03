@@ -99,6 +99,7 @@ let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
 let clientGoalJournal = null;
 let clientAdmissionRecoveryJournal = null;
+let clientAdmissionRecoveryJournalLoadError = null;
 
 function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
@@ -315,9 +316,16 @@ async function ensureClientGoalJournal() {
 }
 
 async function ensureClientAdmissionRecoveryJournal() {
+  if (clientAdmissionRecoveryJournalLoadError) return null;
   if (clientAdmissionRecoveryJournal) {
-    await clientAdmissionRecoveryJournal.load();
-    return clientAdmissionRecoveryJournal;
+    try {
+      await clientAdmissionRecoveryJournal.load();
+      return clientAdmissionRecoveryJournal;
+    } catch (error) {
+      clientAdmissionRecoveryJournalLoadError = String(error?.message || error).slice(0, 240);
+      clientAdmissionRecoveryJournal = null;
+      return null;
+    }
   }
   const target = clientAdmissionRecoveryJournalStatePath();
   clientAdmissionRecoveryJournal = new ClientAdmissionRecoveryJournal({
@@ -329,8 +337,14 @@ async function ensureClientAdmissionRecoveryJournal() {
       await fs.rename(temp, target);
     },
   });
-  await clientAdmissionRecoveryJournal.load();
-  return clientAdmissionRecoveryJournal;
+  try {
+    await clientAdmissionRecoveryJournal.load();
+    return clientAdmissionRecoveryJournal;
+  } catch (error) {
+    clientAdmissionRecoveryJournalLoadError = String(error?.message || error).slice(0, 240);
+    clientAdmissionRecoveryJournal = null;
+    return null;
+  }
 }
 
 async function initDevOSSessionLayouts() {
@@ -2460,6 +2474,20 @@ async function resumeClientAdmissionOnce() {
   }
 
   const journal = await ensureClientAdmissionRecoveryJournal();
+  if (!journal) {
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'HOLD',
+      reason: 'RECOVERY_JOURNAL_INCOMPATIBLE',
+      detail: clientAdmissionRecoveryJournalLoadError,
+      confirmed_open: false,
+      effect_attempted: false,
+      prior_effect_replayed: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
   let observed;
   try {
     observed = await nativeSupervisor.devosEnvironmentState();
