@@ -49,7 +49,6 @@ jobs:
         run: npm test
 
       - name: Setup exact Bun runtime for ME2 UI source proof
-        if: matrix.os == 'ubuntu-24.04'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: '1.3.3'
@@ -69,6 +68,47 @@ jobs:
           bun ci
           test "$(sha256sum bun.lock | awk '{print $1}')" = "$source_lock_sha"
           bun run build
+
+      - name: Prove Windows R97 Client visual flow without packaging
+        if: matrix.os == 'windows-2025'
+        shell: pwsh
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+          METAENGINE_R85_VISUAL_EVIDENCE_DIR: ${{ runner.temp }}\r85-source-visual
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string](bun --version) -ne '1.3.3') { throw 'client_source_visual_bun_version_drift' }
+          $sourceUi = Join-Path $env:GITHUB_WORKSPACE 'apps\me2-ui'
+          Push-Location $sourceUi
+          try {
+            bun ci
+            if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_bun_ci_failed' }
+            bun run build
+            if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_build_failed' }
+            node scripts/pack-me2-ui.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_pack_failed' }
+          } finally { Pop-Location }
+          $uiDist = Join-Path $sourceUi 'me2-ui-dist'
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root $uiDist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_bundle_invalid' }
+          $env:METAENGINE_R85_VISUAL_UI_DIR = $uiDist
+          New-Item -ItemType Directory -Force -Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR | Out-Null
+          Push-Location apps/metaengine-browser
+          try {
+            node --check test/me2-r85-visual-evidence.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_harness_parse_failed' }
+            $electron = Join-Path (Resolve-Path '.\node_modules\electron\dist').Path 'electron.exe'
+            & $electron '.\test\me2-r85-visual-evidence.mjs'
+            if ($LASTEXITCODE -ne 0) { throw "client_source_visual_electron_exit_$LASTEXITCODE" }
+          } finally { Pop-Location }
+          $evidencePath = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
+          if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'client_source_visual_evidence_missing' }
+          $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
+          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v1' -or $evidence.ok -ne $true) {
+            throw 'client_source_visual_evidence_invalid'
+          }
+          if ([string]$evidence.source_head -ne [string]$env:ME2_BUILD_SHA) { throw 'client_source_visual_source_head_drift' }
+          Write-Host ($evidence | ConvertTo-Json -Compress -Depth 8)
 
       - name: Prove one producer SLSA topology and version reservation
         run: node --test tests/browser-slsa-provenance-verification.test.mjs tests/browser-slsa-physical-topology.test.mjs
