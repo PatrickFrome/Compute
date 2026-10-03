@@ -5,6 +5,8 @@ on:
     branches:
       - 'work/build-slsa-physical-fix-v3'
     paths:
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
       - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
       - 'apps/metaengine-browser/test/qualified-installer-consumer-verify.ps1'
       - 'apps/metaengine-browser/test/qualified-installer-consumer-contract.test.mjs'
@@ -94,8 +96,10 @@ jobs:
 
           package = json.loads(Path('apps/metaengine-browser/package.json').read_text(encoding='utf-8'))
           lock = json.loads(Path('apps/metaengine-browser/package-lock.json').read_text(encoding='utf-8'))
-          expected = '0.7.0-dev.37084599153.1'
-          if package.get('version') != expected or lock.get('version') != expected or lock.get('packages', {}).get('', {}).get('version') != expected:
+          version = str(package.get('version') or '')
+          if not __import__('re').fullmatch(r'0\.7\.0-dev\.[0-9]+\.1', version):
+              raise SystemExit(f'slsa_physical_fix_v3_package_identity_invalid:{version}')
+          if lock.get('version') != version or lock.get('packages', {}).get('', {}).get('version') != version:
               raise SystemExit('slsa_physical_fix_v3_package_identity_drift')
 
           print('slsa_physical_fix_v3_source_contract_pass')
