@@ -82,8 +82,8 @@ jobs:
           verifier_required = [
               "'--predicate-type','https://slsa.dev/provenance/v1'",
               "'--signer-workflow',$packagesignerworkflow",
-              "'--signer-digest','${{ inputs.source_head }}'",
-              "'--source-digest','${{ inputs.source_head }}'",
+              "'--signer-digest',",
+              "'--source-digest',",
               "'--source-ref','refs/heads/physical/build-slsa-provenance-v1'",
               "'--deny-self-hosted-runners'",
           ]
