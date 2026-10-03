@@ -65,9 +65,9 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
           workflow = Path('.github/workflows/browser-agent-result-installer-source-qualification.yml').read_text(encoding='utf-8').lower()
-          before, guard = workflow.split('      - name: prove qualification is source only', 1)
-          runtime = before + guard.split('      - name: prove exact source unchanged', 1)[1]
+          runtime = re.sub(r'(?ms)^      - name: prove qualification is source only\n.*?(?=^      - name:|\Z)', '', workflow, count=1)
           for forbidden in ['id-token: write', 'attestations: write', 'contents: write', 'actions: write', 'gh release', 'electron-builder', 'workflow_dispatch', 'start-process']:
               if forbidden in runtime:
                   raise SystemExit(f'agent_installer_source_forbidden:{forbidden}')

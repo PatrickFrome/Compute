@@ -70,6 +70,19 @@ Linux and Windows, using the existing Bun 1.3.3/bun.lock contract in isolated
 staging. Its permissions remain read-only and it has no installer producer.
 Full regression and exact-head qualification are the next terminal record.
 
+Implementation `eb6141421f10fdc556d8cbe29c22aabdcbd961c4`, run `37149802584`:
+Windows 4162 regression checks PASS, Linux 4160 PASS with two Windows-only
+skips, 16 SLSA/topology checks PASS on each OS, frozen UI builds PASS on both OS.
+The terminal run was nevertheless FAILED: the source-only scanner matched its
+own embedded forbidden strings. Its step exclusion now uses anchored YAML step
+lines, rather than an unanchored string split. The exact extracted scanner passes
+locally and rejects an injected privileged UI job in isolated scratch storage.
+The following exact-source run must pass every job before qualification is claimed.
+
+The local full parallel run passed 4155/4156 checks but hit a separate existing
+short rollover fixture failure; that same source's complete CI regression passed
+on both OS. This local result is retained rather than reported as a full pass.
+
 ## Remaining physical acceptance
 
 Reserve a fresh package version/Build Identity before the next physical installer.
