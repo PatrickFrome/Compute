@@ -2,6 +2,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <iostream>
