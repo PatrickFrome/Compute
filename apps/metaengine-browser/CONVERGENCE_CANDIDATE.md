@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37103459439.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37136054065.1`.
 
 Agent result installer successor (2026-10-03):
 - user explicitly requested a new installer containing all current changes;
@@ -168,3 +168,12 @@ Self Update V3 physical closure successor (2026-10-03):
 - fresh monotonic package reservation: `0.7.0-dev.37086632570.1`, derived from the final qualified source run namespace and never previously physically started;
 - the next exact candidate must source-qualify at its own versioned head before `physical/build-slsa-provenance-v1` is advanced; all ten workflows must again consume one Package Smoke installer and run at attempt 1;
 - no rerun of the consumed predecessor, release, promotion, live user install, Guardian enrollment, Supervisor admission, or task dispatch is authorized by this reservation.
+
+
+Admission recovery no-replay successor (2026-10-03):
+- source implementation `6e859e109fe50e242859af5d2bd715d15afccb92` passed Browser Agent Result Installer Source Qualification run `37136054065` on Ubuntu 24.04 and Windows 2025, including the full Browser regression, SLSA topology/version-reservation checks, Windows updater verification, exact source cleanliness and an isolated Bun 1.3.3 ME2 UI production build;
+- the Client now exposes one explicit `Resume execution` control for authoritative `WORKSPACE_EXECUTION_PAUSED`, but success is accepted only after a fresh independent `/v1/devos/environment-state` readback; a mutation receipt alone is never shown as success;
+- the durable local recovery journal persists `SEND_INTENT_DURABLE` before the server effect and never automatically replays an ambiguous attempt. A later explicit user action performs readback-only reconciliation first;
+- `a2-browser-native-supervisor-v1` deployment V11 preserves the V10 source except the exact `devos-routes.mjs` import pin, now bound to qualified source `6e859e109fe50e242859af5d2bd715d15afccb92`; the deployment is ACTIVE and existing signed heartbeat/command traffic remains healthy;
+- current authoritative workspace state remains CLOSED at generation floor 28; this source/package reservation does not reopen admission, promote an Agent, activate Guardian, dispatch a task, publish a release or install on the user machine;
+- fresh monotonic package reservation: `0.7.0-dev.37136054065.1`. It is physically unconsumed until Package Smoke creates its immutable reservation artifact. Move the physical branch only after this versioned source itself is source-qualified; then all ten physical workflows must consume the one Package Smoke installer at attempt 1.
