@@ -139,8 +139,11 @@ export function renderAgentResultProtocol({ task_id, lease_generation, role, ver
   const example = {
     task_id: String(task_id || ''),
     lease_generation: Number(lease_generation) || 1,
-    disposition: verifier ? 'ACCEPT' : 'READY',
-    summary: verifier ? 'bounded independent verdict rationale' : 'bounded result summary',
+    // Keep the prompt template invalid as a claim even when a transcript
+    // projection includes this user message together with the model answer.
+    // This prevents self-echo; it does not prove the answer's message origin.
+    disposition: dispositions,
+    summary: verifier ? '<replace with bounded independent verdict rationale>' : '<replace with bounded result summary>',
     deliverable_refs: [],
     evidence_refs: [],
     ...(verifier ? {
@@ -152,6 +155,7 @@ export function renderAgentResultProtocol({ task_id, lease_generation, role, ver
     `RESULT PROTOCOL ${AGENT_RESULT_CLAIM_MARKER}`,
     'Your final answer for this task MUST contain exactly one fenced result block bound to this exact task and lease generation.',
     `allowed_disposition=${dispositions}`,
+    'The block below is a template, not a result claim. Replace disposition with exactly one allowed value and replace the summary placeholder.',
     'The claim is treated as untrusted model output until Browser/DB readback and independent evidence verify it.',
     `\`\`\`${AGENT_RESULT_FENCE}`,
     AGENT_RESULT_CLAIM_MARKER,

@@ -106,3 +106,55 @@ test('result protocol renders exact verifier subject binding and labels claim no
   assert.match(rendered,new RegExp(subjectSha));
   assert.match(rendered,/untrusted model output/i);
 });
+
+for (const role of ['IMPLEMENTER','RESEARCHER','CRITIC','FALSIFIER']) {
+  const verifier=['CRITIC','FALSIFIER'].includes(role);
+  const bindings={
+    task_id:taskId,
+    lease_generation:7,
+    role,
+    ...(verifier ? {
+      expected_subject_task_id:subjectTask,
+      expected_subject_result_sha256:subjectSha,
+    } : {}),
+  };
+  const rendered=renderAgentResultProtocol({
+    task_id:taskId,
+    lease_generation:7,
+    role,
+    ...(verifier ? {
+      verification_subject:{task_id:subjectTask,result_sha256:subjectSha},
+    } : {}),
+  });
+
+  test(`${role} prompt template alone cannot become a bound result claim`,()=>{
+    const out=parseAgentResultClaim(rendered,bindings);
+    assert.equal(out.state,'MISSING');
+    assert.equal(out.claim,null);
+    assert.equal(out.matching_claims,0);
+    assert.deepEqual(out.invalid,['agent_result_disposition_invalid']);
+  });
+
+  test(`${role} prompt template plus one actual result has one bound claim`,()=>{
+    const actual=block({
+      task_id:taskId,
+      lease_generation:7,
+      disposition:verifier ? 'ACCEPT' : 'READY',
+      summary:verifier ? 'Independent checks passed.' : 'Implemented the requested slice.',
+      deliverable_refs:verifier ? [] : ['commit:actual'],
+      evidence_refs:['ci:actual'],
+      ...(verifier ? {
+        subject_task_id:subjectTask,
+        subject_result_sha256:subjectSha,
+      } : {}),
+    });
+    const out=parseAgentResultClaim(`${rendered}\n${actual}`,bindings);
+    assert.equal(out.state,'CLAIM_BOUND');
+    assert.equal(out.matching_claims,1);
+    assert.equal(out.claim.disposition,verifier ? 'ACCEPT' : 'READY');
+    assert.deepEqual(out.claim.evidence_refs,['ci:actual']);
+    assert.equal(out.claim.model_claim_authority,false);
+    assert.equal(out.claim.authority_effect,false);
+    assert.deepEqual(out.invalid,['agent_result_disposition_invalid']);
+  });
+}

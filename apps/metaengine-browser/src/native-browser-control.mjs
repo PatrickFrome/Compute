@@ -275,22 +275,29 @@ export function buildInteractionTree(nodes = []) {
 // hold. Read-only: no semantic refs, no input values, no authority.
 export async function captureTranscript(webContents, { offset = 0, max_chars = 48000 } = {}) {
   const identity = nativeBrowserTargetIdentity(webContents);
-  const boundedOffset = Math.max(0, Math.min(240000, Number(offset) || 0));
+  const censusLimit = 240000;
+  const boundedOffset = Math.max(0, Math.min(censusLimit, Number(offset) || 0));
   const boundedMax = Math.max(1000, Math.min(60000, Number(max_chars) || 48000));
   return withDebugger(webContents, async (dbg) => {
     const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
     const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
     const parts = [];
     let total = 0;
+    let censusTruncated = false;
     for (const node of nodes) {
       if (node?.ignored === true) continue;
       const role = axValue(node, 'role').toLowerCase();
       const name = axValue(node, 'name');
       if (!name) continue;
       if (['statictext','heading','paragraph','listitem','article','status','alert'].includes(role)) {
-        parts.push(name);
-        total += name.length + 1;
-        if (total >= boundedOffset + boundedMax) break;
+        // Census the bounded transcript independently of the requested page.
+        // A prefix page must report the same total as a later tail page.
+        const separatorLength = parts.length ? 1 : 0;
+        const remaining = censusLimit - total - separatorLength;
+        if (remaining <= 0) { censusTruncated = true; break; }
+        parts.push(name.slice(0, remaining));
+        total += separatorLength + Math.min(name.length, remaining);
+        if (name.length > remaining) { censusTruncated = true; break; }
       }
     }
     const full = parts.join('\n');
@@ -304,8 +311,9 @@ export async function captureTranscript(webContents, { offset = 0, max_chars = 4
       title: clip(webContents.getTitle?.() || '', 240),
       offset: boundedOffset,
       max_chars: boundedMax,
-      total_chars: Math.min(full.length, 240000),
+      total_chars: full.length,
       has_more: boundedOffset + page.length < full.length,
+      census_truncated: censusTruncated,
       text: page,
       semantic_refs_issued: 0,
       page_data_authority: false,

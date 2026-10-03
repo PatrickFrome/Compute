@@ -837,12 +837,25 @@ export class DevOsNativeTaskCycle {
     try {
       let harvest = this.#toolHarvest.get(key) || null;
       if (!harvest) {
-        const head = await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: 0, max_chars: 2000 } });
+        const head = await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: 0, max_chars: 20000 } });
         const total = Number(head?.total_chars || 0);
         const tailOffset = Math.max(0, total - 20000);
-        const tail = tailOffset > 0
+        const tail = tailOffset > 0 && head?.census_truncated !== true
           ? await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: tailOffset, max_chars: 20000 } })
           : head;
+        // A capped census cannot establish that this is the latest answer.
+        // Do not parse or serve tools from an older retained prefix.
+        if (head?.census_truncated === true || tail?.census_truncated === true) {
+          return { pending: 0, results: [], result_claim: { state: 'TRANSCRIPT_CENSUS_TRUNCATED', claim: null, invalid: [] } };
+        }
+        const tailTotal = Number(tail?.total_chars);
+        const totalsComparable = head?.total_chars != null && tail?.total_chars != null
+          && Number.isSafeInteger(total) && total >= 0 && Number.isSafeInteger(tailTotal) && tailTotal >= 0;
+        // The old offset is no longer a proven tail when the page changes
+        // between captures. Never accept a historical claim or serve its tools.
+        if ((totalsComparable && tailTotal !== total) || tail?.has_more === true) {
+          return { pending: 0, results: [], result_claim: { state: 'TRANSCRIPT_TAIL_UNSTABLE', claim: null, invalid: [] } };
+        }
         const transcriptText = tail?.text || '';
         const subject = lease?.task_spec?.verification_subject && typeof lease.task_spec.verification_subject === 'object' && !Array.isArray(lease.task_spec.verification_subject)
           ? lease.task_spec.verification_subject
