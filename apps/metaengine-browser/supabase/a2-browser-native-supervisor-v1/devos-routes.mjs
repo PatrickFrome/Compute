@@ -49,7 +49,12 @@ export function normalizeDevosRuntimeControl(value,{workspaceId}={}){
 
 export async function readDevosRuntimeControl({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))return unavailableDevosRuntimeControl('READ_DEPENDENCY_INVALID');
-  try{return normalizeDevosRuntimeControl(await rpc('devos_environment_state_v1',{p_workspace:workspaceId}),{workspaceId});}
+  try{
+    const state=normalizeDevosRuntimeControl(await rpc('devos_environment_state_v1',{p_workspace:workspaceId}),{workspaceId});
+    return state.authoritative===true
+      ? Object.freeze({...state,observed_at:new Date().toISOString()})
+      : state;
+  }
   catch{return unavailableDevosRuntimeControl('READ_FAILED');}
 }
 
@@ -259,9 +264,12 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
     if(workspaceReadback)return workspaceReadback;
     if(req?.method==='POST'&&path==='/v1/devos/environment-state'){
       const fields=body&&typeof body==='object'&&!Array.isArray(body)?Object.keys(body):[];
-      if(fields.length)return json(400,{error:'devos_environment_state_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});
+      if(fields.some((field)=>field!=='read_request_id'))return json(400,{error:'devos_environment_state_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});
+      const readRequestId=body?.read_request_id==null?null:String(body.read_request_id).toLowerCase();
+      if(readRequestId!==null&&!UUID_RE.test(readRequestId))return json(400,{error:'devos_environment_state_read_request_id_invalid',automatic_retry_allowed:false,authority_effect:false});
       const state=await readDevosRuntimeControl({rpc,workspaceId});
-      return json(state.authoritative===true?200:503,state);
+      const response=state.authoritative===true?Object.freeze({...state,read_request_id:readRequestId}):state;
+      return json(response.authoritative===true?200:503,response);
     }
     // T2-5 Unified Work Graph item 1: operator-gated admission resume. The
     // environment fence (continuous_service_allowed=false) holds the whole
