@@ -139,11 +139,49 @@ type ClientAgentSelection = {
   authority_effect: false;
 };
 
+type ClientWorkReadiness = {
+  schema: "metaengine.client.work-readiness.v1";
+  observed_at: string;
+  state: "READY" | "PAUSED" | "BLOCKED";
+  reason: string | null;
+  label: string;
+  detail: string;
+  execution_ready: boolean;
+  heartbeat_fresh: boolean;
+  generation_floor: number | null;
+  local_generation_floor: number | null;
+  supervisor_state: string | null;
+  proven_agent_count: number;
+  active_agent_count: number | null;
+  bound_unverified_agent_count: number | null;
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
+
+type ClientAdmissionRecoveryResult = {
+  schema: "metaengine.client.admission-recovery-result.v1";
+  state: string;
+  reason: string | null;
+  confirmed_open: boolean;
+  expected_generation_floor?: number | null;
+  observed_generation_floor?: number | null;
+  effect_attempted?: boolean;
+  effect_outcome_known?: boolean;
+  prior_effect_replayed?: false;
+  retry_requires_new_user_action: true;
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
+
 type ClientControlBridge = {
   submitGoal?: (goal: string) => Promise<ClientGoalSubmission>;
   latestGoal?: () => Promise<ClientGoalJournalEntry | null>;
   goalStatus?: (requestId: string) => Promise<ClientGoalProgress>;
   selectAgent?: (agentId: string) => Promise<ClientAgentSelection>;
+  workReadiness?: () => Promise<ClientWorkReadiness>;
+  resumeAdmission?: () => Promise<ClientAdmissionRecoveryResult>;
+  admission_resume_requires_explicit_user_action?: boolean;
+  admission_resume_automatic_retry_allowed?: false;
   typed_positive_api?: boolean;
   generic_command_exposed?: boolean;
 };
@@ -223,7 +261,10 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const [journalEntry, setJournalEntry] = useState<ClientGoalJournalEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const operation = useRef<"submit" | "read" | null>(null);
+  const [readiness, setReadiness] = useState<ClientWorkReadiness | null>(null);
+  const [recoveryPending, setRecoveryPending] = useState(false);
+  const [recoveryResult, setRecoveryResult] = useState<ClientAdmissionRecoveryResult | null>(null);
+  const operation = useRef<"submit" | "read" | "recovery" | null>(null);
   const mounted = useRef(false);
   const loadSequence = useRef(0);
 
@@ -243,6 +284,62 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     void loadLatest();
     return () => { mounted.current = false; loadSequence.current += 1; };
   }, [loadLatest]);
+
+  const loadReadiness = useCallback(async () => {
+    const bridge = clientControlBridge();
+    if (!bridge?.workReadiness) return null;
+    const next = await bridge.workReadiness().catch(() => null);
+    if (mounted.current && next?.schema === "metaengine.client.work-readiness.v1"
+      && next.authority_effect === false && next.automatic_retry_allowed === false) {
+      setReadiness(next);
+      return next;
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const observe = async () => {
+      if (!cancelled) await loadReadiness();
+    };
+    void observe();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void observe();
+    }, 5_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [loadReadiness]);
+
+  const resumeExecution = useCallback(async () => {
+    if (operation.current) return;
+    const bridge = clientControlBridge();
+    if (!bridge?.resumeAdmission || !bridge?.workReadiness
+      || bridge.admission_resume_requires_explicit_user_action !== true
+      || bridge.admission_resume_automatic_retry_allowed !== false) {
+      setError("Admission recovery bridge unavailable");
+      return;
+    }
+    operation.current = "recovery";
+    setRecoveryPending(true);
+    setError(null);
+    try {
+      const result = await bridge.resumeAdmission();
+      if (result?.schema !== "metaengine.client.admission-recovery-result.v1"
+        || result.automatic_retry_allowed !== false
+        || result.retry_requires_new_user_action !== true
+        || result.authority_effect !== false) {
+        throw new Error("admission_recovery_result_invalid");
+      }
+      if (mounted.current) setRecoveryResult(result);
+      // Success is never inferred from the effect receipt. Re-read the regular
+      // work-readiness projection after every explicit recovery action.
+      await loadReadiness();
+    } catch (cause) {
+      if (mounted.current) setError(String((cause as Error)?.message || cause || "admission_recovery_failed").slice(0, 180));
+    } finally {
+      operation.current = null;
+      if (mounted.current) setRecoveryPending(false);
+    }
+  }, [loadReadiness]);
 
   const refreshProgress = useCallback(async () => {
     const bridge = clientControlBridge();
@@ -273,7 +370,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   const submit = useCallback(async () => {
     const value = goal.trim();
-    if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED") return;
+    if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED" || readiness?.execution_ready === false) return;
     const bridge = clientControlBridge();
     if (!bridge?.submitGoal || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
       setError("Typed Client control bridge unavailable");
@@ -300,7 +397,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       operation.current = null;
       if (mounted.current) setPending(false);
     }
-  }, [goal, journalEntry?.state, loadLatest]);
+  }, [goal, journalEntry?.state, loadLatest, readiness?.execution_ready]);
 
   const progress = journalEntry?.progress;
   const proof = journalEntry?.execution_proof;
@@ -342,7 +439,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={pending || refreshing || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"}
+        disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED" || readiness?.execution_ready === false}
         data-testid="client-goal-submit"
         className="h-8 shrink-0 border border-cyan-700 bg-cyan-950/50 px-3 text-[12px] font-semibold text-cyan-100 hover:bg-cyan-950 disabled:opacity-40"
       >
@@ -351,6 +448,26 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite">
         {status}
       </span>
+      {readiness ? (
+        <span
+          className={`min-w-0 max-w-[180px] truncate text-[11px] ${readiness.execution_ready ? "text-emerald-300" : "text-amber-300"}`}
+          data-testid="client-work-readiness"
+          title={readiness.detail}
+        >
+          {readiness.label}
+        </span>
+      ) : null}
+      {readiness?.reason === "WORKSPACE_EXECUTION_PAUSED" || recoveryResult?.state === "RECONCILE_REQUIRED" || recoveryResult?.state === "ABSENCE_CONFIRMED" ? (
+        <button
+          type="button"
+          onClick={() => void resumeExecution()}
+          disabled={recoveryPending || pending || refreshing}
+          data-testid="client-resume-execution"
+          className="h-8 shrink-0 border border-amber-700 bg-amber-950/40 px-2.5 text-[11px] font-semibold text-amber-100 hover:bg-amber-950 disabled:opacity-40"
+        >
+          {recoveryPending ? "Checking…" : recoveryResult?.state === "RECONCILE_REQUIRED" ? "Check recovery" : "Resume execution"}
+        </button>
+      ) : null}
       {(receipt || journalEntry || error) ? (
         <button type="button" onClick={() => onDetailOpenChange(true)} data-testid="client-goal-details"
           className="h-8 shrink-0 px-2 text-[12px] text-zinc-300 hover:bg-zinc-800">Status</button>
@@ -360,6 +477,13 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
           <DialogDescription className="text-zinc-400">{status || "No task submitted"}. A queued task has been accepted for execution. A received result still requires independent verification before acceptance.</DialogDescription>
+          {readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
+            Execution: {readiness.label}. {readiness.detail}
+          </p> : null}
+          {recoveryResult ? <p className="text-[12px] text-amber-200" data-testid="client-admission-recovery-result">
+            Recovery: {recoveryResult.confirmed_open ? "workspace open confirmed by fresh readback" : recoveryResult.state.toLowerCase().replaceAll("_", " ")}.
+            {recoveryResult.prior_effect_replayed === false ? " No prior effect was replayed." : ""}
+          </p> : null}
           <dl className="grid grid-cols-[90px_1fr] gap-2 text-[12px]">
             <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || receipt?.task_id || "Awaiting readback"}</dd>
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
