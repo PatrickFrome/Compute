@@ -491,3 +491,238 @@ P0 should first finish one exact-source physical candidate using the already-qua
 After that proof, move Package Smoke's build+attest core into a separately vetted reusable builder workflow and tighten verification from same-repository workflow identity to the reusable builder identity.
 
 This ordering avoids mixing a build-system refactor with the first physical SLSA evidence transition.
+
+
+## SLSA physical closure V3 — terminal 10/10 result
+
+The second physical candidate `c80e0fb46dc8c701462beb7f74dd8ff45867ac74` materially improved the first SLSA attempt but stopped at 9/10 because Self Update's local re-verification fixture inherited an ambient physical-branch producer-event fence.
+
+The exact failure was not an updater or installer failure. Under PowerShell StrictMode, `Mode Verify` auto-inferred `ExpectedProducerEvent=push`, then dereferenced the synthetic fixture's intentionally absent `producer_event`.
+
+### Contract distinction
+
+This exposed an important semantic boundary:
+
+- `Acquire` selects a remote producer and must bind exact source + producer event.
+- `Wait` observes a previously selected remote producer and must re-check exact source + producer event.
+- `Verify` re-verifies already acquired local bytes/provenance and must not silently inherit an ambient GitHub event unless the caller explicitly requests that check.
+
+The V3 fix therefore limits automatic physical-branch `push` event fencing to non-Verify modes while preserving explicit event verification as an available caller contract.
+
+This was source-qualified on Linux and Windows before another package identity was allowed to cross the physical reservation boundary.
+
+### Canonical reservation drift caught before build
+
+The first versioned V3 source `38888d527a44bc3fa947437754a8f3c914b7b71c` correctly advanced package.json/package-lock to `0.7.0-dev.37086632570.1`, but the canonical reservation sentence at the top of `CONVERGENCE_CANDIDATE.md` still named the consumed predecessor.
+
+Both Linux and Windows full regressions rejected that mismatch.
+
+No physical branch was advanced and no package reservation artifact was created for that failed source qualification.
+
+The canonical reservation and source-qualification path coverage were corrected atomically. Final source:
+
+`a68774eb6ad5a0fe8014501163b0c67f608bed09`
+
+Exact source qualification:
+
+`37087134491` — SUCCESS on Ubuntu and Windows.
+
+This is a useful convergence property: package identity governance is now tested at the exact versioned source head, not only on the pre-version implementation head.
+
+## First terminal SLSA-qualified 10/10 physical matrix
+
+Dedicated physical branch:
+
+`physical/build-slsa-provenance-v1`
+
+Exact source:
+
+`a68774eb6ad5a0fe8014501163b0c67f608bed09`
+
+Package:
+
+`0.7.0-dev.37086632570.1`
+
+Every workflow was attempt 1 and terminal SUCCESS:
+
+- Package Smoke — `37087347663` / #3157
+- Installed Chat Qualification — `37087347662` / #2435
+- Final Runtime Activation — `37087347653` / #2016
+- Autonomous Soak — `37087347631` / #2687
+- Self Update E2E — `37087347623` / #3606
+- Shell — `37087347652` / #3558
+- Critical Audit — `37087347661` / #2611
+- Shell-First Dirty Profile — `37087347656` / #1044
+- Host Resilience Login Start — `37087347640` / #521
+- Workspace Reincarnation — `37087347643` / #573
+
+This closes the P0 physical supply-chain convergence target for one exact candidate.
+
+## Exact physical installer and supply-chain identity
+
+Installer:
+
+`METAENGINE-Browser-Test-Setup-0.7.0-dev.37086632570.1-x64.exe`
+
+Installer SHA-256:
+
+`937936bc51d431540762d170b7cc970fdfe1575b9879b885efdc22089e3f2455`
+
+Installer bytes:
+
+`156364268`
+
+Build Identity V3:
+
+`f7d78fdaf7b89028341cc4d0ceb7a7f73ead9b3a323fc15d1560563d7d0c478c`
+
+Dependency-resolution SHA-256:
+
+`e099165be494af2f8d16a3e5b7d675fcbbe369f16bebf16ce182cf8bb7dfcb09`
+
+Package-lock SHA-256:
+
+`4f4fb5e3d6f44d9dc9dfd55054fb2aed8845a83de82a013727b45ea9d0f52059`
+
+Composed semantic inventory:
+
+`cce189f978bc27d0175b2a431ebb4f771f05a0fa334d3d95af1390363f4b176c`
+
+Composed inventory remains truthfully:
+
+`composition.aggregate=incomplete`
+
+## GitHub / Sigstore SLSA evidence
+
+GitHub attestation:
+
+`52339986`
+
+The exact installer subject was signed via GitHub OIDC-backed Public Good Sigstore and entered into Rekor.
+
+Independent verification produced:
+
+`metaengine.browser-fabric.provenance-evidence.v1`
+
+with:
+
+- `verified=true`
+- `builder_trusted=true`
+- builder id `https://github.com/PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml@refs/heads/physical/build-slsa-provenance-v1`
+- exact source SHA `a68774eb6ad5a0fe8014501163b0c67f608bed09`
+- exact installer SHA-256 `937936bc51d431540762d170b7cc970fdfe1575b9879b885efdc22089e3f2455`
+- predicate `https://slsa.dev/provenance/v1`
+- `authority_effect=false`
+
+Immutable candidate artifact:
+- id `11260817954`
+- digest `sha256:5ec7ff9c36329504cdc46d0f5fa2023720e7e1637e8731b28537768abfcec4f6`
+
+SLSA verification artifact:
+- id `11261401099`
+- digest `sha256:6614a8fa2ccd358bbe1d423845912578d6a194c997eeb736a6222fd610d20331`
+
+Package evidence artifact:
+- id `11261117931`
+- digest `sha256:917bc78714528dc26e744efab8cb96d814d291929f7d4b7990b3893161d8c69d`
+
+Package-version reservation:
+- id `11261231922`
+- digest `sha256:e48a265f111ba0e5ba97ff5e2407efcc477e4e76e6b324333705d01e9d3d1138`
+
+## Self Update physical closure
+
+Self Update #3606 consumed the exact Package Smoke artifact and did not build a target installer.
+
+Its physical path proved:
+- local re-verification boundary;
+- immutable Package Smoke acquisition;
+- published-baseline-to-one-built-target transaction;
+- installed ME2 UI;
+- installed ME2 daemon;
+- Guardian staging;
+- manifest contract;
+- resident Browser + real Sentinel upgrade;
+- terminal exact Package Smoke producer gate.
+
+Resident-upgrade proof:
+
+- legacy version `0.7.0-dev.34759310781.1`
+- target `0.7.0-dev.37086632570.1`
+- target installer SHA `937936bc51d431540762d170b7cc970fdfe1575b9879b885efdc22089e3f2455`
+- installer exit `0`
+- legacy primary gone `true`
+- legacy Sentinel gone `true`
+- new primary started `true`
+- new Sentinel started `true`
+- planned shutdown verified `true`
+- retry dialog required `false`
+- installed executable SHA exact match `true`
+- `authority_effect=false`
+
+Self Update evidence artifact:
+- id `11261575777`
+- digest `sha256:04dab9a9035ce9f27535d049f321d231cf3cb81a8316238db652049751f03fe6`
+
+The terminal shared-consumer proof binds:
+- producer run `37087347663`
+- producer run number `3157`
+- attempt `1`
+- event `push`
+- exact Build Identity
+- exact dependency resolution
+- exact lock/toolchain materials
+- `producer_terminal_success=true`
+- `authority_effect=false`
+
+## Installed qualification backend evidence
+
+The prior c80 candidate physically exercised installed qualification after Supabase function V8 deployment.
+
+Function deployment:
+
+`jhriwwsryeqsvvvufkok_add28328-d282-4942-9fa1-c2302da1e23f_8`
+
+Observed exact sequence in Edge logs:
+- HTTP 202 waiting response
+- HTTP 200 approval response
+
+The a687 Installed Chat qualification is also terminal SUCCESS on the same exact physical branch policy.
+
+This proves the prior 403 was a trust-policy branch-binding gap and that the bounded physical push admission is now operational without broadening to arbitrary push subjects.
+
+## Architectural conclusion
+
+P0 now has a physically demonstrated chain:
+
+exact Git source
+→ fresh one-shot package identity
+→ frozen Node/npm/Bun material
+→ one NSIS producer
+→ Build Identity V3
+→ npm + composed SBOM evidence
+→ installer provenance V3
+→ GitHub OIDC SLSA provenance
+→ Sigstore/Rekor
+→ portable bundle
+→ independent read-only semantic verifier
+→ one immutable candidate
+→ exact downstream producer-event binding
+→ 10/10 physical qualification
+→ successful resident Self Update using the same installer bytes.
+
+This is evidence, not release authority.
+
+No release/tag/promotion/user-machine installation or real z.ai Agent task-result closure is implied by this result.
+
+## Next research frontier
+
+P1 should evaluate moving the build+attest core into a separately vetted reusable builder workflow so the SLSA builder identity becomes a stable isolated build definition rather than the repository-local Package Smoke workflow.
+
+Do this only after preserving the P0 10/10 candidate as a frozen evidence baseline.
+
+The next product-level acceptance work should also remain separate from supply-chain qualification:
+- real z.ai Agent-origin task execution;
+- durable task/result provenance;
+- useful-work completion readback;
+- installed/live browser acceptance on the user's machine only with explicit authorization.
