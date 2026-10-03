@@ -268,6 +268,7 @@ jobs:
         run: |
           from pathlib import Path
           workflow = Path('.github/workflows/browser-release-attestation-slsa-admission-qualification.yml').read_text(encoding='utf-8').lower()
+          runtime = workflow.split('      - name: prove admission qualification has zero signing or release authority', 1)[0]
           forbidden = [
               'id-token: write',
               'attestations: write',
@@ -280,7 +281,7 @@ jobs:
               'authority_effect=true',
           ]
           for token in forbidden:
-              if token in workflow:
+              if token in runtime:
                   raise SystemExit(f'release_slsa_admission_authority_drift:{token}')
           print('release_slsa_admission_zero_authority_pass')
 
