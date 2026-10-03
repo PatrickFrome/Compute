@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - 'work/client-v1-agent-result-installer-v1'
+      - 'work/client-v1-live-result-readback-v1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
       - 'apps/metaengine-browser/CONVERGENCE_CANDIDATE.md'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/test/**'
+      - 'apps/me2-ui/src/**'
       - '.github/workflows/browser-agent-result-installer-source-qualification.yml'
 
 permissions:

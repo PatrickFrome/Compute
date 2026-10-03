@@ -199,7 +199,8 @@ test('Browser persists correlation before effect and uses read-only reconciliati
 
   assert.match(preload, /latestGoal: latestClientGoal/);
   assert.match(preload, /goalStatus: clientGoalStatus/);
-  assert.match(me2, /Acceptance means the task is queued; completion requires verified result evidence/);
+  assert.match(me2, /A queued task has been accepted for execution/);
+  assert.match(me2, /A received result still requires independent verification before acceptance/);
   assert.match(me2, /COMPLETED: "Completed · proof pending"/);
   assert.match(me2, /data-testid="client-goal-refresh"/);
 });

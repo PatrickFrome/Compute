@@ -310,7 +310,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     AMBIGUOUS: "Needs reconciliation", FENCED: "Stopped",
   };
   const status = error ? "Check task status"
-    : proof?.user_goal_to_result_readback === true ? "Result verified"
+    : proof?.user_goal_to_result_readback === true ? "Result received"
     : journalEntry?.state === "RECONCILE_REQUIRED" ? "Needs reconciliation"
     : progress?.found ? labels[progress.task_state || ""] || "Awaiting status"
     : receipt ? "Queued · accepted" : "";
@@ -359,12 +359,12 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         <DialogContent showCloseButton={false} className="mc-dark border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
           onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
-          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. Acceptance means the task is queued; completion requires verified result evidence.</DialogDescription>
+          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. A queued task has been accepted for execution. A received result still requires independent verification before acceptance.</DialogDescription>
           <dl className="grid grid-cols-[90px_1fr] gap-2 text-[12px]">
             <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || receipt?.task_id || "Awaiting readback"}</dd>
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
             <dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified z.ai Agent" : "Not yet verified"}</dd>
-            <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Verified and accepted" : "Not yet verified"}</dd>
+            <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Received · review pending" : "No result received"}</dd>
           </dl>
           {error ? <p role="alert" className="break-words text-[12px] text-rose-300">{error}</p> : null}
           <div className="flex justify-end gap-2">
