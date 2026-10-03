@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37153249506.1`.
+Reserved package identity is `0.7.0-dev.37156727592.1`.
 
 Admission recovery convergence successor (2026-10-03):
 - exact predecessor `219ebe989a4f7ce2adfeb205a394a47ee55037cf` already consumed package identity `0.7.0-dev.37139234564.1` in physical Package Smoke run `37144386164`;
@@ -193,3 +193,12 @@ Admission recovery no-replay successor (2026-10-03):
 - `a2-browser-native-supervisor-v1` deployment V11 preserves the V10 source except the exact `devos-routes.mjs` import pin, now bound to qualified source `6e859e109fe50e242859af5d2bd715d15afccb92`; the deployment is ACTIVE and existing signed heartbeat/command traffic remains healthy;
 - current authoritative workspace state remains CLOSED at generation floor 28; this source/package reservation does not reopen admission, promote an Agent, activate Guardian, dispatch a task, publish a release or install on the user machine;
 - fresh monotonic package reservation: `0.7.0-dev.37136054065.1`. It is physically unconsumed until Package Smoke creates its immutable reservation artifact. Move the physical branch only after this versioned source itself is source-qualified; then all ten physical workflows must consume the one Package Smoke installer at attempt 1.
+
+
+Secondary launch fastpath successor (2026-10-03):
+- exact functional parent `709aeb023f9fcdbed7e065cc66bb729405b3a4a9` defers primary-only Host/Self-Update ESM modules until after singleton ownership and adds a source fence protecting that pre-lock boundary;
+- PR #1101 first physical matrix correctly refused at Package Smoke run `37156727592` because it inherited already-consumed predecessor identity `0.7.0-dev.37153249506.1`; the refusal happened before NSIS packaging and downstream physical consumers failed only because no exact-head installer existed;
+- all source/contract/Brain/chaos jobs observed before installer acquisition remained green; this is not physical activation evidence for the fastpath;
+- fresh one-build identity is `0.7.0-dev.37156727592.1`, derived from the refused Package Smoke run namespace and not previously reserved as a package version;
+- this commit changes only package identity/checkpoint metadata; the fastpath runtime bytes remain those of parent `709aeb023f9fcdbed7e065cc66bb729405b3a4a9`;
+- once the next Package Smoke producer starts, this identity is consumed and MUST NOT be reused after any later source change.
