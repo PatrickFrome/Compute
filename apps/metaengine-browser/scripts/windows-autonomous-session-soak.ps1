@@ -246,19 +246,23 @@ try {
   $activationSequences = New-Object 'System.Collections.Generic.HashSet[long]'
   $lastActivationSequence = [int64]$stable.sequence
   $activationLatencies = New-Object 'System.Collections.Generic.List[double]'
+  $activationSamples = New-Object 'System.Collections.Generic.List[object]'
 
   for ($i = 1; $i -le $ActivationCount; $i++) {
     $secondOut = Join-Path $RunnerTemp "soak-secondary-$i.out"
     $secondErr = Join-Path $RunnerTemp "soak-secondary-$i.err"
     Remove-Item $secondOut,$secondErr -Force -ErrorAction SilentlyContinue
+    $launchRequestedAt = [DateTime]::UtcNow
     $activationStarted = [Diagnostics.Stopwatch]::StartNew()
     $second = Start-Process -FilePath $AppPath -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
     $null = $second.Handle
+    $processStartedAt = $second.StartTime.ToUniversalTime()
     if (-not $second.WaitForExit(18000)) {
       try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}
       throw "soak_secondary_timeout:${i}"
     }
     if ($second.ExitCode -ne 0) { throw "soak_secondary_exit:${i}:$($second.ExitCode)" }
+    $processExitedAt = $second.ExitTime.ToUniversalTime()
     # The latency SLO ends when the losing secondary exits successfully. At that
     # point it has already observed the exact durable activation ACK. Journal
     # parsing below is independent verification and must not inflate user-visible
@@ -293,7 +297,24 @@ try {
     if ([int64]$activation.sequence -le $lastActivationSequence) { throw "soak_activation_sequence_not_monotonic:${i}" }
     if ([int64]$activation.sequence -ne [int64]$ack.event_sequence) { throw "soak_activation_ack_sequence_drift:${i}" }
     if (-not $activationSequences.Add([int64]$activation.sequence)) { throw "soak_activation_sequence_duplicate:${i}" }
+    $activationAt = [DateTime]::Parse([string]$activation.at).ToUniversalTime()
+    $launchToProcessStartMs = [Math]::Max(0.0, ($processStartedAt - $launchRequestedAt).TotalMilliseconds)
+    $processStartToActivationMs = [Math]::Max(0.0, ($activationAt - $processStartedAt).TotalMilliseconds)
+    $activationToExitMs = [Math]::Max(0.0, ($processExitedAt - $activationAt).TotalMilliseconds)
     $activationLatencies.Add($activationElapsedMs)
+    $activationSamples.Add([pscustomobject]@{
+      index = [int]$i
+      launch_id = [string]$ack.launch_id
+      event_sequence = [int64]$activation.sequence
+      launch_requested_at = $launchRequestedAt.ToString('o')
+      process_started_at = $processStartedAt.ToString('o')
+      primary_activation_at = $activationAt.ToString('o')
+      process_exited_at = $processExitedAt.ToString('o')
+      launch_to_process_start_ms = [Math]::Round($launchToProcessStartMs, 2)
+      process_start_to_primary_activation_ms = [Math]::Round($processStartToActivationMs, 2)
+      primary_activation_to_process_exit_ms = [Math]::Round($activationToExitMs, 2)
+      total_elapsed_ms = [Math]::Round($activationElapsedMs, 2)
+    })
     $lastActivationSequence = [int64]$activation.sequence
     $normal.Refresh()
     if ($normal.HasExited) { throw "soak_primary_died_after_activation:${i}" }
@@ -370,7 +391,27 @@ try {
   $procAfter = Get-Process -Id $normal.Id
   $latencySorted = @($activationLatencies | Sort-Object)
   $p95Index = [Math]::Max(0, [Math]::Min($latencySorted.Count - 1, [Math]::Ceiling($latencySorted.Count * 0.95) - 1))
+  $p50Index = [Math]::Max(0, [Math]::Min($latencySorted.Count - 1, [Math]::Ceiling($latencySorted.Count * 0.50) - 1))
   $p95Ms = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$p95Index] } else { 0.0 }
+  $p50Ms = if ($latencySorted.Count -gt 0) { [double]$latencySorted[$p50Index] } else { 0.0 }
+  $maxActivationMs = if ($latencySorted.Count -gt 0) { [double]$latencySorted[-1] } else { 0.0 }
+  $overBudgetIndexes = New-Object 'System.Collections.Generic.List[int]'
+  $longestOverBudgetRun = 0
+  $currentOverBudgetRun = 0
+  foreach ($sample in $activationSamples) {
+    if ([double]$sample.total_elapsed_ms -gt $ActivationP95BudgetMs) {
+      $overBudgetIndexes.Add([int]$sample.index)
+      $currentOverBudgetRun += 1
+      if ($currentOverBudgetRun -gt $longestOverBudgetRun) { $longestOverBudgetRun = $currentOverBudgetRun }
+    } else {
+      $currentOverBudgetRun = 0
+    }
+  }
+  $processToActivationSorted = @($activationSamples | ForEach-Object { [double]$_.process_start_to_primary_activation_ms } | Sort-Object)
+  $activationToExitSorted = @($activationSamples | ForEach-Object { [double]$_.primary_activation_to_process_exit_ms } | Sort-Object)
+  $phaseP95Index = [Math]::Max(0, [Math]::Min($activationSamples.Count - 1, [Math]::Ceiling($activationSamples.Count * 0.95) - 1))
+  $processToActivationP95Ms = if ($processToActivationSorted.Count -gt 0) { [double]$processToActivationSorted[$phaseP95Index] } else { 0.0 }
+  $activationToExitP95Ms = if ($activationToExitSorted.Count -gt 0) { [double]$activationToExitSorted[$phaseP95Index] } else { 0.0 }
   $workingSetAfter = [int64]$procAfter.WorkingSet64
   $handlesAfter = [int64]$procAfter.HandleCount
   $workingSetGrowth = [Math]::Max([int64]0, $workingSetAfter - $workingSetBefore)
@@ -407,9 +448,18 @@ try {
   $proof | Add-Member -NotePropertyName automatic_initial_tab_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
   $proof | Add-Member -NotePropertyName automatic_initial_remote_load_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
+  $proof | Add-Member -NotePropertyName activation_latency_p50_ms -NotePropertyValue ([Math]::Round($p50Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_ms -NotePropertyValue ([Math]::Round($p95Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_max_ms -NotePropertyValue ([Math]::Round($maxActivationMs, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
+  $proof | Add-Member -NotePropertyName activation_latency_over_budget_count -NotePropertyValue $overBudgetIndexes.Count -Force
+  $proof | Add-Member -NotePropertyName activation_latency_over_budget_indexes -NotePropertyValue @($overBudgetIndexes) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_longest_consecutive_over_budget -NotePropertyValue $longestOverBudgetRun -Force
+  $proof | Add-Member -NotePropertyName activation_process_start_to_primary_event_p95_ms -NotePropertyValue ([Math]::Round($processToActivationP95Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_primary_event_to_secondary_exit_p95_ms -NotePropertyValue ([Math]::Round($activationToExitP95Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName activation_latency_samples -NotePropertyValue @($activationSamples) -Force
   $proof | Add-Member -NotePropertyName activation_latency_measurement_boundary -NotePropertyValue 'SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT' -Force
+  $proof | Add-Member -NotePropertyName activation_latency_phase_boundaries -NotePropertyValue 'LAUNCH_REQUEST_TO_PROCESS_START;PROCESS_START_TO_PRIMARY_EVENT;PRIMARY_EVENT_TO_SECONDARY_EXIT' -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_size -NotePropertyValue $ConcurrentBurstSize -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_elapsed_ms -NotePropertyValue ([Math]::Round($burstElapsedMs, 2)) -Force
   $proof | Add-Member -NotePropertyName post_activation_hold_seconds -NotePropertyValue $PostActivationHoldSeconds -Force
