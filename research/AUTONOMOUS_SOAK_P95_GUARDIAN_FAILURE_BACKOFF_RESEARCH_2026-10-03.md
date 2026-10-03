@@ -137,6 +137,27 @@ Therefore the long-term Guardian EPERM repair should preserve the narrow DACL an
 
 The p95 mitigation in the current successor is intentionally separate: it only prevents repeated failed background observation attempts.
 
+## Correction after deeper launcher-path inspection
+
+The initial retry-storm hypothesis does **not** explain the currently observed live `connect EPERM` path.
+
+The machine-bootstrap launcher catches Guardian pipe failures inside `observePrepared()` and converts them into a valid fail-closed launcher status:
+
+- state `HOLD`
+- reason `GUARDIAN_OWNER_OBSERVATION_FAILED`
+- `ready=false`
+- `automatic_retry_allowed=false`
+
+That valid HOLD result is accepted by the shared observer and receives the normal 10-second freshness TTL. Fresh live readback corroborates this: `observation_error=null` while the nested launcher `error` contains the EPERM text, and the observer revision advances at a cadence compatible with TTL-based observation rather than every 2-second heartbeat.
+
+Therefore:
+
+- the failed-read backoff fix remains a valid robustness improvement for *thrown* observer failures (deadline, malformed result, unexpected reader rejection);
+- it is **not** evidence of the root cause of the 1771.21 ms physical soak p95 regression;
+- this source-only branch must not be promoted as a p95 fix without a separate causal measurement.
+
+The stronger current conclusion is that the p95 failure is a localized transient stall with an unchanged activation protocol and identical bounded journal size. The next development step is diagnostic instrumentation that separates secondary-process startup, primary activation/durable ACK, and host-level process-launch jitter while leaving the 1000 ms gate unchanged.
+
 ## Source-only mitigation
 
 Successor branch:
