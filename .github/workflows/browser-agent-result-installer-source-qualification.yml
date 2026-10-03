@@ -98,8 +98,23 @@ jobs:
             node --check test/me2-r85-visual-evidence.mjs
             if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_harness_parse_failed' }
             $electron = Join-Path (Resolve-Path '.\node_modules\electron\dist').Path 'electron.exe'
-            & $electron '.\test\me2-r85-visual-evidence.mjs'
-            if ($LASTEXITCODE -ne 0) { throw "client_source_visual_electron_exit_$LASTEXITCODE" }
+            # Electron is a GUI subsystem executable on Windows, so PowerShell's
+            # call operator can return before the harness has written its terminal
+            # evidence. Use a bounded Process wait instead of racing the evidence
+            # read. This is source-only qualification; no Browser installer runs.
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $electron
+            $psi.WorkingDirectory = (Get-Location).Path
+            $psi.UseShellExecute = $false
+            $psi.ArgumentList.Add('.\test\me2-r85-visual-evidence.mjs')
+            $visual = [System.Diagnostics.Process]::new()
+            $visual.StartInfo = $psi
+            if (-not $visual.Start()) { throw 'client_source_visual_process_start_failed' }
+            if (-not $visual.WaitForExit(135000)) {
+              try { $visual.Kill($true) } catch {}
+              throw 'client_source_visual_process_timeout'
+            }
+            if ($visual.ExitCode -ne 0) { throw "client_source_visual_electron_exit_$($visual.ExitCode)" }
           } finally { Pop-Location }
           $evidencePath = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
           if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'client_source_visual_evidence_missing' }
