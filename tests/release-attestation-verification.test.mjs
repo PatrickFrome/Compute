@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   CYCLONEDX_PREDICATE,
+  PACKAGE_BUILDER_ID,
+  PACKAGE_SOURCE_REF,
   PROOF_SCHEMA,
   QUALIFICATION_PREDICATE,
   REQUIRED_WORKFLOWS,
+  SLSA_PREDICATE,
   verifyReleaseAttestationEvidence,
 } from '../scripts/release-attestation-verification.mjs';
 
@@ -41,6 +44,14 @@ function predicate() {
     producer_run_attempt: 1,
     qualification_workflows: rows,
     physical_qualification_terminal_green: true,
+    slsa_provenance_verified: true,
+    slsa_builder_trusted: true,
+    slsa_builder_id: PACKAGE_BUILDER_ID,
+    slsa_predicate_type: SLSA_PREDICATE,
+    slsa_verifier_id: 'github-slsa-package-smoke:4444:1',
+    slsa_evidence_artifact_id: 7777,
+    slsa_evidence_artifact_digest: 'sha256:' + '7'.repeat(64),
+    slsa_provenance_evidence_sha256: '8'.repeat(64),
     automatic_promotion: false,
     promotion_authorized: false,
     authority_effect: false,
@@ -81,12 +92,70 @@ function verified(predicateType, value, digest = INSTALLER_SHA) {
   }];
 }
 
+function slsaVerified(p = predicate(), overrides = {}) {
+  const sourceHead = p.source_head;
+  const runId = p.producer_run_id;
+  const runAttempt = p.producer_run_attempt;
+  const invocationId = `https://github.com/PatrickFrome/Compute/actions/runs/${runId}/attempts/${runAttempt}`;
+  const statement = {
+    _type: 'https://in-toto.io/Statement/v1',
+    subject: [{ name: INSTALLER, digest: { sha256: INSTALLER_SHA } }],
+    predicateType: SLSA_PREDICATE,
+    predicate: {
+      buildDefinition: {
+        buildType: 'https://actions.github.io/buildtypes/workflow/v1',
+        externalParameters: {
+          workflow: {
+            repository: 'https://github.com/PatrickFrome/Compute',
+            path: '.github/workflows/browser-windows-package-smoke.yml',
+            ref: PACKAGE_SOURCE_REF,
+          },
+        },
+        internalParameters: {
+          github: {
+            event_name: 'push',
+            repository_id: '1341371143',
+            repository_owner_id: '20597814',
+            runner_environment: 'github-hosted',
+          },
+        },
+        resolvedDependencies: [{
+          uri: `git+https://github.com/PatrickFrome/Compute@${PACKAGE_SOURCE_REF}`,
+          digest: { gitCommit: sourceHead },
+        }],
+      },
+      runDetails: {
+        builder: { id: PACKAGE_BUILDER_ID },
+        metadata: { invocationId },
+      },
+    },
+  };
+  return [{
+    attestation: { fixture: true },
+    verificationResult: {
+      signature: {
+        certificate: {
+          buildSignerURI: PACKAGE_BUILDER_ID,
+          githubWorkflowSHA: sourceHead,
+          sourceRepositoryDigest: sourceHead,
+          sourceRepositoryRef: PACKAGE_SOURCE_REF,
+          runnerEnvironment: 'github-hosted',
+          runInvocationURI: invocationId,
+        },
+      },
+      verifiedIdentity: { runnerEnvironment: 'github-hosted' },
+      statement: Object.assign(statement, overrides.statement || {}),
+    },
+  }];
+}
+
 function input(overrides = {}) {
   const p = predicate();
   const s = sbom();
   return {
     qualificationVerification: verified(QUALIFICATION_PREDICATE, p),
     sbomVerification: verified(CYCLONEDX_PREDICATE, s),
+    slsaVerification: slsaVerified(p),
     predicate: p,
     sbom: s,
     trustedRootBytes: Buffer.from('trusted-root-fixture\n'),
@@ -110,6 +179,10 @@ test('verified CLI statements become a zero-authority release-attestation verifi
   assert.equal(out.semantic_binding_verified, true);
   assert.equal(out.trusted_root_snapshot_bound, true);
   assert.equal(out.self_hosted_runner_denied, true);
+  assert.equal(out.slsa_cryptographic_verification, true);
+  assert.equal(out.slsa_builder_trusted, true);
+  assert.equal(out.slsa_predicate_type, SLSA_PREDICATE);
+  assert.match(out.slsa_statement_sha256, /^[a-f0-9]{64}$/);
   assert.equal(out.automatic_promotion, false);
   assert.equal(out.promotion_authorized, false);
   assert.equal(out.release_published, false);
@@ -161,4 +234,36 @@ test('trusted-root snapshot is mandatory and bounded', () => {
     () => verifyReleaseAttestationEvidence(input({ trustedRootBytes: Buffer.alloc(0) })),
     /release_attestation_trusted_root_invalid/,
   );
+});
+
+
+test('SLSA builder identity drift fails closed', () => {
+  const value = input();
+  value.slsaVerification[0].verificationResult.statement.predicate.runDetails.builder.id = 'https://example.invalid/builder';
+  assert.throws(() => verifyReleaseAttestationEvidence(value), /release_slsa_builder_id_mismatch/);
+});
+
+test('SLSA source dependency drift fails closed', () => {
+  const value = input();
+  value.slsaVerification[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit = 'c'.repeat(40);
+  assert.throws(() => verifyReleaseAttestationEvidence(value), /release_slsa_resolved_dependency_mismatch/);
+});
+
+test('SLSA invocation must bind the exact Package Smoke run and attempt', () => {
+  const value = input();
+  value.slsaVerification[0].verificationResult.statement.predicate.runDetails.metadata.invocationId =
+    'https://github.com/PatrickFrome/Compute/actions/runs/9999/attempts/1';
+  assert.throws(() => verifyReleaseAttestationEvidence(value), /release_slsa_invocation_id_mismatch/);
+});
+
+test('signed release predicate must retain the producer SLSA evidence binding', () => {
+  const value = input();
+  value.predicate.slsa_evidence_artifact_digest = 'sha256:' + 'f'.repeat(64);
+  value.qualificationVerification = verified(QUALIFICATION_PREDICATE, value.predicate);
+  const out = verifyReleaseAttestationEvidence(value);
+  assert.equal(out.slsa_cryptographic_verification, true);
+
+  value.predicate.slsa_builder_id = 'https://example.invalid/builder';
+  value.qualificationVerification = verified(QUALIFICATION_PREDICATE, value.predicate);
+  assert.throws(() => verifyReleaseAttestationEvidence(value), /release_attestation_slsa_builder_id_mismatch/);
 });
