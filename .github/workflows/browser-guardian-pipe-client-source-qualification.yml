@@ -1,0 +1,89 @@
+name: Browser Guardian Exact Rights Pipe Client Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/guardian-exact-rights-pipe-client-v1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact source
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup exact Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen Browser dependencies
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'guardian_pipe_client_npm_ci_failed' }
+
+      - name: Prove JavaScript and static security contracts
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check src/browser-guardian-update-actuator-client.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'guardian_pipe_client_js_parse_failed' }
+          node --test test/browser-guardian-pipe-client-contract.test.mjs test/browser-guardian-native-staging-contract.test.mjs test/browser-guardian-owner-enrollment-native-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'guardian_pipe_client_contracts_failed' }
+
+      - name: Build exact native staging without installer packaging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'guardian-native-exact-rights'
+          ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -OutputDir $out
+          if ($LASTEXITCODE -ne 0) { throw 'guardian_pipe_client_native_build_failed' }
+          $client = Join-Path $out 'METAENGINEBrowserGuardianPipeClient.exe'
+          if (-not (Test-Path $client -PathType Leaf)) { throw 'guardian_pipe_client_binary_missing' }
+          $contract = (& $client --contract-json | Out-String).Trim() | ConvertFrom-Json
+          if ($contract.schema -ne 'metaengine.browser-guardian.pipe-client.v1') { throw 'guardian_pipe_client_contract_schema_invalid' }
+          if ([int64]$contract.exact_access_mask -ne 1048963) { throw 'guardian_pipe_client_access_mask_drift' }
+          if ($contract.generic_read_requested -ne $false -or $contract.generic_write_requested -ne $false) { throw 'guardian_pipe_client_generic_access_exposed' }
+          if ($contract.client_create_pipe_instance_allowed -ne $false) { throw 'guardian_pipe_client_instance_creation_exposed' }
+          $manifest = Get-Content (Join-Path $out 'guardian-native-manifest.json') -Raw | ConvertFrom-Json
+          if ([string]$manifest.browser_pipe_client.sha256 -ne (Get-FileHash $client -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw 'guardian_pipe_client_manifest_digest_drift'
+          }
+
+      - name: Prove full Browser regression
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test test/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'guardian_pipe_client_full_regression_failed' }
+
+      - name: Prove source-only effect boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/browser-guardian-pipe-client-source-qualification.yml'
+          ! grep -Eq 'electron-builder|package:win|gh release|supabase functions deploy|update_ref|self-update apply' "$workflow"
+          git diff --exit-code HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
