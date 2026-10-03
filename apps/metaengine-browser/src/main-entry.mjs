@@ -4,13 +4,11 @@ import {
   METAENGINE_BROWSER_APP_ID,
   validSingleInstanceLaunchData,
 } from './single-instance-guard.mjs';
+import { waitForPrimaryActivationAck } from './browser-startup-activation-readback.mjs';
 import {
   activateExistingPrimaryWindow,
-  beginBrowserStartupJournal,
-  recordBrowserStartupEvent,
-  waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
-} from './browser-startup-observability.mjs';
+} from './browser-primary-window-activation.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -86,15 +84,21 @@ if (!guard.primary) {
     app.exit(0);
   }
 } else {
+  // The losing-secondary path must not load journal writers, corruption
+  // quarantine, crypto hashing or durable rename machinery before it exits.
+  const startupObservabilityPromise = import('./browser-startup-observability.mjs');
+
   if (process.platform === 'win32' && typeof app.setAppUserModelId === 'function') {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
 
   let startupJournalFailureLogged = false;
   const startupContextPromise = browserRuntimeNeeded
-    ? beginBrowserStartupJournal(app, {
-      launch_kind: updatedLaunch ? 'UPDATED_SUCCESSOR' : 'NORMAL',
-    }).catch((error) => {
+    ? startupObservabilityPromise
+      .then(({ beginBrowserStartupJournal }) => beginBrowserStartupJournal(app, {
+        launch_kind: updatedLaunch ? 'UPDATED_SUCCESSOR' : 'NORMAL',
+      }))
+      .catch((error) => {
       if (!startupJournalFailureLogged) {
         startupJournalFailureLogged = true;
         console.error(JSON.stringify({
@@ -112,6 +116,7 @@ if (!guard.primary) {
     const context = await startupContextPromise;
     if (!context) return null;
     try {
+      const { recordBrowserStartupEvent } = await startupObservabilityPromise;
       return await recordBrowserStartupEvent(app, {
         boot_id: context.boot_id,
         state,
