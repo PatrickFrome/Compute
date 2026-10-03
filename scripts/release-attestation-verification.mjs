@@ -369,4 +369,5 @@ export {
   PACKAGE_SOURCE_REF,
   REQUIRED_WORKFLOWS,
   canonicalJson,
+  verifySlsaProvenance,
 };
