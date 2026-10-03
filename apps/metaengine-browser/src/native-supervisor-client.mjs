@@ -18,6 +18,7 @@ import { nativeSupervisorTransportState } from './native-supervisor-client-base.
 import { buildSupervisorLifecycleStatusSnapshot } from './supervisor-lifecycle-runtime.mjs';
 import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
 import { buildDevosRuntimeObservability, mergeDevosRuntimeObservability } from './devos-runtime-observability.mjs';
+import { normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
 
 export * from './native-supervisor-client-core.mjs';
 
@@ -651,6 +652,83 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       }
     })().finally(() => { this.#workspaceObservationPromise = null; });
     return this.#workspaceObservationPromise;
+  }
+
+  async devosEnvironmentState() {
+    const identity = await this.#workspaceIdentity.ensure();
+    if (!identity?.device_id) throw new Error('native_supervisor_environment_state_device_not_enrolled');
+    const path = '/v1/devos/environment-state';
+    const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
+    const bodyText = '{}';
+    const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
+    const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: bodyText,
+      cache: 'no-store',
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(`native_supervisor_environment_state_http_${response.status}:${String(body?.error || 'unknown').slice(0, 120)}`);
+      error.status = Number(response.status || 0);
+      error.body = body;
+      throw error;
+    }
+    const checked = normalizeDevosRuntimeControl(body);
+    if (checked.authoritative !== true || checked.authority_effect !== false
+      || !Number.isSafeInteger(Number(checked.generation_floor))
+      || Number(checked.generation_floor) < 0) {
+      throw new Error('native_supervisor_environment_state_readback_invalid');
+    }
+    return Object.freeze(structuredClone(checked));
+  }
+
+  async resumeDevosAdmission(expectedGenerationFloor) {
+    const floor = Number(expectedGenerationFloor);
+    if (!Number.isSafeInteger(floor) || floor < 0) {
+      throw new Error('native_supervisor_resume_generation_floor_invalid');
+    }
+    const identity = await this.#workspaceIdentity.ensure();
+    if (!identity?.device_id) throw new Error('native_supervisor_resume_device_not_enrolled');
+    const path = '/v1/devos/resume-admission';
+    const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
+    const payload = Object.freeze({ confirm: true, expected_generation_floor: floor });
+    const bodyText = JSON.stringify(payload);
+    const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
+    const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: bodyText,
+      cache: 'no-store',
+    });
+    const body = await response.json().catch(() => null);
+    if (response.status === 409) {
+      return Object.freeze({
+        schema: 'metaengine.client.admission-resume-transport.v1',
+        status: 409,
+        effect_state: 'ABSENT',
+        requested_generation_floor: floor,
+        error: String(body?.error || 'devos_resume_conflict').slice(0, 160),
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      });
+    }
+    if (!response.ok) {
+      const error = new Error(`native_supervisor_resume_http_${response.status}:${String(body?.error || 'unknown').slice(0, 120)}`);
+      error.status = Number(response.status || 0);
+      error.body = body;
+      throw error;
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || body.schema !== 'metaengine.devos.environment-resume.v1'
+      || body.resumed !== true
+      || Number(body.requested_floor) !== floor
+      || body.operator_initiated !== true
+      || body.automatic_retry_allowed !== false
+      || body.authority_effect !== false) {
+      throw new Error('native_supervisor_resume_receipt_invalid');
+    }
+    return Object.freeze(structuredClone(body));
   }
 
   runtimeBinding(tabId, options = {}) {
