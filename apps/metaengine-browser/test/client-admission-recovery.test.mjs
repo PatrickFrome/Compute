@@ -229,4 +229,12 @@ test('Client bridge exposes only explicit admission recovery and UI never schedu
   assert.match(ui, /onClick=\{\(\) => void resumeExecution\(\)\}/);
   assert.doesNotMatch(ui, /setInterval\([\s\S]{0,300}resumeAdmission/);
   assert.doesNotMatch(preload, /generic_command_exposed:\s*true/);
+
+  const freshRead = ui.indexOf('const freshReadiness = await loadReadiness();');
+  const submitEffect = ui.indexOf('const next = await bridge.submitGoal(value);', freshRead);
+  assert.ok(freshRead > 0, 'fresh readiness read missing from submit');
+  assert.ok(submitEffect > freshRead, 'goal effect must follow fresh readiness read');
+  assert.match(ui.slice(freshRead, submitEffect), /if \(!freshReadiness\?\.execution_ready\)/);
+  const runButton = ui.match(/data-testid="client-goal-submit"[\s\S]{0,900}/)?.[0] || '';
+  assert.doesNotMatch(runButton, /readiness\?\.execution_ready === false/);
 });
