@@ -80,6 +80,7 @@ function isAuthoritativeState(value) {
     && value.authoritative === true
     && value.authority_effect === false
     && UUID_RE.test(String(value.read_request_id || ''))
+    && value.observation_source === 'AUTHENTICATED_POST_RESPONSE'
     && Number.isFinite(Date.parse(String(value.observed_at || '')))
     && Number.isSafeInteger(Number(value.generation_floor))
     && Number(value.generation_floor) >= 0
@@ -93,6 +94,15 @@ export function classifyAdmissionRecoveryObservation(attempt, environmentState) 
   const current = normalizeAttempt(attempt);
   if (!isAuthoritativeState(environmentState)) {
     return Object.freeze({ disposition: 'UNAVAILABLE', terminal: false, authority_effect: false });
+  }
+  const observedAtMs = Date.parse(String(environmentState.observed_at || ''));
+  const attemptUpdatedAtMs = Date.parse(String(current.updated_at || ''));
+  if (!Number.isFinite(observedAtMs) || !Number.isFinite(attemptUpdatedAtMs) || observedAtMs < attemptUpdatedAtMs) {
+    return Object.freeze({
+      disposition: 'STALE_OBSERVATION',
+      terminal: false,
+      authority_effect: false,
+    });
   }
   const observedFloor = Number(environmentState.generation_floor);
   if (observedFloor !== current.expected_generation_floor) {
