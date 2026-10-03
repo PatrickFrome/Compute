@@ -10,6 +10,11 @@ on:
       - 'apps/metaengine-browser/test/composed-sbom-evidence.test.mjs'
       - 'apps/metaengine-browser/test/npm-sbom-package-smoke.test.mjs'
       - 'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs'
+      - 'apps/metaengine-browser/test/installer-provenance.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-installed-qualification-push-policy.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-installed-qualification-release-oidc.test.mjs'
+      - 'supabase/functions/metaengine-client-installed-qualification-h205f22/**'
+      - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
       - 'tests/browser-slsa-physical-topology.test.mjs'
       - '.github/workflows/browser-slsa-physical-fix-v2-source-qualification.yml'
 
@@ -18,7 +23,11 @@ permissions:
 
 jobs:
   contract:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - name: Checkout exact fix source
@@ -39,8 +48,16 @@ jobs:
 
       - name: Reproduce and close first physical SLSA matrix failures
         working-directory: apps/metaengine-browser
+        shell: bash
         run: |
-          node --test             test/browser-convergence-package-identity.test.mjs             test/composed-sbom-evidence.test.mjs             test/npm-sbom-package-smoke.test.mjs             test/package-build-reservation-workflow.test.mjs
+          node --test \
+            test/browser-convergence-package-identity.test.mjs \
+            test/composed-sbom-evidence.test.mjs \
+            test/npm-sbom-package-smoke.test.mjs \
+            test/package-build-reservation-workflow.test.mjs \
+            test/installer-provenance.test.mjs \
+            test/client-v1-installed-qualification-push-policy.test.mjs \
+            test/client-v1-installed-qualification-release-oidc.test.mjs
 
       - name: Prove complete Browser Node regression after SLSA contract update
         working-directory: apps/metaengine-browser
@@ -86,4 +103,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/CONVERGENCE_CANDIDATE.md apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs apps/metaengine-browser/test/composed-sbom-evidence.test.mjs apps/metaengine-browser/test/npm-sbom-package-smoke.test.mjs apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs tests/browser-slsa-physical-topology.test.mjs .github/workflows/browser-slsa-physical-fix-v2-source-qualification.yml)"
+          git diff --exit-code HEAD

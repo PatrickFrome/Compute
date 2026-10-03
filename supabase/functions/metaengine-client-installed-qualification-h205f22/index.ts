@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@6.1.0";
+import { assertInstalledQualificationPushBinding } from "./push-policy.mjs";
 
 const ISSUER = "https://token.actions.githubusercontent.com";
 const AUDIENCE = "metaengine-client-installed-qualification";
@@ -18,6 +19,12 @@ const LEGACY_RELEASE_SUBJECT = `repo:${REPO}:ref:${RELEASE_REF}`;
 const IMMUTABLE_RELEASE_SUBJECT = `repo:PatrickFrome@${OWNER_ID}/Compute@${REPOSITORY_ID}:ref:${RELEASE_REF}`;
 const PR_SUBJECTS = new Set([LEGACY_PR_SUBJECT, IMMUTABLE_PR_SUBJECT]);
 const RELEASE_SUBJECTS = new Set([LEGACY_RELEASE_SUBJECT, IMMUTABLE_RELEASE_SUBJECT]);
+const PHYSICAL_BRANCH = "physical/build-slsa-provenance-v1";
+const PHYSICAL_REF = `refs/heads/${PHYSICAL_BRANCH}`;
+const PHYSICAL_SUBJECTS = new Set([
+  `repo:${REPO}:ref:${PHYSICAL_REF}`,
+  `repo:PatrickFrome@${OWNER_ID}/Compute@${REPOSITORY_ID}:ref:${PHYSICAL_REF}`,
+]);
 const SHA40 = /^[0-9a-f]{40}$/;
 
 const SUPABASE_URL = String(Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
@@ -183,7 +190,10 @@ Deno.serve(async (req: Request) => {
     const isReleasePush = eventName === "push"
       && String(payload.ref || "") === RELEASE_REF
       && RELEASE_SUBJECTS.has(subject);
-    if (!isPullRequest && !isReleasePush) throw new Error("event_or_subject_forbidden");
+    const isPhysicalPush = eventName === "push"
+      && String(payload.ref || "") === PHYSICAL_REF
+      && PHYSICAL_SUBJECTS.has(subject);
+    if (!isPullRequest && !isReleasePush && !isPhysicalPush) throw new Error("event_or_subject_forbidden");
 
     if (!String(payload.workflow_ref || "").startsWith(WORKFLOW_REF_PREFIX)) {
       throw new Error("workflow_ref_forbidden");
@@ -221,7 +231,7 @@ Deno.serve(async (req: Request) => {
       if (!exactPr) throw new Error("run_pr_head_binding_missing");
     } else {
       if (String(run?.event || "") !== "push") throw new Error("run_event_invalid");
-      if (String(run?.head_branch || "") !== RELEASE_BRANCH) throw new Error("run_release_branch_invalid");
+      assertInstalledQualificationPushBinding(payload, run, sourceHead);
     }
 
     // Nonce preflight fails closed before approval and the SQL RPC repeats

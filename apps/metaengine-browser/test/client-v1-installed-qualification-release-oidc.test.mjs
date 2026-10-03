@@ -15,14 +15,14 @@ test('installed qualification preserves exact PR OIDC binding', () => {
   assert.match(source, /run_pr_head_binding_missing/);
 });
 
-test('installed qualification admits push only for the exact release branch and subject', () => {
+test('installed qualification keeps exact release subject and delegates push tuple verification', () => {
   assert.match(source, /const RELEASE_BRANCH = "release\/self-update-ambiguity-live-v2"/);
   assert.match(source, /const RELEASE_REF = `refs\/heads\/\$\{RELEASE_BRANCH\}`/);
   assert.match(source, /eventName === "push"[\s\S]*?String\(payload\.ref \|\| ""\) === RELEASE_REF[\s\S]*?RELEASE_SUBJECTS\.has\(subject\)/);
   assert.match(source, /repo:\$\{REPO\}:ref:\$\{RELEASE_REF\}/);
   assert.match(source, /repo:PatrickFrome@\$\{OWNER_ID\}\/Compute@\$\{REPOSITORY_ID\}:ref:\$\{RELEASE_REF\}/);
   assert.match(source, /String\(run\?\.event \|\| ""\) !== "push"/);
-  assert.match(source, /String\(run\?\.head_branch \|\| ""\) !== RELEASE_BRANCH/);
+  assert.match(source, /assertInstalledQualificationPushBinding\(payload, run, sourceHead\)/);
   assert.doesNotMatch(source, /eventName === "push"\s*&&\s*RELEASE_SUBJECTS\.has\(subject\)/,
     'release push must also require the exact OIDC ref claim');
 });

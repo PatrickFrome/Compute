@@ -1139,7 +1139,7 @@ test('artifact redirect never forwards GitHub bearer token to the redirected ori
 test('R90/R91 workflow topology builds NSIS once, overlaps physical consumers, then gates on producer success', () => {
   const testDir = dirname(fileURLToPath(import.meta.url));
   const workflowRoot = join(testDir, '..', '..', '..', '.github', 'workflows');
-  const packageSmoke = readFileSync(join(workflowRoot, 'browser-windows-package-smoke.yml'), 'utf8');
+  const packageSmoke = readFileSync(join(workflowRoot, 'browser-windows-package-smoke.yml'), 'utf8').replace(/\r\n/g, '\n');
   const installedChat = readFileSync(join(workflowRoot, 'browser-windows-installed-chat-qualification.yml'), 'utf8');
   const finalRuntime = readFileSync(join(workflowRoot, 'browser-final-runtime-activation-v1.yml'), 'utf8');
   const soak = readFileSync(join(workflowRoot, 'browser-windows-autonomous-soak-v1.yml'), 'utf8');

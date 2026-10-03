@@ -80,7 +80,23 @@ test('shared installer consumers automatically fence the dedicated physical line
   assert.match(source, /producer_event/);
 });
 
-test('physical preparation does not consume a new package identity', async () => {
+test('physical package identity is exact across package, lock and candidate reservation', async () => {
   const pkg = JSON.parse(await repoFile('apps/metaengine-browser/package.json'));
-  assert.equal(pkg.version, '0.7.0-dev.37006000001.1');
+  const lock = JSON.parse(await repoFile('apps/metaengine-browser/package-lock.json'));
+  const doc = await repoFile('apps/metaengine-browser/CONVERGENCE_CANDIDATE.md');
+  const reserved = doc.match(/Reserved package identity is `([^`]+)`\./)?.[1];
+  assert.match(reserved || '', /^0\.7\.0-dev\.[1-9][0-9]*\.1$/);
+  assert.equal(pkg.version, reserved);
+  assert.equal(lock.version, reserved);
+  assert.equal(lock.packages[''].version, reserved);
+});
+
+test('dirty-profile acquire and terminal wait both receive a job-scoped GitHub token', async () => {
+  const source = await workflow('browser-shell-first-dirty-profile-v1.yml');
+  const steps = source.split(/\r?\n      - name: /);
+  for (const mode of ['Acquire', 'Wait']) {
+    const step = steps.find(row => row.includes(`qualified-installer-consumer.ps1 -Mode ${mode}`));
+    assert.ok(step, mode);
+    assert.match(step, /env:[\s\S]*?ME2_GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+  }
 });
