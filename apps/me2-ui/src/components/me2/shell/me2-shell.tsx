@@ -370,9 +370,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   const submit = useCallback(async () => {
     const value = goal.trim();
-    if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED" || readiness?.execution_ready === false) return;
+    if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED") return;
     const bridge = clientControlBridge();
-    if (!bridge?.submitGoal || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
+    if (!bridge?.submitGoal || !bridge?.workReadiness || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
       setError("Typed Client control bridge unavailable");
       return;
     }
@@ -381,6 +381,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     setPending(true);
     setError(null);
     try {
+      // Cached readiness is presentation-only. A user submit always performs a
+      // fresh typed read immediately before the effect so stale READY cannot
+      // authorize work and stale BLOCKED cannot indefinitely suppress a later
+      // valid submit. No submit occurs when the fresh read is unavailable.
+      const freshReadiness = await loadReadiness();
+      if (!freshReadiness?.execution_ready) {
+        setError(freshReadiness?.detail || "Execution readiness unavailable");
+        return;
+      }
       const next = await bridge.submitGoal(value);
       if (next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
         throw new Error("goal_readback_invalid");
@@ -397,7 +406,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       operation.current = null;
       if (mounted.current) setPending(false);
     }
-  }, [goal, journalEntry?.state, loadLatest, readiness?.execution_ready]);
+  }, [goal, journalEntry?.state, loadLatest, loadReadiness]);
 
   const progress = journalEntry?.progress;
   const proof = journalEntry?.execution_proof;
@@ -439,7 +448,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED" || readiness?.execution_ready === false}
+        disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"}
         data-testid="client-goal-submit"
         className="h-8 shrink-0 border border-cyan-700 bg-cyan-950/50 px-3 text-[12px] font-semibold text-cyan-100 hover:bg-cyan-950 disabled:opacity-40"
       >
