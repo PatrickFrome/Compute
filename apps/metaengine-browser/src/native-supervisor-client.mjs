@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   NativeSupervisorClient as CoreNativeSupervisorClient,
   NATIVE_SUPERVISOR_BASE,
@@ -659,6 +660,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     if (!identity?.device_id) throw new Error('native_supervisor_environment_state_device_not_enrolled');
     const path = '/v1/devos/environment-state';
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
+    const readRequestId = randomUUID().toLowerCase();
     const bodyText = '{}';
     const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
     const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
@@ -680,7 +682,15 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       || Number(checked.generation_floor) < 0) {
       throw new Error('native_supervisor_environment_state_readback_invalid');
     }
-    return Object.freeze(structuredClone(checked));
+    // Correlate only after the authenticated no-store POST has completed.
+    // The deployed Edge route remains byte-identical; this nonce prevents an
+    // older persisted CLOSED observation from being reused as current evidence.
+    return Object.freeze({
+      ...structuredClone(checked),
+      read_request_id: readRequestId,
+      observed_at: new Date().toISOString(),
+      observation_source: 'AUTHENTICATED_POST_RESPONSE',
+    });
   }
 
   async resumeDevosAdmission(expectedGenerationFloor) {

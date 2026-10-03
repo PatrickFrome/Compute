@@ -1,5 +1,15 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37153249506.1`.
+
+Admission recovery convergence successor (2026-10-03):
+- exact predecessor `219ebe989a4f7ce2adfeb205a394a47ee55037cf` already consumed package identity `0.7.0-dev.37139234564.1` in physical Package Smoke run `37144386164`;
+- this successor changes Browser runtime bytes (ordered keepalive persistence, admission recovery freshness/restart HOLD semantics), so the predecessor identity MUST NOT be rebuilt;
+- failed reservation probe on source `38b9fc0e26a8e970cb9ec34da94433e30a551476` correctly refused reuse with `PACKAGE_IDENTITY_VERSION_ALREADY_RESERVED`;
+- intermediate source `b414203f3fab105f9eb21cf9a32c17c53fab7615` reserved `0.7.0-dev.37152993016.1` in Package Smoke run `37153032303` (artifact `11285061323`), so that identity is consumed and MUST NOT be reused by the final source;
+- final atomic candidate identity is `0.7.0-dev.37153249506.1`; it must be proven from one exact source head once and all physical workflows must consume that one-built installer;
+- deployed R83 Edge/canary source remains byte-identical; no production deployment or live admission effect is part of this candidate.
+
 Client admission-readiness submit-fence successor on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37139234564.1`.
 
 Admission readiness successor (2026-10-03):

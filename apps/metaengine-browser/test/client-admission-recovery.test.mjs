@@ -10,14 +10,18 @@ import { NativeSupervisorClient } from '../src/native-supervisor-client.mjs';
 
 const WORKSPACE = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';
+const READ_REQUEST = '33333333-3333-4333-8333-333333333333';
 
-function state({ floor = 28, open = false } = {}) {
+function state({ floor = 28, open = false, readRequestId = READ_REQUEST, observedAt = new Date().toISOString() } = {}) {
   return {
     schema: 'metaengine.devos.environment-state.v1',
     state: open ? 'OPEN' : 'CLOSED',
     reason: open ? null : 'CONTINUOUS_SERVICE_ADMISSION_FENCED',
     workspace_id: WORKSPACE,
     generation_floor: floor,
+    read_request_id: readRequestId,
+    observed_at: observedAt,
+    observation_source: 'AUTHENTICATED_POST_RESPONSE',
     refill_enabled: open,
     supervisor_admission_enabled: open,
     continuous_service_allowed: open,
@@ -108,19 +112,40 @@ test('ambiguous intent is reconciled by independent state readback before a new 
 });
 
 test('open and generation-drift readbacks close pending recovery without replay', async () => {
-  for (const [observed, expected] of [
-    [state({ floor: 28, open: true }), 'OPEN_CONFIRMED'],
-    [state({ floor: 29, open: false }), 'REJECTED'],
+  for (const [input, expected] of [
+    [{ floor: 28, open: true }, 'OPEN_CONFIRMED'],
+    [{ floor: 29, open: false }, 'REJECTED'],
   ]) {
     const { journal } = memoryJournal();
     await journal.load();
     await journal.begin({ attempt_id: ATTEMPT, expected_generation_floor: 28 });
     await journal.markSendIntent();
     await journal.markAmbiguous('lost_response');
-    const row = await journal.reconcile(observed);
+    const row = await journal.reconcile(state(input));
     assert.equal(row.state, expected);
     assert.equal(row.automatic_retry_allowed, false);
   }
+});
+
+test('legacy, uncorrelated or pre-attempt CLOSED readback cannot clear an ambiguous effect', async () => {
+  const { journal } = memoryJournal();
+  await journal.load();
+  await journal.begin({ attempt_id: ATTEMPT, expected_generation_floor: 28 });
+  await journal.markSendIntent();
+  await journal.markAmbiguous('lost_response');
+
+  const legacyClosed = state({ floor: 28, open: false });
+  delete legacyClosed.read_request_id;
+  delete legacyClosed.observed_at;
+  delete legacyClosed.observation_source;
+  const stillPending = await journal.reconcile(legacyClosed);
+  assert.equal(stillPending.state, 'AMBIGUOUS');
+  assert.equal(journal.hasPending(), true);
+
+  const staleClosed = state({ floor: 28, open: false, observedAt: '2000-01-01T00:00:00.000Z' });
+  const staleResult = await journal.reconcile(staleClosed);
+  assert.equal(staleResult.state, 'AMBIGUOUS');
+  assert.equal(journal.hasPending(), true);
 });
 
 test('reconciliation classifier fails closed on unavailable authority', () => {
@@ -186,8 +211,42 @@ test('native client signs exact environment read and exact-generation resume rou
   assert.equal(calls.length, 2);
   assert.equal(calls[0].pathname.endsWith('/v1/devos/environment-state'), true);
   assert.equal(calls[0].pathHeader.endsWith('/v1/devos/environment-state'), true);
+  assert.deepEqual(JSON.parse(calls[0].body), {});
+  assert.match(before.read_request_id, /^[0-9a-f-]{36}$/);
+  assert.equal(Number.isFinite(Date.parse(before.observed_at)), true);
+  assert.equal(before.observation_source, 'AUTHENTICATED_POST_RESPONSE');
   assert.deepEqual(JSON.parse(calls[1].body), { confirm: true, expected_generation_floor: 28 });
   assert.equal(calls[1].pathHeader.endsWith('/v1/devos/resume-admission'), true);
+  client.stop();
+});
+
+test('native environment read replaces any stale server correlation with the current authenticated POST identity', async () => {
+  const client = new NativeSupervisorClient({
+    identity: identity(),
+    fetchImpl: async (url) => {
+      const pathname = new URL(url).pathname;
+      if (pathname.endsWith('/v1/devos/environment-state')) {
+        return response(200, {
+          schema: 'metaengine.devos.environment-state.v1',
+          workspace_id: WORKSPACE,
+          generation_floor: 28,
+          read_request_id: READ_REQUEST,
+          observed_at: '2000-01-01T00:00:00.000Z',
+          refill_enabled: false,
+          supervisor_admission_enabled: false,
+          authority_effect: false,
+        });
+      }
+      throw new Error(`unexpected_fetch:${pathname}`);
+    },
+    getState: async () => ({ tabs: [], active_tab: null }),
+    executeCommand: async () => ({ authority_effect: false }),
+    intervalMs: 60_000,
+  });
+  const observed = await client.devosEnvironmentState();
+  assert.notEqual(observed.read_request_id, READ_REQUEST);
+  assert.equal(observed.observation_source, 'AUTHENTICATED_POST_RESPONSE');
+  assert.ok(Date.parse(observed.observed_at) > Date.parse('2000-01-01T00:00:00.000Z'));
   client.stop();
 });
 
@@ -225,6 +284,8 @@ test('Client bridge exposes only explicit admission recovery and UI never schedu
   assert.match(main, /await journal\.markSendIntent\(\);[\s\S]*nativeSupervisor\.resumeDevosAdmission/);
   assert.match(main, /if \(journal\.hasPending\(\)\)[\s\S]*journal\.reconcile\(observed\)/);
   assert.match(main, /prior_effect_replayed:\s*false/);
+  assert.match(main, /RECOVERY_JOURNAL_INCOMPATIBLE/);
+  assert.match(main, /clientAdmissionRecoveryJournalLoadError/);
   assert.match(ui, /data-testid="client-resume-execution"/);
   assert.match(ui, /onClick=\{\(\) => void resumeExecution\(\)\}/);
   assert.doesNotMatch(ui, /setInterval\([\s\S]{0,300}resumeAdmission/);

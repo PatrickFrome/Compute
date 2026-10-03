@@ -79,6 +79,9 @@ function isAuthoritativeState(value) {
     && value.schema === 'metaengine.devos.environment-state.v1'
     && value.authoritative === true
     && value.authority_effect === false
+    && UUID_RE.test(String(value.read_request_id || ''))
+    && value.observation_source === 'AUTHENTICATED_POST_RESPONSE'
+    && Number.isFinite(Date.parse(String(value.observed_at || '')))
     && Number.isSafeInteger(Number(value.generation_floor))
     && Number(value.generation_floor) >= 0
     && typeof value.refill_enabled === 'boolean'
@@ -91,6 +94,15 @@ export function classifyAdmissionRecoveryObservation(attempt, environmentState) 
   const current = normalizeAttempt(attempt);
   if (!isAuthoritativeState(environmentState)) {
     return Object.freeze({ disposition: 'UNAVAILABLE', terminal: false, authority_effect: false });
+  }
+  const observedAtMs = Date.parse(String(environmentState.observed_at || ''));
+  const attemptUpdatedAtMs = Date.parse(String(current.updated_at || ''));
+  if (!Number.isFinite(observedAtMs) || !Number.isFinite(attemptUpdatedAtMs) || observedAtMs < attemptUpdatedAtMs) {
+    return Object.freeze({
+      disposition: 'STALE_OBSERVATION',
+      terminal: false,
+      authority_effect: false,
+    });
   }
   const observedFloor = Number(environmentState.generation_floor);
   if (observedFloor !== current.expected_generation_floor) {
@@ -248,7 +260,7 @@ export class ClientAdmissionRecoveryJournal {
     const existing = this.#state.latest;
     if (!existing || !PENDING.has(existing.state)) return existing ? Object.freeze(clone(existing)) : null;
     const classification = classifyAdmissionRecoveryObservation(existing, environmentState);
-    if (classification.disposition === 'UNAVAILABLE') return Object.freeze(clone(existing));
+    if (classification.terminal !== true) return Object.freeze(clone(existing));
     const nextState = classification.disposition === 'OPEN_CONFIRMED'
       ? 'OPEN_CONFIRMED'
       : classification.disposition === 'ABSENCE_CONFIRMED'
