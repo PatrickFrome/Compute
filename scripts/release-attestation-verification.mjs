@@ -8,6 +8,15 @@ import { pathToFileURL } from 'node:url';
 const PROOF_SCHEMA = 'metaengine.browser.release-attestation-verification.v1';
 const QUALIFICATION_PREDICATE = 'https://metaengine.dev/attestations/browser-release-qualification/v1';
 const CYCLONEDX_PREDICATE = 'https://cyclonedx.org/bom';
+const SLSA_PREDICATE = 'https://slsa.dev/provenance/v1';
+const PACKAGE_BUILD_TYPE = 'https://actions.github.io/buildtypes/workflow/v1';
+const PACKAGE_SOURCE_REF = 'refs/heads/physical/build-slsa-provenance-v1';
+const PACKAGE_BUILDER_WORKFLOW = 'PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml';
+const PACKAGE_BUILDER_ID = `https://github.com/${PACKAGE_BUILDER_WORKFLOW}@${PACKAGE_SOURCE_REF}`;
+const PACKAGE_WORKFLOW_PATH = '.github/workflows/browser-windows-package-smoke.yml';
+const REPOSITORY_URI = 'https://github.com/PatrickFrome/Compute';
+const REPOSITORY_ID = '1341371143';
+const REPOSITORY_OWNER_ID = '20597814';
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
 const REQUIRED_WORKFLOWS = Object.freeze([
@@ -121,12 +130,92 @@ function verifyQualificationPredicate(predicate, expectedName, expectedSha) {
     fail('release_attestation_producer_matrix_binding_mismatch');
   }
   if (predicate.physical_qualification_terminal_green !== true) fail('release_attestation_terminal_green_missing');
+  if (predicate.slsa_provenance_verified !== true) fail('release_attestation_slsa_provenance_missing');
+  if (predicate.slsa_builder_trusted !== true) fail('release_attestation_slsa_builder_untrusted');
+  if (required(predicate.slsa_builder_id, 'release_attestation_slsa_builder_id_missing') !== PACKAGE_BUILDER_ID) {
+    fail('release_attestation_slsa_builder_id_mismatch');
+  }
+  if (required(predicate.slsa_predicate_type, 'release_attestation_slsa_predicate_type_missing') !== SLSA_PREDICATE) {
+    fail('release_attestation_slsa_predicate_type_mismatch');
+  }
+  const expectedVerifierId = `github-slsa-package-smoke:${Number(predicate.producer_run_id)}:${Number(predicate.producer_run_attempt)}`;
+  if (required(predicate.slsa_verifier_id, 'release_attestation_slsa_verifier_id_missing') !== expectedVerifierId) {
+    fail('release_attestation_slsa_verifier_id_mismatch');
+  }
+  if (!Number.isSafeInteger(Number(predicate.slsa_evidence_artifact_id)) || Number(predicate.slsa_evidence_artifact_id) <= 0) {
+    fail('release_attestation_slsa_artifact_id_invalid');
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(required(predicate.slsa_evidence_artifact_digest, 'release_attestation_slsa_artifact_digest_missing'))) {
+    fail('release_attestation_slsa_artifact_digest_invalid');
+  }
+  exactSha256(predicate.slsa_provenance_evidence_sha256, 'release_attestation_slsa_evidence_sha_invalid');
   if (predicate.automatic_promotion !== false
       || predicate.promotion_authorized !== false
       || predicate.authority_effect !== false) {
     fail('release_attestation_authority_drift');
   }
   return { sourceHead, packageVersion };
+}
+
+function verifySlsaProvenance(slsaVerification, qualificationPredicate, expectedName, expectedSha) {
+  if (!Array.isArray(slsaVerification) || slsaVerification.length !== 1) fail('release_slsa_verification_cardinality_invalid');
+  const verificationResult = slsaVerification[0]?.verificationResult;
+  if (!verificationResult || typeof verificationResult !== 'object') fail('release_slsa_verification_result_missing');
+  const statement = verificationResult.statement;
+  if (!statement || typeof statement !== 'object' || Array.isArray(statement)) fail('release_slsa_statement_missing');
+  if (statement.predicateType !== SLSA_PREDICATE) fail('release_slsa_predicate_type_mismatch');
+  verifySubject(statement, expectedName, expectedSha, 'release_slsa');
+
+  const sourceHead = required(qualificationPredicate.source_head, 'release_slsa_source_head_missing').toLowerCase();
+  const producerRunId = Number(qualificationPredicate.producer_run_id);
+  const producerRunAttempt = Number(qualificationPredicate.producer_run_attempt);
+  const buildDefinition = statement.predicate?.buildDefinition;
+  const runDetails = statement.predicate?.runDetails;
+  if (!buildDefinition || !runDetails) fail('release_slsa_predicate_shape_invalid');
+  if (buildDefinition.buildType !== PACKAGE_BUILD_TYPE) fail('release_slsa_build_type_mismatch');
+
+  const workflow = buildDefinition.externalParameters?.workflow;
+  if (workflow?.repository !== REPOSITORY_URI
+      || workflow?.path !== PACKAGE_WORKFLOW_PATH
+      || workflow?.ref !== PACKAGE_SOURCE_REF) {
+    fail('release_slsa_workflow_binding_mismatch');
+  }
+
+  const github = buildDefinition.internalParameters?.github;
+  if (github?.event_name !== 'push'
+      || String(github?.repository_id || '') !== REPOSITORY_ID
+      || String(github?.repository_owner_id || '') !== REPOSITORY_OWNER_ID
+      || github?.runner_environment !== 'github-hosted') {
+    fail('release_slsa_internal_parameters_mismatch');
+  }
+
+  const dependencies = Array.isArray(buildDefinition.resolvedDependencies) ? buildDefinition.resolvedDependencies : [];
+  if (dependencies.length !== 1) fail('release_slsa_resolved_dependency_cardinality_invalid');
+  const dependency = dependencies[0];
+  if (dependency?.uri !== `git+https://github.com/PatrickFrome/Compute@${PACKAGE_SOURCE_REF}`
+      || String(dependency?.digest?.gitCommit || '').toLowerCase() !== sourceHead) {
+    fail('release_slsa_resolved_dependency_mismatch');
+  }
+
+  if (runDetails.builder?.id !== PACKAGE_BUILDER_ID) fail('release_slsa_builder_id_mismatch');
+  const expectedInvocation = `https://github.com/PatrickFrome/Compute/actions/runs/${producerRunId}/attempts/${producerRunAttempt}`;
+  if (runDetails.metadata?.invocationId !== expectedInvocation) fail('release_slsa_invocation_id_mismatch');
+
+  const cert = verificationResult.signature?.certificate;
+  if (!cert || typeof cert !== 'object') fail('release_slsa_certificate_missing');
+  if (cert.buildSignerURI !== PACKAGE_BUILDER_ID
+      || cert.githubWorkflowSHA !== sourceHead
+      || cert.sourceRepositoryDigest !== sourceHead
+      || cert.sourceRepositoryRef !== PACKAGE_SOURCE_REF
+      || cert.runnerEnvironment !== 'github-hosted'
+      || cert.runInvocationURI !== expectedInvocation) {
+    fail('release_slsa_certificate_binding_mismatch');
+  }
+  if (verificationResult.verifiedIdentity?.runnerEnvironment !== 'github-hosted') {
+    fail('release_slsa_verified_identity_runner_invalid');
+  }
+
+  return statement;
 }
 
 function verifyCycloneDx(sbom, expectedSha) {
@@ -145,6 +234,7 @@ function verifyCycloneDx(sbom, expectedSha) {
 export function verifyReleaseAttestationEvidence({
   qualificationVerification,
   sbomVerification,
+  slsaVerification,
   predicate,
   sbom,
   trustedRootBytes,
@@ -179,6 +269,8 @@ export function verifyReleaseAttestationEvidence({
     fail('release_sbom_verified_predicate_drift');
   }
 
+  const slsaStatement = verifySlsaProvenance(slsaVerification, predicate, expectedName, expectedSha);
+
   const rootBytes = Buffer.from(trustedRootBytes || []);
   if (rootBytes.length <= 0 || rootBytes.length > 4 * 1024 * 1024) fail('release_attestation_trusted_root_invalid');
 
@@ -200,6 +292,10 @@ export function verifyReleaseAttestationEvidence({
     sbom_predicate_type: CYCLONEDX_PREDICATE,
     sbom_statement_sha256: sha256(Buffer.from(canonicalJson(sbomStatement), 'utf8')),
     sbom_sha256: sha256(Buffer.from(canonicalJson(sbom), 'utf8')),
+    slsa_predicate_type: SLSA_PREDICATE,
+    slsa_statement_sha256: sha256(Buffer.from(canonicalJson(slsaStatement), 'utf8')),
+    slsa_cryptographic_verification: true,
+    slsa_builder_trusted: true,
     cryptographic_verification: true,
     signer_identity_verified: true,
     semantic_binding_verified: true,
@@ -235,6 +331,7 @@ async function main() {
   const result = verifyReleaseAttestationEvidence({
     qualificationVerification: readJson(a['qualification-verification'], 'release_qualification_verification_unreadable'),
     sbomVerification: readJson(a['sbom-verification'], 'release_sbom_verification_unreadable'),
+    slsaVerification: readJson(a['slsa-verification'], 'release_slsa_verification_unreadable'),
     predicate: readJson(a.predicate, 'release_attestation_predicate_unreadable'),
     sbom: readJson(a.sbom, 'release_attestation_sbom_unreadable'),
     trustedRootBytes,
@@ -266,6 +363,9 @@ export {
   PROOF_SCHEMA,
   QUALIFICATION_PREDICATE,
   CYCLONEDX_PREDICATE,
+  SLSA_PREDICATE,
+  PACKAGE_BUILDER_ID,
+  PACKAGE_SOURCE_REF,
   REQUIRED_WORKFLOWS,
   canonicalJson,
 };
