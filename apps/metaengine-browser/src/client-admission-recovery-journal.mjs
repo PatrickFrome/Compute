@@ -260,7 +260,7 @@ export class ClientAdmissionRecoveryJournal {
     const existing = this.#state.latest;
     if (!existing || !PENDING.has(existing.state)) return existing ? Object.freeze(clone(existing)) : null;
     const classification = classifyAdmissionRecoveryObservation(existing, environmentState);
-    if (classification.disposition === 'UNAVAILABLE') return Object.freeze(clone(existing));
+    if (classification.terminal !== true) return Object.freeze(clone(existing));
     const nextState = classification.disposition === 'OPEN_CONFIRMED'
       ? 'OPEN_CONFIRMED'
       : classification.disposition === 'ABSENCE_CONFIRMED'
