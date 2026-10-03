@@ -289,6 +289,7 @@ jobs:
             slsa_evidence_artifact_id=$slsaArtifactId
             slsa_evidence_artifact_digest=$slsaArtifactDigest
             slsa_provenance_evidence_sha256=$slsaEvidenceSha
+            slsa_verification_material_sha256=$slsaVerificationSha
             automatic_promotion=$false
             promotion_authorized=$false
             authority_effect=$false
@@ -305,6 +306,7 @@ jobs:
           "slsa_evidence_artifact_id=$slsaArtifactId" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "slsa_evidence_artifact_digest=$slsaArtifactDigest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "slsa_provenance_evidence_sha256=$slsaEvidenceSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "slsa_verification_material_sha256=$slsaVerificationSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Attest release qualification for exact installer
         id: qualification_attestation
@@ -366,6 +368,7 @@ jobs:
             slsa_evidence_artifact_id=[int64]'${{ steps.prepare.outputs.slsa_evidence_artifact_id }}'
             slsa_evidence_artifact_digest='${{ steps.prepare.outputs.slsa_evidence_artifact_digest }}'
             slsa_provenance_evidence_sha256='${{ steps.prepare.outputs.slsa_provenance_evidence_sha256 }}'
+            slsa_verification_material_sha256='${{ steps.prepare.outputs.slsa_verification_material_sha256 }}'
             cryptographic_verification=$false
             promotion_authorized=$false
             release_published=$false
@@ -486,7 +489,9 @@ jobs:
 
           $materialReceipt = Get-Content $materialReceiptPath -Raw | ConvertFrom-Json
           $materialSlsaEvidenceSha = (Get-FileHash $slsaEvidenceMaterialPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $materialSlsaVerificationSha = (Get-FileHash $slsaVerificationMaterialPath -Algorithm SHA256).Hash.ToLowerInvariant()
           $materialSlsaEvidence = Get-Content $slsaEvidenceMaterialPath -Raw | ConvertFrom-Json
+          $materialPredicate = Get-Content $predicatePath -Raw | ConvertFrom-Json
           if (
             $materialReceipt.schema -ne 'metaengine.browser.release-attestation-material.v1' -or
             [string]$materialReceipt.signer_source_sha -ne $env:GITHUB_SHA -or
@@ -496,6 +501,9 @@ jobs:
             [int64]$materialReceipt.slsa_evidence_artifact_id -le 0 -or
             [string]$materialReceipt.slsa_evidence_artifact_digest -notmatch '^sha256:[a-f0-9]{64}$' -or
             [string]$materialReceipt.slsa_provenance_evidence_sha256 -ne $materialSlsaEvidenceSha -or
+            [string]$materialReceipt.slsa_verification_material_sha256 -ne $materialSlsaVerificationSha -or
+            [string]$materialPredicate.slsa_provenance_evidence_sha256 -ne $materialSlsaEvidenceSha -or
+            [string]$materialPredicate.slsa_verification_material_sha256 -ne $materialSlsaVerificationSha -or
             $materialSlsaEvidence.schema -ne 'metaengine.browser-fabric.provenance-evidence.v1' -or
             $materialSlsaEvidence.verified -ne $true -or
             $materialSlsaEvidence.builder_trusted -ne $true -or
@@ -565,10 +573,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'release_sbom_attestation_cryptographic_verify_failed' }
           $sbomJson | Set-Content -LiteralPath $sbomVerification -Encoding utf8
 
+          $producerVerificationDocument = Get-Content $slsaVerificationMaterialPath -Raw | ConvertFrom-Json
+          if (@($producerVerificationDocument).Count -ne 1 -or -not $producerVerificationDocument[0].attestation.bundle) {
+            throw 'release_slsa_producer_bundle_material_invalid'
+          }
+          $slsaBundle = "$env:RUNNER_TEMP\release-package-slsa-provenance.bundle.json"
+          $producerVerificationDocument[0].attestation.bundle | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $slsaBundle -Encoding utf8
+          if (-not (Test-Path $slsaBundle -PathType Leaf) -or [int64](Get-Item $slsaBundle).Length -le 0) {
+            throw 'release_slsa_producer_bundle_material_missing'
+          }
+
           $packageSignerWorkflow = "$env:GITHUB_REPOSITORY/.github/workflows/browser-windows-package-smoke.yml"
           $slsaArgs = @(
             'attestation','verify',$installer,
             '--repo',$env:GITHUB_REPOSITORY,
+            '--bundle',$slsaBundle,
             '--custom-trusted-root',$trustedRoot,
             '--predicate-type','https://slsa.dev/provenance/v1',
             '--signer-workflow',$packageSignerWorkflow,
@@ -663,6 +682,7 @@ jobs:
             ${{ runner.temp }}/release-qualification-verification.json
             ${{ runner.temp }}/release-sbom-verification.json
             ${{ runner.temp }}/release-slsa-provenance-verification.json
+            ${{ runner.temp }}/release-package-slsa-provenance.bundle.json
             ${{ runner.temp }}/release-attestation-verification-proof.json
           if-no-files-found: error
           retention-days: 90
