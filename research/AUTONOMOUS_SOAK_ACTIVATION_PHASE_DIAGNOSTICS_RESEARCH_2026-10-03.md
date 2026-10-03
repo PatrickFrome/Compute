@@ -224,9 +224,15 @@ It additionally parses the PowerShell soak script with the PowerShell AST parser
 - one-producer/SLSA topology tests
 - exact source unchanged guard
 
-Current run:
-- `37147874369` / #16 / attempt 1
-- terminal result must be re-read before claiming qualification.
+Source qualification is now terminal green:
+- `37147874369` / #16 / attempt 1 — SUCCESS
+- Linux contract — SUCCESS
+- Windows contract — SUCCESS
+- full Browser regression — SUCCESS on both platforms
+- Windows PowerShell AST parse of the modified soak script — SUCCESS
+- Windows R97 Client source visual proof — SUCCESS
+- one-producer/SLSA topology — SUCCESS
+- exact-source unchanged — SUCCESS
 
 ## Decision
 
