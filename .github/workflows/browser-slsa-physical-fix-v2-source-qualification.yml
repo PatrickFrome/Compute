@@ -92,7 +92,7 @@ jobs:
 
           package = json.loads(Path('apps/metaengine-browser/package.json').read_text(encoding='utf-8'))
           lock = json.loads(Path('apps/metaengine-browser/package-lock.json').read_text(encoding='utf-8'))
-          expected = '0.7.0-dev.37076000001.1'
+          expected = '0.7.0-dev.37084599153.1'
           if package.get('version') != expected or lock.get('version') != expected or lock.get('packages', {}).get('', {}).get('version') != expected:
               raise SystemExit('slsa_physical_fix_source_package_identity_drift')
 

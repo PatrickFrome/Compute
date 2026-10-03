@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37076000001.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37084599153.1`.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
@@ -140,3 +140,12 @@ Composed SBOM physical-successor correction (2026-10-02):
 - Shell/Critical/Self Update contract gates correctly found that `CONVERGENCE_CANDIDATE.md` still reserved the predecessor `0.7.0-dev.36991000001.1` while package.json had advanced. This is an evidence/governance mismatch, not permission to relabel the running physical producer;
 - the isolated source-only successor reserves `0.7.0-dev.37006000001.1`, updates package.json + package-lock + this convergence reservation together, and must complete source qualification before it can replace the physical PR head;
 - no automatic retry, release, promotion, live install, Guardian enrollment, Supervisor admission, or task dispatch is authorized by this correction.
+
+
+SLSA physical closure successor (2026-10-03):
+- consumed predecessor: `b8f2f438bf3d9450a301ebb525eb95181f6d464d` / `0.7.0-dev.37076000001.1`; never rerun or reuse that source/version;
+- functional source: `fae5eae066576a6cdd30f4f336769c2b1b4787ac`, source qualification run `37084599153`, full Linux and Windows Browser Node suites SUCCESS;
+- fresh monotonic package reservation: `0.7.0-dev.37084599153.1`, using that observed qualification run namespace; producer reservation preflight remains mandatory before packaging;
+- installed qualification backend: Meta `jhriwwsryeqsvvvufkok`, function V8 pinned to the qualified source; exact physical push workflow/ref/source/run/attempt binding, nonce approval unchanged;
+- one Package Smoke producer, existing Sigstore/Rekor attestation and independent verifier, exact downstream producer event fencing retained;
+- new source qualification and all ten physical workflows must pass on this successor before it is offered for installation; no claim of production release or real z.ai Agent task/result closure follows from packaging evidence.
