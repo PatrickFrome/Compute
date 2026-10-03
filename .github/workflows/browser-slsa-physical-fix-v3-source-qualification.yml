@@ -5,6 +5,7 @@ on:
     branches:
       - 'work/build-slsa-physical-fix-v3'
     paths:
+      - 'apps/metaengine-browser/CONVERGENCE_CANDIDATE.md'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
       - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
