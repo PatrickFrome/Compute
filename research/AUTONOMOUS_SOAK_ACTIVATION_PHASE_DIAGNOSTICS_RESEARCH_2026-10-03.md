@@ -102,6 +102,21 @@ The exact ACK write is intentionally authoritative and must not be weakened.
 
 The journal is bounded, and old/new physical startup journals are the same size class. Therefore blindly removing fsync, skipping durable ACK, or treating an advisory event as sufficient would weaken correctness without evidence.
 
+## Windows durability cost is a real candidate, not yet a diagnosis
+
+The durable ACK implementation performs two Node/libuv fsync operations per committed JSON write: one on the temporary file before rename and one on the committed file after rename.
+
+On Windows, libuv implements `uv_fs_fsync` / `uv_fs_fdatasync` with `FlushFileBuffers`:
+https://github.com/libuv/libuv/blob/v1.x/src/win/fs.c
+
+Microsoft documents that Windows normally uses write-back caching and that forcing buffers to storage changes the normal caching path:
+https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
+
+Microsoft also notes that `FlushFileBuffers` can be inefficient when invoked after every individual write because of disk-cache interactions:
+https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers
+
+This makes durable storage latency a credible source of occasional outliers, but it is still only a hypothesis. The historical green candidate used the exact same ACK code and durability path, so removing fsync or weakening the write is not justified. The phase diagnostics must first show whether the slow time is concentrated after the primary activation event.
+
 ## Guardian hypothesis falsification
 
 A first hypothesis was that the live Guardian EPERM error caused an every-heartbeat retry storm.
