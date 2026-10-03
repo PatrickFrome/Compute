@@ -256,6 +256,7 @@ const clientGoalStatus = (requestId) => ipcRenderer.invoke(
 );
 const clientConnectionStatus = () => ipcRenderer.invoke('metaengine:client:connection-status');
 const clientWorkReadiness = () => ipcRenderer.invoke('metaengine:client:work-readiness');
+const resumeClientAdmission = () => ipcRenderer.invoke('metaengine:client:resume-admission');
 const clientGuardianStatus = () => ipcRenderer.invoke('metaengine:client:guardian-status');
 const activateClientGuardian = () => ipcRenderer.invoke('metaengine:client:activate-guardian');
 
@@ -286,12 +287,15 @@ if (isPrimaryMe2PresentationDocument()) {
     goalStatus: clientGoalStatus,
     connectionStatus: clientConnectionStatus,
     workReadiness: clientWorkReadiness,
+    resumeAdmission: resumeClientAdmission,
     guardianStatus: clientGuardianStatus,
     activateGuardian: activateClientGuardian,
     typed_positive_api: true,
     generic_command_exposed: false,
     scheduler_authority: false,
     browser_actuation_authority: false,
+    admission_resume_requires_explicit_user_action: true,
+    admission_resume_automatic_retry_allowed: false,
     guardian_activation_requires_explicit_user_action: true,
     guardian_activation_accepts_caller_path: false,
     guardian_activation_accepts_caller_arguments: false,
