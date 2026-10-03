@@ -1,0 +1,154 @@
+{
+  "schema": "metaengine.browser.slsa-physical-closure-checkpoint.v1",
+  "recorded_at": "2026-10-03T01:14:00.859Z",
+  "repository": "PatrickFrome/Compute",
+  "source_head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+  "branch": "physical/build-slsa-provenance-v1",
+  "package_version": "0.7.0-dev.37084599153.1",
+  "state": "PHYSICAL_QUALIFICATION_RUNNING",
+  "consumed_predecessor": {
+    "source_head": "b8f2f438bf3d9450a301ebb525eb95181f6d464d",
+    "version": "0.7.0-dev.37076000001.1",
+    "rerun_allowed": false
+  },
+  "source_qualification": {
+    "functional_source": "fae5eae066576a6cdd30f4f336769c2b1b4787ac",
+    "run_id": 37084599153,
+    "exact_candidate_run_id": 37084981634,
+    "conclusion": "success",
+    "platforms": [
+      "ubuntu-24.04",
+      "windows-2025"
+    ],
+    "windows": {
+      "tests": 3966,
+      "pass": 3966,
+      "fail": 0,
+      "skipped": 0
+    },
+    "linux": {
+      "tests": 3966,
+      "pass": 3964,
+      "fail": 0,
+      "skipped": 2
+    }
+  },
+  "qualification_backend": {
+    "project_ref": "jhriwwsryeqsvvvufkok",
+    "function": "metaengine-client-installed-qualification-h205f22",
+    "version": 8,
+    "source_pin": "fae5eae066576a6cdd30f4f336769c2b1b4787ac",
+    "deployment_digest": "3c8c50a03d33b98d61fc9f724d6305cb83f73a2ed0b080cfb9366bc563f67dd4",
+    "rollback_source_pin": "719febc00bd8879715a0633e8fe9d85acacead41",
+    "unauthenticated_probe": 401,
+    "malformed_jwt_probe": 403,
+    "stable_version": 10,
+    "canary_version": 26
+  },
+  "runs": [
+    {
+      "workflow": "METAENGINE Browser Shell V1",
+      "id": 37085197339,
+      "number": 3557,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "METAENGINE Browser Self Update E2E",
+      "id": 37085197258,
+      "number": 3605,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "METAENGINE Browser Shell-First Dirty Profile V1",
+      "id": 37085197355,
+      "number": 1043,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "Browser Workspace Reincarnation V1",
+      "id": 37085197399,
+      "number": 572,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "METAENGINE Browser Final Runtime Activation V1",
+      "id": 37085197253,
+      "number": 2015,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "METAENGINE Browser Critical Audit V1",
+      "id": 37085197332,
+      "number": 2610,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "METAENGINE Browser Host Resilience Login Start V1",
+      "id": 37085197254,
+      "number": 520,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "workflow": "Browser Windows Installed Chat Qualification",
+      "id": 37085197296,
+      "number": 2434,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "workflow": "METAENGINE Browser Windows Autonomous Soak V1",
+      "id": 37085197298,
+      "number": 2686,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "workflow": "Browser Windows Package Smoke",
+      "id": 37085197260,
+      "number": 3156,
+      "attempt": 1,
+      "event": "push",
+      "head": "c80e0fb46dc8c701462beb7f74dd8ff45867ac74",
+      "status": "queued",
+      "conclusion": null
+    }
+  ],
+  "release_authorized": false,
+  "user_install_qualified": false,
+  "automatic_retry_allowed": false,
+  "authority_effect": false
+}
