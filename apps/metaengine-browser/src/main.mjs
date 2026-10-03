@@ -1968,6 +1968,8 @@ async function initNativeSupervisor() {
     supervisorLoopbackRpc = new SupervisorLoopbackRpcServer({
       executeCommand: executeNativeSupervisorCommand,
       snapshotProvider: () => nativeSupervisorState(),
+      clientConnectionStatusProvider: () => readClientConnectionStatus(),
+      clientWorkReadinessProvider: () => readClientWorkReadiness(),
     });
     await supervisorLoopbackRpc.start();
   } catch (error) {
@@ -2366,8 +2368,7 @@ ipcMain.handle('metaengine:client:goal-status', async (event, rawRequestId) => {
   assertShellSender(event);
   return refreshClientGoal(rawRequestId);
 });
-ipcMain.handle('metaengine:client:connection-status', async (event) => {
-  assertShellSender(event);
+function readClientConnectionStatus() {
   const status = nativeSupervisor?.connectionStatus?.() || Object.freeze({
     schema: 'metaengine.client.connection-status.v1',
     local_runtime_ready: false,
@@ -2401,6 +2402,10 @@ ipcMain.handle('metaengine:client:connection-status', async (event) => {
     legacy_daemon_feed_is_authority: false,
     authority_effect: false,
   });
+}
+ipcMain.handle('metaengine:client:connection-status', async (event) => {
+  assertShellSender(event);
+  return readClientConnectionStatus();
 });
 ipcMain.handle('metaengine:client:guardian-status', async (event) => {
   assertShellSender(event);
@@ -2431,8 +2436,7 @@ ipcMain.handle('metaengine:client:activate-guardian', async (event) => {
   const result = await ensureGuardianBootstrapLauncher().activate();
   return observer.record(result);
 });
-ipcMain.handle('metaengine:client:work-readiness', async (event) => {
-  assertShellSender(event);
+function readClientWorkReadiness() {
   return projectClientWorkReadiness({
     connection: nativeSupervisor?.connectionStatus?.() || {},
     snapshot: nativeSupervisor?.snapshot?.() || {},
@@ -2446,6 +2450,10 @@ ipcMain.handle('metaengine:client:work-readiness', async (event) => {
         && (!binding.conversation_url_sha256 || createHash('sha256').update(url).digest('hex') === binding.conversation_url_sha256));
     },
   });
+}
+ipcMain.handle('metaengine:client:work-readiness', async (event) => {
+  assertShellSender(event);
+  return readClientWorkReadiness();
 });
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);

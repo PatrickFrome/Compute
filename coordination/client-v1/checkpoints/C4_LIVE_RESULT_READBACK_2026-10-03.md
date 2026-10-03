@@ -53,6 +53,40 @@ then passed in isolation (3/3). Exact-head Linux/Windows source qualification is
 the terminal full-regression record for this branch; no consumed installer identity
 is rebuilt by that workflow.
 
+Exact source `9dd45174f8fe38d3677d8dc0b04a8ad68f38fded` completed source
+qualification in run `37133195328`: Windows 4013 PASS, Linux 4011 PASS with
+two existing Windows-only skips, and 16 SLSA/topology checks PASS on each OS.
+
+## Installed observation API repair
+
+A read-only live request proved that inherited method names (`constructor`,
+`toString`, `__proto__`) passed the loopback method table and reached command
+payload validation. No command or effect was supplied by the probe.
+The method allowlist now requires a string and an own property; coercible arrays
+and objects are rejected before any executor/provider call.
+
+Authenticated `client.connection-status` and `client.work-readiness` expose the
+same existing main-process observation owners as the product IPC. They accept
+no caller parameters, enforce complete schema/field/effect contracts, allowlist
+flat bounded fields, and omit keys, device payloads, page text and internal errors.
+Missing providers report unavailable. These methods cannot resume admission,
+enroll devices, issue commands, or prove completed work. Targeted checks and an
+independent review: 37 PASS. This repair is source work, not an installed patch.
+
+## Admission recovery development boundary
+
+The existing device-signed `devosResumeAdmission` route owns generation-floor
+CAS through SQL. It is absent from the primary Client bridge and the installed
+loopback command allowlist. A new narrow primary UI/API is needed before the
+operator can request recovery from that product surface. It must require a
+fresh exact floor, preserve the existing signed owner, and retain ambiguous
+attempts across restart without replaying them. A receipt alone must not turn
+the execution badge green; reconciliation needs an independent newer heartbeat.
+
+The installed Guardian bootstrap has no existing-service replacement protocol.
+It refuses binary/config/manifest drift. Activation cannot replace the separate
+older service; a separately qualified maintenance implementation remains needed.
+
 ## Next acceptance boundary
 
 After authoritative runtime and service recovery: one durable request through the
