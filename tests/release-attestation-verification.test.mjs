@@ -52,6 +52,7 @@ function predicate() {
     slsa_evidence_artifact_id: 7777,
     slsa_evidence_artifact_digest: 'sha256:' + '7'.repeat(64),
     slsa_provenance_evidence_sha256: '8'.repeat(64),
+    slsa_verification_material_sha256: '9'.repeat(64),
     automatic_promotion: false,
     promotion_authorized: false,
     authority_effect: false,
@@ -266,4 +267,15 @@ test('signed release predicate must retain the producer SLSA evidence binding', 
   value.predicate.slsa_builder_id = 'https://example.invalid/builder';
   value.qualificationVerification = verified(QUALIFICATION_PREDICATE, value.predicate);
   assert.throws(() => verifyReleaseAttestationEvidence(value), /release_attestation_slsa_builder_id_mismatch/);
+});
+
+
+test('signed release predicate requires an exact producer SLSA verification-material digest', () => {
+  const value = input();
+  value.predicate.slsa_verification_material_sha256 = 'invalid';
+  value.qualificationVerification = verified(QUALIFICATION_PREDICATE, value.predicate);
+  assert.throws(
+    () => verifyReleaseAttestationEvidence(value),
+    /release_attestation_slsa_verification_material_sha_invalid/,
+  );
 });
