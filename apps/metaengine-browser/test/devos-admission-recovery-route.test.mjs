@@ -22,6 +22,45 @@ function environment({ open = false, floor = 28 } = {}) {
   };
 }
 
+test('environment-state is a read-only authenticated reconciliation endpoint', async () => {
+  let calls = 0;
+  const route = createDevosSupervisorRoutes({
+    workspaceId: WORKSPACE,
+    rpc: async (name, args) => {
+      calls += 1;
+      assert.equal(name, 'devos_environment_state_v1');
+      assert.deepEqual(args, { p_workspace: WORKSPACE });
+      return environment({ open: false, floor: 28 });
+    },
+  });
+
+  const response = await route({
+    req: { method: 'POST' },
+    path: '/v1/devos/environment-state',
+    body: {},
+    clientId: 'device-test',
+  });
+  assert.equal(response.status, 200);
+  const body = await bodyOf(response);
+  assert.equal(body.schema, 'metaengine.devos.environment-state.v1');
+  assert.equal(body.state, 'CLOSED');
+  assert.equal(body.generation_floor, 28);
+  assert.equal(body.authoritative, true);
+  assert.equal(body.automatic_retry_allowed, false);
+  assert.equal(body.authority_effect, false);
+  assert.equal(calls, 1);
+
+  const rejected = await route({
+    req: { method: 'POST' },
+    path: '/v1/devos/environment-state',
+    body: { mutate: true },
+    clientId: 'device-test',
+  });
+  assert.equal(rejected.status, 400);
+  assert.equal((await bodyOf(rejected)).error, 'devos_environment_state_fields_forbidden');
+  assert.equal(calls, 1);
+});
+
 test('resume-admission requires device auth and explicit confirmation before any RPC', async () => {
   let calls = 0;
   const route = createDevosSupervisorRoutes({
