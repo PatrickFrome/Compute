@@ -1,0 +1,304 @@
+name: Browser Release Attestation SLSA Admission Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-release-attestation-slsa-binding-v1'
+    paths:
+      - '.github/workflows/browser-release-attestation-v1.yml'
+      - '.github/workflows/browser-release-attestation-slsa-admission-qualification.yml'
+      - 'scripts/release-attestation-verification.mjs'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANDIDATE_HEAD: a68774eb6ad5a0fe8014501163b0c67f608bed09
+  PACKAGE_VERSION: 0.7.0-dev.37086632570.1
+  PRODUCER_RUN_ID: '37087347663'
+  PRODUCER_RUN_ATTEMPT: '1'
+  SLSA_ARTIFACT_ID: '11261401099'
+  SLSA_ARTIFACT_DIGEST: sha256:6614a8fa2ccd358bbe1d423845912578d6a194c997eeb736a6222fd610d20331
+  SLSA_VERIFICATION_SHA256: 001eec5c0c7309bb2f1785f974e60fc068377d570168c5295840608bbac97a97
+  SLSA_EVIDENCE_SHA256: 60ba1405451fc1dc13e870143775ed827ca82e6f41bb5aa4b8b90c4bd8023218
+  INSTALLER_NAME: METAENGINE-Browser-Test-Setup-0.7.0-dev.37086632570.1-x64.exe
+  INSTALLER_SHA256: 937936bc51d431540762d170b7cc970fdfe1575b9879b885efdc22089e3f2455
+
+jobs:
+  read_only_admission:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact admission source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout exact physical candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.CANDIDATE_HEAD }}
+          path: candidate-src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Reacquire exact one-built installer and seal producer
+        working-directory: candidate-src/apps/metaengine-browser
+        shell: pwsh
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $work = Join-Path $env:RUNNER_TEMP 'release-slsa-admission-candidate'
+          $bindingPath = Join-Path $work 'consumer-binding.json'
+          ./scripts/qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead $env:CANDIDATE_HEAD -ExpectedProducerEvent push -WorkRoot $work -BindingPath $bindingPath -ConfigPath './electron-builder.test.json'
+          if ($LASTEXITCODE -ne 0) { throw 'release_slsa_admission_acquire_failed' }
+
+          ./scripts/qualified-installer-consumer.ps1 -Mode Verify -ExpectedHead $env:CANDIDATE_HEAD -ExpectedProducerEvent push -BindingPath $bindingPath -ConfigPath './electron-builder.test.json'
+          if ($LASTEXITCODE -ne 0) { throw 'release_slsa_admission_reverify_failed' }
+
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if (
+            [string]$binding.source_head -ne $env:CANDIDATE_HEAD -or
+            [string]$binding.installer_name -ne $env:INSTALLER_NAME -or
+            [string]$binding.installer_sha256 -ne $env:INSTALLER_SHA256 -or
+            [int64]$binding.producer_run_id -ne [int64]$env:PRODUCER_RUN_ID -or
+            [int64]$binding.producer_run_attempt -ne [int]$env:PRODUCER_RUN_ATTEMPT -or
+            [string]$binding.producer_event -ne 'push' -or
+            $binding.authority_effect -ne $false
+          ) {
+            throw 'release_slsa_admission_candidate_binding_invalid'
+          }
+
+          $proofPath = Join-Path $env:RUNNER_TEMP 'release-slsa-admission-producer-proof.json'
+          @{
+            schema='metaengine.browser.release-slsa-admission-producer-proof.v1'
+            source_head=$env:CANDIDATE_HEAD
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content $proofPath -Encoding utf8
+
+          ./scripts/qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead $env:CANDIDATE_HEAD -ExpectedProducerEvent push -BindingPath $bindingPath -ProofPath $proofPath -TimeoutMinutes 5 -WaitIntervalSeconds 10
+          if ($LASTEXITCODE -ne 0) { throw 'release_slsa_admission_producer_not_terminal_success' }
+
+          "ADMISSION_INSTALLER_PATH=$([string]$binding.installer_path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ADMISSION_BINDING_PATH=$bindingPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Download exact immutable Package Smoke SLSA evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ env.SLSA_ARTIFACT_ID }}
+          path: producer-slsa
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.PRODUCER_RUN_ID }}
+          digest-mismatch: error
+
+      - name: Prove immutable SLSA artifact identity and material hashes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'metaengine-release-slsa-admission'
+          }
+          $artifact = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:SLSA_ARTIFACT_ID" -Headers $headers
+          if (
+            [int64]$artifact.id -ne [int64]$env:SLSA_ARTIFACT_ID -or
+            [string]$artifact.name -ne "metaengine-browser-package-slsa-verification-$env:CANDIDATE_HEAD" -or
+            [string]$artifact.digest -ne $env:SLSA_ARTIFACT_DIGEST -or
+            $artifact.expired -eq $true -or
+            [int64]$artifact.workflow_run.id -ne [int64]$env:PRODUCER_RUN_ID -or
+            [string]$artifact.workflow_run.head_sha -ne $env:CANDIDATE_HEAD
+          ) {
+            throw 'release_slsa_admission_artifact_identity_invalid'
+          }
+
+          $verificationPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\producer-slsa" -Recurse -Filter 'browser-package-slsa-verification.json' | Select-Object -First 1).FullName
+          $evidencePath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\producer-slsa" -Recurse -Filter 'browser-package-slsa-provenance-evidence.json' | Select-Object -First 1).FullName
+          foreach ($path in @($verificationPath,$evidencePath)) {
+            if (-not $path -or -not (Test-Path $path -PathType Leaf)) { throw "release_slsa_admission_material_missing:$path" }
+          }
+          $verificationSha = (Get-FileHash $verificationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $evidenceSha = (Get-FileHash $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($verificationSha -ne $env:SLSA_VERIFICATION_SHA256 -or $evidenceSha -ne $env:SLSA_EVIDENCE_SHA256) {
+            throw 'release_slsa_admission_material_hash_drift'
+          }
+
+          $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
+          $expectedBuilder = "https://github.com/$env:GITHUB_REPOSITORY/.github/workflows/browser-windows-package-smoke.yml@refs/heads/physical/build-slsa-provenance-v1"
+          if (
+            $evidence.schema -ne 'metaengine.browser-fabric.provenance-evidence.v1' -or
+            $evidence.verified -ne $true -or
+            $evidence.builder_trusted -ne $true -or
+            [string]$evidence.builder_id -ne $expectedBuilder -or
+            [string]$evidence.source_sha -ne $env:CANDIDATE_HEAD -or
+            [string]$evidence.subject_name -ne $env:INSTALLER_NAME -or
+            [string]$evidence.subject_sha256 -ne $env:INSTALLER_SHA256 -or
+            [string]$evidence.predicate_type -ne 'https://slsa.dev/provenance/v1' -or
+            [string]$evidence.verifier_id -ne "github-slsa-package-smoke:$env:PRODUCER_RUN_ID:$env:PRODUCER_RUN_ATTEMPT" -or
+            $evidence.authority_effect -ne $false
+          ) {
+            throw 'release_slsa_admission_producer_evidence_invalid'
+          }
+
+          $document = Get-Content $verificationPath -Raw | ConvertFrom-Json
+          if (@($document).Count -ne 1 -or -not $document[0].attestation.bundle) {
+            throw 'release_slsa_admission_bundle_material_invalid'
+          }
+          $bundlePath = "$env:RUNNER_TEMP\release-slsa-admission.bundle.json"
+          $document[0].attestation.bundle | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $bundlePath -Encoding utf8
+          "ADMISSION_SLSA_BUNDLE=$bundlePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ADMISSION_SLSA_EVIDENCE_PATH=$evidencePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Cryptographically reverify exact Package Smoke SLSA bundle
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $trustedRoot = "$env:RUNNER_TEMP\release-slsa-admission-trusted-root.jsonl"
+          $root = & gh attestation trusted-root
+          if ($LASTEXITCODE -ne 0) { throw 'release_slsa_admission_trusted_root_failed' }
+          $root | Set-Content -LiteralPath $trustedRoot -Encoding utf8
+
+          $verificationOut = "$env:RUNNER_TEMP\release-slsa-admission-verification.json"
+          $args = @(
+            'attestation','verify',$env:ADMISSION_INSTALLER_PATH,
+            '--repo',$env:GITHUB_REPOSITORY,
+            '--bundle',$env:ADMISSION_SLSA_BUNDLE,
+            '--custom-trusted-root',$trustedRoot,
+            '--predicate-type','https://slsa.dev/provenance/v1',
+            '--signer-workflow',"$env:GITHUB_REPOSITORY/.github/workflows/browser-windows-package-smoke.yml",
+            '--signer-digest',$env:CANDIDATE_HEAD,
+            '--source-digest',$env:CANDIDATE_HEAD,
+            '--source-ref','refs/heads/physical/build-slsa-provenance-v1',
+            '--cert-oidc-issuer','https://token.actions.githubusercontent.com',
+            '--deny-self-hosted-runners',
+            '--format','json'
+          )
+          $json = & gh @args
+          if ($LASTEXITCODE -ne 0) { throw 'release_slsa_admission_cryptographic_verify_failed' }
+          $json | Set-Content -LiteralPath $verificationOut -Encoding utf8
+
+          "ADMISSION_TRUSTED_ROOT=$trustedRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ADMISSION_VERIFICATION=$verificationOut" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Semantically bind verified SLSA statement to the exact physical candidate
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $out = "$env:RUNNER_TEMP\release-slsa-admission-proof.json"
+          $script = @'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import { canonicalJson, verifySlsaProvenance } from './scripts/release-attestation-verification.mjs';
+
+          const verification = JSON.parse(fs.readFileSync(process.env.ADMISSION_VERIFICATION, 'utf8').replace(/^\uFEFF/, ''));
+          const evidence = JSON.parse(fs.readFileSync(process.env.ADMISSION_SLSA_EVIDENCE_PATH, 'utf8').replace(/^\uFEFF/, ''));
+          const statement = verifySlsaProvenance(
+            verification,
+            {
+              source_head: process.env.CANDIDATE_HEAD,
+              producer_run_id: Number(process.env.PRODUCER_RUN_ID),
+              producer_run_attempt: Number(process.env.PRODUCER_RUN_ATTEMPT),
+            },
+            process.env.INSTALLER_NAME,
+            process.env.INSTALLER_SHA256,
+          );
+          const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+          const result = {
+            schema: 'metaengine.browser.release-attestation-slsa-admission.v1',
+            source_head: process.env.CANDIDATE_HEAD,
+            package_version: process.env.PACKAGE_VERSION,
+            producer_run_id: Number(process.env.PRODUCER_RUN_ID),
+            producer_run_attempt: Number(process.env.PRODUCER_RUN_ATTEMPT),
+            installer_name: process.env.INSTALLER_NAME,
+            installer_sha256: process.env.INSTALLER_SHA256,
+            slsa_evidence_artifact_id: Number(process.env.SLSA_ARTIFACT_ID),
+            slsa_evidence_artifact_digest: process.env.SLSA_ARTIFACT_DIGEST,
+            slsa_evidence_sha256: process.env.SLSA_EVIDENCE_SHA256,
+            slsa_verification_material_sha256: process.env.SLSA_VERIFICATION_SHA256,
+            slsa_statement_sha256: sha256(Buffer.from(canonicalJson(statement), 'utf8')),
+            slsa_predicate_type: statement.predicateType,
+            builder_id: statement.predicate.runDetails.builder.id,
+            cryptographic_verification: true,
+            semantic_binding_verified: true,
+            builder_trusted: evidence.builder_trusted === true,
+            independent_verifier_no_signing_authority: true,
+            promotion_authorized: false,
+            release_published: false,
+            authority_effect: false,
+          };
+          if (!result.builder_trusted || result.slsa_predicate_type !== 'https://slsa.dev/provenance/v1') {
+            throw new Error('release_slsa_admission_semantic_result_invalid');
+          }
+          fs.writeFileSync(process.env.ADMISSION_PROOF_OUT, JSON.stringify(result, null, 2) + '\n');
+          process.stdout.write(JSON.stringify(result) + '\n');
+          '@
+          $env:ADMISSION_PROOF_OUT = $out
+          $script | node --input-type=module
+          if ($LASTEXITCODE -ne 0) { throw 'release_slsa_admission_semantic_verify_failed' }
+          if (-not (Test-Path $out -PathType Leaf)) { throw 'release_slsa_admission_proof_missing' }
+
+      - name: Prove admission qualification has zero signing or release authority
+        shell: python
+        run: |
+          from pathlib import Path
+          workflow = Path('.github/workflows/browser-release-attestation-slsa-admission-qualification.yml').read_text(encoding='utf-8').lower()
+          forbidden = [
+              'id-token: write',
+              'attestations: write',
+              'artifact-metadata: write',
+              'contents: write',
+              'actions: write',
+              'gh release',
+              'promotion_authorized=true',
+              'release_published=true',
+              'authority_effect=true',
+          ]
+          for token in forbidden:
+              if token in workflow:
+                  raise SystemExit(f'release_slsa_admission_authority_drift:{token}')
+          print('release_slsa_admission_zero_authority_pass')
+
+      - name: Upload read-only SLSA admission evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-release-slsa-admission-${{ env.CANDIDATE_HEAD }}
+          path: |
+            ${{ runner.temp }}/release-slsa-admission-proof.json
+            ${{ runner.temp }}/release-slsa-admission-verification.json
+            ${{ runner.temp }}/release-slsa-admission-trusted-root.jsonl
+            ${{ runner.temp }}/release-slsa-admission.bundle.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: Prove exact admission source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code HEAD
