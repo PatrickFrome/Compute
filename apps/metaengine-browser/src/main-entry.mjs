@@ -4,7 +4,6 @@ import {
   METAENGINE_BROWSER_APP_ID,
   validSingleInstanceLaunchData,
 } from './single-instance-guard.mjs';
-import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
 import {
   activateExistingPrimaryWindow,
   beginBrowserStartupJournal,
@@ -12,14 +11,6 @@ import {
   waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
 } from './browser-startup-observability.mjs';
-import {
-  inspectSelfUpdateStartup,
-  persistUpdatedSuccessorReceipt,
-  SUCCESSOR_STARTUP_PROBE_ONLY,
-} from './self-update-handoff.mjs';
-import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
-import { qualifyUpdatedSuccessorWhenHealthy, startSuccessorQualificationReprobeLoop } from './self-update-successor-qualification.mjs';
-import { shouldResumeSuccessorQualification } from './self-update-successor-recovery.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -181,6 +172,28 @@ if (!guard.primary) {
     });
   }
 
+  // A losing secondary needs only the singleton guard and activation readback.
+  // Keep primary-only Host/Self-Update modules behind the singleton decision:
+  // Node ESM evaluates static imports before this entry body, which otherwise
+  // forces every second-instance launch to load the entire primary module graph
+  // before requestSingleInstanceLock() can return false.
+  const primarySupportPromise = Promise.all([
+    import('./host-resilience-runtime.mjs'),
+    import('./self-update-handoff.mjs'),
+    import('./self-update-signed-heartbeat.mjs'),
+    import('./self-update-successor-qualification.mjs'),
+    import('./self-update-successor-recovery.mjs'),
+  ]).then(([hostResilience, handoff, signedHeartbeat, qualification, recovery]) => Object.freeze({
+    HostResilienceRuntime: hostResilience.HostResilienceRuntime,
+    inspectSelfUpdateStartup: handoff.inspectSelfUpdateStartup,
+    persistUpdatedSuccessorReceipt: handoff.persistUpdatedSuccessorReceipt,
+    SUCCESSOR_STARTUP_PROBE_ONLY: handoff.SUCCESSOR_STARTUP_PROBE_ONLY,
+    installSignedSupervisorHeartbeatQualificationHook: signedHeartbeat.installSignedSupervisorHeartbeatQualificationHook,
+    qualifyUpdatedSuccessorWhenHealthy: qualification.qualifyUpdatedSuccessorWhenHealthy,
+    startSuccessorQualificationReprobeLoop: qualification.startSuccessorQualificationReprobeLoop,
+    shouldResumeSuccessorQualification: recovery.shouldResumeSuccessorQualification,
+  }));
+
   // Load the Browser runtime before any slow startup awaits so it can register
   // privileged protocol metadata and its ready handler in time. The handler is
   // fenced on this promise and cannot create the Browser window until host
@@ -206,6 +219,17 @@ if (!guard.primary) {
         return null;
       });
   }
+
+  const {
+    HostResilienceRuntime,
+    inspectSelfUpdateStartup,
+    persistUpdatedSuccessorReceipt,
+    SUCCESSOR_STARTUP_PROBE_ONLY,
+    installSignedSupervisorHeartbeatQualificationHook,
+    qualifyUpdatedSuccessorWhenHealthy,
+    startSuccessorQualificationReprobeLoop,
+    shouldResumeSuccessorQualification,
+  } = await primarySupportPromise;
 
   let startupUpdateInspection = null;
   if (!selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe) {
