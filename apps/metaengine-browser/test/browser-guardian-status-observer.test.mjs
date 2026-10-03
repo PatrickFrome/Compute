@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  browserGuardianStatusObserverContract,
   createBrowserGuardianStatusObserver,
 } from '../src/browser-guardian-status-observer.mjs';
 import {
@@ -189,6 +190,60 @@ test('hung, malformed, or false-positive Guardian observations cannot become pos
   const rejectedNonReady = await contradictoryNonReady.observe({ force: true });
   assert.equal(rejectedNonReady.state, 'HOLD');
   assert.match(String(rejectedNonReady.observation_error), /nonready_proof_invalid/);
+});
+
+test('failed background Guardian reads back off for one TTL without weakening fail-closed state', async () => {
+  let nowMs = 10_000;
+  let calls = 0;
+  const observer = createBrowserGuardianStatusObserver({
+    readStatus: async () => {
+      calls += 1;
+      throw Object.assign(new Error('guardian_update_actuator_pipe_error:connect EPERM'), { code: 'GUARDIAN_PIPE_IO_ERROR' });
+    },
+    ttlMs: 10_000,
+    now: () => nowMs,
+  });
+
+  const first = await observer.observe();
+  assert.equal(calls, 1);
+  assert.equal(first.state, 'HOLD');
+  assert.equal(first.ready, false);
+  assert.equal(first.owner_binding_proven, false);
+  assert.equal(first.device_binding_proven, false);
+  assert.equal(first.automatic_retry_allowed, false);
+  assert.match(String(first.observation_error), /connect EPERM/);
+  assert.equal(first.observation_retry_not_before, new Date(20_000).toISOString());
+
+  // Native heartbeat/status projection may run every 2s, but the expensive
+  // failing pipe/bootstrap observation is not re-entered during the backoff.
+  for (let i = 0; i < 4; i += 1) {
+    nowMs += 2_000;
+    assert.equal(observer.refreshIfDue(), false);
+    const projected = await observer.observe();
+    assert.equal(projected.state, 'HOLD');
+  }
+  assert.equal(calls, 1);
+
+  // An explicit operator status request still performs one fresh bounded read.
+  await observer.observe({ force: true });
+  assert.equal(calls, 2);
+  assert.equal(observer.snapshot().automatic_retry_allowed, false);
+
+  // After the latest failed read's TTL expires, one background refresh may run.
+  nowMs += 10_001;
+  assert.equal(observer.refreshIfDue(), true);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(calls, 3);
+  assert.equal(observer.refreshIfDue(), false);
+});
+
+test('Guardian observer contract exposes bounded failed-read backoff without retry authority', () => {
+  const contract = browserGuardianStatusObserverContract();
+  assert.equal(contract.failed_background_read_backoff_ms, 10_000);
+  assert.equal(contract.forced_operator_read_bypasses_background_backoff, true);
+  assert.equal(contract.automatic_retry_allowed, false);
+  assert.equal(contract.authority_effect, false);
 });
 
 test('accepted Guardian reads advance revision while cached reads and invalidation do not', async () => {
