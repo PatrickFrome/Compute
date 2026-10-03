@@ -301,6 +301,7 @@ try {
 
   $burstElapsedMs = 0.0
   $burstIndividualP95Ms = 0.0
+  $burstIndividualSamplesMs = @()
   if ($ConcurrentBurstSize -gt 0) {
     $burstWatch = [Diagnostics.Stopwatch]::StartNew()
     $burst = New-Object 'System.Collections.Generic.List[object]'
@@ -340,6 +341,7 @@ try {
     $burstIndividualSorted = @($burstAcks | ForEach-Object { [double]$_.ElapsedMs } | Sort-Object)
     $burstP95Index = [Math]::Max(0, [Math]::Min($burstIndividualSorted.Count - 1, [Math]::Ceiling($burstIndividualSorted.Count * 0.95) - 1))
     $burstIndividualP95Ms = if ($burstIndividualSorted.Count -gt 0) { [double]$burstIndividualSorted[$burstP95Index] } else { 0.0 }
+    $burstIndividualSamplesMs = @($burstIndividualSorted | ForEach-Object { [Math]::Round([double]$_, 2) })
 
     $startup = Get-Content $journal -Raw | ConvertFrom-Json
     foreach ($row in $burstAcks) {
@@ -421,6 +423,7 @@ try {
   $proof | Add-Member -NotePropertyName automatic_initial_remote_load_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
   $proof | Add-Member -NotePropertyName activation_latency_sample_count -NotePropertyValue $latencySorted.Count -Force
+  $proof | Add-Member -NotePropertyName activation_latency_samples_ms -NotePropertyValue @($activationLatencies | ForEach-Object { [Math]::Round([double]$_, 2) }) -Force
   $proof | Add-Member -NotePropertyName activation_latency_min_ms -NotePropertyValue ([Math]::Round($latencyMinMs, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p50_ms -NotePropertyValue ([Math]::Round($p50Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p90_ms -NotePropertyValue ([Math]::Round($p90Ms, 2)) -Force
@@ -439,6 +442,7 @@ try {
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_size -NotePropertyValue $ConcurrentBurstSize -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_elapsed_ms -NotePropertyValue ([Math]::Round($burstElapsedMs, 2)) -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_individual_p95_ms -NotePropertyValue ([Math]::Round($burstIndividualP95Ms, 2)) -Force
+  $proof | Add-Member -NotePropertyName concurrent_activation_individual_samples_ms -NotePropertyValue @($burstIndividualSamplesMs) -Force
   $proof | Add-Member -NotePropertyName post_activation_hold_seconds -NotePropertyValue $PostActivationHoldSeconds -Force
   $proof | Add-Member -NotePropertyName working_set_before_bytes -NotePropertyValue $workingSetBefore -Force
   $proof | Add-Member -NotePropertyName working_set_after_bytes -NotePropertyValue $workingSetAfter -Force

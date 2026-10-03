@@ -94,3 +94,14 @@ test('activation evidence fingerprints the hosted measurement environment withou
   assert.ok(boundary >= 0 && fingerprint > boundary && gate > fingerprint);
   assert.match(source, /\[Environment\]::ProcessorCount/);
 });
+
+
+test('activation evidence retains bounded raw samples for paired same-runner analysis', () => {
+  assert.match(source, /activation_latency_samples_ms/);
+  assert.match(source, /concurrent_activation_individual_samples_ms/);
+  assert.match(source, /\$activationLatencies \| ForEach-Object/);
+  assert.match(source, /\$burstIndividualSamplesMs = @\(/);
+  const sequentialSamples = source.indexOf('activation_latency_samples_ms');
+  const p95Gate = source.indexOf('soak_activation_p95_budget_exceeded', sequentialSamples);
+  assert.ok(sequentialSamples >= 0 && p95Gate > sequentialSamples, 'raw samples are evidence only and must precede unchanged gates');
+});
