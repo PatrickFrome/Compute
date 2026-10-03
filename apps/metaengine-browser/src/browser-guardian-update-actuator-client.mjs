@@ -1,9 +1,11 @@
-import net from 'node:net';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 import { requestBrowserGuardianEnrollmentTicket } from './browser-guardian-enrollment-ticket-client.mjs';
 
 export const BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE = '\\\\.\\pipe\\METAENGINEBrowserGuardianUpdateV1';
 export const BROWSER_GUARDIAN_UPDATE_ACTUATOR_RESULT_SCHEMA = 'metaengine.browser-guardian.update-actuator-result.v1';
+export const BROWSER_GUARDIAN_PIPE_CLIENT_BINARY = 'METAENGINEBrowserGuardianPipeClient.exe';
 const MAX_WIRE_BYTES = 16 * 1024;
 const DEFAULT_TIMEOUT_MS = 135_000;
 
@@ -80,57 +82,105 @@ function normalizeResult(value) {
   });
 }
 
-export function guardianUpdatePipeConnectionError(error, { connected = false } = {}) {
-  const failure = new Error(`guardian_update_actuator_pipe_error:${String(error?.message || error).slice(0, 180)}`);
-  // A message mentioning ENOENT, access denial, timeout or disconnect is not
-  // endpoint absence. Only the structured OS code before connect qualifies.
-  failure.code = connected === false && error?.code === 'ENOENT'
+export function guardianUpdatePipeConnectionError(error, { stage = null, win32_error = null } = {}) {
+  const detail = String(error?.message || error || '').slice(0, 180);
+  const failure = new Error(`guardian_update_actuator_pipe_error:${detail}`);
+  const numeric = Number(win32_error);
+  // Endpoint absence is only accepted from the fixed native client's structured
+  // pre-connect WAIT/CONNECT result. Access denial, timeout and disconnect are
+  // never reclassified as endpoint absence.
+  failure.code = ['wait', 'connect'].includes(String(stage || '').toLowerCase())
+      && [2, 3].includes(numeric)
     ? 'GUARDIAN_PIPE_NOT_FOUND'
     : 'GUARDIAN_PIPE_IO_ERROR';
+  failure.guardian_stage = stage == null ? null : String(stage);
+  failure.win32_error = Number.isSafeInteger(numeric) ? numeric : null;
   return failure;
 }
 
+function guardianPipeClientPath() {
+  const resources = String(process.resourcesPath || '').trim();
+  if (!resources) throw new Error('guardian_pipe_client_resources_path_unavailable');
+  return path.join(resources, 'guardian-native', BROWSER_GUARDIAN_PIPE_CLIENT_BINARY);
+}
+
+function parseNativeClientError(stderr, exitCode) {
+  const text = String(stderr || '').trim().slice(0, 600);
+  const match = text.match(/guardian_pipe_client_error:([a-z_]+):(\d+)/i);
+  if (match) {
+    return guardianUpdatePipeConnectionError(
+      new Error(`${match[1]}:${match[2]}`),
+      { stage: match[1], win32_error: Number(match[2]) },
+    );
+  }
+  const error = new Error(`guardian_update_actuator_native_client_exit:${Number(exitCode)}:${text || 'no_stderr'}`);
+  error.code = 'GUARDIAN_PIPE_IO_ERROR';
+  return error;
+}
+
 export function requestGuardianUpdatePipe(wireRequest, {
-  pipeName = BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  spawnImpl = spawn,
 } = {}) {
   if (process.platform !== 'win32') throw new Error('guardian_update_actuator_windows_required');
+  if (typeof spawnImpl !== 'function') throw new Error('guardian_pipe_client_spawn_required');
   const request = String(wireRequest || '');
   if (!request.endsWith('\n') || Buffer.byteLength(request, 'utf8') > MAX_WIRE_BYTES) {
     throw new Error('guardian_update_actuator_wire_invalid');
   }
+  const timeout = Math.max(1_000, Math.min(DEFAULT_TIMEOUT_MS, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
+  const binary = guardianPipeClientPath();
+
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(pipeName);
-    const chunks = [];
-    let total = 0;
+    let child;
+    try {
+      child = spawnImpl(binary, ['--timeout-ms', String(timeout)], {
+        windowsHide: true,
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      return reject(guardianUpdatePipeConnectionError(error, { stage: 'spawn' }));
+    }
+
+    const stdout = [];
+    const stderr = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let settled = false;
-    let connected = false;
-    let deadlineTimer;
+    const deadline = setTimeout(() => {
+      if (settled) return;
+      try { child.kill(); } catch {}
+      finish(new Error('guardian_update_actuator_pipe_timeout'));
+    }, timeout + 5_000);
+
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
-      clearTimeout(deadlineTimer);
-      try { socket.destroy(); } catch {}
+      clearTimeout(deadline);
       if (error) reject(error);
       else resolve(value);
     };
-    const timeout = Math.max(1_000, Math.min(DEFAULT_TIMEOUT_MS, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
-    // Inactivity timeout alone can be prolonged indefinitely by partial data.
-    deadlineTimer = setTimeout(() => finish(new Error('guardian_update_actuator_pipe_timeout')), timeout);
-    socket.setTimeout(timeout);
-    socket.once('connect', () => {
+
+    child.once('error', (error) => finish(guardianUpdatePipeConnectionError(error, { stage: 'spawn' })));
+    child.stdout?.on('data', (chunk) => {
       if (settled) return;
-      connected = true;
-      socket.write(request, 'utf8');
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_WIRE_BYTES) return finish(new Error('guardian_update_actuator_response_too_large'));
+      stdout.push(Buffer.from(chunk));
     });
-    socket.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk) => {
       if (settled) return;
-      total += chunk.length;
-      if (total > MAX_WIRE_BYTES) return finish(new Error('guardian_update_actuator_response_too_large'));
-      chunks.push(Buffer.from(chunk));
-      const text = Buffer.concat(chunks).toString('utf8');
+      stderrBytes += chunk.length;
+      if (stderrBytes <= MAX_WIRE_BYTES) stderr.push(Buffer.from(chunk));
+    });
+    child.once('close', (code) => {
+      if (settled) return;
+      const stderrText = Buffer.concat(stderr).toString('utf8');
+      if (code !== 0) return finish(parseNativeClientError(stderrText, code));
+      const text = Buffer.concat(stdout).toString('utf8');
       const newline = text.indexOf('\n');
-      if (newline < 0) return;
+      if (newline < 0) return finish(new Error('guardian_update_actuator_response_json_invalid'));
       if (text.slice(newline + 1).trim() !== '') return finish(new Error('guardian_update_actuator_response_trailing_data'));
       let parsed;
       try { parsed = JSON.parse(text.slice(0, newline)); }
@@ -138,14 +188,10 @@ export function requestGuardianUpdatePipe(wireRequest, {
       try { return finish(null, normalizeResult(parsed)); }
       catch (error) { return finish(error); }
     });
-    socket.once('timeout', () => finish(new Error('guardian_update_actuator_pipe_timeout')));
-    socket.once('error', (error) => finish(guardianUpdatePipeConnectionError(error, { connected })));
-    socket.once('end', () => {
-      if (!settled) finish(new Error('guardian_update_actuator_pipe_ended_without_result'));
-    });
-    socket.once('close', () => {
-      if (!settled) finish(new Error('guardian_update_actuator_pipe_closed_without_result'));
-    });
+
+    child.stdin?.once('error', (error) => finish(guardianUpdatePipeConnectionError(error, { stage: 'stdin' })));
+    child.stdin?.end(request, 'utf8');
+    return undefined;
   });
 }
 
