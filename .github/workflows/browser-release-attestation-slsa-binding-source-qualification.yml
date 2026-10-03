@@ -1,0 +1,114 @@
+name: Browser Release Attestation SLSA Binding Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-release-attestation-slsa-binding-v1'
+    paths:
+      - '.github/workflows/browser-release-attestation-v1.yml'
+      - '.github/workflows/browser-release-attestation-slsa-binding-source-qualification.yml'
+      - 'scripts/release-attestation-verification.mjs'
+      - 'tests/release-attestation-verification.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse release attestation verifier
+        run: node --check scripts/release-attestation-verification.mjs
+
+      - name: Prove SLSA-bound release attestation semantics
+        run: node --test tests/release-attestation-verification.test.mjs
+
+      - name: Prove signer/verifier trust split and zero release authority
+        shell: python
+        run: |
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/browser-release-attestation-v1.yml').read_text(encoding='utf-8')
+          lower = workflow.lower()
+
+          required = [
+              "permissions: {}",
+              "id-token: write",
+              "attestations: write",
+              "artifact-metadata: write",
+              "metaengine-browser-package-slsa-verification-$sourcehead",
+              "metaengine.browser-fabric.provenance-evidence.v1",
+              "https://slsa.dev/provenance/v1",
+              "browser-windows-package-smoke.yml",
+              "refs/heads/physical/build-slsa-provenance-v1",
+              "release_slsa_provenance_cryptographic_verify_failed",
+              "'--slsa-verification',$slsaverification",
+              "slsa_cryptographic_verification",
+              "slsa_builder_trusted",
+              "slsa_statement_sha256",
+              "promotion_authorized=$false",
+              "release_published=$false",
+              "authority_effect=$false",
+          ]
+          for token in required:
+              if token.lower() not in lower:
+                  raise SystemExit(f'release_attestation_slsa_binding_missing:{token}')
+
+          signer = lower.split("  verify:", 1)[0]
+          verifier = "  verify:" + lower.split("  verify:", 1)[1]
+          for token in ["id-token: write", "attestations: write", "artifact-metadata: write"]:
+              if token not in signer:
+                  raise SystemExit(f'release_attestation_signer_permission_missing:{token}')
+              if token in verifier:
+                  raise SystemExit(f'release_attestation_verifier_has_signing_authority:{token}')
+
+          verifier_required = [
+              "'--predicate-type','https://slsa.dev/provenance/v1'",
+              "'--signer-workflow',$packagesignerworkflow",
+              "'--signer-digest','${{ inputs.source_head }}'",
+              "'--source-digest','${{ inputs.source_head }}'",
+              "'--source-ref','refs/heads/physical/build-slsa-provenance-v1'",
+              "'--deny-self-hosted-runners'",
+          ]
+          for token in verifier_required:
+              if token.lower() not in verifier:
+                  raise SystemExit(f'release_attestation_slsa_verify_constraint_missing:{token}')
+
+          forbidden = [
+              "gh release create",
+              "gh release edit",
+              "npm publish",
+              "electron-builder --publish",
+              "promotion_authorized=$true",
+              "release_published=$true",
+              "authority_effect=$true",
+          ]
+          for token in forbidden:
+              if token in lower:
+                  raise SystemExit(f'release_attestation_source_authority_drift:{token}')
+
+          print('release_attestation_slsa_source_contract_pass')
+
+      - name: Prove exact source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code HEAD
