@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/browser-release-attestation-v1.yml'
       - '.github/workflows/browser-release-attestation-slsa-binding-source-qualification.yml'
+      - '.github/workflows/browser-release-attestation-slsa-admission-qualification.yml'
       - 'scripts/release-attestation-verification.mjs'
       - 'tests/release-attestation-verification.test.mjs'
 
@@ -47,6 +48,7 @@ jobs:
 
           workflow = Path('.github/workflows/browser-release-attestation-v1.yml').read_text(encoding='utf-8')
           lower = workflow.lower()
+          admission = Path('.github/workflows/browser-release-attestation-slsa-admission-qualification.yml').read_text(encoding='utf-8').lower()
 
           required = [
               "permissions: {}",
@@ -106,6 +108,26 @@ jobs:
           for token in forbidden:
               if token in lower:
                   raise SystemExit(f'release_attestation_source_authority_drift:{token}')
+              if token in admission:
+                  raise SystemExit(f'release_attestation_admission_authority_drift:{token}')
+
+          admission_required = [
+              "permissions:",
+              "actions: read",
+              "contents: read",
+              "artifact-ids:",
+              "run-id:",
+              "digest-mismatch: error",
+              "release_slsa_admission_cryptographic_verify_failed",
+              "verifySlsaProvenance",
+              "independent_verifier_no_signing_authority",
+              "promotion_authorized: false",
+              "release_published: false",
+              "authority_effect: false",
+          ]
+          for token in admission_required:
+              if token.lower() not in admission:
+                  raise SystemExit(f'release_attestation_admission_contract_missing:{token}')
 
           print('release_attestation_slsa_source_contract_pass')
 
