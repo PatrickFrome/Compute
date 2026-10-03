@@ -79,16 +79,28 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ([string](bun --version) -ne '1.3.3') { throw 'client_source_visual_bun_version_drift' }
           $sourceUi = Join-Path $env:GITHUB_WORKSPACE 'apps\me2-ui'
-          Push-Location $sourceUi
+          $sourceLock = Join-Path $sourceUi 'bun.lock'
+          $sourceLockSha = (Get-FileHash $sourceLock -Algorithm SHA256).Hash.ToLowerInvariant()
+          $visualUi = Join-Path $env:RUNNER_TEMP 'me2-ui-source-visual'
+          Remove-Item $visualUi -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force $sourceUi $visualUi
+          $visualLock = Join-Path $visualUi 'bun.lock'
+          if ((Get-FileHash $visualLock -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sourceLockSha) {
+            throw 'client_source_visual_lock_copy_drift'
+          }
+          Push-Location $visualUi
           try {
             bun ci
             if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_bun_ci_failed' }
+            if ((Get-FileHash $visualLock -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sourceLockSha) {
+              throw 'client_source_visual_bun_ci_lock_mutation'
+            }
             bun run build
             if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_build_failed' }
             node scripts/pack-me2-ui.mjs
             if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_pack_failed' }
           } finally { Pop-Location }
-          $uiDist = Join-Path $sourceUi 'me2-ui-dist'
+          $uiDist = Join-Path $visualUi 'me2-ui-dist'
           node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root $uiDist --expected-sha $env:ME2_BUILD_SHA
           if ($LASTEXITCODE -ne 0) { throw 'client_source_visual_bundle_invalid' }
           $env:METAENGINE_R85_VISUAL_UI_DIR = $uiDist
