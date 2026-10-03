@@ -145,6 +145,7 @@ jobs:
 
           $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
           $expectedBuilder = "https://github.com/$env:GITHUB_REPOSITORY/.github/workflows/browser-windows-package-smoke.yml@refs/heads/physical/build-slsa-provenance-v1"
+          $expectedVerifier = "github-slsa-package-smoke:$($env:PRODUCER_RUN_ID):$($env:PRODUCER_RUN_ATTEMPT)"
           if (
             $evidence.schema -ne 'metaengine.browser-fabric.provenance-evidence.v1' -or
             $evidence.verified -ne $true -or
@@ -154,7 +155,7 @@ jobs:
             [string]$evidence.subject_name -ne $env:INSTALLER_NAME -or
             [string]$evidence.subject_sha256 -ne $env:INSTALLER_SHA256 -or
             [string]$evidence.predicate_type -ne 'https://slsa.dev/provenance/v1' -or
-            [string]$evidence.verifier_id -ne "github-slsa-package-smoke:$env:PRODUCER_RUN_ID:$env:PRODUCER_RUN_ATTEMPT" -or
+            [string]$evidence.verifier_id -ne $expectedVerifier -or
             $evidence.authority_effect -ne $false
           ) {
             throw 'release_slsa_admission_producer_evidence_invalid'
