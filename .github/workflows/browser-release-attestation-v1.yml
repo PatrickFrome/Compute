@@ -478,17 +478,32 @@ jobs:
           $predicatePath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'release-attestation-predicate.json' | Select-Object -First 1).FullName
           $sbomPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'browser-composed-sbom.cdx.json' | Select-Object -First 1).FullName
           $materialReceiptPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'release-attestation-material.json' | Select-Object -First 1).FullName
-          foreach ($path in @($installer,$qualificationBundle,$sbomBundle,$predicatePath,$sbomPath,$materialReceiptPath)) {
+          $slsaEvidenceMaterialPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'package-slsa-provenance-evidence.json' | Select-Object -First 1).FullName
+          $slsaVerificationMaterialPath = (Get-ChildItem -Path "$env:GITHUB_WORKSPACE\material" -Recurse -Filter 'package-slsa-verification.json' | Select-Object -First 1).FullName
+          foreach ($path in @($installer,$qualificationBundle,$sbomBundle,$predicatePath,$sbomPath,$materialReceiptPath,$slsaEvidenceMaterialPath,$slsaVerificationMaterialPath)) {
             if (-not $path -or -not (Test-Path $path -PathType Leaf)) { throw "release_attestation_independent_verify_material_missing:$path" }
           }
 
           $materialReceipt = Get-Content $materialReceiptPath -Raw | ConvertFrom-Json
+          $materialSlsaEvidenceSha = (Get-FileHash $slsaEvidenceMaterialPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $materialSlsaEvidence = Get-Content $slsaEvidenceMaterialPath -Raw | ConvertFrom-Json
           if (
             $materialReceipt.schema -ne 'metaengine.browser.release-attestation-material.v1' -or
             [string]$materialReceipt.signer_source_sha -ne $env:GITHUB_SHA -or
             [string]$materialReceipt.signer_source_ref -ne $env:GITHUB_REF -or
             [string]$materialReceipt.source_head -ne '${{ inputs.source_head }}' -or
             [string]$materialReceipt.installer_sha256 -ne $installerSha -or
+            [int64]$materialReceipt.slsa_evidence_artifact_id -le 0 -or
+            [string]$materialReceipt.slsa_evidence_artifact_digest -notmatch '^sha256:[a-f0-9]{64}$' -or
+            [string]$materialReceipt.slsa_provenance_evidence_sha256 -ne $materialSlsaEvidenceSha -or
+            $materialSlsaEvidence.schema -ne 'metaengine.browser-fabric.provenance-evidence.v1' -or
+            $materialSlsaEvidence.verified -ne $true -or
+            $materialSlsaEvidence.builder_trusted -ne $true -or
+            [string]$materialSlsaEvidence.source_sha -ne '${{ inputs.source_head }}' -or
+            [string]$materialSlsaEvidence.subject_name -ne $installerName -or
+            [string]$materialSlsaEvidence.subject_sha256 -ne $installerSha -or
+            [string]$materialSlsaEvidence.predicate_type -ne 'https://slsa.dev/provenance/v1' -or
+            $materialSlsaEvidence.authority_effect -ne $false -or
             $materialReceipt.cryptographic_verification -ne $false -or
             $materialReceipt.promotion_authorized -ne $false -or
             $materialReceipt.release_published -ne $false -or
