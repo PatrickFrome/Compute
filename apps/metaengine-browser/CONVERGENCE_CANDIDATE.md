@@ -1,5 +1,7 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37152993016.1`.
+
 Admission recovery convergence successor (2026-10-03):
 - exact predecessor `219ebe989a4f7ce2adfeb205a394a47ee55037cf` already consumed package identity `0.7.0-dev.37139234564.1` in physical Package Smoke run `37144386164`;
 - this successor changes Browser runtime bytes (ordered keepalive persistence, admission recovery freshness/restart HOLD semantics), so the predecessor identity MUST NOT be rebuilt;
