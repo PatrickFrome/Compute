@@ -79,9 +79,18 @@ lines, rather than an unanchored string split. The exact extracted scanner passe
 locally and rejects an injected privileged UI job in isolated scratch storage.
 The following exact-source run must pass every job before qualification is claimed.
 
-The local full parallel run passed 4155/4156 checks but hit a separate existing
-short rollover fixture failure; that same source's complete CI regression passed
-on both OS. This local result is retained rather than reported as a full pass.
+Corrective source `99c70f3f2a452ee3686636c22ee51d074975c9eb`, exact run
+`37150164212`, completed SUCCESS in all four jobs: Windows 4162 regression checks
+PASS; Linux 4160 PASS with two Windows-only skips; 16 SLSA/topology checks PASS
+per OS; frozen Client UI compilation, TypeScript and standalone checks PASS
+on both OS. The source-only scanner and installer consumer checks also passed.
+
+The earlier local parallel run passed 4155/4156 checks and failed a rollover
+scenario. Subsequent reproduction identified a real persistence race, rather
+than only a short fixture deadline: concurrent atomic replacement of the same
+keepalive checkpoint returned Windows EPERM. The narrowly scoped follow-up
+serializes eagerly captured checkpoints inside the existing keepalive owner.
+Its qualification is recorded separately in the persistence checkpoint.
 
 ## Remaining physical acceptance
 

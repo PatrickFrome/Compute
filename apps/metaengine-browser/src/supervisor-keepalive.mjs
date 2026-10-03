@@ -225,6 +225,7 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch, r
 
 export class SupervisorKeepalive {
   #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch; #processIncarnationId;
+  #saveTail = Promise.resolve();
 
   constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), processIncarnationId = null, minWakeIntervalMs = 60000, maxCyclesPerEpoch = null } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('keepalive_persistence_required');
@@ -956,6 +957,13 @@ export class SupervisorKeepalive {
   async #persist() {
     this.#state.version = SUPERVISOR_KEEPALIVE_VERSION;
     this.#state.updated_at = iso(this.#clock);
-    await this.#save(clone(this.#state));
+    // Capture each checkpoint before waiting: concurrent lifecycle mutations
+    // must not replace an older caller's snapshot or race atomic disk renames.
+    const snapshot = clone(this.#state);
+    const saved = this.#saveTail.then(() => this.#save(snapshot));
+    // A failed save still rejects its caller. Only the ordering tail consumes
+    // that rejection so later independent checkpoints can run without retry.
+    this.#saveTail = saved.catch(() => {});
+    await saved;
   }
 }
