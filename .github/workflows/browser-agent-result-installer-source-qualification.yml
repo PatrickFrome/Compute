@@ -55,12 +55,18 @@ jobs:
 
       - name: Prove ME2 UI TypeScript and production build
         if: matrix.os == 'ubuntu-24.04'
-        working-directory: apps/me2-ui
         env:
           ME2_BUILD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          source_ui="$GITHUB_WORKSPACE/apps/me2-ui"
+          source_lock_sha="$(sha256sum "$source_ui/bun.lock" | awk '{print $1}')"
+          ui_root="$RUNNER_TEMP/me2-ui-source-proof"
+          rm -rf "$ui_root"
+          cp -a "$source_ui" "$ui_root"
+          cd "$ui_root"
           bun ci
+          test "$(sha256sum bun.lock | awk '{print $1}')" = "$source_lock_sha"
           bun run build
 
       - name: Prove one producer SLSA topology and version reservation
