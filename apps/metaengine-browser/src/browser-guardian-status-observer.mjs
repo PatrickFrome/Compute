@@ -163,11 +163,25 @@ export function createBrowserGuardianStatusObserver({
   let lastConfirmed = null;
   let observedAtMs = 0;
   let lastError = null;
+  let retryNotBeforeMs = 0;
   let invalidatedReason = 'GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE';
   let inFlight = null;
 
   function isFresh(at = now()) {
     return Boolean(cached && observedAtMs > 0 && at - observedAtMs <= ttl);
+  }
+
+  // A failed background observation is itself bounded negative evidence: it
+  // cannot prove Guardian readiness, but immediately retrying the same failing
+  // pipe/filesystem path on every 2s heartbeat can monopolize the Electron main
+  // process. Suppress only automatic background refreshes for one observation
+  // TTL. Explicit force=true operator reads still bypass this backoff.
+  function backgroundRetrySuppressed(at = now()) {
+    return Boolean(lastError && retryNotBeforeMs > at);
+  }
+
+  function retryProjection() {
+    return retryNotBeforeMs > 0 ? new Date(retryNotBeforeMs).toISOString() : null;
   }
 
   function projected(at = now()) {
@@ -181,6 +195,7 @@ export function createBrowserGuardianStatusObserver({
         observation_generation: generation,
         observation_revision: revision,
         observation_error: lastError,
+        observation_retry_not_before: retryProjection(),
         invalidated_reason: invalidatedReason,
       });
     }
@@ -208,6 +223,7 @@ export function createBrowserGuardianStatusObserver({
       observation_generation: generation,
       observation_revision: revision,
       observation_error: lastError,
+      observation_retry_not_before: retryProjection(),
       invalidated_reason: invalidatedReason,
       automatic_retry_allowed: false,
       authority_effect: false,
@@ -232,11 +248,13 @@ export function createBrowserGuardianStatusObserver({
       revision += 1;
       lastConfirmed = historical(cached, observedAtMs);
       lastError = null;
+      retryNotBeforeMs = 0;
       invalidatedReason = null;
       return projected();
     } catch (error) {
       if (capturedGeneration === generation) {
         lastError = String(error?.message || error).slice(0, 240);
+        retryNotBeforeMs = now() + ttl;
       }
       return projected();
     } finally {
@@ -245,7 +263,7 @@ export function createBrowserGuardianStatusObserver({
   }
 
   async function observe({ force = false } = {}) {
-    if (!force && isFresh()) return projected();
+    if (!force && (isFresh() || backgroundRetrySuppressed())) return projected();
     if (inFlight) return inFlight;
     const capturedGeneration = generation;
     const promise = boundedRead(capturedGeneration).finally(() => {
@@ -256,7 +274,7 @@ export function createBrowserGuardianStatusObserver({
   }
 
   function refreshIfDue() {
-    if (inFlight || isFresh()) return false;
+    if (inFlight || isFresh() || backgroundRetrySuppressed()) return false;
     void observe().catch(() => {});
     return true;
   }
@@ -267,6 +285,7 @@ export function createBrowserGuardianStatusObserver({
     cached = null;
     observedAtMs = 0;
     lastError = null;
+    retryNotBeforeMs = 0;
     invalidatedReason = String(reason || 'GUARDIAN_OBSERVATION_INVALIDATED').slice(0, 120);
     return projected();
   }
@@ -284,6 +303,7 @@ export function createBrowserGuardianStatusObserver({
     revision += 1;
     lastConfirmed = historical(cached, observedAtMs);
     lastError = null;
+    retryNotBeforeMs = 0;
     invalidatedReason = null;
     return projected();
   }
@@ -303,6 +323,8 @@ export function browserGuardianStatusObserverContract() {
     shared_settings_and_heartbeat_observer: true,
     single_inflight_read: true,
     bounded_read_deadline_ms: BROWSER_GUARDIAN_STATUS_OBSERVATION_DEADLINE_MS,
+    failed_background_read_backoff_ms: BROWSER_GUARDIAN_STATUS_OBSERVATION_TTL_MS,
+    forced_operator_read_bypasses_background_backoff: true,
     freshness_ttl_ms: BROWSER_GUARDIAN_STATUS_OBSERVATION_TTL_MS,
     stale_ready_is_positive: false,
     stale_current_proof_flags_cleared: true,
