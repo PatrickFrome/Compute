@@ -24,7 +24,8 @@ if ($ExpectedHead -notmatch '^[0-9a-fA-F]{40}$') {
   throw 'qualified_installer_expected_head_invalid'
 }
 $ExpectedHead = $ExpectedHead.ToLowerInvariant()
-if (-not $ExpectedProducerEvent `
+if ($Mode -ne 'Verify' `
+    -and -not $ExpectedProducerEvent `
     -and [string]$env:GITHUB_EVENT_NAME -eq 'push' `
     -and [string]$env:GITHUB_REF -eq 'refs/heads/physical/build-slsa-provenance-v1') {
   $ExpectedProducerEvent = 'push'
