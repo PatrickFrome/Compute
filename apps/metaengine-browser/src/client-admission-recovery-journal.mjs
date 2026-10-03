@@ -79,6 +79,8 @@ function isAuthoritativeState(value) {
     && value.schema === 'metaengine.devos.environment-state.v1'
     && value.authoritative === true
     && value.authority_effect === false
+    && UUID_RE.test(String(value.read_request_id || ''))
+    && Number.isFinite(Date.parse(String(value.observed_at || '')))
     && Number.isSafeInteger(Number(value.generation_floor))
     && Number(value.generation_floor) >= 0
     && typeof value.refill_enabled === 'boolean'
