@@ -63,6 +63,8 @@ jobs:
               "slsa_cryptographic_verification",
               "slsa_builder_trusted",
               "slsa_statement_sha256",
+              "slsa_verification_material_sha256",
+              "release_slsa_producer_bundle_material_invalid",
               "promotion_authorized=$false",
               "release_published=$false",
               "authority_effect=$false",
@@ -82,6 +84,7 @@ jobs:
           verifier_required = [
               "'--predicate-type','https://slsa.dev/provenance/v1'",
               "'--signer-workflow',$packagesignerworkflow",
+              "'--bundle',$slsabundle",
               "'--signer-digest',",
               "'--source-digest',",
               "'--source-ref','refs/heads/physical/build-slsa-provenance-v1'",
