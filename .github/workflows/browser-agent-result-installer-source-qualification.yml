@@ -7,6 +7,7 @@ on:
       - 'work/client-v1-live-result-readback-v1'
       - 'work/client-v1-admission-recovery-v1'
       - 'work/client-v1-admission-readiness-submit-fence-v1'
+      - 'work/guardian-observation-failure-backoff-v1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
