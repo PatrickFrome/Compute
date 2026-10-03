@@ -61,6 +61,7 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { ClientGoalJournal } from './client-goal-journal.mjs';
+import { ClientAdmissionRecoveryJournal } from './client-admission-recovery-journal.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 
@@ -97,6 +98,7 @@ let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
 let clientGoalJournal = null;
+let clientAdmissionRecoveryJournal = null;
 
 function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
@@ -288,6 +290,10 @@ function clientGoalJournalStatePath() {
   return path.join(app.getPath('userData'), 'metaengine-client-goal-journal-v1.json');
 }
 
+function clientAdmissionRecoveryJournalStatePath() {
+  return path.join(app.getPath('userData'), 'metaengine-client-admission-recovery-v1.json');
+}
+
 async function ensureClientGoalJournal() {
   if (clientGoalJournal) {
     await clientGoalJournal.load();
@@ -306,6 +312,25 @@ async function ensureClientGoalJournal() {
   });
   await clientGoalJournal.load();
   return clientGoalJournal;
+}
+
+async function ensureClientAdmissionRecoveryJournal() {
+  if (clientAdmissionRecoveryJournal) {
+    await clientAdmissionRecoveryJournal.load();
+    return clientAdmissionRecoveryJournal;
+  }
+  const target = clientAdmissionRecoveryJournalStatePath();
+  clientAdmissionRecoveryJournal = new ClientAdmissionRecoveryJournal({
+    loadState: async () => JSON.parse(await fs.readFile(target, 'utf8')),
+    saveState: async (snapshot) => {
+      const temp = target + '.tmp';
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(temp, JSON.stringify(snapshot, null, 2) + '\n', { mode: 0o600 });
+      await fs.rename(temp, target);
+    },
+  });
+  await clientAdmissionRecoveryJournal.load();
+  return clientAdmissionRecoveryJournal;
 }
 
 async function initDevOSSessionLayouts() {
@@ -2407,6 +2432,198 @@ ipcMain.handle('metaengine:client:connection-status', async (event) => {
   assertShellSender(event);
   return readClientConnectionStatus();
 });
+async function resumeClientAdmissionOnce() {
+  if (!nativeSupervisor
+    || typeof nativeSupervisor.devosEnvironmentState !== 'function'
+    || typeof nativeSupervisor.resumeDevosAdmission !== 'function') {
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'UNAVAILABLE',
+      reason: 'NATIVE_SUPERVISOR_RECOVERY_UNAVAILABLE',
+      confirmed_open: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+  const connection = readClientConnectionStatus();
+  if (connection.admin_ready !== true || connection.access_tier !== 'ADMIN') {
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'HOLD',
+      reason: 'ADMIN_CONNECTION_REQUIRED',
+      confirmed_open: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  const journal = await ensureClientAdmissionRecoveryJournal();
+  let observed;
+  try {
+    observed = await nativeSupervisor.devosEnvironmentState();
+  } catch (error) {
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'READBACK_UNAVAILABLE',
+      reason: String(error?.message || error).slice(0, 180),
+      confirmed_open: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  // A durable pending intent is never replayed. The next explicit user action
+  // performs readback-only reconciliation. If absence is proven, a *later*
+  // explicit action may create a fresh attempt.
+  if (journal.hasPending()) {
+    const reconciled = await journal.reconcile(observed);
+    const confirmed = reconciled?.state === 'OPEN_CONFIRMED';
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: confirmed ? 'CONFIRMED_OPEN' : reconciled?.state || 'RECONCILE_REQUIRED',
+      reason: confirmed ? null : (reconciled?.last_error || 'PRIOR_EFFECT_RECONCILED_NO_REPLAY'),
+      confirmed_open: confirmed,
+      expected_generation_floor: reconciled?.expected_generation_floor ?? null,
+      observed_generation_floor: Number.isSafeInteger(Number(observed?.generation_floor)) ? Number(observed.generation_floor) : null,
+      prior_effect_replayed: false,
+      fresh_readback_required: true,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  if (observed.state === 'OPEN'
+    && observed.continuous_service_allowed === true
+    && observed.refill_enabled === true
+    && observed.supervisor_admission_enabled === true) {
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'ALREADY_OPEN',
+      reason: null,
+      confirmed_open: true,
+      observed_generation_floor: Number(observed.generation_floor),
+      effect_attempted: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  const generationFloor = Number(observed.generation_floor);
+  if (!Number.isSafeInteger(generationFloor) || generationFloor < 0 || observed.authoritative !== true) {
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'HOLD',
+      reason: 'AUTHORITATIVE_GENERATION_FLOOR_REQUIRED',
+      confirmed_open: false,
+      effect_attempted: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  const attempt = await journal.begin({
+    attempt_id: randomUUID(),
+    expected_generation_floor: generationFloor,
+  });
+  await journal.markSendIntent();
+
+  let receipt;
+  try {
+    receipt = await nativeSupervisor.resumeDevosAdmission(generationFloor);
+  } catch (error) {
+    await journal.markAmbiguous(error);
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'RECONCILE_REQUIRED',
+      reason: String(error?.message || error).slice(0, 180),
+      confirmed_open: false,
+      attempt_id: attempt.attempt_id,
+      expected_generation_floor: generationFloor,
+      effect_attempted: true,
+      effect_outcome_known: false,
+      prior_effect_replayed: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  if (receipt?.effect_state === 'ABSENT') {
+    await journal.markAmbiguous(receipt?.error || 'RESUME_EFFECT_ABSENT');
+    let after = null;
+    try { after = await nativeSupervisor.devosEnvironmentState(); } catch {}
+    const reconciled = after ? await journal.reconcile(after) : journal.latest();
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: reconciled?.state || 'RECONCILE_REQUIRED',
+      reason: receipt?.error || 'RESUME_EFFECT_ABSENT',
+      confirmed_open: reconciled?.state === 'OPEN_CONFIRMED',
+      attempt_id: attempt.attempt_id,
+      expected_generation_floor: generationFloor,
+      effect_attempted: true,
+      effect_outcome_known: true,
+      prior_effect_replayed: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  await journal.recordReceipt(receipt);
+  let after;
+  try {
+    after = await nativeSupervisor.devosEnvironmentState();
+  } catch (error) {
+    await journal.markAmbiguous(error);
+    return Object.freeze({
+      schema: 'metaengine.client.admission-recovery-result.v1',
+      state: 'RECONCILE_REQUIRED',
+      reason: 'POST_EFFECT_READBACK_UNAVAILABLE',
+      confirmed_open: false,
+      attempt_id: attempt.attempt_id,
+      expected_generation_floor: generationFloor,
+      effect_attempted: true,
+      effect_outcome_known: true,
+      receipt_received: true,
+      prior_effect_replayed: false,
+      retry_requires_new_user_action: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  const reconciled = await journal.reconcile(after);
+  const confirmed = reconciled?.state === 'OPEN_CONFIRMED';
+  return Object.freeze({
+    schema: 'metaengine.client.admission-recovery-result.v1',
+    state: confirmed ? 'CONFIRMED_OPEN' : reconciled?.state || 'RECONCILE_REQUIRED',
+    reason: confirmed ? null : 'POST_EFFECT_OPEN_NOT_PROVEN',
+    confirmed_open: confirmed,
+    attempt_id: attempt.attempt_id,
+    expected_generation_floor: generationFloor,
+    observed_generation_floor: Number(after.generation_floor),
+    effect_attempted: true,
+    effect_outcome_known: true,
+    receipt_received: true,
+    independent_post_effect_readback: true,
+    prior_effect_replayed: false,
+    retry_requires_new_user_action: true,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+ipcMain.handle('metaengine:client:resume-admission', async (event) => {
+  assertShellSender(event);
+  return resumeClientAdmissionOnce();
+});
+
 ipcMain.handle('metaengine:client:guardian-status', async (event) => {
   assertShellSender(event);
   return ensureGuardianStatusObserver().observe({ force: true });
@@ -2513,6 +2730,7 @@ async function startAfterReady() {
   startupControlState = await loadNativeSupervisorControlState(supervisorControlStatePath());
   await initDevOSSessionLayouts();
   await ensureClientGoalJournal();
+  await ensureClientAdmissionRecoveryJournal();
   if (isDevelopmentPlaneSmoke || isSmoke) configureUserSession();
   if (isDevelopmentPlaneSmoke) {
     try {
