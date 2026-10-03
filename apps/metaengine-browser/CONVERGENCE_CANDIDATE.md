@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37086632570.1`.
+Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37103459439.1`.
+
+Agent result installer successor (2026-10-03):
+- user explicitly requested a new installer containing all current changes;
+- qualified implementation `3123af9eb17f810c4c08f599040637f1cc5bed01` includes canonical SLSA Package Smoke builder validation from `29d76d8f51bbb307d74f55a306223445516875d1`, bounded transcript census/tail harvesting, size-drift guards and non-claim prompt templates;
+- source qualification `37103459439` passed Linux and Windows; its namespace reserves fresh monotonic version `0.7.0-dev.37103459439.1` before any physical build;
+- predecessor `a68774eb6ad5a0fe8014501163b0c67f608bed09` / `0.7.0-dev.37086632570.1` is consumed and must not be rebuilt;
+- qualify this versioned source first, then fast-forward the canonical physical SLSA branch once; Package Smoke remains the sole producer and all ten workflows must consume the same source/version/installer;
+- generic AX assistant authorship and positive generation-completion proof remain separate useful-work gates; packaging does not close C4/C5 live Agent qualification.
 
 Guardian observation successor: Settings and Native Supervisor heartbeat now share one bounded single-flight status observer. A cached positive result becomes fail-closed STALE after 10s; activation invalidates the prior observation generation before any physical owner/bootstrap path, so a late pre-activation READY cannot overwrite the newer state. Guardian is carried inside the already-qualified `host_resilience` plane in both ordinary heartbeat and realtime observation pushes, so no Edge/canary source drift is required. This is diagnostic only: it does not open Supervisor admission or add retry/execution authority.
 
