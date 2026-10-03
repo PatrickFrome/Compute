@@ -50,3 +50,26 @@ test('activation latency boundary excludes post-ACK harness journal parsing', ()
   assert.match(source, /SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT/);
   assert.doesNotMatch(source.slice(journalRead, addLatency), /\$activationStarted\.Stop\(\)/);
 });
+
+
+test('latency evidence partitions process startup, primary activation and durable ACK exit without relaxing SLO', () => {
+  assert.match(source, /launch_requested_at/);
+  assert.match(source, /process_started_at/);
+  assert.match(source, /primary_activation_at/);
+  assert.match(source, /process_exited_at/);
+  assert.match(source, /launch_to_process_start_ms/);
+  assert.match(source, /process_start_to_primary_activation_ms/);
+  assert.match(source, /primary_activation_to_process_exit_ms/);
+  assert.match(source, /activation_latency_samples/);
+  assert.match(source, /activation_latency_p50_ms/);
+  assert.match(source, /activation_latency_max_ms/);
+  assert.match(source, /activation_latency_over_budget_count/);
+  assert.match(source, /activation_latency_longest_consecutive_over_budget/);
+  assert.match(source, /activation_process_start_to_primary_event_p95_ms/);
+  assert.match(source, /activation_primary_event_to_secondary_exit_p95_ms/);
+  assert.match(source, /activation_latency_phase_boundaries/);
+
+  // Diagnostics explain a red gate; they never convert it to success.
+  assert.match(source, /if \(\$p95Ms -gt \$ActivationP95BudgetMs\) \{ throw "soak_activation_p95_budget_exceeded/);
+  assert.doesNotMatch(source, /ActivationP95BudgetMs\s*=\s*[2-9][0-9]{3,}/);
+});
