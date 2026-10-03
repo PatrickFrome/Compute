@@ -267,6 +267,34 @@ test('observability contract rejects stderr-only and mixed-version singleton sil
   assert.equal(contract.authority_effect, false);
 });
 
+test('losing secondary decides singleton ownership before primary-only module graph loads', async () => {
+  const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  const guardAt = source.indexOf('const guard = acquirePrimaryInstance(app');
+  const primaryBranchAt = source.indexOf('} else {', source.indexOf('if (!guard.primary)'));
+  const activationHandlerAt = source.indexOf("app.on('second-instance'", primaryBranchAt);
+  const supportAt = source.indexOf('const primarySupportPromise = Promise.all([', activationHandlerAt);
+
+  assert.ok(guardAt >= 0 && primaryBranchAt > guardAt);
+  assert.ok(activationHandlerAt > primaryBranchAt, 'primary activation handler must exist before primary-only loading');
+  assert.ok(supportAt > activationHandlerAt, 'primary-only module loading must start after the second-instance handler is registered');
+
+  for (const moduleName of [
+    'host-resilience-runtime.mjs',
+    'self-update-handoff.mjs',
+    'self-update-signed-heartbeat.mjs',
+    'self-update-successor-qualification.mjs',
+    'self-update-successor-recovery.mjs',
+  ]) {
+    assert.doesNotMatch(
+      source.slice(0, guardAt),
+      new RegExp(`from ['"]\\./${moduleName.replaceAll('.', '\\.') }['"]`),
+      `${moduleName} must not be a static pre-lock import`,
+    );
+    const dynamicAt = source.indexOf(`import('./${moduleName}')`, guardAt);
+    assert.ok(dynamicAt > activationHandlerAt, `${moduleName} must load only in the primary branch`);
+  }
+});
+
 test('ESM primary arms Electron ready continuation instead of awaiting app.whenReady', async () => {
   const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /await\s+app\.whenReady\s*\(/);
