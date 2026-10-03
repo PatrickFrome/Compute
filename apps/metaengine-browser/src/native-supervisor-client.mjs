@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   NativeSupervisorClient as CoreNativeSupervisorClient,
   NATIVE_SUPERVISOR_BASE,
@@ -659,7 +660,8 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     if (!identity?.device_id) throw new Error('native_supervisor_environment_state_device_not_enrolled');
     const path = '/v1/devos/environment-state';
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
-    const bodyText = '{}';
+    const readRequestId = randomUUID().toLowerCase();
+    const bodyText = JSON.stringify({ read_request_id: readRequestId });
     const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
     const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
       method: 'POST',
@@ -677,7 +679,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     const checked = normalizeDevosRuntimeControl(body);
     if (checked.authoritative !== true || checked.authority_effect !== false
       || !Number.isSafeInteger(Number(checked.generation_floor))
-      || Number(checked.generation_floor) < 0) {
+      || Number(checked.generation_floor) < 0
+      || checked.read_request_id !== readRequestId
+      || !Number.isFinite(Date.parse(String(checked.observed_at || '')))) {
       throw new Error('native_supervisor_environment_state_readback_invalid');
     }
     return Object.freeze(structuredClone(checked));
