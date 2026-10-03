@@ -434,18 +434,20 @@ test('supervisor client exposes devosResumeAdmission and metaObjectiveSet on the
   const client = new NativeSupervisorClient({
     identity,
     fetchImpl: async (url, init) => {
-      posted.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null });
+      posted.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : null, signal: init?.signal });
       return new Response(JSON.stringify({ resumed: true, schema: 'metaengine.devos.environment-resume.v1' }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
     getState: async () => ({}),
     executeCommand: async () => ({}),
     version: 'test',
   });
-  const resumed = await client.devosResumeAdmission({ expected_generation_floor: 28 });
+  const abortController = new AbortController();
+  const resumed = await client.devosResumeAdmission({ expected_generation_floor: 28, signal: abortController.signal });
   assert.equal(resumed.resumed, true);
   assert.equal(posted.length, 1);
   assert.ok(posted[0].url.includes('/v1/devos/resume-admission'));
   assert.deepEqual(posted[0].body, { confirm: true, expected_generation_floor: 28 });
+  assert.equal(posted[0].signal, abortController.signal, 'recovery deadline must reach the signed fetch without entering its payload');
 
   posted.length = 0;
   const activation = await client.metaObjectiveSet({ objective: 'Ship it' });

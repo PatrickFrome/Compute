@@ -61,6 +61,7 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { ClientGoalJournal } from './client-goal-journal.mjs';
+import { createClientAdmissionRecovery, assertClientAdmissionRecoverySender } from './client-admission-recovery.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 
@@ -97,6 +98,7 @@ let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
 let clientGoalJournal = null;
+let clientAdmissionRecovery = null;
 
 function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
@@ -308,6 +310,28 @@ async function ensureClientGoalJournal() {
   return clientGoalJournal;
 }
 
+function ensureClientAdmissionRecovery() {
+  if (clientAdmissionRecovery) return clientAdmissionRecovery;
+  const target = path.join(app.getPath('userData'), 'metaengine-client-admission-recovery-v1.json');
+  clientAdmissionRecovery = createClientAdmissionRecovery({
+    readConnection: () => readClientConnectionStatus(),
+    readWorkReadiness: () => readClientWorkReadiness(),
+    readSnapshot: () => nativeSupervisor?.snapshot?.() || {},
+    resumeAdmission: (request) => {
+      if (!nativeSupervisor?.devosResumeAdmission) throw new Error('client_admission_owner_unavailable');
+      return nativeSupervisor.devosResumeAdmission(request);
+    },
+    loadState: async () => JSON.parse(await fs.readFile(target, 'utf8')),
+    saveState: async (snapshot) => {
+      const temp = target + '.tmp';
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(temp, JSON.stringify(snapshot) + '\n', { mode: 0o600, flush: true });
+      await fs.rename(temp, target);
+    },
+  });
+  return clientAdmissionRecovery;
+}
+
 async function initDevOSSessionLayouts() {
   if (devosSessionLayoutsLoaded) return devosSessionLayouts.snapshot();
   devosSessionLayoutsLoaded = true;
@@ -367,6 +391,13 @@ async function saveOwnerSafetyGateState(state) {
 
 function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
+}
+
+function assertPrimaryClientRecoverySender(event) {
+  assertShellSender(event);
+  assertClientAdmissionRecoverySender(event, {
+    webContents: shellView.webContents, primaryShellMode, primaryShellUrl,
+  });
 }
 
 function startupDegradedSnapshot() {
@@ -2454,6 +2485,16 @@ function readClientWorkReadiness() {
 ipcMain.handle('metaengine:client:work-readiness', async (event) => {
   assertShellSender(event);
   return readClientWorkReadiness();
+});
+ipcMain.handle('metaengine:client:admission-recovery-status', async (event) => {
+  assertPrimaryClientRecoverySender(event);
+  return ensureClientAdmissionRecovery().status();
+});
+ipcMain.handle('metaengine:client:resume-admission', async (event, request) => {
+  assertPrimaryClientRecoverySender(event);
+  // A dedicated operator intent reaches the existing device-signed SQL CAS.
+  // The controller persists ambiguity and never changes runtime authority.
+  return ensureClientAdmissionRecovery().resume(request);
 });
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);

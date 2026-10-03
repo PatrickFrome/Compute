@@ -907,14 +907,14 @@ export class NativeSupervisorClient {
   // through the same device-signed rail as every other supervisor action.
   // Both methods are thin transport — all validation/CAS lives in the edge
   // routes and the SQL beneath them; neither grants any authority here.
-  async devosResumeAdmission({ expected_generation_floor = null } = {}) {
+  async devosResumeAdmission({ expected_generation_floor = null, signal = null } = {}) {
     const payload = { confirm: true };
     if (expected_generation_floor != null) {
       const floor = Number(expected_generation_floor);
       if (!Number.isSafeInteger(floor) || floor < 0) throw new Error('native_supervisor_devos_resume_floor_invalid');
       payload.expected_generation_floor = floor;
     }
-    const response = await this.#signedRequest('/v1/devos/resume-admission', { payload });
+    const response = await this.#signedRequest('/v1/devos/resume-admission', { payload, signal });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`native_supervisor_devos_resume_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
     return body;

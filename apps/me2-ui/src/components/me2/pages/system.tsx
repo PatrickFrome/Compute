@@ -53,6 +53,28 @@ type GuardianStatusT = {
   automatic_retry_allowed: false;
   authority_effect: false;
 };
+type AdmissionRecoveryT = {
+  schema: "metaengine.client.admission-recovery.v1";
+  state: "IDLE" | "PENDING" | "READBACK_REQUIRED" | "AMBIGUOUS" | "CONFIRMED" | "NO_EFFECT" | "HOLD";
+  reason: string;
+  expected_generation_floor: number | null;
+  requested_at: string | null;
+  fresh_readback_required: boolean;
+  automatic_retry_allowed: false;
+  scheduler_authority: false;
+  authority_effect: false;
+};
+type AdmissionBridge = {
+  admissionRecoveryStatus?: () => Promise<AdmissionRecoveryT>;
+  resumeAdmission?: (request: { confirm: true; expected_generation_floor: number }) => Promise<AdmissionRecoveryT>;
+};
+function validAdmissionRecovery(value: AdmissionRecoveryT) {
+  return value?.schema === "metaengine.client.admission-recovery.v1"
+    && ["IDLE", "PENDING", "READBACK_REQUIRED", "AMBIGUOUS", "CONFIRMED", "NO_EFFECT", "HOLD"].includes(value.state)
+    && typeof value.reason === "string"
+    && typeof value.fresh_readback_required === "boolean"
+    && value.automatic_retry_allowed === false && value.scheduler_authority === false && value.authority_effect === false;
+}
 const suState = (v: string): SysState =>
   v === "UP_TO_DATE" ? "Completed" : v === "DIVERGED" ? "Failed" : "Degraded";
 const SHORT7 = (h: string | null) => (h ? h.slice(0, 7) : "—");
@@ -96,6 +118,59 @@ export function SystemPage() {
   const [suBusy, setSuBusy] = useState(false);
   const [guardian, setGuardian] = useState<GuardianStatusT | null>(null);
   const [guardianBusy, setGuardianBusy] = useState(false);
+  const [admissionRecovery, setAdmissionRecovery] = useState<AdmissionRecoveryT | null>(null);
+  const [admissionBusy, setAdmissionBusy] = useState(false);
+  const admissionInFlight = useRef(false);
+  const admissionEpoch = useRef(0);
+
+  // Follow the existing observation refresh. This read never dispatches work.
+  useEffect(() => {
+    let current = true;
+    const epoch = admissionEpoch.current;
+    const bridge = (window as Window & { metaengineClient?: AdmissionBridge }).metaengineClient;
+    if (area !== "runtime" || !bridge?.admissionRecoveryStatus) {
+      setAdmissionRecovery(null);
+      return;
+    }
+    void bridge.admissionRecoveryStatus().then((next) => {
+      if (current && epoch === admissionEpoch.current) setAdmissionRecovery(validAdmissionRecovery(next) ? next : null);
+    }).catch(() => {
+      if (current && epoch === admissionEpoch.current) setAdmissionRecovery(null);
+    });
+    return () => { current = false; };
+  }, [area, nativeRuntime.readback]);
+
+  const resumeFloor = workReadiness?.generation_floor;
+  const canResumeAdmission = nativeRuntime.state === "LIVE"
+    && nativeRuntime.readback?.connection.admin_ready === true
+    && nativeRuntime.readback?.connection.cloud_control_state === "CONNECTED"
+    && workReadiness?.state === "PAUSED" && workReadiness.reason === "WORKSPACE_EXECUTION_PAUSED"
+    && workReadiness.heartbeat_fresh === true
+    && typeof resumeFloor === "number" && Number.isSafeInteger(resumeFloor) && resumeFloor >= 0
+    && resumeFloor === workReadiness.local_generation_floor
+    && admissionRecovery?.fresh_readback_required === false
+    && ["IDLE", "CONFIRMED", "NO_EFFECT"].includes(admissionRecovery.state);
+
+  const resumeAdmission = useCallback(async () => {
+    const bridge = (window as Window & { metaengineClient?: AdmissionBridge }).metaengineClient;
+    if (admissionInFlight.current || !canResumeAdmission || typeof resumeFloor !== "number" || !bridge?.resumeAdmission) return;
+    admissionInFlight.current = true;
+    admissionEpoch.current += 1;
+    setAdmissionBusy(true);
+    setAdmissionRecovery(null);
+    try {
+      const next = await bridge.resumeAdmission({ confirm: true, expected_generation_floor: resumeFloor });
+      setAdmissionRecovery(validAdmissionRecovery(next) ? next : null);
+    } catch {
+      toast({ title: "Resume status unavailable", description: "Refresh status before another recovery action.", variant: "destructive" });
+    } finally {
+      // An acknowledgment never sets the execution badge. Only its existing
+      // independent Native Supervisor readback can change work readiness.
+      await refreshClientRuntimeStatus().catch(() => {});
+      admissionInFlight.current = false;
+      setAdmissionBusy(false);
+    }
+  }, [canResumeAdmission, resumeFloor, toast]);
 
   // ── загрузчики ──
   const loadTokens = useCallback(async () => {
@@ -466,6 +541,24 @@ export function SystemPage() {
               <dt className="text-zinc-500">Verified agents</dt><dd>{workReadiness?.proven_agent_count ?? "Unavailable"}</dd>
               <dt className="text-zinc-500">Generation</dt><dd>{workReadiness ? `${workReadiness.generation_floor ?? "?"} / profile ${workReadiness.local_generation_floor ?? "?"}` : "Unavailable"}</dd>
             </dl>
+            <div className="mt-3 border-t border-zinc-800 pt-3" data-testid="workspace-admission-recovery">
+              <p className="text-[12px] text-zinc-400">Resume workspace execution. Queued tasks may begin after admission is restored.</p>
+              <button type="button" data-testid="workspace-resume" disabled={admissionBusy || !canResumeAdmission}
+                onClick={() => void resumeAdmission()}
+                className="mt-2 min-h-8 border border-cyan-700 bg-cyan-950/30 px-3 text-[12px] text-cyan-200 hover:bg-cyan-950/60 disabled:border-zinc-800 disabled:bg-transparent disabled:text-zinc-600">
+                {admissionBusy ? "Waiting for status…" : "Resume queued work"}
+              </button>
+              <p role="status" className="mt-2 text-[12px] text-zinc-400">
+                {admissionRecovery?.state === "CONFIRMED" ? "Workspace admission restored. Agent readiness is shown above."
+                  : admissionRecovery?.state === "AMBIGUOUS" ? "The response was not confirmed. Resume is blocked until a fresh workspace status confirms recovery."
+                  : admissionRecovery?.fresh_readback_required || admissionBusy ? "Recovery requested. Waiting for a fresh workspace status."
+                  : admissionRecovery?.state === "NO_EFFECT" ? "The workspace changed. Refresh status before resuming."
+                  : admissionRecovery?.state === "HOLD" ? "Recovery is unavailable. Refresh status to inspect the current workspace."
+                  : !admissionRecovery ? "Recovery status is unavailable. This Browser must provide the recovery API."
+                  : !canResumeAdmission ? "Resume requires a connected admin device and a current paused workspace."
+                  : "Select Resume queued work to continue."}
+              </p>
+            </div>
           </section> : null}
           {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="guardian-runtime-status" aria-labelledby="guardian-runtime-title">
             <div className="flex items-center justify-between gap-3">
