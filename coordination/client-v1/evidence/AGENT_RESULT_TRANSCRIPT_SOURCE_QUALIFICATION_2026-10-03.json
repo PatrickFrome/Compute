@@ -1,0 +1,203 @@
+{
+  "schema": "metaengine.client.agent-result-transcript-source-evidence.v1",
+  "classification": "SOURCE_QUALIFIED_WITH_SYNTHETIC_CONTRACTS",
+  "date": "2026-10-03",
+  "timezone": "Europe/Moscow",
+  "source_sha": "3123af9eb17f810c4c08f599040637f1cc5bed01",
+  "branch": "work/client-v1-agent-result-transcript-tail-v1",
+  "parent_sha": "29d76d8f51bbb307d74f55a306223445516875d1",
+  "run": {
+    "id": 37103459439,
+    "url": "https://github.com/PatrickFrome/Compute/actions/runs/37103459439",
+    "event": "push",
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "completed_at": "2026-10-03T06:36:00Z"
+  },
+  "jobs": [
+    {
+      "id": 111147336854,
+      "name": "contract (windows-2025)",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout exact source",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup exact Node runtime",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install frozen Browser dependencies",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove transcript and prompt claim boundaries",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove complete Browser regression",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove independent SLSA verifier contracts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove qualification is source only",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove exact source unchanged",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup exact Node runtime",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout exact source",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 111147336999,
+      "name": "contract (ubuntu-24.04)",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout exact source",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Setup exact Node runtime",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install frozen Browser dependencies",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove transcript and prompt claim boundaries",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove complete Browser regression",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove independent SLSA verifier contracts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove qualification is source only",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Prove exact source unchanged",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Setup exact Node runtime",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout exact source",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "windows": {
+    "focused": {
+      "tests": 39,
+      "pass": 39,
+      "fail": 0,
+      "skip": 0
+    },
+    "browser": {
+      "tests": 4013,
+      "pass": 4013,
+      "fail": 0,
+      "skip": 0
+    },
+    "slsa": {
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "linux": {
+    "focused": {
+      "tests": 39,
+      "pass": 39,
+      "fail": 0,
+      "skip": 0
+    },
+    "browser": {
+      "tests": 4013,
+      "pass": 4011,
+      "fail": 0,
+      "skip": 2
+    },
+    "slsa": {
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "authority_effect": false,
+  "installer_rebuilt": false,
+  "production_changed": false,
+  "live_installed_agent_useful_work_proven": false,
+  "assistant_message_authorship_proven": false,
+  "positive_generation_completion_proven": false,
+  "canonical_C2_complete": false
+}

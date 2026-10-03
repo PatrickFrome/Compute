@@ -1,0 +1,185 @@
+{
+  "date": "2026-10-03",
+  "timezone": "Europe/Moscow",
+  "classification": "REMOTE_CI_AND_DOWNLOADED_PROOF_READBACK",
+  "physical_source": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+  "runs": [
+    {
+      "id": 37087347661,
+      "name": "METAENGINE Browser Critical Audit V1",
+      "path": ".github/workflows/browser-critical-audit-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347661"
+    },
+    {
+      "id": 37087347656,
+      "name": "METAENGINE Browser Shell-First Dirty Profile V1",
+      "path": ".github/workflows/browser-shell-first-dirty-profile-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347656"
+    },
+    {
+      "id": 37087347653,
+      "name": "METAENGINE Browser Final Runtime Activation V1",
+      "path": ".github/workflows/browser-final-runtime-activation-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347653"
+    },
+    {
+      "id": 37087347662,
+      "name": "Browser Windows Installed Chat Qualification",
+      "path": ".github/workflows/browser-windows-installed-chat-qualification.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347662"
+    },
+    {
+      "id": 37087347663,
+      "name": "Browser Windows Package Smoke",
+      "path": ".github/workflows/browser-windows-package-smoke.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347663"
+    },
+    {
+      "id": 37087347631,
+      "name": "METAENGINE Browser Windows Autonomous Soak V1",
+      "path": ".github/workflows/browser-windows-autonomous-soak-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347631"
+    },
+    {
+      "id": 37087347643,
+      "name": "Browser Workspace Reincarnation V1",
+      "path": ".github/workflows/browser-workspace-reincarnation-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347643"
+    },
+    {
+      "id": 37087347640,
+      "name": "METAENGINE Browser Host Resilience Login Start V1",
+      "path": ".github/workflows/browser-host-resilience-login-start-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347640"
+    },
+    {
+      "id": 37087347652,
+      "name": "METAENGINE Browser Shell V1",
+      "path": ".github/workflows/metaengine-browser-shell-v1.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347652"
+    },
+    {
+      "id": 37087347623,
+      "name": "METAENGINE Browser Self Update E2E",
+      "path": ".github/workflows/metaengine-browser-self-update-e2e.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087347623"
+    },
+    {
+      "id": 37087134491,
+      "name": "Browser SLSA Physical Fix V3 Source Qualification",
+      "path": ".github/workflows/browser-slsa-physical-fix-v3-source-qualification.yml",
+      "event": "push",
+      "attempt": 1,
+      "sha": "a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37087134491"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 11261401099,
+      "name": "metaengine-browser-package-slsa-verification-a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "size": 16653,
+      "digest": "sha256:6614a8fa2ccd358bbe1d423845912578d6a194c997eeb736a6222fd610d20331",
+      "expired": false
+    },
+    {
+      "id": 11261231922,
+      "name": "metaengine-browser-package-version-0.7.0-dev.37086632570.1",
+      "size": 861,
+      "digest": "sha256:e48a265f111ba0e5ba97ff5e2407efcc477e4e76e6b324333705d01e9d3d1138",
+      "expired": false
+    },
+    {
+      "id": 11261117931,
+      "name": "metaengine-browser-windows-package-evidence-a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "size": 739366,
+      "digest": "sha256:917bc78714528dc26e744efab8cb96d814d291929f7d4b7990b3893161d8c69d",
+      "expired": false
+    },
+    {
+      "id": 11260817954,
+      "name": "metaengine-browser-windows-candidate-a68774eb6ad5a0fe8014501163b0c67f608bed09",
+      "size": 159164639,
+      "digest": "sha256:5ec7ff9c36329504cdc46d0f5fa2023720e7e1637e8731b28537768abfcec4f6",
+      "expired": false
+    }
+  ],
+  "source_qualification": {
+    "sha": "29d76d8f51bbb307d74f55a306223445516875d1",
+    "run_id": 37101948651,
+    "status": "completed",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 111143061116,
+        "name": "contract (windows-2025)",
+        "conclusion": "success"
+      },
+      {
+        "id": 111143061267,
+        "name": "contract (ubuntu-24.04)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "archive_sha256_verified": {
+    "11261117931": "917bc78714528dc26e744efab8cb96d814d291929f7d4b7990b3893161d8c69d",
+    "11261401099": "6614a8fa2ccd358bbe1d423845912578d6a194c997eeb736a6222fd610d20331"
+  },
+  "installer_source_proof": "Downloaded windows-package-proof.json",
+  "installer_bytes_rehashed_in_this_turn": false,
+  "live_installed_agent_qualified_in_this_turn": false,
+  "authority_effect": false
+}
