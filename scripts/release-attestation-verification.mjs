@@ -149,6 +149,7 @@ function verifyQualificationPredicate(predicate, expectedName, expectedSha) {
     fail('release_attestation_slsa_artifact_digest_invalid');
   }
   exactSha256(predicate.slsa_provenance_evidence_sha256, 'release_attestation_slsa_evidence_sha_invalid');
+  exactSha256(predicate.slsa_verification_material_sha256, 'release_attestation_slsa_verification_material_sha_invalid');
   if (predicate.automatic_promotion !== false
       || predicate.promotion_authorized !== false
       || predicate.authority_effect !== false) {
