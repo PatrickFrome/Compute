@@ -1,6 +1,12 @@
 # METAENGINE Browser convergence candidate
 
-Client work-readiness recovery candidate on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37136054065.1`.
+Client admission-readiness submit-fence successor on the qualified ADMIN.1/UI.1/R109/C4.6 authority base. Reserved package identity is `0.7.0-dev.37139234564.1`.
+
+Admission readiness successor (2026-10-03):
+- physical predecessor `d9aab89f55d119f9fb9f5660872c8627104fc591` consumed `0.7.0-dev.37136054065.1` and failed before NSIS packaging in R97 visual qualification because GoalComposer cached BLOCKED readiness kept Run disabled after the authoritative fixture had become READY;
+- source-only successor `ba5ce72775186fa79995728261ddf4e1f8644549` fixes the race by requiring a fresh typed work-readiness read immediately before submit; exact source qualification `37139234564` passed Linux and Windows including the ME2 production build;
+- `0.7.0-dev.37136054065.1` MUST NOT be retried or rebuilt; this successor advances to fresh identity `0.7.0-dev.37139234564.1`;
+- the fresh versioned source must itself be source-qualified before the canonical physical branch is advanced once.
 
 Agent result installer successor (2026-10-03):
 - user explicitly requested a new installer containing all current changes;
