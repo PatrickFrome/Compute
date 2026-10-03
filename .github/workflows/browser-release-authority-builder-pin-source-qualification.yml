@@ -1,0 +1,68 @@
+name: Browser Release Authority Builder Pin Source Qualification
+
+on:
+  push:
+    branches:
+      - 'work/build-release-authority-builder-pin-v1'
+    paths:
+      - 'apps/metaengine-browser/src/browser-fabric-release-authority-gate.mjs'
+      - 'apps/metaengine-browser/test/browser-fabric-release-canonical-builder.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sovereign-fabric-foundation.test.mjs'
+      - '.github/workflows/browser-release-authority-builder-pin-source-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup exact Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm ci --no-audit --no-fund
+
+      - name: Prove canonical builder and sovereign fabric contracts
+        working-directory: apps/metaengine-browser
+        run: node --test test/browser-fabric-release-canonical-builder.test.mjs test/browser-sovereign-fabric-foundation.test.mjs
+
+      - name: Prove complete Browser regression
+        working-directory: apps/metaengine-browser
+        run: npm test
+
+      - name: Prove existing independent SLSA verifier contracts
+        run: node --test tests/browser-slsa-provenance-verification.test.mjs
+
+      - name: Prove qualification is source only
+        shell: python
+        run: |
+          from pathlib import Path
+          workflow = Path('.github/workflows/browser-release-authority-builder-pin-source-qualification.yml').read_text(encoding='utf-8').lower()
+          runtime = workflow.split('      - name: prove qualification is source only', 1)[0]
+          for forbidden in ['id-token: write', 'attestations: write', 'contents: write', 'actions: write', 'gh release', 'electron-builder', 'workflow_dispatch', 'start-process']:
+              if forbidden in runtime:
+                  raise SystemExit(f'builder_pin_source_forbidden:{forbidden}')
+          print('release_authority_builder_pin_source_only_pass')
+
+      - name: Prove exact source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code HEAD

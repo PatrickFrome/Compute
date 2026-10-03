@@ -562,7 +562,7 @@ test('authority cannot advance on Git SHA alone and requires immutable release p
       verified_at: '2026-09-05T04:00:20Z',
       verified: true,
       builder_trusted: true,
-      builder_id: 'github-actions:browser-release',
+      builder_id: 'https://github.com/PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml@refs/heads/release/self-update-ambiguity-live-v2',
       source_sha: candidate,
       subject_name: trusted.installer_name,
       subject_sha256: trusted.installer_sha256,

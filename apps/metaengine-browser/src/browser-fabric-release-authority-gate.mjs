@@ -8,6 +8,13 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
 const SAFE_ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,191}$/;
 const SLSA_PROVENANCE_V1 = 'https://slsa.dev/provenance/v1';
+// Evidence must come from the same single installer producer trusted by the
+// cryptographic verifier. A caller's builder_trusted flag cannot widen policy.
+const PACKAGE_SMOKE_BUILDER = 'https://github.com/PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml';
+const CANONICAL_BUILDERS = new Set([
+  `${PACKAGE_SMOKE_BUILDER}@refs/heads/release/self-update-ambiguity-live-v2`,
+  `${PACKAGE_SMOKE_BUILDER}@refs/heads/physical/build-slsa-provenance-v1`,
+]);
 
 function hold(reason, extra = {}) {
   return Object.freeze({
@@ -92,6 +99,7 @@ function provenanceEvidenceViolation(evidence, release, candidate, nowMs) {
       || evidence.builder_trusted !== true
       || evidence.predicate_type !== SLSA_PROVENANCE_V1
       || evidence.authority_effect !== false) return 'SLSA_PROVENANCE_PROOF_REQUIRED';
+  if (!CANONICAL_BUILDERS.has(evidence.builder_id)) return 'SLSA_PROVENANCE_BUILDER_NOT_CANONICAL';
   if (String(evidence.source_sha || '').toLowerCase() !== candidate) return 'SLSA_PROVENANCE_SOURCE_MISMATCH';
   if (evidence.subject_name !== release.installer_name) return 'SLSA_PROVENANCE_SUBJECT_NAME_MISMATCH';
   return digest(evidence.subject_sha256) === digest(release.installer_sha256)
@@ -195,6 +203,7 @@ export function browserFabricReleaseGateContract() {
     immutable_release_required: true,
     immutable_release_attestation_required: true,
     provenance_required: true,
+    provenance_canonical_builder_required: true,
     provenance_source_sha_exact: true,
     provenance_subject_name_and_digest_exact: true,
     independent_fast_forward_proof_required: true,
