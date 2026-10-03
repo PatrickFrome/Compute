@@ -11,9 +11,8 @@ import { NativeSupervisorClient } from '../src/native-supervisor-client.mjs';
 const WORKSPACE = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';
 const READ_REQUEST = '33333333-3333-4333-8333-333333333333';
-const OBSERVED_AT = '2026-10-03T20:00:05.000Z';
 
-function state({ floor = 28, open = false, readRequestId = READ_REQUEST, observedAt = OBSERVED_AT } = {}) {
+function state({ floor = 28, open = false, readRequestId = READ_REQUEST, observedAt = new Date().toISOString() } = {}) {
   return {
     schema: 'metaengine.devos.environment-state.v1',
     state: open ? 'OPEN' : 'CLOSED',
@@ -22,6 +21,7 @@ function state({ floor = 28, open = false, readRequestId = READ_REQUEST, observe
     generation_floor: floor,
     read_request_id: readRequestId,
     observed_at: observedAt,
+    observation_source: 'AUTHENTICATED_POST_RESPONSE',
     refill_enabled: open,
     supervisor_admission_enabled: open,
     continuous_service_allowed: open,
@@ -127,7 +127,7 @@ test('open and generation-drift readbacks close pending recovery without replay'
   }
 });
 
-test('legacy or uncorrelated CLOSED readback cannot clear an ambiguous effect', async () => {
+test('legacy, uncorrelated or pre-attempt CLOSED readback cannot clear an ambiguous effect', async () => {
   const { journal } = memoryJournal();
   await journal.load();
   await journal.begin({ attempt_id: ATTEMPT, expected_generation_floor: 28 });
@@ -137,8 +137,14 @@ test('legacy or uncorrelated CLOSED readback cannot clear an ambiguous effect', 
   const legacyClosed = state({ floor: 28, open: false });
   delete legacyClosed.read_request_id;
   delete legacyClosed.observed_at;
+  delete legacyClosed.observation_source;
   const stillPending = await journal.reconcile(legacyClosed);
   assert.equal(stillPending.state, 'AMBIGUOUS');
+  assert.equal(journal.hasPending(), true);
+
+  const staleClosed = state({ floor: 28, open: false, observedAt: '2000-01-01T00:00:00.000Z' });
+  const staleResult = await journal.reconcile(staleClosed);
+  assert.equal(staleResult.state, 'AMBIGUOUS');
   assert.equal(journal.hasPending(), true);
 });
 
@@ -167,21 +173,16 @@ test('native client signs exact environment read and exact-generation resume rou
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     calls.push({ pathname, method: init.method, body: init.body, pathHeader: init.headers?.['x-test-path'] });
-    if (pathname.endsWith('/v1/devos/environment-state')) {
-      const request = JSON.parse(init.body || '{}');
-      return response(200, {
-        schema: 'metaengine.devos.environment-state.v1',
-        workspace_id: WORKSPACE,
-        generation_floor: 28,
-        read_request_id: request.read_request_id,
-        observed_at: OBSERVED_AT,
-        refill_enabled: false,
-        supervisor_admission_enabled: false,
-        reset_at: '2026-10-03T12:00:00.000Z',
-        reset_reason: 'CONTROLLED_RESET',
-        authority_effect: false,
-      });
-    }
+    if (pathname.endsWith('/v1/devos/environment-state')) return response(200, {
+      schema: 'metaengine.devos.environment-state.v1',
+      workspace_id: WORKSPACE,
+      generation_floor: 28,
+      refill_enabled: false,
+      supervisor_admission_enabled: false,
+      reset_at: '2026-10-03T12:00:00.000Z',
+      reset_reason: 'CONTROLLED_RESET',
+      authority_effect: false,
+    });
     if (pathname.endsWith('/v1/devos/resume-admission')) return response(200, {
       schema: 'metaengine.devos.environment-resume.v1',
       resumed: true,
@@ -210,15 +211,16 @@ test('native client signs exact environment read and exact-generation resume rou
   assert.equal(calls.length, 2);
   assert.equal(calls[0].pathname.endsWith('/v1/devos/environment-state'), true);
   assert.equal(calls[0].pathHeader.endsWith('/v1/devos/environment-state'), true);
-  assert.match(JSON.parse(calls[0].body).read_request_id, /^[0-9a-f-]{36}$/);
-  assert.equal(before.read_request_id, JSON.parse(calls[0].body).read_request_id);
-  assert.equal(before.observed_at, OBSERVED_AT);
+  assert.deepEqual(JSON.parse(calls[0].body), {});
+  assert.match(before.read_request_id, /^[0-9a-f-]{36}$/);
+  assert.equal(Number.isFinite(Date.parse(before.observed_at)), true);
+  assert.equal(before.observation_source, 'AUTHENTICATED_POST_RESPONSE');
   assert.deepEqual(JSON.parse(calls[1].body), { confirm: true, expected_generation_floor: 28 });
   assert.equal(calls[1].pathHeader.endsWith('/v1/devos/resume-admission'), true);
   client.stop();
 });
 
-test('native environment read rejects an uncorrelated response instead of accepting stale CLOSED state', async () => {
+test('native environment read replaces any stale server correlation with the current authenticated POST identity', async () => {
   const client = new NativeSupervisorClient({
     identity: identity(),
     fetchImpl: async (url) => {
@@ -229,7 +231,7 @@ test('native environment read rejects an uncorrelated response instead of accept
           workspace_id: WORKSPACE,
           generation_floor: 28,
           read_request_id: READ_REQUEST,
-          observed_at: OBSERVED_AT,
+          observed_at: '2000-01-01T00:00:00.000Z',
           refill_enabled: false,
           supervisor_admission_enabled: false,
           authority_effect: false,
@@ -241,10 +243,10 @@ test('native environment read rejects an uncorrelated response instead of accept
     executeCommand: async () => ({ authority_effect: false }),
     intervalMs: 60_000,
   });
-  await assert.rejects(
-    () => client.devosEnvironmentState(),
-    /native_supervisor_environment_state_readback_invalid/,
-  );
+  const observed = await client.devosEnvironmentState();
+  assert.notEqual(observed.read_request_id, READ_REQUEST);
+  assert.equal(observed.observation_source, 'AUTHENTICATED_POST_RESPONSE');
+  assert.ok(Date.parse(observed.observed_at) > Date.parse('2000-01-01T00:00:00.000Z'));
   client.stop();
 });
 
