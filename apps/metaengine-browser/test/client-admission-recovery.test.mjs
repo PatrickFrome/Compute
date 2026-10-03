@@ -112,16 +112,16 @@ test('ambiguous intent is reconciled by independent state readback before a new 
 });
 
 test('open and generation-drift readbacks close pending recovery without replay', async () => {
-  for (const [observed, expected] of [
-    [state({ floor: 28, open: true }), 'OPEN_CONFIRMED'],
-    [state({ floor: 29, open: false }), 'REJECTED'],
+  for (const [input, expected] of [
+    [{ floor: 28, open: true }, 'OPEN_CONFIRMED'],
+    [{ floor: 29, open: false }, 'REJECTED'],
   ]) {
     const { journal } = memoryJournal();
     await journal.load();
     await journal.begin({ attempt_id: ATTEMPT, expected_generation_floor: 28 });
     await journal.markSendIntent();
     await journal.markAmbiguous('lost_response');
-    const row = await journal.reconcile(observed);
+    const row = await journal.reconcile(state(input));
     assert.equal(row.state, expected);
     assert.equal(row.automatic_retry_allowed, false);
   }
