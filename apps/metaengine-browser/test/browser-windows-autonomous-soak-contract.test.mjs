@@ -76,3 +76,21 @@ test('activation evidence records distribution shape instead of a lone p95 sampl
   assert.ok(sort >= 0 && p50 > sort && p90 > p50 && p95 > p90 && p99 > p95);
   assert.ok(mean > p99 && persist > mean && enforce > persist, 'distribution evidence must persist before the unchanged p95 gate');
 });
+
+
+test('activation evidence fingerprints the hosted measurement environment without changing the gate', () => {
+  for (const field of [
+    'measurement_runner_os',
+    'measurement_runner_arch',
+    'measurement_image_os',
+    'measurement_image_version',
+    'measurement_processor_identifier',
+    'measurement_processor_count',
+  ]) assert.match(source, new RegExp(field));
+
+  const boundary = source.indexOf('activation_latency_measurement_boundary');
+  const fingerprint = source.indexOf('measurement_runner_os', boundary);
+  const gate = source.indexOf('soak_activation_p95_budget_exceeded', fingerprint);
+  assert.ok(boundary >= 0 && fingerprint > boundary && gate > fingerprint);
+  assert.match(source, /\[Environment\]::ProcessorCount/);
+});

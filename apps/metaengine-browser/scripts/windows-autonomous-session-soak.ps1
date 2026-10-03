@@ -430,6 +430,12 @@ try {
   $proof | Add-Member -NotePropertyName activation_latency_mean_ms -NotePropertyValue ([Math]::Round($latencyMeanMs, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
   $proof | Add-Member -NotePropertyName activation_latency_measurement_boundary -NotePropertyValue 'SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT' -Force
+  $proof | Add-Member -NotePropertyName measurement_runner_os -NotePropertyValue ([string]$env:RUNNER_OS) -Force
+  $proof | Add-Member -NotePropertyName measurement_runner_arch -NotePropertyValue ([string]$env:RUNNER_ARCH) -Force
+  $proof | Add-Member -NotePropertyName measurement_image_os -NotePropertyValue ([string]$env:ImageOS) -Force
+  $proof | Add-Member -NotePropertyName measurement_image_version -NotePropertyValue ([string]$env:ImageVersion) -Force
+  $proof | Add-Member -NotePropertyName measurement_processor_identifier -NotePropertyValue ([string]$env:PROCESSOR_IDENTIFIER) -Force
+  $proof | Add-Member -NotePropertyName measurement_processor_count -NotePropertyValue ([Environment]::ProcessorCount) -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_size -NotePropertyValue $ConcurrentBurstSize -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_elapsed_ms -NotePropertyValue ([Math]::Round($burstElapsedMs, 2)) -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_individual_p95_ms -NotePropertyValue ([Math]::Round($burstIndividualP95Ms, 2)) -Force
