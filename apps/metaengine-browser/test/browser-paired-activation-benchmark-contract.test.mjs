@@ -43,3 +43,15 @@ test('paired benchmark binds exact source identities and installer digests witho
   assert.match(source, /automatic_retry_allowed=\$false/);
   assert.match(source, /authority_effect=\$false/);
 });
+
+
+test('paired benchmark requires provenance-bound installer digests and package versions', () => {
+  assert.match(source, /BaselineExpectedInstallerSha256/);
+  assert.match(source, /CandidateExpectedInstallerSha256/);
+  assert.match(source, /BaselineExpectedPackageVersion/);
+  assert.match(source, /CandidateExpectedPackageVersion/);
+  assert.match(source, /paired_activation_baseline_installer_digest_mismatch/);
+  assert.match(source, /paired_activation_candidate_installer_digest_mismatch/);
+  assert.match(source, /paired_activation_baseline_package_version_mismatch/);
+  assert.match(source, /paired_activation_candidate_package_version_mismatch/);
+});
