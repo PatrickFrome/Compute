@@ -4,6 +4,7 @@ import test from 'node:test';
 import { createDevosSupervisorRoutes } from '../supabase/a2-browser-native-supervisor-devos-routes.mjs';
 
 const WORKSPACE = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
+const READ_REQUEST = '33333333-3333-4333-8333-333333333333';
 
 async function bodyOf(response) {
   return JSON.parse(await response.text());
@@ -37,7 +38,7 @@ test('environment-state is a read-only authenticated reconciliation endpoint', a
   const response = await route({
     req: { method: 'POST' },
     path: '/v1/devos/environment-state',
-    body: {},
+    body: { read_request_id: READ_REQUEST },
     clientId: 'device-test',
   });
   assert.equal(response.status, 200);
@@ -45,6 +46,8 @@ test('environment-state is a read-only authenticated reconciliation endpoint', a
   assert.equal(body.schema, 'metaengine.devos.environment-state.v1');
   assert.equal(body.state, 'CLOSED');
   assert.equal(body.generation_floor, 28);
+  assert.equal(body.read_request_id, READ_REQUEST);
+  assert.equal(Number.isFinite(Date.parse(body.observed_at)), true);
   assert.equal(body.authoritative, true);
   assert.equal(body.automatic_retry_allowed, false);
   assert.equal(body.authority_effect, false);
@@ -58,6 +61,16 @@ test('environment-state is a read-only authenticated reconciliation endpoint', a
   });
   assert.equal(rejected.status, 400);
   assert.equal((await bodyOf(rejected)).error, 'devos_environment_state_fields_forbidden');
+  assert.equal(calls, 1);
+
+  const invalidCorrelation = await route({
+    req: { method: 'POST' },
+    path: '/v1/devos/environment-state',
+    body: { read_request_id: 'stale-readback' },
+    clientId: 'device-test',
+  });
+  assert.equal(invalidCorrelation.status, 400);
+  assert.equal((await bodyOf(invalidCorrelation)).error, 'devos_environment_state_read_request_id_invalid');
   assert.equal(calls, 1);
 });
 
