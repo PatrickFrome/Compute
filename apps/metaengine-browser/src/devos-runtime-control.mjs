@@ -9,6 +9,8 @@ export function unavailableDevosRuntimeControl(reason = 'NOT_OBSERVED') {
     reason: String(reason || 'NOT_OBSERVED').slice(0, 160),
     workspace_id: null,
     generation_floor: null,
+    read_request_id: null,
+    observed_at: null,
     refill_enabled: null,
     supervisor_admission_enabled: null,
     continuous_service_allowed: false,
@@ -41,12 +43,19 @@ export function normalizeDevosRuntimeControl(value, { workspaceId = null } = {})
     return unavailableDevosRuntimeControl('READBACK_FIELDS_INVALID');
   }
   const allowed = value.refill_enabled === true && value.supervisor_admission_enabled === true;
+  const readRequestId = UUID_RE.test(String(value.read_request_id || ''))
+    ? String(value.read_request_id).toLowerCase()
+    : null;
+  const observedMs = Date.parse(String(value.observed_at || ''));
+  const observedAt = Number.isFinite(observedMs) ? new Date(observedMs).toISOString() : null;
   return Object.freeze({
     schema: DEVOS_ENVIRONMENT_STATE_SCHEMA,
     state: allowed ? 'OPEN' : 'CLOSED',
     reason: allowed ? null : 'CONTINUOUS_SERVICE_ADMISSION_FENCED',
     workspace_id: observedWorkspace,
     generation_floor: generationFloor,
+    read_request_id: readRequestId,
+    observed_at: observedAt,
     refill_enabled: value.refill_enabled,
     supervisor_admission_enabled: value.supervisor_admission_enabled,
     reset_at: value.reset_at || null,
