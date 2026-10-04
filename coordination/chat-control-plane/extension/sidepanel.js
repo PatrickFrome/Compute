@@ -189,7 +189,8 @@ function render(state) {
   $("pendingCommand").textContent = state.pending_command
     ? `${compact(state.pending_command.target_platform)} · ${compact(state.pending_command.command_id)}`
     : "none";
-  $("glmState").textContent = state.snapshots?.GLM_ZAI ? `legacy · ${renderPeer(state.snapshots.GLM_ZAI)}` : "legacy not observed";
+  const legacyGlm = state.snapshots?.GLM_ZAI_LEGACY_READ_ONLY || state.snapshots?.GLM_ZAI || null;
+  $("glmState").textContent = legacyGlm ? `legacy · ${renderPeer(legacyGlm)}` : "legacy not observed";
   $("gptState").textContent = renderPeer(state.snapshots?.CHATGPT);
   $("daemon").textContent = state.daemon_online_at ? `seen ${state.daemon_online_at}` : "not confirmed";
   $("sensorError").textContent = compact(state.sensor_error);
