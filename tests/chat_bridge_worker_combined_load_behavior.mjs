@@ -6,7 +6,7 @@ import { webcrypto } from 'node:crypto';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const EXT = path.join(ROOT, 'coordination', 'chat-control-plane', 'extension');
-const REMOTE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote';
+const REMOTE = 'https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote';
 const ZAI = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 
