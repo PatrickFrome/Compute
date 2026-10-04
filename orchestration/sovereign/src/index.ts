@@ -50,7 +50,7 @@ Do not optimize for agreement. Prefer falsifiable claims, executable patches/tes
 BUILD/BREAK roles rotate each tick. Never claim canonical authority, VERIFIED, or live evidence absent from the ledger.
 Return exactly one JSON object and no markdown.`;
 
-// Immutable legacy DB vote vocabulary; provider identity is Actor A/B.
+// Immutable legacy DB vote vocabulary; active provider identity is Actor A/B.
 const VOTES = new Set(["WIN_GPT", "WIN_GLM", "SYNTHESIS", "NO_ACTION"]);
 const DATABASE_URL = required("DATABASE_URL");
 const RUNNER_ID = `sovereign:${process.env.DUEL_RUNNER_ID || hostname()}`;
@@ -292,7 +292,7 @@ async function readback(duelId: string): Promise<Readback> {
 
 async function submitPair(lease: Lease, tick: number, checkpoint: string, g: JsonObject, l: JsonObject): Promise<PairReceipt> {
   if (!lease.duel_id || lease.lease_generation == null) throw new Error("lease_identity_missing");
-  const args = [lease.duel_id, RUNNER_ID, lease.lease_generation, tick, checkpoint, stepType(actorA), JSON.stringify(actorA), stepType(actorB), JSON.stringify(actorB)];
+  const args = [lease.duel_id, RUNNER_ID, lease.lease_generation, tick, checkpoint, stepType(g), JSON.stringify(g), stepType(l), JSON.stringify(l)];
   const sql = "select public.h205f22_duel_submit_pair_v3($1::uuid,$2::text,$3::bigint,$4::bigint,$5::text,$6::text,$7::jsonb,$8::text,$9::jsonb) as v";
   try {
     const r = await pool.query<{ v: PairReceipt }>(sql, args);
@@ -317,8 +317,12 @@ async function processLease(lease: Lease): Promise<void> {
   if (!lease.leased || !lease.duel_id || lease.lease_generation == null) return;
   if (lease.protocol_version !== "LOCKSTEP_V2") throw new Error("protocol_mismatch");
   if (lease.execution_policy === "HOSTED_ONLY") return;
+
+  // Historical rows keep gpt_model/glm_model fields. Both fields are now
+  // compatibility slots and must validate as OpenAI models before inference.
   actorModelFromLegacyLease("ACTOR_A", lease);
   actorModelFromLegacyLease("ACTOR_B", lease);
+
   let read: Readback = lease.readback && typeof lease.readback === "object" ? lease.readback : await readback(lease.duel_id);
   let checkpoint = String(read.current_checkpoint_sha256 || lease.current_checkpoint_sha256 || "");
   let lastTick = Number(read.current_tick || lease.current_tick || 0);
@@ -327,46 +331,76 @@ async function processLease(lease: Lease): Promise<void> {
   try {
     for (let tick = lastTick + 1; tick <= maxTicks; tick++) {
       checkpoint = String(read.current_checkpoint_sha256 || checkpoint);
-      const gPeer = recentPeerHash(read, "ACTOR_A");
-      const lPeer = recentPeerHash(read, "ACTOR_B");
+      const actorAPeerHash = recentPeerHash(read, "ACTOR_A");
+      const actorBPeerHash = recentPeerHash(read, "ACTOR_B");
       const started = Date.now();
-      const [actorA, actorB] = await Promise.all([actorVisible("ACTOR_A", lease, read), actorVisible("ACTOR_B", lease, read)]);
-      if (!peerAckOk(actorA.payload, gPeer) || !peerAckOk(actorB.payload, lPeer)) throw new Error(`peer_hash_ack_failed:${tick}`);
-      actorA.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
-      actorB.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
+      const [actorA, actorB] = await Promise.all([
+        actorVisible("ACTOR_A", lease, read),
+        actorVisible("ACTOR_B", lease, read),
+      ]);
+      if (!peerAckOk(actorA.payload, actorAPeerHash) || !peerAckOk(actorB.payload, actorBPeerHash)) {
+        throw new Error(`peer_hash_ack_failed:${tick}`);
+      }
+      actorA.payload._lockstep = {
+        tick_no: tick,
+        pair_inference_ms: Date.now() - started,
+        execution_plane: "SOVEREIGN_PERSISTENT_RUNNER",
+        actor: "ACTOR_A",
+        provider: "OPENAI",
+        platform: "CHATGPT",
+        legacy_db_slot: "GPT",
+        tariff_dependency: false,
+      };
+      actorB.payload._lockstep = {
+        tick_no: tick,
+        pair_inference_ms: Date.now() - started,
+        execution_plane: "SOVEREIGN_PERSISTENT_RUNNER",
+        actor: "ACTOR_B",
+        provider: "OPENAI",
+        platform: "CHATGPT",
+        legacy_db_slot: "GLM",
+        tariff_dependency: false,
+      };
 
+      // RPC positions remain historical GPT/GLM slots; payload order is
+      // deterministic ACTOR_A then ACTOR_B.
       const receipt = await submitPair(lease, tick, checkpoint, actorA.payload, actorB.payload);
-      const gp = eventPayload(receipt.gpt_event);
-      const lp = eventPayload(receipt.glm_event);
+      const actorAStep = eventPayload(receipt.gpt_event);
+      const actorBStep = eventPayload(receipt.glm_event);
       checkpoint = String(receipt.output_checkpoint_sha256 || checkpoint);
       lastTick = tick;
       read = appendReadback(read, receipt, tick);
 
-      if (actorA.executorError || actorB.executorError || gp.model_response === false || lp.model_response === false) {
+      if (actorA.executorError || actorB.executorError || actorAStep.model_response === false || actorBStep.model_response === false) {
         await complete(lease, "BLOCKED", {
           schema: "metaengine.compute.duel-sovereign-result.h205f22.v1",
           outcome: "BLOCKED_EXECUTOR",
           inference_backend: "SOVEREIGN_OPENAI_COMPAT",
+          active_provider: "OPENAI",
+          active_platform: "CHATGPT",
+          actor_a_step: actorAStep,
+          actor_b_step: actorBStep,
+          legacy_db_slots: { GPT: "ACTOR_A", GLM: "ACTOR_B" },
           tariff_dependency: false,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
-          actor_a_step: gp,
-          actor_b_step: lp,
-          legacy_db_slots: { GPT: "ACTOR_A", GLM: "ACTOR_B" },
           canonical: false,
           authority_effect: false,
         });
         return;
       }
 
-      const gv = vote(gp);
-      const lv = vote(lp);
-      if (gp.ready_to_resolve === true && lp.ready_to_resolve === true && gv && gv === lv) {
+      const actorAVote = vote(actorAStep);
+      const actorBVote = vote(actorBStep);
+      if (actorAStep.ready_to_resolve === true && actorBStep.ready_to_resolve === true && actorAVote && actorAVote === actorBVote) {
         await complete(lease, "RESOLVED", {
           schema: "metaengine.compute.duel-sovereign-result.h205f22.v1",
           outcome: "RESOLVED",
-          winner: gv,
+          winner: actorAVote,
+          vote_vocabulary: "LEGACY_DB_COMPATIBILITY",
           inference_backend: "SOVEREIGN_OPENAI_COMPAT",
+          active_provider: "OPENAI",
+          active_platform: "CHATGPT",
           tariff_dependency: false,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
@@ -376,11 +410,13 @@ async function processLease(lease: Lease): Promise<void> {
         return;
       }
 
-      if (gp.need_canary === true && lp.need_canary === true) {
+      if (actorAStep.need_canary === true && actorBStep.need_canary === true) {
         await complete(lease, "CANARY_REQUIRED", {
           schema: "metaengine.compute.duel-sovereign-result.h205f22.v1",
           outcome: "CANARY_REQUIRED",
           inference_backend: "SOVEREIGN_OPENAI_COMPAT",
+          active_provider: "OPENAI",
+          active_platform: "CHATGPT",
           tariff_dependency: false,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
@@ -396,6 +432,8 @@ async function processLease(lease: Lease): Promise<void> {
       outcome: "CANARY_REQUIRED",
       reason: "MAX_MICROSTEPS",
       inference_backend: "SOVEREIGN_OPENAI_COMPAT",
+      active_provider: "OPENAI",
+      active_platform: "CHATGPT",
       tariff_dependency: false,
       final_tick: lastTick,
       final_checkpoint_sha256: checkpoint,
@@ -408,6 +446,8 @@ async function processLease(lease: Lease): Promise<void> {
       outcome: "FAILED",
       error: String(error).slice(0, 2400),
       inference_backend: "SOVEREIGN_OPENAI_COMPAT",
+      active_provider: "OPENAI",
+      active_platform: "CHATGPT",
       tariff_dependency: false,
       final_tick: lastTick,
       final_checkpoint_sha256: checkpoint,
@@ -440,9 +480,9 @@ async function listenForever(): Promise<void> {
     try {
       await client.connect();
       client.on("notification", (msg) => {
-        if (msg.channel !== "h205f22_duel_ready_v1" || !msactorA.payload) return;
+        if (msg.channel !== "h205f22_duel_ready_v1" || !msg.payload) return;
         try {
-          const payload = asObj(JSON.parse(msactorA.payload));
+          const payload = asObj(JSON.parse(msg.payload));
           if (typeof payload.duel_id === "string") dispatch(payload.duel_id);
         } catch (error) {
           console.error("sovereign_notify_parse_failed", String(error));
