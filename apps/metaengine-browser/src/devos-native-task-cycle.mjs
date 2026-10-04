@@ -4,6 +4,7 @@ import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_HOME_URL,
   AGENT_PLATFORM_MODEL,
+  AGENT_PLATFORM_BOOTSTRAP_MODE,
   classifyAgentPlatformSurface,
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformComposer,
@@ -684,13 +685,21 @@ export class DevOsNativeTaskCycle {
 
             // Step 3: create/reset a real Agent task session. The click receipt
             // is not success; the fresh surface/model/composer readback is.
-            bootstrapEffectState = 'NEW_TASK_DISPATCHED';
-            await this.#executeCommand({
-              action: 'TYPED_CLICK',
-              platform: AGENT_PLATFORM_ID,
-              payload: semanticActivationPayload(binding.tab_id, agentSurface.new_task),
-            });
-            frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            if (AGENT_PLATFORM_BOOTSTRAP_MODE === 'ROOT_COMPOSER_SEED') {
+              // ChatGPT root is already the isolated-session creation surface.
+              // No navigation/model/new-task click is needed: re-capture the
+              // exact bound root composer immediately before the seed effect.
+              bootstrapEffectState = 'ROOT_COMPOSER_READY';
+              frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            } else {
+              bootstrapEffectState = 'NEW_TASK_DISPATCHED';
+              await this.#executeCommand({
+                action: 'TYPED_CLICK',
+                platform: AGENT_PLATFORM_ID,
+                payload: semanticActivationPayload(binding.tab_id, agentSurface.new_task),
+              });
+              frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            }
             if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
               throw new Error('devos_agent_new_task_target_drift');
             }
