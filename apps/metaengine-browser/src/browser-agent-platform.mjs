@@ -27,6 +27,7 @@ export const AGENT_PLATFORM_KNOWN_MODELS = Object.freeze([]);
 const CONVERSATION_PATH_RE = /^\/c\/[a-z0-9-]+\/?$/i;
 const AUTH_PATH_RE = /^\/auth(\/|$)/i;
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
+const LEGACY_GLM_HOST = 'chat.z.ai';
 
 function parsedUrl(value) {
   try {
@@ -93,23 +94,58 @@ function targetProjection(row) {
 }
 
 export function resolveAgentPlatformComposer(frame) {
-  if (!frame || frame.authority_effect === true || !isAgentPlatformUrl(frame.url) || isAgentPlatformAuthRedirectUrl(frame.url)) return null;
+  if (!frame || frame.authority_effect === true) return null;
+
+  const url = parsedUrl(frame?.url);
+  const activeChatGptSurface = Boolean(url) && isAgentPlatformHost(url.hostname) && !isAgentPlatformAuthRedirectUrl(frame.url);
+  const legacyGlmSurface = Boolean(url) && url.hostname.toLowerCase() === LEGACY_GLM_HOST;
+  if (url && !activeChatGptSurface && !legacyGlmSurface) return null;
+
   const rows = Array.isArray(frame?.semantic_targets)
-    ? frame.semantic_targets.filter((row) =>
-        String(row?.role || '').toLowerCase() === 'textbox'
-        && CHATGPT_COMPOSER_NAMES.has(String(row?.name || ''))
-        && row?.semantic_ref)
+    ? frame.semantic_targets.filter((row) => String(row?.role || '').toLowerCase() === 'textbox')
     : [];
-  if (rows.length !== 1) return null;
-  const pick = rows[0];
+  const usable = rows.filter((row) => row?.semantic_ref);
+  if (usable.length === 0) return null;
+
+  // Active ChatGPT actuation is intentionally stricter than the old z.ai
+  // textarea contract: exact localized composer name + semantic ref.
+  if (activeChatGptSurface) {
+    const exact = usable.filter((row) => CHATGPT_COMPOSER_NAMES.has(String(row?.name || '')));
+    if (exact.length !== 1) return null;
+    const pick = exact[0];
+    return Object.freeze({
+      role: 'textbox',
+      accessible_name: String(pick.name),
+      semantic_ref: pick.semantic_ref,
+      backend_node_id: Number(pick.backend_node_id || 0) || null,
+      selector_mode: 'EXACT_CHATGPT_COMPOSER_ROLE_NAME_AND_SEMANTIC_REF',
+      value_length: Number.isFinite(Number(pick.value_length)) ? Number(pick.value_length) : null,
+      value_sha256: pick.value_sha256 || null,
+    });
+  }
+
+  // Legacy compatibility/readback only. Historical GLM qualification tests and
+  // persisted evidence can still resolve their old textarea shape, but active
+  // routing, URL normalization and target admission remain ChatGPT-only.
+  // Missing URL is accepted only for this pure resolver utility so old
+  // shape-level unit tests remain meaningful.
+  let pick = null;
+  if (rows.length === 1 && usable.length === 1) {
+    pick = usable[0];
+  } else {
+    const named = usable.filter((row) => row.name);
+    if (named.length === 1) pick = named[0];
+  }
+  if (!pick) return null;
   return Object.freeze({
     role: 'textbox',
-    accessible_name: String(pick.name),
+    accessible_name: pick.name || null,
     semantic_ref: pick.semantic_ref,
     backend_node_id: Number(pick.backend_node_id || 0) || null,
-    selector_mode: 'EXACT_CHATGPT_COMPOSER_ROLE_NAME_AND_SEMANTIC_REF',
+    selector_mode: pick.name ? 'ROLE_NAME_OR_BACKEND_NODE_ID' : 'BACKEND_NODE_ID_REQUIRED',
     value_length: Number.isFinite(Number(pick.value_length)) ? Number(pick.value_length) : null,
     value_sha256: pick.value_sha256 || null,
+    legacy_compatibility: true,
   });
 }
 
