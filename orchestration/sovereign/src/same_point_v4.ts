@@ -511,7 +511,7 @@ async function processLease(lease: Lease): Promise<void> {
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
       tariff_dependency: false,
     };
-    glm.payload._lockstep = {
+    critic.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
