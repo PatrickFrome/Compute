@@ -27,7 +27,6 @@
     "debugger-watchdog.js",
     "trusted-chatgpt.js",
     "chatgpt-rollover.js",
-    "trusted-glm.js",
     "operator-gate-bindings.js",
     "operator-lease-gate.js",
     "operator-actions.js",

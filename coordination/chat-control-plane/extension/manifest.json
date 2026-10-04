@@ -28,8 +28,7 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://chat.z.ai/*"
+        "https://chat.openai.com/*"
       ],
       "js": [
         "prompt-gate.js"
