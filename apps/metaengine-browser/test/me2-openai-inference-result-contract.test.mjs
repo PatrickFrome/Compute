@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const repo = new URL('../../../', import.meta.url);
 const providers = await readFile(new URL('apps/me2-daemon/providers.ts', repo), 'utf8');
+const tokens = await readFile(new URL('apps/me2-daemon/src/tokens.ts', repo), 'utf8');
 const agentchat = await readFile(new URL('apps/me2-daemon/src/agentchat.ts', repo), 'utf8');
 const reviewer = await readFile(new URL('apps/me2-daemon/src/reviewer.ts', repo), 'utf8');
 const brain = await readFile(new URL('apps/me2-daemon/src/brain.ts', repo), 'utf8');
@@ -51,4 +52,19 @@ test('primary Browser projection cannot alias legacy GLM selectors onto ChatGPT 
   assert.match(browserMain, /model: AGENT_PLATFORM_MODEL/);
   assert.match(browserMain, /if \(p === 'GLM_ZAI'\) return host === 'chat\.z\.ai'/);
   assert.doesNotMatch(browserMain, /if \(p === 'GLM_ZAI'\) return isAgentPlatformHost\(host\)/);
+});
+
+
+test('ME2 Supabase backend-key compatibility prefers modern secret keys and never bearer-wraps them', () => {
+  assert.match(tokens, /SUPABASE_SECRET_KEY/);
+  assert.match(tokens, /SUPABASE_SECRET_KEYS/);
+  assert.match(providers, /function supabaseAdminKey\(\)/);
+  assert.match(providers, /namedSupabaseSecret\(tokenGet\("SUPABASE_SECRET_KEYS"\)\)/);
+  assert.match(providers, /export function supabaseAdminRpcHeaders/);
+  assert.match(providers, /value\.split\("\."\)\.length === 3/);
+  assert.match(providers, /headers\.Authorization = `Bearer \$\{value\}`/);
+  assert.doesNotMatch(
+    providers,
+    /headers:\s*\{\s*apikey:\s*serviceJwt,\s*Authorization:\s*`Bearer \$\{serviceJwt\}`/,
+  );
 });
