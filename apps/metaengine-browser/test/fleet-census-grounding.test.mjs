@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { planElasticFleetCapacity, ELASTIC_FLEET_CONTRACT } from '../src/fleet-elastic-governor.mjs';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 
-const AGENT_CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const AGENT_CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const AGENT_CONVERSATION_SHA256 = crypto.createHash('sha256').update(AGENT_CONVERSATION).digest('hex');
 
 function agent(id, state, { created_at = '2026-09-03T10:00:00.000Z', tab_id = null } = {}) {
@@ -101,7 +101,7 @@ test('cycle observes up to four running tasks per heartbeat, isolating per-task 
         // while the other three still complete.
         if (command.payload?.tab_id === 'tab_r2') throw new Error('capture_target_unavailable');
         return {
-          tab_id: command.payload?.tab_id, target_id: 'webcontents:1', url: 'https://chat.z.ai/',
+          tab_id: command.payload?.tab_id, target_id: `webcontents:${Number(String(command.payload?.tab_id || '').replace('tab_r','')) || 1}`, url: AGENT_CONVERSATION,
           viewport: { width: 1200, height: 640 },
           semantic_targets: [{ role: 'button', name: 'Stop generating' }],
           authority_effect: false,
