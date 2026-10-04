@@ -137,10 +137,11 @@ if (!PROBE_MODE) {
 // ── seed (однократно) ─────────────────────────────────────────────
 function seed() {
   if (getMeta("seeded") === "1") return;
-  const a1 = createAgent("IMPLEMENTER", "zai:default");
-  const a2 = createAgent("RESEARCHER", "zai:default");
-  emit("AGENT_CREATED", { role: "IMPLEMENTER", model: "zai:default", seed: true }, a1.id, null);
-  emit("AGENT_CREATED", { role: "RESEARCHER", model: "zai:default", seed: true }, a2.id, null);
+  const seedModel = activeAgentModelTag();
+  const a1 = createAgent("IMPLEMENTER", seedModel);
+  const a2 = createAgent("RESEARCHER", seedModel);
+  emit("AGENT_CREATED", { role: "IMPLEMENTER", model: seedModel, provider: "OPENAI", platform: "CHATGPT", seed: true }, a1.id, null);
+  emit("AGENT_CREATED", { role: "RESEARCHER", model: seedModel, provider: "OPENAI", platform: "CHATGPT", seed: true }, a2.id, null);
 
   const t1 = createTask({
     id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
