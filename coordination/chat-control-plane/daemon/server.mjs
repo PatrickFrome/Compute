@@ -288,22 +288,17 @@ function observeProgress(platform, snapshot) {
   return next;
 }
 
-function peerPlatform(platform) {
-  return platform === 'CHATGPT' ? 'GLM_ZAI' : 'CHATGPT';
-}
-
 function agentForPlatform(platform) {
-  return platform === 'CHATGPT' ? 'GPT' : 'GLM';
+  if (String(platform || '') !== 'CHATGPT') throw new Error('legacy_platform_execution_disabled');
+  return 'GPT';
 }
 
-function missingBlindPeer(relayItem) {
+// h205f22_duel_*_v4 is the historical provider-bound GPT/GLM identity plane.
+// It remains readable evidence, but it must never gate or receive a new
+// ChatGPT-only command. A future provider-neutral duel gets a new schema/RPC.
+function legacyProviderBoundRelay(relayItem) {
   const relay = relayItem?.relay || null;
-  if (!relay || relay.pending_payloads_exposed === true) return null;
-  if (relay.relay_state !== 'WAITING_PROPOSE_PEER') return null;
-  const submitted = new Set(Array.isArray(relay.pending_actors) ? relay.pending_actors : []);
-  if (submitted.has('GPT') && !submitted.has('GLM')) return 'GLM';
-  if (submitted.has('GLM') && !submitted.has('GPT')) return 'GPT';
-  return null;
+  return relay?.duel_id ? relay : null;
 }
 
 function compactA2Message(message) {
@@ -327,15 +322,11 @@ function macroblockSummary(macroblock) {
 
 function buildWakePrompt(targetPlatform) {
   const targetSnapshot = snapshots.get(targetPlatform)?.snapshot || null;
-  const otherPlatform = peerPlatform(targetPlatform);
-  const peerSnapshot = snapshots.get(otherPlatform)?.snapshot || null;
   const agent = agentForPlatform(targetPlatform);
-  // STRICT visibility fence per the work package requirement: never relay peer
-  // DOM text while pending_payloads_exposed is false. When no relay is pending
-  // the flag is false/undefined, so peer chat text stays redacted in that case
-  // too — only an explicitly exposed A2 relay phase may carry peer context.
-  const blind = a2.peerPayloadsExposed !== true;
-  const pendingRelay = a2.pendingRelay?.relay || null;
+  const pendingRelay = legacyProviderBoundRelay(a2.pendingRelay);
+  // Historical provider-bound relays never grant active peer visibility after
+  // the ChatGPT-only migration. Their payloads remain quarantined evidence.
+  const blind = true;
 
   const lines = [
     'A2 CHAT BRIDGE — AUTONOMOUS CONTINUE',
@@ -366,24 +357,22 @@ function buildWakePrompt(targetPlatform) {
   ];
 
   if (pendingRelay) {
-    lines.push('', 'A2 SAME_POINT RELAY:', clip(JSON.stringify({
+    lines.push('', 'LEGACY_PROVIDER_BOUND_RELAY_QUARANTINED:', clip(JSON.stringify({
       duel_id: pendingRelay.duel_id,
       duel_key: pendingRelay.duel_key,
       relay_state: pendingRelay.relay_state,
       pending_wave: pendingRelay.pending_wave,
       pending_actors: pendingRelay.pending_actors,
-      pending_payloads_exposed: pendingRelay.pending_payloads_exposed,
+      pending_payloads_exposed_observed: pendingRelay.pending_payloads_exposed,
       current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256,
-      subject: a2.pendingRelay?.subject || null
+      subject: a2.pendingRelay?.subject || null,
+      active_command_duel_id: null,
+      active_peer_payloads_exposed: false
     }), 8000));
+    lines.push('This historical GPT/GLM relay is evidence only and is not active ChatGPT command authority.');
   }
 
-  if (!blind && peerSnapshot) {
-    lines.push('', 'OTHER PEER CHAT — RECENT VISIBLE TURNS (A2 relay reports pending_payloads_exposed=true):');
-    lines.push(clip(JSON.stringify(recentMessages(peerSnapshot, 5)), MAX_CHAT_CONTEXT_CHARS));
-  } else {
-    lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
-  }
+  lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
 
   lines.push('', 'ACTION: Read the supplied frontier, use your connected project tools as needed, continue the development until the next genuine hard gate/conflict/external dependency, and report/persist the result.');
   return clip(lines.join('\n'), MAX_PROMPT_CHARS);
@@ -394,6 +383,7 @@ function pendingCommandFor(platform) {
 }
 
 function shouldWake(platform) {
+  if (String(platform || '') !== 'CHATGPT') return false;
   const envelope = snapshots.get(platform);
   const state = progress.get(platform);
   if (!envelope || !state) return false;
@@ -402,21 +392,17 @@ function shouldWake(platform) {
   if (Date.now() - state.changedAt < IDLE_MS) return false;
   if (pendingCommandFor(platform)) return false;
 
-  const missing = missingBlindPeer(a2.pendingRelay);
-  if (missing && agentForPlatform(platform) !== missing) return false;
-
-  const wakeKey = `${platform}:${state.assistantHash || 'none'}:${state.messageCount}:${a2.cursor}:${a2.pendingRelay?.relay?.duel_id || 'no-duel'}`;
+  const legacyRelay = legacyProviderBoundRelay(a2.pendingRelay);
+  const quarantineId = legacyRelay?.duel_id || 'none';
+  const wakeKey = [platform, state.assistantHash || 'none', state.messageCount, a2.cursor, 'legacy-relay-quarantined', quarantineId].join(':');
   const last = wakeKeys.get(wakeKey) || 0;
   if (Date.now() - last < WAKE_COOLDOWN_MS) return false;
   return wakeKey;
 }
 
 function queueWake(platform, wakeKey) {
+  if (String(platform || '') !== 'CHATGPT') throw new Error('legacy_platform_execution_disabled');
   const idempotencyKey = sha256(wakeKey);
-  // Idempotency fence: never enqueue a second command for a wake key already
-  // queued inside the idempotency window (in-memory or restored from journal).
-  // After the window elapses, an unchanged stuck state MAY be retried — the
-  // fence prevents duplicates, not legitimate watchdog retries.
   if (idempotencyBlocked(idempotencyKey)) return;
   knownIdempotencyKeys.set(idempotencyKey, Date.now());
   const prompt = buildWakePrompt(platform);
@@ -424,19 +410,16 @@ function queueWake(platform, wakeKey) {
     schema: 'metaengine.chat-bridge.command.v1',
     command_id: randomUUID(),
     idempotency_key: idempotencyKey,
-    target_platform: platform,
-    target_agent: agentForPlatform(platform),
+    target_platform: 'CHATGPT',
+    target_agent: 'GPT',
     created_at: new Date().toISOString(),
     prompt,
     prompt_sha256: sha256(prompt),
     a2_head_message_seq: a2.cursor,
-    a2_peer_payloads_exposed: a2.peerPayloadsExposed,
-    // Receipt lineage is part of the command at creation time.  The secure
-    // proxy must never infer it later from a potentially newer A2 frontier.
-    duel_id: a2.pendingRelay?.relay?.duel_id || null,
-    // Browser/DOM transport is permanently non-authoritative.  Keep the
-    // explicit false value in the leased object so REQUIRED persistence can
-    // fail closed on missing or mutated authority semantics.
+    a2_peer_payloads_exposed: false,
+    // Provider-bound GPT/GLM duel lineage is quarantined after the ChatGPT-only
+    // migration. Never attach a new command to historical duel authority.
+    duel_id: null,
     authority_effect: false,
     status: 'PENDING',
     leased_to: null,
@@ -445,15 +428,14 @@ function queueWake(platform, wakeKey) {
   commands.push(command);
   while (commands.length > 100) commands.shift();
   wakeKeys.set(wakeKey, Date.now());
-  journal({ kind: 'command', command_id: command.command_id, idempotency_key: idempotencyKey, target_platform: platform, created_at: command.created_at }).catch(() => {});
+  journal({ kind: 'command', command_id: command.command_id, idempotency_key: idempotencyKey, target_platform: 'CHATGPT', created_at: command.created_at }).catch(() => {});
 }
 
 async function schedulerTick() {
   await refreshA2(false);
-  for (const platform of ['CHATGPT', 'GLM_ZAI']) {
-    const wakeKey = shouldWake(platform);
-    if (wakeKey) queueWake(platform, wakeKey);
-  }
+  const platform = 'CHATGPT';
+  const wakeKey = shouldWake(platform);
+  if (wakeKey) queueWake(platform, wakeKey);
 }
 
 function nextCommand(clientId) {
@@ -581,8 +563,9 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const platform = String(body?.target_platform || '');
       if (!['CHATGPT', 'GLM_ZAI'].includes(platform)) return json(res, 400, { error: 'invalid_platform' });
+      if (platform !== 'CHATGPT') return json(res, 409, { error: 'legacy_platform_execution_disabled' });
       await refreshA2(true);
-      const key = `manual:${platform}:${Date.now()}:${a2.cursor}`;
+      const key = `manual:${platform}:${Date.now()}:${a2.cursor}:provider-neutral`;
       queueWake(platform, key);
       return json(res, 202, { queued: true, target_platform: platform });
     }
