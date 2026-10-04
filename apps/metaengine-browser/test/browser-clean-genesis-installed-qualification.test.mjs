@@ -21,6 +21,9 @@ test('installed Chat qualification proves always-on clean-genesis preconnect wit
   assert.match(installedQualification, /automatic_initial_tab_suppressed/);
   assert.match(installedQualification, /automatic_initial_remote_load_suppressed/);
   assert.match(installedQualification, /PERSISTENT_PRECONNECT_ONLY/);
+  assert.match(installedQualification, /runtimeEvent\.origin -eq 'https:\/\/chatgpt\.com\/'/);
+  assert.match(installedQualification, /chatgpt_origin[^\n]*https:\/\/chatgpt\.com\//);
+  assert.doesNotMatch(installedQualification, /chatgpt_origin[^\n]*chat\.z\.ai/);
   assert.doesNotMatch(installedQualification, /installed_initial_chatgpt_surface_not_exposed/);
   assert.doesNotMatch(installedQualification, /installed_initial_chatgpt_remote_load_not_ready/);
 });
