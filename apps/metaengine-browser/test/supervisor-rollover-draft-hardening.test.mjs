@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AgentSessionMonitor } from '../src/agent-session-monitor.mjs';
+import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
 // ---------------------------------------------------------------------------
@@ -135,7 +135,7 @@ async function makeRuntime(h, { monitorMs = 1 } = {}) {
     statePath,
     monitorMs,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
   });
   return { runtime, dir };
 }
