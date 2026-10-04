@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 EDGE = ROOT / "supabase" / "functions" / "a2-chat-bridge-remote" / "index.ts"
 MIGRATION = ROOT / "supabase" / "migrations" / "20260825213000_a2_chat_bridge_remote_runtime_v1.sql"
 ATOMIC_MIGRATION = ROOT / "supabase" / "migrations" / "20260827140000_a2_chat_bridge_remote_atomic_command_v2.sql"
-RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql"
+RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql"\nCHATGPT_ONLY_MIGRATION = ROOT / "supabase" / "migrations" / "20261004061500_a2_chat_bridge_chatgpt_only_v1.sql"
 BOOTSTRAP = ROOT / "coordination" / "chat-control-plane" / "extension" / "bootstrap-config.js"
 AMPLIFIER_POLICY = ROOT / "coordination" / "amplifier-loop" / "AMPLIFIER_LOOP_V1.md"
 AMPLIFIER_SEEDS = ROOT / "coordination" / "amplifier-loop" / "seed-amplifiers.json"
@@ -28,7 +28,7 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         cls.edge = EDGE.read_text()
         cls.migration = MIGRATION.read_text()
         cls.atomic_migration = ATOMIC_MIGRATION.read_text()
-        cls.rls = RLS_MIGRATION.read_text()
+        cls.rls = RLS_MIGRATION.read_text()\n        cls.chatgpt_only = CHATGPT_ONLY_MIGRATION.read_text()
         cls.bootstrap = BOOTSTRAP.read_text()
         cls.amplifier_policy = AMPLIFIER_POLICY.read_text()
         cls.amplifier_seeds = json.loads(AMPLIFIER_SEEDS.read_text())
@@ -92,6 +92,24 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("p_duel_id: null", self.edge)
         self.assertIn("legacy_provider_bound_relay_quarantined", self.edge)
         self.assertNotIn("LEGACY_GLM_REQUIRED", self.edge)
+
+    def test_chatgpt_only_migration_is_fresh_project_compatible_and_fail_closed(self):
+        sql = self.chatgpt_only
+        self.assertIn("set search_path = ''", sql)
+        self.assertIn("v_platform <> 'CHATGPT' or v_agent <> 'GPT'", sql)
+        self.assertIn("target_platform='GLM_ZAI'", sql)
+        self.assertIn("result_status='BLOCKED_LEGACY_GLM_DISABLED'", sql)
+        # Fresh Client V1 carries only remote_runtime_v1. Do not accidentally
+        # depend on columns from the superseded dual-provider transport FSM.
+        for historical_column in [
+            "execution_class", "result_reported_at", "dispatch_group_sha256",
+            "predecessor_command_id uuid", "ordering_basis text",
+            "progress_status", "busy_until", "transport_trace_id",
+        ]:
+            self.assertNotIn(historical_column, sql)
+        self.assertNotIn("insert into public.compute_fabric_a2_chat_bridge_remote_command_h205f22(\n    command_id, idempotency_key, target_platform, target_agent, client_id,\n    status, created_at, leased_at, prompt_sha256, a2_head_message_seq,\n    a2_peer_payloads_exposed, duel_id, authority_effect,\n    launch_order", sql)
+        self.assertIn("'launch_order', 1", sql)
+        self.assertIn("'ordering_basis', 'CHATGPT_ONLY'", sql)
 
     def test_amplifier_loop_is_in_every_remote_autonomous_wake(self):
         for needle in [
