@@ -1,12 +1,16 @@
 -- METAENGINE A2 Chat Bridge — ChatGPT-only active command issuance.
 -- Historical GLM/ZAI rows remain readable; no new GLM lease may be created.
+--
+-- IMPORTANT: this migration is intentionally compatible with the baseline
+-- remote-runtime-v1 table. The old dual-provider transport FSM added optional
+-- ordering/progress columns on some historical lineages, but the fresh Client
+-- project does not carry those columns. ChatGPT-only issuance must not depend
+-- on that superseded schema.
 
 update public.compute_fabric_a2_chat_bridge_remote_command_h205f22
    set status='FAILED',
        completed_at=pg_catalog.clock_timestamp(),
-       result_status='BLOCKED_LEGACY_GLM_DISABLED',
-       execution_class=coalesce(execution_class,'BLOCKED'),
-       result_reported_at=coalesce(result_reported_at,pg_catalog.clock_timestamp())
+       result_status='BLOCKED_LEGACY_GLM_DISABLED'
  where target_platform='GLM_ZAI'
    and status='LEASED';
 
@@ -23,7 +27,7 @@ create or replace function public.h205f22_a2_chat_bridge_issue_command_v2(
 ) returns jsonb
 language plpgsql
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
 declare
   v_row public.compute_fabric_a2_chat_bridge_remote_command_h205f22%rowtype;
@@ -58,7 +62,7 @@ begin
       'idempotency_key', v_row.idempotency_key, 'status', v_row.status,
       'target_platform', v_row.target_platform, 'target_agent', v_row.target_agent,
       'leased_to', v_row.client_id,
-      'launch_order', coalesce(v_row.launch_order, 1),
+      'launch_order', 1,
       'predecessor_command_id', null,
       'ordering_basis', 'CHATGPT_ONLY',
       'authority_effect', false
@@ -68,13 +72,11 @@ begin
   insert into public.compute_fabric_a2_chat_bridge_remote_command_h205f22(
     command_id, idempotency_key, target_platform, target_agent, client_id,
     status, created_at, leased_at, prompt_sha256, a2_head_message_seq,
-    a2_peer_payloads_exposed, duel_id, authority_effect,
-    launch_order, predecessor_command_id, ordering_basis
+    a2_peer_payloads_exposed, duel_id, authority_effect
   ) values (
     pg_catalog.gen_random_uuid(), v_key, 'CHATGPT', 'GPT', v_client,
     'LEASED', v_now, v_now, v_hash, greatest(0, coalesce(p_a2_head_message_seq, 0)),
-    coalesce(p_a2_peer_payloads_exposed, false), p_duel_id, false,
-    1, null, 'CHATGPT_ONLY'
+    coalesce(p_a2_peer_payloads_exposed, false), p_duel_id, false
   ) returning * into v_row;
 
   return pg_catalog.jsonb_build_object(
