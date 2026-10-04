@@ -1,5 +1,5 @@
 import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
-import { AGENT_PLATFORM_HOME_URL, isAgentPlatformHost } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_MODEL, AGENT_PLATFORM_PROVIDER, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -536,7 +536,9 @@ function primaryChatFleetRoster() {
       tab_id: tab.tab_id,
       selected: tab.tab_id === selectedTabId,
       title: tab.title || 'Supervisor',
-      model: 'GLM-5.3-Flash',
+      provider: AGENT_PLATFORM_PROVIDER,
+      platform: AGENT_PLATFORM_ID,
+      model: AGENT_PLATFORM_MODEL,
       exact_native_binding: true,
       presentation_only: true,
       authority_effect: false,
@@ -557,7 +559,9 @@ function primaryChatFleetRoster() {
       tab_id: tab.tab_id,
       selected: tab.tab_id === selectedTabId,
       title: tab.title || String(row?.role || 'Agent'),
-      model: 'GLM-5.3-Flash',
+      provider: AGENT_PLATFORM_PROVIDER,
+      platform: AGENT_PLATFORM_ID,
+      model: AGENT_PLATFORM_MODEL,
       exact_native_binding: true,
       presentation_only: true,
       authority_effect: false,
@@ -1584,8 +1588,8 @@ function tabForPlatform(platform) {
   const match = (tab) => {
     try {
       const host = new URL(tab.url).hostname.toLowerCase();
-      if (p === 'GLM_ZAI') return isAgentPlatformHost(host);
-      if (p === 'CHATGPT') return host === 'chatgpt.com' || host === 'www.chatgpt.com' || host === 'chat.openai.com';
+      if (p === 'GLM_ZAI') return host === 'chat.z.ai';
+      if (p === 'CHATGPT') return isAgentPlatformHost(host) || host === 'chat.openai.com';
     } catch {}
     return false;
   };
