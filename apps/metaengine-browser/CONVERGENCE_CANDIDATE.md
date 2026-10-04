@@ -66,7 +66,7 @@ Historical ADMIN.1 changed packaged runtime bytes above UI.1 `0.7.0-dev.36719340
 
 Canonical production authority:
 - one Native Browser Supervisor/Fleet task and Agent lifecycle authority;
-- real authenticated z.ai Agent Web UI sessions, with durable Agent-origin/session provenance;
+- real authenticated ChatGPT Web UI sessions, with durable Agent-origin/session provenance; GLM/Z.ai is legacy read compatibility only and cannot authorize new actuation;
 - one geometry-independent Browser effect path with readback and no blind retry;
 - Browser Brain and durable memory remain Native Browser-owned;
 - Browser-packaged ME2 is a standalone read-only, zero-authority compatibility probe;
@@ -87,7 +87,7 @@ Release safety invariants:
 - tested source SHA, built installer and released installer must be identical in the final release chain;
 - full Self Update E2E consumes and re-verifies the same Package Smoke installer, records zero consumer target builds and waits for its exact producer terminal success;
 - concurrent fresh startup shares one durable device identity initialization and never changes the signing key under an enrollment request;
-- promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update z.ai Agent E2E evidence.
+- promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update ChatGPT Agent E2E evidence, including an explicit negative proof that no active GLM/Z.ai command, lease, navigation or inference effect occurred.
 
 
 Attempted successor identity `0.7.0-dev.36909837122.1` was consumed by the first CI matrix (Package Smoke #3111 started). R83 static canary correctly rejected its temporary Edge-source drift. The correction reuses the existing qualified `host_resilience` plane and reserves `0.7.0-dev.36963586969.1`; no canary manifest or deployed Edge is advanced by this client-only diagnostic slice.
