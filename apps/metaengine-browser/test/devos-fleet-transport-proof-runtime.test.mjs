@@ -17,10 +17,10 @@ const lease = {
   automatic_retry_allowed: false,
   task_spec: { objective: 'Use an already transport-proven Browser incarnation.' },
 };
-const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
+const composer = { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
-const conversation = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversation = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 const fleetProof = {
   schema: 'metaengine.browser.fleet-transport-proof.v1',
@@ -101,7 +101,7 @@ function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.
         url: conversation,
         viewport: { width: 1200, height: 640 },
         semantic_targets: post ? [composer, stop] : [composer],
-        interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'GLM-5.3-Flash' }] },
+        interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'CHATGPT_ACCOUNT_SELECTED' }] },
         authority_effect: false,
       };
     }
@@ -143,13 +143,13 @@ test('ACTIVE exact fleet proof is revalidated before DB mark-running and late pr
   clearFleetRuntime(h.runtime);
 });
 
-test('mark-running rejects Agent-origin digest drift after the physical task effect', async () => {
+test('mark-running rejects agent-origin digest drift after the physical task effect', async () => {
   const driftedAfterSubmit = structuredClone(fleetProof);
   driftedAfterSubmit.agent_surface_sha256 = 'd'.repeat(64);
   const h = harness({ proofAfterSubmit: driftedAfterSubmit });
   const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
   await assert.rejects(() => cycle.cycle(), /devos_transport_active_agent_surface_proof_mismatch/);
-  assert.deepEqual(h.order, [], 'DB RUNNING must not be written after Agent-origin proof drift');
+  assert.deepEqual(h.order, [], 'DB RUNNING must not be written after agent-origin proof drift');
   assert.equal(cycle.snapshot().dispatch_effect.last?.state, 'PROVEN');
 });
 
