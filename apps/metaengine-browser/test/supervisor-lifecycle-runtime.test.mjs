@@ -3,34 +3,42 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { AgentSessionMonitor } from '../src/agent-session-monitor.mjs';
+import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'e'.repeat(64) };
+const STOP_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'f'.repeat(64) };
 
-function glmFrame(text = '') {
-  // GLM surface: placeholder-named (or unnamed) composer addressed by its
-  // semantic_ref; no named Send/Stop controls exist on chat.z.ai.
+function chatgptFrame(text = '', { generating = false } = {}) {
   return {
+    schema: 'metaengine.native-browser.perception.v1',
+    tab_id: 'tab1',
+    target_id: 'webcontents:1',
+    process_incarnation_id: 'process_test_incarnation_0001',
+    state_revision_id: 'rev_' + 'a'.repeat(64),
     url: CONVERSATION,
-    title: 'Z.ai',
+    title: 'ChatGPT',
     text_excerpt: text,
+    viewport: { width: 1200, height: 700 },
     semantic_targets: [
-      { role: 'textbox', name: null, semantic_ref: COMPOSER_REF, backend_node_id: 3 },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 3 },
+      ...(generating ? [{ role: 'button', name: 'Stop generating', semantic_ref: STOP_REF, backend_node_id: 4 }] : []),
     ],
+    authority_effect: false,
   };
 }
 
-test('trusted supervisor wake submits via Enter and an adaptive hard stall escalates without a stop effect', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-'));
+test('trusted supervisor wake uses ChatGPT semantic submit and adaptive hard stall issues one bounded stop', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-chatgpt-'));
   const statePath = path.join(dir, 'keepalive.json');
-  let monitorNow = Date.parse('2026-09-19T15:00:00Z');
+  let monitorNow = Date.parse('2026-10-04T05:00:00Z');
   let typed = '';
   let digestSeq = 0;
   let frozen = false;
+  let generating = false;
   const actions = [];
-  const sessionMonitor = new AgentSessionMonitor({
+  const sessionMonitor = new ChatGptSessionMonitor({
     clock: () => monitorNow,
     softStallFloorMs: 30_000,
     hardStallFloorMs: 60_000,
@@ -43,15 +51,26 @@ test('trusted supervisor wake submits via Enter and an adaptive hard stall escal
   });
   const executeCommand = async (command) => {
     actions.push(command.action);
-    if (command.action === 'CAPTURE') return glmFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`);
+    if (command.action === 'CAPTURE') return chatgptFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`, { generating });
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.platform, 'GLM_ZAI');
+      assert.equal(command.platform, 'CHATGPT');
       assert.equal(command.payload.submit_after_type, true);
       typed = String(command.payload?.text || '');
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      generating = true;
+      return {
+        effect_state: 'PROVEN_GENERATING',
+        composer_cleared: true,
+        new_conversation_observed: false,
+        stop_observed: true,
+        automatic_retry_allowed: false,
+        authority_effect: true,
+      };
     }
-    if (command.action === 'TYPED_CLICK') throw new Error('no named control click exists on the GLM platform');
-    if (command.action === 'STOP_GENERATION') throw new Error('GLM stop requires an exact semantic-ref button and is never auto-dispatched');
+    if (command.action === 'STOP_GENERATION') {
+      generating = false;
+      return { action: 'STOP_GENERATION', authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
     throw new Error(`unexpected_action:${command.action}`);
   };
 
@@ -71,10 +90,6 @@ test('trusted supervisor wake submits via Enter and an adaptive hard stall escal
   assert.equal(actions.includes('TYPED_CLICK'), false);
   assert.equal(runtime.snapshot().active_request?.same_chat_retry_attempt, 0);
 
-  // Advance past the adaptive hard-stall floor with a frozen digest: the GLM
-  // session monitor escalates instead of dispatching a stop effect. The first
-  // frozen cycle absorbs the churn-to-quiet digest transition; the second one
-  // crosses the hard-stall floor with a proven-quiet surface.
   frozen = true;
   monitorNow += 20_000;
   await runtime.cycle({ force: true });
@@ -82,29 +97,36 @@ test('trusted supervisor wake submits via Enter and an adaptive hard stall escal
   await runtime.cycle({ force: true });
 
   const snap = runtime.snapshot();
-  assert.equal(actions.includes('STOP_GENERATION'), false, 'chat.z.ai exposes no addressable stop control — a stall must escalate, never auto-stop');
-  assert.equal(snap.supervisor_generation, 'STALLED');
+  assert.equal(actions.filter((row) => row === 'STOP_GENERATION').length, 1, 'exact ChatGPT stop control permits one bounded recovery effect');
+  assert.equal(snap.supervisor_session.tabs[0].stop_attempted_epoch, snap.supervisor_session.tabs[0].generation_epoch);
   assert.equal(JSON.stringify(snap).includes(typed), false, 'trusted prompt body must not be persisted in lifecycle snapshot');
 
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('GLM session generation runs on digest churn and settles terminal-ready', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-glm-digest-'));
+test('ChatGPT session generation follows STOP/readback and settles terminal-ready after generation ends', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-chatgpt-settle-'));
   const statePath = path.join(dir, 'keepalive.json');
-  let monitorNow = Date.parse('2026-09-19T15:00:00Z');
+  let monitorNow = Date.parse('2026-10-04T05:00:00Z');
   let typed = '';
-  let digestSeq = 0;
-  let frozen = false;
+  let generating = false;
   const getState = async () => ({
     tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return glmFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`);
+    if (command.action === 'CAPTURE') return chatgptFrame(typed, { generating });
     if (command.action === 'SEMANTIC_TYPE') {
       typed = String(command.payload?.text || '');
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      generating = true;
+      return {
+        effect_state: 'PROVEN_GENERATING',
+        composer_cleared: true,
+        new_conversation_observed: false,
+        stop_observed: true,
+        automatic_retry_allowed: false,
+        authority_effect: true,
+      };
     }
     throw new Error(`unexpected_action:${command.action}`);
   };
@@ -115,31 +137,32 @@ test('GLM session generation runs on digest churn and settles terminal-ready', a
     statePath,
     monitorMs: 1000,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => monitorNow, settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => monitorNow, settleMs: 1500 }),
   });
+
   await runtime.start();
   await runtime.cycle({ force: true });
   let snap = runtime.snapshot();
   assert.equal(snap.supervisor_generation, 'GENERATING');
   assert.equal(snap.quiescent, false);
-  assert.equal(snap.supervisor_session.tabs[0].controls.stop, 0, 'no named control signals exist on the GLM platform');
+  assert.equal(snap.supervisor_session.tabs[0].controls.stop, 1);
+
+  generating = false;
+  monitorNow += 500;
+  await runtime.cycle({ force: true });
+  snap = runtime.snapshot();
+  assert.equal(snap.supervisor_generation, 'SETTLING');
 
   monitorNow += 2000;
   await runtime.cycle({ force: true });
   snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'GENERATING', 'digest churn keeps the generation active');
+  assert.equal(snap.supervisor_generation, 'IDLE');
+  assert.equal(snap.supervisor_session.tabs[0].terminal_ready, true);
 
-  frozen = true;
-  monitorNow += 2000;
-  await runtime.cycle({ force: true });
-  monitorNow += 4000;
-  await runtime.cycle({ force: true });
-  snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'IDLE', 'a quiet settle window flips the session terminal-ready');
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('supervisor wake uses one semantic submit and trusts its event-driven generation proof', async () => {
+test('supervisor wake uses one ChatGPT semantic submit and trusts its event-driven generation proof', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-submit-latch-'));
   const statePath = path.join(dir, 'keepalive.json');
   const commands = [];
@@ -149,11 +172,18 @@ test('supervisor wake uses one semantic submit and trusts its event-driven gener
   });
   const executeCommand = async (command) => {
     commands.push(structuredClone(command));
-    if (command.action === 'CAPTURE') return glmFrame();
+    if (command.action === 'CAPTURE') return chatgptFrame();
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.platform, 'GLM_ZAI');
+      assert.equal(command.platform, 'CHATGPT');
       assert.equal(command.payload.submit_after_type, true);
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return {
+        effect_state: 'PROVEN_COMPOSER_CLEARED',
+        composer_cleared: true,
+        new_conversation_observed: false,
+        stop_observed: false,
+        automatic_retry_allowed: false,
+        authority_effect: true,
+      };
     }
     if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
     throw new Error(`unexpected_action:${command.action}`);
@@ -177,7 +207,7 @@ test('supervisor wake uses one semantic submit and trusts its event-driven gener
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('process restart fences predecessor wake and backlog before emitting one fresh lifecycle wake', async () => {
+test('process restart fences predecessor wake and backlog before emitting one fresh ChatGPT lifecycle wake', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-active-retire-'));
   const statePath = path.join(dir, 'keepalive.json');
   const oldWake = 'wake_66af3fcf-849c-4d7f-b7e9-7b7f60ddcae2';
@@ -233,11 +263,18 @@ test('process restart fences predecessor wake and backlog before emitting one fr
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return glmFrame(typed);
+    if (command.action === 'CAPTURE') return { ...chatgptFrame(typed), tab_id: 'tab_new' };
     if (command.action === 'SEMANTIC_TYPE') {
       submitCount += 1;
       typed = String(command.payload?.text || '');
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return {
+        effect_state: 'PROVEN_COMPOSER_CLEARED',
+        composer_cleared: true,
+        new_conversation_observed: false,
+        stop_observed: false,
+        automatic_retry_allowed: false,
+        authority_effect: true,
+      };
     }
     throw new Error(`unexpected_action:${command.action}`);
   };
