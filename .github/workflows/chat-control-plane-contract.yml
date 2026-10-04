@@ -167,7 +167,7 @@ jobs:
             -H 'content-type: application/json' \
             -H 'x-a2-chat-bridge-client: ci' \
             -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
-            -d '{"target_platform":"GLM_ZAI"}' >/dev/null
+            -d '{"target_platform":"CHATGPT"}' >/dev/null
           curl -fsS -H 'x-a2-chat-bridge-client: ci' \
             -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
             http://127.0.0.1:8878/v1/commands/next >/tmp/cmd.json
