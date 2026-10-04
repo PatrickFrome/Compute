@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASE = ROOT / "coordination" / "chat-control-plane"
 EXT = BASE / "extension"
 DAEMON = BASE / "daemon"
-REMOTE_BRIDGE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"
+REMOTE_BRIDGE = "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote"
 
 
 class ChatControlPlaneBridgeContract(unittest.TestCase):
@@ -70,6 +70,25 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn('importScripts("./trusted-glm.js")', self.background_entry)
         self.assertNotIn("trusted-glm.js", package_files)
         self.assertNotIn("import(", self.background_entry)
+
+    def test_active_runtime_routes_to_fresh_client_project(self):
+        fresh = "https://jhriwwsryeqsvvvufkok.supabase.co"
+        retired = "https://xpeibufgzjknrhbhpffp.supabase.co"
+        self.assertIn(fresh + "/functions/v1/a2-chat-bridge-remote", self.bootstrap)
+        self.assertIn(fresh + "/functions/v1/a2-browser-native-supervisor-v1", self.bootstrap)
+        self.assertIn(fresh + "/*", json.dumps(self.manifest))
+        self.assertNotIn(retired + "/*", json.dumps(self.manifest))
+        bridge_client = (EXT / "bridge-client.js").read_text()
+        runtime_core = (EXT / "runtime-core.js").read_text()
+        supervisor = (EXT / "supervisor-authority.js").read_text()
+        transport = (EXT / "supervisor-device-transport.js").read_text()
+        self.assertIn(fresh + "/functions/v1/a2-chat-bridge-remote", bridge_client)
+        self.assertIn("RETIRED_REMOTE", bridge_client)
+        self.assertIn(fresh + "/functions/v1/a2-chat-bridge-remote", runtime_core)
+        self.assertIn(fresh + "/functions/v1/a2-browser-native-supervisor-v1", supervisor)
+        self.assertIn("/a2-browser-native-supervisor-v1", transport)
+        self.assertNotIn("/a2-browser-supervisor-v4", transport)
+        self.assertNotIn("/a2-browser-supervisor-v3-canary", supervisor)
 
     def test_remote_auth_and_secret_boundaries(self):
         self.assertIn(REMOTE_BRIDGE, self.bootstrap)
