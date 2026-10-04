@@ -7,7 +7,7 @@
   if (!runtimeDescriptor?.version) throw new Error("runtime_descriptor_missing");
   const OPERATOR_RUNTIME = String(runtimeDescriptor.version);
   const DEFAULTS = Object.freeze({
-    daemonUrl: String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"),
+    daemonUrl: String(bootstrap.daemonUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote"),
     armed: false,
     autoOpenTabs: true,
     pollMs: 2500,
