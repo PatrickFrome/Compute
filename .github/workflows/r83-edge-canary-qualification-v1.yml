@@ -84,6 +84,21 @@ jobs:
           if (m.rollback.source_binding_complete !== true && m.promotion_authorized !== false) {
             throw new Error('rollback_source_drift_forbids_promotion');
           }
+          if (m.rollback.source_binding_mode === 'PINNED_MIXED_IMPORT_CLOSURE_EXACT_ARTIFACT_CLONE') {
+            if (!Array.isArray(m.rollback.observed_import_pins) || m.rollback.observed_import_pins.length < 1) {
+              throw new Error('rollback_import_closure_missing');
+            }
+            if (m.rollback.observed_import_pins.some((pin) => !/^[0-9a-f]{40}$/.test(pin))) {
+              throw new Error('rollback_import_closure_pin_invalid');
+            }
+            if (!m.rollback.observed_import_pins.includes(m.rollback.source_pin)) {
+              throw new Error('rollback_primary_pin_not_in_closure');
+            }
+            if (m.rollback.exact_stable_artifact_digest_match !== true || m.rollback.rollback_snapshot_deployed !== true) {
+              throw new Error('rollback_exact_artifact_clone_unproven');
+            }
+          }
+          if (m.live_evidence?.rollback_drill_completed !== false) throw new Error('rollback_drill_must_remain_open_in_source');
           if (m.live_qualification.completed !== false) throw new Error('live_qualification_must_remain_open');
           if (m.live_qualification.signed_health_required !== true) throw new Error('signed_health_gate_required');
           if (m.live_qualification.installed_electron_signed_e2e_required !== true) throw new Error('installed_electron_gate_required');
