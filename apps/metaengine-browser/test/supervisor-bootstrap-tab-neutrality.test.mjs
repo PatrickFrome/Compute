@@ -26,8 +26,8 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 //   5. a successful bootstrap clears the stale supervisor_bootstrap* error.
 
 const AUTH_URL = 'https://chatgpt.com/auth/login';
-const ROOT_URL = 'https://chat.z.ai/';
-const CONV_URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const ROOT_URL = 'https://chatgpt.com/';
+const CONV_URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 function authFrame() {
   return { url: AUTH_URL, title: 'Начать работу | ChatGPT', text_excerpt: 'Log in', semantic_targets: [] };
