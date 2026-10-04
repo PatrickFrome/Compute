@@ -21,7 +21,15 @@ const required=new Set([...idsFrom(js),...idsFrom(sup)]);
 for(const id of required) assert.match(html,new RegExp(`id=["']${id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}["']`),`sidepanel missing #${id}`);
 
 for(const id of ['supervisorBadge','supervisorOff','supervisorMonitor','supervisorControl','supervisorLink','supervisorCommand','supervisorReceipt','supervisorTimeline','bridgePulse','supervisorPulse','gatePulse']) assert.ok(required.has(id),`supervisor UI not wired: ${id}`);
-assert.match(html,/Strict causal lane/);
+assert.match(html,/ChatGPT-only inference lane/);
+assert.match(html,/GLM telemetry/);
+assert.match(html,/no actuation/);
+assert.match(html,/Inspect legacy GLM \(read-only\)/);
+assert.doesNotMatch(html,/<option value="GLM_ZAI"/);
+assert.match(html,/<option value="CHATGPT">ChatGPT \/ OpenAI<\/option>/);
+assert.match(js,/ACTIVE_EXECUTION_PLATFORM = "CHATGPT"/);
+assert.match(js,/legacy_platform_execution_disabled/);
+assert.match(js,/Legacy provider capture is read-only; semantic actuation is disabled/);
 assert.match(html,/Chat Supervisor/);
 assert.match(html,/Live timeline/);
 assert.match(html,/<script src="sidepanel\.js"><\/script>\s*<script src="sidepanel-supervisor\.js"><\/script>/);

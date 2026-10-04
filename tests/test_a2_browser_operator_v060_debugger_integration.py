@@ -16,6 +16,10 @@ class BrowserOperatorDebuggerIntegration(unittest.TestCase):
         cls.glm = (EXT / "trusted-glm.js").read_text()
         cls.bindings = (EXT / "operator-gate-bindings.js").read_text()
         cls.oopif = (EXT / "operator-oopif-perception.js").read_text()
+        cls.options_html = (EXT / "options.html").read_text()
+        cls.options_js = (EXT / "options.js").read_text()
+        cls.operator_actions = (EXT / "operator-actions.js").read_text()
+        cls.semantic_actions = (EXT / "operator-semantic-actions.js").read_text()
 
     def test_chrome_125_flat_session_floor(self):
         self.assertGreaterEqual(int(self.manifest["minimum_chrome_version"]), 125)
@@ -25,6 +29,18 @@ class BrowserOperatorDebuggerIntegration(unittest.TestCase):
         gpt = self.entry.index('importScripts("./trusted-chatgpt.js")')
         self.assertLess(broker, gpt)
         self.assertNotIn('importScripts("./trusted-glm.js")', self.entry)
+
+    def test_active_operator_surfaces_are_chatgpt_only(self):
+        self.assertNotIn('id="zaiUrl"', self.options_html)
+        self.assertNotIn('id="restoreZai"', self.options_html)
+        self.assertNotIn("Strict GLM-first", self.options_html)
+        self.assertNotIn("PROJECT_ZAI_URL", self.options_js)
+        self.assertNotIn("zaiUrl,", self.options_js)
+        self.assertIn("ChatGPT-only routing", self.options_js)
+        self.assertIn('ACTIVE_EXECUTION_PLATFORM = "CHATGPT"', self.operator_actions)
+        self.assertIn('ACTIVE_EXECUTION_PLATFORM = "CHATGPT"', self.semantic_actions)
+        self.assertIn("legacy_platform_execution_disabled", self.operator_actions)
+        self.assertIn("legacy_platform_execution_disabled", self.semantic_actions)
 
     def test_trusted_chatgpt_is_broker_only(self):
         self.assertIn("A2_DEBUGGER_RUN", self.gpt)

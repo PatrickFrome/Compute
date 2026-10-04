@@ -26,21 +26,13 @@
 <body>
 <main>
   <h1>METAENGINE A2 Browser Operator</h1>
-  <p><strong>Strict GLM-first compatibility policy:</strong> GLM is physically actuated first. GPT is released only after the durable GLM <span class="mono">ACTUATED</span> barrier (or when A2 proves GLM already submitted the current wave). Provider ordering is a policy profile and will later be generalized by the durable action graph.</p>
+  <p><strong>ChatGPT-only active inference:</strong> every new agent command targets an independently fenced ChatGPT session. Historical GLM/Z.AI state may remain readable for migration evidence, but it has no execution authority.</p>
 
   <section class="card">
-    <div class="row"><span class="pill">GPT peer</span><span class="pill">exact URL binding</span></div>
+    <div class="row"><span class="pill">ChatGPT agent</span><span class="pill">exact URL binding</span></div>
     <label for="chatgptUrl">ChatGPT conversation URL</label>
     <input id="chatgptUrl" type="url" placeholder="https://chatgpt.com/c/..." autocomplete="off" />
     <div class="row" style="margin-top:10px"><button id="detectChatgpt" class="secondary" type="button">Use open ChatGPT tab</button></div>
-  </section>
-
-  <section class="card">
-    <div class="row"><span class="pill">GLM peer</span><span class="pill">launch order #1</span></div>
-    <label for="zaiUrl">Z.AI conversation URL</label>
-    <input id="zaiUrl" type="url" autocomplete="off" />
-    <p class="mono">Default: project-pinned Z.AI conversation</p>
-    <div class="row"><button id="restoreZai" class="secondary" type="button">Restore project Z.AI chat</button></div>
   </section>
 
   <section class="card">
@@ -54,7 +46,7 @@
     <input id="pollMs" type="number" min="1000" max="30000" step="250" />
     <div style="margin-top:14px"><label><input id="autoOpenTabs" type="checkbox" /> Automatically reopen a pinned peer tab if it is closed</label></div>
     <div><label><input id="armed" type="checkbox" /> ARMED — allow trusted CDP actuation on exact pinned conversations</label></div>
-    <p class="warn">GLM actuation is trusted CDP mouse input only. Content scripts have no Send capability. GPT uses trusted CDP Enter. Ambiguous actuation is never automatically retried.</p>
+    <p class="warn">Only ChatGPT has active execution authority. Legacy provider state is read-only. Ambiguous actuation is never automatically retried.</p>
   </section>
 
   <div class="row">
