@@ -11,8 +11,8 @@ Remove the architectural assumption that a browser target is identified by `CHAT
 A logical target persists in `chrome.storage.local`:
 
 - `target_id` — stable logical identity.
-- `provider` — current provider (`OPENAI`, `ZAI`).
-- `platform` — compatibility/runtime surface (`CHATGPT`, `GLM_ZAI`); this is a type/policy attribute, not identity.
+- `provider` — provider metadata. Active routing is `OPENAI`; `ZAI` is retained only on retired legacy rows.
+- `platform` — compatibility/runtime surface. `CHATGPT` is the only active platform; `GLM_ZAI` is read-only legacy compatibility. This remains a type/policy attribute, not identity.
 - `surface` — `WEB_CHAT`.
 - `role` — scheduler-facing logical role.
 - `conversation_epoch` — monotonically advances when the conversation URL changes.
@@ -35,11 +35,11 @@ A physical browser binding persists only in `chrome.storage.session`:
 Existing settings remain valid during migration:
 
 - `chatgptUrl` projects into logical target `gpt_primary`, legacy alias `CHATGPT`.
-- `zaiUrl` projects into logical target `glm_primary`, legacy alias `GLM_ZAI`.
+- `zaiUrl` may still project into logical target `glm_primary` for migration readback, but canonical status is always `RETIRED`; it cannot be resolved for actuation or used to create new targets.
 - changing a legacy URL updates the same logical target and advances its conversation epoch.
 - updating the conversation through the registry mirrors the URL back to the legacy setting for old consumers.
 
-This keeps `STRICT_GLM_FIRST_ACTUATED_V1` and current `target_platform` command contracts intact while the scheduler/dispatch layer migrates in R4.
+The former `STRICT_GLM_FIRST_ACTUATED_V1` ordering is retired. Coordinated execution now requires independent role/session readiness on ChatGPT; no GLM-first actuation prerequisite remains.
 
 ## Safety invariants
 
