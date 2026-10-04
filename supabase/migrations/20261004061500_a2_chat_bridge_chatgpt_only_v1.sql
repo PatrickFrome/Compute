@@ -32,11 +32,11 @@ as $$
 declare
   v_row public.compute_fabric_a2_chat_bridge_remote_command_h205f22%rowtype;
   v_now timestamptz := pg_catalog.clock_timestamp();
-  v_key text := pg_catalog.trim(pg_catalog.coalesce(p_idempotency_key, ''));
-  v_platform text := pg_catalog.upper(pg_catalog.trim(pg_catalog.coalesce(p_target_platform, '')));
-  v_agent text := pg_catalog.upper(pg_catalog.trim(pg_catalog.coalesce(p_target_agent, '')));
-  v_client text := pg_catalog.left(pg_catalog.trim(pg_catalog.coalesce(p_client_id, '')), 160);
-  v_hash text := pg_catalog.lower(pg_catalog.trim(pg_catalog.coalesce(p_prompt_sha256, '')));
+  v_key text := pg_catalog.btrim(coalesce(p_idempotency_key, ''));
+  v_platform text := pg_catalog.upper(pg_catalog.btrim(coalesce(p_target_platform, '')));
+  v_agent text := pg_catalog.upper(pg_catalog.btrim(coalesce(p_target_agent, '')));
+  v_client text := pg_catalog.left(pg_catalog.btrim(coalesce(p_client_id, '')), 160);
+  v_hash text := pg_catalog.lower(pg_catalog.btrim(coalesce(p_prompt_sha256, '')));
 begin
   if p_workspace_id is null or v_key !~ '^[0-9a-f]{64}$' then raise exception 'remote_idempotency_key_invalid'; end if;
   if v_platform <> 'CHATGPT' or v_agent <> 'GPT' then raise exception 'remote_legacy_provider_disabled'; end if;
