@@ -15,9 +15,9 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 // conversation FIRST with a tiny deterministic seed, then types the real
 // message on the conversation surface. These tests pin that medicine.
 
-const conversationUrl = 'https://chat.z.ai/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
-const NEW_CONVERSATION = 'https://chat.z.ai/c/newconv-rolled-seed-1234';
-const ROOT = 'https://chat.z.ai/';
+const conversationUrl = 'https://chatgpt.com/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
+const NEW_CONVERSATION = 'https://chatgpt.com/c/newconv-rolled-seed-1234';
+const ROOT = 'https://chatgpt.com/';
 
 function seedKeepalive(statePath) {
   let stored = null;
