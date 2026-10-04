@@ -3,6 +3,10 @@ name: Browser Typed Workspaces V1
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/browser-agent-platform.mjs'
+      - 'apps/metaengine-browser/src/chatgpt-fenced-submit.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/src/supervisor-lifecycle-runtime-core.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/workspace-binding-observer.mjs'

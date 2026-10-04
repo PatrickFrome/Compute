@@ -13,15 +13,15 @@ test('semantic submit uses persistent CDP events instead of 100ms polling', () =
   assert.doesNotMatch(source, /const sleep\s*=|await sleep\(/);
 });
 
-test('subscribe happens before final v2 runtime fence and Enter dispatch', () => {
-  const latch = source.indexOf('const outcomeLatch = openChatGptSubmitOutcomeLatch');
+test('subscribe happens before final runtime fence and single ChatGPT Send activation', () => {
+  const latch = source.indexOf('const latch = openChatGptSubmitOutcomeLatch');
   const fence = source.indexOf('assertCurrentEffectRuntime(webContents, dbg, effectBinding);', latch);
-  const enter = source.indexOf("type:'rawKeyDown', key:'Enter'", fence);
-  const wait = source.indexOf('await outcomeLatch.wait()', enter);
+  const activation = source.indexOf('const activation = await activateBackendNode(dbg, target.backend_node_id', latch);
+  const wait = source.indexOf('await latch.wait()', fence);
   assert.ok(latch >= 0, 'outcome latch must be opened');
   assert.ok(fence > latch, 'runtime fence must run after subscription');
-  assert.ok(enter > fence, 'Enter must dispatch only after final runtime fence');
-  assert.ok(wait > enter, 'readback waits after physical submit');
+  assert.ok(activation > latch && fence > activation, 'activation must invoke the final runtime fence');
+  assert.ok(wait > fence, 'readback waits after physical submit');
 });
 
 test('ambiguous deadline cannot create an automatic retry authority', () => {

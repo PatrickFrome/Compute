@@ -6,6 +6,10 @@ on:
       - 'work/browser-devos-root-transport-bootstrap-v1'
     paths:
       - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/src/chatgpt-fenced-submit.mjs'
+      - 'apps/metaengine-browser/src/fleet-submit-readiness.mjs'
+      - 'tests/browser-root-transport-static-fence.mjs'
       - 'apps/metaengine-browser/src/fleet-runtime-bridge.mjs'
       - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
       - 'apps/metaengine-browser/test/devos-restart-transport-promotion.test.mjs'
@@ -18,6 +22,10 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/src/chatgpt-fenced-submit.mjs'
+      - 'apps/metaengine-browser/src/fleet-submit-readiness.mjs'
+      - 'tests/browser-root-transport-static-fence.mjs'
       - 'apps/metaengine-browser/src/fleet-runtime-bridge.mjs'
       - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
       - 'apps/metaengine-browser/test/devos-restart-transport-promotion.test.mjs'
@@ -83,28 +91,7 @@ jobs:
             apps/metaengine-browser/test/fleet-revalidation-transport-proof-e2e.test.mjs
 
       - name: Static invariant fence
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          const cycle = fs.readFileSync('apps/metaengine-browser/src/devos-native-task-cycle.mjs','utf8');
-          const bridge = fs.readFileSync('apps/metaengine-browser/src/fleet-runtime-bridge.mjs','utf8');
-          const fleet = fs.readFileSync('apps/metaengine-browser/src/fleet-provisioner.mjs','utf8');
-          if (/setInterval\s*\(|setTimeout\s*\(/.test(cycle)) throw new Error('second_scheduler_loop_detected');
-          if (!/PRECONVERSATION_ROOT/.test(cycle) || !/PRECONVERSATION_ROOT/.test(bridge) || !/PRECONVERSATION_ROOT/.test(fleet)) throw new Error('preconversation_contract_missing');
-          if (!/bound_unverified_dispatch_allowed:\s*false/.test(cycle)) throw new Error('bound_unverified_dispatch_fence_missing');
-          const cycleCore = fs.readFileSync('apps/metaengine-browser/src/devos-native-task-cycle-core.mjs','utf8');
-          // GLM agent platform contract (dccd4ca9 + D-S2 2026-09-19): the dispatch
-          // submits through the single-phase Enter lane with event-driven readback
-          // — the legacy ChatGPT two-phase type-then-click send is gone. The fence
-          // asserts the one-phase contract and its readback path stay in place.
-          if (!/submit_after_type:\s*true/.test(cycleCore)) throw new Error('enter_lane_submit_contract_missing');
-          if (!/ENTER_KEY_EVENT_DRIVEN_READBACK/.test(cycleCore)) throw new Error('enter_lane_readback_contract_missing');
-          if (/submit_after_type:\s*false/.test(cycleCore)) throw new Error('legacy_two_phase_send_resurrected');
-          if (!/UPGRADED_CONVERSATION/.test(cycle) || !/UPGRADED_CONVERSATION/.test(bridge)) throw new Error('canonical_upgrade_gate_missing');
-          if (/\beval\s*\(/.test(cycle) || /\beval\s*\(/.test(bridge) || /\beval\s*\(/.test(fleet)) throw new Error('arbitrary_eval_surface_detected');
-          NODE
+        run: node tests/browser-root-transport-static-fence.mjs
 
       - name: Checkout remains clean
         shell: bash

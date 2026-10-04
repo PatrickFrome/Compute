@@ -253,7 +253,7 @@ test('GLM STOP activates the exact semantic-ref button without viewport geometry
   assert.equal(h.calls.some(([m]) => m === 'Input.dispatchMouseEvent'), false);
 });
 
-test('ChatGPT submit contract is unchanged for the legacy operator lane', async () => {
+test('ChatGPT rejects the historical single-phase operator submit', async () => {
   const h = fakeZai();
   const frame = await captureSemanticFrame(h.webContents);
   const composer = frame.semantic_targets.find((row) => row.role === 'textbox');
@@ -268,5 +268,5 @@ test('ChatGPT submit contract is unchanged for the legacy operator lane', async 
       replace_existing: true,
       submit_after_type: true,
     },
-  }), /native_semantic_submit_requires_exact_chatgpt_composer/);
+  }), /native_chatgpt_two_phase_submit_required/);
 });

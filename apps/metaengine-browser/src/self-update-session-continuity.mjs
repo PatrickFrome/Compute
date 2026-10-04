@@ -26,6 +26,20 @@ const defaultSleep = (ms) => new Promise((resolve) => { const timer = setTimeout
 function clip(value, max = 240) { return String(value ?? '').slice(0, max); }
 function clone(value) { return value == null ? value : structuredClone(value); }
 
+function isRetiredLegacyProviderRoot(tab) {
+  if (String(tab?.kind || '').toUpperCase() !== 'GLM_CHAT') return false;
+  try {
+    const url = new URL(String(tab?.url || ''));
+    return url.protocol === 'https:'
+      && url.hostname.toLowerCase() === 'chat.z.ai'
+      && url.pathname.replace(/\/+$/, '') === ''
+      && !url.search
+      && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeTab(tab, selectedTabId) {
   const tabId = clip(tab?.tab_id, 120);
   const url = clip(tab?.url, 2048);
@@ -169,12 +183,24 @@ export async function restoreSelfUpdateSessionContinuity({
   let restoredTabs = 0;
   let failedTabs = 0;
   let skippedAuthRequiredTabs = 0;
+  let skippedLegacyProviderRoots = 0;
   let authRequiredLatched = false;
   const bindings = [];
   const createdTabIds = [];
   for (const prior of row.tabs) {
     const url = String(prior?.url || '');
     if (!HTTPS_RE.test(url)) { failedTabs += 1; continue; }
+    // ChatGPT-only successor migration: an exact historical z.ai ROOT carries
+    // no durable conversation identity, and the continuity capsule deliberately
+    // persists neither composer text nor credentials. Recreating that root
+    // therefore cannot restore user content; it only consumes a tab slot and
+    // can reintroduce the legacy-provider capacity wall. Retire ONLY the exact
+    // GLM_CHAT root. Legacy conversation URLs remain fully restorable/history-
+    // compatible and every non-root/non-GLM tab keeps the old behavior.
+    if (isRetiredLegacyProviderRoot(prior)) {
+      skippedLegacyProviderRoots += 1;
+      continue;
+    }
     // AUTH_REQUIRED is terminal for ChatGPT-surface restoration: the user
     // session is gone and only a human sign-in can restore it. Restoring
     // more ChatGPT tabs would only mint more login pages (the exact
@@ -232,10 +258,12 @@ export async function restoreSelfUpdateSessionContinuity({
   const hadChatTabs = row.tabs.some((tab) => isChatSurfaceUrl(String(tab?.url || '')));
   const authRequiredTerminal = authRequiredLatched
     || (hadChatTabs && postReadback.auth_state === 'AUTH_REQUIRED');
+  const recordedPreTabCount = Number.isSafeInteger(Number(row.pre_tab_count)) && Number(row.pre_tab_count) > 0
+    ? Number(row.pre_tab_count)
+    : row.tabs.length;
+  const migrationExpectedPreTabCount = Math.max(0, recordedPreTabCount - skippedLegacyProviderRoots);
   const cardinality = checkTabCardinalityContinuity({
-    preTabCount: Number.isSafeInteger(Number(row.pre_tab_count)) && Number(row.pre_tab_count) > 0
-      ? Number(row.pre_tab_count)
-      : row.tabs.length,
+    preTabCount: migrationExpectedPreTabCount,
     postTabCount: Array.isArray(finalState?.tabs) ? finalState.tabs.length : null,
     slack: cardinalitySlack,
   });
@@ -255,6 +283,8 @@ export async function restoreSelfUpdateSessionContinuity({
     restored_tabs: restoredTabs,
     failed_tabs: failedTabs,
     skipped_auth_required_tabs: skippedAuthRequiredTabs,
+    skipped_legacy_provider_roots: skippedLegacyProviderRoots,
+    continuity_expected_tab_count: migrationExpectedPreTabCount,
     created_tab_ids: createdTabIds,
     tab_count: row.tabs.length,
     target_version: row.target_version || null,

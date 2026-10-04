@@ -208,7 +208,7 @@ export function buildSupervisorLifecycleStatusSnapshot(snapshot = {}) {
     'terminal_requires_user_message', 'restart_resumable', 'restart_pending_wake_reconciliation',
     'restart_rollover_reconciliation', 'prompt_plaintext_persisted', 'orphaned_stall_stop_only',
     'ambiguous_terminal_retirement', 'active_wake_terminal_retirement', 'ambiguous_same_wake_retry',
-    'wake_send_transport', 'service_throttle_backpressure', 'worker_observation_prefetch',
+    'ambiguous_submit_requires_explicit_recovery', 'wake_send_transport', 'service_throttle_backpressure', 'worker_observation_prefetch',
     'worker_observation_concurrency', 'authority_effect',
   ]);
   const runtimeControl = scalarProjection(snapshot?.continuous_service?.runtime_control, [
@@ -491,16 +491,18 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand,
       if (!isNativeFrame(before)) return executeCommand(command);
       if (throttleGate?.active()) return block('CHATGPT_SERVICE_THROTTLED');
 
-      await executeCommand({ action: 'SELECT_TAB', payload: { tab_id: tabId }, platform: command?.platform ?? null });
-      const state = await getState();
-      if (!exactSelectedTab(state, tabId)) return block('SUPERVISOR_TAB_NOT_EXACTLY_SELECTED');
+      if (command?.payload?.chatgpt_submit !== true) {
+        await executeCommand({ action: 'SELECT_TAB', payload: { tab_id: tabId }, platform: command?.platform ?? null });
+        const state = await getState();
+        if (!exactSelectedTab(state, tabId)) return block('SUPERVISOR_TAB_NOT_EXACTLY_SELECTED');
+      }
 
       activated = await executeCommand({ action: 'CAPTURE', payload: { tab_id: tabId }, platform: command?.platform ?? null });
       rememberFrame(tabId, activated);
       if (!isNativeFrame(activated)) return block('SUPERVISOR_NATIVE_FRAME_LOST');
       if (throttleGate?.active()) return block('CHATGPT_SERVICE_THROTTLED');
       if (!exactIncarnation(before, activated, tabId)) return block('SUPERVISOR_TARGET_INCARNATION_CHANGED');
-      if (!positiveViewport(activated)) return block('SUPERVISOR_VIEWPORT_NOT_VISIBLE');
+      if (command?.payload?.chatgpt_submit !== true && !positiveViewport(activated)) return block('SUPERVISOR_VIEWPORT_NOT_VISIBLE');
 
       const send = uniqueChatGptControl(activated, 'SEND');
       if (!send) return block('SUPERVISOR_SEND_NOT_UNIQUE_AFTER_SELECT');

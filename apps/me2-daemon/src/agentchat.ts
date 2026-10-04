@@ -86,6 +86,8 @@ function ensureSchema(): void {
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,
+      provider TEXT,
+      platform TEXT,
       title TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'ACTIVE',
       state TEXT NOT NULL DEFAULT 'IDLE',
@@ -113,6 +115,9 @@ function ensureSchema(): void {
   `);
   // миграция существующей БД (G5, R37): колонка objective
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN objective TEXT NOT NULL DEFAULT ''").run(); } catch { /* уже есть */ }
+  const columns = (db.query("PRAGMA table_info(agent_sessions)").all() as Array<{ name: string }>).map((column) => column.name);
+  if (!columns.includes("provider")) db.exec("ALTER TABLE agent_sessions ADD COLUMN provider TEXT");
+  if (!columns.includes("platform")) db.exec("ALTER TABLE agent_sessions ADD COLUMN platform TEXT");
   // миграция (R44, outcome-proof): исход сессии с доказательством (report_outcome)
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_status TEXT").run(); } catch { /* уже есть */ }
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_proof TEXT").run(); } catch { /* уже есть */ }
@@ -120,16 +125,21 @@ function ensureSchema(): void {
   // Provider migration: historical session rows stay auditable, but every
   // executable session identity converges to OpenAI. Message/event history is
   // not rewritten.
-  try {
-    db.query("UPDATE agent_sessions SET model=? WHERE model='' OR model LIKE 'zai:%' OR model LIKE 'glm%' OR model LIKE 'gateway:%'")
-      .run(activeAgentModelTag());
-  } catch { /* compatibility migration must not block schema init */ }
+  const activeSessions = db.query("SELECT id, model FROM agent_sessions WHERE status='ACTIVE'").all() as Array<{ id: string; model: string }>;
+  for (const session of activeSessions) {
+    // Invalid active tags fail schema admission rather than being silently
+    // presented as executable. Closed historical sessions are never rewritten.
+    const model = normalizeChatModel(session.model);
+    db.query("UPDATE agent_sessions SET model=?, provider='OPENAI', platform='CHATGPT' WHERE id=? AND status='ACTIVE'")
+      .run(model, session.id);
+  }
   schemaReady = true;
 }
 
 // ── типы ──────────────────────────────────────────────────────────
 export interface AgentChatSession {
   id: string; agent_id: string; title: string; status: "ACTIVE" | "CLOSED";
+  provider: string | null; platform: string | null;
   state: "IDLE" | "THINKING"; summary: string; compactions: number;
   turns_ok: number; turns_fail: number; fail_streak: number;
   last_error: string | null; model: string; objective: string; created_at: string; updated_at: string;
@@ -149,6 +159,7 @@ function rowToSession(r: Record<string, unknown>): AgentChatSession {
   } catch { /* роль не блокирует чтение сессии */ }
   return {
     id: String(r.id), agent_id: String(r.agent_id), title: String(r.title ?? ""),
+    provider: r.provider == null ? null : String(r.provider), platform: r.platform == null ? null : String(r.platform),
     status: r.status === "CLOSED" ? "CLOSED" : "ACTIVE",
     state: r.state === "THINKING" ? "THINKING" : "IDLE",
     summary: String(r.summary ?? ""), compactions: Number(r.compactions ?? 0),
@@ -586,12 +597,12 @@ export function agentChatCreate(opts: { agent_id?: string; role?: string; title?
   const id = `ac_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const model = normalizeChatModel(opts.model || String(agent.model || activeAgentModelTag()));
   const now = nowIso();
-  db.query(`INSERT INTO agent_sessions (id, agent_id, title, status, state, summary, compactions, turns_ok, turns_fail, fail_streak, model, created_at, updated_at)
-    VALUES (?,?,?,'ACTIVE','IDLE','',0,0,0,0,?,?,?)`)
+  db.query(`INSERT INTO agent_sessions (id, agent_id, title, status, state, summary, compactions, turns_ok, turns_fail, fail_streak, model, created_at, updated_at, provider, platform)
+    VALUES (?,?,?,'ACTIVE','IDLE','',0,0,0,0,?,?,?,'OPENAI','CHATGPT')`)
     .run(id, agent.id, String(opts.title ?? `Чат ${agent.role}`).slice(0, 160), model, now, now);
   chatDir(id); // workspace создаётся сразу
   const sess = rowToSession(qSession(id)!);
-  emit("AGENT_CHAT_CREATED", { session_id: id, agent_id: agent.id, title: sess.title, model }, agent.id, null);
+  emit("AGENT_CHAT_CREATED", { session_id: id, agent_id: agent.id, title: sess.title, model, provider: sess.provider, platform: sess.platform }, agent.id, null);
   return sess;
 }
 

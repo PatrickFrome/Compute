@@ -34,6 +34,7 @@ import { policyStatus } from "./policy";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
 import { glmVerdict } from "./glm";
+import { activeAgentModelTag } from "./inference";
 import { reviewerVerdict } from "./reviewer";
 import { evidenceStatus, verifyChain } from "../evidence";
 import { poolStatus } from "./pool";
@@ -217,9 +218,9 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       evidence: handoffsVerdict().evidence + "; POST /tasks/{id}/handoff — через шину (TASK_ENQUEUE+handoff), 47/47",
     },
     {
-      id: "ME25", name: "GLM currency: флот на каноническом теге + живая probe бэкенда (директива)", old_ref: "— (R29: «все агенты всегда на последней версии glm»)",
+      id: "ME25", name: "GLM compatibility: historical read-only telemetry", old_ref: "R29 legacy model currency",
       verdict: glmVerdict().verdict,
-      evidence: glmVerdict().evidence + "; POST /glm {op:probe|upgrade|set_latest}",
+      evidence: glmVerdict().evidence + "; GET /glm historical only; POST disabled",
     },
     {
       id: "ME26", name: "Reviewer-agent: антифальшь-ревью результатов против спека (C3)", old_ref: "— (R29: «работа агентов не фальшивая»; усиливает ME15 tier-1)",
@@ -257,8 +258,8 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       evidence: (() => { const v = verifyChain(undefined, undefined, 300); return v.ok ? `chain ok ${v.checked} событий (${v.from}..${v.to}) за ${v.ms}ms; GET /evidence/verify?from&to | /evidence/query?task_id — тампер меняет хеш (eval-негатив)` : `chain BROKEN at ${v.broken_at}: ${v.reason}`; })(),
     },
     {
-      id: "ME33", name: "E3: executor-пул — N живых GLM-контекстов, эксклюзивные lease с heartbeat/reaper, универсальный claim (R34)", old_ref: "M2 task cycle (одиночный агент) → parallel live-GLM pool",
-      verdict: (() => { try { const s = poolStatus(); const canon = s.workers.every((w) => w.model === `zai:${s.canonical}`); return s.workers.length > 0 && canon && s.leases.reaped_total >= 0 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      id: "ME33", name: "E3: independent OpenAI executor contexts with exclusive leases and heartbeat/reaper", old_ref: "R34 executor pool",
+      verdict: (() => { try { const s = poolStatus(); const canon = s.workers.every((w) => w.model === activeAgentModelTag()); return s.workers.length > 0 && canon && s.leases.reaped_total >= 0 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
       evidence: (() => { try { const s = poolStatus(); return `scale=${s.scale} live=${s.live}/${s.ceiling}, canonical=${s.canonical}, queue=${s.queue.ready}/${s.queue.running}, concurrency max=${s.concurrency.max_observed}, leases active=${s.leases.active} reaped=${s.leases.reaped_total}, throughput 1ч=${s.throughput.done_1h}✓/${s.throughput.failed_1h}✗; POST /pool {op:scale|burn}`; } catch (e) { return `pool status failed: ${String(e).slice(0, 80)}`; } })(),
     },
     {

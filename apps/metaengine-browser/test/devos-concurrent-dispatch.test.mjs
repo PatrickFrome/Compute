@@ -21,9 +21,13 @@ const mkLease = (n, tabId) => ({
   task_spec: { schema: 'metaengine.devos.task.v1', objective: `Implement slice ${n}.`, constraints: [], deliverable: 'tests' },
 });
 
+const drafts = new Map();
+test.beforeEach(() => drafts.clear());
+
 const conversationUrl = (n) => `https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789ab${n}`;
 
 function frame({ url = 'https://chatgpt.com/', tabId, targetId, composerValueLength = null } = {}) {
+  const draft = drafts.get(tabId) || '';
   return {
     schema: 'metaengine.native-browser.perception.v1',
     process_incarnation_id: 'process_test_incarnation_0001',
@@ -32,7 +36,8 @@ function frame({ url = 'https://chatgpt.com/', tabId, targetId, composerValueLen
     url,
     viewport: { width: 1200, height: 640 },
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT', value_length: composerValueLength ?? undefined, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 },
+      { role: 'textbox', name: 'Message ChatGPT', value_length: draft.length, value_sha256: draft ? crypto.createHash('sha256').update(draft).digest('hex') : null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 },
+      ...(draft ? [{ role:'button',name:'Send prompt',semantic_ref:{ schema:'metaengine.native-browser.semantic-ref.v1',semantic_ref_id:'semref_' + 'b'.repeat(64) },backend_node_id:4 }] : []),
     ],
     interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[] },
     authority_effect: false,
@@ -97,10 +102,13 @@ test('D-C2: a lease BATCH dispatches concurrently across distinct agent tabs', a
       return frame({ url: conversationUrl(n), tabId: command.payload.tab_id, targetId: `webcontents:1${n}` });
     }
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type,false);
+      drafts.set(command.payload.tab_id,command.payload.text);
       marks.push([command.payload.tab_id, 'type']);
-      return { effect_state: 'PROVEN_NEW_CONVERSATION', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { replace_verified:true,authority_effect:true };
     }
     if (command.action === 'SELECT_TAB') throw new Error('dc2_select_tab_forbidden');
+    if (command.action === 'TYPED_CLICK') { drafts.delete(command.payload.tab_id); return { effect_state:'PROVEN_GENERATING',automatic_retry_allowed:false,authority_effect:true }; }
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }), executeCommand, signedRequest });
@@ -117,8 +125,8 @@ test('D-C2: same-tab leases serialize through the tab gate; one flaky lease neve
   const leaseA = mkLease(1, 'tab_ff91dce7-eeb3-425d-9052-94d521c2dfa1');
   // Same tab => same physical webContents: the second lease binds to the
   // identical target incarnation, exactly like two queued tasks for one agent.
-  const leaseB = { ...mkLease(2, 'tab_ff91dce7-eeb3-425d-9052-94d521c2dfa1'), target_id: leaseA.target_id };
-  const fleet = fleetOf([leaseA, leaseB]);
+  const leaseB = { ...mkLease(2, 'tab_ff91dce7-eeb3-425d-9052-94d521c2dfa1'), target_id: leaseA.target_id,agent_id:leaseA.agent_id };
+  const fleet = fleetOf([leaseA]);
   let activeOnTab = 0;
   let maxActiveOnTab = 0;
   const signedRequest = async (path) => {
@@ -136,9 +144,12 @@ test('D-C2: same-tab leases serialize through the tab gate; one flaky lease neve
       return frame({ url: conversationUrl(1), tabId: command.payload.tab_id, targetId: leaseA.target_id });
     }
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type,false);
+      drafts.set(command.payload.tab_id,command.payload.text);
       if (command.payload.text.includes('slice 1.')) throw new Error('flaky_tab_effect');
-      return { effect_state: 'PROVEN_NEW_CONVERSATION', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { replace_verified:true,authority_effect:true };
     }
+    if (command.action === 'TYPED_CLICK') { drafts.delete(command.payload.tab_id); return { effect_state:'PROVEN_GENERATING',automatic_retry_allowed:false,authority_effect:true }; }
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }), executeCommand, signedRequest });
@@ -198,9 +209,12 @@ test('D-C1: every dispatched prompt carries the per-agent isolated-context brief
     if (command.action === 'FLEET_RECONCILE') return fleet;
     if (command.action === 'CAPTURE') return frame({ url: conversationUrl(6), tabId: lease.tab_id, targetId: lease.target_id });
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type,false);
+      drafts.set(command.payload.tab_id,command.payload.text);
       seenPrompt = String(command.payload.text);
-      return { effect_state: 'PROVEN_NEW_CONVERSATION', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { replace_verified:true,authority_effect:true };
     }
+    if (command.action === 'TYPED_CLICK') { drafts.delete(command.payload.tab_id); return { effect_state:'PROVEN_GENERATING',automatic_retry_allowed:false,authority_effect:true }; }
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({

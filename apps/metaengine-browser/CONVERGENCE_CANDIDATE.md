@@ -1,5 +1,30 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37230000001.1`.
+
+Atomic Root Transport contract correction and fresh physical reservation (2026-10-04):
+- runtime source is unchanged from qualified `59f24cf78faf6fe38fa2b9b2d00b68c9149ce445`, Linux/Windows source qualification `37204436247`, and full local Browser 4087 PASS;
+- predecessor candidate `0634bed33afa150f2f8f29af123b292ce2c63cde` is NOT qualified: Root Transport behavioral tests passed 25/25, but its stale inline static contract demanded the retired GLM Enter lane;
+- `0.7.0-dev.37220000001.1` is consumed by producer `37204978252`, immutable reservation artifact `11304666555`, and MUST NOT be rebuilt or relabelled;
+- the replacement static fence verifies active ChatGPT type -> fresh exact draft readback -> one Send and legacy read-only dispatch; it is also included in Linux/Windows source qualification;
+- focused Root Transport 25/25 tests, new static fence, both changed workflow YAML parses and source-only authority checks pass locally;
+- public reservation lookup returned HTTP 200 and zero existing artifacts for `0.7.0-dev.37230000001.1`; producer reservation remains mandatory;
+- workflow repair, all three package version fields and this authoritative reservation change in ONE commit. Package Smoke remains the sole physical producer;
+- all physical consumers must prove this exact head/version/digest. No release/promotion or fresh live fleet qualification is implied.
+
+Reserved package identity is `0.7.0-dev.37220000001.1`.
+
+Atomic fenced ChatGPT-only installer reservation (2026-10-04):
+- source qualification: `59f24cf78faf6fe38fa2b9b2d00b68c9149ce445`, run `37204436247`, attempt 1, terminal SUCCESS on Linux and Windows including Windows source visual proof;
+- full local Browser proof: 4087 PASS, zero failures/skips; isolated OpenAI ME2 and PRIMARY/CRITIC policy/transport/context tests are green;
+- includes exact legacy-root retirement `3a67fedd42568f8f4923fac1a53d1081f98d53a2` on qualified predecessor `3782b73b3f00a9d7eacaa42a4017010cfb374ba6`;
+- `0.7.0-dev.37210000001.1` remains consumed by predecessor producer `37198104703` and MUST NOT be rebuilt or relabelled;
+- new version, both lockfile version fields and this first authoritative reservation change atomically, without runtime changes after source qualification;
+- public GitHub artifact readback found zero existing reservations for `0.7.0-dev.37220000001.1` immediately before this source commit; the producer MUST repeat its real reservation gate;
+- Package Smoke is the sole physical producer. Every consumer MUST bind the same immutable source head, version and installer digest; do not rerun a consumed producer or add a second physical push;
+- PR qualification does not imply canonical push-only SLSA attestation. Release/promotion remains closed until the relevant supply-chain gate and real authenticated ChatGPT useful-work/critic outcome are proven;
+- this reservation does not itself authorize cloud deployment or mass-closing USER tabs.
+
 Reserved package identity is `0.7.0-dev.37210000001.1`.
 
 Atomic ChatGPT live-client package reservation (2026-10-04):

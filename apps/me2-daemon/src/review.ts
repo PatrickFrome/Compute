@@ -25,7 +25,8 @@
 // отдельное REST-семейство /review; события CLASSIFIER_* в hash-chain через emit().
 import { db, emit } from "../store";
 import { chat } from "../providers";
-import { loadPolicy, type ClassifierPolicy } from "./policy";
+import { loadPolicy, normalizeClassifierModel, type ClassifierPolicy } from "./policy";
+import { activeAgentModelTag } from "./inference";
 import { SB_ROOT } from "./sandbox";
 import { WORKTREE_ROOT } from "./worktrees";
 import { sandboxConfig, probeSandboxCaps } from "./sandbox2";
@@ -54,15 +55,17 @@ export interface ReviewInput {
 }
 
 // ── конфигурация: policy.json (файл оператора) + runtime-override (POST /review op:config) ──
-const CFG_DEFAULTS: ClassifierPolicy = { enabled: true, llm_enabled: false, timeout_ms: 3000, queue_max: 20, model: "zai" };
+const CFG_DEFAULTS: ClassifierPolicy = { enabled: true, llm_enabled: false, timeout_ms: 3000, queue_max: 20, model: activeAgentModelTag() };
 let runtimeOverride: Partial<ClassifierPolicy> | null = null;
 
 export function classifierConfig(): ClassifierPolicy {
   const fromFile = loadPolicy().classifier ?? CFG_DEFAULTS;
-  return { ...CFG_DEFAULTS, ...fromFile, ...(runtimeOverride ?? {}) };
+  const effective = { ...CFG_DEFAULTS, ...fromFile, ...(runtimeOverride ?? {}) };
+  return { ...effective, model: normalizeClassifierModel(effective.model) };
 }
 export function classifierSetOverride(patch: Partial<ClassifierPolicy>): ClassifierPolicy {
-  runtimeOverride = { ...(runtimeOverride ?? {}), ...patch };
+  const normalized = patch.model === undefined ? patch : { ...patch, model: normalizeClassifierModel(patch.model) };
+  runtimeOverride = { ...(runtimeOverride ?? {}), ...normalized };
   return classifierConfig();
 }
 

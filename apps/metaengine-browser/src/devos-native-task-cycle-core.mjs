@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { evaluateFleetSubmitReadiness } from './fleet-submit-readiness.mjs';
+import { submitFencedChatGptPrompt } from './chatgpt-fenced-submit.mjs';
 import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
@@ -1058,7 +1059,7 @@ export class DevOsNativeTaskCycle {
       // submit (the only physical effect) happens only after it.
       try {
         await journal?.markEffectAttempted(effectBinding, {
-          phase: 'BEFORE_ENTER_SUBMIT',
+          phase: 'BEFORE_TYPED_DRAFT',
           effect_barrier_contract: WRITE_AHEAD_EFFECT_BARRIER,
           send_click_returned: false,
         });
@@ -1069,29 +1070,29 @@ export class DevOsNativeTaskCycle {
 
       let submitted = null;
       try {
-        clickIssued = true;
-        submitted = await this.#executeCommand({
-          action: 'SEMANTIC_TYPE', platform: AGENT_PLATFORM_ID,
-          payload: {
-            tab_id: lease.tab_id,
-            role: preReady.composer.role,
-            accessible_name: preReady.composer.accessible_name,
-            semantic_ref: preReady.composer.semantic_ref,
-            text: prompt,
-            replace_existing: true,
-            submit_after_type: true,
+        submitted = await submitFencedChatGptPrompt({
+          executeCommand: this.#executeCommand, tab_id: lease.tab_id, frame: pre, text: prompt,
+          validateTypedFrame: async (typedFrame) => {
+            const freshState = await this.#getState();
+            assertLiveLeaseBinding(lease, freshState?.fleet);
+            this.#assertCanonicalAgentConversation(lease, liveAgent, typedFrame);
+            readinessOrThrow({ frame: typedFrame, lease, selected_tab_id: selectedTabId(freshState), phase: 'PRE_CLICK', fleet_snapshot: freshState?.fleet });
+          },
+          beforeSend: async () => {
+            await journal?.markEffectAttempted(effectBinding, { phase: 'BEFORE_SEND_CLICK', effect_barrier_contract: WRITE_AHEAD_EFFECT_BARRIER, send_click_returned: false });
+            clickIssued = true;
           },
         });
         await journal?.markDeliveryPending(effectBinding, {
-          enter_submit_attempted: true,
+          send_click_attempted: true,
           physical_effect_attempted: true,
           effect_barrier_crossed: true,
         });
       } catch (error) {
         this.#dispatchEffectCounters.ambiguous += 1;
-        this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'AMBIGUOUS', reason: 'ENTER_SUBMIT_EFFECT_AMBIGUOUS', effect_state: submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
-        await journal?.markAmbiguous(effectBinding, { reason: 'ENTER_SUBMIT_EFFECT_AMBIGUOUS', enter_submit_attempted: clickIssued, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
-        await this.#reportAmbiguous(lease, 'ENTER_SUBMIT_EFFECT_AMBIGUOUS').catch(() => {});
+        this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'AMBIGUOUS', reason: 'SEND_SUBMIT_EFFECT_AMBIGUOUS', effect_state: submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_SUBMIT_EFFECT_AMBIGUOUS', send_click_attempted: clickIssued, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
+        await this.#reportAmbiguous(lease, 'SEND_SUBMIT_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
       }
 
@@ -1156,7 +1157,7 @@ export class DevOsNativeTaskCycle {
           proof, server: body, prompt_included: false, page_data_authority: false,
           conversation_bootstrap: canonicalAgentConversation.state,
           selected_tab_mutation: false, viewport_geometry_required: false,
-          click_issued: clickIssued, submit_path: 'ENTER_KEY_EVENT_DRIVEN_READBACK', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
+          click_issued: clickIssued, submit_path: 'TYPE_FRESH_DRAFT_READBACK_SINGLE_SEND', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
         };
       } catch (writeError) {
         const status = await this.#readTaskStatus(lease);

@@ -14,7 +14,7 @@ import { WORKSPACE_ROOT } from "./worker";
 import { recordSpan } from "./src/otel";
 import { getObjective } from "./src/objectives";
 import { handoffCreate, type HandoffProtocol } from "./src/handoffs";
-import { agentTag } from "./src/glm";
+import { activeAgentModelTag, normalizeActiveAgentModelTag } from "./src/inference";
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -179,8 +179,7 @@ const handlers: Record<string, Handler> = {
 
   AGENT_SPAWN: (p) => {
     const role = String(p.role ?? "IMPLEMENTER").toUpperCase().slice(0, 32);
-    // R29: директива «все агенты всегда на последней GLM» — дефолт модели = канонический тег
-    const model = String(p.model ?? agentTag()).slice(0, 64);
+    const model = normalizeActiveAgentModelTag(String(p.model ?? activeAgentModelTag()));
     const agent = createAgent(role, model);
     emit("AGENT_CREATED", { role, model }, agent.id, null);
     return { agent };
@@ -267,8 +266,9 @@ const handlers: Record<string, Handler> = {
 
   AGENT_MODEL: (p) => {
     const id = String(p.agent_id ?? p.id ?? "");
-    const model = String(p.model ?? "").trim().slice(0, 64);
-    if (!model) throw new Error("model_required");
+    const requestedModel = String(p.model ?? "").trim();
+    if (!requestedModel) throw new Error("model_required");
+    const model = normalizeActiveAgentModelTag(requestedModel);
     const a = getAgent(id);
     if (!a) throw new Error(`agent_not_found_${id}`);
     if (a.model === model) return { id, model, unchanged: true };

@@ -280,26 +280,22 @@ test('R97: CAPTURE exposes exact AX focus readback without geometry', async () =
 // back to a bounded SEND-control click when the event-driven latch misses it.
 // ---------------------------------------------------------------------------
 
-test('R98/D-P2: source contract — Enter first, bounded semantic activation fallback, fail-closed re-resolution', () => {
-  const enter = source.indexOf("type:'rawKeyDown', key:'Enter'");
-  const latchWait = source.indexOf('await outcomeLatch.wait()', enter);
-  const fallback = source.indexOf('D-P2 (2026-09-18)', latchWait);
-  const fallbackResolve = source.indexOf('const fallbackSends = exactChatGptControls(fallbackTree?.nodes || [], \'SEND\')', fallback);
-  const fallbackThrow = source.indexOf("native_semantic_send_target_not_found'", fallbackResolve);
-  const fallbackActivation = source.indexOf('await activateBackendNode(dbg, fallbackSends[0].backend_node_id', fallbackThrow);
-  assert.ok(enter >= 0, 'Enter dispatch retained');
-  assert.ok(latchWait > enter, 'first latch wait follows Enter');
-  assert.ok(fallbackResolve > latchWait, 'fallback re-resolves the SEND control only after the latch missed');
-  assert.ok(fallbackThrow > fallbackResolve, 'fallback re-resolution fails closed when the control is gone');
-  assert.ok(fallbackActivation > fallbackThrow, 'bounded exact-node activation fallback is last resort');
+test('ChatGPT submit uses one exact semantic Send activation with no Enter fallback', () => {
+  const start = source.indexOf('if (command?.payload?.chatgpt_submit === true)');
+  const section = source.slice(start, source.indexOf("if (action === 'SEMANTIC_TYPE')", start));
+  assert.match(section, /sends\.length !== 1/);
+  assert.match(section, /native_chatgpt_typed_draft_not_exact/);
+  assert.match(section, /await activateBackendNode/);
+  assert.match(section, /await latch\.wait\(\)/);
+  assert.doesNotMatch(section, /Input\.dispatchKeyEvent|fallbackSends/);
 });
 
-test('D-P2: source contract — fallback preserves every runtime fence', () => {
-  const fallback = source.indexOf('D-P2 (2026-09-18)');
-  const section = source.slice(fallback, source.indexOf('const { resolved: _resolved', fallback));
+test('ChatGPT Send preserves every runtime fence and closes its outcome latch', () => {
+  const start = source.indexOf('if (command?.payload?.chatgpt_submit === true)');
+  const section = source.slice(start, source.indexOf("if (action === 'SEMANTIC_TYPE')", start));
   // D-M1: the fence is now the re-anchoring currency gate (liveRef).
   assert.match(section, /requireCurrentSemanticRef\(webContents, dbg, liveRef\)/);
   assert.match(section, /assertCurrentEffectRuntime\(webContents, dbg, effectBinding\)/);
-  assert.match(section, /fallbackLatch\.close\(\)/);
+  assert.match(section, /latch\.close\(\)/);
   assert.doesNotMatch(section, /DOM\.getBoxModel|Input\.dispatchMouseEvent/);
 });

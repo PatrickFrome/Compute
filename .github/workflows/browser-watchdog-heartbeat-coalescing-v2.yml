@@ -12,6 +12,9 @@ on:
       - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/browser-agent-platform.mjs'
+      - 'apps/metaengine-browser/src/chatgpt-fenced-submit.mjs'
+      - 'apps/metaengine-browser/src/supervisor-lifecycle-runtime-core.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'

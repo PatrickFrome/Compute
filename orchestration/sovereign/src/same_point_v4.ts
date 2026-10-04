@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
-import { Client, Pool } from "pg";
+import pg from "pg";
+const { Client, Pool } = pg;
+import { actorConfig, openAiPolicy, requestOpenAiChat } from "./inference-policy.js";
 
 type JsonObject = Record<string, unknown>;
 type Actor = "PRIMARY" | "CRITIC";
@@ -64,13 +66,9 @@ Return exactly one JSON object and no markdown.`;
 const VOTES = new Set(["WIN_GPT", "WIN_GLM", "SYNTHESIS", "NO_ACTION"]);
 const DATABASE_URL = required("DATABASE_URL");
 const RUNNER_ID = `sovereign:v4:${process.env.DUEL_RUNNER_ID || hostname()}`;
-const PRIMARY_URL = process.env.SOVEREIGN_PRIMARY_URL || process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const CRITIC_URL = process.env.SOVEREIGN_CRITIC_URL || "http://127.0.0.1:8002";
-const PRIMARY_MODEL = openAiModel(process.env.SOVEREIGN_PRIMARY_MODEL || process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_PRIMARY_MODEL");
-const CRITIC_MODEL = openAiModel(process.env.SOVEREIGN_CRITIC_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_CRITIC_MODEL");
-const COMMON_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
-const PRIMARY_TOKEN = process.env.SOVEREIGN_PRIMARY_TOKEN || process.env.SOVEREIGN_GPT_TOKEN || COMMON_TOKEN;
-const CRITIC_TOKEN = process.env.SOVEREIGN_CRITIC_TOKEN || COMMON_TOKEN;
+const INFERENCE = openAiPolicy();
+const PRIMARY_MODEL = INFERENCE.agent_a.model;
+const CRITIC_MODEL = INFERENCE.agent_b.model;
 const MODEL_TIMEOUT_MS = boundedInt(process.env.DUEL_MODEL_TIMEOUT_MS, 90_000, 5_000, 300_000);
 const MAX_OUTPUT_TOKENS = boundedInt(process.env.DUEL_MAX_OUTPUT_TOKENS, 1_200, 256, 4_096);
 const RECOVERY_MS = boundedInt(process.env.DUEL_RECOVERY_MS, 60_000, 5_000, 600_000);
@@ -89,11 +87,6 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback;
 }
 
-function openAiModel(raw: string, name: string): string {
-  const model = String(raw || "").trim();
-  if (!/^(?:openai\/|gpt-)/i.test(model)) throw new Error(`${name}_must_be_openai`);
-  return model;
-}
 
 function wireActor(actor: Actor): WireActor {
   return actor === "PRIMARY" ? "GPT" : "GLM";
@@ -103,11 +96,6 @@ function peerWireActor(actor: Actor): WireActor {
   return actor === "PRIMARY" ? "GLM" : "GPT";
 }
 
-function leaseModel(actor: Actor, lease: Lease): string {
-  const candidate = String(actor === "PRIMARY" ? (lease.gpt_model || "") : (lease.glm_model || "")).trim();
-  if (/^(?:openai\/|gpt-)/i.test(candidate)) return candidate;
-  return actor === "PRIMARY" ? PRIMARY_MODEL : CRITIC_MODEL;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,8 +182,9 @@ function prompt(actor: Actor, lease: Lease, read: Readback, wave: Wave): string 
   const base = [
     `ACTOR=${actor}`,
     `LEGACY_WIRE_SLOT=${wireActor(actor)}`,
-    `PROVIDER=OPENAI`,
-    `PLATFORM=CHATGPT`,
+    "PROVIDER=OPENAI",
+    "PLATFORM=OPENAI_API",
+    "WIN_GPT selects PRIMARY and WIN_GLM selects CRITIC; these are ledger vote aliases, not inference providers.",
     `WAVE=${wave}`,
     `DUEL=${lease.duel_key || ""}`,
     `SEMANTIC_POINT_CHECKPOINT=${String(lease.current_checkpoint_sha256 || "")}`,
@@ -279,8 +268,11 @@ function validateModelPayload(payload: JsonObject, wave: Wave, expectedPeerHash:
 function visibleError(actor: Actor, wave: Wave, peerHash: string | null, error: unknown): JsonObject {
   const common: JsonObject = {
     phase: wave,
+    provider: "OPENAI",
+    platform: "OPENAI_API",
+    agent_id: actor === "PRIMARY" ? "agent_a" : "agent_b",
     step_type: "EXECUTOR_ERROR",
-    claim: `${actor} ${wave} execution did not produce a valid public engineering step`,
+    claim: `${actor === "PRIMARY" ? "PRIMARY" : "CRITIC"} ${wave} execution did not produce a valid public engineering step`,
     reasoning_summary: ["No model reasoning was fabricated; this is a SYSTEM-observed executor or schema failure."],
     evidence_used: [],
     assumptions: [],
@@ -303,50 +295,40 @@ function visibleError(actor: Actor, wave: Wave, peerHash: string | null, error: 
 }
 
 async function modelCall(actor: Actor, lease: Lease, read: Readback, wave: Wave): Promise<JsonObject> {
-  const base = actor === "PRIMARY" ? PRIMARY_URL : CRITIC_URL;
-  const model = leaseModel(actor, lease);
-  const token = actor === "PRIMARY" ? PRIMARY_TOKEN : CRITIC_TOKEN;
+  const cfg = actorConfig(INFERENCE, actor, lease);
+  const { base, model } = cfg;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("model_timeout"), MODEL_TIMEOUT_MS);
   const started = Date.now();
   try {
-    const response = await fetch(`${base.replace(/\/$/, "")}/v1/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: prompt(actor, lease, read, wave) },
-        ],
-        max_tokens: MAX_OUTPUT_TOKENS,
-        temperature: 0.2,
-        stream: false,
-      }),
-    });
+    const response = await requestOpenAiChat(cfg, {
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: prompt(actor, lease, read, wave) },
+      ],
+      max_completion_tokens: MAX_OUTPUT_TOKENS,
+      stream: false,
+    }, { signal: controller.signal });
     const raw = await response.text();
-    if (!response.ok) throw new Error(`local_${actor.toLowerCase()}:${response.status}:${raw.slice(0, 800)}`);
+    if (!response.ok) throw new Error(`openai_${cfg.agent_id}:${response.status}:${raw.slice(0, 800)}`);
     const body = asObj(JSON.parse(raw));
     const choices = Array.isArray(body.choices) ? body.choices : [];
     const first = choices[0] && typeof choices[0] === "object" && !Array.isArray(choices[0]) ? asObj(choices[0]) : {};
     const finishReason = String(first.finish_reason || "").trim().toLowerCase();
-    if (finishReason !== "stop") throw new Error(`local_${actor.toLowerCase()}_not_completed:${finishReason || "missing"}`);
+    if (finishReason !== "stop") throw new Error(`openai_${actor.toLowerCase()}_not_completed:${finishReason || "missing"}`);
     const message = first.message && typeof first.message === "object" && !Array.isArray(first.message) ? asObj(first.message) : {};
-    if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`local_${actor.toLowerCase()}_empty`);
+    if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`openai_${cfg.agent_id}_empty`);
     const peerHash = wave === "REBUT" ? recentPeerHash(read, actor) : null;
     const payload = validateModelPayload(parseJson(message.content), wave, peerHash);
     payload._executor = {
       mode: "SOVEREIGN_SAME_POINT_V4",
       wave,
-      provider: "OPENAI",
-      platform: "CHATGPT",
+      provider: cfg.provider,
+      platform: cfg.platform,
+      agent_id: cfg.agent_id,
       logical_role: actor,
       legacy_wire_slot: wireActor(actor),
-      tariff_dependency: false,
+      tariff_dependency: true,
       model,
       endpoint_sha256: sha256(base),
       latency_ms: Date.now() - started,
@@ -482,14 +464,14 @@ async function processLease(lease: Lease): Promise<void> {
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
-      tariff_dependency: false,
+      tariff_dependency: true,
     };
     critic.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
-      tariff_dependency: false,
+      tariff_dependency: true,
     };
     const receipt = await submitProposal(lease, checkpoint, primary.payload, critic.payload);
     checkpoint = String(receipt.output_checkpoint_sha256 || checkpoint);
@@ -509,14 +491,14 @@ async function processLease(lease: Lease): Promise<void> {
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
-      tariff_dependency: false,
+      tariff_dependency: true,
     };
     critic.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
-      tariff_dependency: false,
+      tariff_dependency: true,
     };
 
     const receipt = await submitRebutAndFinalize(lease, checkpoint, primary.payload, critic.payload);
@@ -587,7 +569,7 @@ async function listenForever(): Promise<void> {
         wave_plan: ["PROPOSE", "REBUT"],
         reasoning_visibility: "OBSERVABLE_ENGINEERING_REASONING_V1",
         arbitration_policy: "EVIDENCE_FIRST_ONE_ACTION_V1",
-        tariff_dependency: false,
+        tariff_dependency: true,
       }));
       await new Promise<void>((_resolve, reject) => client.once("error", reject));
     } catch (error) {
@@ -601,18 +583,19 @@ async function listenForever(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (!INFERENCE.agent_a.token || !INFERENCE.agent_b.token) throw new Error("openai_api_key_required");
   console.log(JSON.stringify({
     status: "STARTING",
     runner_id: RUNNER_ID,
     debate_protocol: "SAME_POINT_DUEL_V4",
+    provider: "OPENAI",
+    platform: "OPENAI_API",
     primary_model: PRIMARY_MODEL,
     critic_model: CRITIC_MODEL,
-    primary_endpoint_sha256: sha256(PRIMARY_URL),
-    critic_endpoint_sha256: sha256(CRITIC_URL),
-    provider: "OPENAI",
-    platform: "CHATGPT",
     legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" },
-    tariff_dependency: false,
+    credential_ready: Boolean(INFERENCE.agent_a.token),
+    endpoint_sha256: sha256(INFERENCE.agent_a.base),
+    tariff_dependency: true,
   }));
   await reconcile();
   setInterval(() => void reconcile().catch((error) => console.error("same_point_v4_reconcile_failed", String(error))), RECOVERY_MS).unref();

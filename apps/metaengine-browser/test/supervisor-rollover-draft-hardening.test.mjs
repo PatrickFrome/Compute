@@ -37,6 +37,7 @@ function conversationFrame(text = '') {
     text_excerpt: text,
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }
@@ -48,6 +49,7 @@ function rootFrame({ draftLength = 0 } = {}) {
     text_excerpt: '',
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 196, value_length: draftLength, value_sha256: draftLength ? sha256('x'.repeat(draftLength)) : null },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }
@@ -69,6 +71,7 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
   const tabs = new Map([['tab1', { frame: conversationFrame(''), url: CONVERSATION }]]);
   const closed = [];
   const typed = [];
+  const drafts = new Map();
   let newTabIndex = 0;
   let blankServed = 0;
   const getState = async () => ({
@@ -78,8 +81,16 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
   const executeCommand = async (command) => {
     const action = command.action;
     if (action === 'CAPTURE') {
-      const tab = tabs.get(String(command.payload?.tab_id || ''));
-      return tab ? structuredClone(tab.frame) : blankFrame();
+      const tabId = String(command.payload?.tab_id || '');
+      const tab = tabs.get(tabId);
+      const frame = tab ? structuredClone(tab.frame) : blankFrame();
+      if (drafts.has(tabId)) {
+        const composer = frame.semantic_targets.find((row) => row.role === 'textbox');
+        const draft = drafts.get(tabId);
+        composer.value_length = draft.length;
+        composer.value_sha256 = sha256(draft);
+      }
+      return { ...frame, tab_id: tabId, target_id: `webcontents:${tabId}` };
     }
     if (action === 'NEW_TAB') {
       newTabIndex += 1;
@@ -99,7 +110,7 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
       return { closed: true };
     }
     if (action === 'SEMANTIC_TYPE') {
-      const tab = tabs.get(String(command.payload?.tab_id || ''));
+      assert.equal(command.payload.submit_after_type, false);
       const text = String(command.payload?.text || '');
       typed.push({ tab_id: String(command.payload?.tab_id || ''), text, replace_existing: command.payload?.replace_existing === true });
       if (String(command.payload?.tab_id || '') === 'tab1') {
@@ -107,6 +118,14 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
         // D-K7 shape) so three cycles request the rollover deterministically.
         return { suppressed: true, reason: 'TYPE_EFFECT_AMBIGUOUS' };
       }
+      drafts.set(command.payload.tab_id, text);
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      const tab = tabs.get(String(command.payload.tab_id));
+      const text = drafts.get(command.payload.tab_id) || '';
+      drafts.delete(command.payload.tab_id);
       if (text.startsWith(SEED_HEAD)) {
         // The seed provably creates the conversation on this surface.
         const url = `https://chatgpt.com/c/r82seed-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
@@ -140,7 +159,9 @@ async function makeRuntime(h, { monitorMs = 1 } = {}) {
   return { runtime, dir };
 }
 
-test('R82-DRAFT-CANARY: an oversized root draft aborts BEFORE any insert with the distinct machine reason', async () => {
+test('R82-DRAFT-CANARY: an oversized root draft aborts BEFORE any insert with the distinct machine reason', async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   // Live shape 2026-09-26: 28,708-char account-synced draft on the root
   // surface. The historical path typed the seed into it anyway (growing the
   // shared draft by ~202 chars per attempt) and looped on TYPE_EFFECT_AMBIGUOUS.
@@ -148,11 +169,14 @@ test('R82-DRAFT-CANARY: an oversized root draft aborts BEFORE any insert with th
   const { runtime, dir } = await makeRuntime(h);
   try {
     await runtime.start();               // cycle 1: first composer-blocking wake failure
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 2: second failure
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 3: third failure -> ROLLOVER_REQUIRED
     let snap = runtime.snapshot();
     assert.equal(['ROLLOVER_REQUIRED', 'ROLLOVER_DEFERRED', 'ROLLOVER_PENDING'].includes(snap.keepalive.state), true,
       `expected a rollover state after 3 composer-blocking failures, got ${snap.keepalive.state}`);
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 4: the rollover attempt runs
     snap = runtime.snapshot();
     assert.equal(snap.keepalive.state, 'ROLLOVER_AMBIGUOUS');
@@ -160,6 +184,7 @@ test('R82-DRAFT-CANARY: an oversized root draft aborts BEFORE any insert with th
       `the canary reason must be distinct and machine-readable, got ${snap.keepalive.rollover_reason}`);
     const rolloverTabs = h.typed.filter((t) => t.tab_id.startsWith('tabroll_'));
     assert.equal(rolloverTabs.length, 0, 'the canary must abort before ANY insert into the oversized root draft');
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 5: the D-C7 drain retires the leaked root tab
     assert.ok(h.closed.some((id) => id.startsWith('tabroll_')), 'the leaked rollover tab must be closed by proof');
   } finally {
@@ -167,7 +192,9 @@ test('R82-DRAFT-CANARY: an oversized root draft aborts BEFORE any insert with th
   }
 });
 
-test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a committed tab completes the rollover', async () => {
+test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a committed tab completes the rollover', async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   // Live shape 2026-09-26: rollover NEW_TABs whose bounded navigation was
   // stopped by DEADLINE_EXCEEDED stayed url:'' with zero DOM nodes forever
   // (webcontents:68 still blank 5+ minutes later) while a manual tab hydrated.
@@ -175,8 +202,11 @@ test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a
   const { runtime, dir } = await makeRuntime(h);
   try {
     await runtime.start();               // cycle 1: first composer-blocking wake failure
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 2
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 3 -> ROLLOVER_REQUIRED
+    now += 60_001;
     await runtime.cycle({ force: true }); // cycle 4: rollover with 2 blank rounds then a committed tab
     const snap = runtime.snapshot();
     const blanks = h.closed.filter((id) => id === 'tabroll_1' || id === 'tabroll_2');
@@ -195,13 +225,18 @@ test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a
   }
 });
 
-test('R82-DRAFT-CANARY (regression guard): a normal-size root draft still runs the verified seed protocol', async () => {
+test('R82-DRAFT-CANARY (regression guard): a normal-size root draft still runs the verified seed protocol', async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const h = harness({ rootDraftLength: 500, blankRounds: 0 });
   const { runtime, dir } = await makeRuntime(h);
   try {
     await runtime.start();
+    now += 60_001;
     await runtime.cycle({ force: true });
+    now += 60_001;
     await runtime.cycle({ force: true }); // ROLLOVER_REQUIRED
+    now += 60_001;
     await runtime.cycle({ force: true }); // the rollover attempt runs
     const seeds = h.typed.filter((t) => t.tab_id.startsWith('tabroll_') && t.text.startsWith(SEED_HEAD));
     assert.equal(seeds.length, 1, 'the seed must be dispatched exactly once on the clean root surface');

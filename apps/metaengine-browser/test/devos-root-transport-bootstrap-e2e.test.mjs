@@ -38,6 +38,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
   let captureCount = 0;
   let markRunningObservedCanonicalProof = false;
   let submitCount = 0;
+  let typedDraft = '';
   const state = {
     tabs: [
       { tab_id: 'tab_supervisor', url: 'https://chatgpt.com/c/supervisor-1234', selected: true },
@@ -117,7 +118,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     schema: 'metaengine.native-browser.semantic-ref.v1',
     semantic_ref_id: 'semref_' + suffix.repeat(64).slice(0, 64),
   });
-  const frame = ({ generating = false } = {}) => {
+  const rawFrame = ({ generating = false } = {}) => {
     const base = {
       schema: 'metaengine.native-browser.perception.v1',
       tab_id: TAB_ID,
@@ -163,6 +164,17 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     };
   };
 
+  const frame = (...args) => {
+    const out = rawFrame(...args);
+    const composer = out.semantic_targets?.find((row) => row.role === 'textbox' && row.name === 'Message ChatGPT');
+    if (composer) {
+      composer.value_length = typedDraft.length;
+      composer.value_sha256 = typedDraft ? sha256(typedDraft) : null;
+      if (typedDraft) out.semantic_targets.push({ role:'button',name:'Send prompt',backend_node_id:99,semantic_ref:{ schema:'metaengine.native-browser.semantic-ref.v1',semantic_ref_id:'semref_' + '9'.repeat(64) } });
+    }
+    return out;
+  };
+
   const executeCommand = async (command) => {
     calls.push(['command', command.action, command.payload?.accessible_name || command.payload?.key || null]);
     if (command.action === 'FLEET_RECONCILE') return structuredClone(state.fleet);
@@ -174,11 +186,16 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       captureCount += 1;
       return frame({ generating: surfaceState === 'CONVERSATION' && submitCount >= 2 });
     }
-    if (command.action === 'TYPED_CLICK') {
-      throw new Error(`unexpected_activation:${command.payload.accessible_name}:${surfaceState}`);
-    }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.payload.submit_after_type, true);
+      assert.equal(command.payload.submit_after_type, false);
+      assert.equal(command.payload.replace_existing, true);
+      typedDraft = command.payload.text;
+      return { replace_verified:true,authority_effect:true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      assert.equal(command.payload.accessible_name, 'Send prompt');
+      typedDraft = '';
       submitCount += 1;
       if (submitCount === 1) {
         assert.equal(surfaceState, 'CHAT_ROOT');
@@ -291,7 +308,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     assert.equal(submitCount, 2, 'one bootstrap seed and one task submit are expected');
     assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 2);
     const activations = calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK');
-    assert.deepEqual(activations.map((row) => row[2]), []);
+    assert.deepEqual(activations.map((row) => row[2]), ['Send prompt','Send prompt']);
     const typeIndexes = calls.map((row, index) => row[1] === 'SEMANTIC_TYPE' ? index : -1).filter((index) => index >= 0);
     const cycleIndex = calls.findIndex((row) => row[1] === '/v1/devos/cycle');
     const markRunningIndex = calls.findIndex((row) => row[1] === '/v1/devos/mark-running');

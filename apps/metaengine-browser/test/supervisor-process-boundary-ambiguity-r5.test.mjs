@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime-core.mjs';
 
 const OLD_PROCESS = 'process_old-r5';
@@ -40,13 +41,13 @@ function seedState() {
   };
 }
 
-function rootFrame() {
+function rootFrame(draft = '') {
   return {
     url: 'https://chatgpt.com/',
     title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'composer', value_length: 0 },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'composer', value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
       { role: 'button', name: 'Send prompt', semantic_ref: 'send' },
     ],
   };
@@ -58,15 +59,24 @@ async function makeRuntime({ tabs, seed = seedState() }) {
   await fs.writeFile(statePath, `${JSON.stringify(seed, null, 2)}\n`);
   const actions = [];
   let typed = 0;
+  const drafts = new Map();
   let currentTabs = structuredClone(tabs);
   const executeCommand = async ({ action, payload }) => {
     actions.push(action);
     if (action === 'CAPTURE') {
       const tab = currentTabs.find((row) => String(row?.tab_id || '') === String(payload?.tab_id || ''));
-      return { ...rootFrame(), url: String(tab?.url || 'https://chatgpt.com/'), tab_id: String(payload?.tab_id || '') };
+      const tabId = String(payload?.tab_id || '');
+      return { ...rootFrame(drafts.get(tabId) || ''), url: String(tab?.url || 'https://chatgpt.com/'), tab_id: tabId, target_id: `webcontents:${tabId}` };
     }
     if (action === 'SEMANTIC_TYPE') {
+      assert.equal(payload.submit_after_type, false);
       typed += 1;
+      drafts.set(payload.tab_id, String(payload.text));
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (action === 'TYPED_CLICK') {
+      assert.equal(payload.chatgpt_submit, true);
+      drafts.delete(payload.tab_id);
       currentTabs = currentTabs.map((row) => String(row?.tab_id || '') === String(payload?.tab_id || '')
         ? { ...row, url: 'https://chatgpt.com/c/r5-recovered' }
         : row);
@@ -91,26 +101,24 @@ async function makeRuntime({ tabs, seed = seedState() }) {
   return { runtime, actions, statePath, typed: () => typed };
 }
 
-test('process-boundary bootstrap ambiguity retires predecessor and reuses one clean root for a new wake', async () => {
+test('process-boundary unknown Send retains its wake even when one clean replacement root exists', async () => {
   const { runtime, actions, statePath, typed } = await makeRuntime({
     tabs: [{ tab_id: 'replacement-root', url: 'https://chatgpt.com/', selected: false }],
   });
-  const snap = await runtime.start();
-  assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/r5-recovered');
-  assert.equal(snap.keepalive.tab_id, 'replacement-root');
-  assert.notEqual(snap.keepalive.active_wake?.wake_id, OLD_WAKE);
-  assert.equal(snap.keepalive.active_wake?.reason, 'RESEARCH_ACCELERATOR_DUE');
-  assert.equal(snap.keepalive.ambiguous_history.length, 1);
-  assert.equal(snap.keepalive.ambiguous_history[0].wake_id, OLD_WAKE);
-  assert.equal(snap.keepalive.ambiguous_history[0].retired_reason, 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST');
-  assert.equal(snap.keepalive.ambiguous_history[0].automatic_retry_allowed, false);
-  assert.equal(typed(), 2, "R-SUP-SEED: seed submit proves the root, then the wake submits into it");
-  assert.equal(actions.includes('NEW_TAB'), false);
+  await runtime.start();
+  const snap = await runtime.cycle({ force: true });
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.conversation_url, null);
+  assert.equal(snap.keepalive.pending_wake?.wake_id, OLD_WAKE);
+  assert.equal(snap.keepalive.active_wake, null);
+  assert.equal(snap.keepalive.ambiguous_history.length, 0);
+  assert.equal(snap.last_recovery.action, 'PROCESS_BOUNDARY_EFFECT_READBACK_REQUIRED');
+  assert.equal(typed(), 0);
+  assert.equal(actions.some((action) => ['NEW_TAB', 'TYPED_CLICK', 'CLOSE_TAB'].includes(action)), false);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  assert.equal(durable.pending_wake, null);
-  assert.equal(durable.ambiguous_history[0].retired_process_incarnation_id, OLD_PROCESS);
-  assert.equal(durable.ambiguous_history[0].replacement_tab_id, 'replacement-root');
+  assert.equal(durable.pending_wake.wake_id, OLD_WAKE);
+  assert.equal(durable.pending_wake.automatic_retry_allowed, false);
+  assert.equal(durable.ambiguous_history.length, 0);
 });
 
 test('process-boundary ambiguity stays fail-closed when replacement roots are not unique', async () => {
@@ -129,7 +137,7 @@ test('process-boundary ambiguity stays fail-closed when replacement roots are no
 });
 
 
-test('multi-hop process restarts retain a durable wake-local fence and recover without replaying the old wake', async () => {
+test('multi-hop process restarts retain an unknown wake without replay, retirement or replacement', async () => {
   const seed = seedState();
   seed.process_incarnation_id = 'process_intermediate-r6';
   seed.process_incarnation_started_at = '2026-09-16T00:10:00.000Z';
@@ -139,20 +147,20 @@ test('multi-hop process restarts retain a durable wake-local fence and recover w
     seed,
     tabs: [{ tab_id: 'replacement-root-multihop', url: 'https://chatgpt.com/', selected: false }],
   });
-  const snap = await runtime.start();
-  assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.equal(snap.keepalive.tab_id, 'replacement-root-multihop');
-  assert.notEqual(snap.keepalive.active_wake?.wake_id, OLD_WAKE);
-  assert.equal(snap.keepalive.ambiguous_history.length, 1);
-  assert.equal(snap.keepalive.ambiguous_history[0].wake_id, OLD_WAKE);
-  assert.ok(snap.keepalive.ambiguous_history[0].process_boundary_fenced_at);
-  assert.equal(snap.keepalive.ambiguous_history[0].automatic_retry_allowed, false);
-  assert.equal(typed(), 2, "R-SUP-SEED: seed submit proves the root, then the wake submits into it");
-  assert.equal(actions.includes('NEW_TAB'), false);
+  await runtime.start();
+  const snap = await runtime.cycle({ force: true });
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake?.wake_id, OLD_WAKE);
+  assert.equal(snap.keepalive.active_wake, null);
+  assert.equal(snap.keepalive.ambiguous_history.length, 0);
+  assert.ok(snap.keepalive.pending_wake.process_boundary_fenced_at);
+  assert.equal(snap.keepalive.pending_wake.automatic_retry_allowed, false);
+  assert.equal(typed(), 0);
+  assert.equal(actions.some((action) => ['NEW_TAB', 'TYPED_CLICK', 'CLOSE_TAB'].includes(action)), false);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  assert.equal(durable.pending_wake, null);
-  assert.equal(durable.ambiguous_history[0].retired_process_incarnation_id, OLD_PROCESS);
-  assert.ok(durable.ambiguous_history[0].process_boundary_fenced_by_process_incarnation_id);
+  assert.equal(durable.pending_wake.wake_id, OLD_WAKE);
+  assert.ok(durable.pending_wake.process_boundary_fenced_by_process_incarnation_id);
+  assert.equal(durable.ambiguous_history.length, 0);
 });
 
 test('missing pending process identity stays fail-closed under the multihop fence', async () => {

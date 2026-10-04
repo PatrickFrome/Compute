@@ -116,3 +116,79 @@ test('restore refuses continuity capsule meant for another target version withou
   assert.equal(result.state, 'TARGET_VERSION_MISMATCH');
   assert.equal(acted, false);
 });
+
+
+test('ChatGPT-only restore retires exact legacy z.ai roots but preserves conversations', async () => {
+  const row = buildSelfUpdateSessionContinuity({
+    currentVersion: '1.0.0',
+    targetVersion: '1.0.1',
+    tabsSnapshot: {
+      selected_tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      tabs: [
+        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chat.z.ai/', kind: 'GLM_CHAT' },
+        { tab_id: 'tab_bbbbbbbb-cccc-dddd-eeee-ffffffffffff', url: 'https://chat.z.ai/', kind: 'GLM_CHAT' },
+        { tab_id: 'tab_cccccccc-dddd-eeee-ffff-aaaaaaaaaaaa', url: 'https://chat.z.ai/c/history', kind: 'GLM_CHAT' },
+        { tab_id: 'tab_dddddddd-eeee-ffff-aaaa-bbbbbbbbbbbb', url: 'https://example.com/', kind: 'USER_WEB' },
+      ],
+    },
+  });
+
+  const tabs = [{ tab_id: 'tab_existing-docs-0000-0000-000000000000', url: 'https://example.com/', kind: 'USER_WEB' }];
+  const actions = [];
+  const result = await restoreSelfUpdateSessionContinuity({
+    row,
+    currentVersion: '1.0.1',
+    getState: async () => ({ tabs: structuredClone(tabs) }),
+    executeCommand: async (command) => {
+      actions.push(structuredClone(command));
+      if (command.action === 'NEW_TAB') {
+        const tab = { tab_id: 'tab_restored-chat-0000-0000-000000000000', url: command.payload.url, kind: 'GLM_CHAT' };
+        tabs.push(tab);
+        return tab;
+      }
+      if (command.action === 'SELECT_TAB') return { ok: true };
+      throw new Error(`unexpected:${command.action}`);
+    },
+    authPollDelayMs: 0,
+  });
+
+  assert.equal(result.state, 'RESTORED');
+  assert.equal(result.skipped_legacy_provider_roots, 2);
+  assert.equal(result.continuity_expected_tab_count, 2);
+  assert.equal(result.tab_cardinality.state, 'CONTINUOUS');
+  assert.equal(result.restored_tabs, 1);
+  assert.deepEqual(actions.filter((a) => a.action === 'NEW_TAB').map((a) => a.payload.url), ['https://chat.z.ai/c/history']);
+  assert.equal(actions.some((a) => a.payload?.url === 'https://chat.z.ai/'), false);
+});
+
+test('legacy root retirement is exact: wrong kind, query, and conversation remain restorable', async () => {
+  const row = buildSelfUpdateSessionContinuity({
+    currentVersion: '1.0.0',
+    targetVersion: '1.0.1',
+    tabsSnapshot: {
+      tabs: [
+        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chat.z.ai/', kind: 'USER_WEB' },
+        { tab_id: 'tab_bbbbbbbb-cccc-dddd-eeee-ffffffffffff', url: 'https://chat.z.ai/?keep=1', kind: 'GLM_CHAT' },
+        { tab_id: 'tab_cccccccc-dddd-eeee-ffff-aaaaaaaaaaaa', url: 'https://chat.z.ai/c/history', kind: 'GLM_CHAT' },
+      ],
+      selected_tab_id: null,
+    },
+  });
+  const tabs = [];
+  const urls = [];
+  const result = await restoreSelfUpdateSessionContinuity({
+    row,
+    currentVersion: '1.0.1',
+    getState: async () => ({ tabs: structuredClone(tabs) }),
+    executeCommand: async (command) => {
+      if (command.action !== 'NEW_TAB') return { ok: true };
+      urls.push(command.payload.url);
+      const tab = { tab_id: `tab_created-${urls.length}0000000-0000-0000-000000000000`, url: command.payload.url };
+      tabs.push(tab);
+      return tab;
+    },
+    authPollDelayMs: 0,
+  });
+  assert.equal(result.skipped_legacy_provider_roots, 0);
+  assert.deepEqual(urls, ['https://chat.z.ai/', 'https://chat.z.ai/?keep=1', 'https://chat.z.ai/c/history']);
+});

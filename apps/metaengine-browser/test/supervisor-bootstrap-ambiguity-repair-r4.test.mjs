@@ -69,16 +69,27 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
   await fs.writeFile(statePath, `${JSON.stringify(seedState(), null, 2)}\n`);
   const actions = [];
   const closedTabs = [];
+  const drafts = new Map();
   const executeCommand = async ({ action, payload }) => {
     actions.push(action);
-    if (action === 'CAPTURE') return typeof frame === 'function' ? frame() : structuredClone(frame);
+    if (action === 'CAPTURE') {
+      const captured = typeof frame === 'function' ? frame() : structuredClone(frame);
+      const draft = drafts.get(payload.tab_id);
+      if (draft != null) captured.semantic_targets.find((row) => row.role === 'textbox').value_sha256 = crypto.createHash('sha256').update(draft).digest('hex');
+      if (draft != null) captured.semantic_targets.find((row) => row.role === 'textbox').value_length = draft.length;
+      return { ...captured, tab_id: payload.tab_id, target_id: `webcontents:${payload.tab_id}` };
+    }
     if (action === 'SEMANTIC_TYPE') {
-      if (onSubmit) return onSubmit({ action, payload });
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      assert.equal(payload.submit_after_type, false);
+      drafts.set(payload.tab_id, payload.text);
+      return { replace_verified: true, authority_effect: true };
     }
     if (action === 'TYPED_CLICK') {
+      assert.equal(payload.chatgpt_submit, true);
+      if (onSubmit) return onSubmit({ action, payload });
       if (onClick) return onClick({ action, payload });
-      return { ok: true };
+      drafts.delete(payload.tab_id);
+      return { effect_state: 'PROVEN_GENERATING', stop_observed: true, automatic_retry_allowed: false, authority_effect: true };
     }
     if (action === 'CLOSE_TAB') {
       closedTabs.push(String(payload?.tab_id || ''));
@@ -112,7 +123,7 @@ test('bare bootstrap root transcript marker resolves ambiguity without a write e
   assert.equal(actions.includes('NEW_TAB'), false);
 });
 
-test('exact composer continuation is durably fenced before click and never repeated', async () => {
+test('exact historical draft cannot authorize another Send or retirement of an unknown wake', async () => {
   const composerSha = crypto.createHash('sha256').update(wakeMessage(), 'utf8').digest('hex');
   let submits = 0;
   const { runtime, actions, statePath, closedTabs } = await makeRuntime({
@@ -125,29 +136,23 @@ test('exact composer continuation is durably fenced before click and never repea
   });
   let snap = await runtime.start();
   assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
-  assert.equal(submits, 1);
+  assert.equal(submits, 0);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  assert.equal(durable.pending_wake.ambiguity_continuation_tab_id, 'root-1');
-  assert.equal(durable.pending_wake.ambiguity_continuation_composer_sha256, composerSha);
-  assert.ok(durable.pending_wake.ambiguity_continuation_attempted_at);
-
-  // D-S1 contract update (2026-09-19): the continuation stays single-shot —
-  // never repeated — but the now provably-absent wake (terminal root, no
-  // marker, composer still holding the exact dead draft) is retired on the
-  // next bounded superstep instead of deadlocking the keepalive forever, and
-  // the dead draft tab is closed by proof so the next bootstrap cannot
-  // amplify tab cardinality. The fresh bootstrap happens on a later tick with
-  // a NEW wake; the spent wake is never blindly retried.
+  assert.equal(durable.pending_wake.wake_id, WAKE_ID);
+  assert.equal(durable.pending_wake.ambiguity_continuation_attempted_at, undefined);
+  // Idle, missing marker and a matching draft are readback observations;
+  // none proves that the historical external Send did not happen.
   snap = await runtime.cycle({ force: true });
-  assert.equal(submits, 1, 'the spent wake is never resubmitted');
-  assert.equal(actions.filter((row) => row === 'SEMANTIC_TYPE').length, 1);
+  assert.equal(submits, 0);
+  assert.equal(actions.includes('SEMANTIC_TYPE'), false);
+  assert.equal(actions.includes('TYPED_CLICK'), false);
   const afterCycle = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  const retired = (afterCycle.ambiguous_history || []).find((row) => row.wake_id === WAKE_ID);
-  assert.ok(retired, 'the wake was retired after the spent continuation');
-  assert.equal(retired.retired_reason, 'AMBIGUOUS_BOOTSTRAP_EFFECT_PROVABLY_ABSENT');
-  assert.ok(closedTabs.includes('root-1'), 'the dead draft tab was closed by proof');
-  assert.equal(afterCycle.pending_wake, null, 'retirement is a bounded superstep: no bootstrap in the same tick');
-  assert.ok((afterCycle.queued_wakes || []).length >= 1, 'a fresh continuous wake is queued for the next tick');
+  assert.equal(afterCycle.state, 'WAKE_AMBIGUOUS');
+  assert.equal(afterCycle.pending_wake.wake_id, WAKE_ID);
+  assert.equal(afterCycle.pending_wake.automatic_retry_allowed, false);
+  assert.equal(afterCycle.ambiguous_history.length, 0);
+  assert.equal(actions.includes('NEW_TAB'), false);
+  assert.equal(closedTabs.length, 0, 'an unresolved draft is retained for readback');
 });
 
 test('duplicate bootstrap candidates fail closed with zero effect continuation', async () => {

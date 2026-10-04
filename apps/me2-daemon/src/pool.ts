@@ -30,7 +30,7 @@
  *
  * REST: GET /pool, POST /pool {op:scale|burn} — вне шины (47/47). Механика ME33.
  */
-import { db, emit, nowIso, rid, getTask, updateTask, createTask, listAgents, setAgentPaused, setAgentStatus, type AgentRow, type TaskRow } from "../store";
+import { db, emit, nowIso, rid, getTask, updateTask, createTask, createAgent, listAgents, setAgentModel, setAgentPaused, setAgentStatus, type AgentRow, type TaskRow } from "../store";
 import { ACTIVE_INFERENCE_PLATFORM, ACTIVE_INFERENCE_PROVIDER, activeAgentModelTag, canonicalOpenAiModel } from "./inference";
 import { fleetBeat } from "./fleet";
 import { recordSpan } from "./otel";
@@ -122,9 +122,7 @@ export function poolScale(n: number, by = "operator"): { scale: number; live: nu
 }
 
 function createAgentForSlot(slot: number, model: string): AgentRow {
-  const a = { id: rid("ag"), role: "EXECUTOR", status: "IDLE", model, paused: 0, created_at: nowIso(), updated_at: nowIso() };
-  db.query(`INSERT INTO agents (id,role,status,model,paused,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`)
-    .run(a.id, a.role, a.status, a.model, 0, a.created_at, a.updated_at);
+  const a = createAgent("EXECUTOR", model);
   emit("AGENT_MODEL_SET", { id: a.id, role: a.role, from: "spawn", to: model, by: "pool_spawn_canonical" }, a.id, null);
   return a;
 }
@@ -132,7 +130,7 @@ function createAgentForSlot(slot: number, model: string): AgentRow {
 function syncAgentModel(agentId: string, tag: string): void {
   const a = db.query(`SELECT id, model FROM agents WHERE id=?`).get(agentId) as { id: string; model: string } | undefined;
   if (!a || a.model === tag) return;
-  db.query(`UPDATE agents SET model=?, updated_at=? WHERE id=?`).run(tag, nowIso(), agentId);
+  setAgentModel(agentId, tag);
   emit("AGENT_MODEL_SET", { id: agentId, from: a.model, to: tag, by: "pool_canonical_sync" }, agentId, null);
 }
 

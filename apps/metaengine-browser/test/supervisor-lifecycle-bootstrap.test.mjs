@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import crypto from 'node:crypto';
 
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
@@ -20,20 +21,24 @@ const runtimeOpen = Object.freeze({
   authority_effect: false,
 });
 
-function idleFrame(url, text = '') {
+function idleFrame(url, text = '', { tabId = 'bootstrap_1', draft = '' } = {}) {
   return {
+    tab_id: tabId,
+    target_id: `webcontents:${tabId}`,
     url,
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: 0 },
-      { role: 'button', name: 'Send' },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }
 
-function generatingFrame(url, text = '') {
+function generatingFrame(url, text = '', tabId = 'bootstrap_1') {
   return {
+    tab_id: tabId,
+    target_id: `webcontents:${tabId}`,
     url,
     title: 'ChatGPT',
     text_excerpt: text,
@@ -58,6 +63,7 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
   let bootstrapCreated = 0;
   const submits = [];
   let bootstrapGenerating = false;
+  let draft = '';
 
   const getState = async () => ({
     tabs: structuredClone(tabs),
@@ -73,21 +79,28 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
       return structuredClone(tab);
     }
     if (action === 'CAPTURE') {
-      if (tabId === 'fleet_tab') return idleFrame(FLEET_URL);
+      if (tabId === 'fleet_tab') return idleFrame(FLEET_URL, '', { tabId });
       if (tabId.startsWith('bootstrap_')) {
         // Mirror the real surface: the capture reflects the tab's CURRENT URL
         // (the seed submit navigates root → conversation).
         const row = tabs.find((tab) => tab.tab_id === tabId);
         const url = row?.url ?? ROOT_URL;
-        return bootstrapGenerating ? generatingFrame(url, submits.at(-1) ?? '') : idleFrame(url, submits.at(-1) ?? '');
+        return bootstrapGenerating ? generatingFrame(url, submits.at(-1) ?? '', tabId) : idleFrame(url, submits.at(-1) ?? '', { tabId, draft });
       }
-      if (tabId === 'user_root') return idleFrame(ROOT_URL);
+      if (tabId === 'user_root') return idleFrame(ROOT_URL, '', { tabId });
       throw new Error(`unexpected_capture:${tabId}`);
     }
     if (action === 'SEMANTIC_TYPE') {
       assert.equal(tabId, 'bootstrap_1');
-      assert.equal(command.payload?.submit_after_type, true);
-      const text = String(command.payload?.text || '');
+      assert.equal(command.payload?.submit_after_type, false);
+      draft = String(command.payload?.text || '');
+      assert.equal(bootstrapGenerating, false);
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (action === 'TYPED_CLICK') {
+      assert.equal(command.payload?.chatgpt_submit, true);
+      const text = draft;
+      draft = '';
       submits.push(text);
       // R-SUP-SEED: the tiny conversation seed's READY reply settles quickly
       // (the runtime drains generation before the real send); the full wake
@@ -104,7 +117,6 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
         authority_effect: true,
       };
     }
-    if (action === 'TYPED_CLICK') throw new Error('bootstrap must not dispatch a second send effect');
     throw new Error(`unexpected_action:${action}`);
   };
 
@@ -146,6 +158,8 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
   const tabs = [{ tab_id: 'user_root', url: ROOT_URL, selected: true }];
   let bootstrapCreated = 0;
   const submits = [];
+  let draft = '';
+  let sends = 0;
 
   const getState = async () => ({ tabs: structuredClone(tabs), fleet: { agents: [] } });
   const executeCommand = async (command) => {
@@ -157,12 +171,18 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
       tabs.push(tab);
       return structuredClone(tab);
     }
-    if (action === 'CAPTURE') return idleFrame(ROOT_URL);
+    if (action === 'CAPTURE') return idleFrame(ROOT_URL, '', { tabId, draft });
     if (action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload?.submit_after_type, false);
       submits.push(String(command.payload?.text || ''));
-      return { suppressed: true, reason: 'TYPE_EFFECT_AMBIGUOUS', authority_effect: false };
+      draft = String(command.payload?.text || '');
+      return { replace_verified: true, authority_effect: true };
     }
-    if (action === 'TYPED_CLICK') throw new Error('ambiguous semantic submit must never fall through to a second click');
+    if (action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      sends += 1;
+      return { effect_state: 'AMBIGUOUS_AFTER_SEND', automatic_retry_allowed: false, authority_effect: true };
+    }
     throw new Error(`unexpected_action:${action}:${tabId}`);
   };
 
@@ -179,30 +199,24 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
   await runtime.start();
   await runtime.cycle({ force: true });
 
-  // First cycle after start(): the suppressed TYPE_EFFECT_AMBIGUOUS submit
-  // left the bootstrap composer provably empty (captured zero, root URL, no
-  // marker), so the D-S1 repair retires the unresolved wake instead of
-  // deadlocking the keepalive forever (2026-09-19 contract update). The
-  // retirement is a bounded superstep: state RECOVERING, no pending wake.
   const snap = runtime.snapshot();
   assert.equal(bootstrapCreated, 1);
-  assert.equal(submits.length, 1, 'the suppressed seed is the only submit — the wake is never typed');
+  assert.equal(submits.length, 1, 'only the seed draft was typed — the wake is never typed');
+  assert.equal(sends, 1, 'there is exactly one physical Send and no fallback');
   assert.ok(submits[0].includes('SUPERVISOR CONVERSATION SEED'), 'the seed gate fences the wake behind a proven conversation');
-  assert.equal(snap.keepalive.state, 'RECOVERING');
-  assert.equal(snap.keepalive.pending_wake, null, 'the fenced wake was retired by proof');
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake.ambiguous_reason, 'ROOT_SEED_CONVERSATION_NOT_PROVEN');
   assert.equal(snap.keepalive.conversation_url, null);
-  assert.ok((snap.keepalive.queued_wakes || []).length >= 1, 'a fresh continuous wake is queued');
-  const retiredWakeId = ((JSON.parse(await fs.readFile(statePath, 'utf8')).ambiguous_history || []).slice(-1)[0] || {}).wake_id;
-  assert.ok(retiredWakeId, 'the retired wake is in durable history');
-
-  // Second cycle: the fresh bootstrap runs from clean RECOVERING state with a
-  // NEW wake — one new root, one NEW submit; the old wake is never retried.
+  const ambiguousWakeId = snap.keepalive.pending_wake.wake_id;
+  assert.equal(snap.keepalive.pending_wake.automatic_retry_allowed, false);
+  // Without positive conversation proof, another cycle cannot send again,
+  // replace the unresolved wake, or create a compensating root.
   await runtime.cycle({ force: true });
   const snap2 = runtime.snapshot();
-  assert.equal(bootstrapCreated, 2, 'one fresh root after proof-based retirement');
-  assert.equal(submits.length, 2, 'one seed submit per wake, no blind retry');
-  assert.notEqual(snap2.keepalive.pending_wake?.wake_id, retiredWakeId,
-    'a fresh wake replaced the retired one');
+  assert.equal(bootstrapCreated, 1);
+  assert.equal(submits.length, 1);
+  assert.equal(sends, 1);
+  assert.equal(snap2.keepalive.pending_wake?.wake_id, ambiguousWakeId);
   assert.equal(snap2.keepalive.pending_wake?.automatic_retry_allowed, false);
   assert.equal(snap2.keepalive.conversation_url, null);
 

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
 // P0 (2026-09-17) intra-process amplifier, closed by this contract file.
@@ -32,7 +33,7 @@ const CONV_URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 function authFrame() {
   return { url: AUTH_URL, title: 'Начать работу | ChatGPT', text_excerpt: 'Log in', semantic_targets: [] };
 }
-function rootFrame() {
+function rootFrame(draft = '') {
   return {
     url: ROOT_URL,
     title: 'ChatGPT',
@@ -40,17 +41,21 @@ function rootFrame() {
     // D-K1: bootstrap root readiness now routes through the platform composer
     // resolver, which requires an addressable (semantic_ref-carrying) textbox —
     // real captures always attach refs on the main frame.
-    semantic_targets: [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'r'.repeat(64) }, backend_node_id: 11 }],
+    semantic_targets: [
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'r'.repeat(64) }, backend_node_id: 11, value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
+    ],
   };
 }
-function convFrame({ generating = true } = {}) {
+function convFrame({ generating = true, draft = '' } = {}) {
   return {
     url: CONV_URL,
     title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
-      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
       ...(generating ? [{ role: 'button', name: 'Stop generating' }] : []),
+      ...(!generating ? [{ role: 'button', name: 'Send', semantic_ref: 'send' }] : []),
     ],
   };
 }
@@ -278,6 +283,7 @@ test('successful bootstrap clears the stale supervisor_bootstrap pre-effect erro
   await writeDurableState(statePath);
   const reg = makeRegistry();
   const convCaptures = new Map();
+  const drafts = new Map();
   let sessionLive = false;
   const getState = async () => ({ tabs: reg.tabs.map((t) => ({ ...t })), fleet: { agents: [] } });
   const executeCommand = async (command) => {
@@ -286,16 +292,24 @@ test('successful bootstrap clears the stale supervisor_bootstrap pre-effect erro
     if (command.action === 'CAPTURE') {
       const tab = reg.tabs.find((t) => t.tab_id === String(command.payload?.tab_id || ''));
       const url = tab?.url || '';
-      if (url === AUTH_URL) return authFrame();
-      if (url === ROOT_URL) return rootFrame();
+      const bound = (frame) => ({ ...frame, tab_id: tab.tab_id, target_id: `webcontents:${tab.tab_id}` });
+      if (url === AUTH_URL) return bound(authFrame());
+      if (url === ROOT_URL) return bound(rootFrame(drafts.get(tab.tab_id) || ''));
       // R-SUP-SEED: the conversation surface settles its seed reply after the
       // first observed capture — the runtime's bounded generation drain must
       // see an idle surface before typing the real message.
       const n = (convCaptures.get(tab.tab_id) || 0) + 1;
       convCaptures.set(tab.tab_id, n);
-      return convFrame({ generating: n < 2 });
+      return bound(convFrame({ generating: n < 2, draft: drafts.get(tab.tab_id) || '' }));
     }
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type, false);
+      drafts.set(command.payload.tab_id, command.payload.text);
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      drafts.delete(command.payload.tab_id);
       reg.setUrl(String(command.payload?.tab_id || ''), CONV_URL);
       return { effect_state: 'PROVEN_GENERATING', event_driven_readback: true, authority_effect: true };
     }

@@ -14,7 +14,7 @@ import { emit, getMeta, listAgents, setAgentModel } from "../store";
 
 export const ACTIVE_INFERENCE_PROVIDER = "OPENAI";
 export const ACTIVE_INFERENCE_PLATFORM = "CHATGPT";
-export const ACTIVE_INFERENCE_MODEL_DEFAULT = "gpt-5.6";
+export const ACTIVE_INFERENCE_MODEL_DEFAULT = "gpt-6.1-sol";
 export const LEGACY_GLM_PROVIDER = "ZAI";
 export const LEGACY_GLM_PLATFORM = "GLM_ZAI";
 
@@ -75,7 +75,7 @@ export function migrateAgentsToActiveInference(): {
   let upgraded = 0;
   let already = 0;
   for (const agent of listAgents()) {
-    if (agent.model === target) {
+    if (agent.model === target && agent.provider === ACTIVE_INFERENCE_PROVIDER && agent.platform === ACTIVE_INFERENCE_PLATFORM) {
       already += 1;
       continue;
     }

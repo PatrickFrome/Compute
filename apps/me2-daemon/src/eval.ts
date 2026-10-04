@@ -35,7 +35,8 @@ import { codegraphSummary } from "./codegraph";
 import { otelStatus } from "./otel";
 import { workGraph, OBJECTIVE_STATUSES } from "./objectives";
 import { handoffList, handoffStats } from "./handoffs";
-import { glmStatus, canonicalGlm, agentTag } from "./glm";
+import { glmStatus } from "./glm";
+import { activeAgentModelTag, inferencePolicySnapshot, isLegacyGlmModelTag } from "./inference";
 import { reviewStats } from "./reviewer";
 import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
 import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck, SECRETS_HIDE, probeSandboxCaps } from "./sandbox2";
@@ -75,7 +76,7 @@ import { mirrorSeq, EPOCH_STRIDE } from "./sqlmirror";
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 32;
+export const EVAL_DATASET_VERSION = 33;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -427,15 +428,28 @@ export const EVAL_DATASET: EvalCheck[] = [
       return { ok, evidence: `table=${t ? "yes" : "no"}, rows=${rows.length}, total=${s.total}, 24h=${s.last_24h}, bad_proto=${badProto}` };
     },
   },
-  // — GLM currency (R29, директива оператора) —
+  // Historical check id stays readable; the GLM plane is read-only.
   {
-    id: "glm.currency", plane: "glm", title: "GLM currency (ME25): весь флот на каноническом теге",
-    critical: true, expect: `meta.glm_canonical непуст; все агенты на теге zai:<canonical> (drift=0); таблица glm_probes в схеме`,
+    id: "glm.currency", plane: "legacy", title: "GLM compatibility: historical telemetry remains read-only",
+    critical: true, expect: "legacy_read_only=true; historical glm_probes schema remains readable",
     run: () => {
       const s = glmStatus();
       const t = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='glm_probes'`).get();
-      const ok = !!canonicalGlm() && s.agents.total >= 0 && s.agents.drift === 0 && !!t;
-      return { ok, evidence: `canonical=${s.canonical}, agents=${s.agents.total}, drift=${s.agents.drift}, tag=${s.agent_tag}, probes=${s.probes_total}, honoring=${s.platform_honoring}` };
+      const ok = s.legacy_read_only === true && s.agents.total >= 0 && !!t;
+      return { ok, evidence: `legacy_read_only=${s.legacy_read_only}, historical_probes=${s.probes_total}, schema=${Boolean(t)}` };
+    },
+  },
+  {
+    id: "inference.openai", plane: "inference", title: "Active fleet inference uses OpenAI only",
+    critical: true, expect: "OPENAI/CHATGPT policy; no live registry GLM tags; new identities are openai:*",
+    run: () => {
+      const policy = inferencePolicySnapshot();
+      const agents = listAgents();
+      const legacy = agents.filter((agent) => isLegacyGlmModelTag(agent.model));
+      const ok = policy.provider === "OPENAI" && policy.platform === "CHATGPT"
+        && policy.legacy_glm_active === false && legacy.length === 0
+        && agents.every((agent) => agent.model.startsWith("openai:"));
+      return { ok, evidence: `provider=${policy.provider}, platform=${policy.platform}, agents=${agents.length}, active_legacy=${legacy.length}` };
     },
   },
   {
@@ -559,7 +573,7 @@ export const EVAL_DATASET: EvalCheck[] = [
       const again = poolScale(2, "eval");
       const st = poolStatus();
       const liveOk = st.live === 2 && again.created === 0;
-      const canonOk = st.workers.every((w) => w.model === `zai:${st.canonical}`);
+      const canonOk = st.workers.every((w) => w.model === activeAgentModelTag());
       // 2) lease-цикл на синтетической задаче (синхронно — master-loop не вклинится между шагами)
       const t = createTask({ id: rid("task"), title: "eval pool lease cycle", spec: "eval-only lease mechanics", role: "EXECUTOR", max_steps: 1 } as Parameters<typeof createTask>[0]);
       const agentId = st.workers.find((w) => w.state === "IDLE")?.agent_id ?? st.workers[0]?.agent_id ?? "";
@@ -726,9 +740,9 @@ export const EVAL_DATASET: EvalCheck[] = [
         const digest = fleetDigest();
         const inDigest = digest.includes("цель через инструмент");
         // R37: нормализация модели — двойной префикс из старых сессий не должен доживать до LLM
-        const normOk = normalizeChatModel("zai:zai:glm-5.3") === "zai:glm-5.3" && normalizeChatModel("zai:glm-5.3") === "zai:glm-5.3";
+        const normOk = normalizeChatModel("zai:zai:glm-5.3") === activeAgentModelTag() && normalizeChatModel("zai:glm-5.3") === activeAgentModelTag();
         const supSess = sup ? agentChatGet(sup, 1)?.session.model ?? "" : "";
-        const ok = s1.ok && after.includes("экономию памяти") && supAssign!.ok && notPermitted === "not_permitted" && sys.includes("ДОЛГОЖИВУЩАЯ ЦЕЛЬ") && toolSet.startsWith("OK:") && inDigest && normOk && !supSess.includes("zai:zai:");
+        const ok = s1.ok && after.includes("экономию памяти") && supAssign!.ok && notPermitted === "not_permitted" && sys.includes("ДОЛГОЖИВУЩАЯ ЦЕЛЬ") && toolSet.startsWith("OK:") && inDigest && normOk && supSess.startsWith("openai:");
         return { ok, evidence: `set=${s1.ok}, в_сессии=${after.slice(0, 24)}, sup-назначил=${supAssign!.ok}, not_permitted=${notPermitted}, в_промпте=${sys.includes("ДОЛГОЖИВУЩАЯ ЦЕЛЬ")}, tool=${toolSet.slice(0, 18)}, в_дайджесте=${inDigest}, норм-модели=${normOk}, сессия_супа_чиста=${supSess || "—"}` };
       } finally {
         if (chat) agentChatDelete(chat.id);
@@ -893,19 +907,24 @@ export const EVAL_DATASET: EvalCheck[] = [
   {
     id: "llm.failover_chain",
     plane: "llm",
-    title: "Quota-Resilience L3 (v0.57.0): failover-цепочка провайдеров zai↔gateway — квота ×2 вместо одной точки отказа",
+    title: "OpenAI failover: optional gateway transport retains the same model",
     critical: true,
-    expect: "providerChain('zai:default') начинается с zai и содержит gateway ⇔ ключ реально доступен (честное соответствие, не выдумка); providerChain('gateway:foo') начинается с gateway и всегда содержит zai-альтернативу",
+    expect: "OpenAI direct is primary; configured gateway transports the same OpenAI model; legacy tags never invoke ZAI",
     run: () => {
-      const c1 = providerChain("zai:default");
-      const c2 = providerChain("gateway:foo");
-      const primaryOk = c1[0]?.provider === "zai" && c2[0]?.provider === "gateway";
+      const tag = activeAgentModelTag();
+      const modelId = tag.slice("openai:".length);
+      const c1 = providerChain(tag);
+      const c2 = providerChain(`gateway:openai/${modelId}`);
+      const legacy = providerChain("zai:default");
+      const primaryOk = c1[0]?.provider === "openai" && c2[0]?.provider === (gatewayReady() ? "gateway" : "openai");
       const gwInChain = c1.some((p) => p.provider === "gateway");
       const ready = gatewayReady();
       const consistent = gwInChain === ready && (ready ? c1.length === 2 : c1.length === 1);
-      const zaiAlt = c2.length === 2 && c2[1]?.provider === "zai";
-      const ok = primaryOk && consistent && zaiAlt;
-      return { ok, evidence: `zai:default → [${c1.map((p) => p.provider).join(",")}] (gateway=${gwInChain}, ключ доступен=${ready}, соответствие=${consistent}); gateway:foo → [${c2.map((p) => p.provider).join(",")}], zai-альтернатива=${zaiAlt}` };
+      const openAiAlt = c2.some((p) => p.provider === "openai");
+      const sameModel = [...c1, ...c2, ...legacy].every((p) => p.modelId === modelId && ["openai", "gateway"].includes(p.provider));
+      const noGatewayWhenUnavailable = providerChain(tag, false).every((p) => p.provider === "openai");
+      const ok = primaryOk && consistent && openAiAlt && sameModel && noGatewayWhenUnavailable;
+      return { ok, evidence: `model=${modelId}, direct=[${c1.map((p) => p.provider)}], gateway=[${c2.map((p) => p.provider)}], same_model=${sameModel}, no_glm=true` };
     },
   },
   {

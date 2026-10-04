@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
@@ -35,11 +36,12 @@ function seedKeepalive(statePath) {
   });
 }
 
-function frameFor(url, { composer = true, generating = false } = {}) {
+function frameFor(url, { composer = true, generating = false, tabId = 'tab_keep', draft = '' } = {}) {
   const targets = [];
-  if (composer) targets.push({ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: 0 });
+  if (composer) targets.push({ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') });
   if (generating) targets.push({ role: 'button', name: 'Stop' });
-  return { url, text_excerpt: 'supervisor transcript excerpt', semantic_targets: targets };
+  else targets.push({ role: 'button', name: 'Send', semantic_ref: 'send' });
+  return { tab_id: tabId, target_id: `webcontents:${tabId}`, url, text_excerpt: 'supervisor transcript excerpt', semantic_targets: targets };
 }
 
 // Harness: the keepalive's conversation tab exists; the rollover opens a
@@ -53,6 +55,7 @@ function makeHarness(statePath, { seedProvesConversation = true, wakeProves = tr
     { tab_id: 'tab_keep', url: conversationUrl, selected: false },
   ];
   const captureCounts = new Map();
+  const drafts = new Map();
   const runtime = new SupervisorLifecycleRuntime({
     getState: async () => ({ tabs: structuredClone(registry), fleet: { agents: [] } }),
     executeCommand: async (command) => {
@@ -74,15 +77,24 @@ function makeHarness(statePath, { seedProvesConversation = true, wakeProves = tr
         const row = registry.find((t) => t.tab_id === id);
         // Fresh root tabs hydrate: no composer on the first capture.
         const settled = n >= 2 || row?.url !== ROOT;
-        return frameFor(row?.url || ROOT, { composer: settled });
+        return frameFor(row?.url || ROOT, { composer: settled, tabId: id, draft: drafts.get(id) || '' });
       }
       if (command.action === 'SEMANTIC_TYPE') {
         const text = String(command.payload?.text || '');
         const isSeed = text.includes('SUPERVISOR CONVERSATION SEED');
         types.push({ text, isSeed });
+        assert.equal(command.payload.submit_after_type, false);
+        drafts.set(command.payload.tab_id, text);
+        return { replace_verified: true, authority_effect: true };
+      }
+      if (command.action === 'TYPED_CLICK') {
+        assert.equal(command.payload.chatgpt_submit, true);
+        const id = String(command.payload.tab_id);
+        const text = drafts.get(id) || '';
+        const isSeed = text.includes('SUPERVISOR CONVERSATION SEED');
         const proves = isSeed ? seedProvesConversation : wakeProves;
         if (proves) {
-          const id = String(command.payload?.tab_id || '');
+          drafts.delete(id);
           const row = registry.find((t) => t.tab_id === id);
           if (row && row.url === ROOT) row.url = NEW_CONVERSATION;
           return {
@@ -94,7 +106,7 @@ function makeHarness(statePath, { seedProvesConversation = true, wakeProves = tr
             authority_effect: true,
           };
         }
-        return { effect_state: 'AMBIGUOUS_AFTER_ENTER', suppressed: false, authority_effect: true };
+        return { effect_state: 'AMBIGUOUS_AFTER_SEND', suppressed: false, authority_effect: true };
       }
       if (command.action === 'READ_TRANSCRIPT') return { text: `seed\nMETAENGINE_SUPERVISOR_ROLLOVER_V1\nattempt marker` };
       return {};
@@ -161,16 +173,24 @@ test('R-SUP-SEED: an established conversation surface never pays the seed cost',
   // tests — they deliberately leave their mkdtemp dirs behind).
 
   const types = [];
+  let draft = '';
   const runtime = new SupervisorLifecycleRuntime({
     getState: async () => ({
       tabs: [{ tab_id: 'tab_keep', url: conversationUrl, selected: false }],
       fleet: { agents: [] },
     }),
     executeCommand: async (command) => {
-      if (command.action === 'CAPTURE') return frameFor(conversationUrl);
+      if (command.action === 'CAPTURE') return frameFor(conversationUrl, { draft });
       if (command.action === 'SEMANTIC_TYPE') {
+        assert.equal(command.payload.submit_after_type, false);
         types.push(String(command.payload?.text || ''));
-        return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, authority_effect: true, replace_verified: true };
+        draft = String(command.payload?.text || '');
+        return { replace_verified: true, authority_effect: true };
+      }
+      if (command.action === 'TYPED_CLICK') {
+        assert.equal(command.payload.chatgpt_submit, true);
+        draft = '';
+        return { effect_state: 'PROVEN_GENERATING', composer_cleared: true, new_conversation_observed: false, stop_observed: true, authority_effect: true };
       }
       if (command.action === 'READ_TRANSCRIPT') return { text: 'wake marker present' };
       return {};

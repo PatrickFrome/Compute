@@ -113,12 +113,14 @@ const AUX_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_
 
 function liveConversationFrame(text = '') {
   return {
+    tab_id: 'tab1', target_id: 'webcontents:1',
     url: ACTIVE_CONVERSATION,
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
       { role: 'textbox', name: null, semantic_ref: AUX_REF, backend_node_id: 1864, value_length: 436, value_sha256: sha256('aux') },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }
@@ -133,13 +135,18 @@ test('D-K1 e2e: supervisor wake send resolves the named composer on the two-text
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return liveConversationFrame('');
+    if (command.action === 'CAPTURE') return liveConversationFrame(typed);
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.platform, 'CHATGPT');
       typedRefs.push(command.payload.semantic_ref);
       typed = String(command.payload?.text || '');
       assert.equal(command.payload.accessible_name, 'Message ChatGPT', 'the composer, not the unnamed auxiliary, must be addressed');
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true, replace_verified: true };
+      assert.equal(command.payload.submit_after_type, false);
+      return { authority_effect: true, replace_verified: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      return { effect_state: 'PROVEN_GENERATING', automatic_retry_allowed: false, authority_effect: true };
     }
     throw new Error(`unexpected_action:${command.action}`);
   };
@@ -418,7 +425,7 @@ test('D-K2: replace_existing=false keeps append semantics with replace_verified 
   assert.ok(!('value_length_after' in result), 'no verification readback runs for append-mode types');
 });
 
-test('D-K2: legacy ChatGPT submit lane keeps its historical unverified replace contract', async () => {
+test('single-phase ChatGPT submit is refused before any draft mutation or Enter', async () => {
   // Reuse the ChatGPT-shaped fake: no composer value tracking at all. The
   // legacy lane must not require readback verification.
   let attached = false;
@@ -468,7 +475,7 @@ test('D-K2: legacy ChatGPT submit lane keeps its historical unverified replace c
   };
   const frame = await captureSemanticFrame(webContents);
   const composer = frame.semantic_targets.find((row) => row.role === 'textbox');
-  const result = await executeSemanticCommand(webContents, {
+  await assert.rejects(executeSemanticCommand(webContents, {
     action: 'SEMANTIC_TYPE',
     platform: 'CHATGPT',
     payload: {
@@ -479,10 +486,8 @@ test('D-K2: legacy ChatGPT submit lane keeps its historical unverified replace c
       replace_existing: true,
       submit_after_type: true,
     },
-  });
-  assert.equal(result.replace_verified, null, 'legacy lane is not readback-verified');
-  assert.equal(result.effect_state, 'PROVEN_GENERATING');
-  assert.ok(!('value_length_after' in result));
+  }), /native_chatgpt_two_phase_submit_required/);
+  assert.equal(calls.some(([method]) => ['DOM.focus', 'Input.insertText', 'Input.dispatchKeyEvent'].includes(method)), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -539,7 +544,9 @@ test('D-K5: an unsent wake attempt costs the wake interval before retry', async 
 // D-K7: bounded rollover when the bound composer is provably unusable
 // ---------------------------------------------------------------------------
 
-test('D-K7: three consecutive composer-blocking failures request a rollover', async () => {
+test('D-K7: three consecutive composer-blocking failures request a rollover', async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-dk7-'));
   const statePath = path.join(dir, 'keepalive.json');
   const getState = async () => ({
@@ -549,7 +556,7 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
   const executeCommand = async (command) => {
     if (command.action === 'CAPTURE') {
       return {
-        url: ACTIVE_CONVERSATION, title: 'ChatGPT', text_excerpt: '',
+        tab_id: 'tab1', target_id: 'webcontents:1', url: ACTIVE_CONVERSATION, title: 'ChatGPT', text_excerpt: '',
         semantic_targets: [
           { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: 999, value_sha256: sha256('poisoned draft') },
           { role: 'textbox', name: null, semantic_ref: AUX_REF, backend_node_id: 1864, value_length: 436, value_sha256: sha256('aux') },
@@ -580,7 +587,9 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
   // original three-cycle variant raced the rollover attempt on the next
   // tick - observed live as a CI flake where the state had already moved
   // past ROLLOVER_REQUIRED.)
+  now += 60_001;
   await runtime.cycle({ force: true });
+  now += 60_001;
   await runtime.cycle({ force: true });
   const snap = runtime.snapshot();
   assert.equal(['ROLLOVER_REQUIRED', 'ROLLOVER_DEFERRED', 'ROLLOVER_PENDING'].includes(snap.keepalive.state), true,

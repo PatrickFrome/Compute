@@ -32,8 +32,10 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
   role TEXT NOT NULL,
+  provider TEXT,
+  platform TEXT,
   status TEXT NOT NULL DEFAULT 'IDLE',
-  model TEXT NOT NULL DEFAULT 'openai:gpt-5.6',
+  model TEXT NOT NULL DEFAULT 'openai:gpt-6.1-sol',
   paused INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -103,6 +105,8 @@ if (!eventCols.includes("prev_hash")) db.exec(`ALTER TABLE events ADD COLUMN pre
 if (!eventCols.includes("hash")) db.exec(`ALTER TABLE events ADD COLUMN hash TEXT`);
 const agentCols = (db.query(`PRAGMA table_info(agents)`).all() as Array<{ name: string }>).map((c) => c.name);
 if (!agentCols.includes("paused")) db.exec(`ALTER TABLE agents ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
+if (!agentCols.includes("provider")) db.exec(`ALTER TABLE agents ADD COLUMN provider TEXT`);
+if (!agentCols.includes("platform")) db.exec(`ALTER TABLE agents ADD COLUMN platform TEXT`);
 const cmdCols = (db.query(`PRAGMA table_info(commands)`).all() as Array<{ name: string }>).map((c) => c.name);
 if (!cmdCols.includes("run_after")) db.exec(`ALTER TABLE commands ADD COLUMN run_after INTEGER`);
 // v0.7.0: lineage задач для merge-линий ВЕТКИ (TASK_RETRY ставит parent_id)
@@ -120,7 +124,7 @@ if (!taskCols.includes("not_before_ms")) db.exec(`ALTER TABLE tasks ADD COLUMN n
 if (!taskCols.includes("park_count")) db.exec(`ALTER TABLE tasks ADD COLUMN park_count INTEGER NOT NULL DEFAULT 0`);
 
 export type AgentRow = {
-  id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
+  id: string; role: string; provider: string | null; platform: string | null; status: string; model: string; paused: number; created_at: string; updated_at: string;
 };
 export type TaskRow = {
   id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
@@ -260,9 +264,10 @@ export function eventsByTask(taskId: string, limit = 300): EventRow[] {
 
 // ── agents ────────────────────────────────────────────────────────
 export function createAgent(role: string, model: string): AgentRow {
-  const a: AgentRow = { id: rid("ag"), role, status: "IDLE", model, paused: 0, created_at: nowIso(), updated_at: nowIso() };
-  db.query(`INSERT INTO agents (id, role, status, model, paused, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`)
-    .run(a.id, a.role, a.status, a.model, a.paused, a.created_at, a.updated_at);
+  if (!/^openai:gpt-[a-z0-9._-]+$/i.test(model)) throw new Error("inference_provider_not_allowed");
+  const a: AgentRow = { id: rid("ag"), role, provider: "OPENAI", platform: "CHATGPT", status: "IDLE", model, paused: 0, created_at: nowIso(), updated_at: nowIso() };
+  db.query(`INSERT INTO agents (id, role, provider, platform, status, model, paused, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(a.id, a.role, a.provider, a.platform, a.status, a.model, a.paused, a.created_at, a.updated_at);
   return a;
 }
 export function setAgentPaused(id: string, paused: number) {
@@ -333,7 +338,8 @@ export function setTaskReflectionLlm(id: string, llm: { lesson: string; fix?: st
   return emit("TASK_REFLECTED", { task_id: id, has_llm: true, model: llm.model ?? null, source: llm.source ?? "operator" }, null, id);
 }
 export function setAgentModel(id: string, model: string) {
-  db.query(`UPDATE agents SET model=?, updated_at=? WHERE id=?`).run(model.slice(0, 64), nowIso(), id);
+  if (!/^openai:gpt-[a-z0-9._-]+$/i.test(model)) throw new Error("inference_provider_not_allowed");
+  db.query(`UPDATE agents SET model=?, provider='OPENAI', platform='CHATGPT', updated_at=? WHERE id=?`).run(model, nowIso(), id);
 }
 /** Поиск по событиям (подстрока в type+data); ESCAPE-экранирование % и _. */
 export function searchEvents(q: string, limit = 50): EventRow[] {

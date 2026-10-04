@@ -69,7 +69,7 @@ test('active fleet readiness fails closed when CAPTURE tab identity drifts', () 
 test('ChatGPT fleet lane is tab-scoped and geometry-independent', () => {
   const readiness = evaluateFleetSubmitReadiness({ ...EXPECTED, selected_tab_id:'tab-other', frame:activeAgentFrame() });
   assert.equal(readiness.ready, true);
-  assert.equal(readiness.reason, 'READY_FOR_AGENT_TASK_ENTER_SUBMIT');
+  assert.equal(readiness.reason, 'READY_FOR_TYPE_THEN_SEND_REOBSERVE');
   assert.equal(readiness.platform, 'CHATGPT');
   assert.equal(readiness.agent_origin_proof.agent_surface_sha256, 'c'.repeat(64));
   assert.equal(readiness.model_proof.model, 'CHATGPT_ACCOUNT_SELECTED');
@@ -97,8 +97,8 @@ test('active fleet lane rejects a proof whose exact conversation hash does not m
   assert.equal(readiness.reason, 'AGENT_ORIGIN_PROOF_INVALID');
 });
 
-test('active fleet lane has one pre-effect readiness phase', () => {
+test('active fleet lane rejects PRE_CLICK without a fresh Send', () => {
   const readiness = evaluateFleetSubmitReadiness({ ...EXPECTED, phase:'PRE_CLICK', frame:activeAgentFrame() });
   assert.equal(readiness.ready, false);
-  assert.equal(readiness.reason, 'ACTIVE_AGENT_LANE_IS_SINGLE_PHASE_PRE_TYPE_ONLY');
+  assert.equal(readiness.reason, 'SEND_CONTROL_NOT_UNIQUE');
 });

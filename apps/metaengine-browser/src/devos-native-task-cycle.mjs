@@ -13,6 +13,7 @@ import {
   resolveAgentPlatformSelectedModel,
 } from './browser-agent-platform.mjs';
 import { digestAgentSurfaceProof } from './agent-origin-proof.mjs';
+import { submitFencedChatGptPrompt } from './chatgpt-fenced-submit.mjs';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
   AGENT_ROOT_CONVERSATION_SEED,
@@ -743,17 +744,11 @@ export class DevOsNativeTaskCycle {
 
               // Step 4: create the durable Agent session with a tiny seed only
               // after Agent mode + model + clean input have all been proven.
-              const submitted = await this.#executeCommand({
-                action: 'SEMANTIC_TYPE',
-                platform: AGENT_PLATFORM_ID,
-                payload: {
-                  tab_id: binding.tab_id,
-                  role: composer.role,
-                  accessible_name: composer.accessible_name,
-                  semantic_ref: composer.semantic_ref,
-                  text: AGENT_ROOT_CONVERSATION_SEED,
-                  replace_existing: true,
-                  submit_after_type: true,
+              const submitted = await submitFencedChatGptPrompt({
+                executeCommand: this.#executeCommand, tab_id: binding.tab_id, frame, text: AGENT_ROOT_CONVERSATION_SEED,
+                validateTypedFrame: async (typedFrame) => {
+                  if (String(typedFrame.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_agent_session_target_drift');
+                  if (!resolveAgentPlatformAgentSurface(typedFrame)) throw new Error('devos_agent_session_root_surface_lost');
                 },
               });
               bootstrapEffectState = String(submitted?.effect_state || 'AGENT_SESSION_SEED_DISPATCHED');

@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { Pool } from "pg";
+import pg from "pg";
+const { Pool } = pg;
+import { actorConfig, openAiModel, openAiPolicy, requestOpenAiChat } from "./inference-policy.js";
 
 type JsonObject = Record<string, unknown>;
 type Role = "PRIMARY" | "CRITIC";
@@ -9,13 +11,9 @@ const DATABASE_URL = required("DATABASE_URL");
 const HOST = process.env.SOVEREIGN_HTTP_HOST || "127.0.0.1";
 const PORT = boundedInt(process.env.SOVEREIGN_HTTP_PORT, 8090, 1, 65535);
 const CONTROL_TOKEN = process.env.SOVEREIGN_CONTROL_TOKEN || "";
-const PRIMARY_URL = process.env.SOVEREIGN_PRIMARY_URL || process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const CRITIC_URL = process.env.SOVEREIGN_CRITIC_URL || "http://127.0.0.1:8002";
-const PRIMARY_MODEL = openAiModel(process.env.SOVEREIGN_PRIMARY_MODEL || process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_PRIMARY_MODEL");
-const CRITIC_MODEL = openAiModel(process.env.SOVEREIGN_CRITIC_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_CRITIC_MODEL");
-const COMMON_MODEL_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
-const PRIMARY_TOKEN = process.env.SOVEREIGN_PRIMARY_TOKEN || process.env.SOVEREIGN_GPT_TOKEN || COMMON_MODEL_TOKEN;
-const CRITIC_TOKEN = process.env.SOVEREIGN_CRITIC_TOKEN || COMMON_MODEL_TOKEN;
+const INFERENCE = openAiPolicy();
+const PRIMARY_MODEL = INFERENCE.agent_a.model;
+const CRITIC_MODEL = INFERENCE.agent_b.model;
 const UPSTREAM_TIMEOUT_MS = boundedInt(process.env.SOVEREIGN_UPSTREAM_TIMEOUT_MS, 120_000, 5_000, 600_000);
 const MAX_BODY_BYTES = boundedInt(process.env.SOVEREIGN_HTTP_MAX_BODY_BYTES, 2 * 1024 * 1024, 64 * 1024, 16 * 1024 * 1024);
 const CHANNEL = "h205f22_same_point_v4_ready";
@@ -36,16 +34,6 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback;
 }
 
-function openAiModel(raw: string, name: string): string {
-  const model = String(raw || "").trim();
-  if (!/^(?:openai\/|gpt-)/i.test(model)) throw new Error(`${name}_must_be_openai`);
-  return model;
-}
-
-function inputOpenAiModel(value: unknown, fallback: string, name: string): string {
-  const raw = String(value || "").trim();
-  return raw ? openAiModel(raw, name) : fallback;
-}
 
 function isLoopback(host: string): boolean {
   const normalized = host.trim().toLowerCase();
@@ -109,21 +97,21 @@ function uuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function modelConfig(role: Role): { base: string; model: string; token: string } {
-  return role === "PRIMARY"
-    ? { base: PRIMARY_URL, model: PRIMARY_MODEL, token: PRIMARY_TOKEN }
-    : { base: CRITIC_URL, model: CRITIC_MODEL, token: CRITIC_TOKEN };
+function modelConfig(role: Role) {
+  return actorConfig(INFERENCE, role);
 }
 
 async function probeModel(role: Role): Promise<JsonObject> {
   const cfg = modelConfig(role);
   const started = Date.now();
+  if (!cfg.token) return { role, agent_id: cfg.agent_id, provider: cfg.provider, ok: false, model_visible: false, error: "openai_api_key_required" };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("probe_timeout"), Math.min(UPSTREAM_TIMEOUT_MS, 10_000));
   try {
     const response = await fetch(`${cfg.base.replace(/\/$/, "")}/v1/models`, {
       headers: cfg.token ? { authorization: `Bearer ${cfg.token}` } : undefined,
       signal: controller.signal,
+      redirect: "error",
     });
     const text = await response.text();
     let visible = false;
@@ -137,6 +125,9 @@ async function probeModel(role: Role): Promise<JsonObject> {
     }
     return {
       role,
+      agent_id: cfg.agent_id,
+      provider: cfg.provider,
+      platform: cfg.platform,
       ok: response.ok,
       model_visible: visible,
       expected_model: cfg.model,
@@ -165,7 +156,7 @@ async function readiness(): Promise<JsonObject> {
   const [db, primary, critic] = await Promise.all([dbProbe(), probeModel("PRIMARY"), probeModel("CRITIC")]);
   const ready = db.ok === true && primary.ok === true && critic.ok === true && primary.model_visible === true && critic.model_visible === true;
   lastReady = ready;
-  return { ready, protocol: "SAME_POINT_DUEL_V4", provider: "OPENAI", platform: "CHATGPT", db, primary, critic, legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" } };
+  return { ready, protocol: "SAME_POINT_DUEL_V4", provider: "OPENAI", platform: "OPENAI_API", db, primary, critic, legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" } };
 }
 
 async function proxyModel(req: IncomingMessage, res: ServerResponse, role: Role, kind: "models" | "chat"): Promise<void> {
@@ -174,17 +165,13 @@ async function proxyModel(req: IncomingMessage, res: ServerResponse, role: Role,
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("upstream_timeout"), UPSTREAM_TIMEOUT_MS);
   try {
-    const base = cfg.base.replace(/\/$/, "");
-    const headers: Record<string, string> = {};
-    if (cfg.token) headers.authorization = `Bearer ${cfg.token}`;
-    let init: RequestInit = { method: kind === "models" ? "GET" : "POST", headers, signal: controller.signal };
-    if (kind === "chat") {
-      const input = await readJson(req);
-      input.model = cfg.model;
-      headers["content-type"] = "application/json";
-      init = { ...init, body: JSON.stringify(input) };
-    }
-    const upstream = await fetch(`${base}${kind === "models" ? "/v1/models" : "/v1/chat/completions"}`, init);
+    if (!cfg.token) throw new Error("openai_api_key_required");
+    const upstream = kind === "chat"
+      ? await requestOpenAiChat(cfg, await readJson(req), { signal: controller.signal })
+      : await fetch(`${cfg.base}/v1/models`, {
+        headers: { authorization: `Bearer ${cfg.token}` },
+        signal: controller.signal, redirect: "error",
+      });
     res.statusCode = upstream.status;
     const contentType = upstream.headers.get("content-type");
     if (contentType) res.setHeader("content-type", contentType);
@@ -209,8 +196,9 @@ async function createDuel(input: JsonObject): Promise<JsonObject> {
   const baseSha = String(input.base_github_sha || "").trim().toLowerCase();
   const subject = input.subject && typeof input.subject === "object" && !Array.isArray(input.subject) ? input.subject as JsonObject : {};
   const policy = String(input.execution_policy || "SOVEREIGN_ONLY");
-  const primaryModel = inputOpenAiModel(input.primary_model ?? input.gpt_model, PRIMARY_MODEL, "primary_model");
-  const criticModel = inputOpenAiModel(input.critic_model ?? input.glm_model, CRITIC_MODEL, "critic_model");
+  const primaryModel = openAiModel(input.primary_model || input.agent_a_model || input.gpt_model || PRIMARY_MODEL);
+  const criticModel = openAiModel(input.critic_model || input.agent_b_model || input.glm_model || CRITIC_MODEL);
+  subject.inference = { provider: "OPENAI", platform: "OPENAI_API", primary_model: primaryModel, critic_model: criticModel };
   if (duelKey.length < 3) throw new Error("duel_key_required");
   if (!milestone) throw new Error("milestone_key_required");
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error("base_github_sha_invalid");
@@ -218,7 +206,7 @@ async function createDuel(input: JsonObject): Promise<JsonObject> {
   if (!new Set(["SOVEREIGN_ONLY", "ANY"]).has(policy)) throw new Error("execution_policy_invalid");
   const result = await pool.query<{ v: JsonObject }>(
     "select public.h205f22_duel_create_same_point_v4($1::text,$2::text,$3::text,$4::jsonb,$5::text,$6::text,$7::text) as v",
-    [duelKey, milestone, baseSha, JSON.stringify({ ...subject, active_provider: "OPENAI", active_platform: "CHATGPT", logical_roles: ["PRIMARY","CRITIC"] }), policy, primaryModel, criticModel],
+    [duelKey, milestone, baseSha, JSON.stringify({ ...subject, active_provider: "OPENAI", active_platform: "OPENAI_API", logical_roles: ["PRIMARY","CRITIC"] }), policy, primaryModel, criticModel],
   );
   return result.rows[0]?.v || {};
 }
@@ -289,28 +277,28 @@ const server = createServer(async (req, res) => {
       sendJson(res, 200, {
         object: "list",
         data: [
-          { id: PRIMARY_MODEL, object: "model", owned_by: "sovereign-primary", ready: (state.primary as JsonObject).ok === true },
-          { id: CRITIC_MODEL, object: "model", owned_by: "sovereign-critic", ready: (state.critic as JsonObject).ok === true },
+          { id: PRIMARY_MODEL, object: "model", owned_by: "openai", agent_id: "agent_a", ready: (state.primary as JsonObject).ok === true },
+          { id: CRITIC_MODEL, object: "model", owned_by: "openai", agent_id: "agent_b", ready: (state.critic as JsonObject).ok === true },
         ],
       });
       return;
     }
-    if (method === "GET" && url.pathname === "/primary/v1/models") {
+    if (method === "GET" && ["/primary/v1/models", "/agent-a/v1/models"].includes(url.pathname)) {
       if (!requireAuth(req, res)) return;
       await proxyModel(req, res, "PRIMARY", "models");
       return;
     }
-    if (method === "GET" && url.pathname === "/critic/v1/models") {
+    if (method === "GET" && ["/critic/v1/models", "/agent-b/v1/models"].includes(url.pathname)) {
       if (!requireAuth(req, res)) return;
       await proxyModel(req, res, "CRITIC", "models");
       return;
     }
-    if (method === "POST" && url.pathname === "/primary/v1/chat/completions") {
+    if (method === "POST" && ["/primary/v1/chat/completions", "/agent-a/v1/chat/completions"].includes(url.pathname)) {
       if (!requireAuth(req, res)) return;
       await proxyModel(req, res, "PRIMARY", "chat");
       return;
     }
-    if (method === "POST" && url.pathname === "/critic/v1/chat/completions") {
+    if (method === "POST" && ["/critic/v1/chat/completions", "/agent-b/v1/chat/completions"].includes(url.pathname)) {
       if (!requireAuth(req, res)) return;
       await proxyModel(req, res, "CRITIC", "chat");
       return;
@@ -324,7 +312,7 @@ const server = createServer(async (req, res) => {
       sendJson(res, 410, {
         error: "legacy_provider_endpoint_retired",
         active_provider: "OPENAI",
-        active_platform: "CHATGPT",
+        active_platform: "OPENAI_API",
         role_endpoints: ["/primary/v1", "/critic/v1"],
       });
       return;
@@ -357,7 +345,7 @@ const server = createServer(async (req, res) => {
     const clientErrors = new Set([
       "request_body_too_large", "json_object_required", "duel_key_required", "milestone_key_required",
       "base_github_sha_invalid", "execution_policy_invalid", "hosted_v4_executor_not_implemented",
-      "duel_not_found", "duel_protocol_mismatch", "duel_not_wakeable",
+      "duel_not_found", "duel_protocol_mismatch", "duel_not_wakeable", "openai_model_not_allowed",
     ]);
     const status = code === "request_body_too_large" ? 413 : clientErrors.has(code) ? 400 : 500;
     sendJson(res, status, { error: status >= 500 ? "internal_error" : code });
@@ -372,11 +360,13 @@ server.listen(PORT, HOST, () => {
     port: PORT,
     protocol: "SAME_POINT_DUEL_V4",
     control_auth: CONTROL_TOKEN ? "BEARER" : "LOOPBACK_ONLY",
+    provider: "OPENAI",
+    platform: "OPENAI_API",
     primary_model: PRIMARY_MODEL,
     critic_model: CRITIC_MODEL,
-    provider: "OPENAI",
-    platform: "CHATGPT",
     legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" },
+    credential_ready: Boolean(INFERENCE.agent_a.token),
+    tariff_dependency: true,
   }));
 });
 

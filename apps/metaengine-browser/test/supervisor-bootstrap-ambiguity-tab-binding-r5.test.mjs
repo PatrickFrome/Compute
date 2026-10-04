@@ -12,12 +12,13 @@ import { buildSupervisorWakeMessage } from '../src/supervisor-keepalive.mjs';
 // ambiguous recorded no tab binding, so the recovery scoping fell back to a
 // stale cross-process keepalive.tab_id, observed nothing and deadlocked the
 // keepalive in WAKE_AMBIGUOUS forever (which also fenced every devos task
-// lease via devos_dispatch_continuity_degraded). These tests pin the repair:
+// lease via devos_dispatch_continuity_degraded). These tests pin the current
+// recovery boundary:
 // (1) bootstrap ambiguities durably record their own tab,
 // (2) a unique non-fleet chat candidate is a valid fallback observation
 //     surface when the durable tab id is provably absent,
-// (3) a provably-absent effect retires the wake and re-arms continuous
-//     service within the same tick,
+// (3) an empty root or matching draft cannot prove an unknown historical Send
+//     had no effect, so the original wake remains fenced without replay,
 // (4) unrelated user surfaces and ambiguous evidence keep failing closed.
 
 const ROOT_URL = 'https://chatgpt.com/';
@@ -113,10 +114,18 @@ async function makeRuntime({ seed = null, tabs = [], frames = {}, onSubmit = nul
   if (seed) await fs.writeFile(statePath, `${JSON.stringify(seed, null, 2)}\n`);
   const actions = [];
   const liveTabs = structuredClone(tabs);
+  const drafts = new Map();
   const frameFor = (tabId) => {
     const entry = Object.entries(frames).find(([key]) => key === tabId || tabId.startsWith(key));
     const frame = typeof entry?.[1] === 'function' ? entry[1]() : entry?.[1];
-    return structuredClone(frame ?? rootFrame({}));
+    const captured = structuredClone(frame ?? rootFrame({}));
+    const draft = drafts.get(tabId);
+    if (draft != null) {
+      const composer = captured.semantic_targets.find((row) => row.role === 'textbox');
+      composer.value_sha256 = sha256(draft);
+      composer.value_length = draft.length;
+    }
+    return { ...captured, tab_id: tabId, target_id: `webcontents:${tabId}` };
   };
   const executeCommand = async ({ action, payload }) => {
     const tabId = String(payload?.tab_id || '');
@@ -128,11 +137,17 @@ async function makeRuntime({ seed = null, tabs = [], frames = {}, onSubmit = nul
     }
     if (action === 'CAPTURE') return frameFor(tabId);
     if (action === 'SEMANTIC_TYPE') {
+      assert.equal(payload.submit_after_type, false);
+      drafts.set(tabId, payload.text);
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (action === 'TYPED_CLICK') {
+      assert.equal(payload.chatgpt_submit, true);
+      drafts.delete(tabId);
       if (onSubmit) return onSubmit({ action, payload });
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      return { effect_state: 'PROVEN_GENERATING', stop_observed: true, automatic_retry_allowed: false, authority_effect: true };
     }
     if (action === 'CLOSE_TAB') return { ok: true };
-    if (action === 'TYPED_CLICK') return { ok: true };
     throw new Error(`unexpected_effect:${action}`);
   };
   const runtime = new SupervisorLifecycleRuntime({
@@ -170,7 +185,7 @@ test('bootstrap ambiguity durably records its own tab (seed-unproven pre-binding
     `continuation tab recorded, got: ${durable.pending_wake.ambiguity_continuation_tab_id}`);
 });
 
-test('stale dead durable tab with unique candidate holding the exact draft continues the wake to ACTIVE', async () => {
+test('stale dead durable tab and a unique exact draft keep the unknown wake read-only', async () => {
   let submits = 0;
   let markerShown = false;
   const { runtime, actions } = await makeRuntime({
@@ -191,16 +206,20 @@ test('stale dead durable tab with unique candidate holding the exact draft conti
       return { effect_state: 'PROVEN_COMPOSER_CLEARED', new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     },
   });
-  const snap = await runtime.start();
-  assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.equal(snap.keepalive.pending_wake, null);
-  assert.equal(snap.keepalive.active_wake?.wake_id, WAKE_ID);
-  assert.equal(submits, 1, 'exactly one continuation resubmit');
+  await runtime.start();
+  const snap = await runtime.cycle({ force: true });
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake.wake_id, WAKE_ID);
+  assert.equal(snap.keepalive.active_wake, null);
+  assert.equal(submits, 0);
+  assert.equal(markerShown, false);
+  assert.equal(actions.includes('SEMANTIC_TYPE'), false);
+  assert.equal(actions.includes('TYPED_CLICK'), false);
   assert.equal(actions.includes('NEW_TAB'), false, 'no new tab amplification');
   assert.equal(actions.includes('CLOSE_TAB'), false, 'nothing closed while recovering');
 });
 
-test('stale dead durable tab with provably absent effect retires, re-arms and bootstraps in the same tick', async () => {
+test('an empty replacement root cannot prove absence of the historical Send or retire its wake', async () => {
   let bootstrappedConversation = false;
   const { runtime, actions, statePath } = await makeRuntime({
     seed: seedAmbiguous({}),
@@ -217,23 +236,22 @@ test('stale dead durable tab with provably absent effect retires, re-arms and bo
     },
   });
   let snap = await runtime.start();
-  // Retirement is a bounded superstep: the first tick retires the dead wake,
-  // the second tick performs the fresh bootstrap from clean RECOVERING state.
-  assert.equal(snap.keepalive.state, 'RECOVERING');
-  assert.equal(snap.keepalive.pending_wake, null);
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake.wake_id, WAKE_ID);
   snap = await runtime.cycle({ force: true });
-  // The dead wake was retired and a fresh bootstrap bound the conversation.
-  assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.ok(snap.keepalive.conversation_url?.includes('/c/'), `conversation bound: ${snap.keepalive.conversation_url}`);
-  assert.notEqual(snap.keepalive.active_wake?.wake_id, WAKE_ID, 'a fresh wake, not the retired one');
-  assert.ok(actions.includes('NEW_TAB'), 'fresh bootstrap tab created');
-  assert.ok(actions.includes('SEMANTIC_TYPE'), 'fresh wake sent');
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake.wake_id, WAKE_ID);
+  assert.equal(snap.keepalive.conversation_url, null);
+  assert.equal(snap.keepalive.active_wake, null);
+  assert.equal(bootstrappedConversation, false);
+  assert.equal(actions.includes('NEW_TAB'), false);
+  assert.equal(actions.includes('SEMANTIC_TYPE'), false);
+  assert.equal(actions.includes('TYPED_CLICK'), false);
   assert.equal(actions.includes('CLOSE_TAB'), false, 'empty root was not closed (could be the user tab)');
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  const retired = (durable.ambiguous_history || []).find((row) => row.wake_id === WAKE_ID);
-  assert.ok(retired, 'retired wake is in history');
-  assert.equal(retired.retired_reason, 'AMBIGUOUS_BOOTSTRAP_EFFECT_PROVABLY_ABSENT');
-  assert.equal(retired.ambiguous_reason, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING');
+  assert.equal(durable.ambiguous_history.length, 0);
+  assert.equal(durable.pending_wake.ambiguous_reason, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING');
+  assert.equal(durable.pending_wake.automatic_retry_allowed, false);
 });
 
 test('unrelated user draft surface never retires or resubmits the ambiguous wake', async () => {
@@ -252,7 +270,7 @@ test('unrelated user draft surface never retires or resubmits the ambiguous wake
   assert.equal(actions.includes('CLOSE_TAB'), false);
 });
 
-test('failed continuation with the exact dead draft retires the wake and closes the draft tab by proof', async () => {
+test('a spent legacy continuation flag cannot retire, close or replay an unresolved draft', async () => {
   let submits = 0;
   let bootstrappedConversation = false;
   const { runtime, actions, statePath } = await makeRuntime({
@@ -271,19 +289,19 @@ test('failed continuation with the exact dead draft retires the wake and closes 
     },
   });
   let snap = await runtime.start();
-  // First tick: retirement (bounded superstep). Second tick: fresh bootstrap.
-  assert.equal(snap.keepalive.pending_wake, null, 'seeded wake retired');
+  assert.equal(snap.keepalive.pending_wake.wake_id, WAKE_ID);
   snap = await runtime.cycle({ force: true });
-  assert.notEqual(snap.keepalive.pending_wake?.wake_id, WAKE_ID, 'fresh wake bound instead');
-  // R-SUP-SEED: the fresh bootstrap now submits TWO commands — the tiny
-  // conversation seed (which proves the root surface: the boot_ frames flip
-  // to the conversation after the first submit) and the real wake message.
-  assert.equal(submits, 2, 'seed proves the root surface, then the fresh bootstrap wake — no blind retry of the dead wake');
-  assert.ok(actions.includes('CLOSE_TAB'), 'the dead draft tab was closed by proof');
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake.wake_id, WAKE_ID);
+  assert.equal(submits, 0);
+  assert.equal(bootstrappedConversation, false);
+  assert.equal(actions.includes('SEMANTIC_TYPE'), false);
+  assert.equal(actions.includes('TYPED_CLICK'), false);
+  assert.equal(actions.includes('NEW_TAB'), false);
+  assert.equal(actions.includes('CLOSE_TAB'), false);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  const retired = (durable.ambiguous_history || []).find((row) => row.wake_id === WAKE_ID);
-  assert.ok(retired, 'retired wake is in history');
-  assert.equal(retired.retired_reason, 'AMBIGUOUS_BOOTSTRAP_EFFECT_PROVABLY_ABSENT');
+  assert.equal(durable.ambiguous_history.length, 0);
+  assert.equal(durable.pending_wake.automatic_retry_allowed, false);
 });
 
 test('multiple candidates with a stale dead durable tab keep failing closed', async () => {
