@@ -141,6 +141,14 @@ assert.equal(typeof run, 'function');
 function resetCalls() { calls.length = 0; focusedBackendNodeId = null; selectedAll = false; liveMode = 'normal'; }
 function methods() { return calls.map((row) => row[0]); }
 
+// Legacy provider perception may exist, but it has zero semantic actuation authority.
+resetCalls();
+await assert.rejects(
+  () => run({ action: 'FOCUS_SEMANTIC', platform: 'GLM_ZAI', perception_captured_at: capturedAt, role: 'button', accessible_name: 'Run' }),
+  /legacy_platform_execution_disabled/
+);
+assert.equal(calls.length, 0, 'legacy GLM semantic action reached CDP before the platform fence');
+
 // Focus-only must use DOM.focus and never synthesize a mouse click.
 resetCalls();
 let result = await run({ action: 'FOCUS_SEMANTIC', platform: 'CHATGPT', perception_captured_at: capturedAt, role: 'button', accessible_name: 'Run' });

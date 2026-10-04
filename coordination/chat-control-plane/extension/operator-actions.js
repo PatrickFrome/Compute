@@ -4,8 +4,16 @@
   const MAX_REWRITE_CHARS = 120000;
   const DEFAULT_FRAME_MAX_AGE_MS = 30000;
   const ACTIONS = new Set(["STOP_GENERATION", "SCROLL", "CLICK_POINT", "DOUBLE_CLICK_POINT"]);
+  const ACTIVE_EXECUTION_PLATFORM = "CHATGPT";
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
+
+  function assertActiveExecutionPlatform(value) {
+    const platform = String(value || "");
+    if (platform === "GLM_ZAI") throw new Error("legacy_platform_execution_disabled");
+    if (platform !== ACTIVE_EXECUTION_PLATFORM) throw new Error("operator_action_platform_invalid");
+    return platform;
+  }
 
   function compat(path, fallback) {
     try { return globalThis.A2_COMPAT_GET?.(path, fallback) ?? fallback; }
@@ -62,8 +70,9 @@
   }
 
   async function resolvePinned(platform, exactTabId = null) {
-    const stored = await chrome.storage.local.get(["chatgptUrl", "zaiUrl"]);
-    const configured = platform === "CHATGPT" ? normUrl(stored.chatgptUrl || "") : platform === "GLM_ZAI" ? normUrl(stored.zaiUrl || "") : "";
+    platform = assertActiveExecutionPlatform(platform);
+    const stored = await chrome.storage.local.get(["chatgptUrl"]);
+    const configured = normUrl(stored.chatgptUrl || "");
     if (!configured) throw new Error(`operator_action_target_not_configured:${platform}`);
     const tabs = await chrome.tabs.query({});
     const matches = tabs.filter((tab) => Number.isInteger(tab?.id) && platformOf(tab.url || "") === platform && normUrl(tab.url || "") === configured);
@@ -101,14 +110,13 @@
   }
 
   function composerInspectionExpression(platform) {
-    const selectors = platform === "CHATGPT"
-      ? ["#prompt-textarea", "[data-testid='composer-text-input'] textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"]
-      : ["#chat-input", "textarea.input-scroll", ".messageInputContainer textarea", "textarea", "[role='textbox'][contenteditable='true']"];
+    assertActiveExecutionPlatform(platform);
+    const selectors = ["#prompt-textarea", "[data-testid='composer-text-input'] textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"];
     return `(() => {
       const visible=(el)=>{if(!(el instanceof HTMLElement))return false;const s=getComputedStyle(el),r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0;};
       const selectors=${JSON.stringify(selectors)};
       const found=[];
-      for(const selector of selectors){for(const el of document.querySelectorAll(selector)){if(visible(el)&&!found.includes(el))found.push(el);}if(${JSON.stringify(platform)}==='GLM_ZAI'&&selector==='#chat-input'&&found.length)break;}
+      for(const selector of selectors){for(const el of document.querySelectorAll(selector)){if(visible(el)&&!found.includes(el))found.push(el);}}
       if(found.length!==1)return{ok:false,error:found.length?'composer_ambiguous':'composer_not_found',count:found.length};
       const el=found[0],r=el.getBoundingClientRect();el.focus();
       const text=String(('value'in el?el.value:(el.innerText||el.textContent||''))||'').replace(/\\r\\n?/g,'\\n').trim();
@@ -117,6 +125,7 @@
   }
 
   async function trustedReplaceDraft(tabId, platform, draft) {
+    platform = assertActiveExecutionPlatform(platform);
     assertActionsEnabled("REPLACE_DRAFT");
     const value = String(draft ?? "").slice(0, MAX_REWRITE_CHARS);
     if (!normalize(value)) throw new Error("operator_rewrite_empty");
@@ -154,6 +163,7 @@
   }
 
   async function stopGeneration(platform) {
+    platform = assertActiveExecutionPlatform(platform);
     assertActionsEnabled("STOP_GENERATION");
     return withTab(platform, null, `stop:${platform}`, async (tab, session) => {
       const before = await snapshot(tab.id);
@@ -183,6 +193,7 @@
   }
 
   async function scroll(platform, deltaY) {
+    platform = assertActiveExecutionPlatform(platform);
     assertActionsEnabled("SCROLL");
     const bounded = Math.max(-1600, Math.min(1600, Number(deltaY) || 0));
     if (!bounded) throw new Error("operator_scroll_delta_invalid");
@@ -319,6 +330,7 @@
   }
 
   async function pointClick(platform, frameToken, xRaw, yRaw, doubleClick = false) {
+    platform = assertActiveExecutionPlatform(platform);
     assertActionsEnabled(doubleClick ? "DOUBLE_CLICK_POINT" : "CLICK_POINT");
     const frame = frameFor(platform, frameToken);
     const x = Number(xRaw), y = Number(yRaw);
@@ -364,6 +376,7 @@
   }
 
   async function computeBrowserDispatch(platform, action, message) {
+    platform = assertActiveExecutionPlatform(platform);
     const bridge = globalThis.A2_OPERATOR_COMPUTE_BRIDGE;
     if (!bridge?.call) throw new Error('compute_bridge_unavailable');
 
@@ -409,8 +422,7 @@
   }
 
   async function run(message) {
-    const platform = String(message?.platform || "");
-    if (!["CHATGPT", "GLM_ZAI"].includes(platform)) throw new Error("operator_action_platform_invalid");
+    const platform = assertActiveExecutionPlatform(message?.platform);
     const action = String(message?.action || "");
     if (!ACTIONS.has(action)) throw new Error("operator_action_invalid");
     assertActionsEnabled(action);

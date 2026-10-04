@@ -140,6 +140,15 @@ assert(mousePresses === 0 && mouseReleases === 0, 'rewrite accidentally actuated
 let response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'SCROLL', delta_y: 300 }, options);
 assert(response?.ok === false && response.error === 'operator_sender_not_trusted', 'untrusted page ran operator action');
 
+const effectsBeforeLegacy = { mousePresses, mouseReleases, insertTextCalls, scrollY };
+response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'GLM_ZAI', action: 'STOP_GENERATION' }, sidePanel);
+assert(response?.ok === false && response.error === 'legacy_platform_execution_disabled', 'legacy GLM runtime action was not fenced');
+assert(mousePresses === effectsBeforeLegacy.mousePresses && mouseReleases === effectsBeforeLegacy.mouseReleases && insertTextCalls === effectsBeforeLegacy.insertTextCalls && scrollY === effectsBeforeLegacy.scrollY, 'legacy GLM runtime action caused an input effect');
+let directLegacyError = null;
+try { await context.A2_OPERATOR_STOP_GENERATION('GLM_ZAI'); } catch (error) { directLegacyError = error; }
+assert(String(directLegacyError?.message || directLegacyError) === 'legacy_platform_execution_disabled', 'direct exported GLM effect helper bypassed the platform fence');
+assert(mousePresses === effectsBeforeLegacy.mousePresses && mouseReleases === effectsBeforeLegacy.mouseReleases, 'direct legacy helper caused mouse input');
+
 response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'SCROLL', delta_y: 700 }, sidePanel);
 assert(response?.ok === true && response.result.action === 'SCROLL', 'scroll action failed');
 assert(response.result.before_scroll_y === 100 && response.result.after_scroll_y === 800, 'scroll readback mismatch');
