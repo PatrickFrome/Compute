@@ -96,6 +96,9 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
     def test_chatgpt_only_migration_is_fresh_project_compatible_and_fail_closed(self):
         sql = self.chatgpt_only
         self.assertIn("set search_path = ''", sql)
+        self.assertNotIn("pg_catalog.coalesce", sql)
+        self.assertNotIn("pg_catalog.trim", sql)
+        self.assertIn("pg_catalog.btrim(coalesce(", sql)
         self.assertIn("v_platform <> 'CHATGPT' or v_agent <> 'GPT'", sql)
         self.assertIn("target_platform='GLM_ZAI'", sql)
         self.assertIn("result_status='BLOCKED_LEGACY_GLM_DISABLED'", sql)
