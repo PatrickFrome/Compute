@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37191000001.1`.
+Reserved package identity is `0.7.0-dev.37195000001.1`.
+
+ChatGPT-only hardening successor reservation (2026-10-04):
+- exact predecessor before this identity-only reservation: `13bd9712db490f1f29571cef59999559b3da1699`;
+- Package Smoke run `37193954391` proved `0.7.0-dev.37191000001.1` was already reserved by prior source `a10af067c85e13a3c9d44cb1a6fd42062e85cb96` (artifact `11298721325`), so rebuilding or relabelling it is forbidden;
+- current source adds physical-command GLM/Z.ai quarantine, fresh-project bridge routing, modern Supabase secret-key compatibility, DB active-GLM fencing, fail-closed missing-frontier behavior, role-only sovereign endpoints, and regression/falsification coverage;
+- fresh monotonic one-build identity: `0.7.0-dev.37195000001.1`, chosen above current observed Actions run namespace `37193954391`;
+- Package Smoke remains the sole physical producer; every downstream physical workflow must consume the same exact-head installer and fail closed if the producer is not terminal SUCCESS;
+- this reservation is non-authoritative and does not itself authorize Edge deployment, release, live installation, database migration application, fleet dispatch, or production promotion.
 
 Installed Chat qualification successor reservation (2026-10-04):
 - exact predecessor before this identity-only reservation: `77d4244f2b47aacce84ab97203ad4e3b746ea969`;
