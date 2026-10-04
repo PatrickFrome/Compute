@@ -18,6 +18,7 @@ import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
 import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import { assertLegacyProviderCommandAllowed } from './legacy-provider-quarantine.mjs';
 import { AgentObservationPlane } from './agent-observation-plane.mjs';
 import { projectNativeRuntimeObservation, projectClientWorkReadiness } from './client-work-readiness.mjs';
 import { TabNetworkActivityRegistry } from './tab-network-activity.mjs';
@@ -1714,6 +1715,20 @@ async function executeNativeSupervisorCommand(command) {
 async function executeNativeSupervisorCommandFenced(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
+  // ChatGPT-only execution fence. Historical GLM/Z.ai tabs may still be read,
+  // selected, closed, or navigated away from for reconciliation, but no new
+  // legacy-provider page effect or navigation into chat.z.ai is permitted.
+  // This is deliberately enforced at the single physical command boundary so
+  // stale DB rows or an older bridge cannot bypass provider policy.
+  const quarantineTab = payload?.tab_id
+    ? (registry.get(String(payload.tab_id)) || null)
+    : (tabForPlatform(command?.platform) || registry.selected());
+  assertLegacyProviderCommandAllowed({
+    action,
+    platform: command?.platform,
+    current_url: quarantineTab?.url || null,
+    next_url: ['NEW_TAB','NAVIGATE'].includes(action) ? (payload?.url || null) : null,
+  });
   // Outcome River pre-execution binding: only remote DB-leased commands carry
   // a command_id; when the issuer declared task context (payload.rsi_task)
   // the river binds command→candidate+trajectory before execution so the
