@@ -6,7 +6,7 @@ const AGENT_ID = 'agent_selfheal-1111';
 const TAB_ID = 'tab_selfheal-2222-3333-4444-555555555555';
 const TARGET_ID = 'webcontents:77';
 const TASK_ID = '86543210-1111-4222-8333-444455556666';
-const ROOT = 'https://chat.z.ai/';
+const ROOT = 'https://chatgpt.com/';
 
 const lease = {
   task_id: TASK_ID,
@@ -29,7 +29,7 @@ function response(status, body) {
 function state() {
   return {
     tabs: [
-      { tab_id: 'tab_supervisor', url: 'https://chat.z.ai/c/supervisor', selected: true },
+      { tab_id: 'tab_supervisor', url: 'https://chatgpt.com/c/supervisor', selected: true },
       { tab_id: TAB_ID, url: ROOT, selected: false },
     ],
     active_tab: { tab_id: 'tab_supervisor' },
