@@ -74,6 +74,16 @@ jobs:
           if (!/^[0-9a-f]{64}$/.test(m.candidate.ezbr_sha256)) throw new Error('candidate_digest');
           if (!/^[0-9a-f]{40}$/.test(m.rollback.source_pin)) throw new Error('rollback_pin');
           if (!/^[0-9a-f]{64}$/.test(m.rollback.ezbr_sha256)) throw new Error('rollback_digest');
+          if (m.candidate.source_binding_complete !== true) throw new Error('candidate_source_binding_must_be_complete');
+          if (!Array.isArray(m.candidate.observed_import_pins) || m.candidate.observed_import_pins.length !== 1 || m.candidate.observed_import_pins[0] !== m.candidate.source_pin) {
+            throw new Error('candidate_import_pin_binding_invalid');
+          }
+          if (m.rollback.source_binding_complete !== true && m.live_qualification.completed !== false) {
+            throw new Error('rollback_source_drift_requires_open_live_qualification');
+          }
+          if (m.rollback.source_binding_complete !== true && m.promotion_authorized !== false) {
+            throw new Error('rollback_source_drift_forbids_promotion');
+          }
           if (m.live_qualification.completed !== false) throw new Error('live_qualification_must_remain_open');
           if (m.live_qualification.signed_health_required !== true) throw new Error('signed_health_gate_required');
           if (m.live_qualification.installed_electron_signed_e2e_required !== true) throw new Error('installed_electron_gate_required');
