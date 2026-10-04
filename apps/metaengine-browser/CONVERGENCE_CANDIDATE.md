@@ -1,5 +1,16 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37200000001.1`.
+
+ChatGPT live-client qualification successor (2026-10-04):
+- exact source predecessor before this identity-only reservation: `7bb994e8b384965141b90426dd78e95247587f4f`;
+- `0.7.0-dev.37195000001.1` is consumed by an earlier Package Smoke producer source and MUST NOT be rebuilt or relabelled for this source;
+- live Client `2a60d6a2-c7c2-4dcc-b4c9-99de768443c9` is enrolled ADMIN and currently reaches the source-bound v27 canary through the stable one-client forwarder, while the installed Browser remains the older `0.7.0-dev.37153249506.1` runtime;
+- fresh Client DB now contains the typed Workspace Binding registry, snapshot projection and reincarnation transition; live workspace-snapshot readback changed from HTTP 503 to HTTP 200 AVAILABLE without scheduler/browser authority;
+- exact build target: `0.7.0-dev.37200000001.1`, above the observed Actions namespace used during this convergence cycle;
+- Package Smoke remains the sole physical producer; Installed Chat, Final Runtime, Dirty Profile, Autonomous Soak and Self Update MUST consume the same exact-head immutable installer;
+- release/promotion remains forbidden until exact-head physical gates prove real ChatGPT fleet activation and a harmless useful-work cycle with zero active GLM leases/effects.
+
 Reserved package identity is `0.7.0-dev.37195000001.1`.
 
 ChatGPT-only hardening successor reservation (2026-10-04):
