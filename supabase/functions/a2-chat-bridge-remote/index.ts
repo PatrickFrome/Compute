@@ -1,5 +1,16 @@
 const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '');
-const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+function serverSecretKey() {
+  const modern = String(Deno.env.get('SUPABASE_SECRET_KEYS') || '').trim();
+  if (modern) {
+    try {
+      const parsed = JSON.parse(modern);
+      const value = String(parsed?.default || '').trim();
+      if (value) return value;
+    } catch (_) {}
+  }
+  return String(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '').trim();
+}
+const SERVICE_ROLE = serverSecretKey();
 const WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const MACROBLOCK_ID = 'dce58a3b-2f67-47e0-ae0d-9b3825ff53cd';
 const PAIRING_TABLE = 'compute_fabric_a2_chat_bridge_remote_pairing_h205f22';
@@ -55,7 +66,12 @@ function normalizedUrl(value: unknown) {
 }
 function restHeaders(extra: Record<string, string> = {}) {
   if (!SERVICE_ROLE) throw new Error('service_role_missing');
-  return { apikey: SERVICE_ROLE, authorization: `Bearer ${SERVICE_ROLE}`, 'content-type': 'application/json', ...extra };
+  const headers: Record<string, string> = { apikey: SERVICE_ROLE, 'content-type': 'application/json', ...extra };
+  // Opaque sb_secret_* values are API keys, not JWTs. Sending them as Bearer
+  // credentials makes modern projects reject the request as an invalid JWT.
+  // Legacy JWT service_role keys retain Authorization compatibility.
+  if (SERVICE_ROLE.split('.').length === 3) headers.authorization = `Bearer ${SERVICE_ROLE}`;
+  return headers;
 }
 async function rest(path: string, init: RequestInit = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: restHeaders(init.headers as Record<string, string> || {}) });
@@ -131,19 +147,35 @@ function relayRegisteredAt(item: any) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 async function refreshA2() {
-  const [readback, macroblock, pendingRaw] = await Promise.all([
-    rpc('h205f22_a2_interactive_read_v1', { p_workspace_id: WORKSPACE_ID, p_after_seq: 0, p_limit: 200 }),
-    rpc('h205f22_a2_macroblock_read_v1', { p_macroblock_id: MACROBLOCK_ID }),
-    rpc('h205f22_duel_list_peer_relay_pending_v4', { p_limit: 12 })
-  ]);
-  const messages = extractMessages(readback).sort((a, b) => Number(a?.message_seq || 0) - Number(b?.message_seq || 0));
-  const head = messages.reduce((n, m) => Math.max(n, Number(m?.message_seq || 0)), Number(readback?.head_message_seq || 0));
-  const currentMain = currentMainFromMessages(messages) || currentMainFromMacroblock(macroblock);
-  let items = relayItems(pendingRaw);
-  if (currentMain) items = items.filter((item) => String(item?.relay?.base_github_sha || item?.base_github_sha || '').toLowerCase() === currentMain);
-  const pendingRelay = [...items].sort((a, b) => relayRegisteredAt(b) - relayRegisteredAt(a))[0] || null;
-  const relay = pendingRelay?.relay || null;
-  return { online: true, cursor: head, messages: messages.slice(-24), macroblock, pendingRelay, peerPayloadsExposed: relay?.pending_payloads_exposed === true, currentMain };
+  try {
+    const [readback, macroblock, pendingRaw] = await Promise.all([
+      rpc('h205f22_a2_interactive_read_v1', { p_workspace_id: WORKSPACE_ID, p_after_seq: 0, p_limit: 200 }),
+      rpc('h205f22_a2_macroblock_read_v1', { p_macroblock_id: MACROBLOCK_ID }),
+      rpc('h205f22_duel_list_peer_relay_pending_v4', { p_limit: 12 })
+    ]);
+    const messages = extractMessages(readback).sort((a, b) => Number(a?.message_seq || 0) - Number(b?.message_seq || 0));
+    const head = messages.reduce((n, m) => Math.max(n, Number(m?.message_seq || 0)), Number(readback?.head_message_seq || 0));
+    const currentMain = currentMainFromMessages(messages) || currentMainFromMacroblock(macroblock);
+    let items = relayItems(pendingRaw);
+    if (currentMain) items = items.filter((item) => String(item?.relay?.base_github_sha || item?.base_github_sha || '').toLowerCase() === currentMain);
+    const pendingRelay = [...items].sort((a, b) => relayRegisteredAt(b) - relayRegisteredAt(a))[0] || null;
+    const relay = pendingRelay?.relay || null;
+    return { online: true, cursor: head, messages: messages.slice(-24), macroblock, pendingRelay, peerPayloadsExposed: relay?.pending_payloads_exposed === true, currentMain, error: null };
+  } catch (error) {
+    // The fresh Client project intentionally does not inherit the historical
+    // A2 duel/mailbox RPC plane. Keep the bridge observable, but never invent
+    // a frontier or issue an autonomous wake without authoritative readback.
+    return {
+      online: false,
+      cursor: 0,
+      messages: [],
+      macroblock: null,
+      pendingRelay: null,
+      peerPayloadsExposed: false,
+      currentMain: null,
+      error: `A2_FRONTIER_UNAVAILABLE:${clip(error?.message || error, 240)}`,
+    };
+  }
 }
 function assistantMessage(snapshot: any) {
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
@@ -232,6 +264,7 @@ async function nextCommand(req: Request, body: any) {
   const states = new Map<string, any>();
   for (const [platform, envelope] of snapshots) states.set(platform, await upsertPeer(envelope));
   const a2 = await refreshA2();
+  if (a2.online !== true) return null;
   const legacyRelay = legacyProviderBoundRelay(a2.pendingRelay);
   const order = ['CHATGPT'];
   const now = Date.now();
