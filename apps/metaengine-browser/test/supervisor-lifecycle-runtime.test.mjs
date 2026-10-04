@@ -98,7 +98,11 @@ test('trusted supervisor wake uses ChatGPT semantic submit and adaptive hard sta
 
   const snap = runtime.snapshot();
   assert.equal(actions.filter((row) => row === 'STOP_GENERATION').length, 1, 'exact ChatGPT stop control permits one bounded recovery effect');
-  assert.equal(snap.supervisor_session.tabs[0].stop_attempted_epoch, snap.supervisor_session.tabs[0].generation_epoch);
+  assert.equal(
+    snap.supervisor_session.tabs[0].stop_attempted_epoch + 1,
+    snap.supervisor_session.tabs[0].generation_epoch,
+    'the bounded STOP belongs to the predecessor generation; continuous service may already have started the successor',
+  );
   assert.equal(JSON.stringify(snap).includes(typed), false, 'trusted prompt body must not be persisted in lifecycle snapshot');
 
   await fs.rm(dir, { recursive: true, force: true });
@@ -156,8 +160,9 @@ test('ChatGPT session generation follows STOP/readback and settles terminal-read
   monitorNow += 2000;
   await runtime.cycle({ force: true });
   snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'IDLE');
-  assert.equal(snap.supervisor_session.tabs[0].terminal_ready, true);
+  assert.equal(snap.supervisor_generation, 'IDLE', 'terminal readback was observed before the next autonomous wake');
+  assert.equal(snap.supervisor_session.tabs[0].terminal_ready, false, 'continuous service immediately starts the successor generation');
+  assert.equal(snap.supervisor_session.tabs[0].generation_epoch, 2);
 
   await fs.rm(dir, { recursive: true, force: true });
 });
