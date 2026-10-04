@@ -260,13 +260,13 @@ test('bound-conversation path reuses an auth-redirect tab instead of creating on
 
   await runtime.start();
   let snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'NOT_AGENT_PLATFORM_CONVERSATION', 'the auth tab becomes the observation target');
+  assert.equal(snap.supervisor_generation, 'NOT_CHATGPT_CONVERSATION', 'the auth tab becomes the observation target');
   assert.equal(snap.keepalive.conversation_url, CONV_URL, 'the durable conversation binding is preserved');
   assert.equal(reg.tabs.length, 1);
 
   await runtime.cycle({ force: true });
   snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'NOT_AGENT_PLATFORM_CONVERSATION');
+  assert.equal(snap.supervisor_generation, 'NOT_CHATGPT_CONVERSATION');
   assert.equal(reg.tabs.length, 1, 'repeated ticks must not add tabs');
 
   await fs.rm(dir, { recursive: true, force: true });
