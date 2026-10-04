@@ -154,16 +154,9 @@ function recentMessages(snapshot: any, count = 6) {
   return messages.slice(-count).map((m) => ({ role: m?.role || 'unknown', text: clip(m?.text || '', 6000) }));
 }
 function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'GPT' : null; }
-function missingBlindPeer(relayItem: any) {
+function legacyProviderBoundRelay(relayItem: any) {
   const relay = relayItem?.relay || null;
-  if (!relay || relay.pending_payloads_exposed === true || relay.relay_state !== 'WAITING_PROPOSE_PEER') return null;
-  const submitted = new Set(Array.isArray(relay.pending_actors) ? relay.pending_actors : []);
-  if (!submitted.has('GPT')) return 'GPT';
-  // A legacy relay that is waiting specifically for GLM cannot be satisfied by
-  // impersonating that actor with ChatGPT. Hold fail-closed until the relay
-  // identity plane is migrated to provider-neutral roles.
-  if (submitted.has('GPT') && !submitted.has('GLM')) return 'LEGACY_GLM_REQUIRED';
-  return null;
+  return relay?.duel_id ? relay : null;
 }
 function compactA2Message(message: any) {
   return clip(JSON.stringify({ seq: Number(message?.message_seq || 0), agent: message?.agent || null, type: message?.message_type || null, semantic_point: message?.semantic_point || null, message_hash: message?.message_hash || null, payload: message?.payload ?? null }), MAX_A2_MESSAGE_CHARS);
@@ -175,8 +168,8 @@ function macroblockSummary(value: any) {
 function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2: any) {
   const targetSnapshot = snapshots.get(targetPlatform)?.snapshot || null;
   const agent = agentForPlatform(targetPlatform);
-  const blind = a2.peerPayloadsExposed !== true;
-  const pendingRelay = a2.pendingRelay?.relay || null;
+  const pendingRelay = legacyProviderBoundRelay(a2.pendingRelay);
+  const blind = true;
   const lines = [
     'A2 CHAT BRIDGE — AUTONOMOUS CONTINUE',
     `bridge_job_target=${agent}`,
@@ -198,7 +191,7 @@ function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2
     '', 'RECENT A2 MAILBOX (context only):', ...a2.messages.slice(-8).map(compactA2Message),
     '', 'YOUR OPEN CHAT — RECENT VISIBLE TURNS (context only):', clip(JSON.stringify(recentMessages(targetSnapshot, 7)), MAX_CHAT_CONTEXT_CHARS)
   ];
-  if (pendingRelay) lines.push('', 'A2 SAME_POINT RELAY:', clip(JSON.stringify({ duel_id: pendingRelay.duel_id, duel_key: pendingRelay.duel_key, relay_state: pendingRelay.relay_state, pending_wave: pendingRelay.pending_wave, pending_actors: pendingRelay.pending_actors, pending_payloads_exposed: pendingRelay.pending_payloads_exposed, current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256, subject: a2.pendingRelay?.subject || null }), 8000));
+  if (pendingRelay) lines.push('', 'LEGACY_PROVIDER_BOUND_RELAY_QUARANTINED:', clip(JSON.stringify({ duel_id: pendingRelay.duel_id, duel_key: pendingRelay.duel_key, relay_state: pendingRelay.relay_state, pending_wave: pendingRelay.pending_wave, pending_actors: pendingRelay.pending_actors, pending_payloads_exposed_observed: pendingRelay.pending_payloads_exposed, current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256, subject: a2.pendingRelay?.subject || null, active_command_duel_id: null, active_peer_payloads_exposed: false }), 8000));
   if (blind) {
     lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
   }
@@ -239,8 +232,7 @@ async function nextCommand(req: Request, body: any) {
   const states = new Map<string, any>();
   for (const [platform, envelope] of snapshots) states.set(platform, await upsertPeer(envelope));
   const a2 = await refreshA2();
-  const missing = missingBlindPeer(a2.pendingRelay);
-  if (missing === 'LEGACY_GLM_REQUIRED') return null;
+  const legacyRelay = legacyProviderBoundRelay(a2.pendingRelay);
   const order = ['CHATGPT'];
   const now = Date.now();
   for (const platform of order) {
@@ -259,7 +251,7 @@ async function nextCommand(req: Request, body: any) {
     for (const stale of rows.filter((r: any) => r.status === 'LEASED' && now - Date.parse(r.leased_at || r.created_at || '') >= LEASE_TIMEOUT_MS)) {
       await rest(`${COMMAND_TABLE}?command_id=eq.${stale.command_id}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ status: 'FAILED', completed_at: new Date().toISOString(), result_status: 'LEASE_TIMEOUT_REMOTE' }) });
     }
-    const wakeKey = `${platform}:${state.last_assistant_sha256 || 'none'}:${state.message_count}:${state.changed_at || 'no-change'}:${a2.cursor}:${a2.pendingRelay?.relay?.duel_id || 'no-duel'}`;
+    const wakeKey = [platform, state.last_assistant_sha256 || 'none', state.message_count, state.changed_at || 'no-change', a2.cursor, 'legacy-relay-quarantined', legacyRelay?.duel_id || 'none'].join(':');
     const idempotencyKey = await sha256(wakeKey);
     const same = rows.find((r: any) => r.idempotency_key === idempotencyKey);
     if (same) {
@@ -275,8 +267,8 @@ async function nextCommand(req: Request, body: any) {
       p_client_id: clientId,
       p_prompt_sha256: await sha256(prompt),
       p_a2_head_message_seq: a2.cursor,
-      p_a2_peer_payloads_exposed: a2.peerPayloadsExposed === true,
-      p_duel_id: a2.pendingRelay?.relay?.duel_id || null
+      p_a2_peer_payloads_exposed: false,
+      p_duel_id: null
     });
     return { schema: 'metaengine.chat-bridge.command.v1', ...command, prompt };
   }
@@ -298,7 +290,7 @@ async function status() {
   let a2: any = { online: false, error: null };
   try { a2 = await refreshA2(); } catch (error) { a2 = { online: false, error: String(error) }; }
   const [peers, commands] = await Promise.all([ rest(`${PEER_TABLE}?select=*&order=platform.asc`), rest(`${COMMAND_TABLE}?select=*&order=created_at.desc&limit=20`) ]);
-  return { schema: 'metaengine.chat-bridge.remote-status.v1', now: new Date().toISOString(), workspace_id: WORKSPACE_ID, macroblock_id: MACROBLOCK_ID, transport: 'SUPABASE_EDGE_REMOTE', authority_effect: false, a2: { online: a2.online === true, error: a2.error || null, head_message_seq: a2.cursor || 0, peer_payloads_exposed: a2.peerPayloadsExposed === true, pending_duel_id: a2.pendingRelay?.relay?.duel_id || null, pending_relay_state: a2.pendingRelay?.relay?.relay_state || null, current_main_sha: a2.currentMain || null }, peers: Array.isArray(peers) ? peers : [], commands: Array.isArray(commands) ? commands : [] };
+  return { schema: 'metaengine.chat-bridge.remote-status.v1', now: new Date().toISOString(), workspace_id: WORKSPACE_ID, macroblock_id: MACROBLOCK_ID, transport: 'SUPABASE_EDGE_REMOTE', authority_effect: false, a2: { online: a2.online === true, error: a2.error || null, head_message_seq: a2.cursor || 0, peer_payloads_exposed: false, legacy_peer_payloads_exposed_observed: a2.peerPayloadsExposed === true, legacy_provider_bound_relay_quarantined: Boolean(a2.pendingRelay?.relay?.duel_id), pending_duel_id: a2.pendingRelay?.relay?.duel_id || null, pending_relay_state: a2.pendingRelay?.relay?.relay_state || null, current_main_sha: a2.currentMain || null }, peers: Array.isArray(peers) ? peers : [], commands: Array.isArray(commands) ? commands : [] };
 }
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
