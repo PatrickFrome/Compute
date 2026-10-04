@@ -84,6 +84,15 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertNotIn("worker_admitted=true", self.edge.lower())
         self.assertNotIn("w1_verified=true", self.edge.lower())
 
+    def test_legacy_provider_bound_duel_is_quarantined_from_active_commands(self):
+        self.assertIn("LEGACY_PROVIDER_BOUND_RELAY_QUARANTINED", self.edge)
+        self.assertIn("legacyProviderBoundRelay", self.edge)
+        self.assertIn("const order = ['CHATGPT']", self.edge)
+        self.assertIn("p_a2_peer_payloads_exposed: false", self.edge)
+        self.assertIn("p_duel_id: null", self.edge)
+        self.assertIn("legacy_provider_bound_relay_quarantined", self.edge)
+        self.assertNotIn("LEGACY_GLM_REQUIRED", self.edge)
+
     def test_amplifier_loop_is_in_every_remote_autonomous_wake(self):
         for needle in [
             "AMPLIFIER_LOOP_V1", "meaningful checkpoint, new bottleneck, repeated failure", "bounded deep research",
