@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
+  const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
   const WORKSPACE_ID = "2de9f84b-7c0a-4091-911c-894ff1d6eaf4";
-  const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
+  const SUPERVISOR_URL = String(bootstrap.supervisorUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1").replace(/\\/+$/, "");
   const MODE_KEY = "a2SupervisorModeV1";
   const EVENTS_KEY = "a2SupervisorEventsV1";
   const CURRENT_KEY = "a2SupervisorCurrentCommandV1";
