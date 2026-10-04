@@ -285,3 +285,83 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
   const j = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return j.choices?.[0]?.message?.content ?? "";
 }
+
+
+function extractResponsesText(payload: unknown): string {
+  const row = payload as { output_text?: unknown; output?: unknown };
+  if (typeof row?.output_text === "string" && row.output_text.trim()) return row.output_text.trim();
+  const chunks: string[] = [];
+  for (const item of Array.isArray(row?.output) ? row.output : []) {
+    const content = Array.isArray((item as { content?: unknown })?.content)
+      ? (item as { content: unknown[] }).content
+      : [];
+    for (const part of content) {
+      const text = (part as { text?: unknown })?.text;
+      if (typeof text === "string" && text.trim()) chunks.push(text.trim());
+    }
+  }
+  return chunks.join("\n").trim();
+}
+
+/**
+ * OpenAI-native web search for agent tools.
+ *
+ * This is intentionally direct-OpenAI only: the built-in web_search tool is a
+ * Responses API capability and must never fall back to ZAI/GLM. Search is
+ * read-only, still governor/quota/concurrency bounded, and provider failure is
+ * surfaced to the caller without fabricating results.
+ */
+export async function webSearch(query: string, opts: { lane?: Lane; max_results?: number } = {}): Promise<string> {
+  const q = String(query || "").trim().slice(0, 400);
+  if (!q) throw new Error("openai_web_search_query_required");
+  const lane = opts.lane ?? "P1";
+  const maxResults = Math.max(1, Math.min(8, Number(opts.max_results) || 5));
+  const adm = await governorAdmit(lane);
+  if (!adm.ok) throw new Error(`${adm.reason}: web-search rejected by Governor (lane ${lane})`);
+  try {
+    const out = await llmSlot(async () => {
+      await quotaPace();
+      const key = loadOpenAiKey();
+      if (!key) throw new Error("openai_no_key");
+      const model = canonicalOpenAiModel();
+      return llmRetry(async () => {
+        const body = {
+          model,
+          tools: [{ type: "web_search" }],
+          tool_choice: "auto",
+          store: false,
+          input: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: `Search the web for: ${q}\nReturn up to ${maxResults} useful results. For each result include title, a concise factual snippet, and the source URL. Do not invent URLs.`,
+                },
+              ],
+            },
+          ],
+        };
+        const r = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!r.ok) {
+          const ra = r.headers.get("retry-after");
+          throw new Error(`openai web_search HTTP ${r.status}${ra ? ` (retry-after: ${parseInt(ra, 10) || 1}s)` : ""}: ${(await r.text()).slice(0, 300)}`);
+        }
+        const payload = await r.json();
+        const text = extractResponsesText(payload);
+        if (!text) throw new Error("openai_web_search_empty_response");
+        return text;
+      }, 4, `openai-web-search:${model}`);
+    });
+    governorReportSuccess(lane);
+    return out;
+  } catch (e) {
+    if (RETRYABLE.test(String(e))) governorReport429(lane);
+    throw e;
+  }
+}
