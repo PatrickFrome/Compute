@@ -23,8 +23,8 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 //                       held a send) and a fresh tab is opened, bounded.
 // ---------------------------------------------------------------------------
 
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const ROOT = 'https://chat.z.ai/';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const ROOT = 'https://chatgpt.com/';
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 const SEED_HEAD = 'METAENGINE SUPERVISOR CONVERSATION SEED v1';
 
@@ -109,7 +109,7 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
       }
       if (text.startsWith(SEED_HEAD)) {
         // The seed provably creates the conversation on this surface.
-        const url = `https://chat.z.ai/c/r82seed-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
+        const url = `https://chatgpt.com/c/r82seed-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
         tab.url = url;
         tab.frame = { ...conversationFrame(''), url };
       } else if (tab) {
@@ -189,7 +189,7 @@ test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a
       'the rollover message must be typed and submitted');
     assert.equal(String(snap.keepalive.state).startsWith('ROLLOVER'), false,
       `the rollover must bind the new conversation, got ${snap.keepalive.state}`);
-    assert.equal(snap.keepalive.conversation_url, 'https://chat.z.ai/c/r82seed-0000-4000-8000-000000000003');
+    assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/r82seed-0000-4000-8000-000000000003');
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
   }
