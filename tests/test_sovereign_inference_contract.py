@@ -4,6 +4,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (ROOT / "supabase/migrations/20260824070409_duel_sovereign_inference_v1.sql").read_text(encoding="utf-8")
 RUNNER = (ROOT / "orchestration/sovereign/src/same_point_v4.ts").read_text(encoding="utf-8")
 CONTROL = (ROOT / "orchestration/sovereign/src/control.ts").read_text(encoding="utf-8")
+LEGACY = (ROOT / "orchestration/sovereign/src/index.ts").read_text(encoding="utf-8")
 PACKAGE = (ROOT / "orchestration/sovereign/package.json").read_text(encoding="utf-8")
 README = (ROOT / "orchestration/sovereign/README.md").read_text(encoding="utf-8")
 
@@ -67,3 +68,8 @@ assert "Do not expose raw vLLM to the public Internet" in README
 assert "loopback/private LAN" in README
 
 print("Sovereign inference contract guards: PASS")
+
+# Historical V2 source is a terminal tombstone, not a dormant executable.
+assert "sovereign_legacy_runner_retired_chatgpt_only" in LEGACY
+for forbidden in ("zai-org/GLM", "SOVEREIGN_GLM_URL", "SOVEREIGN_GLM_MODEL", "SOVEREIGN_GLM_TOKEN", "SOVEREIGN_GPT_URL"):
+    assert forbidden not in LEGACY
