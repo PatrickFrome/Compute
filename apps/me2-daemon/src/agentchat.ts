@@ -46,7 +46,7 @@ import * as ports from "./ports";
 import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
 import { db, emit, nowIso, createAgent, createTask, getMeta, setMeta, type AgentRow } from "../store";
-import { chat } from "../providers";
+import { chat, webSearch as providerWebSearch } from "../providers";
 import { laneForRole } from "./governor";
 import { activeAgentModelTag, normalizeActiveAgentModelTag } from "./inference";
 import { memBlockEconomy } from "./memory";
@@ -262,15 +262,8 @@ const CHAT_TOOLS: Array<{ name: ChatToolName; description: string; args: Record<
   { name: "reply", description: "ФИНАЛЬНЫЙ ответ пользователю (завершает ход)", args: { text: "string" } },
 ];
 
-let zaiWeb: Awaited<import("z-ai-web-dev-sdk").default.create> | null = null;
 async function webSearch(query: string): Promise<string> {
-  if (!zaiWeb) {
-    const mod = await import("z-ai-web-dev-sdk");
-    zaiWeb = await mod.default.create();
-  }
-  const results = (await zaiWeb.functions.invoke("web_search", { query: query.slice(0, 400), num: 5 })) as
-    Array<{ name?: string; snippet?: string; url?: string }>;
-  return (results ?? []).map((r, i) => `${i + 1}. ${r.name}\n   ${String(r.snippet ?? "").slice(0, 200)}\n   ${r.url}`).join("\n") || "(no results)";
+  return providerWebSearch(query, { lane: "P1", max_results: 5 });
 }
 
 function daemonStatus(): string {
