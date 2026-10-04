@@ -189,8 +189,17 @@ function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'G
 const EXECUTION_CLASSES = new Set(['SAFE_RETRY_PRE_ACTUATION','AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED','BLOCKED']);
 function executionClassForRemoteResult(body: any, resultStatus: string) {
   const explicit = String(body?.execution_class || '').toUpperCase();
-  if (EXECUTION_CLASSES.has(explicit)) return explicit;
-  if (body?.clicked_send_button === true) return 'AMBIGUOUS_NO_RETRY';
+  const clicked = body?.clicked_send_button === true;
+  // A caller may strengthen a result into a terminal class, but may only claim
+  // retry-safe/blocking classes when the status independently proves the same
+  // pre-actuation condition. This prevents a stale/misbehaving client from
+  // reopening an ambiguous external effect by labelling it SAFE.
+  if (['AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED'].includes(explicit)) return explicit;
+  if (explicit === 'SAFE_RETRY_PRE_ACTUATION' && resultStatus === 'FAILED_SAFE_PRE_ACTUATION' && !clicked) {
+    return explicit;
+  }
+  if (explicit === 'BLOCKED' && resultStatus.startsWith('BLOCKED_') && !clicked) return explicit;
+  if (clicked) return 'AMBIGUOUS_NO_RETRY';
   if (resultStatus.includes('AMBIGUOUS') || resultStatus.includes('NO_RETRY')) return 'AMBIGUOUS_NO_RETRY';
   if (resultStatus.startsWith('SENT_') || resultStatus === 'DUPLICATE_IGNORED') return 'ACTUATED';
   if (resultStatus.startsWith('BLOCKED_')) return 'BLOCKED';
