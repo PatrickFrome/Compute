@@ -87,6 +87,9 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("terminalNoRetryCommand(same)", self.edge)
         self.assertIn("executionClassForRemoteResult", self.edge)
         self.assertIn("Unknown failures are not proof of pre-actuation safety", self.edge)
+        self.assertIn("retry-safe/blocking classes", self.edge)
+        self.assertIn("resultStatus === 'FAILED_SAFE_PRE_ACTUATION' && !clicked", self.edge)
+        self.assertIn("resultStatus.startsWith('BLOCKED_') && !clicked", self.edge)
 
     def test_current_main_never_learns_from_historical_base_sha(self):
         learner = self.edge.split("function findExplicitMainSha", 1)[1].split("function currentMainFromMessages", 1)[0]
