@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37185000001.1`.
+Reserved package identity is `0.7.0-dev.37191000001.1`.
+
+Installed Chat qualification successor reservation (2026-10-04):
+- exact predecessor before this identity-only reservation: `77d4244f2b47aacce84ab97203ad4e3b746ea969`;
+- predecessor `0.7.0-dev.37185000001.1` was already physically consumed by Package Smoke on source `07fb59c16f4f1224a95673734979d8f8e51d468f`;
+- the successor corrects installed ChatGPT preconnect evidence from legacy `https://chat.z.ai/` to active `https://chatgpt.com/` and adds a regression fence rejecting Z.ai as ChatGPT evidence;
+- fresh monotonic one-build identity: `0.7.0-dev.37191000001.1`, chosen above the latest observed Actions run id `37190157197`;
+- Package Smoke remains the sole physical producer; downstream Installed Chat / Final Runtime / Soak / Self Update must consume the exact immutable installer for the successor source;
+- reservation alone grants no production, release, live-install, fleet or database mutation authority.
 
 ChatGPT-Only Agent Fleet V1 physical-qualification reservation (2026-10-04):
 - source-qualified predecessor before the identity-only reservation: `b4688d5ae7318fed58fa5e898e867e974ae28915`; Critical Audit, Shell, Chat Control Plane, Meta Orchestrator, Root Transport Bootstrap, Live Control Recovery and R84 Desktop Convergence were terminal SUCCESS on that exact source;
