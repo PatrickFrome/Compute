@@ -9,8 +9,8 @@ const TAB_ID = 'tab_87654321-1234-4123-8123-123456789abc';
 const TARGET_ID = 'webcontents:51';
 const TASK_ID = '12345678-1111-4111-8111-123456789abc';
 const PROMOTION_LEASE_ID = '12345678-2222-4222-8222-123456789abc';
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-ffffffffffff';
-const ROOT = 'https://chat.z.ai/';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-ffffffffffff';
+const ROOT = 'https://chatgpt.com/';
 const sha256 = (value) => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 
 function response(status, body) {
@@ -40,7 +40,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
   let submitCount = 0;
   const state = {
     tabs: [
-      { tab_id: 'tab_supervisor', url: 'https://chat.z.ai/c/supervisor-1234', selected: true },
+      { tab_id: 'tab_supervisor', url: 'https://chatgpt.com/c/supervisor-1234', selected: true },
       { tab_id: TAB_ID, url: ROOT, selected: false },
     ],
     active_tab: { tab_id: 'tab_supervisor' },
@@ -132,9 +132,9 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       return {
         ...base,
         semantic_targets: [
-          { role: 'button', name: 'Agent', semantic_ref: semanticRef('a'), backend_node_id: 11 },
+          { role: 'textbox', name: 'Message ChatGPT', value_length: 0, value_sha256: null, semantic_ref: semanticRef('a'), backend_node_id: 11 },
         ],
-        interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.2' }] },
+        interaction_tree: { elements: [] },
       };
     }
     if (surfaceState === 'AGENT_HOME' || surfaceState === 'AGENT_TASK') {
@@ -150,16 +150,16 @@ test('root worker is bootstrapped under promotion lease before task lease and re
             ? [{ role: 'textbox', name: 'Describe your task', value_length: 0, value_sha256: null, semantic_ref: semanticRef('1'), backend_node_id: 31 }]
             : []),
         ],
-        interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.3-Flash' }] },
+        interaction_tree: { elements: [{ role: 'button', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
       };
     }
     return {
       ...base,
       semantic_targets: [
-        { role: 'textbox', name: 'Send a Message', value_length: 0, semantic_ref: semanticRef('2'), backend_node_id: 41 },
+        { role: 'textbox', name: 'Message ChatGPT', value_length: 0, semantic_ref: semanticRef('2'), backend_node_id: 41 },
         ...(generating ? [{ role: 'button', name: 'Stop generating', semantic_ref: semanticRef('3'), backend_node_id: 42 }] : []),
       ],
-      interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.3-Flash' }] },
+      interaction_tree: { elements: [{ role: 'button', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
     };
   };
 
@@ -175,21 +175,13 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       return frame({ generating: surfaceState === 'CONVERSATION' && submitCount >= 2 });
     }
     if (command.action === 'TYPED_CLICK') {
-      if (command.payload.accessible_name === 'Agent' && surfaceState === 'CHAT_ROOT') {
-        surfaceState = 'AGENT_HOME';
-        return { activation: { method: 'DOM_CLICK' }, mouse_geometry_required: false, authority_effect: true };
-      }
-      if (command.payload.accessible_name === 'New Task' && surfaceState === 'AGENT_HOME') {
-        surfaceState = 'AGENT_TASK';
-        return { activation: { method: 'DOM_CLICK' }, mouse_geometry_required: false, authority_effect: true };
-      }
       throw new Error(`unexpected_activation:${command.payload.accessible_name}:${surfaceState}`);
     }
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.payload.submit_after_type, true);
       submitCount += 1;
       if (submitCount === 1) {
-        assert.equal(surfaceState, 'AGENT_TASK');
+        assert.equal(surfaceState, 'CHAT_ROOT');
         surfaceState = 'CONVERSATION';
         state.tabs[1].url = CONVERSATION;
       }
@@ -299,7 +291,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     assert.equal(submitCount, 2, 'one bootstrap seed and one task submit are expected');
     assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 2);
     const activations = calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK');
-    assert.deepEqual(activations.map((row) => row[2]), ['Agent', 'New Task']);
+    assert.deepEqual(activations.map((row) => row[2]), []);
     const typeIndexes = calls.map((row, index) => row[1] === 'SEMANTIC_TYPE' ? index : -1).filter((index) => index >= 0);
     const cycleIndex = calls.findIndex((row) => row[1] === '/v1/devos/cycle');
     const markRunningIndex = calls.findIndex((row) => row[1] === '/v1/devos/mark-running');
