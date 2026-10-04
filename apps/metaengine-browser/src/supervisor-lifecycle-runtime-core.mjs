@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
-import { AgentSessionMonitor } from './agent-session-monitor.mjs';
+import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
@@ -15,8 +15,8 @@ import {
   unavailableDevosRuntimeControl,
 } from './devos-runtime-control.mjs';
 
-const CHAT_RE = /^https:\/\/chat\.z\.ai\/c\/[a-z0-9-]+/i;
-const CHAT_ROOT_RE = /^https:\/\/chat\.z\.ai\/?$/i;
+const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
+const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
 const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
 // ROLLOVER_DEFERRED bounded auto-release window (closed-loop audit fix):
@@ -160,7 +160,7 @@ export class SupervisorLifecycleRuntime {
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
-    this.#sessionMonitor = sessionMonitor || new AgentSessionMonitor();
+    this.#sessionMonitor = sessionMonitor || new ChatGptSessionMonitor();
     this.#requireAuthoritativeAdmission = requireAuthoritativeAdmission === true;
     // Test seam only: production leaves this null so the keepalive derives its
     // own process incarnation. Tests inject a fixed id to model a wake that
@@ -578,7 +578,7 @@ export class SupervisorLifecycleRuntime {
     }
     const submitState = String(submitted?.effect_state || '').toUpperCase();
     if (['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(submitState)) {
-      // The GLM monitor's only authoritative GENERATING entry: the proven
+      // The active ChatGPT monitor's explicit authoritative GENERATING entry: the proven
       // Enter submit. Digest churn then tracks streaming; settle flips IDLE.
       this.#sessionMonitor.markGenerationStarted(tabId);
       return { ok: true, clicked: true, observed: submitted, event_driven_readback: true };
@@ -592,7 +592,7 @@ export class SupervisorLifecycleRuntime {
 
     // Compatibility only for injected/legacy executors that do not advertise a
     // submit effect state. Current Browser executors never take this branch.
-    // GLM platform: there is no named SEND control — the compatibility path
+    // Compatibility executor path: do not invent a second authority plane — the compatibility path
     // re-submits through the same Enter lane using the live composer ref.
     const compatFrame = await this.#capture(tabId);
     const compatComposer = composerTarget(compatFrame);
