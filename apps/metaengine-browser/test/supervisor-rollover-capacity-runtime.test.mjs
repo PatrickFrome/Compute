@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
-const URL = 'https://chat.z.ai/c/e1ec5063-0798-46df-b401-df41813e0000';
+const URL = 'https://chatgpt.com/c/e1ec5063-0798-46df-b401-df41813e0000';
 const WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const COMPOSER_REF = {
   schema: 'metaengine.native-browser.semantic-ref.v1',
