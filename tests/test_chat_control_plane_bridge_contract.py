@@ -57,7 +57,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertTrue(set(imports).issubset(package_files), sorted(set(imports) - package_files))
         for script in [
             "runtime-marker.js", "target-registry.js", "target-observability.js", "bridge-runtime.js",
-            "debugger-broker.js", "debugger-watchdog.js", "trusted-chatgpt.js", "trusted-glm.js",
+            "debugger-broker.js", "debugger-watchdog.js", "trusted-chatgpt.js",
             "operator-gate-bindings.js", "operator-lease-gate.js", "operator-actions.js",
             "operator-compute-bridge.js", "runtime-core.js", "operator-control.js",
             "operator-perception.js", "operator-oopif-perception.js", "operator-semantic-actions.js",
@@ -67,6 +67,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             self.assertIn(script, package_files)
         self.assertNotIn("operator-oopf-perception.js", self.background_entry)
         self.assertNotRegex(self.background_entry, r'-v\d{3}\.js')
+        self.assertNotIn('importScripts("./trusted-glm.js")', self.background_entry)
+        self.assertNotIn("trusted-glm.js", package_files)
         self.assertNotIn("import(", self.background_entry)
 
     def test_remote_auth_and_secret_boundaries(self):
@@ -91,10 +93,12 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("pollSnapshots", self.background)
         self.assertIn("duplicate_target_tabs", self.background)
         self.assertIn("target_url_mismatch", self.background)
-        self.assertIn("glm_predecessor_command_id", self.background)
-        self.assertIn("STRICT_GLM_FIRST_ACTUATED_V1", self.background)
-        self.assertIn("GLM_COMMAND_ACTUATED", self.background)
-        self.assertIn("A2_GLM_ALREADY_SUBMITTED", self.background)
+        self.assertIn("CHATGPT_ONLY_V1", self.background)
+        self.assertIn("legacy_target_platform_disabled", self.background)
+        self.assertIn("ordering_contract_chatgpt_only_invalid", self.background)
+        self.assertNotIn("STRICT_GLM_FIRST_ACTUATED_V1", self.background)
+        self.assertNotIn("GLM_COMMAND_ACTUATED", self.background)
+        self.assertNotIn("A2_GLM_ALREADY_SUBMITTED", self.background)
 
     def test_chatgpt_path_is_trusted_enter_and_broker_only(self):
         self.assertIn('await session.send("Input.insertText", { text: prompt })', self.trusted)
@@ -135,21 +139,14 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("Object.getOwnPropertyDescriptor", self.trusted_glm)
         self.assertNotIn("chrome.tabs.reload", self.trusted_glm)
 
-    def test_glm_strict_dispatch_precedes_release_and_gpt_gate(self):
-        press = self.trusted_glm.index('type: "mousePressed"')
-        server_dispatch = self.trusted_glm.index('postProgress(commandId, transportTraceId, "DISPATCHED")', press)
-        local_dispatch = self.trusted_glm.index('state: "DISPATCHED"', server_dispatch)
-        bypass = self.trusted_glm.index("armPromptGateBypass", local_dispatch)
-        release = self.trusted_glm.index('type: "mouseReleased", x: point.x', bypass)
-        self.assertLess(press, server_dispatch)
-        self.assertLess(server_dispatch, local_dispatch)
-        self.assertLess(local_dispatch, bypass)
-        self.assertLess(bypass, release)
-        self.assertIn("GLM_AT_MOST_ONCE_DURABLE_REPLAY", self.trusted_glm)
-        self.assertIn("SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", self.trusted_glm)
-        self.assertIn("A2_ON_GLM_ACTUATED", self.trusted_glm)
-        self.assertIn("PREDECESSOR_KEY", self.background)
-        self.assertIn("consumePredecessorIfSafe", self.background)
+    def test_glm_actuator_is_historical_source_only_and_cannot_enter_active_runtime(self):
+        package_files = set(self.runtime_package["files"])
+        self.assertNotIn("trusted-glm.js", package_files)
+        self.assertNotIn('importScripts("./trusted-glm.js")', self.background_entry)
+        self.assertNotIn("A2_GLM_TRUSTED_SEND", self.background)
+        self.assertNotIn("A2_ON_GLM_ACTUATED", self.background)
+        self.assertNotIn("PREDECESSOR_KEY", self.background)
+        self.assertIn("CHATGPT_ONLY_V1", self.background)
 
     def test_glm_safe_failure_cleanup_never_touches_ambiguous_send(self):
         self.assertIn("scrubSafeGlmDraft", self.gate_bindings)
@@ -220,7 +217,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("BLOCKED_NOT_ARMED", self.background)
         self.assertIn("authority_effect:false", self.background.replace(" ", ""))
         self.assertIn("browser text as transport/context, never as authority", self.server)
-        self.assertIn("OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE", self.server)
+        self.assertIn("LEGACY GLM/ZAI PEER: DISABLED", self.server)
         self.assertNotIn("worker_admitted=true", self.server.lower())
         self.assertNotIn("w1_verified=true", self.server.lower())
         self.assertIn("A2_BRIDGE_SHARED_SECRET", self.secure_entry)
