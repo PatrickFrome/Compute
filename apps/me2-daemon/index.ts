@@ -65,7 +65,8 @@ import { hygieneStatus, hygieneCheckpoint, hygieneVacuum, startHygieneLoop } fro
 import { gateCheck, approvalsStatus, approvalRequest, approvalDecide, policySet } from "./src/approvals";
 import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
 import { handoffList, handoffStats } from "./src/handoffs";
-import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag } from "./src/glm";
+import { glmStatus } from "./src/glm";
+import { activeAgentModelTag, inferencePolicySnapshot, migrateAgentsToActiveInference } from "./src/inference";
 import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/reviewer";
 import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX } from "./src/pool";
 import { autonomyStatus, livenessBrief } from "./src/autonomy";
@@ -174,15 +175,15 @@ if (!PROBE_MODE) {
     console.log(`[tokens] vault: ${tk.present} в БД, seed=${tk.seeded.length ? tk.seeded.join(",") : "—"}, нет=${tk.missing.length}`);
   } catch (e) { console.log(`[tokens] vault bootstrap failed: ${String(e).slice(0, 120)}`); }
 }
-// R29: директива оператора «все агенты всегда на последней GLM» — при каждой инкарнации
-// флот приводится к каноническому тегу; живая probe бэкенда — async (урок R25: сеть вне boot-пути).
+// ChatGPT/OpenAI directive: every executable registry agent converges onto
+// the active OpenAI identity at boot. Historical GLM evidence remains readable,
+// but no GLM network probe or upgrade mutation runs automatically.
 if (!PROBE_MODE) {
   try {
-    const up = upgradeAgents();
-    console.log(`[glm] canonical=${agentTag()} upgraded=${up.upgraded} already=${up.already}`);
-  } catch (e) { console.log(`[glm] upgrade failed: ${String(e).slice(0, 120)}`); }
+    const up = migrateAgentsToActiveInference();
+    console.log(`[inference] canonical=${activeAgentModelTag()} provider=${up.provider} platform=${up.platform} upgraded=${up.upgraded} already=${up.already}`);
+  } catch (e) { console.log(`[inference] migration failed: ${String(e).slice(0, 120)}`); }
 }
-if (!PROBE_MODE) setTimeout(() => { void glmProbe().catch(() => { /* R38: проба не роняет процесс */ }); }, 3_000);
 
 // ── REST API (:3041) ──────────────────────────────────────────────
 function json(res: ServerResponse, code: number, body: unknown) {
@@ -877,19 +878,16 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/handoffs" && req.method === "GET") {
       return json(res, 200, { ok: true, handoffs: handoffList(20), stats: handoffStats() });
     }
-    // ── R29: GLM currency plane (директива «агенты всегда на последней версии») ──
-    if (path === "/glm" && req.method === "GET") return json(res, 200, glmStatus());
+    // Historical GLM telemetry is read-only compatibility. No active request
+    // may probe, upgrade or route through ZAI after the OpenAI migration.
+    if (path === "/glm" && req.method === "GET") {
+      return json(res, 200, { ...glmStatus(), legacy_read_only: true, active_inference: inferencePolicySnapshot() });
+    }
     if (path === "/glm" && req.method === "POST") {
-      const body = await readBody(req);
-      const op = String(body.op ?? "");
-      try {
-        if (op === "probe") return json(res, 200, { ok: true, probe: await glmProbe() });
-        if (op === "upgrade") return json(res, 200, { ok: true, ...upgradeAgents() });
-        if (op === "set_latest") return json(res, 200, { ok: true, result: setLatestGlm(String(body.model ?? "")) });
-        return json(res, 400, { ok: false, error: "op_required: probe|upgrade|set_latest" });
-      } catch (e) {
-        return json(res, 400, { ok: false, error: (e as Error).message });
-      }
+      return json(res, 410, { ok: false, error: "glm_legacy_read_only", active_inference: inferencePolicySnapshot() });
+    }
+    if (path === "/inference" && req.method === "GET") {
+      return json(res, 200, { ok: true, ...inferencePolicySnapshot(), providers: await listProviders() });
     }
     // ── R29 C3: reviewer-agent (антифальшь-ревью результатов против спека) ──
     if (path === "/reviews" && req.method === "GET") {
@@ -1102,7 +1100,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci", "/hooks", "/llm"];
+const BENCH_ADMIN_PREFIXES = ["/inference", "/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci", "/hooks", "/llm"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
