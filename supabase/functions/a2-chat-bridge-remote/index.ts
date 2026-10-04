@@ -186,6 +186,27 @@ function recentMessages(snapshot: any, count = 6) {
   return messages.slice(-count).map((m) => ({ role: m?.role || 'unknown', text: clip(m?.text || '', 6000) }));
 }
 function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'GPT' : null; }
+const EXECUTION_CLASSES = new Set(['SAFE_RETRY_PRE_ACTUATION','AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED','BLOCKED']);
+function executionClassForRemoteResult(body: any, resultStatus: string) {
+  const explicit = String(body?.execution_class || '').toUpperCase();
+  if (EXECUTION_CLASSES.has(explicit)) return explicit;
+  if (body?.clicked_send_button === true) return 'AMBIGUOUS_NO_RETRY';
+  if (resultStatus.includes('AMBIGUOUS') || resultStatus.includes('NO_RETRY')) return 'AMBIGUOUS_NO_RETRY';
+  if (resultStatus.startsWith('SENT_') || resultStatus === 'DUPLICATE_IGNORED') return 'ACTUATED';
+  if (resultStatus.startsWith('BLOCKED_')) return 'BLOCKED';
+  if (resultStatus === 'FAILED_SAFE_PRE_ACTUATION') return 'SAFE_RETRY_PRE_ACTUATION';
+  // Unknown failures are not proof of pre-actuation safety.
+  return 'AMBIGUOUS_NO_RETRY';
+}
+function terminalNoRetryCommand(row: any) {
+  const klass = String(row?.execution_class || '').toUpperCase();
+  const status = String(row?.result_status || '').toUpperCase();
+  return ['AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED'].includes(klass)
+    || status.includes('AMBIGUOUS')
+    || status.includes('NO_RETRY')
+    || status.startsWith('SENT_')
+    || row?.clicked_send_button === true;
+}
 function legacyProviderBoundRelay(relayItem: any) {
   const relay = relayItem?.relay || null;
   return relay?.duel_id ? relay : null;
@@ -289,7 +310,12 @@ async function nextCommand(req: Request, body: any) {
     const same = rows.find((r: any) => r.idempotency_key === idempotencyKey);
     if (same) {
       const age = now - Date.parse(same.created_at || '');
-      if (same.status === 'COMPLETED' || (same.status === 'FAILED' && age < FAILED_RETRY_MS) || (same.status === 'LEASED' && age < LEASE_TIMEOUT_MS)) continue;
+      if (
+        same.status === 'COMPLETED'
+        || terminalNoRetryCommand(same)
+        || (same.status === 'FAILED' && age < FAILED_RETRY_MS)
+        || (same.status === 'LEASED' && age < LEASE_TIMEOUT_MS)
+      ) continue;
     }
     const prompt = buildWakePrompt(platform, snapshots, a2);
     const command = await rpc('h205f22_a2_chat_bridge_issue_command_v2', {
@@ -314,9 +340,19 @@ async function commandResult(req: Request, commandId: string, body: any) {
   if (!command) return json(404, { error: 'command_not_found' });
   if (command.client_id !== clientId) return json(409, { error: 'command_lease_owner_mismatch' });
   const resultStatus = String(body?.status || 'FAILED_CLOSED').slice(0, 120);
+  const executionClass = executionClassForRemoteResult(body, resultStatus);
+  const clickedSendButton = body?.clicked_send_button === true;
   const failed = resultStatus.startsWith('FAILED') || resultStatus.startsWith('BLOCKED');
   const targetUrl = normalizedUrl(body?.target_url || '');
-  await rest(`${COMMAND_TABLE}?command_id=eq.${encodeURIComponent(commandId)}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ status: failed ? 'FAILED' : 'COMPLETED', completed_at: new Date().toISOString(), result_status: resultStatus, clicked_send_button: body?.clicked_send_button === true, target_url_sha256: targetUrl ? await sha256(targetUrl) : null, error_sha256: body?.error ? await sha256(String(body.error)) : null }) });
+  await rest(`${COMMAND_TABLE}?command_id=eq.${encodeURIComponent(commandId)}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({
+    status: failed ? 'FAILED' : 'COMPLETED',
+    completed_at: new Date().toISOString(),
+    result_status: resultStatus,
+    execution_class: executionClass,
+    clicked_send_button: clickedSendButton,
+    target_url_sha256: targetUrl ? await sha256(targetUrl) : null,
+    error_sha256: body?.error ? await sha256(String(body.error)) : null
+  }) });
   return json(200, { accepted: true, authority_effect: false });
 }
 async function status() {
