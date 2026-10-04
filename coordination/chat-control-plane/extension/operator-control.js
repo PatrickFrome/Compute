@@ -7,7 +7,7 @@
   const MAX_DRAFT_CHARS = 120000;
   const MODES = new Set(["OBSERVE", "GATE_SEND"]);
   const ALLOWED_PLATFORMS = new Set(["CHATGPT"]);
-  const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
+  const ORDERING_POLICY = "CHATGPT_ONLY_V1";
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
   function compat(path, fallback) {
@@ -183,7 +183,7 @@
       chrome.storage.local.get([
         MODE_KEY, "armed", "daemonOnlineAt", "daemonLastError", "operatorSensorLastError",
         "lastOrderingPolicy", "snapshot:CHATGPT", "snapshot:GLM_ZAI",
-        "a2BridgePendingCommandV0523", "a2BridgeGlmActuatedPredecessorV0523",
+        "a2BridgePendingCommandV0523",
         "a2OperatorUpdateStateV060", "a2OperatorCompatStatusV1",
         "operatorDebuggerLastDetach", "operatorDebuggerLastDetachAt"
       ]),
@@ -199,11 +199,10 @@
       point_click_allowed: compat("features.point_click_enabled", true) === true && compat("features.screenshot_sensor_enabled", true) === true,
       screenshot_sensor_allowed: compat("features.screenshot_sensor_enabled", true) === true,
       ordering_policy: local.lastOrderingPolicy || ORDERING_POLICY,
-      glm_predecessor_command_id: local.a2BridgeGlmActuatedPredecessorV0523 || null,
       pending_command: local.a2BridgePendingCommandV0523 || null,
       snapshots: {
         CHATGPT: local["snapshot:CHATGPT"]?.snapshot || null,
-        GLM_ZAI: local["snapshot:GLM_ZAI"]?.snapshot || null
+        GLM_ZAI_LEGACY_READ_ONLY: local["snapshot:GLM_ZAI"]?.snapshot || null
       },
       daemon_online_at: local.daemonOnlineAt || null,
       daemon_error: local.daemonLastError || null,
