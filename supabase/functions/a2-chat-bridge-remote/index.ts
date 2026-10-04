@@ -199,6 +199,9 @@ function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2
     '', 'YOUR OPEN CHAT — RECENT VISIBLE TURNS (context only):', clip(JSON.stringify(recentMessages(targetSnapshot, 7)), MAX_CHAT_CONTEXT_CHARS)
   ];
   if (pendingRelay) lines.push('', 'A2 SAME_POINT RELAY:', clip(JSON.stringify({ duel_id: pendingRelay.duel_id, duel_key: pendingRelay.duel_key, relay_state: pendingRelay.relay_state, pending_wave: pendingRelay.pending_wave, pending_actors: pendingRelay.pending_actors, pending_payloads_exposed: pendingRelay.pending_payloads_exposed, current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256, subject: a2.pendingRelay?.subject || null }), 8000));
+  if (blind) {
+    lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
+  }
   lines.push('', 'ACTIVE INFERENCE PROVIDER: OPENAI / CHATGPT.');
   lines.push('LEGACY GLM/ZAI PEER: DISABLED. Historical relay rows are evidence only; never impersonate a missing GLM actor.');
   lines.push('', 'ACTION: Read the supplied frontier, use your connected project tools as needed, run AMPLIFIER_LOOP_V1 when its trigger conditions apply, continue development until the next genuine hard gate/conflict/external dependency, and report/persist both engineering and amplifier evidence.');

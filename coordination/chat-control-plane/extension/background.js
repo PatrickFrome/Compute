@@ -176,7 +176,7 @@
       const s=await settings(); if(!force&&Date.now()-lastPollAt<s.pollMs)return; lastPollAt=Date.now();
       await resumePending();
       try {
-        const snapshots=await freshSnapshots(s), pred=(await chrome.storage.local.get(PREDECESSOR_KEY))[PREDECESSOR_KEY]||null;
+        const snapshots=await freshSnapshots(s);
         const r=await request("/v1/commands/next",{method:"POST",body:JSON.stringify({snapshots,ordering_policy:ORDERING_POLICY,operator_runtime:OPERATOR_RUNTIME})}); if(!r.ok)throw new Error(`command_http_${r.status}`);
         const body=await r.json();
         if(body?.command){await chrome.storage.local.set({[PENDING_KEY]:body.command});await execute(body.command);}

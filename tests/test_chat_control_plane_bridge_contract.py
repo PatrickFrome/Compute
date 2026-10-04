@@ -217,7 +217,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("BLOCKED_NOT_ARMED", self.background)
         self.assertIn("authority_effect:false", self.background.replace(" ", ""))
         self.assertIn("browser text as transport/context, never as authority", self.server)
-        self.assertIn("LEGACY GLM/ZAI PEER: DISABLED", self.server)
+        self.assertIn("OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE", self.server)
         self.assertNotIn("worker_admitted=true", self.server.lower())
         self.assertNotIn("w1_verified=true", self.server.lower())
         self.assertIn("A2_BRIDGE_SHARED_SECRET", self.secure_entry)
