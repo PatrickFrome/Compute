@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37153249506.1`.
+Reserved package identity is `0.7.0-dev.37185000001.1`.
+
+ChatGPT-Only Agent Fleet V1 physical-qualification reservation (2026-10-04):
+- source-qualified predecessor before the identity-only reservation: `b4688d5ae7318fed58fa5e898e867e974ae28915`; Critical Audit, Shell, Chat Control Plane, Meta Orchestrator, Root Transport Bootstrap, Live Control Recovery and R84 Desktop Convergence were terminal SUCCESS on that exact source;
+- Package Smoke on that predecessor correctly refused the already-consumed `0.7.0-dev.37153249506.1` before dependency install/NSIS, so no exact-head candidate installer was produced and all downstream physical consumers failed only at immutable-installer acquisition;
+- the ChatGPT-only migration changes Browser/ME2/coordination/provider runtime bytes, therefore the qualified predecessor package identity MUST NOT be rebuilt or relabelled;
+- fresh monotonic one-build identity: `0.7.0-dev.37185000001.1`, chosen above latest observed repository Actions run id `37184549035`;
+- Package Smoke remains the sole physical producer and its reservation preflight must independently prove that both the version artifact name and the exact source candidate artifact are unused before any physical build;
+- this reservation alone does not authorize release, production promotion, live installation, Guardian/admission mutation or task dispatch.
 
 Admission recovery convergence successor (2026-10-03):
 - exact predecessor `219ebe989a4f7ce2adfeb205a394a47ee55037cf` already consumed package identity `0.7.0-dev.37139234564.1` in physical Package Smoke run `37144386164`;
