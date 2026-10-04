@@ -13,7 +13,7 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 // rollover so #rollover() opens a FRESH tab instead of re-scanning the
 // poisoned attempt tab forever (live: the rollover sat ambiguous 14+ hours).
 
-const conversationUrl = 'https://chat.z.ai/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
+const conversationUrl = 'https://chatgpt.com/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
 
 // Seed a keepalive state file with the exact live wedge: a bound conversation,
 // a requested rollover, an ambiguous attempt bound to a poisoned tab.
@@ -40,7 +40,7 @@ function makeRuntime(statePath) {
   return new SupervisorLifecycleRuntime({
     getState: async () => ({
       fleet: { agents: [] },
-      tabs: [{ tab_id: 'tab_poisoned', url: 'https://chat.z.ai/' }],
+      tabs: [{ tab_id: 'tab_poisoned', url: 'https://chatgpt.com/' }],
     }),
     executeCommand: async () => { throw new Error('no_effects_expected'); },
     canActuate: () => true,
