@@ -1,11 +1,11 @@
 /**
- * ME2 Providers — LLM-слой, модель-агностичный (урок OpenCode: 75+ провайдеров).
- * Формат "provider:model":
- *   zai:<model>         — z-ai-web-dev-sdk (нативный, sandbox backend)
- *   gateway:<model>     — Vercel AI Gateway (OpenAI-совместимый; ключ из Supabase RPC)
- * Пустой суффикс = дефолт провайдера.
+ * ME2 Providers — active OpenAI inference transport.
+ *
+ * Durable agent identity is `openai:<model>`. Direct OpenAI is primary; the
+ * Vercel AI Gateway may be used only as an OpenAI-compatible transport
+ * fallback for the SAME OpenAI model. ZAI/GLM is never an active fallback.
  */
-import ZAI from "z-ai-web-dev-sdk";
+import { activeAgentModelTag, canonicalOpenAiModel, normalizeActiveAgentModelTag } from "./src/inference";
 import { emit } from "./store";
 import { governorAdmit, governorReport429, governorReportSuccess, type Lane } from "./src/governor";
 import { tokenGet, tokenSet, onTokenChange } from "./src/tokens";
@@ -62,11 +62,25 @@ export async function llmRetry<T>(fn: (attempt: number) => Promise<T>, attempts 
 let gatewayKey: string | null = null;
 let gatewayKeyTried = false;
 
-// ротация токенов в vault'е сбрасывает кэши (ключ и креды Supabase для RPC)
+let openAiKey: string | null = null;
+
+// ротация токенов в vault'е сбрасывает кэши.
 onTokenChange((name) => {
+  if (name === "OPENAI_API_KEY") openAiKey = null;
   if (name === "VERCEL_AI_GATEWAY_API_KEY") { gatewayKey = null; gatewayKeyTried = false; }
   if (name === "SUPABASE_URL" || name === "SUPABASE_SERVICE_ROLE_JWT") gatewayKeyTried = false;
 });
+
+function loadOpenAiKey(): string | null {
+  if (openAiKey) return openAiKey;
+  const key = tokenGet("OPENAI_API_KEY") || String(process.env.OPENAI_API_KEY || "").trim() || null;
+  if (key) openAiKey = key;
+  return openAiKey;
+}
+
+export function openAiReady(): boolean {
+  return Boolean(loadOpenAiKey());
+}
 
 async function loadGatewayKey(): Promise<string | null> {
   if (gatewayKey) return gatewayKey;
@@ -101,22 +115,26 @@ async function loadGatewayKey(): Promise<string | null> {
   return gatewayKey;
 }
 
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
-async function zai() {
-  if (!zaiInstance) zaiInstance = await ZAI.create();
-  return zaiInstance;
-}
-
 export async function listProviders(): Promise<Record<string, { ready: boolean; note: string }>> {
-  const key = await loadGatewayKey();
+  const gateway = await loadGatewayKey();
+  const openai = loadOpenAiKey();
   return {
-    zai: { ready: true, note: "z-ai-web-dev-sdk (native)" },
-    gateway: { ready: Boolean(key), note: key ? "Vercel AI Gateway (key from tokens DB, R47)" : "no key (Supabase RPC unavailable)" },
+    openai: {
+      ready: Boolean(openai),
+      note: openai ? `OpenAI direct (${canonicalOpenAiModel()})` : "OPENAI_API_KEY missing from token vault/env",
+    },
+    gateway: {
+      ready: Boolean(gateway),
+      note: gateway ? "OpenAI-compatible Vercel AI Gateway fallback" : "gateway key unavailable",
+    },
+    zai_legacy: {
+      ready: false,
+      note: "legacy read compatibility only; active GLM routing disabled",
+    },
   };
 }
 
-// ── v0.57.0 L3 failover: цепочка провайдеров — квота ×2 вместо одной точки отказа ──
-export interface ProviderChoice { provider: "zai" | "gateway"; modelId: string; label: string }
+export interface ProviderChoice { provider: "openai" | "gateway"; modelId: string; label: string }
 
 // ── R73: TLS-проба канала gateway (боевой случай R72: сеть песочницы режет TLS до
 // ai.gateway.vercel.dev — failover тратил 2 ретрая на заведомо мёртвый канал каждый раз).
@@ -157,21 +175,24 @@ export function gatewayReady(): boolean {
   return Boolean(gatewayKey || tokenGet("VERCEL_AI_GATEWAY_API_KEY"));
 }
 
-/** Failover-цепочка: первичный по префиксу модели + альтернативный провайдер (если готов
- *  И канал жив — R73: TLS-проба исключает мёртвый gateway из цепочки).
- *  zai:default → [zai, gateway?]; gateway:x → [gateway, zai] (zai всегда готов — нативный SDK). */
+/** Active failover chain. The durable model is always OpenAI.
+ * Direct OpenAI is primary. Gateway is an optional transport fallback for the
+ * same model; there is deliberately no ZAI/GLM fallback. */
 export function providerChain(model: string, gatewayAlive = true): ProviderChoice[] {
-  const sep = model.indexOf(":");
-  const provider = sep === -1 ? "zai" : model.slice(0, sep);
-  const modelId = sep === -1 ? "" : model.slice(sep + 1);
-  const primary: "zai" | "gateway" = provider === "gateway" ? "gateway" : "zai";
-  const mk = (p: "zai" | "gateway"): ProviderChoice => ({ provider: p, modelId, label: `${p}:${modelId || "default"}` });
-  const chain: ProviderChoice[] = [mk(primary)];
-  if (primary === "zai") {
-    if (gatewayReady() && gatewayAlive) chain.push(mk("gateway"));
-  } else {
-    chain.push(mk("zai"));
-  }
+  const raw = String(model || "").trim();
+  const gatewayRequested = raw.toLowerCase().startsWith("gateway:");
+  const durable = normalizeActiveAgentModelTag(raw || activeAgentModelTag());
+  const modelId = durable.slice(durable.indexOf(":") + 1) || canonicalOpenAiModel();
+  const mk = (provider: "openai" | "gateway"): ProviderChoice => ({
+    provider,
+    modelId,
+    label: `${provider}:${modelId}`,
+  });
+
+  const chain: ProviderChoice[] = [];
+  if (gatewayRequested && gatewayReady() && gatewayAlive) chain.push(mk("gateway"));
+  chain.push(mk("openai"));
+  if (!gatewayRequested && gatewayReady() && gatewayAlive) chain.push(mk("gateway"));
   return chain;
 }
 
@@ -190,10 +211,11 @@ export async function chat(model: string, messages: ChatMessage[], opts: { tempe
   try {
     const r = await llmSlot(async () => {
       await quotaPace(); // L1: ≤1 старт за ME2_LLM_MIN_GAP_MS глобально
-      await loadGatewayKey(); // дёшево после первой добычи; делает providerChain честной
-      const gwAlive = gatewayReady() ? ((await gatewayTlsProbe()) !== false) : false; // R73: мёртвый канал не в цепочке
-      const chain = providerChain(model, gwAlive);
-      const ck = opts.cache === true ? quotaCacheKey(model, messages, opts.temperature) : null;
+      await loadGatewayKey();
+      const gwAlive = gatewayReady() ? ((await gatewayTlsProbe()) !== false) : false;
+      const durableModel = normalizeActiveAgentModelTag(model || activeAgentModelTag());
+      const chain = providerChain(durableModel, gwAlive);
+      const ck = opts.cache === true ? quotaCacheKey(durableModel, messages, opts.temperature) : null;
       if (ck) {
         const hit = quotaCacheGet(ck);
         if (hit !== null) return hit; // L2: квота не тратится на дедуп
@@ -221,18 +243,21 @@ export async function chat(model: string, messages: ChatMessage[], opts: { tempe
 }
 
 async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temperature?: number }, attempt: number): Promise<string> {
+  const modelId = p.modelId || canonicalOpenAiModel();
+
   if (p.provider === "gateway") {
     const key = await loadGatewayKey();
     if (!key) throw new Error("gateway_no_key");
-    const url = "https://ai.gateway.vercel.dev/v1/chat/completions";
-    const r = await fetch(url, {
+    const body: Record<string, unknown> = {
+      model: `openai/${modelId}`,
+      messages,
+    };
+    // GPT-5.6 reasoning models do not need temperature for the ME2 tool loop.
+    if (opts.temperature !== undefined && !/^gpt-(?:5\.6|6)/i.test(modelId)) body.temperature = opts.temperature;
+    const r = await fetch("https://ai.gateway.vercel.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: p.modelId || "zai/glm-4.6",
-        messages,
-        temperature: opts.temperature ?? 0.4,
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(120_000),
     });
     if (!r.ok) {
@@ -243,12 +268,20 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
     return j.choices?.[0]?.message?.content ?? "";
   }
 
-  // default: zai
-  const z = await zai();
-  const response = await z.chat.completions.create({
-    messages: messages as never,
-    stream: false,
-    thinking: { type: "disabled" },
+  const key = loadOpenAiKey();
+  if (!key) throw new Error("openai_no_key");
+  const body: Record<string, unknown> = { model: modelId, messages };
+  if (opts.temperature !== undefined && !/^gpt-(?:5\.6|6)/i.test(modelId)) body.temperature = opts.temperature;
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
   });
-  return response.choices?.[0]?.message?.content ?? "";
+  if (!r.ok) {
+    const ra = r.headers.get("retry-after");
+    throw new Error(`openai HTTP ${r.status}${ra ? ` (retry-after: ${parseInt(ra, 10) || 1}s)` : ""}: ${(await r.text()).slice(0, 300)}`);
+  }
+  const j = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return j.choices?.[0]?.message?.content ?? "";
 }
