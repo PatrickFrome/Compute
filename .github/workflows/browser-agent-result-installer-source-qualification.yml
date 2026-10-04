@@ -21,6 +21,8 @@ on:
       - 'tests/test_sovereign*'
       - 'tests/test_same_point_duel_v4_contract.py'
       - '.github/workflows/browser-agent-result-installer-source-qualification.yml'
+      - '.github/workflows/browser-devos-root-transport-bootstrap-v1.yml'
+      - 'tests/browser-root-transport-static-fence.mjs'
 
 permissions:
   contents: read
@@ -53,6 +55,9 @@ jobs:
       - name: Prove full Browser regression
         working-directory: apps/metaengine-browser
         run: npm test
+
+      - name: Prove root transport static two-phase contract
+        run: node tests/browser-root-transport-static-fence.mjs
 
       - name: Setup exact Bun runtime for ME2 UI source proof
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

@@ -1,5 +1,17 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37230000001.1`.
+
+Atomic Root Transport contract correction and fresh physical reservation (2026-10-04):
+- runtime source is unchanged from qualified `59f24cf78faf6fe38fa2b9b2d00b68c9149ce445`, Linux/Windows source qualification `37204436247`, and full local Browser 4087 PASS;
+- predecessor candidate `0634bed33afa150f2f8f29af123b292ce2c63cde` is NOT qualified: Root Transport behavioral tests passed 25/25, but its stale inline static contract demanded the retired GLM Enter lane;
+- `0.7.0-dev.37220000001.1` is consumed by producer `37204978252`, immutable reservation artifact `11304666555`, and MUST NOT be rebuilt or relabelled;
+- the replacement static fence verifies active ChatGPT type -> fresh exact draft readback -> one Send and legacy read-only dispatch; it is also included in Linux/Windows source qualification;
+- focused Root Transport 25/25 tests, new static fence, both changed workflow YAML parses and source-only authority checks pass locally;
+- public reservation lookup returned HTTP 200 and zero existing artifacts for `0.7.0-dev.37230000001.1`; producer reservation remains mandatory;
+- workflow repair, all three package version fields and this authoritative reservation change in ONE commit. Package Smoke remains the sole physical producer;
+- all physical consumers must prove this exact head/version/digest. No release/promotion or fresh live fleet qualification is implied.
+
 Reserved package identity is `0.7.0-dev.37220000001.1`.
 
 Atomic fenced ChatGPT-only installer reservation (2026-10-04):
