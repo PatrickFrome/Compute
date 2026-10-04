@@ -2,9 +2,9 @@
   "use strict";
 
   const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
-  const LEGACY_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
-  const SIGNED_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v4";
-  const SIGNED_RUNTIME_PREFIX = "/a2-browser-supervisor-v4";
+  const LEGACY_BASE = String(bootstrap.supervisorUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1").replace(/\\/+$/, "");
+  const SIGNED_BASE = LEGACY_BASE;
+  const SIGNED_RUNTIME_PREFIX = "/a2-browser-native-supervisor-v1";
   const HEALTH_URL = `${SIGNED_BASE}/health`;
   const PROFILE = "A2_DEVICE_HTTP_SIGNATURE_V1";
   // Intentionally retain the V067 key so an in-session upgrade can reconcile an existing terminal hold.
