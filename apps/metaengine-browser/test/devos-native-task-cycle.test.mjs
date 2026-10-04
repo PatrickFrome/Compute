@@ -20,8 +20,8 @@ const fleetTransportProof = {
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
-  conversation_url: 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc',
-  conversation_url_sha256: '758f6ecdbbb580270792b3f5e6cbdf0bb6301c3b95f3465375b71e9cdd19c3b3',
+  conversation_url: 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc',
+  conversation_url_sha256: '986dfc07e0cac4d1ca8f8d672f7b4d88225bca95ba2ec2fe91b076ba171d089e',
   agent_surface_sha256: 'b'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
@@ -43,7 +43,7 @@ const fleet = {
   }],
 };
 const semref = (id) => ({ schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + String(id).padEnd(64, '0').slice(0, 64) });
-const composer = { role: 'textbox', name: 'Send a Message', semantic_ref: semref('composer'), backend_node_id: 3, value_length: 0 };
+const composer = { role: 'textbox', name: 'Message ChatGPT', semantic_ref: semref('composer'), backend_node_id: 3, value_length: 0 };
 const semanticButton = (name, backend_node_id) => ({ role: 'button', name, backend_node_id, semantic_ref: semref(name) });
 const agentSurfaceControls = [
   semanticButton('Agent', 3336),
@@ -55,11 +55,11 @@ const agentSurfaceControls = [
 ];
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
-const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
 function response(status, body) { return { status, ok: status >= 200 && status < 300, async json(){ return structuredClone(body); } }; }
-function frame({ url = 'https://chat.z.ai/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
+function frame({ url = 'https://chatgpt.com/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
@@ -69,7 +69,7 @@ function frame({ url = 'https://chat.z.ai/', stopActive = false, sendVisible = t
     url,
     viewport,
     semantic_targets: [composer, ...agentSurfaceControls, ...(sendVisible ? [send] : []), ...(stopActive ? [stop] : [])],
-    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
+    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
     authority_effect: false,
   };
 }
@@ -184,7 +184,7 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   assert.equal(first.second_scheduler_loop, false);
 });
 
-test('proven Agent-session submit stays in the canonical conversation without re-submit (R98)', async () => {
+test('proven ChatGPT agent-session submit stays in the canonical conversation without re-submit (R98)', async () => {
   let selected = supervisorTab;
   let captureCount = 0;
   const commands = [];
@@ -215,7 +215,7 @@ test('proven Agent-session submit stays in the canonical conversation without re
   assert.ok(captureCount >= 2, 'the task effect receives a post-submit readback');
 });
 
-test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independent submit)', async () => {
+test('zero viewport proceeds on the active ChatGPT semantic lane (D-S2: geometry-independent submit)', async () => {
   let selected = supervisorTab;
   const commands = [];
   let captureCount = 0;
@@ -230,7 +230,7 @@ test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independen
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      // Unrendered fleet tab: 0x0 viewport, exact proven Agent conversation.
+      // Unrendered fleet tab: 0x0 viewport, exact proven ChatGPT agent conversation.
       return frame({ viewport: { width: 0, height: 0 }, url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
     }
     if (command.action === 'SEMANTIC_TYPE') {
