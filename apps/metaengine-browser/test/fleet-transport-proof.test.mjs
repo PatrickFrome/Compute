@@ -36,7 +36,7 @@ test('BOUND_UNVERIFIED promotes to ACTIVE only with exact physical transport pro
     tab_id: before.tab_id,
     target_id: before.target_id,
     generation_epoch: before.generation_epoch,
-    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     agent_surface_sha256: 'a'.repeat(64),
   });
   const after = snap.agents[0];
@@ -61,7 +61,7 @@ test('stale tab, target or generation cannot promote fleet agent', async () => {
     tab_id: agent.tab_id,
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
-    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     agent_surface_sha256: 'a'.repeat(64),
   };
   await assert.rejects(() => h.provisioner.markTransportProven({ ...common, tab_id: 'tab_deadbeef-dead-beef-dead-beefdeadbeef' }), /fleet_transport_tab_binding_mismatch/);
@@ -80,7 +80,7 @@ test('tab loss clears ACTIVE transport proof and increments incarnation', async 
     tab_id: before.tab_id,
     target_id: before.target_id,
     generation_epoch: before.generation_epoch,
-    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     agent_surface_sha256: 'a'.repeat(64),
   });
   await h.provisioner.onTabClosed(before.tab_id, 'TEST_LOSS');
@@ -102,7 +102,7 @@ test('conversation URL alone cannot promote a worker without Agent-surface prove
       tab_id: agent.tab_id,
       target_id: agent.target_id,
       generation_epoch: agent.generation_epoch,
-      conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     }),
     /fleet_transport_agent_surface_proof_required/,
   );
