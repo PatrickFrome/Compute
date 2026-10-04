@@ -26,7 +26,7 @@ function idleFrame(url, text = '') {
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: 0 },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: 0 },
       { role: 'button', name: 'Send' },
     ],
   };
@@ -38,7 +38,7 @@ function generatingFrame(url, text = '') {
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Stop generating' },
     ],
   };
