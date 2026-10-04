@@ -1,7 +1,7 @@
 "use strict";
 
 const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
-const REMOTE_BRIDGE_URL = String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote");
+const REMOTE_BRIDGE_URL = String(bootstrap.daemonUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote");
 const DEFAULTS = { daemonUrl: REMOTE_BRIDGE_URL, armed: false, autoOpenTabs: true, pollMs: 2500, chatgptUrl: "" };
 const $ = (id) => document.getElementById(id);
 let pairingConfigured = false;
