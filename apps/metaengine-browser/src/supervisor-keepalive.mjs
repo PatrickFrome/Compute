@@ -248,6 +248,7 @@ export class SupervisorKeepalive {
     const recoveredAt = iso(this.#clock);
     const predecessorIncarnation = this.#state.process_incarnation_id;
     const crossedProcessBoundary = predecessorIncarnation !== this.#processIncarnationId;
+    const hadActiveWakeAtBoundary = Boolean(this.#state.active_wake);
 
     if (crossedProcessBoundary) {
       const hasPredecessor = predecessorIncarnation != null;
@@ -308,6 +309,25 @@ export class SupervisorKeepalive {
         restart_recovered_at: recoveredAt,
         automatic_retry_allowed: false,
       };
+    }
+    // A released rollover with no surviving conversation and no started
+    // rollover/wake effect cannot make progress after a process boundary:
+    // bootstrap accepts RECOVERING only, while rollover actuation is reached
+    // only through an existing supervisor conversation. Because no rollover
+    // attempt was created, there is no physical effect to replay or reconcile.
+    // Retire only this unstarted intent and return to the fresh bootstrap path.
+    // Started attempts and unresolved wakes remain on their ambiguity fences.
+    if (crossedProcessBoundary
+      && this.#state.state === 'ROLLOVER_REQUIRED'
+      && !this.#state.conversation_url
+      && !this.#state.rollover_attempt
+      && !this.#state.pending_wake
+      && !hadActiveWakeAtBoundary
+      && this.#state.rollover_release_at) {
+      this.#state.state = 'RECOVERING';
+      this.#state.tab_id = null;
+      this.#state.rollover_reason = null;
+      this.#state.rollover_release_at = null;
     }
     if (crossedProcessBoundary && this.#state.admission_state === 'OPEN') {
       // An OPEN decision is never trusted across a process boundary. A fresh
