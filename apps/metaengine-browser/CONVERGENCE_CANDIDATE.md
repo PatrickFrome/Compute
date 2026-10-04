@@ -1,5 +1,18 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37220000001.1`.
+
+Atomic fenced ChatGPT-only installer reservation (2026-10-04):
+- source qualification: `59f24cf78faf6fe38fa2b9b2d00b68c9149ce445`, run `37204436247`, attempt 1, terminal SUCCESS on Linux and Windows including Windows source visual proof;
+- full local Browser proof: 4087 PASS, zero failures/skips; isolated OpenAI ME2 and PRIMARY/CRITIC policy/transport/context tests are green;
+- includes exact legacy-root retirement `3a67fedd42568f8f4923fac1a53d1081f98d53a2` on qualified predecessor `3782b73b3f00a9d7eacaa42a4017010cfb374ba6`;
+- `0.7.0-dev.37210000001.1` remains consumed by predecessor producer `37198104703` and MUST NOT be rebuilt or relabelled;
+- new version, both lockfile version fields and this first authoritative reservation change atomically, without runtime changes after source qualification;
+- public GitHub artifact readback found zero existing reservations for `0.7.0-dev.37220000001.1` immediately before this source commit; the producer MUST repeat its real reservation gate;
+- Package Smoke is the sole physical producer. Every consumer MUST bind the same immutable source head, version and installer digest; do not rerun a consumed producer or add a second physical push;
+- PR qualification does not imply canonical push-only SLSA attestation. Release/promotion remains closed until the relevant supply-chain gate and real authenticated ChatGPT useful-work/critic outcome are proven;
+- this reservation does not itself authorize cloud deployment or mass-closing USER tabs.
+
 Reserved package identity is `0.7.0-dev.37210000001.1`.
 
 Atomic ChatGPT live-client package reservation (2026-10-04):
