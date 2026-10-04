@@ -315,26 +315,18 @@ const server = createServer(async (req, res) => {
       await proxyModel(req, res, "CRITIC", "chat");
       return;
     }
-    // Legacy wire aliases: names only. Both routes terminate on OpenAI-backed
-    // PRIMARY/CRITIC executors; no ZAI/GLM inference exists behind them.
-    if (method === "GET" && url.pathname === "/gpt/v1/models") {
+    // Provider-shaped endpoint aliases are retired. Even when they used the
+    // same OpenAI backend, keeping /glm/* or /gpt/* as active execution routes
+    // preserved obsolete provider identity in telemetry/configuration and made
+    // accidental reactivation possible. Callers must use logical roles.
+    if (url.pathname.startsWith("/glm/") || url.pathname.startsWith("/gpt/")) {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "PRIMARY", "models");
-      return;
-    }
-    if (method === "GET" && url.pathname === "/glm/v1/models") {
-      if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "CRITIC", "models");
-      return;
-    }
-    if (method === "POST" && url.pathname === "/gpt/v1/chat/completions") {
-      if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "PRIMARY", "chat");
-      return;
-    }
-    if (method === "POST" && url.pathname === "/glm/v1/chat/completions") {
-      if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "CRITIC", "chat");
+      sendJson(res, 410, {
+        error: "legacy_provider_endpoint_retired",
+        active_provider: "OPENAI",
+        active_platform: "CHATGPT",
+        role_endpoints: ["/primary/v1", "/critic/v1"],
+      });
       return;
     }
     if (method === "POST" && url.pathname === "/v4/duels") {
