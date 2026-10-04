@@ -7,7 +7,7 @@ const AGENT_ID = 'agent_seedtest-1111';
 const TAB_ID = 'tab_seedtest-2222-3333-4444-555555555555';
 const TARGET_ID = 'webcontents:77';
 const TASK_ID = '76543210-1111-4222-8333-444455556666';
-const ROOT = 'https://chat.z.ai/';
+const ROOT = 'https://chatgpt.com/';
 
 const lease = {
   task_id: TASK_ID,
@@ -66,7 +66,7 @@ test('R98 legacy root seed is not a task-dispatch fallback when Agent promotion 
       fleet,
       active_tab: { tab_id: 'tab_supervisor' },
       tabs: [
-        { tab_id: 'tab_supervisor', url: 'https://chat.z.ai/c/supervisor', selected: true },
+        { tab_id: 'tab_supervisor', url: 'https://chatgpt.com/c/supervisor', selected: true },
         { tab_id: TAB_ID, url: ROOT, selected: false },
       ],
     }),
