@@ -1,3 +1,5 @@
+> **ChatGPT/OpenAI-only runtime policy (2026-10-04):** the active V4 executors are independent logical roles **PRIMARY** and **CRITIC**, both backed by OpenAI models on separate OpenAI-compatible contexts. Historical DB fields/actors named `gpt_*` / `glm_*` and votes `WIN_GPT` / `WIN_GLM` remain wire-compatibility identifiers only until the durable schema migration; they no longer imply a ZAI/GLM provider. Canonical runtime configuration is `SOVEREIGN_PRIMARY_*` / `SOVEREIGN_CRITIC_*`. The legacy V2 runner entry is retired.
+
 # METAENGINE H205F22 Sovereign SAME_POINT_DUEL_V4 Runner
 
 The default sovereign runtime implements a two-wave, same-semantic-point adversarial development protocol without managed inference billing gates.
