@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
   role TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'IDLE',
-  model TEXT NOT NULL DEFAULT 'zai:default',
+  model TEXT NOT NULL DEFAULT 'openai:gpt-5.6',
   paused INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
