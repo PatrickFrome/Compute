@@ -1,20 +1,32 @@
 {
   "schema": "metaengine.r83.edge-canary-qualification.v1",
-  "captured_at": "2026-10-01",
+  "captured_at": "2026-10-04",
   "project_ref": "jhriwwsryeqsvvvufkok",
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
     "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
-    "deployed_version": 26,
-    "ezbr_sha256": "878bb81e59109e93aa49492655c6d856668495c9e85d21c323978b59d9b46eb1",
-    "source_pin": "5aaae3e6696eeee07c09a65ff467857aab67732b"
+    "deployed_version": 27,
+    "ezbr_sha256": "0b913be07472bef68920bf24ec493498f41bc657cb8386f59598bacbe3a68c5e",
+    "source_pin": "26b63b0ec3eb619f768f2172e720a67eab985701",
+    "source_binding_complete": true,
+    "observed_import_pins": [
+      "26b63b0ec3eb619f768f2172e720a67eab985701"
+    ]
   },
   "rollback": {
     "slug": "a2-browser-native-supervisor-v1",
     "function_id": "b94f0619-675a-40fc-b340-0299b0250b9a",
-    "deployed_version": 8,
-    "ezbr_sha256": "3ce87ea81481dbf8fd6afee819bed3bd3b41528e7b5c6842a2d7b7be38ccf829",
-    "source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb"
+    "deployed_version": 11,
+    "ezbr_sha256": "319ba83a1811c4d144e8fd36fa5d33bc82967d354886bf896675c4091b3f9777",
+    "source_pin": "00d7c814213a97ac17504d5c598818bd99c588cb",
+    "source_binding_complete": false,
+    "source_pin_semantics": "LEGACY_PRIMARY_PIN_ONLY_NOT_FULL_BINDING",
+    "observed_import_pins": [
+      "ec20a79e45a686aa840853b7ee404b6816730bd0",
+      "6e859e109fe50e242859af5d2bd715d15afccb92",
+      "00d7c814213a97ac17504d5c598818bd99c588cb"
+    ],
+    "rollback_drill_blocked_reason": "STABLE_V1_MIXED_SOURCE_PINS"
   },
   "required_capabilities": [
     "createDbInspectRoutes",
@@ -45,7 +57,10 @@
     "mode": "EXTERNAL_SHA_BOUND",
     "recorded_in_source_manifest": false,
     "completed": false,
-    "authority_effect": false
+    "authority_effect": false,
+    "canary_deployed_version": 27,
+    "canary_source_binding_readback": true,
+    "rollback_source_binding_complete": false
   },
   "evidence_policy": {
     "mode": "EXTERNAL_SHA_BOUND",
