@@ -1,5 +1,15 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37210000001.1`.
+
+Atomic ChatGPT live-client package reservation (2026-10-04):
+- exact predecessor: `1b5b602f3560f50e67213cb9e63715cd44e78b79`;
+- `0.7.0-dev.37200000001.1` was consumed by intermediate source `9d932186e9a563161c53398b655e86e2fcb1ea5e` before package-lock/convergence metadata were aligned; it MUST NOT be rebuilt;
+- this successor changes package.json, package-lock.json and convergence metadata in ONE Git commit so Package Smoke cannot reserve a half-updated source identity;
+- fresh one-build identity: `0.7.0-dev.37210000001.1`; Package Smoke is the sole physical producer and every physical consumer must bind this exact head and installer digest;
+- live Client remains on the older installed runtime until exact-head Package Smoke + Installed Chat + Final Runtime + Self Update evidence is terminal green;
+- promotion/release remains fail-closed until real ChatGPT fleet activation and useful-work readback are proven.
+
 Reserved package identity is `0.7.0-dev.37200000001.1`.
 
 ChatGPT live-client qualification successor (2026-10-04):
@@ -10,8 +20,6 @@ ChatGPT live-client qualification successor (2026-10-04):
 - exact build target: `0.7.0-dev.37200000001.1`, above the observed Actions namespace used during this convergence cycle;
 - Package Smoke remains the sole physical producer; Installed Chat, Final Runtime, Dirty Profile, Autonomous Soak and Self Update MUST consume the same exact-head immutable installer;
 - release/promotion remains forbidden until exact-head physical gates prove real ChatGPT fleet activation and a harmless useful-work cycle with zero active GLM leases/effects.
-
-Reserved package identity is `0.7.0-dev.37195000001.1`.
 
 ChatGPT-only hardening successor reservation (2026-10-04):
 - exact predecessor before this identity-only reservation: `13bd9712db490f1f29571cef59999559b3da1699`;
