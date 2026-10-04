@@ -1,0 +1,3 @@
+Verification-only path trigger.
+Product source under test: work/chatgpt-only-agent-fleet-v2 @ 7420b181d84c063df73dba770f7d39e93472edb0.
+No runtime or authority semantics.
