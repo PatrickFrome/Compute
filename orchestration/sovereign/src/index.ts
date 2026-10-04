@@ -1,9 +1,17 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
 import { Client, Pool } from "pg";
+import {
+  actorConfig,
+  actorModelFromLegacyLease,
+  legacyDbSlot,
+  peerActor as peerSovereignActor,
+  sovereignActorPolicySnapshot,
+  type SovereignActor,
+} from "./actor-policy.js";
 
 type JsonObject = Record<string, unknown>;
-type Actor = "GPT" | "GLM";
+type Actor = SovereignActor;
 type Lease = JsonObject & {
   leased?: boolean;
   duel_id?: string;
@@ -42,16 +50,10 @@ Do not optimize for agreement. Prefer falsifiable claims, executable patches/tes
 BUILD/BREAK roles rotate each tick. Never claim canonical authority, VERIFIED, or live evidence absent from the ledger.
 Return exactly one JSON object and no markdown.`;
 
+// Immutable legacy DB vote vocabulary; provider identity is Actor A/B.
 const VOTES = new Set(["WIN_GPT", "WIN_GLM", "SYNTHESIS", "NO_ACTION"]);
 const DATABASE_URL = required("DATABASE_URL");
 const RUNNER_ID = `sovereign:${process.env.DUEL_RUNNER_ID || hostname()}`;
-const GPT_URL = process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const GLM_URL = process.env.SOVEREIGN_GLM_URL || "http://127.0.0.1:8002";
-const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b";
-const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || "zai-org/GLM-4.7-Flash";
-const COMMON_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
-const GPT_TOKEN = process.env.SOVEREIGN_GPT_TOKEN || COMMON_TOKEN;
-const GLM_TOKEN = process.env.SOVEREIGN_GLM_TOKEN || COMMON_TOKEN;
 const MODEL_TIMEOUT_MS = boundedInt(process.env.DUEL_MODEL_TIMEOUT_MS, 90_000, 5_000, 300_000);
 const MAX_OUTPUT_TOKENS = boundedInt(process.env.DUEL_MAX_OUTPUT_TOKENS, 1_200, 256, 4_096);
 const RECOVERY_MS = boundedInt(process.env.DUEL_RECOVERY_MS, 60_000, 5_000, 600_000);
@@ -92,11 +94,12 @@ function endpointHash(url: string): string {
 }
 
 function recentPeerHash(read: Readback, actor: Actor): string | null {
+  const peerSlot = legacyDbSlot(peerSovereignActor(actor));
   const events = Array.isArray(read.events) ? read.events : [];
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (!e || typeof e !== "object" || Array.isArray(e)) continue;
-    if (String(e.actor || "") !== actor && typeof e.event_sha256 === "string") return e.event_sha256;
+    if (String(e.actor || "") === peerSlot && typeof e.event_sha256 === "string") return e.event_sha256;
   }
   return null;
 }
@@ -130,7 +133,7 @@ function compactHistory(read: Readback): JsonObject {
 function prompt(actor: Actor, lease: Lease, read: Readback): string {
   const tick = Number(read.current_tick || 0) + 1;
   const peer = recentPeerHash(read, actor);
-  const build = (tick + (actor === "GPT" ? 0 : 1)) % 2 === 0;
+  const build = (tick + (actor === "ACTOR_A" ? 0 : 1)) % 2 === 0;
   const lens = build
     ? "BUILD: propose the smallest executable improvement and the evidence that would prove it works; still surface blockers."
     : "BREAK: search for a counterexample, race, stale assumption, security failure, or cheaper falsifier; agree only if the design survives attack.";
@@ -150,9 +153,10 @@ function prompt(actor: Actor, lease: Lease, read: Readback): string {
 }
 
 async function modelCall(actor: Actor, lease: Lease, text: string): Promise<JsonObject> {
-  const base = actor === "GPT" ? GPT_URL : GLM_URL;
-  const model = actor === "GPT" ? (lease.gpt_model || GPT_MODEL) : (lease.glm_model || GLM_MODEL);
-  const token = actor === "GPT" ? GPT_TOKEN : GLM_TOKEN;
+  const cfg = actorConfig(actor);
+  const base = cfg.base;
+  const model = actorModelFromLegacyLease(actor, lease);
+  const token = cfg.token;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("model_timeout"), MODEL_TIMEOUT_MS);
   const started = Date.now();
@@ -176,15 +180,19 @@ async function modelCall(actor: Actor, lease: Lease, text: string): Promise<Json
       }),
     });
     const bodyText = await response.text();
-    if (!response.ok) throw new Error(`local_${actor.toLowerCase()}:${response.status}:${bodyText.slice(0, 800)}`);
+    if (!response.ok) throw new Error(`actor_${actor.toLowerCase()}:${response.status}:${bodyText.slice(0, 800)}`);
     const body = asObj(JSON.parse(bodyText));
     const choices = Array.isArray(body.choices) ? body.choices : [];
     const first = choices[0] && typeof choices[0] === "object" && !Array.isArray(choices[0]) ? asObj(choices[0]) : {};
     const message = first.message && typeof first.message === "object" && !Array.isArray(first.message) ? asObj(first.message) : {};
-    if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`local_${actor.toLowerCase()}_empty`);
+    if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`actor_${actor.toLowerCase()}_empty`);
     const payload = parseJson(message.content);
     payload._executor = {
       mode: "SOVEREIGN_OPENAI_COMPAT",
+      actor,
+      provider: cfg.provider,
+      platform: cfg.platform,
+      legacy_db_slot: legacyDbSlot(actor),
       tariff_dependency: false,
       model,
       endpoint_sha256: endpointHash(base),
@@ -284,7 +292,7 @@ async function readback(duelId: string): Promise<Readback> {
 
 async function submitPair(lease: Lease, tick: number, checkpoint: string, g: JsonObject, l: JsonObject): Promise<PairReceipt> {
   if (!lease.duel_id || lease.lease_generation == null) throw new Error("lease_identity_missing");
-  const args = [lease.duel_id, RUNNER_ID, lease.lease_generation, tick, checkpoint, stepType(g), JSON.stringify(g), stepType(l), JSON.stringify(l)];
+  const args = [lease.duel_id, RUNNER_ID, lease.lease_generation, tick, checkpoint, stepType(actorA), JSON.stringify(actorA), stepType(actorB), JSON.stringify(actorB)];
   const sql = "select public.h205f22_duel_submit_pair_v3($1::uuid,$2::text,$3::bigint,$4::bigint,$5::text,$6::text,$7::jsonb,$8::text,$9::jsonb) as v";
   try {
     const r = await pool.query<{ v: PairReceipt }>(sql, args);
@@ -309,6 +317,8 @@ async function processLease(lease: Lease): Promise<void> {
   if (!lease.leased || !lease.duel_id || lease.lease_generation == null) return;
   if (lease.protocol_version !== "LOCKSTEP_V2") throw new Error("protocol_mismatch");
   if (lease.execution_policy === "HOSTED_ONLY") return;
+  actorModelFromLegacyLease("ACTOR_A", lease);
+  actorModelFromLegacyLease("ACTOR_B", lease);
   let read: Readback = lease.readback && typeof lease.readback === "object" ? lease.readback : await readback(lease.duel_id);
   let checkpoint = String(read.current_checkpoint_sha256 || lease.current_checkpoint_sha256 || "");
   let lastTick = Number(read.current_tick || lease.current_tick || 0);
@@ -317,22 +327,22 @@ async function processLease(lease: Lease): Promise<void> {
   try {
     for (let tick = lastTick + 1; tick <= maxTicks; tick++) {
       checkpoint = String(read.current_checkpoint_sha256 || checkpoint);
-      const gPeer = recentPeerHash(read, "GPT");
-      const lPeer = recentPeerHash(read, "GLM");
+      const gPeer = recentPeerHash(read, "ACTOR_A");
+      const lPeer = recentPeerHash(read, "ACTOR_B");
       const started = Date.now();
-      const [g, l] = await Promise.all([actorVisible("GPT", lease, read), actorVisible("GLM", lease, read)]);
-      if (!peerAckOk(g.payload, gPeer) || !peerAckOk(l.payload, lPeer)) throw new Error(`peer_hash_ack_failed:${tick}`);
-      g.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
-      l.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
+      const [actorA, actorB] = await Promise.all([actorVisible("ACTOR_A", lease, read), actorVisible("ACTOR_B", lease, read)]);
+      if (!peerAckOk(actorA.payload, gPeer) || !peerAckOk(actorB.payload, lPeer)) throw new Error(`peer_hash_ack_failed:${tick}`);
+      actorA.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
+      actorB.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
 
-      const receipt = await submitPair(lease, tick, checkpoint, g.payload, l.payload);
+      const receipt = await submitPair(lease, tick, checkpoint, actorA.payload, actorB.payload);
       const gp = eventPayload(receipt.gpt_event);
       const lp = eventPayload(receipt.glm_event);
       checkpoint = String(receipt.output_checkpoint_sha256 || checkpoint);
       lastTick = tick;
       read = appendReadback(read, receipt, tick);
 
-      if (g.executorError || l.executorError || gp.model_response === false || lp.model_response === false) {
+      if (actorA.executorError || actorB.executorError || gp.model_response === false || lp.model_response === false) {
         await complete(lease, "BLOCKED", {
           schema: "metaengine.compute.duel-sovereign-result.h205f22.v1",
           outcome: "BLOCKED_EXECUTOR",
@@ -340,8 +350,9 @@ async function processLease(lease: Lease): Promise<void> {
           tariff_dependency: false,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
-          gpt_step: gp,
-          glm_step: lp,
+          actor_a_step: gp,
+          actor_b_step: lp,
+          legacy_db_slots: { GPT: "ACTOR_A", GLM: "ACTOR_B" },
           canonical: false,
           authority_effect: false,
         });
@@ -429,9 +440,9 @@ async function listenForever(): Promise<void> {
     try {
       await client.connect();
       client.on("notification", (msg) => {
-        if (msg.channel !== "h205f22_duel_ready_v1" || !msg.payload) return;
+        if (msg.channel !== "h205f22_duel_ready_v1" || !msactorA.payload) return;
         try {
-          const payload = asObj(JSON.parse(msg.payload));
+          const payload = asObj(JSON.parse(msactorA.payload));
           if (typeof payload.duel_id === "string") dispatch(payload.duel_id);
         } catch (error) {
           console.error("sovereign_notify_parse_failed", String(error));
@@ -454,10 +465,11 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({
     status: "STARTING",
     runner_id: RUNNER_ID,
-    gpt_model: GPT_MODEL,
-    glm_model: GLM_MODEL,
-    gpt_endpoint_sha256: endpointHash(GPT_URL),
-    glm_endpoint_sha256: endpointHash(GLM_URL),
+    inference_policy: sovereignActorPolicySnapshot(),
+    actor_a_model: actorConfig("ACTOR_A").model,
+    actor_b_model: actorConfig("ACTOR_B").model,
+    actor_a_endpoint_sha256: endpointHash(actorConfig("ACTOR_A").base),
+    actor_b_endpoint_sha256: endpointHash(actorConfig("ACTOR_B").base),
     tariff_dependency: false,
   }));
   await reconcile();
