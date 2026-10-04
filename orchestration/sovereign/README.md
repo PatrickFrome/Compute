@@ -4,13 +4,13 @@ The default sovereign runtime implements a two-wave, same-semantic-point adversa
 
 ## Core invariant
 
-GPT and GLM do not develop separate branches or take sequential turns. They receive the same semantic point and run concurrently in each wave:
+Actor A and Actor B are independent ChatGPT/OpenAI agents; they do not develop separate branches or take sequential turns. They receive the same semantic point and run concurrently in each wave:
 
-`checkpoint N -> (GPT PROPOSE || GLM PROPOSE) -> atomic pair -> (GPT REBUT || GLM REBUT) -> atomic pair + deterministic arbitration -> ONE resulting_action`
+`checkpoint N -> (ACTOR_A PROPOSE || ACTOR_B PROPOSE) -> atomic pair -> (ACTOR_A REBUT || ACTOR_B REBUT) -> atomic pair + deterministic arbitration -> ONE resulting_action`
 
 Private chain-of-thought is never shared. Every engineering-relevant rationale intended for the peer is persisted as observable structured data: `claim`, `reasoning_summary`, `evidence_used`, `assumptions`, `peer_claims_addressed`, `counterexample`, `falsifier`, `tests_required`, and the proposed/resulting action.
 
-The REBUT wave sees both persisted PROPOSE events. GPT must address the exact GLM PROPOSE event hash and GLM must address the exact GPT PROPOSE event hash. A stale or wrong peer hash fails closed.
+The REBUT wave sees both persisted PROPOSE events. ACTOR_A must address ACTOR_B's exact PROPOSE event hash and ACTOR_B must address ACTOR_A's. A stale or wrong peer hash fails closed.
 
 ## Low-latency path
 
@@ -39,8 +39,8 @@ The database emits exactly one immutable `resulting_action` and one `decision_sh
 
 Outcomes:
 
-- `WIN_GPT`: both rebuttals select GPT's final action.
-- `WIN_GLM`: both rebuttals select GLM's final action.
+- `WIN_GPT`: historical V4 DB vote meaning ACTOR_A wins; `GPT` is a compatibility slot, not provider identity.
+- `WIN_GLM`: historical V4 DB vote meaning ACTOR_B wins; `GLM` is a compatibility slot, not provider identity.
 - `SYNTHESIS`: both rebuttals independently converge on the identical final action hash.
 - `NO_ACTION`: both reject mutation.
 - `CANARY_REQUIRED`: security veto, explicit canary request, or unresolved action disagreement.
@@ -50,10 +50,12 @@ On unresolved disagreement the database does not choose by rhetoric. It emits `R
 
 The decision row is append-only/immutable, `canonical=false`, and `authority_effect=false`. A duel decision is therefore a proposed engineering action, not roadmap/mainline authority.
 
-## Default model pair
+## Active model pair
 
-- GPT side: `openai/gpt-oss-20b`
-- GLM side: `zai-org/GLM-4.7-Flash`
+- ACTOR_A: OpenAI/ChatGPT, default `openai/gpt-oss-20b`.
+- ACTOR_B: OpenAI/ChatGPT, default `openai/gpt-oss-20b`.
+
+The two actors must have independent session/context identities even when they use the same model SKU. Active GLM/Z.ai inference is disabled.
 
 For physical concurrency, two independent devices/workers are preferred. Logical `Promise.all` on one saturated GPU is not equivalent to independent physical inference.
 
@@ -61,8 +63,8 @@ For physical concurrency, two independent devices/workers are preferred. Logical
 
 The V4 runner expects OpenAI-compatible endpoints and defaults to:
 
-- GPT: `http://127.0.0.1:8001`
-- GLM: `http://127.0.0.1:8002`
+- ACTOR_A: `http://127.0.0.1:8001`
+- ACTOR_B: `http://127.0.0.1:8002`
 
 Each model server must implement `GET /v1/models` and `POST /v1/chat/completions`.
 
@@ -73,12 +75,12 @@ vllm serve openai/gpt-oss-20b \
   --served-model-name openai/gpt-oss-20b \
   --host 127.0.0.1 --port 8001
 
-vllm serve zai-org/GLM-4.7-Flash \
-  --served-model-name zai-org/GLM-4.7-Flash \
+vllm serve openai/gpt-oss-20b \
+  --served-model-name openai/gpt-oss-20b \
   --host 127.0.0.1 --port 8002
 ```
 
-Keep model servers on loopback/private LAN. **Do not expose raw vLLM to the public Internet.** If a model lives on another machine or Colab runtime, put an authenticated private tunnel/reverse proxy in front of it and set `SOVEREIGN_GPT_URL` or `SOVEREIGN_GLM_URL` to that private endpoint.
+Keep model servers on loopback/private LAN. **Do not expose raw vLLM to the public Internet.** If a model lives on another machine or Colab runtime, put an authenticated private tunnel/reverse proxy in front of it and set `SOVEREIGN_ACTOR_A_URL` or `SOVEREIGN_ACTOR_B_URL` to that private endpoint.
 
 ## Sovereign HTTP gateway
 
@@ -88,11 +90,12 @@ Operational endpoints:
 
 - `GET /healthz` — process liveness.
 - `GET /readyz` — fail-closed readiness: PostgreSQL + both exact model inventories must be reachable.
-- `GET /status` — detailed DB/GPT/GLM readiness and latency.
+- `GET /status` — detailed DB/ACTOR_A/ACTOR_B readiness and latency.
 - `GET /metrics` — Prometheus-style process counters.
-- `GET /v1/models` — logical GPT/GLM model inventory.
-- `GET /gpt/v1/models` and `GET /glm/v1/models` — role-specific upstream model inventory.
-- `POST /gpt/v1/chat/completions` and `POST /glm/v1/chat/completions` — streaming role proxies. The gateway overwrites the client-supplied `model` with the configured exact model identity.
+- `GET /v1/models` — logical ACTOR_A/ACTOR_B OpenAI model inventory.
+- `GET /actor-a/v1/models` and `GET /actor-b/v1/models` — actor-specific upstream OpenAI model inventory.
+- `POST /actor-a/v1/chat/completions` and `POST /actor-b/v1/chat/completions` — streaming actor proxies. The gateway overwrites the client-supplied `model` with the configured exact OpenAI identity.
+- Legacy `/gpt/*` and `/glm/*` inference routes return HTTP 410 and never proxy inference.
 - `POST /v4/duels` — create one `SAME_POINT_DUEL_V4` session.
 - `GET /v4/duels/:duel_id` — full observable debate, hashes, ticks and decision.
 - `GET /v4/duels/:duel_id/decision` — final immutable V4 decision only.
@@ -117,8 +120,8 @@ npm run check
 
 export DATABASE_URL='postgresql://...'
 export DUEL_RUNNER_ID='linux-worker-01'
-export SOVEREIGN_GPT_URL='http://127.0.0.1:8001'
-export SOVEREIGN_GLM_URL='http://127.0.0.1:8002'
+export SOVEREIGN_ACTOR_A_URL='http://127.0.0.1:8001'
+export SOVEREIGN_ACTOR_B_URL='http://127.0.0.1:8002'
 export SOVEREIGN_CONTROL_TOKEN='replace-with-a-random-secret'
 npm start
 ```
@@ -132,9 +135,8 @@ Commands:
 
 Optional variables:
 
-- `SOVEREIGN_GPT_MODEL`
-- `SOVEREIGN_GLM_MODEL`
-- `SOVEREIGN_INFERENCE_TOKEN`, or per-model `SOVEREIGN_GPT_TOKEN` / `SOVEREIGN_GLM_TOKEN`
+- `SOVEREIGN_OPENAI_MODEL`, or per-actor `SOVEREIGN_ACTOR_A_MODEL` / `SOVEREIGN_ACTOR_B_MODEL`
+- `SOVEREIGN_INFERENCE_TOKEN`, or per-actor `SOVEREIGN_ACTOR_A_TOKEN` / `SOVEREIGN_ACTOR_B_TOKEN`
 - `SOVEREIGN_HTTP_HOST` / `SOVEREIGN_HTTP_PORT`
 - `SOVEREIGN_CONTROL_TOKEN`
 - `SOVEREIGN_UPSTREAM_TIMEOUT_MS`
@@ -169,7 +171,7 @@ select public.h205f22_duel_create_same_point_v4(
   '{"semantic_point":"exact engineering decision to develop"}'::jsonb,
   'SOVEREIGN_ONLY',
   'openai/gpt-oss-20b',
-  'zai-org/GLM-4.7-Flash'
+  'openai/gpt-oss-20b'
 );
 ```
 
@@ -194,6 +196,19 @@ The readback contains the persisted low-level event/tick ledger and the immutabl
 
 ## Tariff independence
 
-`SOVEREIGN_ONLY` V4 sessions never use Cloudflare/Vercel managed inference. Cloudflare/Vercel/OpenAI/Z.ai hosted APIs may be optional accelerators or control surfaces, but the local V4 executor is independent of them.
+`SOVEREIGN_ONLY` V4 sessions never use Cloudflare/Vercel managed inference. Cloudflare/Vercel/OpenAI hosted APIs may be optional accelerators or control surfaces, but the local V4 executor is independent of them.
 
 This removes managed inference tariff gates. It does not remove the physical cost of GPU/CPU, RAM, storage, electricity, or network capacity.
+
+
+## Legacy DB-slot compatibility
+
+The immutable V4 schema predates the ChatGPT-only migration and stores the two pair positions as `GPT` and `GLM`. These labels are now **storage coordinates only**:
+
+- legacy DB slot `GPT` = active `ACTOR_A`;
+- legacy DB slot `GLM` = active `ACTOR_B`;
+- both active actors are `provider=OPENAI`, `platform=CHATGPT`;
+- a recovered historical row whose model is a GLM/Z.ai model fails closed before inference;
+- new interactive relays use `h205f22_duel_create_chatgpt_relay_v1` and `h205f22_duel_submit_chatgpt_peer_v1` with truthful `chatgpt:actor-a:*` / `chatgpt:actor-b:*` peer IDs.
+
+Historical migrations/evidence are preserved and remain readable. They do not grant active GLM routing authority.
