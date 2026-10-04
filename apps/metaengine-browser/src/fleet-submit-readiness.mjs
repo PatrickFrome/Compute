@@ -10,7 +10,7 @@ import {
 
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
-const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
+const ACTIVE_AGENT_READINESS_PHASES = new Set(['PRE_TYPE']);
 const HASH_RE = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
@@ -81,20 +81,20 @@ export function evaluateFleetSubmitReadiness({
   const selectedTab = String(selected_tab_id || '');
   const readinessPhase = String(phase || 'PRE_CLICK').toUpperCase();
   const semanticPlatform = String(platform || 'CHATGPT').toUpperCase();
-  const glmLane = semanticPlatform === AGENT_PLATFORM_ID;
-  const phases = glmLane ? GLM_READINESS_PHASES : READINESS_PHASES;
+  const activeAgentLane = semanticPlatform === AGENT_PLATFORM_ID;
+  const phases = activeAgentLane ? ACTIVE_AGENT_READINESS_PHASES : READINESS_PHASES;
 
   if (!phases.has(readinessPhase)) {
-    return Object.freeze({ ready: false, reason: glmLane ? 'GLM_LANE_IS_SINGLE_PHASE_PRE_TYPE_ONLY' : 'READINESS_PHASE_INVALID', authority_effect: false });
+    return Object.freeze({ ready: false, reason: activeAgentLane ? 'ACTIVE_AGENT_LANE_IS_SINGLE_PHASE_PRE_TYPE_ONLY' : 'READINESS_PHASE_INVALID', authority_effect: false });
   }
-  // D-C2 (2026-09-19): readiness is TAB-SCOPED on the GLM lane. The GLM lane
+  // D-C2 (2026-09-19): readiness is TAB-SCOPED on the active agent lane. The active agent lane
   // never required foreground selection in effect (D-S2: the bootstrap types
   // and Enter-submits on unselected, unrendered tabs — semantic addressing is
   // geometry-independent), and the dispatch no longer grabs SELECT_TAB, so a
   // foreground mismatch is reported as an observation instead of failing the
   // submit gate. The legacy ChatGPT lane keeps its foreground gate untouched.
   const foreground = selectedTab === expectedTab;
-  if (!glmLane && selectedTab && selectedTab !== expectedTab) {
+  if (!activeAgentLane && selectedTab && selectedTab !== expectedTab) {
     return Object.freeze({ ready: false, reason: 'TAB_NOT_FOREGROUND_EXACT', authority_effect: false });
   }
   if (!expectedTab || !frameTab || frameTab !== expectedTab || observedTab !== expectedTab) {
@@ -106,7 +106,7 @@ export function evaluateFleetSubmitReadiness({
   const width = Number(frame?.viewport?.width || 0);
   const height = Number(frame?.viewport?.height || 0);
 
-  // GLM agent platform lane: chat.z.ai exposes no named STOP/SEND controls, so
+  // active agent platform lane: the active fleet uses provider-specific native submit readback, so
   // readiness is the exact foreground/incarnation binding plus a unique textbox
   // composer addressable through its semantic_ref. Submit is the SEMANTIC_TYPE
   // Enter path with composer-cleared / new-conversation readback inside the
@@ -117,8 +117,8 @@ export function evaluateFleetSubmitReadiness({
   // while the CDP semantic lane stays fully functional — the supervisor
   // bootstrap already types and Enter-submits on unselected, unrendered tabs
   // (semantic addressing is geometry-independent by design). The viewport is
-  // therefore reported as an observation, never as a GLM submit gate.
-  if (glmLane) {
+  // therefore reported as an observation, never as a active-agent submit gate.
+  if (activeAgentLane) {
     // R98: AGENT_HOME is a provisioning proof, not a property of every
     // conversation frame. Once promotion created the real z.ai Agent session,
     // task readiness consumes the durable origin proof that binds this exact
