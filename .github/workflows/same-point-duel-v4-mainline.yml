@@ -8,6 +8,7 @@ on:
       - "supabase/migrations/*duel*.sql"
       - "tests/test_sovereign_*"
       - "tests/test_same_point_duel_v4_*"
+      - "tests/test_same_point_duel_chatgpt_actor_compat.py"
       - ".github/workflows/same-point-duel-v4-mainline.yml"
   push:
     branches:
@@ -18,6 +19,7 @@ on:
       - "supabase/migrations/*duel*.sql"
       - "tests/test_sovereign_*"
       - "tests/test_same_point_duel_v4_*"
+      - "tests/test_same_point_duel_chatgpt_actor_compat.py"
       - ".github/workflows/same-point-duel-v4-mainline.yml"
 
 permissions:
@@ -43,6 +45,10 @@ jobs:
         run: python tests/test_same_point_duel_v4_lineage.py
       - name: Verify independent peer relay semantics
         run: python tests/test_same_point_duel_v4_peer_relay.py
+      - name: Verify ChatGPT actor DB compatibility
+        run: python tests/test_same_point_duel_chatgpt_actor_compat.py
+      - name: Verify ChatGPT actor policy
+        run: python tests/test_sovereign_chatgpt_actor_policy.py
 
   typescript:
     runs-on: ubuntu-24.04
