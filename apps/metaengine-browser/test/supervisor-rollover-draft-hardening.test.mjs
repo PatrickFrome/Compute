@@ -33,10 +33,10 @@ const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', sema
 function conversationFrame(text = '') {
   return {
     url: CONVERSATION,
-    title: 'Z.ai',
+    title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Send a Message', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
     ],
   };
 }
@@ -44,10 +44,10 @@ function conversationFrame(text = '') {
 function rootFrame({ draftLength = 0 } = {}) {
   return {
     url: ROOT,
-    title: 'Z.ai',
+    title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
-      { role: 'textbox', name: 'How can I help you today?', semantic_ref: COMPOSER_REF, backend_node_id: 196, value_length: draftLength, value_sha256: draftLength ? sha256('x'.repeat(draftLength)) : null },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 196, value_length: draftLength, value_sha256: draftLength ? sha256('x'.repeat(draftLength)) : null },
     ],
   };
 }
@@ -91,7 +91,7 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
       } else {
         tabs.set(tab_id, { frame: rootFrame({ draftLength: rootDraftLength }), url: ROOT });
       }
-      return { tab_id, url: blank ? '' : ROOT, kind: 'GLM_CHAT', role: 'USER' };
+      return { tab_id, url: blank ? '' : ROOT, kind: 'CHATGPT', role: 'USER' };
     }
     if (action === 'CLOSE_TAB') {
       closed.push(String(command.payload?.tab_id || ''));
