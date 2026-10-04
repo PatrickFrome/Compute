@@ -155,7 +155,7 @@ test('ChatGPT-only restore retires exact legacy z.ai roots but preserves convers
   assert.equal(result.state, 'RESTORED');
   assert.equal(result.skipped_legacy_provider_roots, 2);
   assert.equal(result.continuity_expected_tab_count, 2);
-  assert.equal(result.tab_cardinality.state, 'CONTINUED');
+  assert.equal(result.tab_cardinality.state, 'CONTINUOUS');
   assert.equal(result.restored_tabs, 1);
   assert.deepEqual(actions.filter((a) => a.action === 'NEW_TAB').map((a) => a.payload.url), ['https://chat.z.ai/c/history']);
   assert.equal(actions.some((a) => a.payload?.url === 'https://chat.z.ai/'), false);
