@@ -37,7 +37,7 @@ function seedKeepalive(statePath) {
 
 function frameFor(url, { composer = true, generating = false } = {}) {
   const targets = [];
-  if (composer) targets.push({ role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-1', value_length: 0 });
+  if (composer) targets.push({ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: 0 });
   if (generating) targets.push({ role: 'button', name: 'Stop' });
   return { url, text_excerpt: 'supervisor transcript excerpt', semantic_targets: targets };
 }
@@ -90,7 +90,7 @@ function makeHarness(statePath, { seedProvesConversation = true, wakeProves = tr
             suppressed: false,
             url: NEW_CONVERSATION,
             text_excerpt: text,
-            semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-next', value_length: 0 }],
+            semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-next', value_length: 0 }],
             authority_effect: true,
           };
         }
