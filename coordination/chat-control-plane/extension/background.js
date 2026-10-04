@@ -152,9 +152,9 @@
     }
     inFlight.add(id);
     try {
-      const tab=await resolveTab(command,s); let result;
-      if(command.target_platform==="GLM_ZAI"){if(typeof globalThis.A2_GLM_TRUSTED_SEND!=="function")throw new Error("glm_trusted_send_unavailable");result=await globalThis.A2_GLM_TRUSTED_SEND(tab.id,command);}
-      else {if(typeof globalThis.A2_CHATGPT_TRUSTED_SEND!=="function")throw new Error("chatgpt_trusted_send_unavailable");result=await sendChatgpt(tab,command);}
+      const tab=await resolveTab(command,s);
+      if(typeof globalThis.A2_CHATGPT_TRUSTED_SEND!=="function")throw new Error("chatgpt_trusted_send_unavailable");
+      const result=await sendChatgpt(tab,command);
       const status=String(result?.status||"FAILED_CLOSED"),executionClass=executionClassFor(status,result);
       const envelope={status,execution_class:executionClass,target_platform:command.target_platform,target_url:targetUrl(command,await settings()),tab_id:tab.id,clicked_send_button:result?.clicked_send_button===true||result?.ok===true,transport_trace_id:result?.transport_trace_id||null,verification:result?.verification||null,recovery:result?.recovery||null,dispatch_group_sha256:command.dispatch_group_sha256||null,launch_order:command.launch_order||null,predecessor_command_id:command.predecessor_command_id||null,ordering_basis:command.ordering_basis||null,authority_effect:false,captured_at:new Date().toISOString()};
       if(["ACTUATED","VERIFIED"].includes(executionClass))await rememberCompleted(command,envelope);
