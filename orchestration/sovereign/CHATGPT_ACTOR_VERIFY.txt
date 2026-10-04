@@ -1,0 +1,3 @@
+Verification-only branch marker.
+Product source tree under test is work/chatgpt-only-agent-fleet-v2 @ 9d527032a1aa3910191d0430bda2934d265109cd.
+This file carries no runtime authority and exists only to trigger path-filtered SAME_POINT_DUEL_V4 CI.
