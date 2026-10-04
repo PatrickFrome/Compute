@@ -62,6 +62,18 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertNotIn("messages:", persisted_peer)
         self.assertNotIn("snapshot:", persisted_peer)
 
+    def test_modern_supabase_secret_keys_are_not_sent_as_bearer(self):
+        self.assertIn("SUPABASE_SECRET_KEYS", self.edge)
+        self.assertIn("SERVICE_ROLE.split('.').length === 3", self.edge)
+        self.assertIn("headers.authorization = `Bearer ${SERVICE_ROLE}`", self.edge)
+        self.assertNotIn("return { apikey: SERVICE_ROLE, authorization:", self.edge)
+
+    def test_missing_legacy_a2_frontier_is_observable_and_command_fail_closed(self):
+        self.assertIn("A2_FRONTIER_UNAVAILABLE", self.edge)
+        self.assertIn("if (a2.online !== true) return null;", self.edge)
+        self.assertIn("online: false", self.edge)
+        self.assertIn("currentMain: null", self.edge)
+
     def test_current_main_never_learns_from_historical_base_sha(self):
         learner = self.edge.split("function findExplicitMainSha", 1)[1].split("function currentMainFromMessages", 1)[0]
         self.assertIn("current_main_sha", learner)
