@@ -163,21 +163,25 @@ test('R84 desktop gateway semantic port closes upgraded sockets under Browser li
 });
 
 
-test('R108 canonical z.ai conversation normalization remains strict and is not Agent proof', () => {
+test('R108 canonical ChatGPT conversation normalization is strict and retired z.ai is never active Agent proof', () => {
   assert.throws(
     () => normalizeAgentPlatformConversationUrl('api-session-123'),
     /fleet_transport_conversation_origin_invalid/,
   );
   assert.throws(
-    () => normalizeAgentPlatformConversationUrl('http://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'),
+    () => normalizeAgentPlatformConversationUrl('http://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'),
     /fleet_transport_conversation_origin_invalid/,
   );
   assert.throws(
     () => normalizeAgentPlatformConversationUrl('https://example.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'),
     /fleet_transport_conversation_origin_invalid/,
   );
+  assert.throws(
+    () => normalizeAgentPlatformConversationUrl('https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'),
+    /fleet_transport_conversation_origin_invalid/,
+  );
   assert.equal(
-    normalizeAgentPlatformConversationUrl('https://chat.z.ai/c/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/'),
-    'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    normalizeAgentPlatformConversationUrl('https://www.chatgpt.com/c/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/'),
+    'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
   );
 });
