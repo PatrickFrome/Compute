@@ -9,6 +9,7 @@ MIGRATION = ROOT / "supabase" / "migrations" / "20260825213000_a2_chat_bridge_re
 ATOMIC_MIGRATION = ROOT / "supabase" / "migrations" / "20260827140000_a2_chat_bridge_remote_atomic_command_v2.sql"
 RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql"
 CHATGPT_ONLY_MIGRATION = ROOT / "supabase" / "migrations" / "20261004061500_a2_chat_bridge_chatgpt_only_v1.sql"
+EXECUTION_FENCE_MIGRATION = ROOT / "supabase" / "migrations" / "20261004101500_a2_chat_bridge_execution_class_fence_v1.sql"
 BOOTSTRAP = ROOT / "coordination" / "chat-control-plane" / "extension" / "bootstrap-config.js"
 AMPLIFIER_POLICY = ROOT / "coordination" / "amplifier-loop" / "AMPLIFIER_LOOP_V1.md"
 AMPLIFIER_SEEDS = ROOT / "coordination" / "amplifier-loop" / "seed-amplifiers.json"
@@ -31,6 +32,7 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         cls.atomic_migration = ATOMIC_MIGRATION.read_text()
         cls.rls = RLS_MIGRATION.read_text()
         cls.chatgpt_only = CHATGPT_ONLY_MIGRATION.read_text()
+        cls.execution_fence = EXECUTION_FENCE_MIGRATION.read_text()
         cls.bootstrap = BOOTSTRAP.read_text()
         cls.amplifier_policy = AMPLIFIER_POLICY.read_text()
         cls.amplifier_seeds = json.loads(AMPLIFIER_SEEDS.read_text())
@@ -73,6 +75,18 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("if (a2.online !== true) return null;", self.edge)
         self.assertIn("online: false", self.edge)
         self.assertIn("currentMain: null", self.edge)
+
+    def test_ambiguous_external_effect_is_permanently_non_retriable(self):
+        sql = self.execution_fence
+        self.assertIn("execution_class text null", sql)
+        self.assertIn("'AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED'", sql)
+        self.assertIn("v_terminal_no_retry", sql)
+        self.assertIn("coalesce(v_row.clicked_send_button,false)", sql)
+        self.assertIn("'terminal_no_retry', v_terminal_no_retry", sql)
+        self.assertIn("pg_advisory_xact_lock", sql)
+        self.assertIn("terminalNoRetryCommand(same)", self.edge)
+        self.assertIn("executionClassForRemoteResult", self.edge)
+        self.assertIn("Unknown failures are not proof of pre-actuation safety", self.edge)
 
     def test_current_main_never_learns_from_historical_base_sha(self):
         learner = self.edge.split("function findExplicitMainSha", 1)[1].split("function currentMainFromMessages", 1)[0]
