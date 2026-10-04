@@ -78,3 +78,28 @@ test('canonical convergence policy names ChatGPT as active provider', async () =
   assert.doesNotMatch(canonical, /authenticated z\.ai Agent Web UI sessions/);
   assert.doesNotMatch(canonical, /post-update z\.ai Agent E2E evidence/);
 });
+
+
+test('agent tool Edge route is ChatGPT-only before DB issuance', async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const edge = await fs.readFile(path.join(here, '..', 'supabase', 'a2-browser-native-supervisor-v1', 'index.ts'), 'utf8');
+  const start = edge.indexOf('async function issueTool');
+  const end = edge.indexOf('async function health', start);
+  assert.ok(start >= 0 && end > start, 'issueTool source block must be present');
+  const issueTool = edge.slice(start, end);
+  assert.match(issueTool, /p_platform:'CHATGPT'/);
+  assert.doesNotMatch(issueTool, /p_platform:'GLM_ZAI'/);
+});
+
+test('DB command authority rejects active GLM while retaining terminal history', async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const sql = await fs.readFile(
+    path.join(here, '..', '..', '..', 'supabase', 'migrations', '20261004094000_browser_supervisor_chatgpt_only_platform_v1.sql'),
+    'utf8',
+  );
+  assert.match(sql, /platform is distinct from 'GLM_ZAI'/);
+  assert.match(sql, /status not in \('PENDING','LEASED'\)/);
+  assert.match(sql, /not valid/);
+  assert.match(sql, /validate constraint a2_browser_supervisor_command_no_active_legacy_platform_ck/);
+  assert.doesNotMatch(sql, /delete\s+from/i, 'historical evidence must not be deleted');
+});
