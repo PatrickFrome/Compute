@@ -136,6 +136,26 @@ export async function listProviders(): Promise<Record<string, { ready: boolean; 
 
 export interface ProviderChoice { provider: "openai" | "gateway"; modelId: string; label: string }
 
+type ChatCompletionPayload = {
+  choices?: Array<{
+    finish_reason?: unknown;
+    message?: { content?: unknown };
+  }>;
+};
+
+export function extractCompletedChatText(payload: unknown, providerLabel = "openai"): string {
+  const row = payload as ChatCompletionPayload;
+  const choice = Array.isArray(row?.choices) ? row.choices[0] : null;
+  if (!choice) throw new Error(`${providerLabel}_chat_response_choice_missing`);
+  const finishReason = String(choice.finish_reason ?? "").trim().toLowerCase();
+  if (finishReason !== "stop") {
+    throw new Error(`${providerLabel}_chat_response_not_completed:${finishReason || "missing"}`);
+  }
+  const content = typeof choice.message?.content === "string" ? choice.message.content.trim() : "";
+  if (!content) throw new Error(`${providerLabel}_chat_response_empty`);
+  return content;
+}
+
 // ── R73: TLS-проба канала gateway (боевой случай R72: сеть песочницы режет TLS до
 // ai.gateway.vercel.dev — failover тратил 2 ретрая на заведомо мёртвый канал каждый раз).
 // Кэш здоровья 5 мин: любая HTTP-ответка (даже 401/404) = TLS жив; сетевое исключение =
@@ -264,8 +284,8 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
       const ra = r.headers.get("retry-after");
       throw new Error(`gateway HTTP ${r.status}${ra ? ` (retry-after: ${parseInt(ra, 10) || 1}s)` : ""}: ${(await r.text()).slice(0, 300)}`);
     }
-    const j = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    return j.choices?.[0]?.message?.content ?? "";
+    const j = await r.json();
+    return extractCompletedChatText(j, "gateway");
   }
 
   const key = loadOpenAiKey();
@@ -282,8 +302,8 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
     const ra = r.headers.get("retry-after");
     throw new Error(`openai HTTP ${r.status}${ra ? ` (retry-after: ${parseInt(ra, 10) || 1}s)` : ""}: ${(await r.text()).slice(0, 300)}`);
   }
-  const j = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return j.choices?.[0]?.message?.content ?? "";
+  const j = await r.json();
+  return extractCompletedChatText(j, "openai");
 }
 
 

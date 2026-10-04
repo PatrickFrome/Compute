@@ -739,7 +739,7 @@ export async function agentChatTurn(sessionId: string, userText: string): Promis
       emit("AGENT_CHAT_STEP", { session_id: sessionId, step, kind: "tool", tool, ms: Date.now() - tTool, preview: observation.slice(0, 140) }, sess.agent_id, null);
       history.push({ role: "user", content: `[observation] ${observation}` });
     }
-    if (!reply && !hardError) reply = "(ход завершён без reply — см. шаги и observation в истории)";
+    if (!reply && !hardError) hardError = "agent_reply_missing_after_max_steps";
   } catch (e) {
     hardError = e instanceof Error ? e.message : String(e);
   }

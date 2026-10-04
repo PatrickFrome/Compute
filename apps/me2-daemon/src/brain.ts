@@ -12,6 +12,7 @@
  * Zero-authority: план НЕ enqueue-ит задачи сам — оператор видит steps и решает.
  */
 import { chat } from "../providers";
+import { activeAgentModelTag } from "./inference";
 import { memSearch, memTouch, memBlockEconomy, memWrite, memoryStatus } from "./memory";
 import { emit } from "../store";
 import { recordSpan } from "./otel";
@@ -52,7 +53,8 @@ export async function brainThink(goalRaw: string): Promise<BrainThought & { thou
     block.block ? `\n${block.block}` : "",
     recalled.length ? `\nРЕЛЕВАНТНЫЕ ЗАПИСИ: ${recalled.slice(0, 4).map((r) => `${r.key} (${r.kind})`).join("; ")}` : "",
   ].join("\n");
-  const raw = await chat("zai:default", [
+  const model = activeAgentModelTag();
+  const raw = await chat(model, [
     { role: "system", content: sys },
     { role: "user", content: user },
   ], { temperature: 0.3, lane: "P2" }); // брейн — фон (G11)
@@ -73,7 +75,7 @@ export async function brainThink(goalRaw: string): Promise<BrainThought & { thou
 
   const thought: BrainThought = {
     goal: goal.slice(0, 300), summary, steps, risks,
-    memory_used: block.used.map((u) => u.id), mem_saved_pct: econ.metrics.saved_pct, ms, model: "zai:default",
+    memory_used: block.used.map((u) => u.id), mem_saved_pct: econ.metrics.saved_pct, ms, model,
   };
   emit("BRAIN_THOUGHT", { goal: thought.goal, steps: steps.length, ms, memory_used: thought.memory_used.length, mem_saved_pct: thought.mem_saved_pct });
   recordSpan("brain.think", { "me2.ms": ms, "me2.steps": steps.length, "me2.mem_used": thought.memory_used.length }, t0);
