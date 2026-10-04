@@ -48,3 +48,8 @@ assert "tsx src/control.ts" in START
 assert "tsx src/same_point_v4.ts" in START
 
 print("Sovereign endpoint contract guards: PASS")
+
+assert 'legacy_provider_endpoint_retired' in CONTROL
+assert 'url.pathname.startsWith("/glm/")' in CONTROL
+assert 'url.pathname.startsWith("/gpt/")' in CONTROL
+assert 'role_endpoints: ["/primary/v1", "/critic/v1"]' in CONTROL
