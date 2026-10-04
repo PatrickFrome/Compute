@@ -7,15 +7,15 @@ RECOVERY = (ROOT / "supabase/migrations/20260824074927_same_point_duel_v4_recove
 RUNNER = (ROOT / "orchestration/sovereign/src/same_point_v4.ts").read_text(encoding="utf-8")
 PACKAGE = (ROOT / "orchestration/sovereign/package.json").read_text(encoding="utf-8")
 
-# One semantic point is exactly two simultaneous waves, never a sequential GPT->GLM chat.
+# One semantic point is exactly two simultaneous waves, never a sequential provider chat.
 assert "SAME_POINT_DUEL_V4" in MIGRATION
 assert "jsonb_build_array('PROPOSE','REBUT')" in MIGRATION
 assert "EVIDENCE_FIRST_ONE_ACTION_V1" in MIGRATION
 assert "OBSERVABLE_ENGINEERING_REASONING_V1" in MIGRATION
 assert "p_gpt_model,p_glm_model,2" in MIGRATION
 assert RUNNER.count("Promise.all([") >= 2
-assert 'actorVisible("GPT", lease, read, wave)' in RUNNER
-assert 'actorVisible("GLM", lease, read, wave)' in RUNNER
+assert 'actorVisible("PRIMARY", lease, read, wave)' in RUNNER
+assert 'actorVisible("CRITIC", lease, read, wave)' in RUNNER
 
 # Public engineering reasoning is explicit; hidden chain-of-thought is not used as shared state.
 for field in (
@@ -63,6 +63,8 @@ assert "h205f22_same_point_v4_ready" in FENCING
 assert "SAME_POINT_V4_WAKE_NOTIFIED" in FENCING
 assert 'const RUNNER_ID = `sovereign:v4:' in RUNNER
 assert 'const CHANNEL = "h205f22_same_point_v4_ready"' in RUNNER
+assert 'provider: "OPENAI"' in RUNNER
+assert 'platform: "CHATGPT"' in RUNNER
 
 # Crash recovery after PROPOSE must restore the persisted causal view before REBUT.
 assert "v_readback := public.h205f22_duel_read_lockstep_v2(d.duel_id,0)" in RECOVERY
@@ -75,7 +77,7 @@ assert '"start": "bash scripts/start-all.sh"' in PACKAGE
 assert '"start:all": "bash scripts/start-all.sh"' in PACKAGE
 assert '"start:v4": "tsx src/same_point_v4.ts"' in PACKAGE
 assert '"start:control": "tsx src/control.ts"' in PACKAGE
-assert '"start:legacy": "tsx src/index.ts"' in PACKAGE
+assert "sovereign_legacy_runner_retired_chatgpt_only" in PACKAGE
 
 # The runner itself contains no managed-inference endpoint dependency.
 for forbidden in ("ai-gateway.vercel.sh", "api.cloudflare.com/client/v4", "api.openai.com", "api.z.ai"):
