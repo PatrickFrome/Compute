@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { SupervisorKeepalive, buildSupervisorWakeMessage } from '../src/supervisor-keepalive.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
@@ -21,14 +22,16 @@ function keepaliveHarness() {
   return { make, state: () => structuredClone(stored), advance: (ms) => { now += ms; } };
 }
 
-function idleFrame(text = '') {
+function idleFrame(text = '', draft = '') {
   return {
+    tab_id: 'tab1',
+    target_id: 'webcontents:1',
     url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
-      { role: 'button', name: 'Send' },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }
@@ -100,6 +103,7 @@ test('lifecycle automatically sends the next supervisor development cycle after 
   const statePath = path.join(dir, 'keepalive.json');
   let isGenerating = false;
   let typed = '';
+  let draft = '';
   let sendCount = 0;
   const sessionMonitor = {
     observe({ tab_id, frame }) {
@@ -128,14 +132,21 @@ test('lifecycle automatically sends the next supervisor development cycle after 
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed) : idleFrame(typed);
+    if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed) : idleFrame(typed, draft);
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type, false);
+      assert.equal(isGenerating, false);
+      typed = String(command.payload?.text || '');
+      draft = typed;
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
       sendCount += 1;
       isGenerating = true;
-      typed = String(command.payload?.text || '');
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      draft = '';
+      return { effect_state: 'PROVEN_GENERATING', composer_cleared: true, new_conversation_observed: false, stop_observed: true, automatic_retry_allowed: false, authority_effect: true };
     }
-    if (command.action === 'TYPED_CLICK') throw new Error('second send click must not be dispatched on the ChatGPT semantic-submit path');
     throw new Error(`unexpected_action:${command.action}`);
   };
   const runtime = new SupervisorLifecycleRuntime({

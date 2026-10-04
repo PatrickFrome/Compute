@@ -8,7 +8,7 @@ LEGACY = (ROOT / "orchestration/sovereign/src/index.ts").read_text(encoding="utf
 PACKAGE = (ROOT / "orchestration/sovereign/package.json").read_text(encoding="utf-8")
 README = (ROOT / "orchestration/sovereign/README.md").read_text(encoding="utf-8")
 
-# Managed inference must not be required for sovereign sessions.
+# Historical migration guarantees remain readable and are not rewritten by the OpenAI-only source slice.
 assert "SOVEREIGN_ONLY" in MIGRATION
 assert "tariff_dependency',false" in MIGRATION
 assert "OPEN_WEIGHT_SELF_HOSTED" in MIGRATION
@@ -32,11 +32,12 @@ assert "SOVEREIGN_ONLY' and v_hosted" in MIGRATION
 assert "HOSTED_ONLY' and v_sovereign" in MIGRATION
 
 # The local runner is event-driven in the hot path; periodic activity is recovery only.
-assert 'listen h205f22_duel_ready_v1' in RUNNER
+assert 'await client.query(`listen ${CHANNEL}`)' in RUNNER
+assert 'const CHANNEL = "h205f22_same_point_v4_ready"' in RUNNER
 assert 'notification' in RUNNER
 assert 'reconcile()' in RUNNER
 assert 'DUEL_RECOVERY_MS' in RUNNER
-assert 'SOVEREIGN_PERSISTENT_RUNNER' in RUNNER
+assert 'SOVEREIGN_SAME_POINT_V4' in RUNNER
 
 # PRIMARY and CRITIC are independent OpenAI actors. GPT/GLM survive only as
 # database wire slots required by the immutable historical pair RPC/schema.
@@ -44,28 +45,29 @@ assert 'actorVisible("PRIMARY"' in RUNNER
 assert 'actorVisible("CRITIC"' in RUNNER
 assert 'logical_role: actor' in RUNNER
 assert 'provider: "OPENAI"' in RUNNER
-assert 'platform: "CHATGPT"' in RUNNER
+assert 'platform: "OPENAI_API"' in RUNNER
 assert "h205f22_duel_submit_pair_v3" in RUNNER
 assert "h205f22_duel_submit_rebut_finalize_v4" in RUNNER
 assert 'legacy_wire_slot: wireActor(actor)' in RUNNER
 
-# No active ZAI/GLM inference configuration or hosted vendor endpoint is allowed.
-for source in (RUNNER, CONTROL):
-    for forbidden in ("ai-gateway.vercel.sh", "api.cloudflare.com/client/v4", "api.openai.com", "api.z.ai", "zai-org/GLM", "SOVEREIGN_GLM_URL", "SOVEREIGN_GLM_MODEL", "SOVEREIGN_GLM_TOKEN"):
-        assert forbidden not in source
-
-# Two independent local/private OpenAI-compatible contexts stay available.
-assert 'SOVEREIGN_PRIMARY_URL' in RUNNER
-assert 'SOVEREIGN_CRITIC_URL' in RUNNER
-assert 'http://127.0.0.1:8001' in RUNNER
-assert 'http://127.0.0.1:8002' in RUNNER
-assert '/v1/chat/completions' in RUNNER
-assert 'finishReason !== "stop"' in RUNNER
-assert '/primary/v1/chat/completions' in CONTROL
-assert '/critic/v1/chat/completions' in CONTROL
-assert "sovereign_legacy_runner_retired_chatgpt_only" in PACKAGE
-assert "Do not expose raw vLLM to the public Internet" in README
-assert "loopback/private LAN" in README
+# Active actors A/B are OpenAI only; historical GPT/GLM labels are DB wire aliases.
+POLICY = (ROOT / "orchestration/sovereign/src/inference-policy.ts").read_text(encoding="utf-8")
+assert 'openAiPolicy()' in RUNNER
+assert 'actorConfig(INFERENCE, actor, lease)' in RUNNER
+assert 'requestOpenAiChat(cfg' in RUNNER
+assert 'tariff_dependency: true' in RUNNER
+assert 'agent_id: cfg.agent_id' in RUNNER
+assert 'https://api.openai.com/v1/chat/completions' in POLICY
+assert 'openai_api_key_required' in POLICY
+assert 'SOVEREIGN_OPENAI_API_KEY || env.OPENAI_API_KEY' in POLICY
+assert 'store: false' in POLICY
+assert 'redirect: "error"' in POLICY
+for forbidden in ('SOVEREIGN_GLM_URL', 'SOVEREIGN_GLM_TOKEN', 'zai-org/', 'api.z.ai'):
+    assert forbidden not in RUNNER
+    assert forbidden not in POLICY
+assert 'legacyHint' in POLICY
+assert 'tariff_dependency=true' in README
+assert 'separate authentication' in README
 
 print("Sovereign inference contract guards: PASS")
 

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AGENT_PLATFORM_BOOTSTRAP_MODE,
+  ACTIVE_AGENT_PLATFORM,
+  LEGACY_GLM_PLATFORM,
   AGENT_PLATFORM_HOME_URL,
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
@@ -41,11 +43,14 @@ function rootFrame(overrides = {}) {
 test('active agent platform is ChatGPT/OpenAI and GLM routing is disabled', () => {
   const snapshot = agentPlatformSnapshot();
   assert.equal(AGENT_PLATFORM_ID, 'CHATGPT');
+  assert.equal(ACTIVE_AGENT_PLATFORM, 'CHATGPT');
+  assert.equal(LEGACY_GLM_PLATFORM, 'GLM_ZAI');
   assert.equal(AGENT_PLATFORM_PROVIDER, 'OPENAI');
   assert.equal(AGENT_PLATFORM_HOME_URL, 'https://chatgpt.com/');
   assert.equal(AGENT_PLATFORM_MODEL, 'CHATGPT_ACCOUNT_SELECTED');
   assert.equal(AGENT_PLATFORM_BOOTSTRAP_MODE, 'ROOT_COMPOSER_SEED');
   assert.equal(snapshot.legacy_glm_active_routing, false);
+  assert.equal(snapshot.submit_path, 'TYPE_WITHOUT_SUBMIT_THEN_FRESH_EXACT_SEND_AND_EVENT_READBACK');
   assert.equal(snapshot.authority_effect, false);
 });
 

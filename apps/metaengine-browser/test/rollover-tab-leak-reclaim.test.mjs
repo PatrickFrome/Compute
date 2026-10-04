@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
@@ -35,14 +36,15 @@ function seedKeepalive(statePath) {
   });
 }
 
-function frameFor(url, { composer = true } = {}) {
+function frameFor(url, { composer = true, tabId = '', draft = '' } = {}) {
   return {
+    tab_id: tabId, target_id: `webcontents:${tabId}`,
     url,
     text_excerpt: 'supervisor transcript excerpt',
     viewport: { width: 1200, height: 800 },
     semantic_targets: composer
-      ? [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: 0 }]
-      : [{ role: 'textbox', name: 'Search', semantic_ref: 'sr-search' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-2', value_length: 0 }],
+      ? [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') }, { role: 'button', name: 'Send', semantic_ref: 'send' }]
+      : [{ role: 'textbox', name: 'Search', semantic_ref: 'sr-search' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-2', value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') }, { role: 'button', name: 'Send', semantic_ref: 'send' }],
   };
 }
 
@@ -51,7 +53,7 @@ function frameFor(url, { composer = true } = {}) {
 // (the D-C7 composer-wait motivation). `closeAttemptsBeforeSuccess` wedges the
 // first N CLOSE_TAB commands (the retry-ledger path); the send effect is
 // configurable per test.
-function makeHarness(statePath, { sendEffect = 'AMBIGUOUS', closeAttemptsBeforeSuccess = 0 } = {}) {
+function makeHarness(statePath, { sendEffect = 'PRE_SEND_FAILURE', closeAttemptsBeforeSuccess = 0 } = {}) {
   const calls = [];
   let newTabs = 0;
   let closeAttempts = 0;
@@ -61,6 +63,7 @@ function makeHarness(statePath, { sendEffect = 'AMBIGUOUS', closeAttemptsBeforeS
     { tab_id: 'tab_fleet', url: ROOT, selected: false },
   ];
   const captureCounts = new Map();
+  const drafts = new Map();
   const runtime = new SupervisorLifecycleRuntime({
     getState: async () => ({
       fleet: { agents: [{ tab_id: 'tab_fleet', agent_id: 'agent_x', lifecycle_state: 'ACTIVE' }] },
@@ -91,9 +94,16 @@ function makeHarness(statePath, { sendEffect = 'AMBIGUOUS', closeAttemptsBeforeS
         // Fresh root tabs hydrate: ambiguous multi-textbox surface on the
         // first capture, settled unique composer afterwards.
         const settled = n >= 2;
-        return frameFor(row?.url || ROOT, { composer: settled || row?.url !== ROOT });
+        return frameFor(row?.url || ROOT, { composer: settled || row?.url !== ROOT, tabId: id, draft: drafts.get(id) || '' });
       }
       if (command.action === 'SEMANTIC_TYPE') {
+        assert.equal(command.payload.submit_after_type, false);
+        if (sendEffect === 'PRE_SEND_FAILURE') return { suppressed: true, reason: 'TYPE_EFFECT_AMBIGUOUS' };
+        drafts.set(command.payload.tab_id, command.payload.text);
+        return { replace_verified: true };
+      }
+      if (command.action === 'TYPED_CLICK') {
+        assert.equal(command.payload.chatgpt_submit, true);
         // The native lane's post-submit result carries the surface it landed
         // on: a proven new conversation exposes the conversation URL and a
         // STOP control (generating); an ambiguous send exposes neither.
@@ -101,11 +111,13 @@ function makeHarness(statePath, { sendEffect = 'AMBIGUOUS', closeAttemptsBeforeS
           const id = String(command.payload?.tab_id || '');
           const row = registry.find((t) => t.tab_id === id);
           if (row) row.url = 'https://chatgpt.com/c/newconv-rolled-1234';
+          const text = drafts.get(id) || '';
+          drafts.delete(id);
           return {
             effect_state: sendEffect,
             suppressed: false,
             url: 'https://chatgpt.com/c/newconv-rolled-1234',
-            text_excerpt: 'rolled over',
+            text_excerpt: text,
             semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-next', value_length: 0 }],
           };
         }
@@ -136,7 +148,7 @@ test('D-C7: a failed rollover leak is reclaimed by proof — the retry loop is t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rollover-leak-'));
   const statePath = path.join(dir, 'keepalive.json');
   await seedKeepalive(statePath);
-  const h = makeHarness(statePath, { sendEffect: 'AMBIGUOUS' });
+  const h = makeHarness(statePath, { sendEffect: 'PRE_SEND_FAILURE' });
 
   await drive(h);
   assert.equal(h.newTabs, 1, 'one rollover attempt opened one tab');
@@ -159,7 +171,7 @@ test('D-C7: a wedged CLOSE_TAB stays in the ledger and is retried BEFORE the nex
   const statePath = path.join(dir, 'keepalive.json');
   await seedKeepalive(statePath);
   // Every close stays wedged: the leak can only be retried, never cleared.
-  const h = makeHarness(statePath, { sendEffect: 'AMBIGUOUS', closeAttemptsBeforeSuccess: 99 });
+  const h = makeHarness(statePath, { sendEffect: 'PRE_SEND_FAILURE', closeAttemptsBeforeSuccess: 99 });
 
   await drive(h);
   assert.equal(h.newTabs, 1);

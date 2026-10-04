@@ -271,7 +271,10 @@ export async function chat(model: string, messages: ChatMessage[], opts: { tempe
       const ck = opts.cache === true ? quotaCacheKey(durableModel, messages, opts.temperature) : null;
       if (ck) {
         const hit = quotaCacheGet(ck);
-        if (hit !== null) return hit; // L2: квота не тратится на дедуп
+        if (hit !== null) {
+          if (!hit.trim()) throw new Error("inference_cached_empty_response");
+          return hit; // L2: квота не тратится на дедуп
+        }
       }
       let lastErr: unknown;
       for (let pi = 0; pi < chain.length; pi++) {
@@ -304,13 +307,15 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
     const body: Record<string, unknown> = {
       model: `openai/${modelId}`,
       messages,
+      store: false,
     };
-    // GPT-5.6 reasoning models do not need temperature for the ME2 tool loop.
-    if (opts.temperature !== undefined && !/^gpt-(?:5\.6|6)/i.test(modelId)) body.temperature = opts.temperature;
+    // Reasoning families use their supported default sampling behavior.
+    if (opts.temperature !== undefined && !/^gpt-[5-9](?:[.-]|$)/i.test(modelId)) body.temperature = opts.temperature;
     const r = await fetch("https://ai.gateway.vercel.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      redirect: "error",
       signal: AbortSignal.timeout(120_000),
     });
     if (!r.ok) {
@@ -323,12 +328,13 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
 
   const key = loadOpenAiKey();
   if (!key) throw new Error("openai_no_key");
-  const body: Record<string, unknown> = { model: modelId, messages };
-  if (opts.temperature !== undefined && !/^gpt-(?:5\.6|6)/i.test(modelId)) body.temperature = opts.temperature;
+  const body: Record<string, unknown> = { model: modelId, messages, store: false };
+  if (opts.temperature !== undefined && !/^gpt-[5-9](?:[.-]|$)/i.test(modelId)) body.temperature = opts.temperature;
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    redirect: "error",
     signal: AbortSignal.timeout(120_000),
   });
   if (!r.ok) {
@@ -341,19 +347,65 @@ async function chatOnce(p: ProviderChoice, messages: ChatMessage[], opts: { temp
 
 
 function extractResponsesText(payload: unknown): string {
-  const row = payload as { output_text?: unknown; output?: unknown };
-  if (typeof row?.output_text === "string" && row.output_text.trim()) return row.output_text.trim();
+  const row = payload as { output?: unknown };
   const chunks: string[] = [];
   for (const item of Array.isArray(row?.output) ? row.output : []) {
+    if (item?.type !== "message" || item.role !== "assistant" || item.status !== "completed") continue;
     const content = Array.isArray((item as { content?: unknown })?.content)
       ? (item as { content: unknown[] }).content
       : [];
     for (const part of content) {
       const text = (part as { text?: unknown })?.text;
-      if (typeof text === "string" && text.trim()) chunks.push(text.trim());
+      if ((part as { type?: unknown })?.type === "output_text" && typeof text === "string" && text.trim()) chunks.push(text.trim());
     }
   }
   return chunks.join("\n").trim();
+}
+
+function completedWebSearchText(payload: unknown, maxResults: number): string {
+  const row = payload as { status?: unknown; output?: unknown } | null;
+  if (row?.status !== "completed") throw new Error("openai_web_search_response_not_completed");
+  const output = Array.isArray(row.output) ? row.output : [];
+  const searches = output.filter((item) => item?.type === "web_search_call" && item.status === "completed");
+  if (!searches.length) throw new Error("openai_web_search_call_not_completed");
+  const text = extractResponsesText(payload);
+  if (!text) throw new Error("openai_web_search_empty_response");
+  const sources = new Map<string, { title: string; url: string }>();
+  const normalizedUrl = (value: unknown): string | null => {
+    try {
+      const url = new URL(String(value || ""));
+      return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+    } catch { return null; }
+  };
+  const add = (source: { url?: unknown; title?: unknown }) => {
+    const url = normalizedUrl(source?.url);
+    if (url) sources.set(url, { title: String(source.title || url).slice(0, 300), url });
+  };
+  for (const search of searches) {
+    for (const source of Array.isArray(search.action?.sources) ? search.action.sources : []) add(source);
+  }
+  for (const item of output) {
+    if (item?.type !== "message" || item.status !== "completed") continue;
+    for (const part of Array.isArray(item.content) ? item.content : []) {
+      for (const annotation of Array.isArray(part?.annotations) ? part.annotations : []) {
+        if (annotation?.type === "url_citation") add(annotation);
+      }
+    }
+  }
+  if (!sources.size) throw new Error("openai_web_search_sources_missing");
+  // Generated prose alone cannot establish a source URL. Preserve only links
+  // backed by the completed tool's sources or API citation annotations.
+  const summary = text.replace(/\bhttps?:\/\/[^\s<>"\])]+/gi, (link) => {
+    const exact = normalizedUrl(link);
+    const unpunctuated = normalizedUrl(link.replace(/[.,;:!?]+$/, ""));
+    return (exact && sources.has(exact)) || (unpunctuated && sources.has(unpunctuated))
+      ? link : "[unverified URL omitted]";
+  });
+  return JSON.stringify({
+    schema: "me2.openai.web-search-result.v1", provider: "OPENAI",
+    response_status: "completed", completed_search_calls: searches.map((item) => item.id || null),
+    summary, sources: [...sources.values()].slice(0, maxResults),
+  });
 }
 
 /**
@@ -381,7 +433,8 @@ export async function webSearch(query: string, opts: { lane?: Lane; max_results?
         const body = {
           model,
           tools: [{ type: "web_search" }],
-          tool_choice: "auto",
+          tool_choice: "required",
+          include: ["web_search_call.action.sources"],
           store: false,
           input: [
             {
@@ -399,6 +452,7 @@ export async function webSearch(query: string, opts: { lane?: Lane; max_results?
           method: "POST",
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          redirect: "error",
           signal: AbortSignal.timeout(120_000),
         });
         if (!r.ok) {
@@ -406,9 +460,7 @@ export async function webSearch(query: string, opts: { lane?: Lane; max_results?
           throw new Error(`openai web_search HTTP ${r.status}${ra ? ` (retry-after: ${parseInt(ra, 10) || 1}s)` : ""}: ${(await r.text()).slice(0, 300)}`);
         }
         const payload = await r.json();
-        const text = extractResponsesText(payload);
-        if (!text) throw new Error("openai_web_search_empty_response");
-        return text;
+        return completedWebSearchText(payload, maxResults);
       }, 4, `openai-web-search:${model}`);
     });
     governorReportSuccess(lane);

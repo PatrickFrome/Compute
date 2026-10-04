@@ -7,6 +7,8 @@ on:
       - 'work/client-v1-live-result-readback-v1'
       - 'work/client-v1-admission-recovery-v1'
       - 'work/client-v1-admission-readiness-submit-fence-v1'
+      - 'work/chatgpt-only-agent-fleet-v1'
+      - 'work/chatgpt-only-fenced-submit-v2'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
@@ -14,6 +16,10 @@ on:
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/test/**'
       - 'apps/me2-ui/src/**'
+      - 'apps/me2-daemon/**'
+      - 'orchestration/sovereign/**'
+      - 'tests/test_sovereign*'
+      - 'tests/test_same_point_duel_v4_contract.py'
       - '.github/workflows/browser-agent-result-installer-source-qualification.yml'
 
 permissions:
@@ -68,6 +74,29 @@ jobs:
           bun ci
           test "$(sha256sum bun.lock | awk '{print $1}')" = "$source_lock_sha"
           bun run build
+
+      - name: Install frozen OpenAI daemon dependencies
+        working-directory: apps/me2-daemon
+        run: bun install --frozen-lockfile
+
+      - name: Prove isolated OpenAI daemon policy and independent role contexts
+        working-directory: apps/me2-daemon
+        run: bun test test/inference-policy.test.ts
+
+      - name: Prove isolated OpenAI request and web-search contracts
+        working-directory: apps/me2-daemon
+        run: bun test test/provider-transport.test.ts
+
+      - name: Prove OpenAI A/B request isolation and compatibility contracts
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          set -euo pipefail
+          npm --prefix orchestration/sovereign ci --no-audit --no-fund
+          npm --prefix orchestration/sovereign run check
+          npm --prefix orchestration/sovereign test
+          python tests/test_sovereign_inference_contract.py
+          python tests/test_sovereign_endpoint_contract.py
+          python tests/test_same_point_duel_v4_contract.py
 
       - name: Prove Windows R97 Client visual flow without packaging
         if: matrix.os == 'windows-2025'

@@ -50,7 +50,7 @@ const fleet = {
   }],
 };
 const composer = { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
-const send = { role: 'button', name: 'Send Message' };
+const send = { role:'button',name:'Send Message',backend_node_id:4,semantic_ref:{ schema:'metaengine.native-browser.semantic-ref.v1',semantic_ref_id:'semref_' + 'b'.repeat(64) } };
 const stop = { role: 'button', name: 'Stop' };
 const supervisorTab = 'tab_supervisor';
 
@@ -60,12 +60,12 @@ const state = (selected) => ({
   active_tab: { tab_id: selected },
   tabs: [{ tab_id: supervisorTab, selected: selected === supervisorTab }, { tab_id: lease.tab_id, selected: selected === lease.tab_id }],
 });
-const frame = ({ sent = false } = {}) => ({
+const frame = ({ sent = false,draft = '' } = {}) => ({
   tab_id: lease.tab_id,
   target_id: lease.target_id,
   url: conversationUrl,
   viewport: { width: 1200, height: 700 },
-  semantic_targets: sent ? [composer, stop] : [composer],
+  semantic_targets: sent ? [composer,stop] : [{ ...composer,value_length:draft.length,value_sha256:draft ? crypto.createHash('sha256').update(draft).digest('hex') : null },...(draft ? [send] : [])],
   interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'CHATGPT_ACCOUNT_SELECTED' }] },
   authority_effect: false,
 });
@@ -86,19 +86,22 @@ async function journalFixture() {
 
 function commandHarness(calls, selectedRef, { sentInitially = false } = {}) {
   let captureCount = 0;
+  let draft = '';
+  let sent = sentInitially;
   return async (command) => {
     calls.push(command.action);
     if (command.action === 'FLEET_RECONCILE') return fleet;
     if (command.action === 'SELECT_TAB') { selectedRef.value = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      const sent = sentInitially || captureCount >= 2;
-      return frame({ sent });
+      return frame({ sent,draft });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: !sentInitially, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      assert.equal(command.payload.submit_after_type,false);
+      draft = command.payload.text;
+      return { replace_verified:true,authority_effect:true };
     }
-    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
+    if (command.action === 'TYPED_CLICK') { sent = true; draft = ''; return { effect_state:'PROVEN_GENERATING',automatic_retry_allowed:false,authority_effect:true }; }
     throw new Error(`unexpected_action:${command.action}`);
   };
 }
@@ -125,8 +128,8 @@ test('lost DB receipt survives restart and redelivers receipt without replaying 
   assert.equal(first.dispatch.state, 'DELIVERY_PENDING');
   assert.equal(firstMarkRunning, 1);
   assert.equal(firstCalls.filter((x) => x === 'SEMANTIC_TYPE').length, 1);
-  // active ChatGPT lane: submit is the SEMANTIC_TYPE Enter-first path — no separate Send click.
-  assert.equal(firstCalls.filter((x) => x === 'TYPED_CLICK').length, 0);
+  // active ChatGPT lane: submit follows typed draft readback and exactly one Send click.
+  assert.equal(firstCalls.filter((x) => x === 'TYPED_CLICK').length, 1);
 
   const persistedAfterLoss = new DevOsEffectDeliveryJournal({ statePath });
   await persistedAfterLoss.init();

@@ -20,6 +20,7 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
   const calls = [];
   let surfaceState = tabUrl === ROOT ? 'CHAT_ROOT' : 'CONVERSATION';
   let submitCount = 0;
+  let typedDraft = '';
   const state = {
     tabs: [{ tab_id: TAB_ID, url: tabUrl, selected: false }],
     active_tab: null,
@@ -101,7 +102,7 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
     schema: 'metaengine.native-browser.semantic-ref.v1',
     semantic_ref_id: 'semref_' + char.repeat(64),
   });
-  const frame = () => {
+  const rawFrame = () => {
     const base = {
       schema: 'metaengine.native-browser.perception.v1',
       tab_id: TAB_ID,
@@ -141,6 +142,17 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
     };
   };
 
+  const frame = (...args) => {
+    const out = rawFrame(...args);
+    const composer = out.semantic_targets?.find((row) => row.role === 'textbox' && row.name === 'Message ChatGPT');
+    if (composer) {
+      composer.value_length = typedDraft.length;
+      composer.value_sha256 = typedDraft ? sha256(typedDraft) : null;
+      if (typedDraft) out.semantic_targets.push({ role:'button',name:'Send prompt',backend_node_id:99,semantic_ref:{ schema:'metaengine.native-browser.semantic-ref.v1',semantic_ref_id:'semref_' + '9'.repeat(64) } });
+    }
+    return out;
+  };
+
   const executeCommand = async (command) => {
     calls.push(['command', command.action, command.payload?.accessible_name || command.payload?.key || null]);
     if (command.action === 'CAPTURE') return frame();
@@ -152,20 +164,24 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
       state.tabs[0].url = ROOT;
       return { ok: true, tab_id: TAB_ID, url: ROOT, authority_effect: true };
     }
-    if (command.action === 'TYPED_CLICK') {
-      throw new Error(`unexpected_activation:${surfaceState}:${command.payload.accessible_name}`);
-    }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(surfaceState, 'CHAT_ROOT');
-      assert.equal(command.payload.submit_after_type, true);
+      assert.equal(command.payload.submit_after_type, false);
       assert.equal(command.payload.replace_existing, true);
+      typedDraft = command.payload.text;
+      return { replace_verified:true,authority_effect:true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(surfaceState, 'CHAT_ROOT');
+      assert.equal(command.payload.chatgpt_submit, true);
+      assert.equal(command.payload.accessible_name, 'Send prompt');
+      typedDraft = '';
       submitCount += 1;
       if (bootstrapSucceeds) {
         surfaceState = 'CONVERSATION';
         state.tabs[0].url = CONVERSATION;
       }
       return {
-        effect_state: bootstrapSucceeds ? 'PROVEN_NEW_CONVERSATION' : 'AMBIGUOUS_AFTER_ENTER',
+        effect_state: bootstrapSucceeds ? 'PROVEN_NEW_CONVERSATION' : 'AMBIGUOUS_AFTER_SEND',
         composer_cleared: bootstrapSucceeds,
         new_conversation_observed: bootstrapSucceeds,
         automatic_retry_allowed: false,
@@ -244,7 +260,7 @@ test('restored bare conversation is reset to canonical root and rebuilt as a pro
     assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'only the canonical ChatGPT seed is submitted');
     assert.deepEqual(
       h.calls.filter((row) => row[1] === 'TYPED_CLICK').map((row) => row[2]),
-      [],
+      ['Send prompt'],
     );
   } finally {
     h.cleanup();
@@ -284,7 +300,7 @@ test('root ChatGPT tab is bootstrapped into an isolated conversation before sche
     assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1);
     assert.deepEqual(
       h.calls.filter((row) => row[1] === 'TYPED_CLICK').map((row) => row[2]),
-      [],
+      ['Send prompt'],
     );
     const bootstrapIndex = h.calls.findIndex((row) => row[1] === 'SEMANTIC_TYPE');
     const cycleIndex = h.calls.findIndex((row) => row[1] === '/v1/devos/cycle');

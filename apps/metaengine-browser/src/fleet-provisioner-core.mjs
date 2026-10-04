@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { AGENT_PLATFORM_HOME_URL, normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_PROVIDER, normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { persistFleetStateTargetRevalidation } from './fleet-state-target-revalidation.mjs';
 
@@ -34,6 +34,7 @@ const LEGACY_CAPACITY_AMBIGUITY = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded';
 const CAPACITY_BACKPRESSURE_REASON = 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT';
 const RESTART_STALE_LOST_REASON = 'PHYSICAL_TAB_MISSING_ON_RESTART';
 const GENERATION_FLOOR_STATES = new Set(['REGISTERED', 'PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE', 'LOST']);
+const CONVERSATION_IDENTITY_CONFLICT = 'TRANSPORT_CONVERSATION_IDENTITY_CONFLICT';
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function iso(clock) {
@@ -143,6 +144,35 @@ function normalizeConversationUrl(value) {
   return normalizeAgentPlatformConversationUrl(value);
 }
 
+function loadedInferenceIdentity(row) {
+  let legacyUrl = false;
+  try { legacyUrl = new URL(String(row?.transport_proof?.conversation_url || '')).hostname.toLowerCase() === 'chat.z.ai'; } catch {}
+  const declaredPlatform = String(row?.platform || '').toUpperCase();
+  const declaredProvider = String(row?.provider || '').toUpperCase();
+  const legacyIdentity = legacyUrl || declaredPlatform === 'GLM_ZAI' || declaredProvider === 'ZAI';
+  const platform = declaredPlatform || (legacyIdentity ? 'GLM_ZAI' : AGENT_PLATFORM_ID);
+  const provider = declaredProvider || (legacyIdentity ? 'ZAI' : AGENT_PLATFORM_PROVIDER);
+  return { provider, platform, legacy_read_only: row?.legacy_read_only === true || provider !== AGENT_PLATFORM_PROVIDER || platform !== AGENT_PLATFORM_ID };
+}
+
+function activeInferenceIdentity(agent) {
+  return agent?.provider === AGENT_PLATFORM_PROVIDER && agent?.platform === AGENT_PLATFORM_ID && agent?.legacy_read_only !== true;
+}
+
+function conversationClaim(row) {
+  // Conversation ownership survives transport-proof invalidation at restart.
+  // This is a collision fence only: it never restores transport authority.
+  const durableHash = String(row?.conversation_url_sha256 || '').toLowerCase();
+  if (/^[a-f0-9]{64}$/.test(durableHash)) return durableHash;
+  const proof = row?.transport_proof;
+  if (!proof || proof.transport_stage === 'PRECONVERSATION_ROOT') return null;
+  if (proof.conversation_url) {
+    try { return crypto.createHash('sha256').update(normalizeConversationUrl(proof.conversation_url), 'utf8').digest('hex'); } catch {}
+  }
+  const proofHash = String(proof.conversation_url_sha256 || '').toLowerCase();
+  return /^[a-f0-9]{64}$/.test(proofHash) ? proofHash : null;
+}
+
 function sanitizeLoadedState(input, policy) {
   // Operator fleet target persistence: the loaded file's boot_fleet_target is
   // the ONLY policy field that survives the startup-policy replacement. It
@@ -169,6 +199,7 @@ function sanitizeLoadedState(input, policy) {
     agents.push({
       agent_id: agentId,
       role: String(row.role || 'WORKER').toUpperCase(),
+      ...loadedInferenceIdentity(row),
       ownership: 'FLEET_OWNED',
       lifecycle_state: lifecycle === 'PROVISIONING' ? 'LOST' : lifecycle,
       tab_id: row.tab_id ? String(row.tab_id) : null,
@@ -180,9 +211,27 @@ function sanitizeLoadedState(input, policy) {
       lost_reason: row.lost_reason ? String(row.lost_reason) : null,
       ambiguous_reason: row.ambiguous_reason ? String(row.ambiguous_reason) : null,
       transport_proof: transportProof,
+      conversation_url_sha256: conversationClaim(row),
       automatic_retry_allowed: false,
       authority_effect: false,
     });
+  }
+  const claims = new Map();
+  for (const agent of agents) {
+    if (agent.lifecycle_state === 'RETIRED' || !agent.conversation_url_sha256) continue;
+    const peers = claims.get(agent.conversation_url_sha256) || [];
+    peers.push(agent);
+    claims.set(agent.conversation_url_sha256, peers);
+  }
+  for (const peers of claims.values()) {
+    if (peers.length < 2) continue;
+    for (const agent of peers) {
+      // Do not choose a winner by file order when historical roles shared a
+      // conversation. Both incarnations require explicit reconciliation.
+      agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
+      agent.ambiguous_reason = CONVERSATION_IDENTITY_CONFLICT;
+      agent.transport_proof = null;
+    }
   }
   // Bounded RETIRED history: RETIRED rows hold no slot and no tab, so only the
   // newest RETIRED_HISTORY_LIMIT survive a restart. Everything else is kept
@@ -377,6 +426,7 @@ export class FleetProvisioner {
     return this.#serial(async () => {
       this.#assertReady();
       const agent = this.#requireAgent(agent_id);
+      if (!activeInferenceIdentity(agent)) throw new Error('fleet_transport_legacy_read_only');
       const tabId = String(tab_id || '');
       const targetId = String(target_id || '').toLowerCase();
       const generationEpoch = Number(generation_epoch);
@@ -402,6 +452,7 @@ export class FleetProvisioner {
     return this.#serial(async () => {
       this.#assertReady();
       const agent = this.#requireAgent(agent_id);
+      if (!activeInferenceIdentity(agent)) throw new Error('fleet_transport_legacy_read_only');
       const tabId = String(tab_id || '');
       const targetId = String(target_id || '').toLowerCase();
       const generationEpoch = Number(generation_epoch);
@@ -416,8 +467,16 @@ export class FleetProvisioner {
       const conversationUrl = normalizeConversationUrl(conversation_url);
       const agentSurfaceSha256 = String(agent_surface_sha256 || '').toLowerCase();
       if (!/^[a-f0-9]{64}$/.test(agentSurfaceSha256)) throw new Error('fleet_transport_agent_surface_proof_required');
+      const conversationUrlSha256 = crypto.createHash('sha256').update(conversationUrl, 'utf8').digest('hex');
+      if (this.#state.agents.some((peer) => peer.agent_id !== agent.agent_id
+        && peer.lifecycle_state !== 'RETIRED'
+        && conversationClaim(peer) === conversationUrlSha256)) {
+        throw new Error('fleet_transport_conversation_identity_conflict');
+      }
       agent.transport_proof = {
         schema: 'metaengine.browser.fleet-transport-proof.v1',
+        provider: AGENT_PLATFORM_PROVIDER,
+        platform: AGENT_PLATFORM_ID,
         tab_id: tabId,
         target_id: targetId,
         generation_epoch: generationEpoch,
@@ -429,11 +488,12 @@ export class FleetProvisioner {
         // text control (editing keys ignored, mouse selection defeated,
         // account-synced draft accumulates on every failed replace).
         conversation_url: conversationUrl,
-        conversation_url_sha256: crypto.createHash('sha256').update(conversationUrl, 'utf8').digest('hex'),
+        conversation_url_sha256: conversationUrlSha256,
         agent_surface_sha256: agentSurfaceSha256,
         proven_at: iso(this.#clock),
         authority_effect: false,
       };
+      agent.conversation_url_sha256 = conversationUrlSha256;
       agent.lifecycle_state = 'ACTIVE';
       agent.lost_reason = null;
       agent.ambiguous_reason = null;
@@ -478,7 +538,7 @@ export class FleetProvisioner {
       if (censusProbe && (censusProbe.fleet_at_ceiling || censusProbe.total_at_wall) && !this.#capacityBackpressure) {
         this.#capacityBackpressure = true;
       }
-      const activatable = this.#state.agents.filter((agent) => (
+      const activatable = this.#state.agents.filter((agent) => activeInferenceIdentity(agent) && (
         agent.lifecycle_state === 'REGISTERED'
         || (agent.lifecycle_state === 'LOST' && !isRestartStaleLost(agent))
       ));
@@ -540,6 +600,9 @@ export class FleetProvisioner {
     return {
       agent_id: `agent_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`,
       role: this.#nextRole(),
+      provider: AGENT_PLATFORM_PROVIDER,
+      platform: AGENT_PLATFORM_ID,
+      legacy_read_only: false,
       ownership: 'FLEET_OWNED',
       lifecycle_state: 'REGISTERED',
       tab_id: null,
@@ -551,6 +614,7 @@ export class FleetProvisioner {
       lost_reason: null,
       ambiguous_reason: null,
       transport_proof: null,
+      conversation_url_sha256: null,
       automatic_retry_allowed: false,
       authority_effect: false,
     };
@@ -594,15 +658,16 @@ export class FleetProvisioner {
   #slotCount() {
     const ignoreAmbiguous = globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout');
     return this.#state.agents.filter((a) => (
-      a.lifecycle_state !== 'RETIRED'
+      activeInferenceIdentity(a)
+      && a.lifecycle_state !== 'RETIRED'
       && !isRestartStaleLost(a)
       && !(ignoreAmbiguous && a.lifecycle_state === 'PROVISIONING_AMBIGUOUS')
     )).length;
   }
-  #liveCount() { return this.#state.agents.filter((a) => ['PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE'].includes(a.lifecycle_state)).length; }
+  #liveCount() { return this.#state.agents.filter((a) => activeInferenceIdentity(a) && ['PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE'].includes(a.lifecycle_state)).length; }
   #nextRole() {
     const roles = FLEET_PROFILES[this.#state.policy.profile];
-    const active = this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED');
+    const active = this.#state.agents.filter((a) => activeInferenceIdentity(a) && a.lifecycle_state !== 'RETIRED');
     const counts = new Map(roles.map((r) => [r, 0]));
     for (const agent of active) if (counts.has(agent.role)) counts.set(agent.role, counts.get(agent.role) + 1);
     return [...counts.entries()].sort((a, b) => a[1] - b[1] || roles.indexOf(a[0]) - roles.indexOf(b[0]))[0]?.[0] || roles[0];

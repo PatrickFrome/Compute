@@ -64,7 +64,7 @@ assert "SAME_POINT_V4_WAKE_NOTIFIED" in FENCING
 assert 'const RUNNER_ID = `sovereign:v4:' in RUNNER
 assert 'const CHANNEL = "h205f22_same_point_v4_ready"' in RUNNER
 assert 'provider: "OPENAI"' in RUNNER
-assert 'platform: "CHATGPT"' in RUNNER
+assert 'platform: "OPENAI_API"' in RUNNER
 
 # Crash recovery after PROPOSE must restore the persisted causal view before REBUT.
 assert "v_readback := public.h205f22_duel_read_lockstep_v2(d.duel_id,0)" in RECOVERY
@@ -79,8 +79,13 @@ assert '"start:v4": "tsx src/same_point_v4.ts"' in PACKAGE
 assert '"start:control": "tsx src/control.ts"' in PACKAGE
 assert "sovereign_legacy_runner_retired_chatgpt_only" in PACKAGE
 
-# The runner itself contains no managed-inference endpoint dependency.
-for forbidden in ("ai-gateway.vercel.sh", "api.cloudflare.com/client/v4", "api.openai.com", "api.z.ai"):
+# Active A/B inference is OpenAI-only, independently identified, and tariff-aware.
+assert 'actorConfig(INFERENCE, actor, lease)' in RUNNER
+assert 'requestOpenAiChat(cfg' in RUNNER
+assert 'agent_id: cfg.agent_id' in RUNNER
+assert 'provider: cfg.provider' in RUNNER
+assert 'tariff_dependency: true' in RUNNER
+for forbidden in ('SOVEREIGN_GLM_URL', 'SOVEREIGN_GLM_TOKEN', 'zai-org/', 'api.z.ai', 'tariff_dependency: false'):
     assert forbidden not in RUNNER
 
 print("SAME_POINT_DUEL_V4 contract guards: PASS")

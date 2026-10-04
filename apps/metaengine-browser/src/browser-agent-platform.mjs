@@ -10,7 +10,9 @@
 // not the agent identity itself.
 
 export const AGENT_PLATFORM_SCHEMA = 'metaengine.browser.agent-platform.v1';
-export const AGENT_PLATFORM_ID = 'CHATGPT';
+export const ACTIVE_AGENT_PLATFORM = 'CHATGPT';
+export const LEGACY_GLM_PLATFORM = 'GLM_ZAI';
+export const AGENT_PLATFORM_ID = ACTIVE_AGENT_PLATFORM;
 export const AGENT_PLATFORM_PROVIDER = 'OPENAI';
 export const AGENT_PLATFORM_HOSTS = Object.freeze(['chatgpt.com', 'www.chatgpt.com']);
 export const AGENT_PLATFORM_HOME_URL = 'https://chatgpt.com/';
@@ -45,6 +47,11 @@ export function isAgentPlatformHost(host) {
 export function isAgentPlatformUrl(value) {
   const url = parsedUrl(value);
   return Boolean(url) && isAgentPlatformHost(url.hostname);
+}
+
+export function isLegacyAgentPlatformUrl(value) {
+  const url = parsedUrl(value);
+  return Boolean(url) && url.hostname.toLowerCase() === LEGACY_GLM_HOST;
 }
 
 export function isAgentPlatformConversationUrl(value) {
@@ -233,8 +240,8 @@ export function agentPlatformSnapshot() {
     url_is_agent_surface_authority: false,
     composer_addressing: 'EXACT_CHATGPT_ROLE_NAME_PLUS_SEMANTIC_REF',
     composer_name_is_localized_allowlist: true,
-    submit_path: 'ENTER_FIRST_WITH_EXACT_SEND_FALLBACK_AND_EVENT_READBACK',
-    named_control_click_authority: 'SEND_FALLBACK_ONLY_AFTER_ENTER_NOT_PROVEN',
+    submit_path: 'TYPE_WITHOUT_SUBMIT_THEN_FRESH_EXACT_SEND_AND_EVENT_READBACK',
+    named_control_click_authority: 'ONE_SEND_AFTER_EXACT_TYPED_DRAFT_READBACK',
     legacy_glm_active_routing: false,
     authority_effect: false,
   });

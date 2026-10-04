@@ -18,20 +18,26 @@ for route in (
     '"/metrics"',
     '"/status"',
     '"/v1/models"',
-    '"/gpt/v1/models"',
-    '"/glm/v1/models"',
-    '"/gpt/v1/chat/completions"',
-    '"/glm/v1/chat/completions"',
+    '"/primary/v1/models"',
+    '"/critic/v1/models"',
+    '"/primary/v1/chat/completions"',
+    '"/critic/v1/chat/completions"',
     '"/v4/duels"',
 ):
     assert route in CONTROL
 assert "decision|wake" in CONTROL
 
 # Role proxies pin exact configured model identities and stream responses.
-assert "input.model = cfg.model" in CONTROL
-assert 'SOVEREIGN_GPT_URL || "http://127.0.0.1:8001"' in CONTROL
-assert 'SOVEREIGN_GLM_URL || "http://127.0.0.1:8002"' in CONTROL
-assert '"/v1/chat/completions"' in CONTROL
+POLICY = (ROOT / "orchestration/sovereign/src/inference-policy.ts").read_text(encoding="utf-8")
+assert 'requestOpenAiChat(cfg, await readJson(req)' in CONTROL
+assert 'model: openAiModel(cfg.model)' in POLICY
+assert 'https://api.openai.com/v1/chat/completions' in POLICY
+assert '"/agent-a/v1/chat/completions"' in CONTROL
+assert '"/agent-b/v1/chat/completions"' in CONTROL
+assert 'error: "legacy_provider_endpoint_retired"' in CONTROL
+assert 'openAiModel(input.critic_model || input.agent_b_model || input.glm_model || CRITIC_MODEL)' in CONTROL
+assert 'provider: "OPENAI", platform: "OPENAI_API"' in CONTROL
+assert '/v1/chat/completions' in CONTROL
 assert "AsyncIterable<Uint8Array>" in CONTROL
 
 # Local control creates/reads/signals V4 through the fenced DB protocol.

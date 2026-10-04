@@ -5,6 +5,7 @@ import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
+import { submitFencedChatGptPrompt } from './chatgpt-fenced-submit.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
 import { SupervisorBootstrapKeepalive } from './supervisor-bootstrap-keepalive.mjs';
@@ -261,14 +262,15 @@ export class SupervisorLifecycleRuntime {
         external_confirmation_required_for_continuation: false,
         terminal_requires_user_message: false,
         restart_resumable: true,
-        restart_pending_wake_reconciliation: 'COMPOSER_HASH_OR_TRANSCRIPT_PROOF_V1',
-        restart_rollover_reconciliation: 'ROLLOVER_ATTEMPT_COMPOSER_HASH_OR_TRANSCRIPT_PROOF_V1',
+        restart_pending_wake_reconciliation: 'POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1',
+        restart_rollover_reconciliation: 'ROLLOVER_POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1',
         prompt_plaintext_persisted: false,
         orphaned_stall_stop_only: true,
-        ambiguous_terminal_retirement: true,
+        ambiguous_terminal_retirement: false,
         active_wake_terminal_retirement: 'EXACT_WAKE_TAB_GENERATION_V1',
         ambiguous_same_wake_retry: false,
-        wake_send_transport: 'SEMANTIC_TYPE_SUBMIT_EVENT_LATCH_V1',
+        ambiguous_submit_requires_explicit_recovery: true,
+        wake_send_transport: 'TYPE_FRESH_DRAFT_READBACK_SINGLE_SEND',
         initial_conversation_bootstrap: 'DEDICATED_ROOT_EXACT_WAKE_V1',
         authority_effect: false,
       },
@@ -377,44 +379,15 @@ export class SupervisorLifecycleRuntime {
       };
       return true;
     }
-    const composer = composerTarget(frame);
-    if (row.terminal_ready === true
-      && composer?.value_sha256 === sha256(message)
-      && this.#canActuate() === true) {
-      // GLM platform: the composer still holding the exact message is the
-      // proof the prior Enter never submitted; the continuation re-submits the
-      // same logical wake through the Enter lane (no named SEND control).
-      if (!composer?.semantic_ref) return false;
-      const continuationArmed = await this.#keepalive.markAmbiguousContinuationAttempt({
-        wake_id: pending.wake_id,
-        tab_id: tab.tab_id,
-        composer_sha256: composer.value_sha256,
-      });
-      if (!continuationArmed) return false;
-      await this.#execute({
-        action: 'SEMANTIC_TYPE',
-        payload: { tab_id: String(tab.tab_id), role: 'textbox', accessible_name: composer.name, semantic_ref: composer.semantic_ref, text: message, replace_existing: true, submit_after_type: true },
-        platform: AGENT_PLATFORM_ID,
-      });
-      const readback = await this.#observeSendReadback(tab.tab_id, pending.wake_id);
-      if (readback.ok) {
-        await this.#keepalive.resolveAmbiguous({ observed_sent: true });
-        this.#activateRequest(pending, tab.tab_id, true);
-        this.#lastRecovery = {
-          action: 'RESTART_TYPED_WAKE_SEND_RECOVERED', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
-          proof: 'DURABLE_SINGLE_CONTINUATION_FENCE_THEN_POSITIVE_SEND_READBACK', confirmed: true, ambiguous: false,
-          prompt_retyped: false, automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
-        };
-        return true;
-      }
-      this.#lastRecovery = {
-        action: 'RESTART_TYPED_WAKE_SEND_AMBIGUOUS', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
-        proof: 'DURABLE_SINGLE_CONTINUATION_FENCE_BEFORE_CLICK', confirmed: false, ambiguous: true,
-        prompt_retyped: false, automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
-      };
-      return true;
-    }
-    return false;
+    // A retained draft or an idle surface cannot prove that an ambiguous Send
+    // never executed. Preserve the durable intent until positive readback or
+    // explicit recovery; no automatic click, retype, or fresh wake is allowed.
+    this.#lastRecovery = {
+      action:'AMBIGUOUS_WAKE_READBACK_REQUIRED', wake_id:pending.wake_id, tab_id:String(tab.tab_id),
+      proof:'NO_POSITIVE_SEND_READBACK', confirmed:false, ambiguous:true,
+      automatic_retry_allowed:false, at:new Date().toISOString(), authority_effect:false,
+    };
+    return true;
   }
 
   async #observeSupervisor(tab, state) {
@@ -429,26 +402,6 @@ export class SupervisorLifecycleRuntime {
       const recovered = await this.#recoverAmbiguousWakeFromFrame(tab, frame, row, keepalive);
       keepalive = this.#keepalive.snapshot();
       if (recovered) return { frame, row };
-    }
-    if (row.terminal_ready === true && keepalive.pending_wake?.ambiguous_at) {
-      const retiredWakeId = String(keepalive.pending_wake.wake_id || '');
-      await this.#keepalive.retireAmbiguousAfterTerminal({
-        tab_id: tab.tab_id,
-        generation_epoch: row.generation_epoch,
-        reason: 'SUPERVISOR_TERMINAL_BOUNDARY_CONFIRMED',
-      });
-      this.#lastRecovery = {
-        action: 'AMBIGUOUS_WAKE_RETIRED_AFTER_TERMINAL',
-        wake_id: retiredWakeId,
-        tab_id: String(tab.tab_id),
-        generation_epoch: row.generation_epoch,
-        confirmed: true,
-        ambiguous: false,
-        automatic_retry_allowed: false,
-        at: new Date().toISOString(),
-        authority_effect: false,
-      };
-      keepalive = this.#keepalive.snapshot();
     }
 
     const activeRetirement = this.#activeRequest ? evaluateActiveWakeTerminalRetirement({
@@ -549,28 +502,23 @@ export class SupervisorLifecycleRuntime {
         this.#lastError = `supervisor_root_seed:${seed.reason}`;
         return { ok: false, reason: seed.reason, clicked: seed.clicked === true, event_driven_readback: true };
       }
+      clicked = seed.clicked === true;
       before = seed.frame || before;
       const conversationBox = composerTarget(before);
       if (conversationBox) box = conversationBox;
     }
-    // Persisted wake intent already fences this logical effect. Submit through the
-    // semantic command's CDP event latch so type + send has one physical boundary
-    // and one positive readback path. Once submit dispatch starts, any exception is
-    // conservatively ambiguous and must never fall through to a second click.
-    clicked = true;
-    const submitted = await this.#execute({
-      action: 'SEMANTIC_TYPE',
-      payload: {
-        tab_id: tabId,
-        role: 'textbox',
-        accessible_name: box.name,
-        semantic_ref: box.semantic_ref,
-        text: message,
-        replace_existing: true,
-        submit_after_type: true,
-      },
-      platform: AGENT_PLATFORM_ID,
-    });
+    // Persisted wake intent fences this logical effect. Type without submission,
+    // prove the fresh draft, then perform one Send with the CDP outcome latch.
+    // Once Send dispatch starts, uncertainty never permits a second click.
+    let submitted;
+    try {
+      submitted = await submitFencedChatGptPrompt({
+        executeCommand: this.#execute, tab_id: tabId, frame: before, text: message,
+        beforeSend: async () => { clicked = true; },
+      });
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error).slice(0, 180), clicked, event_driven_readback: true };
+    }
     if (submitted?.suppressed === true) {
       const reason = String(submitted.reason || 'SEMANTIC_SUBMIT_SUPPRESSED');
       const preEffect = ['SEMANTIC_REF_REOBSERVE_REQUIRED','CHATGPT_SERVICE_THROTTLED'].includes(reason);
@@ -590,24 +538,13 @@ export class SupervisorLifecycleRuntime {
         : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked: true, event_driven_readback: true };
     }
 
-    // Compatibility only for injected/legacy executors that do not advertise a
-    // submit effect state. Current Browser executors never take this branch.
-    // Compatibility executor path: do not invent a second authority plane — the compatibility path
-    // re-submits through the same Enter lane using the live composer ref.
-    const compatFrame = await this.#capture(tabId);
-    const compatComposer = composerTarget(compatFrame);
-    if (!compatComposer?.semantic_ref) throw new Error('supervisor_composer_not_unique');
-    await this.#execute({
-      action: 'SEMANTIC_TYPE',
-      payload: { tab_id: tabId, role: 'textbox', accessible_name: compatComposer.name, semantic_ref: compatComposer.semantic_ref, text: message, replace_existing: true, submit_after_type: true },
-      platform: AGENT_PLATFORM_ID,
-    });
+    // Missing receipt state permits readback only, never a second submit.
     const readback = await this.#observeSendReadback(tabId, positiveMarker);
     return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
   }
 
   // R-SUP-SEED: root-surface conversation bootstrap (see #typeAndSend).
-  // One SEMANTIC_TYPE (submit_after_type) with the tiny seed, bounded
+  // Two-phase fenced submission of the tiny seed, bounded
   // conversation-URL readback (6×700ms — the dispatch readback contract; the
   // 2s command latch alone can miss the async SPA navigation), then a bounded
   // generation drain — the real submit is only safe on an idle surface.
@@ -616,21 +553,18 @@ export class SupervisorLifecycleRuntime {
   // suppressed seed mirrors the real-submit suppression semantics
   // (#typeAndSend): a provably pre-effect reason is a clean abort
   // (clicked=false), anything else stays conservatively ambiguous
-  // (clicked=true) so the D-S1 proof-based retirement bounds the retry.
+  // (clicked=true), retaining the original attempt for positive readback.
   async #seedRootConversation(tabId, box) {
-    const submitted = await this.#execute({
-      action: 'SEMANTIC_TYPE',
-      payload: {
-        tab_id: tabId,
-        role: 'textbox',
-        accessible_name: box.name,
-        semantic_ref: box.semantic_ref,
-        text: GLM_SUPERVISOR_CONVERSATION_SEED,
-        replace_existing: true,
-        submit_after_type: true,
-      },
-      platform: AGENT_PLATFORM_ID,
-    });
+    let clicked = false;
+    let submitted;
+    try {
+      submitted = await submitFencedChatGptPrompt({
+        executeCommand: this.#execute, tab_id: tabId, frame: await this.#capture(tabId), text: GLM_SUPERVISOR_CONVERSATION_SEED,
+        beforeSend: async () => { clicked = true; },
+      });
+    } catch (error) {
+      return { ok: false, clicked, reason: String(error?.message || error).slice(0, 180), frame: null };
+    }
     if (submitted?.suppressed === true) {
       const reason = String(submitted.reason || 'SEMANTIC_SUBMIT_SUPPRESSED');
       const preEffect = ['SEMANTIC_REF_REOBSERVE_REQUIRED', 'CHATGPT_SERVICE_THROTTLED'].includes(reason);
@@ -679,7 +613,13 @@ export class SupervisorLifecycleRuntime {
         return true;
       }
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'SEND_WITHOUT_POSITIVE_READBACK');
-      this.#recordComposerBlockingFailure(String(sent.reason || ''));
+      if (!clicked) {
+        await this.#keepalive.resolveAmbiguous({ observed_sent: false });
+        this.#wakeSendFailureCount += 1;
+        this.#lastSendError = { at: new Date().toISOString(), wake_id: prepared.pending.wake_id,
+          reason: String(sent.reason || ''), clicked: false, failure_count: this.#wakeSendFailureCount, authority_effect: false };
+        this.#recordComposerBlockingFailure(String(sent.reason || ''));
+      }
     } catch (e) {
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, clicked ? 'SEND_PATH_AMBIGUOUS' : 'NO_SEND_EFFECT').catch(() => {});
       if (!clicked) await this.#keepalive.resolveAmbiguous({ observed_sent: false }).catch(() => {});
@@ -796,6 +736,7 @@ export class SupervisorLifecycleRuntime {
           await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_PRE_EFFECT_ABORT', { continuation_tab_id: tab.tab_id });
           await this.#keepalive.resolveAmbiguous({ observed_sent: false });
           await this.#keepalive.resume();
+          if (createdHere) await this.#closeFailedBootstrapTab(tab.tab_id);
         }
         return false;
       }
@@ -872,67 +813,14 @@ export class SupervisorLifecycleRuntime {
     }
   }
 
-  // D-S1 bounded retirement for a bootstrap-ambiguous wake whose surface is
-  // observed terminal at the preconversation root with no wake marker in the
-  // transcript and a composer that is either empty or still holding the exact
-  // wake draft. A submitted first message always navigates the root to the
-  // conversation URL, so under those observations the send provably never
-  // landed on this tab: the unresolved wake is retired with zero effect
-  // authority, the runtime resumes RECOVERING with a fresh continuous wake
-  // queued, and a tab still holding the exact dead draft is closed by proof so
-  // the next bootstrap cannot amplify tab cardinality (the historical 7 -> 32
-  // incident vector). Retirement is refused for ambiguity reasons that may
-  // indicate a latch-proven send; those keep the conservative deadlock posture.
+  // Compatibility entrypoint for historical bootstrap records. A root URL,
+  // empty composer or exact retained draft cannot prove the absence of Send.
+  // Only a current failure before the Send boundary permits no-effect recovery.
   async #retireAmbiguousBootstrapWakeWithoutEffect(bootstrapTab, frame, row, keepalive) {
-    const pending = keepalive?.pending_wake;
-    if (!pending?.ambiguous_at || this.#canActuate() !== true) return false;
-    const DRAFT_HELD_REASONS = new Set([
-      'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING',
-      'BOOTSTRAP_SEND_EFFECT_UNKNOWN',
-      'BOOTSTRAP_SEND_PATH_AMBIGUOUS',
-      'SEND_WITHOUT_POSITIVE_READBACK',
-      'TYPE_EFFECT_AMBIGUOUS',
-    ]);
-    if (!DRAFT_HELD_REASONS.has(String(pending.ambiguous_reason || ''))) return false;
-    if (String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''))) return false;
-    const composer = composerTarget(frame);
-    if (!composer) return false;
-    const draftSha = sha256(buildSupervisorWakeMessage({
-      supervisorEpoch: pending.supervisor_epoch,
-      cycleSeq: pending.cycle_seq,
-      wakeId: pending.wake_id,
-      reason: pending.reason,
-    }));
-    const composerEmpty = composer.value_length === 0;
-    const composerHoldsDraft = Boolean(composer.value_sha256) && composer.value_sha256 === draftSha;
-    if (!composerEmpty && !composerHoldsDraft) return false;
-    // A missing value_length is an unproven composer, not an empty one: only a
-    // captured zero (or the exact draft hash) proves the send never landed.
-    const recordedContinuationTab = String(pending.ambiguity_continuation_tab_id || '');
-    const retiredTabId = String(bootstrapTab.tab_id || '');
-    const tabOwnedByThisWake = composerHoldsDraft
-      || (recordedContinuationTab === retiredTabId && composerEmpty);
-    await this.#keepalive.retireAmbiguousAfterTerminal({
-      tab_id: null,
-      generation_epoch: row.generation_epoch,
-      reason: 'AMBIGUOUS_BOOTSTRAP_EFFECT_PROVABLY_ABSENT',
-    });
-    await this.#keepalive.resume();
-    const resumed = this.#keepalive.snapshot();
-    if (!resumed.paused && !resumed.pending_wake && !resumed.active_wake) {
-      await this.#keepalive.enqueueWake(CONTINUOUS_WAKE_REASON, {
-        key: `epoch-${resumed.supervisor_epoch}-cycle-${resumed.cycle_seq}`,
-      });
-    }
-    this.#lastRecovery = {
-      action: 'AMBIGUOUS_BOOTSTRAP_WAKE_RETIRED', wake_id: String(pending.wake_id || ''),
-      tab_id: retiredTabId,
-      proof: 'TERMINAL_ROOT_NO_MARKER_COMPOSER_EMPTY_OR_EXACT_DRAFT',
-      confirmed: true, ambiguous: false, automatic_retry_allowed: false,
-      at: new Date().toISOString(), authority_effect: false,
-    };
-    if (tabOwnedByThisWake) await this.#closeFailedBootstrapTab(retiredTabId);
-    return true;
+    // Historical ambiguous records do not carry a durable negative Send
+    // barrier. Empty/exact drafts are observations, never absence-of-effect
+    // proof. Current pre-Send failures resolve in the clicked:false branch.
+    return false;
   }
 
   async #sweepLeakedBootstrapTabs() {
@@ -1031,56 +919,13 @@ export class SupervisorLifecycleRuntime {
     );
     if (durableTabId && tabs.some((tab) => String(tab?.tab_id || '') === durableTabId)) return false;
 
-    const fleetTabs = new Set((state?.fleet?.agents || []).map((agent) => String(agent?.tab_id || '')).filter(Boolean));
-    const roots = tabs.filter((tab) => (
-      !fleetTabs.has(String(tab?.tab_id || ''))
-      && CHAT_ROOT_RE.test(String(tab?.url || ''))
-    ));
-    if (roots.length !== 1 || this.#canActuate() !== true) return false;
-
-    const root = roots[0];
-    let frame;
-    try { frame = await this.#capture(root.tab_id); } catch { return false; }
-    if (!CHAT_ROOT_RE.test(String(frame?.url || root?.url || '')) || generating(frame)) return false;
-    if (String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''))) return false;
-    const composer = composerTarget(frame);
-    if (!composer || Number(composer.value_length) !== 0) return false;
-    const live = tabLiveness(state, root.tab_id);
-    const row = this.#sessionMonitor.observe({ tab_id: root.tab_id, frame, ...live });
-    if (row.terminal_ready !== true) return false;
-
-    const retiredWakeId = String(pending.wake_id || '');
-    await this.#keepalive.retireAmbiguousAfterProcessBoundary({
-      reason: 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST',
-      replacement_tab_id: root.tab_id,
-    });
+    // Losing the original target across restart strengthens uncertainty; a
+    // different empty root cannot prove absence of the predecessor's Send.
     this.#lastRecovery = {
-      action: 'PROCESS_BOUNDARY_AMBIGUOUS_WAKE_RETIRED',
-      wake_id: retiredWakeId,
-      tab_id: String(root.tab_id),
-      proof: 'DURABLE_PROCESS_BOUNDARY_FENCE_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT',
-      confirmed: true,
-      ambiguous: false,
-      automatic_retry_allowed: false,
-      at: new Date().toISOString(),
-      authority_effect: false,
+      action:'PROCESS_BOUNDARY_EFFECT_READBACK_REQUIRED', wake_id:String(pending.wake_id), tab_id:durableTabId || null,
+      proof:'PREDECESSOR_TARGET_ABSENT_WITH_UNKNOWN_SEND_EFFECT', confirmed:false, ambiguous:true,
+      automatic_retry_allowed:false, at:new Date().toISOString(), authority_effect:false,
     };
-
-    const bootstrapped = await this.#bootstrapSupervisorConversation({ preferredExistingRootTabId: root.tab_id });
-    if (bootstrapped) {
-      this.#lastRecovery = {
-        action: 'PROCESS_BOUNDARY_BOOTSTRAP_RECOVERED',
-        wake_id: this.#keepalive.activeWake()?.wake_id || null,
-        retired_wake_id: retiredWakeId,
-        tab_id: String(root.tab_id),
-        proof: 'RETIRED_PREDECESSOR_THEN_REUSED_UNIQUE_EMPTY_ROOT',
-        confirmed: true,
-        ambiguous: false,
-        automatic_retry_allowed: false,
-        at: new Date().toISOString(),
-        authority_effect: false,
-      };
-    }
     return true;
   }
 
@@ -1244,20 +1089,12 @@ export class SupervisorLifecycleRuntime {
     if (composerMatchesRows.length !== 1 || this.#canActuate() !== true) return false;
     const { tab, frame } = composerMatchesRows[0];
     if (!attempt.tab_id) await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
-    // GLM platform: composer sha256 match proves the typed rollover message
-    // never submitted; re-submit through the Enter lane (no named SEND).
-    const rolloverComposer = composerTarget(frame);
-    if (!rolloverComposer?.semantic_ref) return false;
-    await this.#execute({
-      action: 'SEMANTIC_TYPE',
-      payload: { tab_id: String(tab.tab_id), role: 'textbox', accessible_name: rolloverComposer.name, semantic_ref: rolloverComposer.semantic_ref, text: message, replace_existing: true, submit_after_type: true },
-      platform: AGENT_PLATFORM_ID,
-    });
-    const readback = await this.#observeSendReadback(tab.tab_id, attempt.attempt_id);
-    if (readback.ok) return this.#bindRecoveredRollover(tab.tab_id, readback.observed);
+    // An exact retained draft is not positive evidence that an ambiguous Send
+    // never executed. Rollover recovery observes existing markers only; a new
+    // external effect requires a separately fenced operator recovery intent.
     this.#lastRecovery = {
-      action: 'RESTART_TYPED_ROLLOVER_SEND_AMBIGUOUS', tab_id: String(tab.tab_id), rollover_attempt_id: attempt.attempt_id,
-      proof: 'EXACT_COMPOSER_SHA256_BEFORE_SINGLE_CLICK', prompt_retyped: false,
+      action: 'RESTART_TYPED_ROLLOVER_READBACK_REQUIRED', tab_id: String(tab.tab_id), rollover_attempt_id: attempt.attempt_id,
+      proof: 'EXACT_DRAFT_WITHOUT_POSITIVE_SEND_PROOF', prompt_retyped: false,
       confirmed: false, ambiguous: true, automatic_retry_allowed: false,
       at: new Date().toISOString(), authority_effect: false,
     };
@@ -1286,24 +1123,8 @@ export class SupervisorLifecycleRuntime {
       };
       return true;
     }
-    const row = observed?.row || null;
-    if (row?.terminal_ready !== true) return false;
-    const composer = composerTarget(frame);
-    const message = buildSupervisorWakeMessage({
-      supervisorEpoch: pending.supervisor_epoch,
-      cycleSeq: pending.cycle_seq,
-      wakeId: pending.wake_id,
-      reason: pending.reason,
-    });
-    const unsentProven = Boolean(composer) && composer.value_sha256 === sha256(message);
-    await this.#keepalive.settleRolloverBlockedAmbiguousWake({ observed_sent: false });
-    this.#lastRecovery = {
-      action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_DROPPED', wake_id: pending.wake_id,
-      tab_id: String(supervisor.tab_id || ''),
-      proof: unsentProven ? 'COMPOSER_STILL_HOLDS_EXACT_MESSAGE' : 'TERMINAL_READY_WITHOUT_WAKE_MARKER',
-      confirmed: false, ambiguous: false, at: new Date().toISOString(), authority_effect: false,
-    };
-    return true;
+    // An idle surface without a marker does not settle an unknown Send.
+    return false;
   }
 
   async #settleProvenNoEffectRollover() {
@@ -1364,10 +1185,13 @@ export class SupervisorLifecycleRuntime {
       // R82-BLANK-TAB: the tab is proven to have committed its navigation
       // before the rollover message is typed into it.
       tab = await this.#openCommittedRolloverTab();
+      await this.#keepalive.bindRolloverAttemptTab(tab.tab_id);
       const sent = await this.#typeAndSend(tab.tab_id, message, attempt.attempt_id);
       if (!sent.ok) {
-        await this.#keepalive.markRolloverAmbiguous(sent.reason || 'ROLLOVER_WITHOUT_POSITIVE_READBACK');
-        await this.#markRolloverTabLeaked(tab.tab_id);
+        await this.#keepalive.markRolloverAmbiguous(sent.reason || 'ROLLOVER_WITHOUT_POSITIVE_READBACK', {
+          pre_send_no_effect: sent.clicked === false, expected_attempt_id: attempt.attempt_id,
+        });
+        if (sent.clicked === false) await this.#markRolloverTabLeaked(tab.tab_id);
         return false;
       }
       const observed = sent.observed || await this.#capture(tab.tab_id);
@@ -1384,7 +1208,6 @@ export class SupervisorLifecycleRuntime {
         return true;
       }
       await this.#keepalive.markRolloverAmbiguous('ROLLOVER_WITHOUT_POSITIVE_READBACK');
-      await this.#markRolloverTabLeaked(tab.tab_id);
     } catch (e) {
       const message = String(e?.message || e);
       const durableAttempt = this.#keepalive.snapshot()?.rollover_attempt;
@@ -1412,7 +1235,6 @@ export class SupervisorLifecycleRuntime {
         } catch {}
       }
       if (attempt) await this.#keepalive.markRolloverAmbiguous(`ROLLOVER_ERROR:${message}`).catch(() => {});
-      if (tab?.tab_id) await this.#markRolloverTabLeaked(tab.tab_id);
       this.#lastError = message.slice(0, 240);
     }
     return false;
@@ -1445,17 +1267,9 @@ export class SupervisorLifecycleRuntime {
     throw new Error('rollover_tab_never_committed');
   }
 
-  // D-C5 (live 2026-09-19): ROLLOVER_AMBIGUOUS with no reconciliation
-  // progress is a terminal dead state — wakes do not run in rollover states,
-  // admission close PRESERVES the ambiguity, and restart reconciliation only
-  // works with a positive readback. Live evidence: the rollover sat ambiguous
-  // for 14+ hours while its every-2s candidate scan ALSO starved the idle
-  // maintenance window (D-C6) so the devos task cycle never ran. After this
-  // many consecutive no-progress cycles, the lifecycle re-requests the
-  // rollover: requestRollover(autoRelease) clears the attempt and returns to
-  // ROLLOVER_REQUIRED, so #rollover() opens a FRESH tab (the account-level
-  // root draft was flushed by then) instead of eternally re-scanning the
-  // poisoned attempt tab.
+  // D-C5: a bounded fresh-tab recovery is allowed only with durable proof that
+  // the exact attempt failed before Send. Unknown outcomes retain their binding
+  // indefinitely; elapsed time and missing progress do not authorize replay.
   #rolloverNoProgressCycles = 0;
   #lastAmbiguousRolloverScanAt = 0;
   // ROLLOVER_DEFERRED bounded auto-release (closed-loop audit fix): operator-
@@ -1516,7 +1330,8 @@ export class SupervisorLifecycleRuntime {
           // fresh tab instead of scanning the same poisoned tab forever. The
           // superseded attempt tab is reclaimed by proof (root-only) so the
           // re-request cannot pile fresh leaks on old ones.
-          if (this.#rolloverNoProgressCycles >= 8 && this.#canActuate() === true) {
+          if (this.#rolloverNoProgressCycles >= 8 && this.#canActuate() === true
+            && this.#keepalive.snapshot()?.rollover_attempt?.pre_send_no_effect === true) {
             const supersededAttemptTabId = String(this.#keepalive.snapshot()?.rollover_attempt?.tab_id || '');
             await this.#keepalive.requestRollover('ROLLOVER_AMBIGUOUS_NO_PROGRESS_FRESH_TAB', { autoRelease: true }).catch(() => {});
             this.#rolloverNoProgressCycles = 0;

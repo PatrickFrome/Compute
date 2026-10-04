@@ -604,14 +604,19 @@ export class SupervisorKeepalive {
     return clone(this.#state.rollover_attempt);
   }
 
-  async markRolloverAmbiguous(reason = 'ROLLOVER_SEND_EFFECT_UNKNOWN') {
+  async markRolloverAmbiguous(reason = 'ROLLOVER_SEND_EFFECT_UNKNOWN', { pre_send_no_effect = false, expected_attempt_id = null } = {}) {
     if (!['ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) throw new Error('keepalive_rollover_not_released');
+    if (pre_send_no_effect && (this.#state.state !== 'ROLLOVER_PENDING'
+      || !expected_attempt_id || expected_attempt_id !== this.#state.rollover_attempt?.attempt_id)) {
+      throw new Error('keepalive_rollover_no_effect_attempt_binding_mismatch');
+    }
     this.#state.state = 'ROLLOVER_AMBIGUOUS';
     this.#state.rollover_reason = String(reason).slice(0, 160);
     if (this.#state.rollover_attempt) {
       this.#state.rollover_attempt.ambiguous_at = iso(this.#clock);
       this.#state.rollover_attempt.ambiguous_reason = String(reason).slice(0, 200);
       this.#state.rollover_attempt.automatic_retry_allowed = false;
+      this.#state.rollover_attempt.pre_send_no_effect = pre_send_no_effect === true;
     }
     await this.#persist();
     return this.snapshot();

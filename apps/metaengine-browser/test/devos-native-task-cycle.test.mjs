@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DevOsNativeTaskCycle, assertLiveLeaseBinding, planBacklogCapacity, renderDevosTaskPrompt } from '../src/devos-native-task-cycle.mjs';
@@ -53,7 +54,9 @@ const agentSurfaceControls = [
   semanticButton('Writing', 11852),
   semanticButton('Data Insight', 11858),
 ];
-const send = { role: 'button', name: 'Send prompt' };
+const send = { role: 'button', name: 'Send prompt', semantic_ref: semref('send'), backend_node_id: 4 };
+let typedDraft = '';
+test.beforeEach(() => { typedDraft = ''; });
 const stop = { role: 'button', name: 'Stop generating' };
 const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
@@ -68,7 +71,7 @@ function frame({ url = 'https://chatgpt.com/', stopActive = false, sendVisible =
     state_revision_id: 'rev_' + 'c'.repeat(64),
     url,
     viewport,
-    semantic_targets: [composer, ...agentSurfaceControls, ...(sendVisible ? [send] : []), ...(stopActive ? [stop] : [])],
+    semantic_targets: [{ ...composer, value_length: typedDraft.length, value_sha256: typedDraft ? crypto.createHash('sha256').update(typedDraft).digest('hex') : null }, ...agentSurfaceControls, ...(sendVisible ? [send] : []), ...(stopActive ? [stop] : [])],
     interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
     authority_effect: false,
   };
@@ -138,7 +141,7 @@ test('backlog capacity grows only on the existing heartbeat cycle and is burst b
   assert.deepEqual({ active: p.active, target_agents: p.target_agents, spawn_burst_limit: p.spawn_burst_limit }, { active: true, target_agents: 6, spawn_burst_limit: 4 });
 });
 
-test('cycle dispatches tab-scoped without foreground grab, types with Enter submit, proves generation and never touches selection (D-C2)', async () => {
+test('cycle dispatches tab-scoped without foreground grab, types then fresh-readbacks and clicks one Send, proves generation and never touches selection (D-C2)', async () => {
   const calls = [];
   let selected = supervisorTab;
   let captureCount = 0;
@@ -155,13 +158,14 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true, tab_id: selected }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      return frame({ url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
+      return frame({ url: conversationUrl, stopActive: captureCount > 2, sendVisible: captureCount === 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.payload.submit_after_type, true);
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      typedDraft = command.payload.text;
+      assert.equal(command.payload.submit_after_type, false);
+      return { replace_verified: true, authority_effect: true };
     }
-    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
+    if (command.action === 'TYPED_CLICK') return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, automatic_retry_allowed: false, authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
@@ -169,16 +173,16 @@ test('cycle dispatches tab-scoped without foreground grab, types with Enter subm
   assert.equal(first.dispatch.state, 'RUNNING');
   assert.equal(first.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.equal(first.dispatch.selected_tab_mutation, false, 'D-C2: dispatch is tab-scoped, never foreground-scoped');
-  assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: GLM semantic submit is geometry-independent');
+  assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: ChatGPT semantic submit is geometry-independent');
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SELECT_TAB').length, 0, 'D-C2: no SELECT_TAB is issued anywhere in the dispatch');
   assert.equal(selected, supervisorTab, 'D-C2: the user selection is never touched');
   assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED');
   assert.equal(first.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(selected, supervisorTab);
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 0);
+  assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 1);
   const type = calls.find((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE');
-  assert.equal(type[2].submit_after_type, true);
+  assert.equal(type[2].submit_after_type, false);
   const second = await cycle.cycle();
   assert.equal(second.dispatch.state, 'NO_REDISPATCH');
   assert.equal(first.second_scheduler_loop, false);
@@ -199,11 +203,13 @@ test('proven ChatGPT agent-session submit stays in the canonical conversation wi
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      return frame({ url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
+      return frame({ url: conversationUrl, stopActive: captureCount > 2, sendVisible: captureCount === 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      typedDraft = command.payload.text;
+      return { replace_verified: true, authority_effect: true };
     }
+    if (command.action === 'TYPED_CLICK') return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, automatic_retry_allowed: false, authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
@@ -231,11 +237,13 @@ test('zero viewport proceeds on the active ChatGPT semantic lane (D-S2: geometry
     if (command.action === 'CAPTURE') {
       captureCount += 1;
       // Unrendered fleet tab: 0x0 viewport, exact proven ChatGPT agent conversation.
-      return frame({ viewport: { width: 0, height: 0 }, url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
+      return frame({ viewport: { width: 0, height: 0 }, url: conversationUrl, stopActive: captureCount > 2, sendVisible: captureCount === 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      typedDraft = command.payload.text;
+      return { replace_verified: true, authority_effect: true };
     }
+    if (command.action === 'TYPED_CLICK') return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, automatic_retry_allowed: false, authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
@@ -243,7 +251,7 @@ test('zero viewport proceeds on the active ChatGPT semantic lane (D-S2: geometry
   // The dispatch completes through the geometry-independent semantic lane.
   assert.equal(result.dispatch.state, 'RUNNING');
   assert.ok(commands.includes('SEMANTIC_TYPE'), 'the submit fired despite the 0x0 viewport');
-  assert.equal(commands.includes('TYPED_CLICK'), false);
+  assert.equal(commands.includes('TYPED_CLICK'), true);
 });
 
 test('existing conversation URL alone never proves no-op submit and the submit is not repeated', async () => {
@@ -259,7 +267,8 @@ test('existing conversation URL alone never proves no-op submit and the submit i
     if (command.action === 'FLEET_RECONCILE') return fleet;
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') return frame({ url: conversationUrl, stopActive: false, sendVisible: true });
-    if (command.action === 'SEMANTIC_TYPE') { submits += 1; return { authority_effect: true }; }
+    if (command.action === 'SEMANTIC_TYPE') {
+      typedDraft = command.payload.text; submits += 1; return { authority_effect: true }; }
     if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
@@ -290,13 +299,14 @@ test('user-selected tab after Send is not overwritten by restoration', async () 
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount > 1) selected = 'tab_user_override';
-      return frame({ url: conversationUrl, stopActive: captureCount > 1, sendVisible: false });
+      if (captureCount > 2) selected = 'tab_user_override';
+      return frame({ url: conversationUrl, stopActive: captureCount > 2, sendVisible: captureCount === 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      typedDraft = command.payload.text;
+      return { replace_verified: true, authority_effect: true };
     }
-    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
+    if (command.action === 'TYPED_CLICK') return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, automatic_retry_allowed: false, authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });

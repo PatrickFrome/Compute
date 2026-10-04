@@ -26,6 +26,7 @@
  */
 import { db, emit, listTasks, getMeta, setMeta } from "../store";
 import { agentChatCreate, agentChatTurnAsync, chatSetObjective, chatInFlightCount } from "./agentchat";
+import { activeAgentModelTag } from "./inference";
 import { poolStatus } from "./pool";
 import { breakerStateForDemand } from "./governor";
 
@@ -201,7 +202,7 @@ export function demandTick(opts: { snapshot?: DemandSnapshot; kick?: boolean } =
   }
   // СОЗДАНИЕ — живое
   const title = `Demand·${need.role}`;
-  const sess = agentChatCreate({ role: need.role, title, model: "zai:glm-5.3" });
+  const sess = agentChatCreate({ role: need.role, title, model: activeAgentModelTag() });
   const obj = chatSetObjective(sess.id, need.objective);
   roleLastSet(need.role);
   const d: DemandDecision = {

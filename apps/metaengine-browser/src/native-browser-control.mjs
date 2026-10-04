@@ -23,7 +23,7 @@ import {
 } from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
-import { isAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
+import { isAgentPlatformConversationUrl, isAgentPlatformUrl, isAgentPlatformAuthRedirectUrl } from './browser-agent-platform.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -470,7 +470,7 @@ async function inspectChatGptSubmit(dbg, webContents, { preUrl } = {}) {
   }
   return {
     resolved: false,
-    effect_state: 'PENDING_AFTER_ENTER',
+    effect_state: 'PENDING_AFTER_SEND',
     stop_observed: false,
     new_conversation_observed: false,
     send_control_remaining: sendCount > 0,
@@ -488,7 +488,7 @@ function openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl, timeoutMs = 2
     isResolved: (row) => row?.resolved === true,
     onDeadline: (last, lastError) => ({
       resolved: false,
-      effect_state: 'AMBIGUOUS_AFTER_ENTER',
+      effect_state: 'AMBIGUOUS_AFTER_SEND',
       stop_observed: last?.stop_observed === true,
       new_conversation_observed: last?.new_conversation_observed === true,
       send_control_remaining: last?.send_control_remaining === true,
@@ -758,6 +758,8 @@ async function activateBackendNode(dbg, backendNodeId, beforeDispatch = null) {
   const objectId = String(resolved?.object?.objectId || '');
   if (!objectId) throw new Error('native_semantic_dom_object_unavailable');
   try {
+    // DOM resolution is asynchronous; fence again immediately before click.
+    await beforeDispatch?.();
     const result = await dbg.sendCommand('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: 'function(){if(!this||typeof this.click!=="function")return false;this.click();return true;}',
@@ -934,6 +936,37 @@ export async function executeSemanticCommand(webContents, command) {
     }
 
     if (action === 'TYPED_CLICK') {
+      if (command?.payload?.chatgpt_submit === true) {
+        if (String(command?.platform || '').toUpperCase() !== 'CHATGPT' || target.role !== 'button' || !chatGptControlMatches('SEND', target.name)) {
+          throw new Error('native_chatgpt_submit_requires_exact_send');
+        }
+        const preUrl = clip(webContents.getURL?.() || '', 1200);
+        if (!isAgentPlatformUrl(preUrl) || isAgentPlatformAuthRedirectUrl(preUrl)) throw new Error('native_chatgpt_submit_origin_invalid');
+        const assertDraft = async () => {
+          const currentTree = await dbg.sendCommand('Accessibility.getFullAXTree');
+          const nodes = currentTree?.nodes || [];
+          if (exactChatGptControls(nodes, 'STOP').length > 0) throw new Error('native_chatgpt_generation_already_active');
+          const sends = exactChatGptControls(nodes, 'SEND');
+          if (sends.length !== 1 || sends[0].backend_node_id !== target.backend_node_id) throw new Error('native_chatgpt_send_binding_mismatch');
+          const composers = uniqueSemanticTargets(nodes).filter((row) => isExactChatGptComposer(row, command));
+          if (composers.length !== 1) throw new Error('native_chatgpt_composer_not_unique');
+          const composerNode = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId) === composers[0].backend_node_id);
+          const currentValue = composerNode ? axRawValue(composerNode, 'value') : null;
+          if (!currentValue || currentValue.length !== command.payload.prompt_length || sha256(currentValue) !== command.payload.prompt_sha256) throw new Error('native_chatgpt_typed_draft_not_exact');
+        };
+        await assertDraft();
+        const latch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
+        try {
+          const activation = await activateBackendNode(dbg, target.backend_node_id, async () => {
+            liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
+            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+            await assertDraft();
+            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+          });
+          const { resolved: _resolved, ...observation } = await latch.wait();
+          return { action, target, activation, ...observation, authority_effect: true, event_driven_readback: true, automatic_retry_allowed: false, mouse_geometry_required: false, viewport_geometry_required: false };
+        } finally { latch.close(); }
+      }
       const activation = await activateBackendNode(dbg, target.backend_node_id, async () => {
         liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
@@ -947,6 +980,7 @@ export async function executeSemanticCommand(webContents, command) {
       if (!TEXT_INPUT_ROLES.has(target.role)) throw new Error('native_semantic_type_requires_text_input');
       const submitAfterType = command?.payload?.submit_after_type === true;
       const semanticPlatform = String(command?.platform || '').toUpperCase();
+      if (submitAfterType && semanticPlatform === 'CHATGPT') throw new Error('native_chatgpt_two_phase_submit_required');
       if (submitAfterType && semanticPlatform === 'GLM_ZAI' && !isExactGlmComposer(webContents, target, command)) {
         throw new Error('native_semantic_submit_requires_exact_glm_composer');
       }
@@ -974,7 +1008,7 @@ export async function executeSemanticCommand(webContents, command) {
       // copy of the prompt — exactly the ambiguity this lane prevents. The
       // legacy ChatGPT operator lane keeps its historical unverified replace.
       const replaceRequested = command?.payload?.replace_existing !== false;
-      const verifyReplace = replaceRequested && semanticPlatform === 'GLM_ZAI';
+      const verifyReplace = replaceRequested && ['GLM_ZAI', 'CHATGPT'].includes(semanticPlatform);
       let typeReadback = null;
       let replaceVerified = !verifyReplace;
       let replaceGesture = null;
@@ -1169,70 +1203,8 @@ export async function executeSemanticCommand(webContents, command) {
         }
       }
 
-      const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
-      const sendTargets = exactChatGptControls(readyTree?.nodes || [], 'SEND');
-      if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
-      const outcomeLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
-      try {
-        liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
-        assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-        await dbg.sendCommand('Input.dispatchKeyEvent', {
-          type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
-        });
-        await dbg.sendCommand('Input.dispatchKeyEvent', {
-          type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
-        });
-        let observed = await outcomeLatch.wait();
-        // D-P2 (2026-09-18): the current ChatGPT composer ignores a synthetic
-        // Enter keypress (live-observed: the typed prompt stayed in the composer
-        // and only a physical SEND-control click submitted it). When the
-        // event-driven latch misses the Enter, re-resolve the single SEND
-        // control from a fresh tree and click it through the same bounded
-        // backend-node path used by STOP_GENERATION, then observe a fresh
-        // latch. Enter-first preserves the zero-geometry background-submit
-        // contract; the click fallback runs only when Enter provably produced
-        // no submit. If Enter did submit but the latch missed it, the SEND
-        // control is already gone and the re-resolution fails closed — no
-        // second physical effect is possible.
-        if (observed?.resolved !== true) {
-          const fallbackTree = await dbg.sendCommand('Accessibility.getFullAXTree');
-          const fallbackSends = exactChatGptControls(fallbackTree?.nodes || [], 'SEND');
-          if (fallbackSends.length !== 1) throw new Error(fallbackSends.length ? `native_semantic_send_target_ambiguous:${fallbackSends.length}` : 'native_semantic_send_target_not_found');
-          const fallbackLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
-          try {
-            liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
-            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-            await activateBackendNode(dbg, fallbackSends[0].backend_node_id, async () => {
-              liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
-              assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-            });
-            const fallbackObserved = await fallbackLatch.wait();
-            if (fallbackObserved?.resolved === true) observed = fallbackObserved;
-          } finally {
-            fallbackLatch.close();
-          }
-        }
-        const { resolved: _resolved, ...observation } = observed || {};
-        return {
-          action,
-          target,
-          inserted_chars: text.length,
-          replace_existing: replaceRequested,
-          replace_verified: verifyReplace ? replaceVerified : null,
-          replace_gesture: verifyReplace ? replaceGesture : null,
-          ...(typeReadback || {}),
-          submit_after_type: true,
-          prompt_sha256: sha256(text),
-          prompt_included: false,
-          send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
-          ...observation,
-          event_driven_readback: true,
-          readback_poll_timer_required: false,
-          authority_effect: true,
-        };
-      } finally {
-        outcomeLatch.close();
-      }
+      throw new Error('native_semantic_submit_platform_invalid');
+
     }
 
     throw new Error('native_semantic_action_not_supported');

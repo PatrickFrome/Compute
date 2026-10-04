@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
@@ -10,7 +11,7 @@ const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'e'.repeat(64) };
 const STOP_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'f'.repeat(64) };
 
-function chatgptFrame(text = '', { generating = false } = {}) {
+function chatgptFrame(text = '', { generating = false, draft = '' } = {}) {
   return {
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: 'tab1',
@@ -22,8 +23,9 @@ function chatgptFrame(text = '', { generating = false } = {}) {
     text_excerpt: text,
     viewport: { width: 1200, height: 700 },
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 3 },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 3, value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
       ...(generating ? [{ role: 'button', name: 'Stop generating', semantic_ref: STOP_REF, backend_node_id: 4 }] : []),
+      ...(!generating ? [{ role: 'button', name: 'Send', semantic_ref: 'send' }] : []),
     ],
     authority_effect: false,
   };
@@ -34,6 +36,7 @@ test('trusted supervisor wake uses ChatGPT semantic submit and adaptive hard sta
   const statePath = path.join(dir, 'keepalive.json');
   let monitorNow = Date.parse('2026-10-04T05:00:00Z');
   let typed = '';
+  let draft = '';
   let digestSeq = 0;
   let frozen = false;
   let generating = false;
@@ -51,11 +54,19 @@ test('trusted supervisor wake uses ChatGPT semantic submit and adaptive hard sta
   });
   const executeCommand = async (command) => {
     actions.push(command.action);
-    if (command.action === 'CAPTURE') return chatgptFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`, { generating });
+    if (command.action === 'CAPTURE') return chatgptFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`, { generating, draft });
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.platform, 'CHATGPT');
-      assert.equal(command.payload.submit_after_type, true);
+      assert.equal(command.payload.submit_after_type, false);
       typed = String(command.payload?.text || '');
+      draft = typed;
+      assert.equal(generating, false, 'typing cannot start inference');
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      assert.equal(command.payload.prompt_length, draft.length);
+      draft = '';
       generating = true;
       return {
         effect_state: 'PROVEN_GENERATING',
@@ -70,7 +81,6 @@ test('trusted supervisor wake uses ChatGPT semantic submit and adaptive hard sta
       generating = false;
       return { action: 'STOP_GENERATION', authority_effect: true };
     }
-    if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
     throw new Error(`unexpected_action:${command.action}`);
   };
 
@@ -87,7 +97,7 @@ test('trusted supervisor wake uses ChatGPT semantic submit and adaptive hard sta
   await runtime.start();
   assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
   assert.equal(actions.filter((row) => row === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(actions.includes('TYPED_CLICK'), false);
+  assert.equal(actions.filter((row) => row === 'TYPED_CLICK').length, 1);
   assert.equal(runtime.snapshot().active_request?.same_chat_retry_attempt, 0);
 
   frozen = true;
@@ -113,15 +123,24 @@ test('ChatGPT session generation follows STOP/readback and settles terminal-read
   const statePath = path.join(dir, 'keepalive.json');
   let monitorNow = Date.parse('2026-10-04T05:00:00Z');
   let typed = '';
+  let draft = '';
   let generating = false;
   const getState = async () => ({
     tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return chatgptFrame(typed, { generating });
+    if (command.action === 'CAPTURE') return chatgptFrame(typed, { generating, draft });
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type, false);
       typed = String(command.payload?.text || '');
+      draft = typed;
+      assert.equal(generating, false);
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      draft = '';
       generating = true;
       return {
         effect_state: 'PROVEN_GENERATING',
@@ -171,26 +190,32 @@ test('supervisor wake uses one ChatGPT semantic submit and trusts its event-driv
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-submit-latch-'));
   const statePath = path.join(dir, 'keepalive.json');
   const commands = [];
+  let draft = '';
   const getState = async () => ({
     tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
     commands.push(structuredClone(command));
-    if (command.action === 'CAPTURE') return chatgptFrame();
+    if (command.action === 'CAPTURE') return chatgptFrame('', { draft });
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.platform, 'CHATGPT');
-      assert.equal(command.payload.submit_after_type, true);
+      assert.equal(command.payload.submit_after_type, false);
+      draft = command.payload.text;
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      draft = '';
       return {
-        effect_state: 'PROVEN_COMPOSER_CLEARED',
+        effect_state: 'PROVEN_GENERATING',
         composer_cleared: true,
         new_conversation_observed: false,
-        stop_observed: false,
+        stop_observed: true,
         automatic_retry_allowed: false,
         authority_effect: true,
       };
     }
-    if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
     throw new Error(`unexpected_action:${command.action}`);
   };
   const runtime = new SupervisorLifecycleRuntime({
@@ -204,10 +229,13 @@ test('supervisor wake uses one ChatGPT semantic submit and trusts its event-driv
 
   await runtime.start();
   assert.equal(commands.filter((row) => row.action === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(commands.some((row) => row.action === 'TYPED_CLICK'), false);
+  assert.equal(commands.filter((row) => row.action === 'TYPED_CLICK').length, 1);
+  const typeIndex = commands.findIndex((row) => row.action === 'SEMANTIC_TYPE');
+  const sendIndex = commands.findIndex((row) => row.action === 'TYPED_CLICK');
+  assert.ok(commands.slice(typeIndex + 1, sendIndex).some((row) => row.action === 'CAPTURE'), 'Send follows a fresh draft readback');
   assert.equal(runtime.snapshot().keepalive.state, 'ACTIVE');
   assert.equal(runtime.snapshot().keepalive.ambiguous_history.length, 0);
-  assert.equal(runtime.snapshot().continuous_service.wake_send_transport, 'SEMANTIC_TYPE_SUBMIT_EVENT_LATCH_V1');
+  assert.equal(runtime.snapshot().continuous_service.wake_send_transport, 'TYPE_FRESH_DRAFT_READBACK_SINGLE_SEND');
 
   await fs.rm(dir, { recursive: true, force: true });
 });
@@ -262,21 +290,29 @@ test('process restart fences predecessor wake and backlog before emitting one fr
   }), 'utf8');
 
   let typed = '';
+  let draft = '';
   let submitCount = 0;
   const getState = async () => ({
     tabs: [{ tab_id: 'tab_new', url, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return { ...chatgptFrame(typed), tab_id: 'tab_new' };
+    if (command.action === 'CAPTURE') return { ...chatgptFrame(typed, { draft }), tab_id: 'tab_new' };
     if (command.action === 'SEMANTIC_TYPE') {
-      submitCount += 1;
+      assert.equal(command.payload.submit_after_type, false);
       typed = String(command.payload?.text || '');
+      draft = typed;
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      submitCount += 1;
+      draft = '';
       return {
-        effect_state: 'PROVEN_COMPOSER_CLEARED',
+        effect_state: 'PROVEN_GENERATING',
         composer_cleared: true,
         new_conversation_observed: false,
-        stop_observed: false,
+        stop_observed: true,
         automatic_retry_allowed: false,
         authority_effect: true,
       };

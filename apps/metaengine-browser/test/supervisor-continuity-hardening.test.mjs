@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
@@ -25,20 +26,24 @@ function keepaliveHarness() {
 
 const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'f'.repeat(64) };
 
-function idleFrame(text = '') {
+function idleFrame(text = '', draft = '') {
   return {
+    tab_id: 'tab1',
+    target_id: 'webcontents:1',
     url: CONVERSATION,
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 3 },
-      { role: 'button', name: 'Send' },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 3, value_length: draft.length, value_sha256: crypto.createHash('sha256').update(draft).digest('hex') },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }
 
 function generatingFrame(text = '') {
   return {
+    tab_id: 'tab1',
+    target_id: 'webcontents:1',
     url: CONVERSATION,
     title: 'ChatGPT',
     text_excerpt: text,
@@ -83,7 +88,7 @@ test('tab rebind cannot launder an ambiguous pending wake into WAITING', async (
   assert.ok(successor.pending.cycle_seq > prepared.pending.cycle_seq);
 });
 
-test('restart with ambiguous wake and orphaned hard stall performs STOP-only then starts a fresh successor', async () => {
+test('STOP of an orphaned stall does not prove the unknown wake completed or permit a successor', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-continuity-hardening-'));
   const statePath = path.join(dir, 'keepalive.json');
   const oldWakeId = 'wake_00000000-0000-4000-8000-000000000099';
@@ -126,6 +131,7 @@ test('restart with ambiguous wake and orphaned hard stall performs STOP-only the
   let monitorNow = Date.parse('2026-08-30T14:00:00.000Z');
   let generating = true; // orphaned predecessor generation exists physically
   let typed = '';
+  let draft = '';
   const actions = [];
   const sessionMonitor = new ChatGptSessionMonitor({
     clock: () => monitorNow,
@@ -140,13 +146,21 @@ test('restart with ambiguous wake and orphaned hard stall performs STOP-only the
   });
   const executeCommand = async (command) => {
     actions.push(command.action);
-    if (command.action === 'CAPTURE') return generating ? generatingFrame(typed) : idleFrame(typed);
+    if (command.action === 'CAPTURE') return generating ? generatingFrame(typed) : idleFrame(typed, draft);
     if (command.action === 'STOP_GENERATION') {
       generating = false;
       return { action: 'STOP_GENERATION', authority_effect: true };
     }
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type, false);
       typed = String(command.payload?.text || '');
+      draft = typed;
+      assert.equal(generating, false);
+      return { replace_verified: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') {
+      assert.equal(command.payload.chatgpt_submit, true);
+      draft = '';
       generating = true;
       return {
         effect_state: 'PROVEN_GENERATING',
@@ -157,7 +171,6 @@ test('restart with ambiguous wake and orphaned hard stall performs STOP-only the
         authority_effect: true,
       };
     }
-    if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
     throw new Error(`unexpected_action:${command.action}`);
   };
 
@@ -190,16 +203,13 @@ test('restart with ambiguous wake and orphaned hard stall performs STOP-only the
 
   const snap = runtime.snapshot();
   assert.equal(actions.filter((action) => action === 'STOP_GENERATION').length, 1, 'STOP is bounded to one predecessor generation');
-  assert.equal(snap.keepalive.pending_wake, null);
-  assert.equal(snap.keepalive.ambiguous_history.some((row) => row.wake_id === oldWakeId), true);
-  assert.equal(snap.keepalive.ambiguous_history.find((row) => row.wake_id === oldWakeId)?.automatic_retry_allowed, false);
-  assert.ok(snap.active_request, 'terminal boundary releases a fresh successor wake');
-  assert.notEqual(snap.active_request.wake_id, oldWakeId);
-  assert.ok(snap.keepalive.active_wake.cycle_seq > 6);
-  assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
-  assert.doesNotMatch(typed, new RegExp(oldWakeId));
-  assert.doesNotMatch(typed, /METAENGINE_SAME_WAKE_RETRY_V1/);
-  assert.equal(generating, true, 'fresh successor has positive ChatGPT generation proof');
+  assert.equal(snap.keepalive.pending_wake?.wake_id, oldWakeId);
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.ambiguous_history.length, 0);
+  assert.equal(snap.active_request, null);
+  assert.equal(actions.filter((action) => ['SEMANTIC_TYPE', 'TYPED_CLICK', 'NEW_TAB'].includes(action)).length, 0);
+  assert.equal(typed, '');
+  assert.equal(generating, false);
 
   await fs.rm(dir, { recursive: true, force: true });
 });

@@ -21,6 +21,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, emit, nowIso } from "../store";
+import { activeAgentModelTag, normalizeActiveAgentModelTag } from "./inference";
 
 export type Tier = "T0" | "T1" | "T2";
 
@@ -52,6 +53,13 @@ export interface ClassifierPolicy {
   model: string;           // модель LLM-классификатора (канон Cursor: малая модель)
 }
 
+/** Old operator policy files used the bare transport name `zai`. It is a
+ * compatibility input only; the effective classifier identity is OpenAI. */
+export function normalizeClassifierModel(value: unknown): string {
+  const raw = String(value || "").trim();
+  return raw.toLowerCase() === "zai" ? activeAgentModelTag() : normalizeActiveAgentModelTag(raw);
+}
+
 export interface SandboxPolicy {
   // R64 P0-2 (sec.sandbox-config — «конфигурация как данные», канон Cursor):
   auto_sandbox: boolean;   // классификатор выдаёт вердикт «sandbox» на fs-риски (tier-2 реален); false → ask (R63-поведение)
@@ -79,7 +87,7 @@ const DEFAULTS: PolicyFile = {
     },
   },
   caps: { crons_per_chat: 8, crons_global: 48, cron_min_minutes: 5 },
-  classifier: { enabled: true, llm_enabled: false, timeout_ms: 3000, queue_max: 20, model: "zai" },
+  classifier: { enabled: true, llm_enabled: false, timeout_ms: 3000, queue_max: 20, model: activeAgentModelTag() },
   sandbox: { auto_sandbox: false, net: "deny", extra_hide: [], strict: true, tmp_size: "64m" },
 };
 

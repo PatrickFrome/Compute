@@ -43,25 +43,43 @@ const frame = Object.freeze({
 test('active ChatGPT PRE_TYPE is tab-scoped and does not require foreground geometry', () => {
   const pre=evaluateFleetSubmitReadiness({ ...exact, frame, phase:'PRE_TYPE' });
   assert.equal(pre.ready,true);
-  assert.equal(pre.reason,'READY_FOR_AGENT_TASK_ENTER_SUBMIT');
+  assert.equal(pre.reason,'READY_FOR_TYPE_THEN_SEND_REOBSERVE');
   assert.equal(pre.platform,'CHATGPT');
   assert.equal(pre.viewport_rendered,false);
   assert.equal(pre.send_control,null);
   assert.equal(pre.send_required_before_type,false);
-  assert.equal(pre.send_required_before_click,false);
+  assert.equal(pre.send_required_before_click,true);
   assert.equal(pre.automatic_retry_allowed,false);
   assert.equal(pre.authority_effect,false);
 });
 
-test('active ChatGPT fleet has no second PRE_CLICK effect phase', () => {
+test('active ChatGPT PRE_CLICK requires a fresh exact Send semantic ref', () => {
   const out=evaluateFleetSubmitReadiness({ ...exact, frame, phase:'PRE_CLICK' });
   assert.equal(out.ready,false);
-  assert.equal(out.reason,'ACTIVE_AGENT_LANE_IS_SINGLE_PHASE_PRE_TYPE_ONLY');
+  assert.equal(out.reason,'SEND_CONTROL_NOT_UNIQUE');
   assert.equal(out.authority_effect,false);
+  const ready = evaluateFleetSubmitReadiness({ ...exact, frame: { ...frame, semantic_targets: [...frame.semantic_targets, { role:'button', name:'Send prompt', semantic_ref:semref }] }, phase:'PRE_CLICK' });
+  assert.equal(ready.ready,true);
+  assert.equal(ready.reason,'READY_FOR_TWO_PHASE_SEND');
+  assert.ok(ready.send_control.semantic_ref);
 });
 
 test('active ChatGPT PRE_TYPE still requires exact durable origin proof', () => {
   const out=evaluateFleetSubmitReadiness({ ...exact, agent_origin_proof:null, frame, phase:'PRE_TYPE' });
   assert.equal(out.ready,false);
   assert.equal(out.reason,'AGENT_ORIGIN_PROOF_INVALID');
+});
+
+test('legacy platform never regains an active single-phase task lane', () => {
+  const out = evaluateFleetSubmitReadiness({ ...exact, frame, platform:'GLM_ZAI', phase:'PRE_TYPE' });
+  assert.equal(out.ready,false);
+  assert.equal(out.reason,'LEGACY_AGENT_PLATFORM_READ_ONLY');
+});
+
+test('active ChatGPT generation blocks both readiness phases', () => {
+  for (const phase of ['PRE_TYPE','PRE_CLICK']) {
+    const out = evaluateFleetSubmitReadiness({ ...exact, frame: { ...frame, semantic_targets: [...frame.semantic_targets, { role:'button', name:'Stop generating' }] }, phase });
+    assert.equal(out.ready,false);
+    assert.equal(out.reason,'GENERATION_ALREADY_ACTIVE');
+  }
 });

@@ -14,6 +14,7 @@ import { db, emit, rid } from "../store";
 import { recordSpan } from "./otel";
 import { memSearch } from "./memory";
 import { chat } from "../providers";
+import { activeAgentModelTag } from "./inference";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -74,7 +75,7 @@ export async function rsiPropose(opts: { auto?: boolean; hint?: string } = {}): 
 
   if (ev.lessons.length || hint) {
     try {
-      const raw = await chat("zai:default", [
+      const raw = await chat(activeAgentModelTag(), [
         { role: "system", content: "Ты — RSI-контур ME2 OS. По evidence (уроки памяти, hint) предложи КОНКРЕТНОЕ улучшение системы. Верни СТРОГО JSON: {\"title\": \"короткий заголовок\", \"body_md\": \"markdown: Проблема/Предложение/Шаги внедрения/Риски\"}. Никаких изменений в коде не делаешь — только черновик для оператора." },
         { role: "user", content: JSON.stringify({ hint, lessons: ev.lessons, reward_hack_count: ev.rh }) },
       ], { temperature: 0.4, lane: "P2" }); // RSI — фон (G11)

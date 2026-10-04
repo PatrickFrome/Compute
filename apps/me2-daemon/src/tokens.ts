@@ -30,6 +30,7 @@ export interface TokenRow {
 
 /** Реестр известных токенов системы (ярусы в семантике H2 policy). */
 export const KNOWN_TOKENS: Record<string, { tier: TokenTier; desc: string }> = {
+  OPENAI_API_KEY: { tier: "T1", desc: "OpenAI API inference; configured separately from Browser ChatGPT sign-in" },
   GITHUB_TOKEN_ADMIN: { tier: "T2", desc: "GitHub admin: selfupdate (ff-only sandbox/me2-os), push релизов" },
   GITHUB_TOKEN_SANDBOX: { tier: "T1", desc: "GitHub sandbox: push-токен рабочей ветки" },
   SUPABASE_URL: { tier: "T2", desc: "Supabase project URL: evidence-mirror, DDL-хилер" },

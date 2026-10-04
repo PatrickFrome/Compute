@@ -19,6 +19,7 @@ import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { assertLegacyProviderCommandAllowed } from './legacy-provider-quarantine.mjs';
+import { assertActiveInferenceCommandPolicy } from './active-inference-command-policy.mjs';
 import { AgentObservationPlane } from './agent-observation-plane.mjs';
 import { projectNativeRuntimeObservation, projectClientWorkReadiness } from './client-work-readiness.mjs';
 import { TabNetworkActivityRegistry } from './tab-network-activity.mjs';
@@ -1590,7 +1591,7 @@ function tabForPlatform(platform) {
     try {
       const host = new URL(tab.url).hostname.toLowerCase();
       if (p === 'GLM_ZAI') return host === 'chat.z.ai';
-      if (p === 'CHATGPT') return isAgentPlatformHost(host) || host === 'chat.openai.com';
+      if (p === 'CHATGPT') return host === 'chatgpt.com' || host === 'www.chatgpt.com' || host === 'chat.openai.com';
     } catch {}
     return false;
   };
@@ -1713,6 +1714,7 @@ async function executeNativeSupervisorCommand(command) {
 }
 
 async function executeNativeSupervisorCommandFenced(command) {
+  assertActiveInferenceCommandPolicy(command);
   const action = String(command?.action || '');
   const payload = command?.payload || {};
   // ChatGPT-only execution fence. Historical GLM/Z.ai tabs may still be read,
@@ -1741,6 +1743,7 @@ async function executeNativeSupervisorCommandFenced(command) {
     }).catch(() => {});
   }
   const exactMutationTarget = resolveExactNativeSupervisorMutationTarget(command, { registry, views });
+  if (exactMutationTarget) assertActiveInferenceCommandPolicy(command, { target_url: exactMutationTarget.view?.webContents?.getURL?.() || registry.get(exactMutationTarget.tab_id)?.url });
   if (action === 'POLL') return { ok: true, snapshot: await nativeSupervisorState(), authority_effect: false };
   if (action === 'SET_MODE') {
     const requested = String(payload?.mode || '').toUpperCase();
