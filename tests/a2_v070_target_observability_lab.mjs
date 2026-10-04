@@ -13,7 +13,7 @@ const bindCalls = [];
 const targets = [
   { target_id: 'gpt_primary', provider: 'OPENAI', platform: 'CHATGPT', surface: 'WEB_CHAT', role: 'OPERATOR_PRIMARY', conversation_epoch: 1, conversation_url: 'https://chatgpt.com/c/alpha', status: 'ACTIVE' },
   { target_id: 'gpt_critic', provider: 'OPENAI', platform: 'CHATGPT', surface: 'WEB_CHAT', role: 'CRITIC', conversation_epoch: 1, conversation_url: 'https://chatgpt.com/c/beta', status: 'ACTIVE' },
-  { target_id: 'glm_primary', provider: 'ZAI', platform: 'GLM_ZAI', surface: 'WEB_CHAT', role: 'OPERATOR_PREDECESSOR', conversation_epoch: 1, conversation_url: 'https://chat.z.ai/c/glm', status: 'ACTIVE' }
+  { target_id: 'glm_primary', provider: 'ZAI', platform: 'GLM_ZAI', surface: 'WEB_CHAT', role: 'OPERATOR_PREDECESSOR', conversation_epoch: 1, conversation_url: 'https://chat.z.ai/c/glm', status: 'RETIRED' }
 ];
 
 function normUrl(value) {
@@ -113,10 +113,9 @@ assert.equal(await context.A2_TARGET_OBSERVABILITY.observe({ id: 11, url: 'https
 assert.equal(await context.A2_TARGET_OBSERVABILITY.observe({ id: 99, url: 'https://chatgpt.com/c/unregistered' }, { ...alphaSnapshot, url: 'https://chatgpt.com/c/unregistered' }), null, 'unregistered tab produced health state');
 
 let inventory = await context.A2_TARGET_OBSERVABILITY.inventory();
-assert.equal(inventory.length, 3);
+assert.equal(inventory.length, 2);
 assert.equal(inventory.find((row) => row.target.target_id === 'gpt_primary').health.target_id, 'gpt_primary');
 assert.equal(inventory.find((row) => row.target.target_id === 'gpt_critic').health.target_id, 'gpt_critic');
-assert.equal(inventory.find((row) => row.target.target_id === 'glm_primary').health, null);
 assert.equal(inventory.find((row) => row.target.target_id === 'gpt_primary').health_fresh_for_epoch, true);
 
 // Rollover makes old observation stale without deleting historical health.
@@ -149,7 +148,7 @@ assert.equal(response?.ok, false);
 assert.equal(response?.error, 'target_observability_sender_not_trusted');
 response = await dispatch({ type: 'A2_TARGET_OBSERVABILITY_LIST' }, sidePanel);
 assert.equal(response?.ok, true);
-assert.equal(response.result.length, 3);
+assert.equal(response.result.length, 2);
 
 assert.ok(bindCalls.length >= 2, 'observed trusted tabs were not offered to target registry binding');
 console.log('A2 v0.7.0 target observability contract: PASS', {
