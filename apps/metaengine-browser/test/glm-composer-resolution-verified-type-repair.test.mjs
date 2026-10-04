@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AgentSessionMonitor } from '../src/agent-session-monitor.mjs';
+import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 import { resolveAgentPlatformComposer } from '../src/browser-agent-platform.mjs';
 import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
@@ -150,7 +150,7 @@ test('D-K1 e2e: supervisor wake send resolves the named composer on the two-text
     statePath,
     monitorMs: 5000,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
   });
   await runtime.start();
   assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
@@ -193,7 +193,7 @@ test('D-K3: a pre-effect send failure is durably visible instead of presenting a
     statePath,
     monitorMs: 1,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
   });
   await runtime.start();
   await runtime.cycle({ force: true });
@@ -570,7 +570,7 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
     statePath,
     monitorMs: 1,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
   });
   await runtime.start();
   // start() itself runs one cycle: the FIRST composer-blocking failure lands
