@@ -20,7 +20,7 @@ import { buildSupervisorWakeMessage } from '../src/supervisor-keepalive.mjs';
 //     service within the same tick,
 // (4) unrelated user surfaces and ambiguous evidence keep failing closed.
 
-const ROOT_URL = 'https://chat.z.ai/';
+const ROOT_URL = 'https://chatgpt.com/';
 const WAKE_ID = 'wake_ds1_live_deadlock';
 const STALE_TAB = 'tab_stale_previous_process';
 // Matches seedAmbiguous(): the pending wake belongs to THIS process, which is
@@ -80,7 +80,7 @@ function seedAmbiguous({ continuationTabId = null, continuationAttemptedAt = nul
 }
 
 function rootFrame({ composerSha = null, composerLength = null, marker = false, unrelatedDraft = false } = {}) {
-  const textbox = { role: 'textbox', name: 'How can I help you today?', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 1112 };
+  const textbox = { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 1112 };
   if (composerSha != null) textbox.value_sha256 = composerSha;
   if (composerLength != null) textbox.value_length = composerLength;
   if (unrelatedDraft) {
@@ -89,20 +89,20 @@ function rootFrame({ composerSha = null, composerLength = null, marker = false, 
   }
   return {
     url: ROOT_URL,
-    title: 'Z.ai',
+    title: 'ChatGPT',
     text_excerpt: marker ? `METAENGINE_SUPERVISOR_WAKE_V1 ... ${WAKE_ID} ...` : 'What can I build for you?',
-    semantic_targets: [textbox, { role: 'button', name: 'Select a model', semantic_ref: 'model' }],
+    semantic_targets: [textbox, { role: 'button', name: 'Send', semantic_ref: 'send' }],
   };
 }
 
 function conversationFrame(text = '') {
   return {
-    url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db',
-    title: 'Z.ai',
+    url: 'https://chatgpt.com/c/55fd8c37-00d0-4821-8e56-14f36c7be6db',
+    title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Send a Message', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'b'.repeat(64) }, backend_node_id: 2213 },
-      { role: 'button', name: 'Select a model', semantic_ref: 'model' },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'b'.repeat(64) }, backend_node_id: 2213 },
+      { role: 'button', name: 'Send', semantic_ref: 'send' },
     ],
   };
 }

@@ -42,7 +42,7 @@ function conversationFrame(overrides = {}) {
     tab_id: binding.tab_id,
     target_id: binding.target_id,
     process_incarnation_id: 'process-agent-origin-001',
-    url: 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555',
+    url: 'https://chatgpt.com/c/11111111-2222-4333-8444-555555555555',
     authority_effect: false,
     ...overrides,
   };

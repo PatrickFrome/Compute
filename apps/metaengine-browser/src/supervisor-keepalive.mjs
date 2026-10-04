@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 
 export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
@@ -8,7 +9,6 @@ export const KEEPALIVE_STATES = Object.freeze([
   'PAUSED','RECOVERING','PARKED',
 ]);
 
-const AGENT_PLATFORM_CONVERSATION_RE = /^https:\/\/chat\.z\.ai\/c\/[a-z0-9-]+(?:[/?#].*)?$/i;
 const WAKE_REASONS = new Set([
   'CONTINUE_DEVELOPMENT',
   'WORKER_RESULT_READY','WORKER_FAILED','WORKER_LOST','CI_TERMINAL',
@@ -24,9 +24,11 @@ const clone = (value) => value == null ? value : structuredClone(value);
 const iso = (clock) => new Date(clock()).toISOString();
 
 function normalizeUrl(value) {
-  const url = String(value || '').trim();
-  if (!AGENT_PLATFORM_CONVERSATION_RE.test(url)) throw new Error('keepalive_supervisor_conversation_invalid');
-  return url;
+  try {
+    return normalizeAgentPlatformConversationUrl(value);
+  } catch {
+    throw new Error('keepalive_supervisor_conversation_invalid');
+  }
 }
 
 function sanitizeProcessIncarnationId(value) {

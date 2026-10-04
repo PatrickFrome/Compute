@@ -29,7 +29,7 @@ async function deadlock(h) {
   // reproduce the exact live sequence: wake prepared → send cut ambiguous →
   // composer unclearable on the same conversation → rollover requested.
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab_supervisor' });
+  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab_supervisor' });
   await h.keepalive.enqueueWake('CONTINUE_DEVELOPMENT');
   const wake = await h.keepalive.prepareNextWake();
   await h.keepalive.markWakeAmbiguous(wake.pending.wake_id, 'TYPE_EFFECT_AMBIGUOUS');
@@ -66,7 +66,7 @@ test('a provably unsent wake is dropped from ROLLOVER_REQUIRED and the rollover 
 test('settlement refuses to act outside the ROLLOVER_REQUIRED + ambiguous-pending pair', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.enqueueWake('CONTINUE_DEVELOPMENT');
   const wake = await h.keepalive.prepareNextWake();
   await h.keepalive.markWakeAmbiguous(wake.pending.wake_id, 'TYPE_EFFECT_AMBIGUOUS');

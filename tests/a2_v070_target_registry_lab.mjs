@@ -99,8 +99,13 @@ const h = harness({
 
 await h.context.A2_TARGET_REGISTRY.ready;
 let targets = await h.context.A2_TARGET_REGISTRY.listTargets();
-assert.equal(targets.length, 2);
-assert.equal(JSON.stringify([...targets].map((t) => t.target_id).sort()), JSON.stringify(['glm_primary', 'gpt_primary']));
+assert.equal(targets.length, 1);
+assert.equal(JSON.stringify([...targets].map((t) => t.target_id).sort()), JSON.stringify(['gpt_primary']));
+const legacyTargets = await h.context.A2_TARGET_REGISTRY.listTargets({ includeRetired: true });
+const glmLegacy = legacyTargets.find((t) => t.target_id === 'glm_primary');
+assert.equal(glmLegacy.platform, 'GLM_ZAI');
+assert.equal(glmLegacy.provider, 'ZAI');
+assert.equal(glmLegacy.status, 'RETIRED');
 const gpt = targets.find((t) => t.target_id === 'gpt_primary');
 assert.equal(gpt.platform, 'CHATGPT');
 assert.equal(gpt.provider, 'OPENAI');
@@ -108,6 +113,14 @@ assert.equal(gpt.conversation_url, 'https://chatgpt.com/c/alpha');
 assert.equal(gpt.conversation_epoch, 1);
 assert.equal(Object.hasOwn(gpt, 'tab_id'), false, 'persistent logical target must not contain tab_id');
 
+await assert.rejects(
+  h.context.A2_TARGET_REGISTRY.resolveSelector('GLM_ZAI'),
+  /target_not_found/
+);
+await assert.rejects(
+  h.context.A2_TARGET_REGISTRY.createTarget({ platform: 'GLM_ZAI', conversation_url: 'https://chat.z.ai/c/new' }),
+  /target_platform_legacy_disabled/
+);
 const resolvedLegacy = await h.context.A2_TARGET_REGISTRY.resolveSelector('CHATGPT');
 assert.equal(resolvedLegacy.target_id, 'gpt_primary');
 const live = await h.context.A2_TARGET_REGISTRY.resolveLiveTab('gpt_primary');

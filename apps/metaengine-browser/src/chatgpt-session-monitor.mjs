@@ -99,6 +99,24 @@ export class ChatGptSessionMonitor {
     return { soft: Math.round(soft), hard: Math.round(hard), baseline_ms: baseline == null ? null : Math.round(baseline) };
   }
 
+  // Explicit positive entry used immediately after the native submit boundary
+  // proves a send effect. This closes the short interval before ChatGPT renders
+  // its STOP control without inventing page authority.
+  markGenerationStarted(tabId) {
+    const now = this.#clock();
+    const row = this.#row(tabId);
+    row.generation_epoch += 1;
+    row.generation_started_at = iso(now);
+    row.last_progress_at = iso(now);
+    row.last_progress_source = 'GENERATION_STARTED';
+    row.settle_started_at = null;
+    row.recovery_attempts = 0;
+    row.state = 'GENERATING';
+    row.state_since = iso(now);
+    row.terminal_ready = false;
+    return this.get(tabId);
+  }
+
   observe({ tab_id, frame, physical_health = 'HEALTHY', network_active = false, external_progress = false } = {}) {
     const now = this.#clock();
     const row = this.#row(tab_id);

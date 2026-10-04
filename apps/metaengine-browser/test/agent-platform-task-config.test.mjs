@@ -18,7 +18,7 @@ import {
 
 function frameWithTargets(rows) {
   return {
-    url: 'https://chat.z.ai/',
+    url: 'https://chatgpt.com/',
     semantic_targets: rows.map(([role, name]) => ({
       role,
       name,
@@ -29,12 +29,10 @@ function frameWithTargets(rows) {
 }
 
 
-test('R97: ordinary z.ai Chat root is not an Agent task surface', () => {
+test('ChatGPT root is not admitted without the exact semantic composer', () => {
   const frame = frameWithTargets([
-    ['button', 'ZCode'],
-    ['button', 'Landing Page'],
-    ['button', 'Select a model'],
-    ['textbox', 'How can I help you today?'],
+    ['button', 'Search'],
+    ['textbox', 'Search'],
   ]);
   const surface = classifyAgentPlatformTaskSurface(frame);
   assert.equal(surface.stage, 'CHAT_ROOT');
@@ -42,22 +40,18 @@ test('R97: ordinary z.ai Chat root is not an Agent task surface', () => {
   assert.equal(resolveAgentHomeControls(frame).ready, false);
 });
 
-test('R97: Agent home requires exact Agent + New Task + model + Full-Stack evidence', () => {
+test('ChatGPT root composer is the exact isolated-session bootstrap surface', () => {
   const frame = frameWithTargets([
-    ['button', 'Agent'],
-    ['button', 'New Task'],
-    ['button', 'Select a model'],
-    ['button', 'Full-Stack'],
-    ['button', 'Writing'],
-    ['button', 'Data Insight'],
+    ['textbox', 'Message ChatGPT'],
+    ['button', 'Search'],
   ]);
   const surface = classifyAgentPlatformTaskSurface(frame);
   assert.equal(surface.stage, 'AGENT_HOME');
   assert.equal(surface.proven, true);
   const controls = resolveAgentHomeControls(frame);
   assert.equal(controls.ready, true);
-  assert.equal(controls.controls.new_task.name, 'New Task');
-  assert.equal(controls.controls.full_stack_template.name, 'Full-Stack');
+  assert.equal(controls.controls.root_composer.accessible_name, 'Message ChatGPT');
+  assert.equal(controls.controls.new_task, null);
   assert.equal(controls.authority_effect, false);
 });
 
@@ -65,7 +59,7 @@ test('R98: conversation URL alone never proves Agent origin', () => {
   const frame = frameWithTargets([
     ['textbox', 'Send a Message'],
   ]);
-  frame.url = 'https://chat.z.ai/c/11111111-2222-3333-4444-555555555555';
+  frame.url = 'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555';
   const surface = classifyAgentPlatformTaskSurface(frame);
   assert.equal(surface.stage, 'CONVERSATION_ORIGIN_UNPROVEN');
   assert.equal(surface.proven, false);
@@ -74,7 +68,7 @@ test('R98: conversation URL alone never proves Agent origin', () => {
   assert.equal(resolveAgentHomeControls(frame).ready, false);
 });
 
-test('R97: partial Agent-looking surface is not admitted', () => {
+test('legacy z.ai-style controls do not grant ChatGPT root admission', () => {
   const frame = frameWithTargets([
     ['button', 'Agent'],
     ['button', 'New Task'],
@@ -238,18 +232,18 @@ test('database visibility: empty required set completes on the first readable sn
   assert.equal(calls, 1);
 });
 
-test('task-config snapshot requires the Agent New Task flow and never aliases Chat root', () => {
+test('task-config snapshot exposes ChatGPT root bootstrap and fences legacy z.ai configuration', () => {
   const snap = agentPlatformTaskConfigSnapshot();
-  assert.equal(snap.database_visibility, 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED');
-  assert.equal(snap.task_creation_surface, 'AGENT_HOME_NEW_TASK_FLOW');
-  assert.equal(snap.ordinary_root_is_task_surface, false);
+  assert.equal(snap.platform, 'CHATGPT');
+  assert.equal(snap.task_creation_surface, 'CHATGPT_ROOT_COMPOSER');
+  assert.equal(snap.ordinary_root_is_task_surface, true);
+  assert.equal(snap.root_requires_exact_semantic_composer, true);
   assert.equal(snap.conversation_url_is_agent_surface_authority, false);
   assert.equal(snap.conversation_origin_requires_durable_agent_surface_proof, true);
-  assert.equal(snap.agent_home_proof, 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS');
-  assert.equal(snap.task_config_surface_state, 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION');
-  assert.equal(snap.composer_ignores_synthetic_editing_keys, null);
-  assert.equal(snap.composer_enter_submits, null);
-  assert.equal(snap.replace_gesture_root_surface, null);
+  assert.equal(snap.agent_home_proof, 'EXACT_CHATGPT_ROOT_COMPOSER_SAME_REVISION');
+  assert.equal(snap.legacy_task_config_active, false);
+  assert.equal(snap.task_config_surface_state, 'LEGACY_COMPATIBILITY_ONLY');
+  assert.equal(snap.database_visibility, 'LEGACY_ZAI_TASK_CONFIG_ONLY');
   assert.equal(snap.agent_home_controls.new_task.name, AGENT_HOME_CONTROLS.new_task.name);
   assert.equal(snap.authority_effect, false);
 });

@@ -1,15 +1,15 @@
 /**
  * ME2 daemon — Executor Pool (R34, пункт E3 из research/2026/R32-EVIDENCE-ELINE-RESEARCH.md:
- * parallel live-GLM executor pool с честными lease).
+ * parallel live OpenAI executor pool с честными lease).
  *
- * Директива оператора: «агенты — полноценные живые отдельные агенты GLM на последней версии,
+ * Директива оператора: «агенты — полноценные живые отдельные OpenAI-агенты на последней версии,
  * работа не фальшивая» + «всё в замкнутый производственный контур».
  *
  * Что это: N слотов-исполнителей (POOL_MAX=4), каждый — РЕАЛЬНЫЙ агент реестра (agents)
- * с каноническим GLM-тегом (плоскость валюты glm.ts покрывает их автоматически: drift=0),
- * исполняющий задачи work_graph в СВОЁМ независимом GLM-контексте (runAgentTask строит
+ * с каноническим OpenAI-тегом (плоскость валюты glm.ts покрывает их автоматически: drift=0),
+ * исполняющий задачи work_graph в СВОЁМ независимом OpenAI-контексте (runAgentTask строит
  * свежий контекст на задачу). Пул умножает контуры master-loop'а: K агентов = K параллельных
- * живых GLM-исполнений.
+ * живых OpenAI-исполнений.
  *
  * Честные lease (ядро анти-фальши пула):
  *  - эксклюзивность: pool_leases.task_id UNIQUE — INSERT-гонка решает владение, второй
@@ -31,7 +31,7 @@
  * REST: GET /pool, POST /pool {op:scale|burn} — вне шины (47/47). Механика ME33.
  */
 import { db, emit, nowIso, rid, getTask, updateTask, createTask, listAgents, setAgentPaused, setAgentStatus, type AgentRow, type TaskRow } from "../store";
-import { agentTag, canonicalGlm } from "./glm";
+import { ACTIVE_INFERENCE_PLATFORM, ACTIVE_INFERENCE_PROVIDER, activeAgentModelTag, canonicalOpenAiModel } from "./inference";
 import { fleetBeat } from "./fleet";
 import { recordSpan } from "./otel";
 
@@ -94,7 +94,7 @@ export function concurrencyGauge(): { current: number; max_observed: number } {
  */
 export function poolScale(n: number, by = "operator"): { scale: number; live: number; created: number; drained: number } {
   const want = Math.min(Math.max(0, Math.floor(n) || 0), POOL_MAX);
-  const tag = agentTag();
+  const tag = activeAgentModelTag();
   let created = 0, drained = 0;
   const existing = new Map(workerRows().map((w) => [w.slot, w]));
   for (let slot = 1; slot <= POOL_MAX; slot++) {
@@ -146,7 +146,7 @@ function liveCount(): number {
  *  pool-задачи в RUNNING честно FAILED "pool_lease_expired", без ожидания watchdog'а. */
 export function poolRestore(): { restored: number; cleared: number; healed: number } {
   const rows = workerRows();
-  const tag = agentTag();
+  const tag = activeAgentModelTag();
   let restored = 0;
   let healed = 0;
   for (const w of rows) {
@@ -239,11 +239,11 @@ export function poolReap(): { reaped: number; ids: string[] } {
 
 /** Liveness-битность живых слотов в fleet (kind=pool-executor, caps: slot+канон). */
 export function poolLiveness(): number {
-  const tag = agentTag();
+  const tag = activeAgentModelTag();
   let beat = 0;
   for (const w of workerRows().filter((x) => x.mode === "live")) {
     try {
-      fleetBeat({ id: w.agent_id, kind: "pool-executor", caps: { slot: w.slot, glm: tag }, meta: { pool: true } });
+      fleetBeat({ id: w.agent_id, kind: "pool-executor", caps: { slot: w.slot, provider: ACTIVE_INFERENCE_PROVIDER, platform: ACTIVE_INFERENCE_PLATFORM, model: tag }, meta: { pool: true } });
       beat++;
     } catch { /* fleet не роняет пул */ }
   }
@@ -306,7 +306,7 @@ export function poolStatus(): PoolStatus {
   const running = (db.query(`SELECT COUNT(*) c FROM tasks WHERE status='RUNNING'`).get() as { c: number }).c;
   return {
     ok: true,
-    canonical: canonicalGlm(),
+    canonical: canonicalOpenAiModel(),
     scale: liveCount(), workers_total: workers.length, live: liveCount(), ceiling: POOL_MAX,
     workers: workers.map((w) => {
       const a = agents.get(w.agent_id);
@@ -332,8 +332,8 @@ export function poolStatus(): PoolStatus {
 
 /**
  * burn — живая дымовая проверка пула: n РЕАЛЬНЫХ задач (role EXECUTOR), исполняемых
- * живыми GLM-работниками через стандартный tool-loop. Это НЕ симуляция: задачи проходят
- * весь контур (lease → GLM-шаги → write_file → COMPLETED → reviewer). Ограничение ≤3.
+ * живыми OpenAI-работниками через стандартный tool-loop. Это НЕ симуляция: задачи проходят
+ * весь контур (lease → OpenAI-шаги → write_file → COMPLETED → reviewer). Ограничение ≤3.
  */
 export function poolBurn(n: number): { created: Array<{ id: string; title: string }> } {
   const k = Math.min(Math.max(1, Math.floor(n) || 1), 3);

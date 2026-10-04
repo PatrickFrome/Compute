@@ -1,5 +1,5 @@
 import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
-import { AGENT_PLATFORM_HOME_URL, isAgentPlatformHost } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_MODEL, AGENT_PLATFORM_PROVIDER, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -18,6 +18,7 @@ import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
 import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import { assertLegacyProviderCommandAllowed } from './legacy-provider-quarantine.mjs';
 import { AgentObservationPlane } from './agent-observation-plane.mjs';
 import { projectNativeRuntimeObservation, projectClientWorkReadiness } from './client-work-readiness.mjs';
 import { TabNetworkActivityRegistry } from './tab-network-activity.mjs';
@@ -536,7 +537,9 @@ function primaryChatFleetRoster() {
       tab_id: tab.tab_id,
       selected: tab.tab_id === selectedTabId,
       title: tab.title || 'Supervisor',
-      model: 'GLM-5.3-Flash',
+      provider: AGENT_PLATFORM_PROVIDER,
+      platform: AGENT_PLATFORM_ID,
+      model: AGENT_PLATFORM_MODEL,
       exact_native_binding: true,
       presentation_only: true,
       authority_effect: false,
@@ -557,7 +560,9 @@ function primaryChatFleetRoster() {
       tab_id: tab.tab_id,
       selected: tab.tab_id === selectedTabId,
       title: tab.title || String(row?.role || 'Agent'),
-      model: 'GLM-5.3-Flash',
+      provider: AGENT_PLATFORM_PROVIDER,
+      platform: AGENT_PLATFORM_ID,
+      model: AGENT_PLATFORM_MODEL,
       exact_native_binding: true,
       presentation_only: true,
       authority_effect: false,
@@ -1584,8 +1589,8 @@ function tabForPlatform(platform) {
   const match = (tab) => {
     try {
       const host = new URL(tab.url).hostname.toLowerCase();
-      if (p === 'GLM_ZAI') return isAgentPlatformHost(host);
-      if (p === 'CHATGPT') return host === 'chatgpt.com' || host === 'www.chatgpt.com' || host === 'chat.openai.com';
+      if (p === 'GLM_ZAI') return host === 'chat.z.ai';
+      if (p === 'CHATGPT') return isAgentPlatformHost(host) || host === 'chat.openai.com';
     } catch {}
     return false;
   };
@@ -1710,6 +1715,20 @@ async function executeNativeSupervisorCommand(command) {
 async function executeNativeSupervisorCommandFenced(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
+  // ChatGPT-only execution fence. Historical GLM/Z.ai tabs may still be read,
+  // selected, closed, or navigated away from for reconciliation, but no new
+  // legacy-provider page effect or navigation into chat.z.ai is permitted.
+  // This is deliberately enforced at the single physical command boundary so
+  // stale DB rows or an older bridge cannot bypass provider policy.
+  const quarantineTab = payload?.tab_id
+    ? (registry.get(String(payload.tab_id)) || null)
+    : (tabForPlatform(command?.platform) || registry.selected());
+  assertLegacyProviderCommandAllowed({
+    action,
+    platform: command?.platform,
+    current_url: quarantineTab?.url || null,
+    next_url: ['NEW_TAB','NAVIGATE'].includes(action) ? (payload?.url || null) : null,
+  });
   // Outcome River pre-execution binding: only remote DB-leased commands carry
   // a command_id; when the issuer declared task context (payload.rsi_task)
   // the river binds command→candidate+trajectory before execution so the

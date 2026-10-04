@@ -4,12 +4,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AgentSessionMonitor } from '../src/agent-session-monitor.mjs';
+import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 import { resolveAgentPlatformComposer } from '../src/browser-agent-platform.mjs';
 import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
 
 const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const ACTIVE_CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 // ---------------------------------------------------------------------------
@@ -112,11 +113,11 @@ const AUX_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_
 
 function liveConversationFrame(text = '') {
   return {
-    url: CONVERSATION,
-    title: 'Z.ai',
+    url: ACTIVE_CONVERSATION,
+    title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Send a Message', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
       { role: 'textbox', name: null, semantic_ref: AUX_REF, backend_node_id: 1864, value_length: 436, value_sha256: sha256('aux') },
     ],
   };
@@ -128,16 +129,16 @@ test('D-K1 e2e: supervisor wake send resolves the named composer on the two-text
   let typed = '';
   const typedRefs = [];
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
+    tabs: [{ tab_id: 'tab1', url: ACTIVE_CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
     if (command.action === 'CAPTURE') return liveConversationFrame('');
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.platform, 'GLM_ZAI');
+      assert.equal(command.platform, 'CHATGPT');
       typedRefs.push(command.payload.semantic_ref);
       typed = String(command.payload?.text || '');
-      assert.equal(command.payload.accessible_name, 'Send a Message', 'the composer, not the unnamed auxiliary, must be addressed');
+      assert.equal(command.payload.accessible_name, 'Message ChatGPT', 'the composer, not the unnamed auxiliary, must be addressed');
       return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true, replace_verified: true };
     }
     throw new Error(`unexpected_action:${command.action}`);
@@ -149,7 +150,7 @@ test('D-K1 e2e: supervisor wake send resolves the named composer on the two-text
     statePath,
     monitorMs: 5000,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
   });
   await runtime.start();
   assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
@@ -162,7 +163,7 @@ test('D-K3: a pre-effect send failure is durably visible instead of presenting a
   const statePath = path.join(dir, 'keepalive.json');
   let failures = 0;
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
+    tabs: [{ tab_id: 'tab1', url: ACTIVE_CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
@@ -170,8 +171,8 @@ test('D-K3: a pre-effect send failure is durably visible instead of presenting a
       // A surface where the composer cannot be resolved at all — the historical
       // shape of the D-K1 live livelock (two unnamed textboxes).
       return {
-        url: CONVERSATION,
-        title: 'Z.ai',
+        url: ACTIVE_CONVERSATION,
+        title: 'ChatGPT',
         text_excerpt: '',
         semantic_targets: [
           { role: 'textbox', name: null, semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: 0, value_sha256: null },
@@ -192,7 +193,7 @@ test('D-K3: a pre-effect send failure is durably visible instead of presenting a
     statePath,
     monitorMs: 1,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
   });
   await runtime.start();
   await runtime.cycle({ force: true });
@@ -501,7 +502,7 @@ test('D-K5: an unsent wake attempt costs the wake interval before retry', async 
     minWakeIntervalMs: 60000,
   });
   await ka.init();
-  await ka.bindConversation({ url: CONVERSATION, tab_id: 'tab1' });
+  await ka.bindConversation({ url: ACTIVE_CONVERSATION, tab_id: 'tab1' });
   await ka.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'k1' });
   assert.equal(ka.canWake(), true, 'first attempt allowed');
 
@@ -542,15 +543,15 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-dk7-'));
   const statePath = path.join(dir, 'keepalive.json');
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
+    tabs: [{ tab_id: 'tab1', url: ACTIVE_CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
     if (command.action === 'CAPTURE') {
       return {
-        url: CONVERSATION, title: 'Z.ai', text_excerpt: '',
+        url: ACTIVE_CONVERSATION, title: 'ChatGPT', text_excerpt: '',
         semantic_targets: [
-          { role: 'textbox', name: 'Send a Message', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: 999, value_sha256: sha256('poisoned draft') },
+          { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: 999, value_sha256: sha256('poisoned draft') },
           { role: 'textbox', name: null, semantic_ref: AUX_REF, backend_node_id: 1864, value_length: 436, value_sha256: sha256('aux') },
         ],
       };
@@ -569,7 +570,7 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
     statePath,
     monitorMs: 1,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
   });
   await runtime.start();
   // start() itself runs one cycle: the FIRST composer-blocking failure lands
@@ -599,7 +600,7 @@ test('D-K9: wake settlement never cancels a requested rollover (live rollover-ca
       processIncarnationId: 'process_test_dk9',
     });
     await ka.init();
-    await ka.bindConversation({ url: CONVERSATION, tab_id: 'tab1' });
+    await ka.bindConversation({ url: ACTIVE_CONVERSATION, tab_id: 'tab1' });
     return ka;
   };
 
@@ -659,7 +660,7 @@ test('D-K8: requestRollover with autoRelease goes straight to ROLLOVER_REQUIRED'
     processIncarnationId: 'process_test_dk8',
   });
   await ka.init();
-  await ka.bindConversation({ url: CONVERSATION, tab_id: 'tab1' });
+  await ka.bindConversation({ url: ACTIVE_CONVERSATION, tab_id: 'tab1' });
 
   await ka.requestRollover('COMPOSER_UNCLEARABLE_DK7', { autoRelease: true });
   let snap = ka.snapshot();

@@ -4,6 +4,7 @@ import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_MODEL,
   isAgentPlatformConversationUrl,
+  normalizeAgentPlatformConversationUrl,
 } from './browser-agent-platform.mjs';
 import { renderAgentContextBriefing } from './agent-context-token.mjs';
 import { parseAgentToolRequests, renderAgentToolProtocol, renderAgentToolResults } from './agent-tool-protocol.mjs';
@@ -46,12 +47,13 @@ function runningObservationBudget(liveAgents) {
 function fleetLeaseDispatchConcurrency(liveAgents) {
   return runningObservationBudget(liveAgents);
 }
-// R97 convergence: the bootstrap message is permitted only AFTER z.ai Agent
-// mode, the exact target model and a clean New Task composer are proven. It
-// creates the durable Agent session transport; ordinary Chat-root bootstrap is
-// forbidden. The legacy export name is retained temporarily for stacked tests
-// while the value/contract is Agent-specific.
-export const GLM_ROOT_CONVERSATION_SEED = 'METAENGINE AGENT SESSION SEED v1 — this is a Browser-managed z.ai Agent worker session; a verified development task arrives in the NEXT message; reply with exactly READY.';
+// Provider-neutral bootstrap seed. The active platform policy decides how a
+// fresh isolated conversation is created. The text never grants authority;
+// exact tab/target/generation + write-ahead fencing remain the effect gates.
+export const AGENT_ROOT_CONVERSATION_SEED = 'METAENGINE AGENT SESSION SEED v2 — this is a Browser-managed isolated ChatGPT worker session; a verified development task arrives in the NEXT message; reply with exactly READY.';
+// Temporary source-compatibility alias for stacked branches/tests. New code
+// must use AGENT_ROOT_CONVERSATION_SEED.
+export const GLM_ROOT_CONVERSATION_SEED = AGENT_ROOT_CONVERSATION_SEED;
 // D-C1: context tokens are re-issued at most this often per agent+epoch so the
 // rendered prompt (and its journal hash) stays deterministic within a lease.
 // Closed-loop audit fix (fleet scale): raised 64 -> 128 for larger fleets.
@@ -79,9 +81,11 @@ function stopControlName(name) {
 
 function conversationUrl(value) {
   if (!isAgentPlatformConversationUrl(value)) return null;
-  const url = new URL(String(value || ''));
-  const path = url.pathname.replace(/\/+$/, '');
-  return `https://chat.z.ai${path.toLowerCase()}`;
+  try {
+    return normalizeAgentPlatformConversationUrl(value);
+  } catch {
+    return null;
+  }
 }
 function selectedTabId(state = {}) {
   const active = String(state?.active_tab?.tab_id || '');
@@ -176,8 +180,8 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   // boot, so the prompt hash stays deterministic within a lease.
   const accessCapsuleBlock = clip(String(access_capsule || ''), 2000).trim();
   if (accessCapsuleBlock) lines.push('', accessCapsuleBlock);
-  // D-C1 (2026-09-19 operator directive): GLM agents have NO shared context —
-  // every chat.z.ai Task conversation starts blank. The briefing trains each
+  // D-C1 (2026-09-19 operator directive): fleet agents have NO shared context —
+  // every isolated agent conversation starts blank. The briefing trains each
   // agent individually (identity token, mission, fleet roster, coordination
   // protocol) on EVERY dispatch, so the isolated session can act without any
   // cross-agent memory. It rides above the telemetry digest so the task body
@@ -783,7 +787,7 @@ export class DevOsNativeTaskCycle {
   }
 
   // D-C1: issue (or reuse) the agent's context token and render the
-  // per-agent briefing. GLM agents have no shared context — the briefing is
+  // per-agent briefing. fleet agents have no shared context — the briefing is
   // the agent's ONLY fleet knowledge and rides on every dispatched prompt.
   // Cached per (agent, epoch) so the prompt hash stays deterministic within
   // a lease; without an enrolled identity the briefing degrades to a
@@ -1050,8 +1054,8 @@ export class DevOsNativeTaskCycle {
       });
 
       // Durable write-ahead barrier: once this fsync succeeds, any crash is
-      // conservatively treated as a possibly executed external effect. The GLM
-      // Enter submit (the only physical effect) happens only after it.
+      // conservatively treated as a possibly executed external effect. The active-platform
+      // submit (the only physical effect) happens only after it.
       try {
         await journal?.markEffectAttempted(effectBinding, {
           phase: 'BEFORE_ENTER_SUBMIT',
@@ -1091,7 +1095,7 @@ export class DevOsNativeTaskCycle {
         throw error;
       }
 
-      // Bounded conversation readback (D-S3, live-proven 2026-09-19): the GLM
+      // Bounded conversation readback (D-S3, live-proven 2026-09-19): the active chat
       // SPA navigates to /c/<id> asynchronously after a proven Enter submit, so
       // a single immediate capture can miss the URL while the composer is
       // already provably cleared — the physical effect happened but the proof
@@ -1189,7 +1193,7 @@ export class DevOsNativeTaskCycle {
     if (!HASH_RE.test(expectedUrlHash)) return { state: 'WAITING_FOR_TRANSPORT_PROOF', authority_effect: false };
     const frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
     // Cross-platform generation hint: a uniquely named stop control proves an
-    // in-flight generation regardless of platform (chat.z.ai usually exposes no
+    // in-flight generation regardless of platform (some providers expose no
     // named stop control; the proven-conversation path then decides completion).
     if ((frame?.semantic_targets || []).some((row) => String(row?.role || '').toLowerCase() === 'button' && stopControlName(row?.name))) {
       return { state: 'GENERATING', task_id: lease.task_id, authority_effect: false };

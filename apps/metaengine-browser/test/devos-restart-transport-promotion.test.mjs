@@ -8,8 +8,8 @@ const AGENT_ID = 'agent_12345678-abcd';
 const TAB_ID = 'tab_12345678-1234-4123-8123-123456789abc';
 const TARGET_ID = 'webcontents:41';
 const LEASE_ID = '12345678-1234-4123-8123-123456789abc';
-const ROOT = 'https://chat.z.ai/';
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const ROOT = 'https://chatgpt.com/';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
 function response(status, body) {
@@ -114,8 +114,8 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
     if (surfaceState === 'CHAT_ROOT') {
       return {
         ...base,
-        semantic_targets: [{ role: 'button', name: 'Agent', semantic_ref: ref('a'), backend_node_id: 11 }],
-        interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.2' }] },
+        semantic_targets: [{ role: 'textbox', name: 'Message ChatGPT', value_length: 0, semantic_ref: ref('a'), backend_node_id: 11 }],
+        interaction_tree: { elements: [] },
       };
     }
     if (surfaceState === 'AGENT_HOME' || surfaceState === 'AGENT_TASK') {
@@ -131,13 +131,13 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
             ? [{ role: 'textbox', name: 'Describe your task', value_length: 0, semantic_ref: ref('1'), backend_node_id: 31 }]
             : []),
         ],
-        interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.3-Flash' }] },
+        interaction_tree: { elements: [{ role: 'button', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
       };
     }
     return {
       ...base,
-      semantic_targets: [{ role: 'textbox', name: 'Send a Message', value_length: 0, semantic_ref: ref('2'), backend_node_id: 41 }],
-      interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.3-Flash' }] },
+      semantic_targets: [{ role: 'textbox', name: 'Message ChatGPT', value_length: 0, semantic_ref: ref('2'), backend_node_id: 41 }],
+      interaction_tree: { elements: [{ role: 'button', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
     };
   };
 
@@ -153,18 +153,10 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSuccee
       return { ok: true, tab_id: TAB_ID, url: ROOT, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') {
-      if (surfaceState === 'CHAT_ROOT' && command.payload.accessible_name === 'Agent') {
-        surfaceState = 'AGENT_HOME';
-        return { mouse_geometry_required: false, authority_effect: true };
-      }
-      if (surfaceState === 'AGENT_HOME' && command.payload.accessible_name === 'New Task') {
-        surfaceState = 'AGENT_TASK';
-        return { mouse_geometry_required: false, authority_effect: true };
-      }
       throw new Error(`unexpected_activation:${surfaceState}:${command.payload.accessible_name}`);
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(surfaceState, 'AGENT_TASK');
+      assert.equal(surfaceState, 'CHAT_ROOT');
       assert.equal(command.payload.submit_after_type, true);
       assert.equal(command.payload.replace_existing, true);
       submitCount += 1;
@@ -249,10 +241,10 @@ test('restored bare conversation is reset to canonical root and rebuilt as a pro
     assert.equal(snapshot.fleet_transport_promotion.bootstrap_effect_state, 'PROVEN_NEW_CONVERSATION');
     assert.match(snapshot.fleet_transport_promotion.agent_surface_sha256, /^[a-f0-9]{64}$/);
     assert.equal(h.calls.filter((row) => row[1] === 'NAVIGATE').length, 1, 'unproven conversation is reset exactly once');
-    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'only the canonical Agent seed is submitted');
+    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'only the canonical ChatGPT seed is submitted');
     assert.deepEqual(
       h.calls.filter((row) => row[1] === 'TYPED_CLICK').map((row) => row[2]),
-      ['Agent', 'New Task'],
+      [],
     );
   } finally {
     h.cleanup();
@@ -278,7 +270,7 @@ test('ambiguous restart reset is write-ahead fenced and never blindly navigated 
   }
 });
 
-test('root GLM tab is bootstrapped through Agent home before scheduler cycle', async () => {
+test('root ChatGPT tab is bootstrapped into an isolated conversation before scheduler cycle', async () => {
   const h = harness({ tabUrl: ROOT });
   try {
     const snapshot = await h.cycle.cycle();
@@ -292,17 +284,17 @@ test('root GLM tab is bootstrapped through Agent home before scheduler cycle', a
     assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1);
     assert.deepEqual(
       h.calls.filter((row) => row[1] === 'TYPED_CLICK').map((row) => row[2]),
-      ['Agent', 'New Task'],
+      [],
     );
     const bootstrapIndex = h.calls.findIndex((row) => row[1] === 'SEMANTIC_TYPE');
     const cycleIndex = h.calls.findIndex((row) => row[1] === '/v1/devos/cycle');
-    assert.ok(bootstrapIndex >= 0 && cycleIndex > bootstrapIndex, 'Agent session bootstrap must complete before scheduler cycle');
+    assert.ok(bootstrapIndex >= 0 && cycleIndex > bootstrapIndex, 'ChatGPT agent bootstrap must complete before scheduler cycle');
   } finally {
     h.cleanup();
   }
 });
 
-test('lost promotion-release ACK never repeats successful Agent bootstrap', async () => {
+test('lost promotion-release ACK never repeats successful ChatGPT agent bootstrap', async () => {
   const h = harness({ tabUrl: ROOT, releaseThrows: true });
   try {
     const first = await h.cycle.cycle();
@@ -315,13 +307,13 @@ test('lost promotion-release ACK never repeats successful Agent bootstrap', asyn
 
     await h.cycle.cycle();
     assert.equal(h.calls.filter((row) => row[1] === '/v1/devos/promotion-lease').length, 1);
-    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'successful Agent bootstrap must not replay');
+    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'successful ChatGPT agent bootstrap must not replay');
   } finally {
     h.cleanup();
   }
 });
 
-test('ambiguous Agent session bootstrap is write-ahead fenced and never auto-submitted again', async () => {
+test('ambiguous ChatGPT agent bootstrap is write-ahead fenced and never auto-submitted again', async () => {
   const h = harness({ tabUrl: ROOT, bootstrapSucceeds: false });
   try {
     const first = await h.cycle.cycle();
@@ -332,7 +324,7 @@ test('ambiguous Agent session bootstrap is write-ahead fenced and never auto-sub
     assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1);
 
     await h.cycle.cycle();
-    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'ambiguous Agent bootstrap must not replay');
+    assert.equal(h.calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, 1, 'ambiguous ChatGPT agent bootstrap must not replay');
     assert.equal(h.calls.filter((row) => row[1] === '/v1/devos/promotion-lease').length, 1);
   } finally {
     h.cleanup();

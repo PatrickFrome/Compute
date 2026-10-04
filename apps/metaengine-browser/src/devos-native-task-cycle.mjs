@@ -4,6 +4,7 @@ import {
   AGENT_PLATFORM_ID,
   AGENT_PLATFORM_HOME_URL,
   AGENT_PLATFORM_MODEL,
+  AGENT_PLATFORM_BOOTSTRAP_MODE,
   classifyAgentPlatformSurface,
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformComposer,
@@ -14,7 +15,7 @@ import {
 import { digestAgentSurfaceProof } from './agent-origin-proof.mjs';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
-  GLM_ROOT_CONVERSATION_SEED,
+  AGENT_ROOT_CONVERSATION_SEED,
   assertLiveLeaseBinding as assertCoreLiveLeaseBinding,
   normalizeLease,
   planBacklogCapacity,
@@ -527,7 +528,7 @@ export class DevOsNativeTaskCycle {
         let agentSurface = resolveAgentPlatformAgentSurface(frame);
         let agentSurfaceSha256 = null;
 
-        // Step 1: enter z.ai Agent SPA. Agent and Chat share the same URL, so
+        // Step 1: prove the active agent bootstrap surface. Agent and Chat share the same URL, so
         // success is proven only by a fresh semantic CAPTURE, never by the
         // TYPED_CLICK receipt itself.
         if (!agentSurface) {
@@ -592,7 +593,7 @@ export class DevOsNativeTaskCycle {
 
           // Step 2: the selected model is a separate UI fact. Page title
           // branding is ignored. If the exact required model is not already
-          // selected, open the selector and choose GLM-5.3-Flash semantically.
+          // selected, open the selector and choose the required provider model semantically when the platform exposes such a selector.
           if (!modelProof || modelProof.matches_required_model !== true) {
             const selector = resolveAgentPlatformNavControl(frame, 'Select a model');
             if (!selector?.semantic_ref) {
@@ -684,13 +685,21 @@ export class DevOsNativeTaskCycle {
 
             // Step 3: create/reset a real Agent task session. The click receipt
             // is not success; the fresh surface/model/composer readback is.
-            bootstrapEffectState = 'NEW_TASK_DISPATCHED';
-            await this.#executeCommand({
-              action: 'TYPED_CLICK',
-              platform: AGENT_PLATFORM_ID,
-              payload: semanticActivationPayload(binding.tab_id, agentSurface.new_task),
-            });
-            frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            if (AGENT_PLATFORM_BOOTSTRAP_MODE === 'ROOT_COMPOSER_SEED') {
+              // ChatGPT root is already the isolated-session creation surface.
+              // No navigation/model/new-task click is needed: re-capture the
+              // exact bound root composer immediately before the seed effect.
+              bootstrapEffectState = 'ROOT_COMPOSER_READY';
+              frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            } else {
+              bootstrapEffectState = 'NEW_TASK_DISPATCHED';
+              await this.#executeCommand({
+                action: 'TYPED_CLICK',
+                platform: AGENT_PLATFORM_ID,
+                payload: semanticActivationPayload(binding.tab_id, agentSurface.new_task),
+              });
+              frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            }
             if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
               throw new Error('devos_agent_new_task_target_drift');
             }
@@ -742,7 +751,7 @@ export class DevOsNativeTaskCycle {
                   role: composer.role,
                   accessible_name: composer.accessible_name,
                   semantic_ref: composer.semantic_ref,
-                  text: GLM_ROOT_CONVERSATION_SEED,
+                  text: AGENT_ROOT_CONVERSATION_SEED,
                   replace_existing: true,
                   submit_after_type: true,
                 },
@@ -761,7 +770,7 @@ export class DevOsNativeTaskCycle {
                   lease_id: lease.lease_id,
                   transport_stage: transport?.stage || 'OTHER',
                   bootstrap_effect_state: bootstrapEffectState || null,
-                  bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
+                  bootstrap_prompt_sha256: sha256(AGENT_ROOT_CONVERSATION_SEED),
                   agent_surface_sha256: agentSurfaceSha256,
                   write_ahead_barrier_persisted: true,
                   reason: 'AGENT_SESSION_CONVERSATION_NOT_PROVEN',
@@ -790,7 +799,7 @@ export class DevOsNativeTaskCycle {
                   agent_surface_sha256: agentSurfaceSha256,
                   local_proof_state: localProof.state,
                   bootstrap_effect_state: bootstrapEffectState || null,
-                  bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
+                  bootstrap_prompt_sha256: sha256(AGENT_ROOT_CONVERSATION_SEED),
                   write_ahead_barrier_persisted: true,
                   automatic_retry_allowed: false,
                   authority_effect: false,

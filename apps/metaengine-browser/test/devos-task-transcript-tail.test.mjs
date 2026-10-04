@@ -6,7 +6,7 @@ import { releasePersistentBrowserDebugger } from '../src/browser-persistent-cdp-
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle-core.mjs';
 
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
-const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const lease = {
   task_id: '09f2e414-5c31-4fc7-87a3-f5de1315cb81',
   agent_id: 'agent_a2bf77e6-66d3-4f10-9c9c-683df36f4510',
@@ -22,6 +22,19 @@ const fleet = {
   agents: [{
     agent_id: lease.agent_id, role: lease.role, lifecycle_state: 'ACTIVE',
     tab_id: lease.tab_id, target_id: lease.target_id, generation_epoch: 7,
+    transport_proof: {
+      schema: 'metaengine.browser.fleet-transport-proof.v1',
+      tab_id: lease.tab_id,
+      target_id: lease.target_id,
+      generation_epoch: 7,
+      conversation_url: conversationUrl,
+      conversation_url_sha256: sha256(conversationUrl),
+      agent_surface_sha256: 'c'.repeat(64),
+      proven_at: '2026-10-04T00:00:00.000Z',
+      authority_effect: false,
+    },
+    automatic_retry_allowed: false,
+    authority_effect: false,
   }],
 };
 const claim = [

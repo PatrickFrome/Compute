@@ -3,7 +3,8 @@ import { hostname } from "node:os";
 import { Client, Pool } from "pg";
 
 type JsonObject = Record<string, unknown>;
-type Actor = "GPT" | "GLM";
+type Actor = "PRIMARY" | "CRITIC";
+type WireActor = "GPT" | "GLM";
 type Wave = "PROPOSE" | "REBUT";
 
 type Lease = JsonObject & {
@@ -63,13 +64,13 @@ Return exactly one JSON object and no markdown.`;
 const VOTES = new Set(["WIN_GPT", "WIN_GLM", "SYNTHESIS", "NO_ACTION"]);
 const DATABASE_URL = required("DATABASE_URL");
 const RUNNER_ID = `sovereign:v4:${process.env.DUEL_RUNNER_ID || hostname()}`;
-const GPT_URL = process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const GLM_URL = process.env.SOVEREIGN_GLM_URL || "http://127.0.0.1:8002";
-const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b";
-const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || "zai-org/GLM-4.7-Flash";
+const PRIMARY_URL = process.env.SOVEREIGN_PRIMARY_URL || process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
+const CRITIC_URL = process.env.SOVEREIGN_CRITIC_URL || "http://127.0.0.1:8002";
+const PRIMARY_MODEL = openAiModel(process.env.SOVEREIGN_PRIMARY_MODEL || process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_PRIMARY_MODEL");
+const CRITIC_MODEL = openAiModel(process.env.SOVEREIGN_CRITIC_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_CRITIC_MODEL");
 const COMMON_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
-const GPT_TOKEN = process.env.SOVEREIGN_GPT_TOKEN || COMMON_TOKEN;
-const GLM_TOKEN = process.env.SOVEREIGN_GLM_TOKEN || COMMON_TOKEN;
+const PRIMARY_TOKEN = process.env.SOVEREIGN_PRIMARY_TOKEN || process.env.SOVEREIGN_GPT_TOKEN || COMMON_TOKEN;
+const CRITIC_TOKEN = process.env.SOVEREIGN_CRITIC_TOKEN || COMMON_TOKEN;
 const MODEL_TIMEOUT_MS = boundedInt(process.env.DUEL_MODEL_TIMEOUT_MS, 90_000, 5_000, 300_000);
 const MAX_OUTPUT_TOKENS = boundedInt(process.env.DUEL_MAX_OUTPUT_TOKENS, 1_200, 256, 4_096);
 const RECOVERY_MS = boundedInt(process.env.DUEL_RECOVERY_MS, 60_000, 5_000, 600_000);
@@ -86,6 +87,26 @@ function required(name: string): string {
 function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
   const n = Number(raw ?? fallback);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback;
+}
+
+function openAiModel(raw: string, name: string): string {
+  const model = String(raw || "").trim();
+  if (!/^(?:openai\/|gpt-)/i.test(model)) throw new Error(`${name}_must_be_openai`);
+  return model;
+}
+
+function wireActor(actor: Actor): WireActor {
+  return actor === "PRIMARY" ? "GPT" : "GLM";
+}
+
+function peerWireActor(actor: Actor): WireActor {
+  return actor === "PRIMARY" ? "GLM" : "GPT";
+}
+
+function leaseModel(actor: Actor, lease: Lease): string {
+  const candidate = String(actor === "PRIMARY" ? (lease.gpt_model || "") : (lease.glm_model || "")).trim();
+  if (/^(?:openai\/|gpt-)/i.test(candidate)) return candidate;
+  return actor === "PRIMARY" ? PRIMARY_MODEL : CRITIC_MODEL;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -112,12 +133,8 @@ function parseJson(text: string): JsonObject {
   return asObj(JSON.parse(stripped.slice(start, end + 1)));
 }
 
-function peerActor(actor: Actor): Actor {
-  return actor === "GPT" ? "GLM" : "GPT";
-}
-
 function recentPeerHash(read: Readback, actor: Actor): string | null {
-  const peer = peerActor(actor);
+  const peer = peerWireActor(actor);
   const events = Array.isArray(read.events) ? read.events : [];
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
@@ -176,6 +193,9 @@ function prompt(actor: Actor, lease: Lease, read: Readback, wave: Wave): string 
   const peerHash = recentPeerHash(read, actor);
   const base = [
     `ACTOR=${actor}`,
+    `LEGACY_WIRE_SLOT=${wireActor(actor)}`,
+    `PROVIDER=OPENAI`,
+    `PLATFORM=CHATGPT`,
     `WAVE=${wave}`,
     `DUEL=${lease.duel_key || ""}`,
     `SEMANTIC_POINT_CHECKPOINT=${String(lease.current_checkpoint_sha256 || "")}`,
@@ -199,7 +219,7 @@ function prompt(actor: Actor, lease: Lease, read: Readback, wave: Wave): string 
       "Return keys: phase, step_type, claim, reasoning_summary, evidence_used, assumptions, peer_claims_addressed, counterexample, falsifier, resulting_action, tests_required, peer_event_hash_addressed, need_canary, terminal_vote.",
       "phase MUST be REBUT. resulting_action MUST be one JSON object with a non-empty kind.",
       "peer_event_hash_addressed MUST equal PEER_PROPOSE_EVENT_HASH.",
-      "terminal_vote MUST be one of WIN_GPT, WIN_GLM, SYNTHESIS, NO_ACTION."
+      "terminal_vote MUST be one of WIN_GPT, WIN_GLM, SYNTHESIS, NO_ACTION. These are legacy DB wire votes only: WIN_GPT=PRIMARY, WIN_GLM=CRITIC."
     );
   }
   return base.join("\n");
@@ -283,9 +303,9 @@ function visibleError(actor: Actor, wave: Wave, peerHash: string | null, error: 
 }
 
 async function modelCall(actor: Actor, lease: Lease, read: Readback, wave: Wave): Promise<JsonObject> {
-  const base = actor === "GPT" ? GPT_URL : GLM_URL;
-  const model = actor === "GPT" ? (lease.gpt_model || GPT_MODEL) : (lease.glm_model || GLM_MODEL);
-  const token = actor === "GPT" ? GPT_TOKEN : GLM_TOKEN;
+  const base = actor === "PRIMARY" ? PRIMARY_URL : CRITIC_URL;
+  const model = leaseModel(actor, lease);
+  const token = actor === "PRIMARY" ? PRIMARY_TOKEN : CRITIC_TOKEN;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("model_timeout"), MODEL_TIMEOUT_MS);
   const started = Date.now();
@@ -313,6 +333,8 @@ async function modelCall(actor: Actor, lease: Lease, read: Readback, wave: Wave)
     const body = asObj(JSON.parse(raw));
     const choices = Array.isArray(body.choices) ? body.choices : [];
     const first = choices[0] && typeof choices[0] === "object" && !Array.isArray(choices[0]) ? asObj(choices[0]) : {};
+    const finishReason = String(first.finish_reason || "").trim().toLowerCase();
+    if (finishReason !== "stop") throw new Error(`local_${actor.toLowerCase()}_not_completed:${finishReason || "missing"}`);
     const message = first.message && typeof first.message === "object" && !Array.isArray(first.message) ? asObj(first.message) : {};
     if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`local_${actor.toLowerCase()}_empty`);
     const peerHash = wave === "REBUT" ? recentPeerHash(read, actor) : null;
@@ -320,6 +342,10 @@ async function modelCall(actor: Actor, lease: Lease, read: Readback, wave: Wave)
     payload._executor = {
       mode: "SOVEREIGN_SAME_POINT_V4",
       wave,
+      provider: "OPENAI",
+      platform: "CHATGPT",
+      logical_role: actor,
+      legacy_wire_slot: wireActor(actor),
       tariff_dependency: false,
       model,
       endpoint_sha256: sha256(base),
@@ -447,25 +473,25 @@ async function processLease(lease: Lease): Promise<void> {
   if (tick === 0) {
     const wave: Wave = "PROPOSE";
     const started = Date.now();
-    const [gpt, glm] = await Promise.all([
-      actorVisible("GPT", lease, read, wave),
-      actorVisible("GLM", lease, read, wave),
+    const [primary, critic] = await Promise.all([
+      actorVisible("PRIMARY", lease, read, wave),
+      actorVisible("CRITIC", lease, read, wave),
     ]);
-    gpt.payload._lockstep = {
+    primary.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
       tariff_dependency: false,
     };
-    glm.payload._lockstep = {
+    critic.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
       tariff_dependency: false,
     };
-    const receipt = await submitProposal(lease, checkpoint, gpt.payload, glm.payload);
+    const receipt = await submitProposal(lease, checkpoint, primary.payload, critic.payload);
     checkpoint = String(receipt.output_checkpoint_sha256 || checkpoint);
     read = appendReadback(read, receipt, 1);
     tick = 1;
@@ -474,18 +500,18 @@ async function processLease(lease: Lease): Promise<void> {
   if (tick === 1) {
     const wave: Wave = "REBUT";
     const started = Date.now();
-    const [gpt, glm] = await Promise.all([
-      actorVisible("GPT", lease, read, wave),
-      actorVisible("GLM", lease, read, wave),
+    const [primary, critic] = await Promise.all([
+      actorVisible("PRIMARY", lease, read, wave),
+      actorVisible("CRITIC", lease, read, wave),
     ]);
-    gpt.payload._lockstep = {
+    primary.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
       execution_plane: "SOVEREIGN_V4_PERSISTENT",
       tariff_dependency: false,
     };
-    glm.payload._lockstep = {
+    critic.payload._lockstep = {
       debate_protocol: "SAME_POINT_DUEL_V4",
       wave,
       pair_inference_ms: Date.now() - started,
@@ -493,7 +519,7 @@ async function processLease(lease: Lease): Promise<void> {
       tariff_dependency: false,
     };
 
-    const receipt = await submitRebutAndFinalize(lease, checkpoint, gpt.payload, glm.payload);
+    const receipt = await submitRebutAndFinalize(lease, checkpoint, primary.payload, critic.payload);
     const decision = receipt.decision && typeof receipt.decision === "object" && !Array.isArray(receipt.decision)
       ? receipt.decision
       : null;
@@ -579,10 +605,13 @@ async function main(): Promise<void> {
     status: "STARTING",
     runner_id: RUNNER_ID,
     debate_protocol: "SAME_POINT_DUEL_V4",
-    gpt_model: GPT_MODEL,
-    glm_model: GLM_MODEL,
-    gpt_endpoint_sha256: sha256(GPT_URL),
-    glm_endpoint_sha256: sha256(GLM_URL),
+    primary_model: PRIMARY_MODEL,
+    critic_model: CRITIC_MODEL,
+    primary_endpoint_sha256: sha256(PRIMARY_URL),
+    critic_endpoint_sha256: sha256(CRITIC_URL),
+    provider: "OPENAI",
+    platform: "CHATGPT",
+    legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" },
     tariff_dependency: false,
   }));
   await reconcile();

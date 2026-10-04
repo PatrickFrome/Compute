@@ -46,9 +46,9 @@ import * as ports from "./ports";
 import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
 import { db, emit, nowIso, createAgent, createTask, getMeta, setMeta, type AgentRow } from "../store";
-import { chat } from "../providers";
+import { chat, webSearch as providerWebSearch } from "../providers";
 import { laneForRole } from "./governor";
-import { agentTag, canonicalGlm } from "./glm";
+import { activeAgentModelTag, normalizeActiveAgentModelTag } from "./inference";
 import { memBlockEconomy } from "./memory";
 import { poolStatus } from "./pool";
 import { livenessBrief } from "./autonomy";
@@ -72,10 +72,10 @@ const CHAT_CEILING = Number(process.env.ME2_CHAT_CEILING ?? 24); // эласти
 const CHAT_MAX_INFLIGHT = 8;         // глобальный конкурентный предел ходов (бережём LLM-слот)
 const OBJECTIVE_MAX_CHARS = 600;     // долгоживущая цель чата (G5)
 
-/** Нормализация модели: однократный префикс zai: (лечит zai:zai:… — R37, хил сессий R36 был неполный). */
+/** Durable model identity is OpenAI-only. Legacy zai:/glm tags are accepted
+ * only as migration input and immediately collapse to the active OpenAI tag. */
 export function normalizeChatModel(m: string): string {
-  const s = String(m ?? "").trim();
-  return s ? s.replace(/^(zai:)+/, "zai:") : s;
+  return normalizeActiveAgentModelTag(String(m ?? "").trim() || activeAgentModelTag());
 }
 
 // ── схема ─────────────────────────────────────────────────────────
@@ -117,8 +117,13 @@ function ensureSchema(): void {
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_status TEXT").run(); } catch { /* уже есть */ }
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_proof TEXT").run(); } catch { /* уже есть */ }
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_at TEXT").run(); } catch { /* уже есть */ }
-  // хил двойного префикса в СЕССИЯХ (R37: R36 вылечил реестр, но не персистентные session-строки)
-  try { db.query("UPDATE agent_sessions SET model=? WHERE model LIKE 'zai:zai:%'").run("zai:" + canonicalGlm()); } catch { /* noop */ }
+  // Provider migration: historical session rows stay auditable, but every
+  // executable session identity converges to OpenAI. Message/event history is
+  // not rewritten.
+  try {
+    db.query("UPDATE agent_sessions SET model=? WHERE model='' OR model LIKE 'zai:%' OR model LIKE 'glm%' OR model LIKE 'gateway:%'")
+      .run(activeAgentModelTag());
+  } catch { /* compatibility migration must not block schema init */ }
   schemaReady = true;
 }
 
@@ -257,15 +262,8 @@ const CHAT_TOOLS: Array<{ name: ChatToolName; description: string; args: Record<
   { name: "reply", description: "ФИНАЛЬНЫЙ ответ пользователю (завершает ход)", args: { text: "string" } },
 ];
 
-let zaiWeb: Awaited<import("z-ai-web-dev-sdk").default.create> | null = null;
 async function webSearch(query: string): Promise<string> {
-  if (!zaiWeb) {
-    const mod = await import("z-ai-web-dev-sdk");
-    zaiWeb = await mod.default.create();
-  }
-  const results = (await zaiWeb.functions.invoke("web_search", { query: query.slice(0, 400), num: 5 })) as
-    Array<{ name?: string; snippet?: string; url?: string }>;
-  return (results ?? []).map((r, i) => `${i + 1}. ${r.name}\n   ${String(r.snippet ?? "").slice(0, 200)}\n   ${r.url}`).join("\n") || "(no results)";
+  return providerWebSearch(query, { lane: "P1", max_results: 5 });
 }
 
 function daemonStatus(): string {
@@ -582,11 +580,11 @@ export function agentChatCreate(opts: { agent_id?: string; role?: string; title?
     if (!r) throw new Error("agent_not_found");
     agent = r as unknown as AgentRow;
   } else {
-    agent = createAgent(String(opts.role ?? "CHAT"), opts.model ? normalizeChatModel(`zai:${String(opts.model).replace(/^(zai:)+/, "")}`) : agentTag());
+    agent = createAgent(String(opts.role ?? "CHAT"), normalizeChatModel(opts.model || activeAgentModelTag()));
     emit("AGENT_CREATED", { role: agent.role, model: agent.model, by: "agentchat" }, agent.id, null);
   }
   const id = `ac_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  const model = normalizeChatModel(opts.model ? `zai:${String(opts.model).replace(/^(zai:)+/, "")}` : String(agent.model || agentTag()));
+  const model = normalizeChatModel(opts.model || String(agent.model || activeAgentModelTag()));
   const now = nowIso();
   db.query(`INSERT INTO agent_sessions (id, agent_id, title, status, state, summary, compactions, turns_ok, turns_fail, fail_streak, model, created_at, updated_at)
     VALUES (?,?,?,'ACTIVE','IDLE','',0,0,0,0,?,?,?)`)
@@ -640,7 +638,7 @@ export function agentChatClose(id: string): boolean {
   return true;
 }
 
-/** Полное удаление (eval-самоочистка). Осиротевший агент чата удаляется — иначе stub-модели копятся в GLM-флоте (drift). */
+/** Полное удаление (eval-самоочистка). Осиротевший агент чата удаляется — иначе stub-модели копятся в активном inference-флоте (drift). */
 export function agentChatDelete(id: string): void {
   ensureSchema();
   const r = qSession(id);
@@ -672,7 +670,7 @@ export async function agentChatCompact(id: string, opts: { force?: boolean } = {
   }
   const older = msgs.slice(0, msgs.length - COMPACT_KEEP_LAST);
   const transcript = older.map((m) => `${m.role}: ${m.content.slice(0, 600)}`).join("\n").slice(0, 14000);
-  const model = normalizeChatModel(sess.model) || `zai:${agentTag()}`;
+  const model = normalizeChatModel(sess.model) || activeAgentModelTag();
   const raw = await chat(model, [
     { role: "system", content: "Ты — архивариус агентных чатов. Сожми диалог в плотную сводку: факты, решения, результаты инструментов, незакрытые вопросы. Без воды, до 1200 символов." },
     { role: "user", content: transcript },
@@ -709,7 +707,7 @@ export async function agentChatTurn(sessionId: string, userText: string): Promis
   let hardError: string | undefined;
 
   try {
-    const model = normalizeChatModel(sess.model) || `zai:${agentTag()}`;
+    const model = normalizeChatModel(sess.model) || activeAgentModelTag();
     const history = buildChatContext({ ...sess, state: "THINKING" }, role);
     for (let step = 0; step < MAX_STEPS; step++) {
       if (Date.now() - t0 > TURN_DEADLINE_MS) { hardError = "turn_deadline"; break; }
@@ -741,7 +739,7 @@ export async function agentChatTurn(sessionId: string, userText: string): Promis
       emit("AGENT_CHAT_STEP", { session_id: sessionId, step, kind: "tool", tool, ms: Date.now() - tTool, preview: observation.slice(0, 140) }, sess.agent_id, null);
       history.push({ role: "user", content: `[observation] ${observation}` });
     }
-    if (!reply && !hardError) reply = "(ход завершён без reply — см. шаги и observation в истории)";
+    if (!reply && !hardError) hardError = "agent_reply_missing_after_max_steps";
   } catch (e) {
     hardError = e instanceof Error ? e.message : String(e);
   }

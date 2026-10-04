@@ -15,9 +15,9 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 // conversation FIRST with a tiny deterministic seed, then types the real
 // message on the conversation surface. These tests pin that medicine.
 
-const conversationUrl = 'https://chat.z.ai/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
-const NEW_CONVERSATION = 'https://chat.z.ai/c/newconv-rolled-seed-1234';
-const ROOT = 'https://chat.z.ai/';
+const conversationUrl = 'https://chatgpt.com/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
+const NEW_CONVERSATION = 'https://chatgpt.com/c/newconv-rolled-seed-1234';
+const ROOT = 'https://chatgpt.com/';
 
 function seedKeepalive(statePath) {
   let stored = null;
@@ -37,7 +37,7 @@ function seedKeepalive(statePath) {
 
 function frameFor(url, { composer = true, generating = false } = {}) {
   const targets = [];
-  if (composer) targets.push({ role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-1', value_length: 0 });
+  if (composer) targets.push({ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: 0 });
   if (generating) targets.push({ role: 'button', name: 'Stop' });
   return { url, text_excerpt: 'supervisor transcript excerpt', semantic_targets: targets };
 }
@@ -90,7 +90,7 @@ function makeHarness(statePath, { seedProvesConversation = true, wakeProves = tr
             suppressed: false,
             url: NEW_CONVERSATION,
             text_excerpt: text,
-            semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-next', value_length: 0 }],
+            semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-next', value_length: 0 }],
             authority_effect: true,
           };
         }

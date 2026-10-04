@@ -20,7 +20,7 @@ const lease = {
   automatic_retry_allowed: false,
   task_spec: { schema: 'metaengine.devos.task.v1', objective: 'Implement the safe slice.', constraints: ['no main merge'], deliverable: 'commit tests' },
 };
-const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const conversationHash = crypto.createHash('sha256').update(conversationUrl).digest('hex');
 const promptHash = crypto.createHash('sha256').update(renderDevosTaskPrompt(lease)).digest('hex');
 const fleet = {
@@ -49,7 +49,7 @@ const fleet = {
     authority_effect: false,
   }],
 };
-const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
+const composer = { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send Message' };
 const stop = { role: 'button', name: 'Stop' };
 const supervisorTab = 'tab_supervisor';
@@ -66,7 +66,7 @@ const frame = ({ sent = false } = {}) => ({
   url: conversationUrl,
   viewport: { width: 1200, height: 700 },
   semantic_targets: sent ? [composer, stop] : [composer],
-  interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'GLM-5.3-Flash' }] },
+  interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'CHATGPT_ACCOUNT_SELECTED' }] },
   authority_effect: false,
 });
 const journalBinding = () => ({
@@ -125,7 +125,7 @@ test('lost DB receipt survives restart and redelivers receipt without replaying 
   assert.equal(first.dispatch.state, 'DELIVERY_PENDING');
   assert.equal(firstMarkRunning, 1);
   assert.equal(firstCalls.filter((x) => x === 'SEMANTIC_TYPE').length, 1);
-  // GLM lane: submit is the SEMANTIC_TYPE Enter path — no separate Send click.
+  // active ChatGPT lane: submit is the SEMANTIC_TYPE Enter-first path — no separate Send click.
   assert.equal(firstCalls.filter((x) => x === 'TYPED_CLICK').length, 0);
 
   const persistedAfterLoss = new DevOsEffectDeliveryJournal({ statePath });

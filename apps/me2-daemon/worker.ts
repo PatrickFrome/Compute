@@ -6,11 +6,10 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, normalize, dirname } from "node:path";
-import ZAI from "z-ai-web-dev-sdk";
 import {
   listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
-import { chat } from "./providers";
+import { chat, webSearch as providerWebSearch } from "./providers";
 import { isQuotaError, parkTaskQuota, PARK_MAX } from "./src/quota";
 import { recordSpan } from "./src/otel";
 import { reviewTask } from "./src/reviewer";
@@ -49,7 +48,6 @@ function fleetStep(
     step: payload.step, kind, tool: payload.tool ?? null, preview: payload.preview.slice(0, 140),
   }, agentId, task.id);
 }
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
 type ToolDef = { name: string; description: string; args: Record<string, string> };
 const TOOLS: ToolDef[] = [
@@ -111,13 +109,8 @@ async function execTool(name: string, args: Record<string, unknown>, taskId: str
       }
       case "shell":
         return await runShell(cwd, String(args.command ?? ""));
-      case "web_search": {
-        if (!zaiInstance) zaiInstance = await ZAI.create();
-        const results = (await zaiInstance.functions.invoke("web_search", {
-          query: String(args.query ?? "").slice(0, 400), num: 5,
-        })) as Array<{ name?: string; snippet?: string; url?: string }>;
-        return (results ?? []).map((r, i) => `${i + 1}. ${r.name}\n   ${String(r.snippet ?? "").slice(0, 200)}\n   ${r.url}`).join("\n") || "(no results)";
-      }
+      case "web_search":
+        return await providerWebSearch(String(args.query ?? ""), { lane: "P1", max_results: 5 });
       case "finish":
         return "__FINISHED__";
       default:

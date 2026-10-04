@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 
 // R98/D-C2 contract tests: multiply-and-simultaneous task execution is
-// permitted only for ACTIVE z.ai Agent sessions. Root bootstrap belongs to
+// permitted only for ACTIVE ChatGPT agent sessions. Root bootstrap belongs to
 // the promotion lease path and is explicitly fenced from task dispatch.
 
 const mkLease = (n, tabId) => ({
@@ -21,9 +21,9 @@ const mkLease = (n, tabId) => ({
   task_spec: { schema: 'metaengine.devos.task.v1', objective: `Implement slice ${n}.`, constraints: [], deliverable: 'tests' },
 });
 
-const conversationUrl = (n) => `https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789ab${n}`;
+const conversationUrl = (n) => `https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789ab${n}`;
 
-function frame({ url = 'https://chat.z.ai/', tabId, targetId, composerValueLength = null } = {}) {
+function frame({ url = 'https://chatgpt.com/', tabId, targetId, composerValueLength = null } = {}) {
   return {
     schema: 'metaengine.native-browser.perception.v1',
     process_incarnation_id: 'process_test_incarnation_0001',
@@ -32,9 +32,9 @@ function frame({ url = 'https://chat.z.ai/', tabId, targetId, composerValueLengt
     url,
     viewport: { width: 1200, height: 640 },
     semantic_targets: [
-      { role: 'textbox', name: null, value_length: composerValueLength ?? undefined, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 },
+      { role: 'textbox', name: 'Message ChatGPT', value_length: composerValueLength ?? undefined, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 },
     ],
-    interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[{ role:'statictext', text:'GLM-5.3-Flash' }] },
+    interaction_tree: { schema:'metaengine.native-browser.interaction-tree.v1', elements:[] },
     authority_effect: false,
   };
 }
@@ -158,8 +158,8 @@ test('R98: PRECONVERSATION_ROOT cannot enter task dispatch; promotion owns Agent
     tab_id: lease.tab_id,
     target_id: lease.target_id,
     generation_epoch: lease.agent_generation_epoch,
-    conversation_url: 'https://chat.z.ai/',
-    conversation_url_sha256: crypto.createHash('sha256').update('https://chat.z.ai/').digest('hex'),
+    conversation_url: 'https://chatgpt.com/',
+    conversation_url_sha256: crypto.createHash('sha256').update('https://chatgpt.com/').digest('hex'),
     proven_at: '2026-09-28T00:00:00.000Z',
     authority_effect: false,
   };

@@ -1,4 +1,4 @@
-import { classifyAgentPlatformSurface } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_ID, classifyAgentPlatformSurface, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 
 // Agent-platform task configuration contract — z.ai Agent-surface provisioning.
 //
@@ -38,10 +38,7 @@ export function classifyAgentPlatformTaskSurface(frame) {
   const transport = classifyAgentPlatformSurface(frame?.url);
   if (!transport) return Object.freeze({ stage: 'NOT_AGENT_PLATFORM', proven: false, authority_effect: false });
   if (transport.stage === 'CONVERSATION') {
-    // A /c/<id> URL is shared by ordinary Chat and Agent-created sessions.
-    // URL reachability alone therefore carries ZERO Agent-origin authority.
-    // Admission must come from the durable fleet transport proof that binds
-    // the conversation to a previously proven AGENT_HOME capture.
+    // Conversation URL alone never proves which durable fleet agent created it.
     return Object.freeze({
       stage: 'CONVERSATION_ORIGIN_UNPROVEN',
       proven: false,
@@ -54,16 +51,39 @@ export function classifyAgentPlatformTaskSurface(frame) {
     return Object.freeze({ stage: 'OTHER', proven: false, authority_effect: false });
   }
 
+  // ChatGPT has no separate z.ai-style Agent/New Task product surface. The
+  // exact authenticated root composer is the isolated-session creation
+  // surface. URL reachability alone remains insufficient: the composer must
+  // be a unique semantic target in the same native perception revision.
+  if (AGENT_PLATFORM_ID === 'CHATGPT') {
+    const composer = resolveAgentPlatformComposer(frame);
+    return Object.freeze({
+      stage: composer ? 'AGENT_HOME' : 'CHAT_ROOT',
+      proven: Boolean(composer),
+      controls: Object.freeze({
+        root_composer: composer ? structuredClone(composer) : null,
+        agent_nav: null,
+        new_task: null,
+        model_selector: null,
+        full_stack_template: null,
+      }),
+      url_only_authority: false,
+      authority_effect: false,
+    });
+  }
+
+  // Legacy compatibility only. No active routing should enter this branch
+  // while AGENT_PLATFORM_ID is CHATGPT.
   const agentNav = exactNamedTarget(frame, AGENT_HOME_CONTROLS.agent_nav);
   const newTask = exactNamedTarget(frame, AGENT_HOME_CONTROLS.new_task);
   const fullStack = exactNamedTarget(frame, AGENT_HOME_CONTROLS.full_stack_template);
   const modelSelector = exactNamedTarget(frame, AGENT_HOME_CONTROLS.model_selector);
   const agentHome = Boolean(agentNav && newTask && fullStack && modelSelector);
-
   return Object.freeze({
     stage: agentHome ? 'AGENT_HOME' : 'CHAT_ROOT',
     proven: agentHome,
     controls: Object.freeze({
+      root_composer: null,
       agent_nav: agentNav ? structuredClone(agentNav) : null,
       new_task: newTask ? structuredClone(newTask) : null,
       model_selector: modelSelector ? structuredClone(modelSelector) : null,
@@ -239,18 +259,19 @@ export async function waitForAgentPlatformDatabaseVisibility({
 export function agentPlatformTaskConfigSnapshot() {
   return Object.freeze({
     schema: AGENT_PLATFORM_TASK_CONFIG_SCHEMA,
-    platform: 'GLM_ZAI',
-    task_creation_surface: 'AGENT_HOME_NEW_TASK_FLOW',
-    ordinary_root_is_task_surface: false,
+    platform: AGENT_PLATFORM_ID,
+    task_creation_surface: AGENT_PLATFORM_ID === 'CHATGPT' ? 'CHATGPT_ROOT_COMPOSER' : 'LEGACY_AGENT_HOME_NEW_TASK_FLOW',
+    ordinary_root_is_task_surface: AGENT_PLATFORM_ID === 'CHATGPT',
+    root_requires_exact_semantic_composer: true,
     conversation_url_is_agent_surface_authority: false,
     conversation_origin_requires_durable_agent_surface_proof: true,
-    agent_home_proof: 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS',
+    agent_home_proof: AGENT_PLATFORM_ID === 'CHATGPT'
+      ? 'EXACT_CHATGPT_ROOT_COMPOSER_SAME_REVISION'
+      : 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS',
     agent_home_controls: AGENT_HOME_CONTROLS,
-    task_config_surface_state: 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION',
-    composer_ignores_synthetic_editing_keys: null,
-    composer_enter_submits: null,
-    replace_gesture_root_surface: null,
-    database_visibility: 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED',
+    legacy_task_config_active: false,
+    task_config_surface_state: 'LEGACY_COMPATIBILITY_ONLY',
+    database_visibility: 'LEGACY_ZAI_TASK_CONFIG_ONLY',
     controls: TASK_CONFIG_CONTROLS,
     authority_effect: false,
   });

@@ -21,9 +21,10 @@ export function classifyRemoteUrl(input) {
   if (BLOCKED_PROTOCOLS.has(url.protocol)) return { allowed: false, reason: 'PRIVILEGED_SCHEME', url, kind: 'BLOCKED' };
   if (url.protocol === 'about:' && url.href === 'about:blank') return { allowed: true, reason: null, url, kind: 'BLANK' };
   if (url.protocol === 'https:') {
-    const kind = isAgentPlatformHost(url.hostname.toLowerCase())
-      ? 'GLM_CHAT'
-      : (CHATGPT_HOSTS.has(url.hostname.toLowerCase()) ? 'CHATGPT' : 'USER_WEB');
+    const host = url.hostname.toLowerCase();
+    const kind = isAgentPlatformHost(host)
+      ? 'CHATGPT'
+      : (host === 'chat.z.ai' ? 'GLM_CHAT' : (CHATGPT_HOSTS.has(host) ? 'CHATGPT' : 'USER_WEB'));
     return { allowed: true, reason: null, url, kind };
   }
   if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname.toLowerCase())) return { allowed: true, reason: null, url, kind: 'LOCAL_DEV' };

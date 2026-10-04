@@ -18,13 +18,13 @@
       <div><span class="dot"></span><small>Gate</small><strong id="gatePulse">OBSERVE</strong></div>
     </section>
     <section class="card causal-card">
-      <div class="section-title"><span>Strict causal lane</span><span class="micro" id="ordering">—</span></div>
+      <div class="section-title"><span>ChatGPT-only inference lane</span><span class="micro" id="ordering">—</span></div>
       <div class="causal-lane">
-        <article class="agent agent-glm"><div class="agent-head"><span class="agent-icon">G</span><div><b>GLM</b><small>launch #1</small></div></div><div id="glmState" class="agent-state">—</div></article>
-        <div class="barrier"><span class="arrow">→</span><span class="barrier-pill">ACTUATED</span><span class="arrow">→</span></div>
-        <article class="agent agent-gpt"><div class="agent-head"><span class="agent-icon">P</span><div><b>GPT</b><small>launch #2</small></div></div><div id="gptState" class="agent-state">—</div></article>
+        <article class="agent agent-gpt"><div class="agent-head"><span class="agent-icon">C</span><div><b>ChatGPT</b><small>active execution</small></div></div><div id="gptState" class="agent-state">—</div></article>
+        <div class="barrier"><span class="barrier-pill">LEGACY READ-ONLY</span></div>
+        <article class="agent agent-glm"><div class="agent-head"><span class="agent-icon">L</span><div><b>GLM telemetry</b><small>no actuation</small></div></div><div id="glmState" class="agent-state">—</div></article>
       </div>
-      <div class="causal-meta"><span>predecessor <code id="predecessor">—</code></span><span>pending <code id="pendingCommand">—</code></span></div>
+      <div class="causal-meta"><span>legacy predecessor <code id="predecessor">—</code></span><span>pending <code id="pendingCommand">—</code></span></div>
     </section>
     <section class="card supervisor-card">
       <div class="section-title"><span>Chat Supervisor</span><span id="supervisorBadge" class="badge neutral">OFF</span></div>
@@ -47,16 +47,16 @@
       <div class="actions"><button id="cancelIntent" class="danger">Cancel send</button><button id="allowOriginal">Allow once</button><button id="rewriteAllow" class="primary">Rewrite + allow</button></div>
     </section>
     <details class="drawer" open><summary><span>Live perception</span><span class="micro">DOM · AX · pixels</span></summary><section class="drawer-body perception">
-      <div class="actions compact"><button id="captureGlm">Capture GLM</button><button id="captureGpt">Capture GPT</button><button id="clearPerception">Clear</button></div>
+      <div class="actions compact"><button id="captureGpt">Capture ChatGPT</button><button id="captureGlm">Inspect legacy GLM (read-only)</button><button id="clearPerception">Clear</button></div>
       <dl class="perception-meta"><dt>Target</dt><dd id="perceptionTarget">none</dd><dt>Captured</dt><dd id="perceptionCaptured">—</dd><dt>Frame</dt><dd id="perceptionFrame">—</dd><dt>Text</dt><dd id="perceptionTextMeta">—</dd><dt>AX / DOM</dt><dd id="perceptionStructure">—</dd><dt>Hashes</dt><dd id="perceptionHashes">—</dd></dl>
-      <img id="perceptionScreenshot" alt="Captured browser viewport; click to actuate this exact frame" hidden><label for="perceptionBody">Visible text excerpt</label><textarea id="perceptionBody" readonly placeholder="Capture a configured GPT or GLM tab…"></textarea><details class="nested"><summary>Accessibility / DOM excerpt</summary><pre id="perceptionStructureDump">No capture.</pre></details>
+      <img id="perceptionScreenshot" alt="Captured browser viewport; click to actuate this exact frame" hidden><label for="perceptionBody">Visible text excerpt</label><textarea id="perceptionBody" readonly placeholder="Capture ChatGPT, or inspect legacy GLM telemetry read-only…"></textarea><details class="nested"><summary>Accessibility / DOM excerpt</summary><pre id="perceptionStructureDump">No capture.</pre></details>
     </section></details>
     <details class="drawer"><summary><span>Semantic actions</span><span class="micro">live AX target</span></summary><section class="drawer-body">
       <label for="semanticTarget">Target from last capture</label><select id="semanticTarget" disabled><option value="">Capture a page first…</option></select><label for="semanticText">Trusted text</label><textarea id="semanticText" placeholder="Text for TYPE / replace…"></textarea>
       <div class="actions action-row"><button id="semanticFocus" disabled>Focus</button><button id="semanticClick" disabled>Click</button><button id="semanticType" disabled>Type / replace</button></div><div id="semanticState" class="meta">No semantic target selected.</div>
     </section></details>
     <details class="drawer"><summary><span>Action dock</span><span class="micro">trusted CDP</span></summary><section class="drawer-body">
-      <label for="actionTarget">Target</label><select id="actionTarget"><option value="GLM_ZAI">GLM / Z.AI</option><option value="CHATGPT">GPT / ChatGPT</option></select><div class="actions action-row"><button id="stopGeneration" class="danger">Stop generation</button><button id="scrollUp">Scroll up</button><button id="scrollDown">Scroll down</button></div><div id="lastAction" class="meta">No operator action yet.</div>
+      <label for="actionTarget">Target</label><select id="actionTarget"><option value="CHATGPT">ChatGPT / OpenAI</option></select><div class="actions action-row"><button id="stopGeneration" class="danger">Stop generation</button><button id="scrollUp">Scroll up</button><button id="scrollDown">Scroll down</button></div><div id="lastAction" class="meta">No operator action yet.</div>
     </section></details>
     <details class="drawer diagnostics"><summary><span>Runtime diagnostics</span><span class="micro">health & fences</span></summary><section class="drawer-body"><dl><dt>Daemon</dt><dd id="daemon">—</dd><dt>Update</dt><dd id="updateState">—</dd><dt>Compatibility</dt><dd id="compatState">—</dd><dt>Capabilities</dt><dd id="capabilityState">—</dd><dt>Debugger</dt><dd id="debuggerState">—</dd><dt>Sensor error</dt><dd id="sensorError">—</dd><dt>Last error</dt><dd id="lastError">—</dd></dl></section></details>
     <p id="status" role="status"></p>

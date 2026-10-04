@@ -53,7 +53,7 @@ function wakeMessage() {
 
 function composerFrame({ marker = false, composerSha = null } = {}) {
   return {
-    url: 'https://chat.z.ai/',
+    url: 'https://chatgpt.com/',
     title: 'ChatGPT',
     text_excerpt: marker ? `message ${WAKE_ID}` : '',
     semantic_targets: [
@@ -84,7 +84,7 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
       closedTabs.push(String(payload?.tab_id || ''));
       return { ok: true };
     }
-    if (action === 'NEW_TAB') return { tab_id: 'bootstrap_new', url: 'https://chat.z.ai/' };
+    if (action === 'NEW_TAB') return { tab_id: 'bootstrap_new', url: 'https://chatgpt.com/' };
     throw new Error(`unexpected_effect:${action}`);
   };
   const runtime = new SupervisorLifecycleRuntime({
@@ -100,7 +100,7 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
 
 test('bare bootstrap root transcript marker resolves ambiguity without a write effect', async () => {
   const { runtime, actions } = await makeRuntime({
-    tabs: [{ tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false }],
+    tabs: [{ tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false }],
     frame: composerFrame({ marker: true }),
   });
   const snap = await runtime.start();
@@ -116,7 +116,7 @@ test('exact composer continuation is durably fenced before click and never repea
   const composerSha = crypto.createHash('sha256').update(wakeMessage(), 'utf8').digest('hex');
   let submits = 0;
   const { runtime, actions, statePath, closedTabs } = await makeRuntime({
-    tabs: [{ tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false }],
+    tabs: [{ tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false }],
     frame: composerFrame({ composerSha }),
     onSubmit: () => {
       submits += 1;
@@ -154,8 +154,8 @@ test('duplicate bootstrap candidates fail closed with zero effect continuation',
   const composerSha = crypto.createHash('sha256').update(wakeMessage(), 'utf8').digest('hex');
   const { runtime, actions } = await makeRuntime({
     tabs: [
-      { tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false },
-      { tab_id: 'root-2', url: 'https://chat.z.ai/', selected: false },
+      { tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false },
+      { tab_id: 'root-2', url: 'https://chatgpt.com/', selected: false },
     ],
     frame: composerFrame({ composerSha }),
   });

@@ -3,19 +3,19 @@ import { timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 
 type JsonObject = Record<string, unknown>;
-type Role = "GPT" | "GLM";
+type Role = "PRIMARY" | "CRITIC";
 
 const DATABASE_URL = required("DATABASE_URL");
 const HOST = process.env.SOVEREIGN_HTTP_HOST || "127.0.0.1";
 const PORT = boundedInt(process.env.SOVEREIGN_HTTP_PORT, 8090, 1, 65535);
 const CONTROL_TOKEN = process.env.SOVEREIGN_CONTROL_TOKEN || "";
-const GPT_URL = process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const GLM_URL = process.env.SOVEREIGN_GLM_URL || "http://127.0.0.1:8002";
-const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b";
-const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || "zai-org/GLM-4.7-Flash";
+const PRIMARY_URL = process.env.SOVEREIGN_PRIMARY_URL || process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
+const CRITIC_URL = process.env.SOVEREIGN_CRITIC_URL || "http://127.0.0.1:8002";
+const PRIMARY_MODEL = openAiModel(process.env.SOVEREIGN_PRIMARY_MODEL || process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_PRIMARY_MODEL");
+const CRITIC_MODEL = openAiModel(process.env.SOVEREIGN_CRITIC_MODEL || "openai/gpt-oss-20b", "SOVEREIGN_CRITIC_MODEL");
 const COMMON_MODEL_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
-const GPT_TOKEN = process.env.SOVEREIGN_GPT_TOKEN || COMMON_MODEL_TOKEN;
-const GLM_TOKEN = process.env.SOVEREIGN_GLM_TOKEN || COMMON_MODEL_TOKEN;
+const PRIMARY_TOKEN = process.env.SOVEREIGN_PRIMARY_TOKEN || process.env.SOVEREIGN_GPT_TOKEN || COMMON_MODEL_TOKEN;
+const CRITIC_TOKEN = process.env.SOVEREIGN_CRITIC_TOKEN || COMMON_MODEL_TOKEN;
 const UPSTREAM_TIMEOUT_MS = boundedInt(process.env.SOVEREIGN_UPSTREAM_TIMEOUT_MS, 120_000, 5_000, 600_000);
 const MAX_BODY_BYTES = boundedInt(process.env.SOVEREIGN_HTTP_MAX_BODY_BYTES, 2 * 1024 * 1024, 64 * 1024, 16 * 1024 * 1024);
 const CHANNEL = "h205f22_same_point_v4_ready";
@@ -34,6 +34,17 @@ function required(name: string): string {
 function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
   const n = Number(raw ?? fallback);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback;
+}
+
+function openAiModel(raw: string, name: string): string {
+  const model = String(raw || "").trim();
+  if (!/^(?:openai\/|gpt-)/i.test(model)) throw new Error(`${name}_must_be_openai`);
+  return model;
+}
+
+function inputOpenAiModel(value: unknown, fallback: string, name: string): string {
+  const raw = String(value || "").trim();
+  return raw ? openAiModel(raw, name) : fallback;
 }
 
 function isLoopback(host: string): boolean {
@@ -99,9 +110,9 @@ function uuid(value: string): boolean {
 }
 
 function modelConfig(role: Role): { base: string; model: string; token: string } {
-  return role === "GPT"
-    ? { base: GPT_URL, model: GPT_MODEL, token: GPT_TOKEN }
-    : { base: GLM_URL, model: GLM_MODEL, token: GLM_TOKEN };
+  return role === "PRIMARY"
+    ? { base: PRIMARY_URL, model: PRIMARY_MODEL, token: PRIMARY_TOKEN }
+    : { base: CRITIC_URL, model: CRITIC_MODEL, token: CRITIC_TOKEN };
 }
 
 async function probeModel(role: Role): Promise<JsonObject> {
@@ -151,10 +162,10 @@ async function dbProbe(): Promise<JsonObject> {
 }
 
 async function readiness(): Promise<JsonObject> {
-  const [db, gpt, glm] = await Promise.all([dbProbe(), probeModel("GPT"), probeModel("GLM")]);
-  const ready = db.ok === true && gpt.ok === true && glm.ok === true && gpt.model_visible === true && glm.model_visible === true;
+  const [db, primary, critic] = await Promise.all([dbProbe(), probeModel("PRIMARY"), probeModel("CRITIC")]);
+  const ready = db.ok === true && primary.ok === true && critic.ok === true && primary.model_visible === true && critic.model_visible === true;
   lastReady = ready;
-  return { ready, protocol: "SAME_POINT_DUEL_V4", db, gpt, glm };
+  return { ready, protocol: "SAME_POINT_DUEL_V4", provider: "OPENAI", platform: "CHATGPT", db, primary, critic, legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" } };
 }
 
 async function proxyModel(req: IncomingMessage, res: ServerResponse, role: Role, kind: "models" | "chat"): Promise<void> {
@@ -198,8 +209,8 @@ async function createDuel(input: JsonObject): Promise<JsonObject> {
   const baseSha = String(input.base_github_sha || "").trim().toLowerCase();
   const subject = input.subject && typeof input.subject === "object" && !Array.isArray(input.subject) ? input.subject as JsonObject : {};
   const policy = String(input.execution_policy || "SOVEREIGN_ONLY");
-  const gptModel = String(input.gpt_model || GPT_MODEL);
-  const glmModel = String(input.glm_model || GLM_MODEL);
+  const primaryModel = inputOpenAiModel(input.primary_model ?? input.gpt_model, PRIMARY_MODEL, "primary_model");
+  const criticModel = inputOpenAiModel(input.critic_model ?? input.glm_model, CRITIC_MODEL, "critic_model");
   if (duelKey.length < 3) throw new Error("duel_key_required");
   if (!milestone) throw new Error("milestone_key_required");
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error("base_github_sha_invalid");
@@ -207,7 +218,7 @@ async function createDuel(input: JsonObject): Promise<JsonObject> {
   if (!new Set(["SOVEREIGN_ONLY", "ANY"]).has(policy)) throw new Error("execution_policy_invalid");
   const result = await pool.query<{ v: JsonObject }>(
     "select public.h205f22_duel_create_same_point_v4($1::text,$2::text,$3::text,$4::jsonb,$5::text,$6::text,$7::text) as v",
-    [duelKey, milestone, baseSha, JSON.stringify(subject), policy, gptModel, glmModel],
+    [duelKey, milestone, baseSha, JSON.stringify({ ...subject, active_provider: "OPENAI", active_platform: "CHATGPT", logical_roles: ["PRIMARY","CRITIC"] }), policy, primaryModel, criticModel],
   );
   return result.rows[0]?.v || {};
 }
@@ -278,30 +289,44 @@ const server = createServer(async (req, res) => {
       sendJson(res, 200, {
         object: "list",
         data: [
-          { id: GPT_MODEL, object: "model", owned_by: "sovereign-gpt", ready: (state.gpt as JsonObject).ok === true },
-          { id: GLM_MODEL, object: "model", owned_by: "sovereign-glm", ready: (state.glm as JsonObject).ok === true },
+          { id: PRIMARY_MODEL, object: "model", owned_by: "sovereign-primary", ready: (state.primary as JsonObject).ok === true },
+          { id: CRITIC_MODEL, object: "model", owned_by: "sovereign-critic", ready: (state.critic as JsonObject).ok === true },
         ],
       });
       return;
     }
-    if (method === "GET" && url.pathname === "/gpt/v1/models") {
+    if (method === "GET" && url.pathname === "/primary/v1/models") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GPT", "models");
+      await proxyModel(req, res, "PRIMARY", "models");
       return;
     }
-    if (method === "GET" && url.pathname === "/glm/v1/models") {
+    if (method === "GET" && url.pathname === "/critic/v1/models") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GLM", "models");
+      await proxyModel(req, res, "CRITIC", "models");
       return;
     }
-    if (method === "POST" && url.pathname === "/gpt/v1/chat/completions") {
+    if (method === "POST" && url.pathname === "/primary/v1/chat/completions") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GPT", "chat");
+      await proxyModel(req, res, "PRIMARY", "chat");
       return;
     }
-    if (method === "POST" && url.pathname === "/glm/v1/chat/completions") {
+    if (method === "POST" && url.pathname === "/critic/v1/chat/completions") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GLM", "chat");
+      await proxyModel(req, res, "CRITIC", "chat");
+      return;
+    }
+    // Provider-shaped endpoint aliases are retired. Even when they used the
+    // same OpenAI backend, keeping /glm/* or /gpt/* as active execution routes
+    // preserved obsolete provider identity in telemetry/configuration and made
+    // accidental reactivation possible. Callers must use logical roles.
+    if (url.pathname.startsWith("/glm/") || url.pathname.startsWith("/gpt/")) {
+      if (!requireAuth(req, res)) return;
+      sendJson(res, 410, {
+        error: "legacy_provider_endpoint_retired",
+        active_provider: "OPENAI",
+        active_platform: "CHATGPT",
+        role_endpoints: ["/primary/v1", "/critic/v1"],
+      });
       return;
     }
     if (method === "POST" && url.pathname === "/v4/duels") {
@@ -347,8 +372,11 @@ server.listen(PORT, HOST, () => {
     port: PORT,
     protocol: "SAME_POINT_DUEL_V4",
     control_auth: CONTROL_TOKEN ? "BEARER" : "LOOPBACK_ONLY",
-    gpt_model: GPT_MODEL,
-    glm_model: GLM_MODEL,
+    primary_model: PRIMARY_MODEL,
+    critic_model: CRITIC_MODEL,
+    provider: "OPENAI",
+    platform: "CHATGPT",
+    legacy_wire_slots: { PRIMARY: "GPT", CRITIC: "GLM" },
   }));
 });
 

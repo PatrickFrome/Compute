@@ -131,11 +131,11 @@ try {
   const snapshotEnvelope = {
     schema: 'metaengine.chat-bridge.snapshot-envelope.v1',
     tab_id: 1,
-    platform: 'GLM_ZAI',
+    platform: 'CHATGPT',
     observed_at: new Date().toISOString(),
     snapshot: {
-      platform: 'GLM_ZAI',
-      url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db?must=not-persist#secret',
+      platform: 'CHATGPT',
+      url: 'https://chatgpt.com/c/55fd8c37-00d0-4821-8e56-14f36c7be6db?must=not-persist#secret',
       generating: false,
       composer_present: true,
       composer_text: '',
@@ -148,7 +148,7 @@ try {
 
   const wake = await requestJson(`${base}/v1/control/wake`, {
     method: 'POST',
-    body: { target_platform: 'GLM_ZAI' }
+    body: { target_platform: 'CHATGPT' }
   });
   assert.equal(wake.response.status, 202);
 
@@ -188,7 +188,7 @@ try {
   failReceipt = true;
   const strongResult = {
     status: 'SENT_AND_DOM_VERIFIED',
-    target_platform: 'GLM_ZAI',
+    target_platform: 'CHATGPT',
     target_url: snapshotEnvelope.snapshot.url,
     clicked_send_button: true,
     verification: { verified: true, exact_user_turn_seen: true },

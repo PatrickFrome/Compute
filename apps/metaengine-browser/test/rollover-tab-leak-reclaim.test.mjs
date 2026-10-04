@@ -16,8 +16,8 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 // reconciliation owns it). Failed closes stay in the ledger and are retried
 // BEFORE the next rollover opens a new tab, so the retry loop is tab-neutral.
 
-const conversationUrl = 'https://chat.z.ai/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
-const ROOT = 'https://chat.z.ai/';
+const conversationUrl = 'https://chatgpt.com/c/0799499c-9ead-4a7e-8edc-be365222c4d4';
+const ROOT = 'https://chatgpt.com/';
 
 function seedKeepalive(statePath) {
   let stored = null;
@@ -41,8 +41,8 @@ function frameFor(url, { composer = true } = {}) {
     text_excerpt: 'supervisor transcript excerpt',
     viewport: { width: 1200, height: 800 },
     semantic_targets: composer
-      ? [{ role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-1', value_length: 0 }]
-      : [{ role: 'textbox', name: 'Search', semantic_ref: 'sr-search' }, { role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-2', value_length: 0 }],
+      ? [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-1', value_length: 0 }]
+      : [{ role: 'textbox', name: 'Search', semantic_ref: 'sr-search' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-2', value_length: 0 }],
   };
 }
 
@@ -100,13 +100,13 @@ function makeHarness(statePath, { sendEffect = 'AMBIGUOUS', closeAttemptsBeforeS
         if (sendEffect === 'PROVEN_NEW_CONVERSATION') {
           const id = String(command.payload?.tab_id || '');
           const row = registry.find((t) => t.tab_id === id);
-          if (row) row.url = 'https://chat.z.ai/c/newconv-rolled-1234';
+          if (row) row.url = 'https://chatgpt.com/c/newconv-rolled-1234';
           return {
             effect_state: sendEffect,
             suppressed: false,
-            url: 'https://chat.z.ai/c/newconv-rolled-1234',
+            url: 'https://chatgpt.com/c/newconv-rolled-1234',
             text_excerpt: 'rolled over',
-            semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Ask anything', semantic_ref: 'sr-next', value_length: 0 }],
+            semantic_targets: [{ role: 'button', name: 'Stop' }, { role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'sr-next', value_length: 0 }],
           };
         }
         return { effect_state: sendEffect, suppressed: false };
@@ -197,7 +197,7 @@ test('D-C7: the composer wait rescues a hydrating fresh tab (no premature compos
   // and leak the tab. With it, the send is proven and the rollover binds.
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.ok(['WAITING', 'ACTIVE'].includes(state.state), `the rollover bound the new conversation (state=${state.state})`);
-  assert.equal(state.conversation_url, 'https://chat.z.ai/c/newconv-rolled-1234', 'the keepalive bound the new conversation URL');
+  assert.equal(state.conversation_url, 'https://chatgpt.com/c/newconv-rolled-1234', 'the keepalive bound the new conversation URL');
   assert.deepEqual(h.closed, [], 'no reclaim needed on the success path');
   assert.equal(h.newTabs, 1);
 });
@@ -210,7 +210,7 @@ test('D-C7: a leaked tab that drifted to a conversation URL is NEVER closed', as
 
   await drive(h);
   // The ambiguous send lands late: the wedged leaked tab drifts to a conversation.
-  h.registry.find((t) => t.tab_id === 'tab_new_1').url = 'https://chat.z.ai/c/drifted-4242';
+  h.registry.find((t) => t.tab_id === 'tab_new_1').url = 'https://chatgpt.com/c/drifted-4242';
   for (let i = 0; i < 4; i += 1) {
     await h.runtime.cycle({ force: true });
   }

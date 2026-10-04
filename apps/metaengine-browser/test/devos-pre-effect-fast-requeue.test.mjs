@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const CONVERSATION_SHA256 = crypto.createHash('sha256').update(CONVERSATION).digest('hex');
 
 const lease = {
@@ -53,7 +53,7 @@ const fleet = {
   }],
 };
 
-const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
+const composer = { role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const supervisorTab = 'tab_supervisor';
 
@@ -80,7 +80,7 @@ function frame({ targetId = lease.target_id, viewport = { width: 1200, height: 6
     url: CONVERSATION,
     viewport,
     semantic_targets: composerMissing ? [send] : [composer, send],
-    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'GLM-5.3-Flash' }] },
+    interaction_tree: { schema: 'metaengine.native-browser.interaction-tree.v1', elements: [{ role: 'statictext', text: 'CHATGPT_ACCOUNT_SELECTED' }] },
     authority_effect: false,
   };
 }

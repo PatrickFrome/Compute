@@ -3,25 +3,25 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const source = fs.readFileSync('coordination/chat-control-plane/extension/background.js', 'utf8');
-const ZAI = 'https://chat.z.ai/c/restart-idempotency';
+const CHATGPT = 'https://chatgpt.com/c/restart-idempotency';
 const COMPLETED_KEY = 'a2BridgeCompletedCommandsV0523';
 const PENDING_KEY = 'a2BridgePendingCommandV0523';
 const storage = new Map([
   ['armed', true],
   ['autoOpenTabs', false],
   ['pollMs', 2500],
-  ['chatgptUrl', ''],
-  ['zaiUrl', ZAI],
+  ['chatgptUrl', CHATGPT],
+  ['zaiUrl', ''],
   ['daemonUrl', 'https://example.invalid/a2']
 ]);
 
 const command = (id, idem) => ({
   command_id: id,
   idempotency_key: idem,
-  target_platform: 'GLM_ZAI',
-  prompt: 'A2 CHAT BRIDGE — AUTONOMOUS CONTINUE\nbridge_job_target=GLM',
+  target_platform: 'CHATGPT',
+  prompt: 'A2 CHAT BRIDGE — AUTONOMOUS CONTINUE\nbridge_job_target=GPT',
   launch_order: 1,
-  ordering_basis: 'GLM_FIRST',
+  ordering_basis: 'CHATGPT_ONLY',
   predecessor_command_id: null,
   authority_effect: false
 });
@@ -59,12 +59,12 @@ function makeRuntime({ nextResponses, resultPolicy, trustedCounter, resultCalls 
       onAlarm: { addListener(fn) { listeners.alarm.push(fn); } }
     },
     tabs: {
-      async query() { return [{ id: 7, url: ZAI }]; },
-      async get(id) { assert.equal(id, 7); return { id: 7, url: ZAI }; },
+      async query() { return [{ id: 7, url: CHATGPT }]; },
+      async get(id) { assert.equal(id, 7); return { id: 7, url: CHATGPT }; },
       async sendMessage(id, message) {
         assert.equal(id, 7);
         if (message?.type === 'GET_CHAT_SNAPSHOT') {
-          return { ok: true, snapshot: { platform: 'GLM_ZAI', generating: false, composer_text: '', message_count: 1, messages: [] } };
+          return { ok: true, snapshot: { platform: 'CHATGPT', generating: false, composer_text: '', message_count: 1, messages: [] } };
         }
         throw new Error(`unexpected tab message ${String(message?.type)}`);
       },
@@ -94,8 +94,7 @@ function makeRuntime({ nextResponses, resultPolicy, trustedCounter, resultCalls 
   context.A2_BRIDGE_BOOTSTRAP = { daemonUrl: 'https://example.invalid/a2' };
   context.A2_SECRET_VAULT_READY = Promise.resolve();
   context.A2_BRIDGE_CLIENT_ID = async () => 'restart-test-client';
-  context.A2_GLM_RECONCILE = async () => null;
-  context.A2_GLM_TRUSTED_SEND = async (_tabId, cmd) => {
+    context.A2_CHATGPT_TRUSTED_SEND = async (_tabId, cmd) => {
     trustedCounter.count += 1;
     return {
       ok: true,
@@ -106,11 +105,11 @@ function makeRuntime({ nextResponses, resultPolicy, trustedCounter, resultCalls 
       transport_trace_id: 'a'.repeat(32)
     };
   };
-  context.A2_CHATGPT_TRUSTED_SEND = async () => { throw new Error('unexpected GPT send'); };
+  context.A2_GLM_TRUSTED_SEND = async () => { throw new Error('legacy GLM send must never run'); };
   context.A2_BRIDGE_REQUEST = async (path, init = {}) => {
     if (path === '/v1/snapshots') return new Response(JSON.stringify({ accepted: true }), { status: 202, headers: { 'content-type': 'application/json' } });
     if (path === '/v1/commands/next') {
-      const body = nextResponses.shift() || { command: null, ordering_policy: 'STRICT_GLM_FIRST_ACTUATED_V1' };
+      const body = nextResponses.shift() || { command: null, ordering_policy: 'CHATGPT_ONLY_V1' };
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     const match = String(path).match(/^\/v1\/commands\/([^/]+)\/result$/);
@@ -131,9 +130,9 @@ function makeRuntime({ nextResponses, resultPolicy, trustedCounter, resultCalls 
 const trustedCounter = { count: 0 };
 const phase1Results = [];
 
-// Phase 1: physical GLM actuation succeeds, but every final result ACK is lost.
+// Phase 1: physical ChatGPT actuation succeeds, but every final result ACK is lost.
 makeRuntime({
-  nextResponses: [{ command: command('cmd-1', 'idem-A'), ordering_policy: 'STRICT_GLM_FIRST_ACTUATED_V1' }],
+  nextResponses: [{ command: command('cmd-1', 'idem-A'), ordering_policy: 'CHATGPT_ONLY_V1' }],
   resultPolicy: () => new Error('simulated_result_ack_loss'),
   trustedCounter,
   resultCalls: phase1Results
@@ -153,7 +152,7 @@ const phase2Results = [];
 // Phase 2: service-worker restart over the same storage. First replay the old
 // pending command, then receive a new command id with the same idempotency key.
 makeRuntime({
-  nextResponses: [{ command: command('cmd-2', 'idem-A'), ordering_policy: 'STRICT_GLM_FIRST_ACTUATED_V1' }],
+  nextResponses: [{ command: command('cmd-2', 'idem-A'), ordering_policy: 'CHATGPT_ONLY_V1' }],
   resultPolicy: () => 200,
   trustedCounter,
   resultCalls: phase2Results

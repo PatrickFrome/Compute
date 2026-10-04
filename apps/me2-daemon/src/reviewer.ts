@@ -24,6 +24,7 @@
  */
 import { db, emit, getTask, updateTask, nowIso, type TaskRow } from "../store";
 import { chat } from "../providers";
+import { activeAgentModelTag } from "./inference";
 import { memWrite } from "./memory";
 import { recordSpan } from "./otel";
 
@@ -119,7 +120,7 @@ async function runReview(t: TaskRow, hint?: { writes: number; tool_calls: number
     `Ответь РОВНО ОДНИМ JSON-объектом без markdown: {"verdict":"real|suspect|empty","reasons":["…"],"confidence":0..1}`,
     `Критерии: "empty" — результат пуст или не содержит ничего по спеку; "suspect" — утверждения результата не подтверждаются (обещано создание файлов/кода, а конкретики нет; отписка-заглушка; шагов слишком мало для спека); "real" — результат конкретен и согласован со спеком.`,
   ].join("\n");
-  const raw = await chat("zai:default", [
+  const raw = await chat(activeAgentModelTag(), [
     { role: "system", content: "Ты антифальшь-ревьюер. Только JSON." },
     { role: "user", content: prompt },
   ], { temperature: 0.1, lane: "P2" }); // ревью — фон (G11)

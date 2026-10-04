@@ -9,7 +9,6 @@
     "check": "bash scripts/probe.sh"
   },
   "dependencies": {
-    "socket.io": "^4.8.1",
-    "z-ai-web-dev-sdk": "^0.0.18"
+    "socket.io": "^4.8.1"
   }
 }

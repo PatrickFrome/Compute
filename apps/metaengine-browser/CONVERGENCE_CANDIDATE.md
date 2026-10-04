@@ -1,6 +1,49 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37153249506.1`.
+Reserved package identity is `0.7.0-dev.37210000001.1`.
+
+Atomic ChatGPT live-client package reservation (2026-10-04):
+- exact predecessor: `1b5b602f3560f50e67213cb9e63715cd44e78b79`;
+- `0.7.0-dev.37200000001.1` was consumed by intermediate source `9d932186e9a563161c53398b655e86e2fcb1ea5e` before package-lock/convergence metadata were aligned; it MUST NOT be rebuilt;
+- this successor changes package.json, package-lock.json and convergence metadata in ONE Git commit so Package Smoke cannot reserve a half-updated source identity;
+- fresh one-build identity: `0.7.0-dev.37210000001.1`; Package Smoke is the sole physical producer and every physical consumer must bind this exact head and installer digest;
+- live Client remains on the older installed runtime until exact-head Package Smoke + Installed Chat + Final Runtime + Self Update evidence is terminal green;
+- promotion/release remains fail-closed until real ChatGPT fleet activation and useful-work readback are proven.
+
+Reserved package identity is `0.7.0-dev.37200000001.1`.
+
+ChatGPT live-client qualification successor (2026-10-04):
+- exact source predecessor before this identity-only reservation: `7bb994e8b384965141b90426dd78e95247587f4f`;
+- `0.7.0-dev.37195000001.1` is consumed by an earlier Package Smoke producer source and MUST NOT be rebuilt or relabelled for this source;
+- live Client `2a60d6a2-c7c2-4dcc-b4c9-99de768443c9` is enrolled ADMIN and currently reaches the source-bound v27 canary through the stable one-client forwarder, while the installed Browser remains the older `0.7.0-dev.37153249506.1` runtime;
+- fresh Client DB now contains the typed Workspace Binding registry, snapshot projection and reincarnation transition; live workspace-snapshot readback changed from HTTP 503 to HTTP 200 AVAILABLE without scheduler/browser authority;
+- exact build target: `0.7.0-dev.37200000001.1`, above the observed Actions namespace used during this convergence cycle;
+- Package Smoke remains the sole physical producer; Installed Chat, Final Runtime, Dirty Profile, Autonomous Soak and Self Update MUST consume the same exact-head immutable installer;
+- release/promotion remains forbidden until exact-head physical gates prove real ChatGPT fleet activation and a harmless useful-work cycle with zero active GLM leases/effects.
+
+ChatGPT-only hardening successor reservation (2026-10-04):
+- exact predecessor before this identity-only reservation: `13bd9712db490f1f29571cef59999559b3da1699`;
+- Package Smoke run `37193954391` proved `0.7.0-dev.37191000001.1` was already reserved by prior source `a10af067c85e13a3c9d44cb1a6fd42062e85cb96` (artifact `11298721325`), so rebuilding or relabelling it is forbidden;
+- current source adds physical-command GLM/Z.ai quarantine, fresh-project bridge routing, modern Supabase secret-key compatibility, DB active-GLM fencing, fail-closed missing-frontier behavior, role-only sovereign endpoints, and regression/falsification coverage;
+- fresh monotonic one-build identity: `0.7.0-dev.37195000001.1`, chosen above current observed Actions run namespace `37193954391`;
+- Package Smoke remains the sole physical producer; every downstream physical workflow must consume the same exact-head installer and fail closed if the producer is not terminal SUCCESS;
+- this reservation is non-authoritative and does not itself authorize Edge deployment, release, live installation, database migration application, fleet dispatch, or production promotion.
+
+Installed Chat qualification successor reservation (2026-10-04):
+- exact predecessor before this identity-only reservation: `77d4244f2b47aacce84ab97203ad4e3b746ea969`;
+- predecessor `0.7.0-dev.37185000001.1` was already physically consumed by Package Smoke on source `07fb59c16f4f1224a95673734979d8f8e51d468f`;
+- the successor corrects installed ChatGPT preconnect evidence from legacy `https://chat.z.ai/` to active `https://chatgpt.com/` and adds a regression fence rejecting Z.ai as ChatGPT evidence;
+- fresh monotonic one-build identity: `0.7.0-dev.37191000001.1`, chosen above the latest observed Actions run id `37190157197`;
+- Package Smoke remains the sole physical producer; downstream Installed Chat / Final Runtime / Soak / Self Update must consume the exact immutable installer for the successor source;
+- reservation alone grants no production, release, live-install, fleet or database mutation authority.
+
+ChatGPT-Only Agent Fleet V1 physical-qualification reservation (2026-10-04):
+- source-qualified predecessor before the identity-only reservation: `b4688d5ae7318fed58fa5e898e867e974ae28915`; Critical Audit, Shell, Chat Control Plane, Meta Orchestrator, Root Transport Bootstrap, Live Control Recovery and R84 Desktop Convergence were terminal SUCCESS on that exact source;
+- Package Smoke on that predecessor correctly refused the already-consumed `0.7.0-dev.37153249506.1` before dependency install/NSIS, so no exact-head candidate installer was produced and all downstream physical consumers failed only at immutable-installer acquisition;
+- the ChatGPT-only migration changes Browser/ME2/coordination/provider runtime bytes, therefore the qualified predecessor package identity MUST NOT be rebuilt or relabelled;
+- fresh monotonic one-build identity: `0.7.0-dev.37185000001.1`, chosen above latest observed repository Actions run id `37184549035`;
+- Package Smoke remains the sole physical producer and its reservation preflight must independently prove that both the version artifact name and the exact source candidate artifact are unused before any physical build;
+- this reservation alone does not authorize release, production promotion, live installation, Guardian/admission mutation or task dispatch.
 
 Admission recovery convergence successor (2026-10-03):
 - exact predecessor `219ebe989a4f7ce2adfeb205a394a47ee55037cf` already consumed package identity `0.7.0-dev.37139234564.1` in physical Package Smoke run `37144386164`;
@@ -50,7 +93,7 @@ Historical ADMIN.1 changed packaged runtime bytes above UI.1 `0.7.0-dev.36719340
 
 Canonical production authority:
 - one Native Browser Supervisor/Fleet task and Agent lifecycle authority;
-- real authenticated z.ai Agent Web UI sessions, with durable Agent-origin/session provenance;
+- real authenticated ChatGPT Web UI sessions, with durable Agent-origin/session provenance; GLM/Z.ai is legacy read compatibility only and cannot authorize new actuation;
 - one geometry-independent Browser effect path with readback and no blind retry;
 - Browser Brain and durable memory remain Native Browser-owned;
 - Browser-packaged ME2 is a standalone read-only, zero-authority compatibility probe;
@@ -71,7 +114,7 @@ Release safety invariants:
 - tested source SHA, built installer and released installer must be identical in the final release chain;
 - full Self Update E2E consumes and re-verifies the same Package Smoke installer, records zero consumer target builds and waits for its exact producer terminal success;
 - concurrent fresh startup shares one durable device identity initialization and never changes the signing key under an enrollment request;
-- promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update z.ai Agent E2E evidence.
+- promotion requires terminal-green exact-head critical gates plus physical clean/upgrade/self-update and post-update ChatGPT Agent E2E evidence, including an explicit negative proof that no active GLM/Z.ai command, lease, navigation or inference effect occurred.
 
 
 Attempted successor identity `0.7.0-dev.36909837122.1` was consumed by the first CI matrix (Package Smoke #3111 started). R83 static canary correctly rejected its temporary Edge-source drift. The correction reuses the existing qualified `host_resilience` plane and reserves `0.7.0-dev.36963586969.1`; no canary manifest or deployed Edge is advanced by this client-only diagnostic slice.

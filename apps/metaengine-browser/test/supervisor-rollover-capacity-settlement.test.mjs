@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 
-const CHAT_URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const CHAT_URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 function harness(seed = null) {
   let stored = seed == null ? null : structuredClone(seed);
@@ -93,7 +93,7 @@ test('the exact live false-ambiguity signature parks under CLOSED admission', as
     supervisor_epoch: 2,
     cycle_seq: 2109,
     state: 'ROLLOVER_AMBIGUOUS',
-    conversation_url: 'https://chat.z.ai/c/e1ec5063-0798-46df-b401-df41813e0000',
+    conversation_url: 'https://chatgpt.com/c/e1ec5063-0798-46df-b401-df41813e0000',
     tab_id: 'tab_supervisor',
     paused: false,
     process_incarnation_id: 'process_test_current',
@@ -107,7 +107,7 @@ test('the exact live false-ambiguity signature parks under CLOSED admission', as
     rollover_attempt: {
       attempt_id: attemptId,
       supervisor_epoch: 2,
-      previous_conversation: 'https://chat.z.ai/c/e1ec5063-0798-46df-b401-df41813e0000',
+      previous_conversation: 'https://chatgpt.com/c/e1ec5063-0798-46df-b401-df41813e0000',
       started_at: '2026-09-28T20:59:09.703Z',
       tab_id: null,
       ambiguous_at: '2026-09-28T20:59:09.706Z',

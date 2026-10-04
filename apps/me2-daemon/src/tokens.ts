@@ -33,7 +33,9 @@ export const KNOWN_TOKENS: Record<string, { tier: TokenTier; desc: string }> = {
   GITHUB_TOKEN_ADMIN: { tier: "T2", desc: "GitHub admin: selfupdate (ff-only sandbox/me2-os), push релизов" },
   GITHUB_TOKEN_SANDBOX: { tier: "T1", desc: "GitHub sandbox: push-токен рабочей ветки" },
   SUPABASE_URL: { tier: "T2", desc: "Supabase project URL: evidence-mirror, DDL-хилер" },
-  SUPABASE_SERVICE_ROLE_JWT: { tier: "T2", desc: "Supabase service role key: outbox-доставка, RPC gateway-ключа" },
+  SUPABASE_SECRET_KEY: { tier: "T2", desc: "Supabase modern sb_secret_* backend API key: admin RPC/REST (apikey header only)" },
+  SUPABASE_SECRET_KEYS: { tier: "T2", desc: "Supabase modern named secret-key JSON map; default key is used by backend RPC/REST" },
+  SUPABASE_SERVICE_ROLE_JWT: { tier: "T2", desc: "Legacy Supabase service_role JWT compatibility key; migrate to SUPABASE_SECRET_KEY" },
   SUPABASE_JWT_SECRET: { tier: "T2", desc: "Supabase JWT secret: mint service_role HS256 (канал mgmt_minted_jwt)" },
   VERCEL_AI_GATEWAY_API_KEY: { tier: "T1", desc: "Vercel AI Gateway: LLM-провайдер gateway:<model>" },
 };
@@ -93,7 +95,7 @@ const SEED_FILES = [
   // PGRST205 на таблице = аутентификация прошла → канонический RLS-гейт из UI РАБОТАЕТ).
   // R57: +SUPABASE_UI_ACCOUNT_EMAIL/PASSWORD (сервис-аккаунт GoTrue от R55; gotrue-канал —
   // authenticated-чтение зеркала по политике RLS; креденшалы только в vault/env, никогда не печатаются).
-  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_JWT", "SUPABASE_UI_ACCOUNT_EMAIL", "SUPABASE_UI_ACCOUNT_PASSWORD"] },
+  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_JWT", "SUPABASE_UI_ACCOUNT_EMAIL", "SUPABASE_UI_ACCOUNT_PASSWORD"] },
   { path: "/home/z/.a2/.github.env", keys: ["GITHUB_TOKEN_ADMIN"] },
 ];
 

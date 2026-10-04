@@ -8,6 +8,8 @@ EDGE = ROOT / "supabase" / "functions" / "a2-chat-bridge-remote" / "index.ts"
 MIGRATION = ROOT / "supabase" / "migrations" / "20260825213000_a2_chat_bridge_remote_runtime_v1.sql"
 ATOMIC_MIGRATION = ROOT / "supabase" / "migrations" / "20260827140000_a2_chat_bridge_remote_atomic_command_v2.sql"
 RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql"
+CHATGPT_ONLY_MIGRATION = ROOT / "supabase" / "migrations" / "20261004061500_a2_chat_bridge_chatgpt_only_v1.sql"
+EXECUTION_FENCE_MIGRATION = ROOT / "supabase" / "migrations" / "20261004101500_a2_chat_bridge_execution_class_fence_v1.sql"
 BOOTSTRAP = ROOT / "coordination" / "chat-control-plane" / "extension" / "bootstrap-config.js"
 AMPLIFIER_POLICY = ROOT / "coordination" / "amplifier-loop" / "AMPLIFIER_LOOP_V1.md"
 AMPLIFIER_SEEDS = ROOT / "coordination" / "amplifier-loop" / "seed-amplifiers.json"
@@ -29,6 +31,8 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         cls.migration = MIGRATION.read_text()
         cls.atomic_migration = ATOMIC_MIGRATION.read_text()
         cls.rls = RLS_MIGRATION.read_text()
+        cls.chatgpt_only = CHATGPT_ONLY_MIGRATION.read_text()
+        cls.execution_fence = EXECUTION_FENCE_MIGRATION.read_text()
         cls.bootstrap = BOOTSTRAP.read_text()
         cls.amplifier_policy = AMPLIFIER_POLICY.read_text()
         cls.amplifier_seeds = json.loads(AMPLIFIER_SEEDS.read_text())
@@ -60,6 +64,33 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertNotIn("messages:", persisted_peer)
         self.assertNotIn("snapshot:", persisted_peer)
 
+    def test_modern_supabase_secret_keys_are_not_sent_as_bearer(self):
+        self.assertIn("SUPABASE_SECRET_KEYS", self.edge)
+        self.assertIn("SERVICE_ROLE.split('.').length === 3", self.edge)
+        self.assertIn("headers.authorization = `Bearer ${SERVICE_ROLE}`", self.edge)
+        self.assertNotIn("return { apikey: SERVICE_ROLE, authorization:", self.edge)
+
+    def test_missing_legacy_a2_frontier_is_observable_and_command_fail_closed(self):
+        self.assertIn("A2_FRONTIER_UNAVAILABLE", self.edge)
+        self.assertIn("if (a2.online !== true) return null;", self.edge)
+        self.assertIn("online: false", self.edge)
+        self.assertIn("currentMain: null", self.edge)
+
+    def test_ambiguous_external_effect_is_permanently_non_retriable(self):
+        sql = self.execution_fence
+        self.assertIn("execution_class text null", sql)
+        self.assertIn("'AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED'", sql)
+        self.assertIn("v_terminal_no_retry", sql)
+        self.assertIn("coalesce(v_row.clicked_send_button,false)", sql)
+        self.assertIn("'terminal_no_retry', v_terminal_no_retry", sql)
+        self.assertIn("pg_advisory_xact_lock", sql)
+        self.assertIn("terminalNoRetryCommand(same)", self.edge)
+        self.assertIn("executionClassForRemoteResult", self.edge)
+        self.assertIn("Unknown failures are not proof of pre-actuation safety", self.edge)
+        self.assertIn("retry-safe/blocking classes", self.edge)
+        self.assertIn("resultStatus === 'FAILED_SAFE_PRE_ACTUATION' && !clicked", self.edge)
+        self.assertIn("resultStatus.startsWith('BLOCKED_') && !clicked", self.edge)
+
     def test_current_main_never_learns_from_historical_base_sha(self):
         learner = self.edge.split("function findExplicitMainSha", 1)[1].split("function currentMainFromMessages", 1)[0]
         self.assertIn("current_main_sha", learner)
@@ -83,6 +114,36 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("WEB_CHAT_INTERACTIVE_REMOTE", self.edge)
         self.assertNotIn("worker_admitted=true", self.edge.lower())
         self.assertNotIn("w1_verified=true", self.edge.lower())
+
+    def test_legacy_provider_bound_duel_is_quarantined_from_active_commands(self):
+        self.assertIn("LEGACY_PROVIDER_BOUND_RELAY_QUARANTINED", self.edge)
+        self.assertIn("legacyProviderBoundRelay", self.edge)
+        self.assertIn("const order = ['CHATGPT']", self.edge)
+        self.assertIn("p_a2_peer_payloads_exposed: false", self.edge)
+        self.assertIn("p_duel_id: null", self.edge)
+        self.assertIn("legacy_provider_bound_relay_quarantined", self.edge)
+        self.assertNotIn("LEGACY_GLM_REQUIRED", self.edge)
+
+    def test_chatgpt_only_migration_is_fresh_project_compatible_and_fail_closed(self):
+        sql = self.chatgpt_only
+        self.assertIn("set search_path = ''", sql)
+        self.assertNotIn("pg_catalog.coalesce", sql)
+        self.assertNotIn("pg_catalog.trim", sql)
+        self.assertIn("pg_catalog.btrim(coalesce(", sql)
+        self.assertIn("v_platform <> 'CHATGPT' or v_agent <> 'GPT'", sql)
+        self.assertIn("target_platform='GLM_ZAI'", sql)
+        self.assertIn("result_status='BLOCKED_LEGACY_GLM_DISABLED'", sql)
+        # Fresh Client V1 carries only remote_runtime_v1. Do not accidentally
+        # depend on columns from the superseded dual-provider transport FSM.
+        for historical_column in [
+            "execution_class", "result_reported_at", "dispatch_group_sha256",
+            "predecessor_command_id uuid", "ordering_basis text",
+            "progress_status", "busy_until", "transport_trace_id",
+        ]:
+            self.assertNotIn(historical_column, sql)
+        self.assertNotIn("insert into public.compute_fabric_a2_chat_bridge_remote_command_h205f22(\n    command_id, idempotency_key, target_platform, target_agent, client_id,\n    status, created_at, leased_at, prompt_sha256, a2_head_message_seq,\n    a2_peer_payloads_exposed, duel_id, authority_effect,\n    launch_order", sql)
+        self.assertIn("'launch_order', 1", sql)
+        self.assertIn("'ordering_basis', 'CHATGPT_ONLY'", sql)
 
     def test_amplifier_loop_is_in_every_remote_autonomous_wake(self):
         for needle in [

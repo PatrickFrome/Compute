@@ -1,19 +1,17 @@
 "use strict";
 
 const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
-const PROJECT_ZAI_URL = "https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db";
-const REMOTE_BRIDGE_URL = String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote");
-const DEFAULTS = { daemonUrl: REMOTE_BRIDGE_URL, armed: false, autoOpenTabs: true, pollMs: 2500, chatgptUrl: "", zaiUrl: PROJECT_ZAI_URL };
+const REMOTE_BRIDGE_URL = String(bootstrap.daemonUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote");
+const DEFAULTS = { daemonUrl: REMOTE_BRIDGE_URL, armed: false, autoOpenTabs: true, pollMs: 2500, chatgptUrl: "" };
 const $ = (id) => document.getElementById(id);
 let pairingConfigured = false;
 
-function normalizedChatUrl(value, expectedPlatform) {
+function normalizedChatUrl(value) {
   const url = new URL(String(value || "").trim());
   url.hash = ""; url.search = ""; url.pathname = url.pathname.replace(/\/+$/, "") || "/";
   const host = url.hostname.toLowerCase();
-  if (expectedPlatform === "CHATGPT" && !["chatgpt.com", "chat.openai.com"].includes(host)) throw new Error("ChatGPT URL must be on chatgpt.com or chat.openai.com");
-  if (expectedPlatform === "GLM_ZAI" && host !== "chat.z.ai") throw new Error("Z.AI URL must be on chat.z.ai");
-  if (!url.pathname.startsWith("/c/")) throw new Error("Use a specific conversation URL containing /c/<conversation-id>");
+  if (!["chatgpt.com", "chat.openai.com"].includes(host)) throw new Error("ChatGPT URL must be on chatgpt.com or chat.openai.com");
+  if (!url.pathname.startsWith("/c/")) throw new Error("Use a specific ChatGPT conversation URL containing /c/<conversation-id>");
   return `${url.origin}${url.pathname}`;
 }
 
@@ -48,7 +46,7 @@ async function pairingStatus() {
   return pairingConfigured;
 }
 
-async function requestPoll(successText = "Authenticated bridge poll requested.") {
+async function requestPoll(successText = "Authenticated ChatGPT-only bridge poll requested.") {
   const response = await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
   if (!response?.ok) throw new Error(response?.error || "poll failed");
   setStatus(successText);
@@ -59,22 +57,20 @@ async function load() {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
   const settings = { ...DEFAULTS, ...stored };
   $("chatgptUrl").value = settings.chatgptUrl || "";
-  $("zaiUrl").value = settings.zaiUrl || PROJECT_ZAI_URL;
   $("daemonUrl").value = settings.daemonUrl || DEFAULTS.daemonUrl;
   $("bridgeSecret").value = "";
   $("pollMs").value = settings.pollMs || DEFAULTS.pollMs;
   $("autoOpenTabs").checked = settings.autoOpenTabs !== false;
   $("armed").checked = settings.armed === true;
   await pairingStatus();
-  if (pairingConfigured) await requestPoll("Background worker is running; strict GLM-first bridge poll requested automatically.");
+  if (pairingConfigured) await requestPoll("Background worker is running; ChatGPT-only bridge poll requested automatically.");
   else setStatus("Enter the scoped pairing token, save settings, then ARM the bridge.", true);
 }
 
 async function save() {
   try {
     const chatgptRaw = $("chatgptUrl").value.trim();
-    const chatgptUrl = chatgptRaw ? normalizedChatUrl(chatgptRaw, "CHATGPT") : "";
-    const zaiUrl = normalizedChatUrl($("zaiUrl").value.trim(), "GLM_ZAI");
+    const chatgptUrl = chatgptRaw ? normalizedChatUrl(chatgptRaw) : "";
     const daemonUrl = validateBridgeUrl($("daemonUrl").value.trim());
     const secret = $("bridgeSecret").value.trim();
     if (secret) {
@@ -87,8 +83,10 @@ async function save() {
       throw new Error("Pairing token is required");
     }
     const pollMs = Math.max(1000, Math.min(30000, Number($("pollMs").value) || DEFAULTS.pollMs));
-    await chrome.storage.local.set({ chatgptUrl, zaiUrl, daemonUrl, pollMs, autoOpenTabs: $("autoOpenTabs").checked, armed: $("armed").checked });
-    await requestPoll("Saved. Strict GLM-first barrier and exact peer bindings are active.");
+    // Deliberately do not remove historical zaiUrl keys: older evidence/settings
+    // stay readable, but this active UI can neither create nor modify them.
+    await chrome.storage.local.set({ chatgptUrl, daemonUrl, pollMs, autoOpenTabs: $("autoOpenTabs").checked, armed: $("armed").checked });
+    await requestPoll("Saved. ChatGPT-only routing and exact target bindings are active.");
   } catch (error) { setStatus(String(error?.message || error), true); }
 }
 
@@ -100,7 +98,7 @@ async function detectChatgpt() {
       catch (_) { return false; }
     });
     if (candidates.length !== 1) throw new Error(`Expected exactly one open ChatGPT conversation tab; found ${candidates.length}`);
-    $("chatgptUrl").value = normalizedChatUrl(candidates[0].url, "CHATGPT");
+    $("chatgptUrl").value = normalizedChatUrl(candidates[0].url);
     setStatus("Detected the open ChatGPT conversation. Click Save settings.");
   } catch (error) { setStatus(String(error?.message || error), true); }
 }
@@ -108,5 +106,4 @@ async function detectChatgpt() {
 $("save").addEventListener("click", save);
 $("pollNow").addEventListener("click", () => requestPoll().catch((error) => setStatus(String(error?.message || error), true)));
 $("detectChatgpt").addEventListener("click", detectChatgpt);
-$("restoreZai").addEventListener("click", () => { $("zaiUrl").value = PROJECT_ZAI_URL; setStatus("Project Z.AI chat restored. Click Save settings."); });
 load().catch((error) => setStatus(String(error?.message || error), true));

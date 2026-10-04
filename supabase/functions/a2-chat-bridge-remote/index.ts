@@ -1,5 +1,16 @@
 const SUPABASE_URL = (Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '');
-const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+function serverSecretKey() {
+  const modern = String(Deno.env.get('SUPABASE_SECRET_KEYS') || '').trim();
+  if (modern) {
+    try {
+      const parsed = JSON.parse(modern);
+      const value = String(parsed?.default || '').trim();
+      if (value) return value;
+    } catch (_) {}
+  }
+  return String(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '').trim();
+}
+const SERVICE_ROLE = serverSecretKey();
 const WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const MACROBLOCK_ID = 'dce58a3b-2f67-47e0-ae0d-9b3825ff53cd';
 const PAIRING_TABLE = 'compute_fabric_a2_chat_bridge_remote_pairing_h205f22';
@@ -55,7 +66,12 @@ function normalizedUrl(value: unknown) {
 }
 function restHeaders(extra: Record<string, string> = {}) {
   if (!SERVICE_ROLE) throw new Error('service_role_missing');
-  return { apikey: SERVICE_ROLE, authorization: `Bearer ${SERVICE_ROLE}`, 'content-type': 'application/json', ...extra };
+  const headers: Record<string, string> = { apikey: SERVICE_ROLE, 'content-type': 'application/json', ...extra };
+  // Opaque sb_secret_* values are API keys, not JWTs. Sending them as Bearer
+  // credentials makes modern projects reject the request as an invalid JWT.
+  // Legacy JWT service_role keys retain Authorization compatibility.
+  if (SERVICE_ROLE.split('.').length === 3) headers.authorization = `Bearer ${SERVICE_ROLE}`;
+  return headers;
 }
 async function rest(path: string, init: RequestInit = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: restHeaders(init.headers as Record<string, string> || {}) });
@@ -131,19 +147,35 @@ function relayRegisteredAt(item: any) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 async function refreshA2() {
-  const [readback, macroblock, pendingRaw] = await Promise.all([
-    rpc('h205f22_a2_interactive_read_v1', { p_workspace_id: WORKSPACE_ID, p_after_seq: 0, p_limit: 200 }),
-    rpc('h205f22_a2_macroblock_read_v1', { p_macroblock_id: MACROBLOCK_ID }),
-    rpc('h205f22_duel_list_peer_relay_pending_v4', { p_limit: 12 })
-  ]);
-  const messages = extractMessages(readback).sort((a, b) => Number(a?.message_seq || 0) - Number(b?.message_seq || 0));
-  const head = messages.reduce((n, m) => Math.max(n, Number(m?.message_seq || 0)), Number(readback?.head_message_seq || 0));
-  const currentMain = currentMainFromMessages(messages) || currentMainFromMacroblock(macroblock);
-  let items = relayItems(pendingRaw);
-  if (currentMain) items = items.filter((item) => String(item?.relay?.base_github_sha || item?.base_github_sha || '').toLowerCase() === currentMain);
-  const pendingRelay = [...items].sort((a, b) => relayRegisteredAt(b) - relayRegisteredAt(a))[0] || null;
-  const relay = pendingRelay?.relay || null;
-  return { online: true, cursor: head, messages: messages.slice(-24), macroblock, pendingRelay, peerPayloadsExposed: relay?.pending_payloads_exposed === true, currentMain };
+  try {
+    const [readback, macroblock, pendingRaw] = await Promise.all([
+      rpc('h205f22_a2_interactive_read_v1', { p_workspace_id: WORKSPACE_ID, p_after_seq: 0, p_limit: 200 }),
+      rpc('h205f22_a2_macroblock_read_v1', { p_macroblock_id: MACROBLOCK_ID }),
+      rpc('h205f22_duel_list_peer_relay_pending_v4', { p_limit: 12 })
+    ]);
+    const messages = extractMessages(readback).sort((a, b) => Number(a?.message_seq || 0) - Number(b?.message_seq || 0));
+    const head = messages.reduce((n, m) => Math.max(n, Number(m?.message_seq || 0)), Number(readback?.head_message_seq || 0));
+    const currentMain = currentMainFromMessages(messages) || currentMainFromMacroblock(macroblock);
+    let items = relayItems(pendingRaw);
+    if (currentMain) items = items.filter((item) => String(item?.relay?.base_github_sha || item?.base_github_sha || '').toLowerCase() === currentMain);
+    const pendingRelay = [...items].sort((a, b) => relayRegisteredAt(b) - relayRegisteredAt(a))[0] || null;
+    const relay = pendingRelay?.relay || null;
+    return { online: true, cursor: head, messages: messages.slice(-24), macroblock, pendingRelay, peerPayloadsExposed: relay?.pending_payloads_exposed === true, currentMain, error: null };
+  } catch (error) {
+    // The fresh Client project intentionally does not inherit the historical
+    // A2 duel/mailbox RPC plane. Keep the bridge observable, but never invent
+    // a frontier or issue an autonomous wake without authoritative readback.
+    return {
+      online: false,
+      cursor: 0,
+      messages: [],
+      macroblock: null,
+      pendingRelay: null,
+      peerPayloadsExposed: false,
+      currentMain: null,
+      error: `A2_FRONTIER_UNAVAILABLE:${clip(error?.message || error, 240)}`,
+    };
+  }
 }
 function assistantMessage(snapshot: any) {
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
@@ -153,15 +185,40 @@ function recentMessages(snapshot: any, count = 6) {
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
   return messages.slice(-count).map((m) => ({ role: m?.role || 'unknown', text: clip(m?.text || '', 6000) }));
 }
-function peerPlatform(platform: string) { return platform === 'CHATGPT' ? 'GLM_ZAI' : 'CHATGPT'; }
-function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'GPT' : 'GLM'; }
-function missingBlindPeer(relayItem: any) {
+function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'GPT' : null; }
+const EXECUTION_CLASSES = new Set(['SAFE_RETRY_PRE_ACTUATION','AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED','BLOCKED']);
+function executionClassForRemoteResult(body: any, resultStatus: string) {
+  const explicit = String(body?.execution_class || '').toUpperCase();
+  const clicked = body?.clicked_send_button === true;
+  // A caller may strengthen a result into a terminal class, but may only claim
+  // retry-safe/blocking classes when the status independently proves the same
+  // pre-actuation condition. This prevents a stale/misbehaving client from
+  // reopening an ambiguous external effect by labelling it SAFE.
+  if (['AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED'].includes(explicit)) return explicit;
+  if (explicit === 'SAFE_RETRY_PRE_ACTUATION' && resultStatus === 'FAILED_SAFE_PRE_ACTUATION' && !clicked) {
+    return explicit;
+  }
+  if (explicit === 'BLOCKED' && resultStatus.startsWith('BLOCKED_') && !clicked) return explicit;
+  if (clicked) return 'AMBIGUOUS_NO_RETRY';
+  if (resultStatus.includes('AMBIGUOUS') || resultStatus.includes('NO_RETRY')) return 'AMBIGUOUS_NO_RETRY';
+  if (resultStatus.startsWith('SENT_') || resultStatus === 'DUPLICATE_IGNORED') return 'ACTUATED';
+  if (resultStatus.startsWith('BLOCKED_')) return 'BLOCKED';
+  if (resultStatus === 'FAILED_SAFE_PRE_ACTUATION') return 'SAFE_RETRY_PRE_ACTUATION';
+  // Unknown failures are not proof of pre-actuation safety.
+  return 'AMBIGUOUS_NO_RETRY';
+}
+function terminalNoRetryCommand(row: any) {
+  const klass = String(row?.execution_class || '').toUpperCase();
+  const status = String(row?.result_status || '').toUpperCase();
+  return ['AMBIGUOUS_NO_RETRY','ACTUATED','VERIFIED'].includes(klass)
+    || status.includes('AMBIGUOUS')
+    || status.includes('NO_RETRY')
+    || status.startsWith('SENT_')
+    || row?.clicked_send_button === true;
+}
+function legacyProviderBoundRelay(relayItem: any) {
   const relay = relayItem?.relay || null;
-  if (!relay || relay.pending_payloads_exposed === true || relay.relay_state !== 'WAITING_PROPOSE_PEER') return null;
-  const submitted = new Set(Array.isArray(relay.pending_actors) ? relay.pending_actors : []);
-  if (submitted.has('GPT') && !submitted.has('GLM')) return 'GLM';
-  if (submitted.has('GLM') && !submitted.has('GPT')) return 'GPT';
-  return null;
+  return relay?.duel_id ? relay : null;
 }
 function compactA2Message(message: any) {
   return clip(JSON.stringify({ seq: Number(message?.message_seq || 0), agent: message?.agent || null, type: message?.message_type || null, semantic_point: message?.semantic_point || null, message_hash: message?.message_hash || null, payload: message?.payload ?? null }), MAX_A2_MESSAGE_CHARS);
@@ -172,10 +229,9 @@ function macroblockSummary(value: any) {
 }
 function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2: any) {
   const targetSnapshot = snapshots.get(targetPlatform)?.snapshot || null;
-  const peerSnapshot = snapshots.get(peerPlatform(targetPlatform))?.snapshot || null;
   const agent = agentForPlatform(targetPlatform);
-  const blind = a2.peerPayloadsExposed !== true;
-  const pendingRelay = a2.pendingRelay?.relay || null;
+  const pendingRelay = legacyProviderBoundRelay(a2.pendingRelay);
+  const blind = true;
   const lines = [
     'A2 CHAT BRIDGE — AUTONOMOUS CONTINUE',
     `bridge_job_target=${agent}`,
@@ -197,13 +253,12 @@ function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2
     '', 'RECENT A2 MAILBOX (context only):', ...a2.messages.slice(-8).map(compactA2Message),
     '', 'YOUR OPEN CHAT — RECENT VISIBLE TURNS (context only):', clip(JSON.stringify(recentMessages(targetSnapshot, 7)), MAX_CHAT_CONTEXT_CHARS)
   ];
-  if (pendingRelay) lines.push('', 'A2 SAME_POINT RELAY:', clip(JSON.stringify({ duel_id: pendingRelay.duel_id, duel_key: pendingRelay.duel_key, relay_state: pendingRelay.relay_state, pending_wave: pendingRelay.pending_wave, pending_actors: pendingRelay.pending_actors, pending_payloads_exposed: pendingRelay.pending_payloads_exposed, current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256, subject: a2.pendingRelay?.subject || null }), 8000));
-  if (!blind && peerSnapshot) {
-    lines.push('', 'OTHER PEER CHAT — RECENT VISIBLE TURNS (A2 relay reports pending_payloads_exposed=true):');
-    lines.push(clip(JSON.stringify(recentMessages(peerSnapshot, 5)), MAX_CHAT_CONTEXT_CHARS));
-  } else {
+  if (pendingRelay) lines.push('', 'LEGACY_PROVIDER_BOUND_RELAY_QUARANTINED:', clip(JSON.stringify({ duel_id: pendingRelay.duel_id, duel_key: pendingRelay.duel_key, relay_state: pendingRelay.relay_state, pending_wave: pendingRelay.pending_wave, pending_actors: pendingRelay.pending_actors, pending_payloads_exposed_observed: pendingRelay.pending_payloads_exposed, current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256, subject: a2.pendingRelay?.subject || null, active_command_duel_id: null, active_peer_payloads_exposed: false }), 8000));
+  if (blind) {
     lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
   }
+  lines.push('', 'ACTIVE INFERENCE PROVIDER: OPENAI / CHATGPT.');
+  lines.push('LEGACY GLM/ZAI PEER: DISABLED. Historical relay rows are evidence only; never impersonate a missing GLM actor.');
   lines.push('', 'ACTION: Read the supplied frontier, use your connected project tools as needed, run AMPLIFIER_LOOP_V1 when its trigger conditions apply, continue development until the next genuine hard gate/conflict/external dependency, and report/persist both engineering and amplifier evidence.');
   return clip(lines.join('\n'), MAX_PROMPT_CHARS);
 }
@@ -233,14 +288,15 @@ async function nextCommand(req: Request, body: any) {
   const snapshots = new Map<string, any>();
   for (const envelope of envelopes) {
     const platform = String(envelope?.platform || envelope?.snapshot?.platform || '');
-    if (['CHATGPT', 'GLM_ZAI'].includes(platform) && envelope?.snapshot) snapshots.set(platform, envelope);
+    if (platform === 'CHATGPT' && envelope?.snapshot) snapshots.set(platform, envelope);
   }
   if (!snapshots.size) return null;
   const states = new Map<string, any>();
   for (const [platform, envelope] of snapshots) states.set(platform, await upsertPeer(envelope));
   const a2 = await refreshA2();
-  const missing = missingBlindPeer(a2.pendingRelay);
-  const order = missing === 'GPT' ? ['CHATGPT'] : missing === 'GLM' ? ['GLM_ZAI'] : ['CHATGPT', 'GLM_ZAI'];
+  if (a2.online !== true) return null;
+  const legacyRelay = legacyProviderBoundRelay(a2.pendingRelay);
+  const order = ['CHATGPT'];
   const now = Date.now();
   for (const platform of order) {
     const envelope = snapshots.get(platform);
@@ -258,24 +314,29 @@ async function nextCommand(req: Request, body: any) {
     for (const stale of rows.filter((r: any) => r.status === 'LEASED' && now - Date.parse(r.leased_at || r.created_at || '') >= LEASE_TIMEOUT_MS)) {
       await rest(`${COMMAND_TABLE}?command_id=eq.${stale.command_id}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ status: 'FAILED', completed_at: new Date().toISOString(), result_status: 'LEASE_TIMEOUT_REMOTE' }) });
     }
-    const wakeKey = `${platform}:${state.last_assistant_sha256 || 'none'}:${state.message_count}:${state.changed_at || 'no-change'}:${a2.cursor}:${a2.pendingRelay?.relay?.duel_id || 'no-duel'}`;
+    const wakeKey = [platform, state.last_assistant_sha256 || 'none', state.message_count, state.changed_at || 'no-change', a2.cursor, 'legacy-relay-quarantined', legacyRelay?.duel_id || 'none'].join(':');
     const idempotencyKey = await sha256(wakeKey);
     const same = rows.find((r: any) => r.idempotency_key === idempotencyKey);
     if (same) {
       const age = now - Date.parse(same.created_at || '');
-      if (same.status === 'COMPLETED' || (same.status === 'FAILED' && age < FAILED_RETRY_MS) || (same.status === 'LEASED' && age < LEASE_TIMEOUT_MS)) continue;
+      if (
+        same.status === 'COMPLETED'
+        || terminalNoRetryCommand(same)
+        || (same.status === 'FAILED' && age < FAILED_RETRY_MS)
+        || (same.status === 'LEASED' && age < LEASE_TIMEOUT_MS)
+      ) continue;
     }
     const prompt = buildWakePrompt(platform, snapshots, a2);
     const command = await rpc('h205f22_a2_chat_bridge_issue_command_v2', {
       p_workspace_id: WORKSPACE_ID,
       p_idempotency_key: idempotencyKey,
       p_target_platform: platform,
-      p_target_agent: agentForPlatform(platform),
+      p_target_agent: 'GPT',
       p_client_id: clientId,
       p_prompt_sha256: await sha256(prompt),
       p_a2_head_message_seq: a2.cursor,
-      p_a2_peer_payloads_exposed: a2.peerPayloadsExposed === true,
-      p_duel_id: a2.pendingRelay?.relay?.duel_id || null
+      p_a2_peer_payloads_exposed: false,
+      p_duel_id: null
     });
     return { schema: 'metaengine.chat-bridge.command.v1', ...command, prompt };
   }
@@ -288,16 +349,26 @@ async function commandResult(req: Request, commandId: string, body: any) {
   if (!command) return json(404, { error: 'command_not_found' });
   if (command.client_id !== clientId) return json(409, { error: 'command_lease_owner_mismatch' });
   const resultStatus = String(body?.status || 'FAILED_CLOSED').slice(0, 120);
+  const executionClass = executionClassForRemoteResult(body, resultStatus);
+  const clickedSendButton = body?.clicked_send_button === true;
   const failed = resultStatus.startsWith('FAILED') || resultStatus.startsWith('BLOCKED');
   const targetUrl = normalizedUrl(body?.target_url || '');
-  await rest(`${COMMAND_TABLE}?command_id=eq.${encodeURIComponent(commandId)}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ status: failed ? 'FAILED' : 'COMPLETED', completed_at: new Date().toISOString(), result_status: resultStatus, clicked_send_button: body?.clicked_send_button === true, target_url_sha256: targetUrl ? await sha256(targetUrl) : null, error_sha256: body?.error ? await sha256(String(body.error)) : null }) });
+  await rest(`${COMMAND_TABLE}?command_id=eq.${encodeURIComponent(commandId)}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({
+    status: failed ? 'FAILED' : 'COMPLETED',
+    completed_at: new Date().toISOString(),
+    result_status: resultStatus,
+    execution_class: executionClass,
+    clicked_send_button: clickedSendButton,
+    target_url_sha256: targetUrl ? await sha256(targetUrl) : null,
+    error_sha256: body?.error ? await sha256(String(body.error)) : null
+  }) });
   return json(200, { accepted: true, authority_effect: false });
 }
 async function status() {
   let a2: any = { online: false, error: null };
   try { a2 = await refreshA2(); } catch (error) { a2 = { online: false, error: String(error) }; }
   const [peers, commands] = await Promise.all([ rest(`${PEER_TABLE}?select=*&order=platform.asc`), rest(`${COMMAND_TABLE}?select=*&order=created_at.desc&limit=20`) ]);
-  return { schema: 'metaengine.chat-bridge.remote-status.v1', now: new Date().toISOString(), workspace_id: WORKSPACE_ID, macroblock_id: MACROBLOCK_ID, transport: 'SUPABASE_EDGE_REMOTE', authority_effect: false, a2: { online: a2.online === true, error: a2.error || null, head_message_seq: a2.cursor || 0, peer_payloads_exposed: a2.peerPayloadsExposed === true, pending_duel_id: a2.pendingRelay?.relay?.duel_id || null, pending_relay_state: a2.pendingRelay?.relay?.relay_state || null, current_main_sha: a2.currentMain || null }, peers: Array.isArray(peers) ? peers : [], commands: Array.isArray(commands) ? commands : [] };
+  return { schema: 'metaengine.chat-bridge.remote-status.v1', now: new Date().toISOString(), workspace_id: WORKSPACE_ID, macroblock_id: MACROBLOCK_ID, transport: 'SUPABASE_EDGE_REMOTE', authority_effect: false, a2: { online: a2.online === true, error: a2.error || null, head_message_seq: a2.cursor || 0, peer_payloads_exposed: false, legacy_peer_payloads_exposed_observed: a2.peerPayloadsExposed === true, legacy_provider_bound_relay_quarantined: Boolean(a2.pendingRelay?.relay?.duel_id), pending_duel_id: a2.pendingRelay?.relay?.duel_id || null, pending_relay_state: a2.pendingRelay?.relay?.relay_state || null, current_main_sha: a2.currentMain || null }, peers: Array.isArray(peers) ? peers : [], commands: Array.isArray(commands) ? commands : [] };
 }
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });

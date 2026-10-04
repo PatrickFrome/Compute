@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AgentSessionMonitor } from '../src/agent-session-monitor.mjs';
+import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
 // ---------------------------------------------------------------------------
@@ -23,8 +23,8 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 //                       held a send) and a fresh tab is opened, bounded.
 // ---------------------------------------------------------------------------
 
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const ROOT = 'https://chat.z.ai/';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const ROOT = 'https://chatgpt.com/';
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 const SEED_HEAD = 'METAENGINE SUPERVISOR CONVERSATION SEED v1';
 
@@ -33,10 +33,10 @@ const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', sema
 function conversationFrame(text = '') {
   return {
     url: CONVERSATION,
-    title: 'Z.ai',
+    title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Send a Message', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: text.length, value_sha256: text ? sha256(text) : null },
     ],
   };
 }
@@ -44,10 +44,10 @@ function conversationFrame(text = '') {
 function rootFrame({ draftLength = 0 } = {}) {
   return {
     url: ROOT,
-    title: 'Z.ai',
+    title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
-      { role: 'textbox', name: 'How can I help you today?', semantic_ref: COMPOSER_REF, backend_node_id: 196, value_length: draftLength, value_sha256: draftLength ? sha256('x'.repeat(draftLength)) : null },
+      { role: 'textbox', name: 'Message ChatGPT', semantic_ref: COMPOSER_REF, backend_node_id: 196, value_length: draftLength, value_sha256: draftLength ? sha256('x'.repeat(draftLength)) : null },
     ],
   };
 }
@@ -91,7 +91,7 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
       } else {
         tabs.set(tab_id, { frame: rootFrame({ draftLength: rootDraftLength }), url: ROOT });
       }
-      return { tab_id, url: blank ? '' : ROOT, kind: 'GLM_CHAT', role: 'USER' };
+      return { tab_id, url: blank ? '' : ROOT, kind: 'CHATGPT', role: 'USER' };
     }
     if (action === 'CLOSE_TAB') {
       closed.push(String(command.payload?.tab_id || ''));
@@ -109,7 +109,7 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
       }
       if (text.startsWith(SEED_HEAD)) {
         // The seed provably creates the conversation on this surface.
-        const url = `https://chat.z.ai/c/r82seed-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
+        const url = `https://chatgpt.com/c/r82seed-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
         tab.url = url;
         tab.frame = { ...conversationFrame(''), url };
       } else if (tab) {
@@ -135,7 +135,7 @@ async function makeRuntime(h, { monitorMs = 1 } = {}) {
     statePath,
     monitorMs,
     researchMs: 5 * 60 * 1000,
-    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
+    sessionMonitor: new ChatGptSessionMonitor({ clock: () => Date.now(), settleMs: 1500 }),
   });
   return { runtime, dir };
 }
@@ -189,7 +189,7 @@ test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a
       'the rollover message must be typed and submitted');
     assert.equal(String(snap.keepalive.state).startsWith('ROLLOVER'), false,
       `the rollover must bind the new conversation, got ${snap.keepalive.state}`);
-    assert.equal(snap.keepalive.conversation_url, 'https://chat.z.ai/c/r82seed-0000-4000-8000-000000000003');
+    assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/r82seed-0000-4000-8000-000000000003');
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
   }

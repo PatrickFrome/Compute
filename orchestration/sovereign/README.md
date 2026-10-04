@@ -1,12 +1,14 @@
+> **ChatGPT/OpenAI-only runtime policy (2026-10-04):** the active V4 executors are independent logical roles **PRIMARY** and **CRITIC**, both backed by OpenAI models on separate OpenAI-compatible contexts. Historical DB fields/actors named `gpt_*` / `glm_*` and votes `WIN_GPT` / `WIN_GLM` remain wire-compatibility identifiers only until the durable schema migration; they no longer imply a ZAI/GLM provider. Canonical runtime configuration is `SOVEREIGN_PRIMARY_*` / `SOVEREIGN_CRITIC_*`. The legacy V2 runner entry is retired.
+
 # METAENGINE H205F22 Sovereign SAME_POINT_DUEL_V4 Runner
 
 The default sovereign runtime implements a two-wave, same-semantic-point adversarial development protocol without managed inference billing gates.
 
 ## Core invariant
 
-GPT and GLM do not develop separate branches or take sequential turns. They receive the same semantic point and run concurrently in each wave:
+PRIMARY and CRITIC do not develop separate branches or take sequential turns. They receive the same semantic point and run concurrently in each wave:
 
-`checkpoint N -> (GPT PROPOSE || GLM PROPOSE) -> atomic pair -> (GPT REBUT || GLM REBUT) -> atomic pair + deterministic arbitration -> ONE resulting_action`
+`checkpoint N -> (PRIMARY PROPOSE || CRITIC PROPOSE) -> atomic pair -> (PRIMARY REBUT || CRITIC REBUT) -> atomic pair + deterministic arbitration -> ONE resulting_action`
 
 Private chain-of-thought is never shared. Every engineering-relevant rationale intended for the peer is persisted as observable structured data: `claim`, `reasoning_summary`, `evidence_used`, `assumptions`, `peer_claims_addressed`, `counterexample`, `falsifier`, `tests_required`, and the proposed/resulting action.
 
@@ -52,8 +54,8 @@ The decision row is append-only/immutable, `canonical=false`, and `authority_eff
 
 ## Default model pair
 
-- GPT side: `openai/gpt-oss-20b`
-- GLM side: `zai-org/GLM-4.7-Flash`
+- PRIMARY: OpenAI model on an independent OpenAI-compatible context
+- CRITIC: OpenAI model on a second independent OpenAI-compatible context
 
 For physical concurrency, two independent devices/workers are preferred. Logical `Promise.all` on one saturated GPU is not equivalent to independent physical inference.
 
@@ -61,8 +63,8 @@ For physical concurrency, two independent devices/workers are preferred. Logical
 
 The V4 runner expects OpenAI-compatible endpoints and defaults to:
 
-- GPT: `http://127.0.0.1:8001`
-- GLM: `http://127.0.0.1:8002`
+- PRIMARY: `http://127.0.0.1:8001`
+- CRITIC: `http://127.0.0.1:8002`
 
 Each model server must implement `GET /v1/models` and `POST /v1/chat/completions`.
 
@@ -73,12 +75,12 @@ vllm serve openai/gpt-oss-20b \
   --served-model-name openai/gpt-oss-20b \
   --host 127.0.0.1 --port 8001
 
-vllm serve zai-org/GLM-4.7-Flash \
-  --served-model-name zai-org/GLM-4.7-Flash \
+vllm serve openai/gpt-oss-20b \\
+  --served-model-name openai/gpt-oss-20b \\
   --host 127.0.0.1 --port 8002
 ```
 
-Keep model servers on loopback/private LAN. **Do not expose raw vLLM to the public Internet.** If a model lives on another machine or Colab runtime, put an authenticated private tunnel/reverse proxy in front of it and set `SOVEREIGN_GPT_URL` or `SOVEREIGN_GLM_URL` to that private endpoint.
+Keep model servers on loopback/private LAN. **Do not expose raw vLLM to the public Internet.** If a model lives on another machine or Colab runtime, put an authenticated private tunnel/reverse proxy in front of it and set `SOVEREIGN_PRIMARY_URL` or `SOVEREIGN_CRITIC_URL` to that private endpoint.
 
 ## Sovereign HTTP gateway
 
@@ -88,11 +90,11 @@ Operational endpoints:
 
 - `GET /healthz` — process liveness.
 - `GET /readyz` — fail-closed readiness: PostgreSQL + both exact model inventories must be reachable.
-- `GET /status` — detailed DB/GPT/GLM readiness and latency.
+- `GET /status` — detailed DB/PRIMARY/CRITIC readiness and latency.
 - `GET /metrics` — Prometheus-style process counters.
-- `GET /v1/models` — logical GPT/GLM model inventory.
-- `GET /gpt/v1/models` and `GET /glm/v1/models` — role-specific upstream model inventory.
-- `POST /gpt/v1/chat/completions` and `POST /glm/v1/chat/completions` — streaming role proxies. The gateway overwrites the client-supplied `model` with the configured exact model identity.
+- `GET /v1/models` — logical PRIMARY/CRITIC OpenAI model inventory.
+- `GET /primary/v1/models` and `GET /critic/v1/models` — role-specific upstream model inventory.
+- `POST /primary/v1/chat/completions` and `POST /critic/v1/chat/completions` — streaming role proxies. Provider-shaped `/gpt/*` and `/glm/*` aliases are retired with HTTP 410.
 - `POST /v4/duels` — create one `SAME_POINT_DUEL_V4` session.
 - `GET /v4/duels/:duel_id` — full observable debate, hashes, ticks and decision.
 - `GET /v4/duels/:duel_id/decision` — final immutable V4 decision only.
@@ -117,8 +119,8 @@ npm run check
 
 export DATABASE_URL='postgresql://...'
 export DUEL_RUNNER_ID='linux-worker-01'
-export SOVEREIGN_GPT_URL='http://127.0.0.1:8001'
-export SOVEREIGN_GLM_URL='http://127.0.0.1:8002'
+export SOVEREIGN_PRIMARY_URL='http://127.0.0.1:8001'
+export SOVEREIGN_CRITIC_URL='http://127.0.0.1:8002'
 export SOVEREIGN_CONTROL_TOKEN='replace-with-a-random-secret'
 npm start
 ```
@@ -132,9 +134,9 @@ Commands:
 
 Optional variables:
 
-- `SOVEREIGN_GPT_MODEL`
-- `SOVEREIGN_GLM_MODEL`
-- `SOVEREIGN_INFERENCE_TOKEN`, or per-model `SOVEREIGN_GPT_TOKEN` / `SOVEREIGN_GLM_TOKEN`
+- `SOVEREIGN_PRIMARY_MODEL`
+- `SOVEREIGN_CRITIC_MODEL`
+- `SOVEREIGN_INFERENCE_TOKEN`, or per-model `SOVEREIGN_PRIMARY_TOKEN` / `SOVEREIGN_CRITIC_TOKEN`
 - `SOVEREIGN_HTTP_HOST` / `SOVEREIGN_HTTP_PORT`
 - `SOVEREIGN_CONTROL_TOKEN`
 - `SOVEREIGN_UPSTREAM_TIMEOUT_MS`
@@ -194,6 +196,6 @@ The readback contains the persisted low-level event/tick ledger and the immutabl
 
 ## Tariff independence
 
-`SOVEREIGN_ONLY` V4 sessions never use Cloudflare/Vercel managed inference. Cloudflare/Vercel/OpenAI/Z.ai hosted APIs may be optional accelerators or control surfaces, but the local V4 executor is independent of them.
+`SOVEREIGN_ONLY` V4 sessions never use Cloudflare/Vercel managed inference. Hosted model APIs may be optional accelerators or control surfaces, but the local V4 executor is independent of them and has no active Z.ai/GLM provider path.
 
 This removes managed inference tariff gates. It does not remove the physical cost of GPU/CPU, RAM, storage, electricity, or network capacity.

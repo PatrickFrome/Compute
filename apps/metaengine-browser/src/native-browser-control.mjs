@@ -23,7 +23,7 @@ import {
 } from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
-import { isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-agent-platform.mjs';
+import { isAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -347,11 +347,22 @@ function isExactChatGptComposer(target, command) {
 // (backend node identity is pinned by the ref), so the gate adds the platform,
 // the live host and the text-input role. The composer's accessible name is a
 // localized placeholder and is deliberately NOT part of the gate.
+function isLegacyGlmConversationUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:'
+      && url.hostname.toLowerCase() === 'chat.z.ai'
+      && /^\/c\/[a-z0-9-]+\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function isExactGlmComposer(webContents, target, command) {
   if (String(command?.platform || '').toUpperCase() !== 'GLM_ZAI') return false;
   let host = '';
   try { host = new URL(String(webContents?.getURL?.() || '')).hostname.toLowerCase(); } catch {}
-  return isAgentPlatformHost(host) && TEXT_INPUT_ROLES.has(String(target?.role || ''));
+  return host === 'chat.z.ai' && TEXT_INPUT_ROLES.has(String(target?.role || ''));
 }
 
 // GLM submit readback: the composer's AX value returning to '' proves the
@@ -385,8 +396,8 @@ async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}
   const node = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId || 0) === Number(backendNodeId));
   const value = node ? axRawValue(node, 'value') : null;
   const composerCleared = node != null && value === '';
-  const startedAtRoot = !isAgentPlatformConversationUrl(preUrl);
-  const rootToConversation = startedAtRoot && isAgentPlatformConversationUrl(url);
+  const startedAtRoot = !isLegacyGlmConversationUrl(preUrl);
+  const rootToConversation = startedAtRoot && isLegacyGlmConversationUrl(url);
   // On an existing conversation, composer clear is enough to prove the site
   // consumed the message. On PRECONVERSATION_ROOT it is only intermediate
   // evidence: the fleet must not become runnable until a canonical /c/<id>

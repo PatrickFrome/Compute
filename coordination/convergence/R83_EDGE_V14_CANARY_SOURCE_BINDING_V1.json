@@ -1,11 +1,11 @@
 {
   "schema": "metaengine.r83.edge-canary-source-binding.v1",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "candidate": {
     "slug": "a2-browser-native-supervisor-v14-canary",
-    "observed_function_version": 26,
-    "observed_ezbr_sha256": "878bb81e59109e93aa49492655c6d856668495c9e85d21c323978b59d9b46eb1",
-    "source_commit": "5aaae3e6696eeee07c09a65ff467857aab67732b",
+    "observed_function_version": 27,
+    "observed_ezbr_sha256": "0b913be07472bef68920bf24ec493498f41bc657cb8386f59598bacbe3a68c5e",
+    "source_commit": "26b63b0ec3eb619f768f2172e720a67eab985701",
     "service_marker": "/a2-browser-native-supervisor-v1",
     "source_binding": "PINNED_RAW_GITHUB_IMPORT_CLOSURE",
     "imports": [
@@ -57,10 +57,18 @@
   },
   "production_observed": {
     "slug": "a2-browser-native-supervisor-v1",
-    "observed_function_version": 10,
-    "observed_ezbr_sha256": "e6a365996221a6ed0edddbe261e450d7e17cafca1cdfb12e3bc8cff715af61cc",
+    "observed_function_version": 11,
+    "observed_ezbr_sha256": "319ba83a1811c4d144e8fd36fa5d33bc82967d354886bf896675c4091b3f9777",
     "one_client_canary_forwarding": true,
-    "ticket_redemption_bridge_source_pin": "ec20a79e45a686aa840853b7ee404b6816730bd0"
+    "ticket_redemption_bridge_source_pin": "ec20a79e45a686aa840853b7ee404b6816730bd0",
+    "source_binding_complete": true,
+    "observed_import_pins": [
+      "ec20a79e45a686aa840853b7ee404b6816730bd0",
+      "6e859e109fe50e242859af5d2bd715d15afccb92",
+      "00d7c814213a97ac17504d5c598818bd99c588cb"
+    ],
+    "rollback_drill_blocked_reason": null,
+    "source_binding_mode": "PINNED_MIXED_IMPORT_CLOSURE"
   },
   "required_capabilities": [
     "POSTGRES_NOTIFY_WAKE",
@@ -72,6 +80,25 @@
   "promotion_authorized": false,
   "automatic_promotion_allowed": false,
   "authority_effect": false,
-  "captured_at": "2026-10-01",
-  "project_ref": "jhriwwsryeqsvvvufkok"
+  "captured_at": "2026-10-04",
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "rollback_snapshot": {
+    "slug": "a2-browser-native-supervisor-v11-rollback-snapshot",
+    "function_id": "24696ee9-3ba0-44f6-a639-16f9beaa939d",
+    "observed_function_version": 1,
+    "observed_ezbr_sha256": "319ba83a1811c4d144e8fd36fa5d33bc82967d354886bf896675c4091b3f9777",
+    "stable_slug": "a2-browser-native-supervisor-v1",
+    "stable_function_version": 11,
+    "stable_ezbr_sha256": "319ba83a1811c4d144e8fd36fa5d33bc82967d354886bf896675c4091b3f9777",
+    "exact_artifact_digest_match": true,
+    "source_binding_mode": "PINNED_MIXED_IMPORT_CLOSURE",
+    "observed_import_pins": [
+      "ec20a79e45a686aa840853b7ee404b6816730bd0",
+      "6e859e109fe50e242859af5d2bd715d15afccb92",
+      "00d7c814213a97ac17504d5c598818bd99c588cb"
+    ],
+    "deployed": true,
+    "health_verified": false,
+    "authority_effect": false
+  }
 }

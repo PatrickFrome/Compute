@@ -432,7 +432,7 @@ async function issueTool(req:Request,body:any){
   toolPayload.rsi_task={schema:'metaengine.rsi.command-task-context.v1',task_id:taskId,agent_id:agentId};
   const idem=`tool:${(await sha256(`${agentId}:${taskId}:${requestId}`)).slice(0,40)}`;
   try{
-    const result=await rpc(ISSUE_NATIVE_RPC,{p_client_id:clientId(req),p_action:action,p_platform:'GLM_ZAI',p_payload:toolPayload,p_ttl_seconds:120,p_issued_by:`agent:${agentId}`,p_idempotency_key:idem});
+    const result=await rpc(ISSUE_NATIVE_RPC,{p_client_id:clientId(req),p_action:action,p_platform:'CHATGPT',p_payload:toolPayload,p_ttl_seconds:120,p_issued_by:`agent:${agentId}`,p_idempotency_key:idem});
     if(!result||typeof result!=='object'||result.accepted!==true)return json(409,{accepted:false,error:'agent_tool_issue_rejected',reason:String(result?.error||result?.reason||'unknown').slice(0,160),authority_effect:false});
     return json(200,{accepted:true,command_id:result.command_id,status:result.status||'PENDING',idempotency_key:idem,replayed:result.replayed===true,issued_by:`agent:${agentId}`,rsi_task_bound:true,authority_effect:false});
   }catch(error){

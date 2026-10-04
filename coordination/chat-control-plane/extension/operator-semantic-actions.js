@@ -5,12 +5,20 @@
   const DEFAULT_FRAME_MAX_AGE_MS = 30000;
   const RECEIPT_KEY = "a2OperatorLastSemanticActionV060";
   const ACTIONS = new Set(["FOCUS_SEMANTIC", "TYPE_SEMANTIC", "CLICK_SEMANTIC"]);
+  const ACTIVE_EXECUTION_PLATFORM = "CHATGPT";
   const CLICKABLE_ROLES = new Set(["button", "checkbox", "radio", "switch", "tab", "menuitem"]);
   const EDITABLE_ROLES = new Set(["textbox", "searchbox", "combobox"]);
   const ALLOWED_ROLES = new Set([...CLICKABLE_ROLES, ...EDITABLE_ROLES]);
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").replace(/\s+/gu, " ").trim();
   const axValue = (value) => value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "value") ? value.value : value;
+
+  function assertActiveExecutionPlatform(value) {
+    const platform = String(value || "");
+    if (platform === "GLM_ZAI") throw new Error("legacy_platform_execution_disabled");
+    if (platform !== ACTIVE_EXECUTION_PLATFORM) throw new Error("semantic_platform_invalid");
+    return platform;
+  }
 
   function compat(path, fallback) {
     try { return globalThis.A2_COMPAT_GET?.(path, fallback) ?? fallback; }
@@ -65,8 +73,9 @@
   }
 
   async function resolvePinned(platform, exactTabId) {
-    const stored = await chrome.storage.local.get(["chatgptUrl", "zaiUrl"]);
-    const configured = platform === "CHATGPT" ? normUrl(stored.chatgptUrl || "") : platform === "GLM_ZAI" ? normUrl(stored.zaiUrl || "") : "";
+    platform = assertActiveExecutionPlatform(platform);
+    const stored = await chrome.storage.local.get(["chatgptUrl"]);
+    const configured = normUrl(stored.chatgptUrl || "");
     if (!configured) throw new Error(`semantic_target_not_configured:${platform}`);
     const tabs = await chrome.tabs.query({});
     const matches = tabs.filter((tab) => Number.isInteger(tab?.id) && platformOf(tab.url || "") === platform && normUrl(tab.url || "") === configured);
@@ -204,9 +213,8 @@
   async function run(message) {
     assertEnabled();
     const action = String(message?.action || "");
-    const platform = String(message?.platform || "");
+    const platform = assertActiveExecutionPlatform(message?.platform);
     if (!ACTIONS.has(action)) throw new Error("semantic_action_invalid");
-    if (!["CHATGPT", "GLM_ZAI"].includes(platform)) throw new Error("semantic_platform_invalid");
     const target = frameFor(platform, message?.perception_captured_at, message?.role, message?.accessible_name);
     const tab = await resolvePinned(platform, target.frame.tab_id);
     if (normUrl(tab.url || "") !== target.frame.url) throw new Error("semantic_frame_url_changed");

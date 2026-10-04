@@ -10,8 +10,11 @@
   const TARGET_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,95}$/;
   const STATUSES = new Set(["UNBOUND", "ACTIVE", "IDLE", "GENERATING", "STALLED", "EXHAUSTED", "ROLLOVER", "RETIRED"]);
   const PLATFORMS = Object.freeze({
-    CHATGPT: Object.freeze({ provider: "OPENAI", surface: "WEB_CHAT", configKey: "chatgptUrl", seedId: "gpt_primary" }),
-    GLM_ZAI: Object.freeze({ provider: "ZAI", surface: "WEB_CHAT", configKey: "zaiUrl", seedId: "glm_primary" })
+    CHATGPT: Object.freeze({ provider: "OPENAI", surface: "WEB_CHAT", configKey: "chatgptUrl", seedId: "gpt_primary", active: true }),
+    // Legacy compatibility only. Existing persisted targets remain readable,
+    // but canonicalization forces them RETIRED and no new GLM target may be
+    // created or resolved for actuation.
+    GLM_ZAI: Object.freeze({ provider: "ZAI", surface: "WEB_CHAT", configKey: "zaiUrl", seedId: "glm_primary", active: false })
   });
 
   let mutation = Promise.resolve();
@@ -87,7 +90,7 @@
       legacy_alias: legacyAlias,
       conversation_epoch: epoch,
       conversation_url: conversationUrl || null,
-      status: normalizeStatus(raw?.status ?? previous?.status, Boolean(conversationUrl)),
+      status: spec.active === false ? "RETIRED" : normalizeStatus(raw?.status ?? previous?.status, Boolean(conversationUrl)),
       created_at: createdAt,
       updated_at: String(raw?.updated_at || previous?.updated_at || nowIso())
     };
@@ -317,6 +320,7 @@
       const registry = await loadRegistry();
       const platform = String(input.platform || "").toUpperCase();
       if (!PLATFORMS[platform]) throw new Error("target_platform_invalid");
+      if (PLATFORMS[platform].active === false) throw new Error("target_platform_legacy_disabled");
       const targetId = input.target_id
         ? normalizeTargetId(input.target_id)
         : `${platform === "CHATGPT" ? "gpt" : "glm"}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;

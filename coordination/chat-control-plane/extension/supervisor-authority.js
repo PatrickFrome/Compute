@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
+  const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
   const WORKSPACE_ID = "2de9f84b-7c0a-4091-911c-894ff1d6eaf4";
-  const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
+  const SUPERVISOR_URL = String(bootstrap.supervisorUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1").replace(/\/+$/, "");
   const MODE_KEY = "a2SupervisorModeV1";
   const EVENTS_KEY = "a2SupervisorEventsV1";
   const CURRENT_KEY = "a2SupervisorCurrentCommandV1";
@@ -282,7 +283,7 @@
 
   async function semantic(action, command) {
     const platform = String(command.platform || "");
-    if (!["CHATGPT", "GLM_ZAI"].includes(platform)) throw new Error("supervisor_semantic_platform_invalid");
+    if (platform !== "CHATGPT") throw new Error("legacy_platform_execution_disabled");
     if (typeof globalThis.A2_OPERATOR_CAPTURE_PERCEPTION !== "function" || typeof globalThis.A2_OPERATOR_SEMANTIC_ACTION !== "function") {
       throw new Error("supervisor_semantic_runtime_unavailable");
     }
@@ -313,6 +314,10 @@
     const x = await chrome.storage.session.get("a2OperatorHeldPromptIntentV060");
     const intent = x.a2OperatorHeldPromptIntentV060 || null;
     if (!intent?.intent_id) throw new Error("supervisor_no_held_prompt");
+    if (String(intent.platform || "") !== "CHATGPT") {
+      await chrome.storage.session.remove("a2OperatorHeldPromptIntentV060");
+      throw new Error("legacy_prompt_intent_execution_disabled");
+    }
     const action = String(command.payload?.action || "CANCEL");
     if (!["CANCEL", "ALLOW_ONCE", "REWRITE_ALLOW_ONCE"].includes(action)) {
       throw new Error("supervisor_prompt_resolution_invalid");

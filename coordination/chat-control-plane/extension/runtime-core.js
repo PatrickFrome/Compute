@@ -2,12 +2,12 @@
   "use strict";
 
   const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
-  const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
+  const ORDERING_POLICY = "CHATGPT_ONLY_V1";
   const runtimeDescriptor = globalThis.A2_RUNTIME;
   if (!runtimeDescriptor?.version) throw new Error("runtime_descriptor_missing");
   const OPERATOR_RUNTIME = String(runtimeDescriptor.version);
   const DEFAULTS = Object.freeze({
-    daemonUrl: String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"),
+    daemonUrl: String(bootstrap.daemonUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote"),
     armed: false,
     autoOpenTabs: true,
     pollMs: 2500,
@@ -17,7 +17,6 @@
   const CHATGPT_ROOT = "https://chatgpt.com/";
   const COMPLETED_KEY = "a2BridgeCompletedCommandsV0523";
   const PENDING_KEY = "a2BridgePendingCommandV0523";
-  const PREDECESSOR_KEY = "a2BridgeGlmActuatedPredecessorV0523";
   const SUPERVISOR_CHAT_URL_KEY = "a2SupervisorChatUrlV1";
   const SUPERVISOR_CHAT_TAB_KEY = "a2SupervisorChatTabIdV1";
   const SUPERVISOR_SNAPSHOT_KEY = "a2SupervisorChatSnapshotV1";
@@ -65,7 +64,7 @@
     const s=await settings();
     await chrome.action.setBadgeText({text:s.armed?"ON":"OFF"});
     await chrome.action.setBadgeBackgroundColor({color:s.armed?"#16803a":"#5d6470"});
-    await chrome.action.setTitle({title:s.armed?"METAENGINE A2 Browser Operator — ARMED · GLM FIRST":"METAENGINE A2 Browser Operator — DISARMED"});
+    await chrome.action.setTitle({title:s.armed?"METAENGINE A2 Browser Operator — ARMED · CHATGPT ONLY":"METAENGINE A2 Browser Operator — DISARMED"});
   }
 
   async function reportSnapshot(tabId,snapshot) {
@@ -88,10 +87,14 @@
     if(claimedPlatform!==senderPlatform)return{accepted:false,role:"UNMANAGED",reason:"platform_mismatch"};
 
     const s=await settings();
-    const operatorUrl=senderPlatform==="CHATGPT"?normUrl(s.chatgptUrl):senderPlatform==="GLM_ZAI"?normUrl(s.zaiUrl):"";
+    if(senderPlatform==="GLM_ZAI"){
+      await reportSnapshot(tabId,snapshot);
+      return{accepted:true,role:"LEGACY_READ_ONLY",platform:"GLM_ZAI",authority_effect:false};
+    }
+    const operatorUrl=senderPlatform==="CHATGPT"?normUrl(s.chatgptUrl):"";
     if(operatorUrl&&senderUrl===operatorUrl){
       await reportSnapshot(tabId,snapshot);
-      return{accepted:true,role:"OPERATOR",platform:senderPlatform};
+      return{accepted:true,role:"OPERATOR",platform:"CHATGPT"};
     }
 
     if(senderPlatform==="CHATGPT"){
@@ -119,8 +122,8 @@
   }
 
   async function snapshotEnvelopes() {
-    const x=await chrome.storage.local.get(["snapshot:CHATGPT","snapshot:GLM_ZAI"]);
-    return [x["snapshot:CHATGPT"],x["snapshot:GLM_ZAI"]].filter((v)=>v?.snapshot);
+    const x=await chrome.storage.local.get(["snapshot:CHATGPT"]);
+    return [x["snapshot:CHATGPT"]].filter((v)=>v?.snapshot);
   }
   async function findPinned(url,platform) {
     const target=normUrl(url), tabs=await chrome.tabs.query({});
@@ -141,7 +144,7 @@
   }
   async function pollSnapshots() {
     const s=await settings();
-    for(const [platform,url] of [["CHATGPT",s.chatgptUrl],["GLM_ZAI",s.zaiUrl]]) {
+    for(const [platform,url] of [["CHATGPT",s.chatgptUrl]]) {
       if(!url)continue;
       try {
         const tab=await findPinned(url,platform);
@@ -149,7 +152,6 @@
         const r=await chrome.tabs.sendMessage(tab.id,{type:"GET_CHAT_SNAPSHOT"});
         if(r?.ok&&r.snapshot) {
           await reportSnapshot(tab.id,r.snapshot);
-          if(platform==="GLM_ZAI"&&typeof globalThis.A2_GLM_RECONCILE==="function")await globalThis.A2_GLM_RECONCILE(tab.id).catch(()=>{});
         }
       } catch(error) {
         await chrome.storage.local.set({operatorSensorLastError:String(error?.message||error),operatorSensorLastErrorAt:new Date().toISOString()});
@@ -158,14 +160,14 @@
   }
   async function freshSnapshots(s) {
     let rows=await snapshotEnvelopes(), now=Date.now(), maxAge=Math.max(5000,s.pollMs*2);
-    if(rows.length<2||rows.some((e)=>!Number.isFinite(Date.parse(e?.observed_at||""))||now-Date.parse(e.observed_at)>maxAge)) {
+    if(rows.length<1||rows.some((e)=>!Number.isFinite(Date.parse(e?.observed_at||""))||now-Date.parse(e.observed_at)>maxAge)) {
       await pollSnapshots();
       rows=await snapshotEnvelopes();
     }
     return rows;
   }
 
-  function targetUrl(command,s){return command.target_platform==="CHATGPT"?normUrl(s.chatgptUrl):command.target_platform==="GLM_ZAI"?normUrl(s.zaiUrl):"";}
+  function targetUrl(command,s){return command.target_platform==="CHATGPT"?normUrl(s.chatgptUrl):"";}
   async function resolveTab(command,s) {
     const url=targetUrl(command,s);
     if(!url)throw new Error(`target_url_not_configured:${command.target_platform}`);
@@ -178,9 +180,8 @@
   }
   function validateOrdering(c) {
     const order=Number(c?.launch_order||0),basis=String(c?.ordering_basis||""),pred=c?.predecessor_command_id==null?null:String(c.predecessor_command_id);
-    if(c?.target_platform==="GLM_ZAI"){if(order!==1||basis!=="GLM_FIRST"||pred!==null)throw new Error("ordering_contract_glm_invalid");return;}
-    if(c?.target_platform==="CHATGPT"){if(order!==2)throw new Error("ordering_contract_gpt_order_invalid");if(basis==="GLM_COMMAND_ACTUATED"&&pred)return;if(basis==="A2_GLM_ALREADY_SUBMITTED"&&pred===null)return;throw new Error("ordering_contract_gpt_gate_invalid");}
-    throw new Error("unsupported_target_platform");
+    if(c?.target_platform!=="CHATGPT")throw new Error("legacy_target_platform_disabled");
+    if(order!==1||basis!=="CHATGPT_ONLY"||pred!==null)throw new Error("ordering_contract_chatgpt_only_invalid");
   }
 
   async function loadCompleted(){const x=await chrome.storage.local.get(COMPLETED_KEY);return Array.isArray(x[COMPLETED_KEY])?x[COMPLETED_KEY]:[];}
@@ -202,10 +203,9 @@
     }
   }
   async function clearPendingIf(id){const x=await chrome.storage.local.get(PENDING_KEY);if(x[PENDING_KEY]?.command_id===id)await chrome.storage.local.remove(PENDING_KEY);}
-  async function consumePredecessorIfSafe(command,executionClass,accepted) {
-    if(!accepted||command?.target_platform!=="CHATGPT"||!command?.predecessor_command_id||!["ACTUATED","VERIFIED"].includes(executionClass))return;
-    const x=await chrome.storage.local.get(PREDECESSOR_KEY);
-    if(String(x[PREDECESSOR_KEY]||"")===String(command.predecessor_command_id))await chrome.storage.local.remove(PREDECESSOR_KEY);
+  async function consumePredecessorIfSafe() {
+    // ChatGPT-only v1 has no provider predecessor. Kept as a no-op seam for
+    // receipt/idempotency call sites while old stored rows remain readable.
   }
 
   async function waitNewConversation(tabId,timeout=12000){
@@ -269,20 +269,14 @@
     inFlight.add(id);
     try {
       const tab=await resolveTab(command,s);
-      let result;
-      if(command.target_platform==="GLM_ZAI"){
-        if(typeof globalThis.A2_GLM_TRUSTED_SEND!=="function")throw new Error("glm_trusted_send_unavailable");
-        result=await globalThis.A2_GLM_TRUSTED_SEND(tab.id,command);
-      } else {
-        if(typeof globalThis.A2_CHATGPT_TRUSTED_SEND!=="function")throw new Error("chatgpt_trusted_send_unavailable");
-        result=await sendChatgpt(tab,command);
-      }
+      if(typeof globalThis.A2_CHATGPT_TRUSTED_SEND!=="function")throw new Error("chatgpt_trusted_send_unavailable");
+      const result=await sendChatgpt(tab,command);
       const status=String(result?.status||"FAILED_CLOSED"),executionClass=executionClassFor(status,result);
       const envelope={status,execution_class:executionClass,target_platform:command.target_platform,target_url:targetUrl(command,await settings()),tab_id:tab.id,clicked_send_button:result?.clicked_send_button===true||result?.ok===true,transport_trace_id:result?.transport_trace_id||null,verification:result?.verification||null,recovery:result?.recovery||null,dispatch_group_sha256:command.dispatch_group_sha256||null,launch_order:command.launch_order||null,predecessor_command_id:command.predecessor_command_id||null,ordering_basis:command.ordering_basis||null,authority_effect:false,captured_at:new Date().toISOString()};
       if(["ACTUATED","VERIFIED"].includes(executionClass))await rememberCompleted(command,envelope);
       const accepted=await postResult(id,envelope);
       if(accepted){await clearPendingIf(id);await consumePredecessorIfSafe(command,executionClass,true);}
-      setTimeout(()=>pollSnapshots().finally(()=>poll(true)),command.target_platform==="GLM_ZAI"?250:1200);
+      setTimeout(()=>pollSnapshots().finally(()=>poll(true)),1200);
     } catch(error) {
       const result=error?.a2Result||null;
       const status=String(result?.status||(["AMBIGUOUS_NO_RETRY"].includes(String(error?.a2ExecutionClass||""))?"FAILED_DURABLE_AMBIGUOUS_NO_RETRY":"FAILED_SAFE_PRE_ACTUATION"));
@@ -312,8 +306,7 @@
       }
       try {
         const snapshots=await freshSnapshots(s);
-        const pred=(await chrome.storage.local.get(PREDECESSOR_KEY))[PREDECESSOR_KEY]||null;
-        const r=await request("/v1/commands/next",{method:"POST",body:JSON.stringify({snapshots,ordering_policy:ORDERING_POLICY,glm_predecessor_command_id:pred,operator_runtime:OPERATOR_RUNTIME})});
+        const r=await request("/v1/commands/next",{method:"POST",body:JSON.stringify({snapshots,ordering_policy:ORDERING_POLICY,operator_runtime:OPERATOR_RUNTIME})});
         if(!r.ok)throw new Error(`command_http_${r.status}`);
         const body=await r.json();
         if(body?.command){await chrome.storage.local.set({[PENDING_KEY]:body.command});await execute(body.command);}
@@ -333,11 +326,6 @@
     return {ok:true,armed:(await settings()).armed===true,at:new Date().toISOString()};
   }
 
-  globalThis.A2_ON_GLM_ACTUATED=(commandId)=>{
-    const id=String(commandId||"");
-    if(!id)return;
-    chrome.storage.local.set({[PREDECESSOR_KEY]:id}).then(()=>pollSnapshots()).finally(()=>poll(true));
-  };
   globalThis.A2_OPERATOR_RUNTIME=OPERATOR_RUNTIME;
   globalThis.A2_BRIDGE_POLL_NOW=directPoll;
 
@@ -360,7 +348,7 @@
   chrome.alarms.onAlarm.addListener((a)=>{if(a.name==="a2-chat-bridge-poll")pollSnapshots().finally(()=>poll(true));});
   chrome.storage.onChanged.addListener(async(changes,area)=>{
     if(area!=="local")return;
-    if(changes.armed||changes.chatgptUrl||changes.zaiUrl||changes.daemonUrl||changes.pollMs){await badge();await poll(true);}
+    if(changes.armed||changes.chatgptUrl||changes.daemonUrl||changes.pollMs){await badge();await poll(true);}
   });
   chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
     if(m?.type==="CHAT_SNAPSHOT"&&sender.tab?.id&&m.snapshot){

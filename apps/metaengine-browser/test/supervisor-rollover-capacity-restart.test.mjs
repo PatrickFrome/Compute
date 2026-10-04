@@ -11,7 +11,7 @@ test('process restart preserves exact capacity no-effect proof until it is safel
     supervisor_epoch: 2,
     cycle_seq: 2109,
     state: 'ROLLOVER_AMBIGUOUS',
-    conversation_url: 'https://chat.z.ai/c/e1ec5063-0798-46df-b401-df41813e0000',
+    conversation_url: 'https://chatgpt.com/c/e1ec5063-0798-46df-b401-df41813e0000',
     tab_id: 'tab_supervisor',
     paused: false,
     process_incarnation_id: 'process_pre_update',
@@ -25,7 +25,7 @@ test('process restart preserves exact capacity no-effect proof until it is safel
     rollover_attempt: {
       attempt_id: attemptId,
       supervisor_epoch: 2,
-      previous_conversation: 'https://chat.z.ai/c/e1ec5063-0798-46df-b401-df41813e0000',
+      previous_conversation: 'https://chatgpt.com/c/e1ec5063-0798-46df-b401-df41813e0000',
       started_at: '2026-09-28T20:59:09.703Z',
       tab_id: null,
       ambiguous_at: '2026-09-28T20:59:09.706Z',

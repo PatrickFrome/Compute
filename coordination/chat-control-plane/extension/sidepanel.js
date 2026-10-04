@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 const SEMANTIC_CLICK_ROLES = new Set(["button", "checkbox", "radio", "switch", "tab", "menuitem"]);
 const SEMANTIC_EDITABLE_ROLES = new Set(["textbox", "searchbox", "combobox"]);
 const SEMANTIC_ROLES = new Set([...SEMANTIC_CLICK_ROLES, ...SEMANTIC_EDITABLE_ROLES]);
+const ACTIVE_EXECUTION_PLATFORM = "CHATGPT";
 let lastIntentId = null;
 let lastArmed = false;
 let captureBusy = false;
@@ -43,12 +44,14 @@ function selectedSemanticTarget() {
 function updateSemanticControls() {
   const select = $("semanticTarget");
   const target = selectedSemanticTarget();
-  const disabled = actionBusy || captureBusy || !currentPerception || semanticTargets.length === 0;
+  const legacyReadOnly = Boolean(currentPerception) && String(currentPerception.platform || "") !== ACTIVE_EXECUTION_PLATFORM;
+  const disabled = actionBusy || captureBusy || !currentPerception || legacyReadOnly || semanticTargets.length === 0;
   select.disabled = disabled;
   $("semanticFocus").disabled = disabled || !target;
   $("semanticClick").disabled = disabled || !target || !SEMANTIC_CLICK_ROLES.has(target.role);
   $("semanticType").disabled = disabled || !target || !SEMANTIC_EDITABLE_ROLES.has(target.role);
-  if (!target && !actionBusy) $("semanticState").textContent = semanticTargets.length ? "Select a semantic target." : "No unique supported semantic target in this capture.";
+  if (legacyReadOnly && !actionBusy) $("semanticState").textContent = "Legacy provider capture is read-only; semantic actuation is disabled.";
+  else if (!target && !actionBusy) $("semanticState").textContent = semanticTargets.length ? "Select a semantic target." : "No unique supported semantic target in this capture.";
 }
 
 function renderSemanticTargets(perception) {
@@ -186,7 +189,8 @@ function render(state) {
   $("pendingCommand").textContent = state.pending_command
     ? `${compact(state.pending_command.target_platform)} · ${compact(state.pending_command.command_id)}`
     : "none";
-  $("glmState").textContent = renderPeer(state.snapshots?.GLM_ZAI);
+  const legacyGlm = state.snapshots?.GLM_ZAI_LEGACY_READ_ONLY || state.snapshots?.GLM_ZAI || null;
+  $("glmState").textContent = legacyGlm ? `legacy · ${renderPeer(legacyGlm)}` : "legacy not observed";
   $("gptState").textContent = renderPeer(state.snapshots?.CHATGPT);
   $("daemon").textContent = state.daemon_online_at ? `seen ${state.daemon_online_at}` : "not confirmed";
   $("sensorError").textContent = compact(state.sensor_error);
@@ -260,8 +264,12 @@ async function capturePerception(platform) {
       options: { include_screenshot: true, body_limit: 16000, ax_limit: 70, dom_limit: 100 }
     });
     renderPerception(response.perception || null);
-    $("actionTarget").value = platform;
-    setStatus(`${platform} screen captured locally. Full capture remains in service-worker memory only.`);
+    if (platform === ACTIVE_EXECUTION_PLATFORM) {
+      $("actionTarget").value = ACTIVE_EXECUTION_PLATFORM;
+      setStatus("ChatGPT screen captured locally. Full capture remains in service-worker memory only.");
+    } else {
+      setStatus("Legacy GLM telemetry captured read-only. All semantic and point actuation remains disabled.");
+    }
   } catch (error) { setStatus(String(error?.message || error), true); }
   finally {
     captureBusy = false;
@@ -282,6 +290,7 @@ async function runOperatorAction(action, extra = {}) {
   actionBusy = true;
   const { platform: platformOverride, ...payload } = extra;
   const platform = String(platformOverride || $("actionTarget").value);
+  if (platform !== ACTIVE_EXECUTION_PLATFORM) return setStatus("legacy_platform_execution_disabled", true);
   setActionControlsDisabled(true);
   try {
     setStatus(`Running ${action} on ${platform}…`);
@@ -317,6 +326,7 @@ async function runSemanticAction(action) {
   if (actionBusy || captureBusy) return;
   const perception = currentPerception;
   const target = selectedSemanticTarget();
+  if (perception?.platform && String(perception.platform) !== ACTIVE_EXECUTION_PLATFORM) return setStatus("legacy_platform_execution_disabled", true);
   if (!perception?.platform || !perception?.captured_at || !target) return setStatus("Capture and select a unique semantic target first.", true);
   const payload = {
     action,
@@ -400,7 +410,8 @@ $("perceptionScreenshot").addEventListener("click", (event) => {
     const point = screenshotCoordinates(event);
     const platform = String(currentPerception?.platform || "");
     if (!platform) throw new Error("Captured frame has no target platform.");
-    $("actionTarget").value = platform;
+    if (platform !== ACTIVE_EXECUTION_PLATFORM) throw new Error("legacy_platform_execution_disabled");
+    $("actionTarget").value = ACTIVE_EXECUTION_PLATFORM;
     runOperatorAction(event.shiftKey ? "DOUBLE_CLICK_POINT" : "CLICK_POINT", {
       platform,
       frame_token: currentPerception.frame_token,

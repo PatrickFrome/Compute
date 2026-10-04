@@ -44,7 +44,7 @@ const fleet = {
 const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'c'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
-const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
 function response(status, body) {
@@ -54,7 +54,7 @@ function frame({ sendVisible, conversation = false } = {}) {
   return {
     tab_id: lease.tab_id,
     target_id: lease.target_id,
-    url: conversation ? conversationUrl : 'https://chat.z.ai/',
+    url: conversation ? conversationUrl : 'https://chatgpt.com/',
     viewport: { width: 1200, height: 640 },
     semantic_targets: [composer, ...(sendVisible ? [send] : []), ...(conversation ? [stop] : [])],
     authority_effect: false,

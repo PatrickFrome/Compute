@@ -160,7 +160,18 @@ async function postSnapshot(platform, marker) {
 
 try {
   await waitReady();
+
+  const blockedLegacyWake = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/v1/control/wake`, {
+    method: 'POST',
+    headers: authHeaders,
+    body: JSON.stringify({ target_platform: 'GLM_ZAI' })
+  });
+  assert.equal(blockedLegacyWake.status, 409);
+  assert.equal((await blockedLegacyWake.json()).error, 'legacy_platform_execution_disabled');
+
   await postSnapshot('CHATGPT', GPT_DOM_MARKER);
+  // Legacy GLM telemetry may still arrive during migration. It is observable
+  // compatibility evidence only and cannot become executable command authority.
   await postSnapshot('GLM_ZAI', GLM_DOM_MARKER);
   await new Promise((r) => setTimeout(r, 5200));
   await postSnapshot('CHATGPT', GPT_DOM_MARKER);
@@ -171,18 +182,19 @@ try {
   });
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.ok(body.command, `expected GLM wake command; logs=${logs}`);
-  assert.equal(body.command.target_platform, 'GLM_ZAI');
-  assert.equal(body.command.target_agent, 'GLM');
+  assert.ok(body.command, `expected ChatGPT wake command; logs=${logs}`);
+  assert.equal(body.command.target_platform, 'CHATGPT');
+  assert.equal(body.command.target_agent, 'GPT');
   assert.equal(body.command.a2_peer_payloads_exposed, false);
+  assert.equal(body.command.duel_id, null);
+  assert.match(body.command.prompt, /LEGACY_PROVIDER_BOUND_RELAY_QUARANTINED/);
   assert.match(body.command.prompt, /OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE/);
-  assert.match(body.command.prompt, new RegExp(GLM_DOM_MARKER));
-  assert.doesNotMatch(body.command.prompt, new RegExp(GPT_DOM_MARKER));
-  assert.match(body.command.prompt, /pending_payloads_exposed/);
+  assert.match(body.command.prompt, new RegExp(GPT_DOM_MARKER));
+  assert.doesNotMatch(body.command.prompt, new RegExp(GLM_DOM_MARKER));
 
   const second = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/v1/commands/next`, { headers: authHeaders });
   const secondBody = await second.json();
-  assert.equal(secondBody.command, null, 'blind phase must not queue GPT while GLM is the missing peer');
+  assert.equal(secondBody.command, null, 'quarantined legacy relay must not create a duplicate ChatGPT wake');
   console.log('blind-phase behavioral contract PASS');
 } finally {
   child.kill('SIGTERM');

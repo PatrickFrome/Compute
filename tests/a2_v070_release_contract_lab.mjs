@@ -76,16 +76,16 @@ assert.doesNotMatch(registry, /document\.|querySelector|innerText|textContent/, 
 assert.doesNotMatch(registry, /eval\s*\(|new Function|executeScript/, 'registry must not execute arbitrary code');
 
 const runtimeCore = read('runtime-core.js');
-assert.match(runtimeCore, /STRICT_GLM_FIRST_ACTUATED_V1/);
+assert.match(runtimeCore, /CHATGPT_ONLY_V1/);
 assert.match(runtimeCore, /FAILED_DURABLE_AMBIGUOUS_NO_RETRY/);
 assert.match(runtimeCore, /const runtimeDescriptor = globalThis\.A2_RUNTIME/);
 
 const trustedSupervisor = read('trusted-supervisor-chat.js');
 for (const marker of ['PRE_ENTER_DURABLE', 'AMBIGUOUS_NO_RETRY', 'Input.dispatchKeyEvent', 'ACTUATED']) assert.ok(trustedSupervisor.includes(marker));
 const trustedGlm = read('trusted-glm.js');
-assert.doesNotMatch(trustedGlm, /chrome\.tabs\.reload\s*\(/);
-assert.match(trustedGlm, /mousePressed/);
-assert.match(trustedGlm, /mouseReleased/);
+assert.ok(!pkg.files.includes('trusted-glm.js'), 'legacy GLM actuator must not ship in active runtime package');
+assert.doesNotMatch(entry, /trusted-glm\.js/);
+assert.match(trustedGlm, /GLM_ZAI/); // historical source retained for forensic compatibility only
 
 const bootstrap = read('bootstrap-config.js');
 for (const marker of ['bridgeSecret: ""', 'supervisorBootstrapSecret: ""', 'pairingEpoch: ""']) assert.ok(bootstrap.includes(marker));

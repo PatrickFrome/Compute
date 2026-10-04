@@ -2,7 +2,8 @@
   "use strict";
 
   const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
-  const DEFAULT_REMOTE = String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote").replace(/\/+$/, "");
+  const DEFAULT_REMOTE = String(bootstrap.daemonUrl || "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote").replace(/\/+$/, "");
+  const RETIRED_REMOTE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote";
 
   function normalizeBase(value) {
     const url = new URL(String(value || DEFAULT_REMOTE));
@@ -14,7 +15,15 @@
 
   async function bridgeBase() {
     const stored = await chrome.storage.local.get("daemonUrl");
-    return normalizeBase(stored.daemonUrl || DEFAULT_REMOTE);
+    const candidate = normalizeBase(stored.daemonUrl || DEFAULT_REMOTE);
+    if (candidate === RETIRED_REMOTE) {
+      // Upgrade repair only: old recovery-project routing is no longer an
+      // execution endpoint. Rebind to the current Client project without
+      // changing pairing/device authority.
+      await chrome.storage.local.set({ daemonUrl: DEFAULT_REMOTE });
+      return DEFAULT_REMOTE;
+    }
+    return candidate;
   }
 
   async function clientId() {

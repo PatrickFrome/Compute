@@ -2,7 +2,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (ROOT / "supabase/migrations/20260824070409_duel_sovereign_inference_v1.sql").read_text(encoding="utf-8")
-RUNNER = (ROOT / "orchestration/sovereign/src/index.ts").read_text(encoding="utf-8")
+RUNNER = (ROOT / "orchestration/sovereign/src/same_point_v4.ts").read_text(encoding="utf-8")
+CONTROL = (ROOT / "orchestration/sovereign/src/control.ts").read_text(encoding="utf-8")
+LEGACY = (ROOT / "orchestration/sovereign/src/index.ts").read_text(encoding="utf-8")
+PACKAGE = (ROOT / "orchestration/sovereign/package.json").read_text(encoding="utf-8")
 README = (ROOT / "orchestration/sovereign/README.md").read_text(encoding="utf-8")
 
 # Managed inference must not be required for sovereign sessions.
@@ -35,22 +38,38 @@ assert 'reconcile()' in RUNNER
 assert 'DUEL_RECOVERY_MS' in RUNNER
 assert 'SOVEREIGN_PERSISTENT_RUNNER' in RUNNER
 
-# GPT and GLM are launched concurrently and atomically persisted through the existing V3 pair RPC.
-assert 'Promise.all([actorVisible("GPT"' in RUNNER
-assert 'actorVisible("GLM"' in RUNNER
+# PRIMARY and CRITIC are independent OpenAI actors. GPT/GLM survive only as
+# database wire slots required by the immutable historical pair RPC/schema.
+assert 'actorVisible("PRIMARY"' in RUNNER
+assert 'actorVisible("CRITIC"' in RUNNER
+assert 'logical_role: actor' in RUNNER
+assert 'provider: "OPENAI"' in RUNNER
+assert 'platform: "CHATGPT"' in RUNNER
 assert "h205f22_duel_submit_pair_v3" in RUNNER
-assert "h205f22_duel_complete_lockstep_v2" in RUNNER
-assert "peer_hash_ack_failed" in RUNNER
+assert "h205f22_duel_submit_rebut_finalize_v4" in RUNNER
+assert 'legacy_wire_slot: wireActor(actor)' in RUNNER
 
-# No managed inference vendor is referenced by the runner implementation.
-for forbidden in ("ai-gateway.vercel.sh", "api.cloudflare.com/client/v4", "api.openai.com", "api.z.ai"):
-    assert forbidden not in RUNNER
+# No active ZAI/GLM inference configuration or hosted vendor endpoint is allowed.
+for source in (RUNNER, CONTROL):
+    for forbidden in ("ai-gateway.vercel.sh", "api.cloudflare.com/client/v4", "api.openai.com", "api.z.ai", "zai-org/GLM", "SOVEREIGN_GLM_URL", "SOVEREIGN_GLM_MODEL", "SOVEREIGN_GLM_TOKEN"):
+        assert forbidden not in source
 
-# Model endpoints are local/private OpenAI-compatible servers by default.
+# Two independent local/private OpenAI-compatible contexts stay available.
+assert 'SOVEREIGN_PRIMARY_URL' in RUNNER
+assert 'SOVEREIGN_CRITIC_URL' in RUNNER
 assert 'http://127.0.0.1:8001' in RUNNER
 assert 'http://127.0.0.1:8002' in RUNNER
 assert '/v1/chat/completions' in RUNNER
+assert 'finishReason !== "stop"' in RUNNER
+assert '/primary/v1/chat/completions' in CONTROL
+assert '/critic/v1/chat/completions' in CONTROL
+assert "sovereign_legacy_runner_retired_chatgpt_only" in PACKAGE
 assert "Do not expose raw vLLM to the public Internet" in README
 assert "loopback/private LAN" in README
 
 print("Sovereign inference contract guards: PASS")
+
+# Historical V2 source is a terminal tombstone, not a dormant executable.
+assert "sovereign_legacy_runner_retired_chatgpt_only" in LEGACY
+for forbidden in ("zai-org/GLM", "SOVEREIGN_GLM_URL", "SOVEREIGN_GLM_MODEL", "SOVEREIGN_GLM_TOKEN", "SOVEREIGN_GPT_URL"):
+    assert forbidden not in LEGACY

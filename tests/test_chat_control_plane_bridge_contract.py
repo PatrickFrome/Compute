@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASE = ROOT / "coordination" / "chat-control-plane"
 EXT = BASE / "extension"
 DAEMON = BASE / "daemon"
-REMOTE_BRIDGE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"
+REMOTE_BRIDGE = "https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-chat-bridge-remote"
 
 
 class ChatControlPlaneBridgeContract(unittest.TestCase):
@@ -57,7 +57,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertTrue(set(imports).issubset(package_files), sorted(set(imports) - package_files))
         for script in [
             "runtime-marker.js", "target-registry.js", "target-observability.js", "bridge-runtime.js",
-            "debugger-broker.js", "debugger-watchdog.js", "trusted-chatgpt.js", "trusted-glm.js",
+            "debugger-broker.js", "debugger-watchdog.js", "trusted-chatgpt.js",
             "operator-gate-bindings.js", "operator-lease-gate.js", "operator-actions.js",
             "operator-compute-bridge.js", "runtime-core.js", "operator-control.js",
             "operator-perception.js", "operator-oopif-perception.js", "operator-semantic-actions.js",
@@ -67,7 +67,39 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             self.assertIn(script, package_files)
         self.assertNotIn("operator-oopf-perception.js", self.background_entry)
         self.assertNotRegex(self.background_entry, r'-v\d{3}\.js')
+        self.assertNotIn('importScripts("./trusted-glm.js")', self.background_entry)
+        self.assertNotIn("trusted-glm.js", package_files)
         self.assertNotIn("import(", self.background_entry)
+
+    def test_active_runtime_routes_to_fresh_client_project(self):
+        fresh = "https://jhriwwsryeqsvvvufkok.supabase.co"
+        retired = "https://xpeibufgzjknrhbhpffp.supabase.co"
+        self.assertIn(fresh + "/functions/v1/a2-chat-bridge-remote", self.bootstrap)
+        self.assertIn(fresh + "/functions/v1/a2-browser-native-supervisor-v1", self.bootstrap)
+        self.assertIn(fresh + "/*", json.dumps(self.manifest))
+        self.assertNotIn(retired + "/*", json.dumps(self.manifest))
+        bridge_client = (EXT / "bridge-client.js").read_text()
+        runtime_core = (EXT / "runtime-core.js").read_text()
+        supervisor = (EXT / "supervisor-authority.js").read_text()
+        transport = (EXT / "supervisor-device-transport.js").read_text()
+        self.assertIn(fresh + "/functions/v1/a2-chat-bridge-remote", bridge_client)
+        self.assertIn("RETIRED_REMOTE", bridge_client)
+        self.assertIn(fresh + "/functions/v1/a2-chat-bridge-remote", runtime_core)
+        self.assertIn(fresh + "/functions/v1/a2-browser-native-supervisor-v1", supervisor)
+        self.assertIn("/a2-browser-native-supervisor-v1", transport)
+        self.assertNotIn("/a2-browser-supervisor-v4", transport)
+        self.assertNotIn("/a2-browser-supervisor-v3-canary", supervisor)
+
+    def test_supervisor_mutation_surface_is_chatgpt_only(self):
+        supervisor = (EXT / "supervisor-authority.js").read_text()
+        start = supervisor.index("async function semantic")
+        end = supervisor.index("async function resolvePrompt", start)
+        semantic = supervisor[start:end]
+        self.assertIn('platform !== "CHATGPT"', semantic)
+        self.assertIn("legacy_platform_execution_disabled", semantic)
+        self.assertNotIn('["CHATGPT", "GLM_ZAI"].includes(platform)', semantic)
+        self.assertIn("legacy_prompt_intent_execution_disabled", supervisor)
+        self.assertIn('String(intent.platform || "") !== "CHATGPT"', supervisor)
 
     def test_remote_auth_and_secret_boundaries(self):
         self.assertIn(REMOTE_BRIDGE, self.bootstrap)
@@ -91,10 +123,12 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("pollSnapshots", self.background)
         self.assertIn("duplicate_target_tabs", self.background)
         self.assertIn("target_url_mismatch", self.background)
-        self.assertIn("glm_predecessor_command_id", self.background)
-        self.assertIn("STRICT_GLM_FIRST_ACTUATED_V1", self.background)
-        self.assertIn("GLM_COMMAND_ACTUATED", self.background)
-        self.assertIn("A2_GLM_ALREADY_SUBMITTED", self.background)
+        self.assertIn("CHATGPT_ONLY_V1", self.background)
+        self.assertIn("legacy_target_platform_disabled", self.background)
+        self.assertIn("ordering_contract_chatgpt_only_invalid", self.background)
+        self.assertNotIn("STRICT_GLM_FIRST_ACTUATED_V1", self.background)
+        self.assertNotIn("GLM_COMMAND_ACTUATED", self.background)
+        self.assertNotIn("A2_GLM_ALREADY_SUBMITTED", self.background)
 
     def test_chatgpt_path_is_trusted_enter_and_broker_only(self):
         self.assertIn('await session.send("Input.insertText", { text: prompt })', self.trusted)
@@ -135,21 +169,14 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("Object.getOwnPropertyDescriptor", self.trusted_glm)
         self.assertNotIn("chrome.tabs.reload", self.trusted_glm)
 
-    def test_glm_strict_dispatch_precedes_release_and_gpt_gate(self):
-        press = self.trusted_glm.index('type: "mousePressed"')
-        server_dispatch = self.trusted_glm.index('postProgress(commandId, transportTraceId, "DISPATCHED")', press)
-        local_dispatch = self.trusted_glm.index('state: "DISPATCHED"', server_dispatch)
-        bypass = self.trusted_glm.index("armPromptGateBypass", local_dispatch)
-        release = self.trusted_glm.index('type: "mouseReleased", x: point.x', bypass)
-        self.assertLess(press, server_dispatch)
-        self.assertLess(server_dispatch, local_dispatch)
-        self.assertLess(local_dispatch, bypass)
-        self.assertLess(bypass, release)
-        self.assertIn("GLM_AT_MOST_ONCE_DURABLE_REPLAY", self.trusted_glm)
-        self.assertIn("SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", self.trusted_glm)
-        self.assertIn("A2_ON_GLM_ACTUATED", self.trusted_glm)
-        self.assertIn("PREDECESSOR_KEY", self.background)
-        self.assertIn("consumePredecessorIfSafe", self.background)
+    def test_glm_actuator_is_historical_source_only_and_cannot_enter_active_runtime(self):
+        package_files = set(self.runtime_package["files"])
+        self.assertNotIn("trusted-glm.js", package_files)
+        self.assertNotIn('importScripts("./trusted-glm.js")', self.background_entry)
+        self.assertNotIn("A2_GLM_TRUSTED_SEND", self.background)
+        self.assertNotIn("A2_ON_GLM_ACTUATED", self.background)
+        self.assertNotIn("PREDECESSOR_KEY", self.background)
+        self.assertIn("CHATGPT_ONLY_V1", self.background)
 
     def test_glm_safe_failure_cleanup_never_touches_ambiguous_send(self):
         self.assertIn("scrubSafeGlmDraft", self.gate_bindings)

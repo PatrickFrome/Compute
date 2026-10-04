@@ -25,7 +25,6 @@ importScripts("./debugger-broker.js");
 importScripts("./debugger-watchdog.js");
 importScripts("./trusted-chatgpt.js");
 importScripts("./chatgpt-rollover.js");
-importScripts("./trusted-glm.js");
 importScripts("./operator-gate-bindings.js");
 // B5 lease gate: must load BEFORE operator-actions.js so that
 // assertLeaseValid() can validate action leases through
