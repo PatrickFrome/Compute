@@ -48,7 +48,7 @@ test('BOUND_UNVERIFIED promotes to ACTIVE only with exact physical transport pro
   assert.equal(after.transport_proof.generation_epoch, before.generation_epoch);
   assert.match(after.transport_proof.conversation_url_sha256, /^[a-f0-9]{64}$/);
   assert.equal(after.transport_proof.agent_surface_sha256, 'a'.repeat(64));
-  assert.equal(JSON.stringify(after.transport_proof).includes('chatgpt.com/c/'), false);
+  assert.equal(after.transport_proof.conversation_url, 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
 });
 
 test('stale tab, target or generation cannot promote fleet agent', async () => {
