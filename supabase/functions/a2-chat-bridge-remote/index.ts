@@ -153,14 +153,16 @@ function recentMessages(snapshot: any, count = 6) {
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
   return messages.slice(-count).map((m) => ({ role: m?.role || 'unknown', text: clip(m?.text || '', 6000) }));
 }
-function peerPlatform(platform: string) { return platform === 'CHATGPT' ? 'GLM_ZAI' : 'CHATGPT'; }
-function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'GPT' : 'GLM'; }
+function agentForPlatform(platform: string) { return platform === 'CHATGPT' ? 'GPT' : null; }
 function missingBlindPeer(relayItem: any) {
   const relay = relayItem?.relay || null;
   if (!relay || relay.pending_payloads_exposed === true || relay.relay_state !== 'WAITING_PROPOSE_PEER') return null;
   const submitted = new Set(Array.isArray(relay.pending_actors) ? relay.pending_actors : []);
-  if (submitted.has('GPT') && !submitted.has('GLM')) return 'GLM';
-  if (submitted.has('GLM') && !submitted.has('GPT')) return 'GPT';
+  if (!submitted.has('GPT')) return 'GPT';
+  // A legacy relay that is waiting specifically for GLM cannot be satisfied by
+  // impersonating that actor with ChatGPT. Hold fail-closed until the relay
+  // identity plane is migrated to provider-neutral roles.
+  if (submitted.has('GPT') && !submitted.has('GLM')) return 'LEGACY_GLM_REQUIRED';
   return null;
 }
 function compactA2Message(message: any) {
@@ -172,7 +174,6 @@ function macroblockSummary(value: any) {
 }
 function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2: any) {
   const targetSnapshot = snapshots.get(targetPlatform)?.snapshot || null;
-  const peerSnapshot = snapshots.get(peerPlatform(targetPlatform))?.snapshot || null;
   const agent = agentForPlatform(targetPlatform);
   const blind = a2.peerPayloadsExposed !== true;
   const pendingRelay = a2.pendingRelay?.relay || null;
@@ -198,12 +199,8 @@ function buildWakePrompt(targetPlatform: string, snapshots: Map<string, any>, a2
     '', 'YOUR OPEN CHAT — RECENT VISIBLE TURNS (context only):', clip(JSON.stringify(recentMessages(targetSnapshot, 7)), MAX_CHAT_CONTEXT_CHARS)
   ];
   if (pendingRelay) lines.push('', 'A2 SAME_POINT RELAY:', clip(JSON.stringify({ duel_id: pendingRelay.duel_id, duel_key: pendingRelay.duel_key, relay_state: pendingRelay.relay_state, pending_wave: pendingRelay.pending_wave, pending_actors: pendingRelay.pending_actors, pending_payloads_exposed: pendingRelay.pending_payloads_exposed, current_checkpoint_sha256: pendingRelay.current_checkpoint_sha256, subject: a2.pendingRelay?.subject || null }), 8000));
-  if (!blind && peerSnapshot) {
-    lines.push('', 'OTHER PEER CHAT — RECENT VISIBLE TURNS (A2 relay reports pending_payloads_exposed=true):');
-    lines.push(clip(JSON.stringify(recentMessages(peerSnapshot, 5)), MAX_CHAT_CONTEXT_CHARS));
-  } else {
-    lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
-  }
+  lines.push('', 'ACTIVE INFERENCE PROVIDER: OPENAI / CHATGPT.');
+  lines.push('LEGACY GLM/ZAI PEER: DISABLED. Historical relay rows are evidence only; never impersonate a missing GLM actor.');
   lines.push('', 'ACTION: Read the supplied frontier, use your connected project tools as needed, run AMPLIFIER_LOOP_V1 when its trigger conditions apply, continue development until the next genuine hard gate/conflict/external dependency, and report/persist both engineering and amplifier evidence.');
   return clip(lines.join('\n'), MAX_PROMPT_CHARS);
 }
@@ -233,14 +230,15 @@ async function nextCommand(req: Request, body: any) {
   const snapshots = new Map<string, any>();
   for (const envelope of envelopes) {
     const platform = String(envelope?.platform || envelope?.snapshot?.platform || '');
-    if (['CHATGPT', 'GLM_ZAI'].includes(platform) && envelope?.snapshot) snapshots.set(platform, envelope);
+    if (platform === 'CHATGPT' && envelope?.snapshot) snapshots.set(platform, envelope);
   }
   if (!snapshots.size) return null;
   const states = new Map<string, any>();
   for (const [platform, envelope] of snapshots) states.set(platform, await upsertPeer(envelope));
   const a2 = await refreshA2();
   const missing = missingBlindPeer(a2.pendingRelay);
-  const order = missing === 'GPT' ? ['CHATGPT'] : missing === 'GLM' ? ['GLM_ZAI'] : ['CHATGPT', 'GLM_ZAI'];
+  if (missing === 'LEGACY_GLM_REQUIRED') return null;
+  const order = ['CHATGPT'];
   const now = Date.now();
   for (const platform of order) {
     const envelope = snapshots.get(platform);
@@ -270,7 +268,7 @@ async function nextCommand(req: Request, body: any) {
       p_workspace_id: WORKSPACE_ID,
       p_idempotency_key: idempotencyKey,
       p_target_platform: platform,
-      p_target_agent: agentForPlatform(platform),
+      p_target_agent: 'GPT',
       p_client_id: clientId,
       p_prompt_sha256: await sha256(prompt),
       p_a2_head_message_seq: a2.cursor,

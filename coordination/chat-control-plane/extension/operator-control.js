@@ -6,7 +6,7 @@
   const INTENT_TTL_MS = 15 * 60 * 1000;
   const MAX_DRAFT_CHARS = 120000;
   const MODES = new Set(["OBSERVE", "GATE_SEND"]);
-  const ALLOWED_PLATFORMS = new Set(["CHATGPT", "GLM_ZAI"]);
+  const ALLOWED_PLATFORMS = new Set(["CHATGPT"]);
   const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
