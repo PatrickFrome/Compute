@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 
-const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const CLOSED = Object.freeze({
   authoritative: true, state: 'CLOSED', generation_floor: 28,
   continuous_service_allowed: false, refill_enabled: false, supervisor_admission_enabled: false,
