@@ -68,7 +68,7 @@ let openAiKey: string | null = null;
 onTokenChange((name) => {
   if (name === "OPENAI_API_KEY") openAiKey = null;
   if (name === "VERCEL_AI_GATEWAY_API_KEY") { gatewayKey = null; gatewayKeyTried = false; }
-  if (name === "SUPABASE_URL" || name === "SUPABASE_SERVICE_ROLE_JWT") gatewayKeyTried = false;
+  if (["SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_JWT"].includes(name)) gatewayKeyTried = false;
 });
 
 function loadOpenAiKey(): string | null {
@@ -82,6 +82,39 @@ export function openAiReady(): boolean {
   return Boolean(loadOpenAiKey());
 }
 
+function namedSupabaseSecret(raw: string | null | undefined): string | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const value = String(parsed?.default || "").trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+function supabaseAdminKey(): string | null {
+  return tokenGet("SUPABASE_SECRET_KEY")
+    || namedSupabaseSecret(tokenGet("SUPABASE_SECRET_KEYS"))
+    || String(process.env.SUPABASE_SECRET_KEY || "").trim()
+    || namedSupabaseSecret(process.env.SUPABASE_SECRET_KEYS)
+    || tokenGet("SUPABASE_SERVICE_ROLE_JWT")
+    || String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    || null;
+}
+
+export function supabaseAdminRpcHeaders(key: string): Record<string, string> {
+  const value = String(key || "").trim();
+  if (!value) throw new Error("supabase_admin_key_required");
+  const headers: Record<string, string> = { apikey: value, "Content-Type": "application/json" };
+  // Modern sb_secret_* values are API keys, not JWT access tokens. Sending
+  // them as Bearer credentials makes Supabase reject the request as Invalid JWT.
+  // Preserve Authorization only for the legacy JWT-shaped service_role key.
+  if (value.split(".").length === 3) headers.Authorization = `Bearer ${value}`;
+  return headers;
+}
+
 async function loadGatewayKey(): Promise<string | null> {
   if (gatewayKey) return gatewayKey;
   // 1) vault БД — первоисточник (после первой добычи здесь всегда лежит)
@@ -90,15 +123,15 @@ async function loadGatewayKey(): Promise<string | null> {
   if (gatewayKeyTried) return null;
   gatewayKeyTried = true;
   try {
-    const supabaseUrl = tokenGet("SUPABASE_URL");
-    const serviceJwt = tokenGet("SUPABASE_SERVICE_ROLE_JWT");
-    if (!supabaseUrl || !serviceJwt) {
-      console.log("[providers] gateway key: нет SUPABASE_URL/SERVICE_ROLE_JWT в tokens DB → RPC недоступен");
+    const supabaseUrl = tokenGet("SUPABASE_URL") || String(process.env.SUPABASE_URL || "").trim();
+    const adminKey = supabaseAdminKey();
+    if (!supabaseUrl || !adminKey) {
+      console.log("[providers] gateway key: нет SUPABASE_URL/modern backend key в vault/env → RPC недоступен");
       return null;
     }
     const r = await fetch(`${supabaseUrl}/rest/v1/rpc/h205f22_aop1_vercel_gateway_runtime_secret_v1`, {
       method: "POST",
-      headers: { apikey: serviceJwt, Authorization: `Bearer ${serviceJwt}`, "Content-Type": "application/json" },
+      headers: supabaseAdminRpcHeaders(adminKey),
       body: "{}",
     });
     if (r.ok) {
