@@ -20,12 +20,11 @@ class BrowserOperatorDebuggerIntegration(unittest.TestCase):
     def test_chrome_125_flat_session_floor(self):
         self.assertGreaterEqual(int(self.manifest["minimum_chrome_version"]), 125)
 
-    def test_broker_loads_before_trusted_transports(self):
+    def test_broker_loads_before_active_chatgpt_transport_and_glm_is_not_active(self):
         broker = self.entry.index('importScripts("./debugger-broker.js")')
         gpt = self.entry.index('importScripts("./trusted-chatgpt.js")')
-        glm = self.entry.index('importScripts("./trusted-glm.js")')
         self.assertLess(broker, gpt)
-        self.assertLess(broker, glm)
+        self.assertNotIn('importScripts("./trusted-glm.js")', self.entry)
 
     def test_trusted_chatgpt_is_broker_only(self):
         self.assertIn("A2_DEBUGGER_RUN", self.gpt)
