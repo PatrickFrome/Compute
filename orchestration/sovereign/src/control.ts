@@ -1,21 +1,19 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
+import {
+  actorConfig,
+  normalizeSovereignOpenAiModel,
+  sovereignActorPolicySnapshot,
+  type SovereignActor,
+} from "./actor-policy.js";
 
 type JsonObject = Record<string, unknown>;
-type Role = "GPT" | "GLM";
 
 const DATABASE_URL = required("DATABASE_URL");
 const HOST = process.env.SOVEREIGN_HTTP_HOST || "127.0.0.1";
 const PORT = boundedInt(process.env.SOVEREIGN_HTTP_PORT, 8090, 1, 65535);
 const CONTROL_TOKEN = process.env.SOVEREIGN_CONTROL_TOKEN || "";
-const GPT_URL = process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const GLM_URL = process.env.SOVEREIGN_GLM_URL || "http://127.0.0.1:8002";
-const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b";
-const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || "zai-org/GLM-4.7-Flash";
-const COMMON_MODEL_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
-const GPT_TOKEN = process.env.SOVEREIGN_GPT_TOKEN || COMMON_MODEL_TOKEN;
-const GLM_TOKEN = process.env.SOVEREIGN_GLM_TOKEN || COMMON_MODEL_TOKEN;
 const UPSTREAM_TIMEOUT_MS = boundedInt(process.env.SOVEREIGN_UPSTREAM_TIMEOUT_MS, 120_000, 5_000, 600_000);
 const MAX_BODY_BYTES = boundedInt(process.env.SOVEREIGN_HTTP_MAX_BODY_BYTES, 2 * 1024 * 1024, 64 * 1024, 16 * 1024 * 1024);
 const CHANNEL = "h205f22_same_point_v4_ready";
@@ -98,14 +96,13 @@ function uuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function modelConfig(role: Role): { base: string; model: string; token: string } {
-  return role === "GPT"
-    ? { base: GPT_URL, model: GPT_MODEL, token: GPT_TOKEN }
-    : { base: GLM_URL, model: GLM_MODEL, token: GLM_TOKEN };
+function modelConfig(actor: SovereignActor): { base: string; model: string; token: string; actor: SovereignActor; provider: string; platform: string } {
+  const cfg = actorConfig(actor);
+  return { base: cfg.base, model: cfg.model, token: cfg.token, actor, provider: cfg.provider, platform: cfg.platform };
 }
 
-async function probeModel(role: Role): Promise<JsonObject> {
-  const cfg = modelConfig(role);
+async function probeModel(actor: SovereignActor): Promise<JsonObject> {
+  const cfg = modelConfig(actor);
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("probe_timeout"), Math.min(UPSTREAM_TIMEOUT_MS, 10_000));
@@ -125,7 +122,9 @@ async function probeModel(role: Role): Promise<JsonObject> {
       }
     }
     return {
-      role,
+      actor,
+      provider: cfg.provider,
+      platform: cfg.platform,
       ok: response.ok,
       model_visible: visible,
       expected_model: cfg.model,
@@ -134,7 +133,7 @@ async function probeModel(role: Role): Promise<JsonObject> {
       status: response.status,
     };
   } catch {
-    return { role, ok: false, model_visible: false, expected_model: cfg.model, endpoint: cfg.base, latency_ms: Date.now() - started, status: 0 };
+    return { actor, provider: cfg.provider, platform: cfg.platform, ok: false, model_visible: false, expected_model: cfg.model, endpoint: cfg.base, latency_ms: Date.now() - started, status: 0 };
   } finally {
     clearTimeout(timer);
   }
@@ -151,14 +150,23 @@ async function dbProbe(): Promise<JsonObject> {
 }
 
 async function readiness(): Promise<JsonObject> {
-  const [db, gpt, glm] = await Promise.all([dbProbe(), probeModel("GPT"), probeModel("GLM")]);
-  const ready = db.ok === true && gpt.ok === true && glm.ok === true && gpt.model_visible === true && glm.model_visible === true;
+  const [db, actorA, actorB] = await Promise.all([dbProbe(), probeModel("ACTOR_A"), probeModel("ACTOR_B")]);
+  const ready = db.ok === true
+    && actorA.ok === true && actorB.ok === true
+    && actorA.model_visible === true && actorB.model_visible === true;
   lastReady = ready;
-  return { ready, protocol: "SAME_POINT_DUEL_V4", db, gpt, glm };
+  return {
+    ready,
+    protocol: "SAME_POINT_DUEL_V4",
+    inference_policy: sovereignActorPolicySnapshot(),
+    db,
+    actor_a: actorA,
+    actor_b: actorB,
+  };
 }
 
-async function proxyModel(req: IncomingMessage, res: ServerResponse, role: Role, kind: "models" | "chat"): Promise<void> {
-  const cfg = modelConfig(role);
+async function proxyModel(req: IncomingMessage, res: ServerResponse, actor: SovereignActor, kind: "models" | "chat"): Promise<void> {
+  const cfg = modelConfig(actor);
   upstreamRequestsTotal += 1;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("upstream_timeout"), UPSTREAM_TIMEOUT_MS);
@@ -198,16 +206,25 @@ async function createDuel(input: JsonObject): Promise<JsonObject> {
   const baseSha = String(input.base_github_sha || "").trim().toLowerCase();
   const subject = input.subject && typeof input.subject === "object" && !Array.isArray(input.subject) ? input.subject as JsonObject : {};
   const policy = String(input.execution_policy || "SOVEREIGN_ONLY");
-  const gptModel = String(input.gpt_model || GPT_MODEL);
-  const glmModel = String(input.glm_model || GLM_MODEL);
+  const actorAModel = normalizeSovereignOpenAiModel(String(input.actor_a_model || input.gpt_model || actorConfig("ACTOR_A").model));
+  const actorBModel = normalizeSovereignOpenAiModel(String(input.actor_b_model || input.glm_model || actorConfig("ACTOR_B").model));
   if (duelKey.length < 3) throw new Error("duel_key_required");
   if (!milestone) throw new Error("milestone_key_required");
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error("base_github_sha_invalid");
   if (policy === "HOSTED_ONLY") throw new Error("hosted_v4_executor_not_implemented");
   if (!new Set(["SOVEREIGN_ONLY", "ANY"]).has(policy)) throw new Error("execution_policy_invalid");
+  const subjectWithActors = {
+    ...subject,
+    active_inference_provider: "OPENAI",
+    active_inference_platform: "CHATGPT",
+    actor_identity_protocol: "CHATGPT_ACTOR_PAIR_V1",
+    legacy_db_actor_slot_mapping: { GPT: "ACTOR_A", GLM: "ACTOR_B" },
+  };
   const result = await pool.query<{ v: JsonObject }>(
     "select public.h205f22_duel_create_same_point_v4($1::text,$2::text,$3::text,$4::jsonb,$5::text,$6::text,$7::text) as v",
-    [duelKey, milestone, baseSha, JSON.stringify(subject), policy, gptModel, glmModel],
+    // The final two DB parameters retain historical column/RPC positions only.
+    // Both values are validated OpenAI model identities before crossing this boundary.
+    [duelKey, milestone, baseSha, JSON.stringify(subjectWithActors), policy, actorAModel, actorBModel],
   );
   return result.rows[0]?.v || {};
 }
@@ -278,30 +295,40 @@ const server = createServer(async (req, res) => {
       sendJson(res, 200, {
         object: "list",
         data: [
-          { id: GPT_MODEL, object: "model", owned_by: "sovereign-gpt", ready: (state.gpt as JsonObject).ok === true },
-          { id: GLM_MODEL, object: "model", owned_by: "sovereign-glm", ready: (state.glm as JsonObject).ok === true },
+          { id: actorConfig("ACTOR_A").model, object: "model", owned_by: "sovereign-actor-a", provider: "OPENAI", platform: "CHATGPT", ready: (state.actor_a as JsonObject).ok === true },
+          { id: actorConfig("ACTOR_B").model, object: "model", owned_by: "sovereign-actor-b", provider: "OPENAI", platform: "CHATGPT", ready: (state.actor_b as JsonObject).ok === true },
         ],
       });
       return;
     }
-    if (method === "GET" && url.pathname === "/gpt/v1/models") {
+    if (method === "GET" && url.pathname === "/actor-a/v1/models") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GPT", "models");
+      await proxyModel(req, res, "ACTOR_A", "models");
       return;
     }
-    if (method === "GET" && url.pathname === "/glm/v1/models") {
+    if (method === "GET" && url.pathname === "/actor-b/v1/models") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GLM", "models");
+      await proxyModel(req, res, "ACTOR_B", "models");
       return;
     }
-    if (method === "POST" && url.pathname === "/gpt/v1/chat/completions") {
+    if (method === "POST" && url.pathname === "/actor-a/v1/chat/completions") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GPT", "chat");
+      await proxyModel(req, res, "ACTOR_A", "chat");
       return;
     }
-    if (method === "POST" && url.pathname === "/glm/v1/chat/completions") {
+    if (method === "POST" && url.pathname === "/actor-b/v1/chat/completions") {
       if (!requireAuth(req, res)) return;
-      await proxyModel(req, res, "GLM", "chat");
+      await proxyModel(req, res, "ACTOR_B", "chat");
+      return;
+    }
+    if (url.pathname.startsWith("/glm/") || url.pathname.startsWith("/gpt/")) {
+      if (!requireAuth(req, res)) return;
+      sendJson(res, 410, {
+        error: "legacy_provider_endpoint_retired",
+        active_provider: "OPENAI",
+        active_platform: "CHATGPT",
+        actor_endpoints: ["/actor-a/v1", "/actor-b/v1"],
+      });
       return;
     }
     if (method === "POST" && url.pathname === "/v4/duels") {
@@ -347,8 +374,10 @@ server.listen(PORT, HOST, () => {
     port: PORT,
     protocol: "SAME_POINT_DUEL_V4",
     control_auth: CONTROL_TOKEN ? "BEARER" : "LOOPBACK_ONLY",
-    gpt_model: GPT_MODEL,
-    glm_model: GLM_MODEL,
+    active_provider: "OPENAI",
+    active_platform: "CHATGPT",
+    actor_a_model: actorConfig("ACTOR_A").model,
+    actor_b_model: actorConfig("ACTOR_B").model,
   }));
 });
 
