@@ -90,6 +90,17 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("/a2-browser-supervisor-v4", transport)
         self.assertNotIn("/a2-browser-supervisor-v3-canary", supervisor)
 
+    def test_supervisor_mutation_surface_is_chatgpt_only(self):
+        supervisor = (EXT / "supervisor-authority.js").read_text()
+        start = supervisor.index("async function semantic")
+        end = supervisor.index("async function resolvePrompt", start)
+        semantic = supervisor[start:end]
+        self.assertIn('platform !== "CHATGPT"', semantic)
+        self.assertIn("legacy_platform_execution_disabled", semantic)
+        self.assertNotIn('["CHATGPT", "GLM_ZAI"].includes(platform)', semantic)
+        self.assertIn("legacy_prompt_intent_execution_disabled", supervisor)
+        self.assertIn('String(intent.platform || "") !== "CHATGPT"', supervisor)
+
     def test_remote_auth_and_secret_boundaries(self):
         self.assertIn(REMOTE_BRIDGE, self.bootstrap)
         self.assertIn("x-a2-chat-bridge-secret", self.bridge_client)
