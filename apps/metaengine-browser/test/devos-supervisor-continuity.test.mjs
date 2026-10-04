@@ -23,7 +23,7 @@ function keepaliveHarness() {
 
 function idleFrame(text = '') {
   return {
-    url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
@@ -47,7 +47,7 @@ test('CONTINUE_DEVELOPMENT bypasses ordinary wake throttle only after prior cycl
   const h = keepaliveHarness();
   const keepalive = h.make();
   await keepalive.init();
-  await keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
+  await keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
   await keepalive.enqueueWake('CI_TERMINAL', { key: 'first' });
   const first = await keepalive.prepareNextWake();
   await keepalive.confirmWakeSent(first.pending.wake_id);
@@ -64,7 +64,7 @@ test('confirmed predecessor wake is fenced on process restart and only a fresh w
   const h = keepaliveHarness();
   const first = h.make();
   await first.init();
-  await first.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
+  await first.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
   await first.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'boot' });
   const prepared = await first.prepareNextWake();
   await first.confirmWakeSent(prepared.pending.wake_id);
@@ -124,7 +124,7 @@ test('lifecycle automatically sends the next supervisor development cycle after 
     markGenerationStarted() {},
   };
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
