@@ -55,7 +55,7 @@ test('never closes non-root or bound conversation tabs', () => {
     currentTabs: [
       { tab_id: 'tab_a', url: 'https://chatgpt.com/c/a', selected: true },
       { tab_id: 'tab_unknown_chat', url: 'https://chatgpt.com/c/unknown', selected: false },
-      { tab_id: 'tab_other_root', url: 'https://chatgpt.com/', selected: false },
+      { tab_id: 'tab_other', url: 'https://example.com/', selected: false },
     ],
   });
   assert.deepEqual(plan.close_tab_ids, []);
