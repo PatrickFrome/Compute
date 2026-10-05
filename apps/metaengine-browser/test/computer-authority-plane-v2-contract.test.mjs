@@ -38,6 +38,12 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes('computer_visual_frame_geometry_drift'));
   assert.ok(plane.includes('visual_pointer_requires_target_bound_window_capture: true'));
   assert.ok(plane.includes('visual_pointer_requires_unchanged_window_geometry: true'));
+  assert.ok(plane.includes('visual_pointer_requires_exact_hit_test_root: true'));
+  assert.ok(plane.includes('visual_pointer_revalidates_hit_test_before_mouse_down: true'));
+  assert.ok(executor.includes('WindowFromPoint'));
+  assert.ok(executor.includes('GetAncestor'));
+  assert.ok(executor.includes('computer_visual_hit_test_target_mismatch'));
+  assert.ok(executor.includes('computer_visual_hit_test_drift_before_click'));
   assert.ok(plane.includes('typed_effect_readback_kind_required: true'));
   assert.ok(plane.includes('delivery_only_is_never_effect_proof: true'));
   assert.ok(executor.includes('hasAdmissibleEffectReadback(request, result)'));
@@ -96,8 +102,9 @@ test('Computer V2 visual click never brings a stale frame to foreground and reva
   assert.ok(block.includes('computer_visual_foreground_drift_before_click'));
   const pixelFence = block.indexOf('computer_visual_frame_changed_before_click');
   const finalTargetFence = block.lastIndexOf('Assert-TargetIdentity $request.target');
+  const finalHitTestFence = block.indexOf('computer_visual_hit_test_drift_before_click');
   const mouseDown = block.indexOf('mouse_event(0x0002');
-  assert.ok(pixelFence >= 0 && finalTargetFence > pixelFence && mouseDown > finalTargetFence);
+  assert.ok(pixelFence >= 0 && finalTargetFence > pixelFence && finalHitTestFence > finalTargetFence && mouseDown > finalHitTestFence);
   assert.ok(executor.includes('foreground = $foregroundStable'));
   assert.ok(executor.includes('geometry_stable = $geometryStable'));
   assert.ok(executor.includes('pixel_sha256 = $pixelHash'));
