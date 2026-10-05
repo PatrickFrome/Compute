@@ -31,7 +31,7 @@ from controller.r1.recovery_encryption_envelope import (
 
 EXPECTED_REPOSITORY_ID = 1341371143
 EXPECTED_REPOSITORY = "PatrickFrome/Compute"
-EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"
+EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"
 SOURCE_ENVIRONMENT = "r1-recovery-source"
 SOURCE_WORKFLOW_PATH = ".github/workflows/r1-live-recovery-source.yml"
 SOURCE_ARTIFACT_ATTESTATION_NAME = "r1-recovery-source-attestation.sigstore.jsonl"
