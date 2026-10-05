@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const migration = fs.readFileSync(new URL('../../../supabase/migrations/20261005110000_browser_computer_authority_plane_v2_fast_actions.sql', import.meta.url), 'utf8');
+const visualFenceMigration = fs.readFileSync(new URL('../../../supabase/migrations/20261005123000_browser_computer_visual_fence_target_binding_v1.sql', import.meta.url), 'utf8');
 const executor = fs.readFileSync(new URL('../src/windows-local-computer-executor.mjs', import.meta.url), 'utf8');
 const plane = fs.readFileSync(new URL('../src/computer-authority-plane.mjs', import.meta.url), 'utf8');
 
@@ -21,6 +22,19 @@ test('Computer V2 issuer adds only typed UIA/display subactions and requires V2 
   assert.equal(/create\s+or\s+replace\s+function\s+public\.h205f22_a2_browser_supervisor_lease/i.test(migration), false);
   assert.ok(migration.includes("'scheduler_authority',false"));
   assert.ok(migration.includes("'execution_authority',false"));
+});
+
+test('Computer V2 visual fallback requires exact target binding at issuer and executor boundaries', () => {
+  assert.match(visualFenceMigration, /'POINTER_CLICK'/);
+  assert.match(visualFenceMigration, /computer_authority_v2_not_attested/);
+  assert.match(visualFenceMigration, /v_subaction in \('UIA_SNAPSHOT','CAPTURE_WINDOW','VERIFY_TARGET'\)/);
+  assert.match(visualFenceMigration, /computer_target_identity_digest_required/);
+  assert.match(visualFenceMigration, /<> '2\.0\.0'/);
+  assert.equal(/create\s+table/i.test(visualFenceMigration), false);
+  assert.equal(/create\s+or\s+replace\s+function\s+public\.h205f22_a2_browser_supervisor_lease/i.test(visualFenceMigration), false);
+  assert.ok(executor.includes('computer_visual_frame_target_unbound'));
+  assert.ok(executor.includes('computer_visual_frame_target_mismatch'));
+  assert.ok(plane.includes('visual_pointer_requires_target_bound_window_capture: true'));
 });
 
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
