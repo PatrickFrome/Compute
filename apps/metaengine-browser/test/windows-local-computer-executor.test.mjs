@@ -3,8 +3,13 @@ import assert from 'node:assert/strict';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
+  runFixedWindowsPowerShell,
 } from '../src/windows-local-computer-executor.mjs';
-import { computerTargetIdentityDigest, normalizeComputerTargetIdentity } from '../src/computer-authority-plane.mjs';
+import {
+  computerTargetIdentityDigest,
+  normalizeComputerRequest,
+  normalizeComputerTargetIdentity,
+} from '../src/computer-authority-plane.mjs';
 
 const target = {
   machine_fingerprint_sha256:'a'.repeat(64),
@@ -44,6 +49,17 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   assert.equal(snapshot.raw_shell_input, false);
   assert.equal(snapshot.arbitrary_eval, false);
   assert.match(WINDOWS_COMPUTER_BRIDGE_SHA256, /^[0-9a-f]{64}$/);
+});
+
+test('fixed Windows PowerShell bridge physically parses and serves STATUS', { skip: process.platform !== 'win32' }, async () => {
+  const result = await runFixedWindowsPowerShell(normalizeComputerRequest({ action:'STATUS' }), { timeout_ms:20000 });
+  assert.equal(result.ok, true);
+  assert.equal(result.effect_started, false);
+  assert.equal(result.schema, 'metaengine.windows-computer-executor.status.v1');
+  assert.equal(result.typed_actions_only, true);
+  assert.equal(result.arbitrary_shell, false);
+  assert.equal(result.raw_powershell_command_input, false);
+  assert.equal(result.authority_effect, false);
 });
 
 test('read-only observation carries no authority effect', async () => {
