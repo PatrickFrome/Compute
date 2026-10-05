@@ -59,7 +59,9 @@ Add-Type -AssemblyName UIAutomationTypes
 
 Add-Type -TypeDefinition @"
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 public static class MetaengineWin32 {
@@ -129,6 +131,28 @@ public static class MetaengineWin32 {
     }
   }
 
+  public static string GetProcessImageSha256(uint processId) {
+    var imagePath = GetProcessImagePath(processId);
+    if (String.IsNullOrWhiteSpace(imagePath)) return null;
+    try {
+      using (var stream = new FileStream(
+        imagePath,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.ReadWrite | FileShare.Delete
+      )) {
+        using (var sha = SHA256.Create()) {
+          var digest = sha.ComputeHash(stream);
+          var result = new StringBuilder(digest.Length * 2);
+          foreach (var value in digest) result.Append(value.ToString("x2"));
+          return result.ToString();
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
   const uint INPUT_KEYBOARD = 1;
   const uint KEYEVENTF_KEYUP = 0x0002;
   const uint KEYEVENTF_UNICODE = 0x0004;
@@ -190,15 +214,18 @@ function Get-ProcessIdentity([int]$ProcessId) {
   if ($hwnd -le 0) { throw "computer_target_window_missing" }
   $start = [DateTimeOffset]::new($p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()
   $exeHash = $null
-  $exePath = $null
-  try {
-    if ($p.Path) { $exePath = [string]$p.Path }
-  } catch {}
-  if (-not $exePath) {
-    try { $exePath = [MetaengineWin32]::GetProcessImagePath([UInt32]$p.Id) } catch {}
-  }
-  if ($exePath) {
-    try { $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant() } catch {}
+  try { $exeHash = [MetaengineWin32]::GetProcessImageSha256([UInt32]$p.Id) } catch {}
+  if (-not $exeHash) {
+    $exePath = $null
+    try {
+      if ($p.Path) { $exePath = [string]$p.Path }
+    } catch {}
+    if (-not $exePath) {
+      try { $exePath = [MetaengineWin32]::GetProcessImagePath([UInt32]$p.Id) } catch {}
+    }
+    if ($exePath) {
+      try { $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant() } catch {}
+    }
   }
   if (-not $exeHash) { throw "computer_target_executable_hash_unavailable" }
   $generation = [Int64](($start % 2147483646) + 1)
