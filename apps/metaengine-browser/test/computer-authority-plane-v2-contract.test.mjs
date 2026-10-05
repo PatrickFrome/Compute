@@ -55,8 +55,8 @@ test('Computer V2 does not confuse dispatch confirmation with effect proof', () 
   assert.ok(plane.includes('type_text_requires_value_readback_for_effect_proof: true'));
 });
 
-test('Computer V2 crosses the ambiguity barrier before foreground, focus or pointer side effects', () => {
-  for (const action of ['TYPE_TEXT','KEY_PRESS','POINTER_CLICK']) {
+test('Computer V2 crosses the ambiguity barrier before every pre-dispatch physical side effect', () => {
+  for (const action of ['TYPE_TEXT','KEY_PRESS']) {
     const start = executor.indexOf("    '" + action + "' {");
     assert.ok(start >= 0, action);
     const next = executor.indexOf("\n    '", start + 8);
@@ -68,11 +68,18 @@ test('Computer V2 crosses the ambiguity barrier before foreground, focus or poin
       const focus = block.indexOf('$element.SetFocus()');
       assert.ok(focus >= 0 && barrier < focus, action + ':focus');
     }
-    if (action === 'POINTER_CLICK') {
-      const cursor = block.indexOf('SetCursorPos');
-      assert.ok(cursor >= 0 && barrier < cursor, action + ':pointer');
-    }
   }
+
+  const pointerStart = executor.indexOf("    'POINTER_CLICK' {");
+  assert.ok(pointerStart >= 0, 'POINTER_CLICK');
+  const pointerEnd = executor.indexOf("\n    default {", pointerStart);
+  const pointerBlock = executor.slice(pointerStart, pointerEnd > pointerStart ? pointerEnd : executor.length);
+  const pointerBarrier = pointerBlock.indexOf('$effectStarted = $true');
+  const cursor = pointerBlock.indexOf('SetCursorPos');
+  assert.ok(pointerBarrier >= 0 && cursor >= 0 && pointerBarrier < cursor, 'POINTER_CLICK:pointer');
+  assert.equal(pointerBlock.includes('SetForegroundWindow'), false, 'POINTER_CLICK:must_not_foreground_stale_frame');
+  assert.ok(pointerBlock.indexOf('computer_visual_foreground_drift') >= 0, 'POINTER_CLICK:foreground_fence');
+
   assert.ok(plane.includes('effect_barrier_precedes_foreground_focus_pointer_side_effects: true'));
 });
 
