@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 AGE_REQUIRED_VERSION = "1.3.1"
-BUNDLE_SCHEMA = "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v1"
+BUNDLE_SCHEMA = "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v2"
 BUNDLE_CLASSIFICATION = "PLAINTEXT_BUNDLE_BUILD_RECEIPT_NONAUTHORITATIVE"
 ENVELOPE_SCHEMA = "metaengine.compute.r1-recovery-encryption-envelope.h205f22.v1"
 ENVELOPE_CLASSIFICATION = "ENCRYPTED_RECOVERY_ARTIFACT_CANDIDATE_NONAUTHORITATIVE"
