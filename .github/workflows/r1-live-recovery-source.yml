@@ -86,8 +86,9 @@ jobs:
           assert 'xpeibufgzjknrhbhpffp' not in env_block
           assert 'EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"' in attester
           assert 'EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"' not in attester
-          assert 'R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2' in raw
-          assert 'R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1' not in raw
+          assert env_block.count('R1_SOURCE_PREDICATE_TYPE:') == 1
+          assert 'R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2' in env_block
+          assert '/attestations/r1-recovery-source/v1' not in env_block
           assert 'SOURCE_PREDICATE_TYPE = "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2"' in attester
           before,remainder=raw.split('      - name: Validate source workflow contract',1)
           _checker,after=remainder.split('\n  preflight-source:',1)
