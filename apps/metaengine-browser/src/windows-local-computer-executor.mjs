@@ -103,6 +103,8 @@ public static class MetaengineWin32 {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
@@ -210,6 +212,18 @@ function Get-WindowRectForIdentity([object]$Identity) {
     width = $rect.Right - $rect.Left
     height = $rect.Bottom - $rect.Top
   }
+}
+
+function Assert-PointTargetsWindow([int]$ScreenX,[int]$ScreenY,[IntPtr]$ExpectedRoot,[string]$Reason) {
+  $point = New-Object MetaengineWin32+POINT
+  $point.X = $ScreenX
+  $point.Y = $ScreenY
+  $hit = [MetaengineWin32]::WindowFromPoint($point)
+  if ($hit -eq [IntPtr]::Zero) { throw $Reason }
+  $root = [MetaengineWin32]::GetAncestor($hit, 2)
+  if ($root -eq [IntPtr]::Zero) { $root = $hit }
+  if ($root -ne $ExpectedRoot) { throw $Reason }
+  return $true
 }
 
 function RuntimeId-Equal([int[]]$A, [object[]]$B) {
@@ -816,6 +830,7 @@ try {
       $screenY = $rect.top + $y
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_visual_foreground_drift" }
+      $null = Assert-PointTargetsWindow $screenX $screenY $hwnd "computer_visual_hit_test_target_mismatch"
       $effectStarted = $true
       if (-not [MetaengineWin32]::SetCursorPos($screenX, $screenY)) { throw "computer_pointer_position_failed" }
 
@@ -842,6 +857,7 @@ try {
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) {
         throw "computer_visual_foreground_drift_before_click"
       }
+      $null = Assert-PointTargetsWindow $screenX $screenY $hwnd "computer_visual_hit_test_drift_before_click"
 
       [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
       [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
