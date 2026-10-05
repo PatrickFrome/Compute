@@ -8,6 +8,7 @@ const READ_ONLY_ACTIONS = new Set([
   'OBSERVE_WINDOWS',
   'UIA_SNAPSHOT',
   'CAPTURE_DESKTOP',
+  'VERIFY_TARGET',
 ]);
 
 const MUTATING_ACTIONS = new Set([
@@ -169,7 +170,7 @@ function assertLeaseBinding(context) {
 export function normalizeComputerRequest(input, context = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('computer_request_invalid');
   const classification = classifyComputerAction(input.action);
-  const targetRequired = classification.mutating || ['UIA_SNAPSHOT'].includes(classification.action);
+  const targetRequired = classification.mutating || ['UIA_SNAPSHOT','VERIFY_TARGET'].includes(classification.action);
   const target = targetRequired ? normalizeComputerTargetIdentity(input.target) : null;
   const expectedDigest = target ? computerTargetIdentityDigest(target) : null;
   if (target && input.target_identity_sha256 && String(input.target_identity_sha256).toLowerCase() !== expectedDigest) {
