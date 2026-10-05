@@ -38,6 +38,7 @@ const SAFE_KEYS = new Set([
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const HWND_RE = /^0x[0-9a-f]+$/i;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const AGENT_ID_RE = /^agent_[a-z0-9-]{8,64}$/i;
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
@@ -164,11 +165,15 @@ export function normalizeComputerRequest(input, context = {}) {
     throw new Error('computer_target_identity_digest_mismatch');
   }
   const lease = classification.mutating ? assertLeaseBinding(context) : null;
+  const agentId = input.agent_id == null ? null : String(input.agent_id).trim().toLowerCase();
+  if (classification.mutating && !AGENT_ID_RE.test(agentId || '')) throw new Error('computer_agent_id_required');
+  if (agentId && !AGENT_ID_RE.test(agentId)) throw new Error('computer_agent_id_invalid');
   return Object.freeze({
     schema: 'metaengine.computer-request.v1',
     action: classification.action,
     lane: classification.lane,
     mutating: classification.mutating,
+    agent_id: agentId,
     target,
     target_identity_sha256: expectedDigest,
     args: normalizeArgs(classification.action, input.args),
@@ -230,6 +235,10 @@ export function computerAuthorityPlaneSnapshot() {
     version: '1.0.0',
     scheduler_authority: false,
     command_authority: 'DB_LEASE_ONLY',
+    agent_observation_scope: 'FULL_SHARED_COMPUTER_AND_BROWSER',
+    agent_mutation_scope: 'FULL_TYPED_COMPUTER_CAPABILITIES_VIA_SHARED_ARBITER',
+    physical_input_arbitration: 'SERIALIZE_CONFLICTING_SHARED_DESKTOP_EFFECTS',
+    independent_session_parallelism: true,
     router_order: Object.freeze(['BROWSER_SEMANTIC', 'WINDOWS_UIA', 'COMPUTER_VISUAL']),
     read_only_actions: Object.freeze([...READ_ONLY_ACTIONS]),
     mutating_actions: Object.freeze([...MUTATING_ACTIONS]),
@@ -259,6 +268,7 @@ export function projectComputerEffectReceipt({
   return Object.freeze({
     schema: COMPUTER_EFFECT_RECEIPT_SCHEMA,
     command_id: request.lease?.command_id || null,
+    agent_id: request.agent_id || null,
     action: request.action,
     target_identity_sha256: request.target_identity_sha256,
     outcome: normalizedOutcome,
