@@ -103,10 +103,14 @@ def validate_database_url_project_identity(value: Any) -> dict[str, Any]:
         raise SourceAttestationError("database_url_scheme_invalid")
     if parsed.fragment:
         raise SourceAttestationError("database_url_fragment_forbidden")
+    if parsed.query:
+        raise SourceAttestationError("database_url_query_forbidden")
 
-    host = (parsed.hostname or "").lower().rstrip(".")
+    host = unquote(parsed.hostname or "").lower().rstrip(".")
     if not host:
         raise SourceAttestationError("database_url_host_missing")
+    if "," in host:
+        raise SourceAttestationError("database_url_multiple_hosts_forbidden")
     username = unquote(parsed.username or "")
     if not username:
         raise SourceAttestationError("database_url_username_missing")
