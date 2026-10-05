@@ -1751,10 +1751,20 @@ async function executeNativeSupervisorCommandFenced(command) {
   if (action === 'COMPUTER_STATUS') return computerExecutor.status();
   if (action === 'COMPUTER_OBSERVE') return computerExecutor.observe(payload);
   if (action === 'COMPUTER_ACTION') {
-    return computerExecutor.act(payload, {
+    const receipt = await computerExecutor.act(payload, {
       command_id: command?.command_id,
       effect_binding: command?.effect_binding,
     });
+    const effectOutcome = receipt?.outcome === 'EFFECT_PROVEN'
+      ? 'CONFIRMED'
+      : receipt?.outcome === 'NO_EFFECT_PROVEN'
+        ? 'NO_EFFECT_PROVEN'
+        : 'AMBIGUOUS';
+    return {
+      ...receipt,
+      effect_outcome: effectOutcome,
+      automatic_retry_allowed: false,
+    };
   }
   if (action === 'SET_MODE') {
     const requested = String(payload?.mode || '').toUpperCase();
