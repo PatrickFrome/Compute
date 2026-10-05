@@ -1,6 +1,9 @@
 name: R1 Live R2 Execution Orchestration
 
 on:
+  push:
+    branches:
+      - 'work/r1-step10-source-identity-qualification-v1'
   pull_request:
     branches: [main]
     paths:
@@ -75,6 +78,15 @@ jobs:
           _checker,after=remainder.split('\n  preflight-live:',1)
           p=before+'\n  preflight-live:'+after
           guard=Path('controller/r1/live_r2_execution_guard.py').read_text()
+          source_attester=Path('controller/r1/live_recovery_source_attestation.py').read_text()
+          ingestion_gate=Path('controller/r1/supervisor_r2_ingestion_gate.py').read_text()
+          authority_gate=Path('controller/r1/supervisor_r2_ingestion_authority_gate.py').read_text()
+          assert 'EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"' in source_attester
+          assert 'EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"' not in source_attester
+          assert 'SOURCE_PREDICATE_TYPE = "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2"' in source_attester
+          assert 'from controller.r1.live_recovery_source_attestation import (' in ingestion_gate
+          assert 'SOURCE_PREDICATE_TYPE,' in ingestion_gate
+          assert '"--predicate-type",' in authority_gate and 'SOURCE_PREDICATE_TYPE,' in authority_gate
           assert 'workflow_dispatch:' in p
           assert 'INGEST_R1_TWO_DOMAIN_EVIDENCE_TO_CONTINUITY_DB' in p
           assert 'r1-supervisor-r2-db-ingestion' in p
