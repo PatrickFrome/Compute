@@ -1,0 +1,78 @@
+{
+  "schema": "metaengine.audit-synchronization-receipt.v1",
+  "status": "SOURCE_AND_LIVE_DB_CONTRACT_SYNCHRONIZED_RELEASE_GATES_OPEN",
+  "source_publication": {
+    "checked_at": "2026-10-05T18:09:05.910Z",
+    "repository": "PatrickFrome/Compute",
+    "branch": "work/computer-proof-convergence-audit-r1-20261005",
+    "commit_sha": "ecebc30a47bdd8e60ed29e88afd0fafd8351bbfe",
+    "parent_sha": "b5689a915ef578f0629322e33309824efb422fb2",
+    "source_manifest_sha256": "ad08bc3de8db0df1cc54d993f99473b0570dba522ec234e3e515c1a5f19c5f37",
+    "published_files": 13,
+    "branch_ref_readback_confirmed": true,
+    "main_changed": false,
+    "force_update": false,
+    "workflow_dispatched": false,
+    "package_reserved": false
+  },
+  "database": {
+    "project_ref": "jhriwwsryeqsvvvufkok",
+    "connector": "coffee-house",
+    "migration_version": "20261005175138",
+    "mutation_permission": "Explicit operator approval to change DB, synchronize fixes, make DB checkpoints and create branches.",
+    "checkpoint_append_readback_at": "2026-10-05T18:09:01.668Z",
+    "independent_checkpoint_readback_at": "2026-10-05T18:10:30.739Z",
+    "independent_checkpoint_hash_verification": "PASS: both durable rows and all three artifact byte hashes match",
+    "checkpoint_scope": "OPERATIONAL_AUDIT_ONLY",
+    "canonical_checkpoint": false,
+    "authority_effect": false,
+    "immutability": "Generated payload SHA-256; RLS; service_role SELECT/INSERT only; mutation and truncate rejected. DB owner/DDL authority is outside this ordinary-role protection.",
+    "checkpoint_rows": [
+      {
+        "kind": "CRITICAL_AUDIT",
+        "checkpoint_id": "73a26e40d2f442e2b9de1c4ad2bd806f1ca687b25781026249587c7dd760fb41",
+        "evidence_state": "EVIDENCE_READY",
+        "payload_sha256": "e288de2a1f33bf43dd155f75de5fab1922681de39dfa861c1450508cfd856eb9",
+        "created_at": "2026-10-05T18:09:01.580495Z"
+      },
+      {
+        "kind": "DEVELOPMENT_ROADMAP",
+        "checkpoint_id": "05e129c0526758b939bc4638b72f534f95371b2d9c154b990a2a8888834b23ba",
+        "evidence_state": "PARTIAL",
+        "payload_sha256": "57056d3fc937d0c29d8bf22851c5676353fe486892e48d4d0b1edc17ca01eeab",
+        "created_at": "2026-10-05T18:09:01.604366Z"
+      }
+    ]
+  },
+  "report_artifacts": {
+    "branch": "analysis/metaengine-critical-audit-20261005",
+    "commit_identity_note": "A content-addressed commit ID cannot be embedded in its own bytes. Verify the published branch ref and immutable document blobs independently.",
+    "files": [
+      { "path": "docs/METAENGINE_CRITICAL_AUDIT_2026-10-05.md", "sha256": "75f83d741373c1a10fa47059fe7ad1b93db9326a57f3f4865e598add3daf64af" },
+      { "path": "docs/METAENGINE_DEVELOPMENT_ROADMAP_2026-10-05.md", "sha256": "2c330533530c77786598e4c5a65f2690adbb43e998782c18938fa90d43ee4f53" },
+      { "path": "evidence/metaengine-client/critical-audit-final.json", "sha256": "c9e279c3b14a444ccc4b026e789300e243b707c076b8dba27be1956af14fa480" }
+    ]
+  },
+  "validation": {
+    "source_transport_tests": { "total": 194, "pass": 192, "fail": 0, "skip": 2 },
+    "db_proof_assertions": 124,
+    "db_checkpoint_assertions": 6,
+    "db_canary_kind": "SYNTHETIC_DB_TRANSACTION_ROLLBACK",
+    "physical_effects_performed": false,
+    "typescript_no_emit": "PASS",
+    "artifact_hash_contracts": "PASS",
+    "unauthorized_maintenance_route": "404"
+  },
+  "open_gates": [
+    "New exact-source Ubuntu and Windows qualification",
+    "Fresh monotonic immutable package identity after source qualification",
+    "One verified installer digest and provenance",
+    "Installed qualification matrix and direct user-installed live readback",
+    "R1 independent continuity/restore quorum",
+    "C1 real admitted Linux worker",
+    "C2 real serial coding loop with verified artifact"
+  ],
+  "milestones_promoted": [],
+  "user_machine_changed": false,
+  "deployment_performed": false
+}

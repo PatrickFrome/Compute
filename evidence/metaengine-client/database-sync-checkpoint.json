@@ -1,0 +1,142 @@
+{
+  "schema": "metaengine.client-db-contract-checkpoint.v1",
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "connector_uid": "supabase",
+  "connector_name": "coffee-house",
+  "connector_subject": "app",
+  "status": "HISTORICAL_SIGNATURE_ONLY_SNAPSHOT_SUPERSEDED",
+  "latest_checkpoint": "evidence/metaengine-client/critical-audit-final.json",
+  "latest_synchronization": "evidence/metaengine-client/audit-synchronization-receipt.json",
+  "historical_scope_note": "Retained unchanged evidence from before the operator explicitly approved DB changes. This is not the current synchronization verdict.",
+ "operator_decision": {
+  "date": "2026-10-05",
+  "decision": "NO_NEW_INTEGRATIONS_NO_ENV_VARS_NO_SCRIPTS_APPLIED",
+  "effect": "Migrations not applied; RPC bodies unverified; live sync remains open, not passed."
+ },
+  "checked_at": "2026-10-05T17:13:51.387Z",
+  "schema_read_at": "2026-10-05T17:06:33.445Z",
+  "migrations_read_at": "2026-10-05T17:13:51.387Z",
+  "types_sha256": "b317055abec0f16e8aedcdc1dbbdfc1a71939b3005fda171a362394f8421dc6c",
+  "migration_metadata_sha256": "346c21f2900574d62c57bb5b284abc093b09a8dbef20e06457f1bae65d464fa9",
+  "verification_method": "Fresh cache-bypassed Supabase Management GET reads through the existing coffee-house app connector; TypeScript AST comparison of exact RPC names, argument names/types/optionality and return types, plus redacted historical migration-artifact summaries. No SQL executed, raw statements returned, private rows or API keys fetched.",
+  "table_counts": { "public": 16, "destruktion_meta": 7 },
+  "functions": [
+    {
+      "name": "h205f22_a2_browser_supervisor_issue_computer_v1",
+      "args": {
+        "p_action": ["string", false],
+        "p_client_id": ["string", false],
+        "p_idempotency_key": ["string", true],
+        "p_issued_by": ["string", true],
+        "p_payload": ["Json", true],
+        "p_ttl_seconds": ["number", true]
+      },
+      "returns": "Json",
+      "signature_matches": true
+    },
+    {
+      "name": "h205f22_a2_browser_supervisor_bind_effect_v1",
+      "args": {
+        "p_authority_effect": ["boolean", true],
+        "p_binding": ["Json", false],
+        "p_client_id": ["string", false],
+        "p_command_id": ["string", false],
+        "p_workspace_id": ["string", false]
+      },
+      "returns": "Json",
+      "signature_matches": true
+    },
+    {
+      "name": "h205f22_a2_browser_supervisor_complete_v7",
+      "args": {
+        "p_authority_effect": ["boolean", true],
+        "p_client_id": ["string", false],
+        "p_command_id": ["string", false],
+        "p_error": ["string", true],
+        "p_ok": ["boolean", false],
+        "p_receipt": ["Json", true],
+        "p_workspace_id": ["string", false]
+      },
+      "returns": "Json",
+      "signature_matches": true
+    },
+    {
+      "name": "h205f22_a2_browser_supervisor_complete_batch_v1",
+      "args": {
+        "p_client_id": ["string", false],
+        "p_results": ["Json", false],
+        "p_workspace_id": ["string", false]
+      },
+      "returns": "Json",
+      "signature_matches": true
+    },
+    {
+      "name": "devos_runtime_capabilities_v1",
+      "args": "never",
+      "returns": "Json",
+      "signature_matches": true
+    }
+  ],
+  "argument_encoding": "Each argument is [generated_type, optional_boolean].",
+  "migration_count": 78,
+  "computer_migrations": [
+    { "version": "20261005061108", "name": "browser_computer_authority_plane_v1_live_convergence" },
+    { "version": "20261005072701", "name": "browser_computer_authority_plane_v2_fast_actions_live_convergence" },
+    { "version": "20261005072852", "name": "browser_computer_authority_plane_v2_fast_actions_live_convergence" }
+  ],
+  "migration_history_artifacts": [
+    {
+      "version": "20261005061108",
+      "read_at": "2026-10-05T17:09:01.962Z",
+      "cache": "MISS",
+      "statement_count": 1,
+      "statements_sha256": "e4f16075f0f5d2e4c47248b03781fbac7c8dab2c227b1978f49c6fb9cd84f443",
+      "declared_functions": [
+        "public.h205f22_a2_browser_supervisor_issue_computer_v1",
+        "public.h205f22_a2_browser_supervisor_bind_effect_v1",
+        "public.h205f22_a2_browser_supervisor_complete_v5",
+        "public.h205f22_a2_browser_supervisor_complete_batch_v1",
+        "public.devos_runtime_capabilities_v1"
+      ]
+    },
+    {
+      "version": "20261005072701",
+      "read_at": "2026-10-05T17:09:01.779Z",
+      "cache": "MISS",
+      "statement_count": 1,
+      "statements_sha256": "448966b58f0b5e5ed9773143e6afffa01a7c26579057aea9732ba1afaab2536a",
+      "declared_functions": ["public.h205f22_a2_browser_supervisor_issue_computer_v1"]
+    },
+    {
+      "version": "20261005072852",
+      "read_at": "2026-10-05T17:09:01.782Z",
+      "cache": "MISS",
+      "statement_count": 1,
+      "statements_sha256": "448966b58f0b5e5ed9773143e6afffa01a7c26579057aea9732ba1afaab2536a",
+      "declared_functions": ["public.h205f22_a2_browser_supervisor_issue_computer_v1"]
+    }
+  ],
+  "migration_artifact_hash_material": "SHA-256 of JSON.stringify(provider statements array), computed server-side without returning SQL text.",
+  "migration_artifact_trust_limit": "Migration history is an applied-artifact snapshot, not fresh pg_proc definitions, function ACLs, RLS or successful execution proof. The two V2 snapshots are identical; no ledger entry was deleted or reapplied.",
+  "postgrest": {
+    "read_at": "2026-10-05T17:03:50.374Z",
+    "db_schema": "public,graphql_public",
+    "private_schema_directly_exposed": false
+  },
+  "client_patch_rpc_signatures_changed": false,
+  "client_patch_schema_migration_added": false,
+  "definitions_verified": false,
+  "grants_verified": false,
+  "rls_policies_verified_this_turn": false,
+  "lease_state_verified": false,
+  "live_rows_inspected": false,
+  "database_mutated": false,
+  "new_resource_created": false,
+  "next_checks": [
+    "Keep using the existing coffee-house app connector and confirmed project for bounded read-only metadata; do not request new integrations, environment variables or API keys.",
+    "Keep current RPC definitions, ACLs, SECURITY DEFINER search paths, RLS and actuation leases explicitly unverified until the operator separately permits an available live-inspection mechanism. Do not execute SQL or apply scripts under the current decision.",
+    "When current definitions become available, verify action-specific proof, native identity field types, exact sealed target identity and terminal no-retry completion semantics; signatures and historical migration statements do not establish this.",
+    "Compare the actual current issuer definition with the visual-fence target-binding source before proposing any DDL. Do not reapply identical history entries, weaken RLS or reuse a consumed release identity to clear a gate."
+  ],
+  "synchronization_complete": false
+}
