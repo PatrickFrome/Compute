@@ -84,6 +84,11 @@ test('mutating computer requests require DB lease and effect binding', () => {
   assert.equal(request.lease.authority_source, 'DB_LEASE_ONLY');
   assert.equal(request.automatic_retry_allowed, false);
   assert.equal(request.args.text, 'hello');
+  assert.equal(request.args.replace, true);
+  assert.throws(
+    () => normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'hello', runtime_id:[1,2,3], replace:false } }, lease()),
+    /computer_type_append_mode_unproven/
+  );
 });
 
 test('pointer and key payloads are bounded and allowlisted', () => {
