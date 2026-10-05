@@ -1,5 +1,15 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37300000001.1`.
+
+Atomic Computer Authority Plane V2 visual-fence final qualification reservation (2026-10-05):
+- runtime code is unchanged from visual-fence source head `dbfecbfe1f8f99590db3002a219070f316918289`, which passed exact-head Critical Audit and Shell with 4117/4117 full Browser Node tests and 90/90 focused authority/causal/wake contracts;
+- successor commits after that proof changed only package identity/convergence metadata and the source-qualification workflow allowlist so this branch and additive migration are covered explicitly;
+- package identity `0.7.0-dev.37290000001.1` was already reserved to the prior exact head and MUST NOT be rebuilt for this successor;
+- this commit atomically advances package.json, both package-lock root version fields and this convergence reservation to a fresh monotonic identity; no runtime or authority code changes are included;
+- final acceptance still requires exact-head Critical/Shell plus Package Smoke as sole producer and Installed Chat / Final Runtime / Dirty Profile / Autonomous Soak / Self Update consuming the same installer digest;
+- live Supabase migration/Edge promotion remains blocked until authorized apply/readback is available.
+
 Reserved package identity is `0.7.0-dev.37290000001.1`.
 
 Atomic Computer Authority Plane V2 visual-fence reservation (2026-10-05):
