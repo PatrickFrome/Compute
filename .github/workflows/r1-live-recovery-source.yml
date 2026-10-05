@@ -51,7 +51,7 @@ permissions: {}
 
 env:
   R1_PROJECT_REF: jhriwwsryeqsvvvufkok
-  R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1
+  R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2
   POSTGRES_CLIENT_IMAGE: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
 
 jobs:
@@ -93,6 +93,9 @@ jobs:
           assert 'R1_PROJECT_REF: xpeibufgzjknrhbhpffp' not in raw
           assert 'EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"' in attester
           assert 'EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"' not in attester
+          assert 'R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2' in raw
+          assert 'R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1' not in raw
+          assert 'SOURCE_PREDICATE_TYPE = "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2"' in attester
           before,remainder=raw.split('      - name: Validate source workflow contract',1)
           _checker,after=remainder.split('\n  preflight-source:',1)
           p=before+'\n  preflight-source:'+after
