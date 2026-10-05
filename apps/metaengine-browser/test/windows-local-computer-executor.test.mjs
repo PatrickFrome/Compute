@@ -79,8 +79,11 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     "$label.Location = [System.Drawing.Point]::new(24,24)",
     "$form.Controls.Add($label)",
     "$form.Show()",
-    "[System.Windows.Forms.Application]::DoEvents()",
-    "[Console]::Out.WriteLine('READY')",
+    "$form.Activate()",
+    "$deadline = [DateTime]::UtcNow.AddSeconds(5)",
+    "do { [System.Windows.Forms.Application]::DoEvents(); $p = Get-Process -Id $PID; $p.Refresh(); if ($p.MainWindowHandle -eq $form.Handle -and $p.MainWindowHandle -ne 0) { break }; Start-Sleep -Milliseconds 20 } while ([DateTime]::UtcNow -lt $deadline)",
+    "if ($p.MainWindowHandle -eq 0 -or $p.MainWindowHandle -ne $form.Handle) { throw 'computer_fixture_main_window_unavailable' }",
+    "[Console]::Out.WriteLine('READY:' + [Int64]$p.MainWindowHandle)",
     "[Console]::Out.Flush()",
     "while ($true) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 20 }",
   ].join('; ');
@@ -112,12 +115,20 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
 
     const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
     let identity = null;
-    for (let attempt=0; attempt<30 && !identity; attempt += 1) {
+    let lastObserved = null;
+    for (let attempt=0; attempt<10 && !identity; attempt += 1) {
       const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
+      lastObserved = observed.result;
       identity = observed.result.windows.find(row => Number(row?.identity?.process_id) === child.pid)?.identity || null;
       if (!identity) await new Promise(resolve => setTimeout(resolve,100));
     }
-    assert.ok(identity, 'fixture window identity');
+    assert.ok(identity, 'fixture window identity; observed=' + JSON.stringify({
+      child_pid:child.pid,
+      count:lastObserved?.count,
+      total_candidates:lastObserved?.total_candidates,
+      process_ids:lastObserved?.windows?.map(row => row?.identity?.process_id),
+      stderr:stderr.slice(-300),
+    }));
 
     const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
     assert.equal(capture.result.effect_started, false);
