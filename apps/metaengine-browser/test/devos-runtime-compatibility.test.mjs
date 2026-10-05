@@ -89,6 +89,7 @@ test('required feature list covers recovery, promotion, capacity, meta leader an
     'meta_orchestrator_controller_lease_v1',
     'meta_atomic_frontier_v2',
     'post_lock_transport_revalidation_v1',
+    'computer_authority_plane_v1',
   ]) assert.equal(DEVOS_REQUIRED_SERVER_FEATURES.includes(feature), true, feature);
 });
 
