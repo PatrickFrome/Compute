@@ -15,6 +15,7 @@ export const NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES = Object.freeze({
     meta_orchestrator_controller_lease_v1: true,
     meta_atomic_frontier_v2: true,
     post_lock_transport_revalidation_v1: true,
+    computer_authority_plane_v1: true,
   }),
   ambiguity_recovery_classes: Object.freeze(['PRE_EFFECT_ABORTED', 'EFFECT_PROVEN']),
   scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT',

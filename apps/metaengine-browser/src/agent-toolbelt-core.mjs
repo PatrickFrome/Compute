@@ -23,7 +23,7 @@ const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
 const TAB_RE = /^tab_[0-9a-f-]{36}$/i;
 const MAX_COMMANDS_PER_LEASE = 8;
 const MAX_SERVED_RESULTS = 128;
-const RESULT_SUMMARY_CLIP = 1200;
+const RESULT_SUMMARY_CLIP = 4000;
 
 function clip(value, max) { return String(value ?? '').slice(0, max); }
 
@@ -228,7 +228,10 @@ export function agentToolbeltTrustRootSnapshot() {
     issued_commands_ride_command_plane: true,
     per_agent_attribution_required: true,
     outcome_river_binding_via_rsi_task: true,
-    read_heavy_allowlist_only: true,
+    read_heavy_allowlist_only: false,
+    browser_and_computer_shared_observation: true,
+    computer_typed_actuation_allowed: true,
+    computer_effects_require_existing_db_lease: true,
     conversation_mutation_allowed: false,
     results_delivered_on_next_task_message: true,
     execution_authority: false,

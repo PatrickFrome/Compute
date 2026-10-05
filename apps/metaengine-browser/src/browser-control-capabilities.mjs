@@ -5,7 +5,7 @@ import {
 
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.5.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.6.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows(publicBrowserControlActions().map((row) => ({
   action: row.action,
@@ -53,6 +53,10 @@ export const CONTROL_INVARIANTS = Object.freeze({
   secrets_must_not_be_extracted_from_page: true,
   process_observation_requires_no_actuation_authority: true,
   process_observation_must_not_create_second_command_scheduler: true,
+  computer_observation_shared_across_agents: true,
+  computer_mutation_requires_agent_identity: true,
+  computer_mutation_uses_existing_db_lease_scheduler: true,
+  computer_visual_fallback_after_semantic_and_uia: true,
   process_lifecycle_events_are_event_driven: true,
   semantic_observation_is_event_driven: true,
   semantic_observation_uses_persistent_cdp_sessions: true,

@@ -7,6 +7,8 @@ import test from 'node:test';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrationPath = path.resolve(here, '../../../supabase/migrations/20260903112000_devos_runtime_capability_contract_v1.sql');
 const sql = fs.readFileSync(migrationPath, 'utf8');
+const computerMigrationPath = path.resolve(here, '../../../supabase/migrations/20261005080000_browser_computer_authority_plane_v1.sql');
+const computerSql = fs.readFileSync(computerMigrationPath, 'utf8');
 
 function must(pattern, label) {
   assert.match(sql, pattern, label);
@@ -34,6 +36,14 @@ test('migration publishes the exact non-authoritative protocol-generation-2 capa
   must(/'arbitrary_eval',\s*false/i, 'arbitrary eval must remain false');
   must(/'page_model_text_authority',\s*false/i, 'page/model text authority must remain false');
   must(/'authority_effect',\s*false/i, 'authority effect must remain false');
+});
+
+test('Computer Authority migration extends the exact DB capability envelope without a second scheduler', () => {
+  assert.match(computerSql, /create or replace function public\.devos_runtime_capabilities_v1\(\)/i);
+  assert.match(computerSql, /'computer_authority_plane_v1',\s*true/i);
+  assert.match(computerSql, /'second_scheduler_loop',\s*false/i);
+  assert.match(computerSql, /'automatic_retry_allowed',\s*false/i);
+  assert.match(computerSql, /'authority_effect',\s*false/i);
 });
 
 test('capability and debt RPCs are service-role only', () => {
