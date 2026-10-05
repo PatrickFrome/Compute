@@ -34,8 +34,8 @@ on:
         type: string
 
 concurrency:
-  group: r1-live-recovery-source
-  queue: max
+  group: ${{ github.event_name == 'push' && 'r1-live-recovery-source' || format('r1-live-recovery-source-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions: {}
 
