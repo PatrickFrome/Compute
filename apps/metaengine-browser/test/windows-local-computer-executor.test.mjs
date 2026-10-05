@@ -100,6 +100,7 @@ test('V2 read-only computer observations include display and exact-window surfac
           png_sha256:'e'.repeat(64),
           pixel_sha256:'1'.repeat(64),
           foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
@@ -201,6 +202,7 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
           png_sha256:'c'.repeat(64),
           pixel_sha256:'2'.repeat(64),
           foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
@@ -211,6 +213,7 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
       assert.deepEqual(request.args.visual_fence.window_rect, { left:10, top:20, width:800, height:600 });
       assert.equal(request.args.visual_fence.pixel_sha256, '2'.repeat(64));
       assert.equal(request.args.visual_fence.foreground_at_capture, true);
+      assert.equal(request.args.visual_fence.geometry_stable_at_capture, true);
       return {
         ok:true,
         effect_started:true,
@@ -252,6 +255,7 @@ test('background window capture cannot authorize visual pointer mutation', async
           png_sha256:'8'.repeat(64),
           pixel_sha256:'5'.repeat(64),
           foreground:false,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
@@ -274,6 +278,41 @@ test('background window capture cannot authorize visual pointer mutation', async
   assert.equal(physicalCalls, 0);
 });
 
+test('geometry-unstable window capture cannot authorize visual pointer mutation', async () => {
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'6'.repeat(64),
+          pixel_sha256:'6'.repeat(64),
+          foreground:true,
+          geometry_stable:false,
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:false, authority_effect:false };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'6'.repeat(64) } },
+  }, contextFor('POINTER_CLICK'));
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_geometry_unstable_at_capture/);
+  assert.equal(physicalCalls, 0);
+});
+
 test('window capture without raw pixel digest cannot authorize visual pointer mutation', async () => {
   let physicalCalls = 0;
   const executor = new WindowsLocalComputerExecutor({
@@ -285,6 +324,7 @@ test('window capture without raw pixel digest cannot authorize visual pointer mu
           effect_started:false,
           png_sha256:'7'.repeat(64),
           foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
@@ -356,6 +396,7 @@ test('window capture cannot be replayed against a different exact target', async
           png_sha256:'9'.repeat(64),
           pixel_sha256:'3'.repeat(64),
           foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
@@ -392,6 +433,7 @@ test('stale visual capture is rejected before physical execution', async () => {
           png_sha256:'d'.repeat(64),
           pixel_sha256:'4'.repeat(64),
           foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
