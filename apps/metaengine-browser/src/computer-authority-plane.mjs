@@ -335,6 +335,7 @@ export function computerAuthorityPlaneSnapshot() {
     typed_action_schema_required: true,
     exact_target_identity_required_for_mutation: true,
     post_effect_readback_required: true,
+    effect_barrier_precedes_foreground_focus_pointer_side_effects: true,
     dispatch_only_mutations_never_claim_effect_proven: true,
     type_text_requires_exact_uia_runtime_id: true,
     type_text_requires_value_readback_for_effect_proof: true,
