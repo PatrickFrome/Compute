@@ -145,6 +145,8 @@ jobs:
           assert '--format=custom --schema=destruktion_meta' in source
           assert 'pg_restore --schema-only' in source and 'pg_restore --data-only' in source
           assert 'SINGLE_PG_DUMP_CUSTOM_ARCHIVE' in source
+          assert '--source-checkpoint-id "$SOURCE_CHECKPOINT_ID"' in source
+          assert '--semantic-head' not in source
           assert 'supabase db dump --db-url "$SUPABASE_DB_URL" --role-only' in source
           assert 'supabase db dump --db-url "$SUPABASE_DB_URL" --schema destruktion_meta' not in source
           assert 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377' in source
@@ -555,7 +557,7 @@ jobs:
           SOURCE_CHECKPOINT_ID="$(python3 -c "import json;print(json.load(open('$PRIVATE/export-metadata.json'))['latest_checkpoint_id'])")"
 
           python3 controller/r1/recovery_artifact_packager.py \
-            --project-ref "$R1_PROJECT_REF" --semantic-head "$SOURCE_CHECKPOINT_ID" \
+            --project-ref "$R1_PROJECT_REF" --source-checkpoint-id "$SOURCE_CHECKPOINT_ID" \
             --source-git-sha "$GITHUB_SHA" --snapshot-at "$SNAPSHOT_AT" \
             --schema "$PRIVATE/schema.sql" --data "$PRIVATE/data.sql" --roles "$PRIVATE/roles.sql" \
             --migration-ledger "$PRIVATE/migration-ledger.json" --export-metadata "$PRIVATE/export-metadata.json" \
