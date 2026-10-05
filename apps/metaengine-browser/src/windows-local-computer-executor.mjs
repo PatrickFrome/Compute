@@ -13,7 +13,7 @@ import {
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15000;
 
-const POWERSHELL_BRIDGE = String.raw\`
+const POWERSHELL_BRIDGE = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -529,7 +529,7 @@ try {
     authority_effect = $false
   })
 }
-\`;
+`;
 
 export const WINDOWS_COMPUTER_BRIDGE_SHA256 = createHash('sha256')
   .update(POWERSHELL_BRIDGE, 'utf8')
@@ -551,7 +551,7 @@ export async function runFixedWindowsPowerShell(request, {
   if (process.platform !== 'win32') throw new Error('computer_executor_windows_required');
   const timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-'));
-  const requestPath = path.join(dir, \`request-\${randomUUID()}.json\`);
+  const requestPath = path.join(dir, `request-${randomUUID()}.json`);
   await fs.writeFile(requestPath, JSON.stringify(request), { encoding:'utf8', flag:'wx', mode:0o600 });
 
   try {
@@ -600,7 +600,7 @@ export async function runFixedWindowsPowerShell(request, {
       child.once('exit', (code) => {
         if (settled) return;
         if (code !== 0) {
-          finish(reject, new Error(\`computer_executor_exit_\${code}:\${stderr.slice(-500)}\`));
+          finish(reject, new Error(`computer_executor_exit_${code}:${stderr.slice(-500)}`));
           return;
         }
         try {
