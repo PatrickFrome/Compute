@@ -4,6 +4,7 @@ import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
 } from '../src/windows-local-computer-executor.mjs';
+import { computerTargetIdentityDigest, normalizeComputerTargetIdentity } from '../src/computer-authority-plane.mjs';
 
 const target = {
   machine_fingerprint_sha256:'a'.repeat(64),
@@ -17,15 +18,7 @@ const target = {
 
 const contextFor = (computerAction, exactTarget = target, agentId = 'agent_test-12345678') => {
   const commandId = '2a924f7a-884c-4a10-87b4-1d550561286e';
-  const material = [
-    exactTarget.machine_fingerprint_sha256,
-    exactTarget.session_id,
-    exactTarget.process_id,
-    exactTarget.process_creation_time_ms,
-    exactTarget.window_handle,
-    exactTarget.executable_sha256,
-    exactTarget.generation,
-  ].join('|');
+  const normalized = normalizeComputerTargetIdentity(exactTarget);
   return {
     command_id:commandId,
     effect_binding:{
@@ -34,19 +27,14 @@ const contextFor = (computerAction, exactTarget = target, agentId = 'agent_test-
       action:'COMPUTER_ACTION',
       computer_action:computerAction,
       agent_id:agentId,
-      target_identity_sha256:awaitDigest(material),
-      target:{ ...exactTarget, schema:'metaengine.computer-target-identity.v1', authority_effect:false },
+      target_identity_sha256:computerTargetIdentityDigest(normalized),
+      target:normalized,
       authority_effect:false,
       page_data_authority:false,
       automatic_retry_allowed:false,
     },
   };
 };
-
-function awaitDigest(material) {
-  return createHash('sha256').update(material, 'utf8').digest('hex');
-}
-
 test('executor snapshot exposes fixed bridge identity and no scheduler authority', () => {
   const executor = new WindowsLocalComputerExecutor({ platform:'linux', runner:async () => ({ ok:true }) });
   const snapshot = executor.snapshot();
@@ -141,11 +129,11 @@ test('visual pointer fallback consumes one fresh capture and then fails closed',
     target,
     args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } },
   };
-  const first = await executor.act(payload, contextFor('TYPE_TEXT'));
+  const first = await executor.act(payload, contextFor('POINTER_CLICK'));
   assert.equal(first.outcome, 'EFFECT_PROVEN');
   assert.equal(physicalCalls, 1);
 
-  const second = await executor.act(payload, contextFor('TYPE_TEXT'));
+  const second = await executor.act(payload, contextFor('POINTER_CLICK'));
   assert.equal(second.outcome, 'NO_EFFECT_PROVEN');
   assert.match(second.error, /computer_visual_frame_not_observed/);
   assert.equal(physicalCalls, 1);
