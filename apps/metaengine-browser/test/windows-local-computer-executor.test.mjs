@@ -641,6 +641,67 @@ test('runner failure after dispatch boundary is conservatively ambiguous and ter
   assert.equal(result.automatic_retry_allowed, false);
 });
 
+test('missing or malformed effect boundary is conservatively ambiguous and terminal', async (t) => {
+  const readback = { ok:true, readback_proven:true, readback_kind:'UIA_VALUE_EXACT' };
+  const cases = [
+    ['missing response', undefined],
+    ['null response', null],
+    ['empty response', {}],
+    ['array response', []],
+    ['incomplete error response', { ok:false, error:'incomplete_bridge_result' }],
+    ['readback without effect boundary', readback],
+    ['null effect boundary', { ...readback, effect_started:null }],
+    ['undefined effect boundary', { ...readback, effect_started:undefined }],
+    ['string false effect boundary', { ...readback, effect_started:'false' }],
+    ['string true effect boundary', { ...readback, effect_started:'true' }],
+    ['zero effect boundary', { ...readback, effect_started:0 }],
+    ['nonzero effect boundary', { ...readback, effect_started:1 }],
+    ['object effect boundary', { ...readback, effect_started:{} }],
+  ];
+  for (const [name, bridgeResult] of cases) {
+    await t.test(name, async () => {
+      let dispatches = 0;
+      const executor = new WindowsLocalComputerExecutor({
+        platform:'win32',
+        runner:async () => { dispatches += 1; return bridgeResult; },
+      });
+      const receipt = await executor.act({
+        action:'UIA_SET_VALUE',
+        agent_id:'agent_test-12345678',
+        target,
+        args:{ runtime_id:[1,2], value:'value' },
+      }, contextFor('UIA_SET_VALUE'));
+      assert.equal(receipt.outcome, 'AMBIGUOUS_NO_RETRY');
+      assert.equal(receipt.authority_effect, false);
+      assert.equal(receipt.automatic_retry_allowed, false);
+      assert.equal(receipt.error, bridgeResult?.error || 'computer_effect_start_unconfirmed');
+      assert.equal(dispatches, 1);
+    });
+  }
+});
+
+test('explicit false effect boundary preserves proven pre-actuation rejection', async () => {
+  let dispatches = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async () => {
+      dispatches += 1;
+      return { ok:false, effect_started:false, error:'computer_target_identity_drift:window_handle' };
+    },
+  });
+  const receipt = await executor.act({
+    action:'UIA_SET_VALUE',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ runtime_id:[1,2], value:'value' },
+  }, contextFor('UIA_SET_VALUE'));
+  assert.equal(receipt.outcome, 'NO_EFFECT_PROVEN');
+  assert.equal(receipt.authority_effect, false);
+  assert.equal(receipt.automatic_retry_allowed, false);
+  assert.equal(receipt.error, 'computer_target_identity_drift:window_handle');
+  assert.equal(dispatches, 1);
+});
+
 test('mutating executor path cannot bypass DB lease binding', async () => {
   const executor = new WindowsLocalComputerExecutor({
     platform:'win32',

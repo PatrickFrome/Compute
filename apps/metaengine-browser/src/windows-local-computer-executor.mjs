@@ -1268,12 +1268,14 @@ export class WindowsLocalComputerExecutor {
       });
     }
 
-    if (result?.effect_started === true) {
+    if (result?.effect_started !== false) {
       return projectComputerEffectReceipt({
         request,
         result,
         outcome: 'AMBIGUOUS_NO_RETRY',
-        error: result?.error || 'computer_effect_readback_not_proven',
+        error: result?.error || (result?.effect_started === true
+          ? 'computer_effect_readback_not_proven'
+          : 'computer_effect_start_unconfirmed'),
       });
     }
 
