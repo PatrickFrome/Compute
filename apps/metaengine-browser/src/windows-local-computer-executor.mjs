@@ -308,6 +308,40 @@ function Invoke-MetaengineComputerRequest([object]$request) {
       break
     }
 
+    'OBSERVE_DISPLAYS' {
+      $screens = @([System.Windows.Forms.Screen]::AllScreens)
+      $rows = @()
+      for ($i=0; $i -lt $screens.Count; $i++) {
+        $s = $screens[$i]
+        $rows += [ordered]@{
+          index = $i
+          device_name = [string]$s.DeviceName
+          primary = [bool]$s.Primary
+          bounds = [ordered]@{
+            x = [int]$s.Bounds.X
+            y = [int]$s.Bounds.Y
+            width = [int]$s.Bounds.Width
+            height = [int]$s.Bounds.Height
+          }
+          working_area = [ordered]@{
+            x = [int]$s.WorkingArea.X
+            y = [int]$s.WorkingArea.Y
+            width = [int]$s.WorkingArea.Width
+            height = [int]$s.WorkingArea.Height
+          }
+        }
+      }
+      Write-Result ([ordered]@{
+        ok = $true
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.displays.v1'
+        displays = $rows
+        count = $rows.Count
+        authority_effect = $false
+      })
+      break
+    }
+
     'VERIFY_TARGET' {
       $identity = Assert-TargetIdentity $request.target
       $rect = Get-WindowRectForIdentity $identity
@@ -354,7 +388,10 @@ function Invoke-MetaengineComputerRequest([object]$request) {
     }
 
     'CAPTURE_DESKTOP' {
-      $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+      $screens = @([System.Windows.Forms.Screen]::AllScreens)
+      $monitor = [int]$request.args.monitor
+      if ($monitor -lt 0 -or $monitor -ge $screens.Count) { throw "computer_monitor_index_invalid" }
+      $screen = $screens[$monitor].Bounds
       $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
       try {
@@ -372,7 +409,8 @@ function Invoke-MetaengineComputerRequest([object]$request) {
         ok = $true
         effect_started = $false
         schema = 'metaengine.windows-computer-executor.capture.v1'
-        monitor = 0
+        monitor = $monitor
+        origin = [ordered]@{ x=[int]$screen.X; y=[int]$screen.Y }
         width = [int]$screen.Width
         height = [int]$screen.Height
         png_path = $file
