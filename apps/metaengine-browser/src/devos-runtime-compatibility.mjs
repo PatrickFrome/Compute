@@ -9,6 +9,7 @@ const REQUIRED_FEATURES = Object.freeze([
   'meta_orchestrator_controller_lease_v1',
   'meta_atomic_frontier_v2',
   'post_lock_transport_revalidation_v1',
+  'computer_authority_plane_v1',
 ]);
 const REQUIRED_RECOVERY_CLASSES = Object.freeze(['PRE_EFFECT_ABORTED', 'EFFECT_PROVEN']);
 const CAPABILITY_SCHEMA = 'metaengine.native-browser-supervisor.capabilities.v1';
