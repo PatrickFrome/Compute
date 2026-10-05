@@ -15,15 +15,37 @@ const target = {
   generation:3,
 };
 
-const context = {
-  command_id:'2a924f7a-884c-4a10-87b4-1d550561286e',
-  effect_binding:{
-    schema:'metaengine.native-supervisor.effect-binding.v2',
-    authority_effect:false,
-    page_data_authority:false,
-    automatic_retry_allowed:false,
-  },
+const contextFor = (computerAction, exactTarget = target, agentId = 'agent_test-12345678') => {
+  const commandId = '2a924f7a-884c-4a10-87b4-1d550561286e';
+  const material = [
+    exactTarget.machine_fingerprint_sha256,
+    exactTarget.session_id,
+    exactTarget.process_id,
+    exactTarget.process_creation_time_ms,
+    exactTarget.window_handle,
+    exactTarget.executable_sha256,
+    exactTarget.generation,
+  ].join('|');
+  return {
+    command_id:commandId,
+    effect_binding:{
+      schema:'metaengine.native-supervisor.computer-effect-binding.v1',
+      command_id:commandId,
+      action:'COMPUTER_ACTION',
+      computer_action:computerAction,
+      agent_id:agentId,
+      target_identity_sha256:awaitDigest(material),
+      target:{ ...exactTarget, schema:'metaengine.computer-target-identity.v1', authority_effect:false },
+      authority_effect:false,
+      page_data_authority:false,
+      automatic_retry_allowed:false,
+    },
+  };
 };
+
+function awaitDigest(material) {
+  return createHash('sha256').update(material, 'utf8').digest('hex');
+}
 
 test('executor snapshot exposes fixed bridge identity and no scheduler authority', () => {
   const executor = new WindowsLocalComputerExecutor({ platform:'linux', runner:async () => ({ ok:true }) });
@@ -64,7 +86,7 @@ test('proven mutation becomes EFFECT_PROVEN only after positive readback', async
       authority_effect:true,
     }),
   });
-  const result = await executor.act({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target, args:{ text:'hello', runtime_id:[1,2,3] } }, context);
+  const result = await executor.act({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target, args:{ text:'hello', runtime_id:[1,2,3] } }, contextFor('TYPE_TEXT'));
   assert.equal(result.outcome, 'EFFECT_PROVEN');
   assert.equal(result.authority_effect, true);
   assert.equal(result.automatic_retry_allowed, false);
@@ -80,7 +102,7 @@ test('pre-effect executor rejection is NO_EFFECT_PROVEN and still never auto-ret
       authority_effect:false,
     }),
   });
-  const result = await executor.act({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target, args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } } }, context);
+  const result = await executor.act({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target, args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } } }, contextFor('POINTER_CLICK'));
   assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
   assert.equal(result.authority_effect, false);
   assert.equal(result.automatic_retry_allowed, false);
@@ -119,11 +141,11 @@ test('visual pointer fallback consumes one fresh capture and then fails closed',
     target,
     args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } },
   };
-  const first = await executor.act(payload, context);
+  const first = await executor.act(payload, contextFor('TYPE_TEXT'));
   assert.equal(first.outcome, 'EFFECT_PROVEN');
   assert.equal(physicalCalls, 1);
 
-  const second = await executor.act(payload, context);
+  const second = await executor.act(payload, contextFor('TYPE_TEXT'));
   assert.equal(second.outcome, 'NO_EFFECT_PROVEN');
   assert.match(second.error, /computer_visual_frame_not_observed/);
   assert.equal(physicalCalls, 1);
@@ -156,7 +178,7 @@ test('stale visual capture is rejected before physical execution', async () => {
     agent_id:'agent_test-12345678',
     target,
     args:{ x:10, y:20, visual_fence:{ frame_sha256:'d'.repeat(64) } },
-  }, context);
+  }, contextFor('POINTER_CLICK'));
   assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
   assert.match(result.error, /computer_visual_frame_stale/);
   assert.equal(physicalCalls, 0);
@@ -167,7 +189,7 @@ test('runner failure after dispatch boundary is conservatively ambiguous and ter
     platform:'win32',
     runner:async () => { throw new Error('transport_lost'); },
   });
-  const result = await executor.act({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target, args:{ key:'ENTER' } }, context);
+  const result = await executor.act({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target, args:{ key:'ENTER' } }, contextFor('KEY_PRESS'));
   assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY');
   assert.equal(result.authority_effect, false);
   assert.equal(result.automatic_retry_allowed, false);
