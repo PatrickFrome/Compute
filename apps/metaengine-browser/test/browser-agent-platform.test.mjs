@@ -96,6 +96,29 @@ test('root composer is exact role/name/semantic-ref evidence', () => {
   ] })), null);
 });
 
+test('current Russian ChatGPT composer label is exact allowlisted without weakening uniqueness', () => {
+  const russian = rootFrame({
+    semantic_targets:[
+      { role:'textbox', name:'Спросить ChatGPT', backend_node_id:9, semantic_ref:semref('ru-composer'), value_length:0 },
+    ],
+  });
+  const composer = resolveAgentPlatformComposer(russian);
+  assert.equal(composer.role, 'textbox');
+  assert.equal(composer.accessible_name, 'Спросить ChatGPT');
+  assert.equal(composer.selector_mode, 'EXACT_CHATGPT_COMPOSER_ROLE_NAME_AND_SEMANTIC_REF');
+
+  assert.equal(resolveAgentPlatformComposer(rootFrame({
+    semantic_targets:[{ role:'textbox', name:'Введите сообщение', semantic_ref:semref('unknown') }],
+  })), null);
+
+  assert.equal(resolveAgentPlatformComposer(rootFrame({
+    semantic_targets:[
+      { role:'textbox', name:'Спросить ChatGPT', semantic_ref:semref('ru-a') },
+      { role:'textbox', name:'Спросить ChatGPT', semantic_ref:semref('ru-b') },
+    ],
+  })), null);
+});
+
 test('ChatGPT root produces a durable compatibility origin proof without claiming an exact model', () => {
   const frame = rootFrame();
   const proof = resolveAgentPlatformAgentSurface(frame);

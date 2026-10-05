@@ -18,6 +18,7 @@ import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
 import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import { createWindowsLocalComputerExecutor } from './windows-local-computer-executor.mjs';
 import { assertLegacyProviderCommandAllowed } from './legacy-provider-quarantine.mjs';
 import { assertActiveInferenceCommandPolicy } from './active-inference-command-policy.mjs';
 import { AgentObservationPlane } from './agent-observation-plane.mjs';
@@ -179,6 +180,7 @@ const devosSessionLayouts = createDevOSSessionLayoutRegistry({ max_sessions: 128
 // ring buffers plus the single-trace SYSTEM_TELEMETRY digest — the read lane
 // behind TAB_TELEMETRY / SYSTEM_TELEMETRY and the agent prompt telemetry.
 const agentObservationPlane = new AgentObservationPlane();
+const computerExecutor = createWindowsLocalComputerExecutor();
 const tabNetworkActivity = new TabNetworkActivityRegistry();
 tabNetworkActivity.setCompletionSink((entry) => agentObservationPlane.recordNetwork(entry.webContentsId, entry));
 let shellLayoutState = normalizeShellLayoutState();
@@ -1664,6 +1666,7 @@ async function nativeSupervisorState() {
     rsi_operator_steering: rsiOperatorSteering?.snapshot() || null,
     tab_network: tabNetworkActivity.snapshot(),
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
+    computer_authority: computerExecutor.snapshot(),
     loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
     compute,
     guardian,
@@ -1745,6 +1748,24 @@ async function executeNativeSupervisorCommandFenced(command) {
   const exactMutationTarget = resolveExactNativeSupervisorMutationTarget(command, { registry, views });
   if (exactMutationTarget) assertActiveInferenceCommandPolicy(command, { target_url: exactMutationTarget.view?.webContents?.getURL?.() || registry.get(exactMutationTarget.tab_id)?.url });
   if (action === 'POLL') return { ok: true, snapshot: await nativeSupervisorState(), authority_effect: false };
+  if (action === 'COMPUTER_STATUS') return computerExecutor.status();
+  if (action === 'COMPUTER_OBSERVE') return computerExecutor.observe(payload);
+  if (action === 'COMPUTER_ACTION') {
+    const receipt = await computerExecutor.act(payload, {
+      command_id: command?.command_id,
+      effect_binding: command?.effect_binding,
+    });
+    const effectOutcome = receipt?.outcome === 'EFFECT_PROVEN'
+      ? 'CONFIRMED'
+      : receipt?.outcome === 'NO_EFFECT_PROVEN'
+        ? 'NO_EFFECT_PROVEN'
+        : 'AMBIGUOUS';
+    return {
+      ...receipt,
+      effect_outcome: effectOutcome,
+      automatic_retry_allowed: false,
+    };
+  }
   if (action === 'SET_MODE') {
     const requested = String(payload?.mode || '').toUpperCase();
     if (requested === 'OBSERVE') return nativeSupervisor.setControlState({ mode: 'MONITOR' });

@@ -26,9 +26,9 @@ test('v2 binding is fenced again immediately before browser mutation', () => {
   assert.match(browserControl, /binding_generation: runtime\.binding_generation/);
 });
 
-test('edge and sql accept v1 plus v2 while the database lease remains authority', () => {
-  assert.match(edge, /EFFECT_BINDING_SCHEMAS=new Set\(\['metaengine\.native-supervisor\.effect-binding\.v1','metaengine\.native-supervisor\.effect-binding\.v2'\]\)/);
-  assert.match(edge, /effect_intent_binding_schemas:\['v1','v2'\]/);
+test('edge accepts tab v1/v2 plus computer v1 while DB lease remains authority', () => {
+  assert.match(edge, /EFFECT_BINDING_SCHEMAS=new Set\(\['metaengine\.native-supervisor\.effect-binding\.v1','metaengine\.native-supervisor\.effect-binding\.v2','metaengine\.native-supervisor\.computer-effect-binding\.v1'\]\)/);
+  assert.match(edge, /effect_intent_binding_schemas:\['v1','v2','computer-v1'\]/);
   assert.match(edge, /p_authority_effect:false/);
 
   assert.match(migration, /v_schema not in \('metaengine\.native-supervisor\.effect-binding\.v1','metaengine\.native-supervisor\.effect-binding\.v2'\)/);

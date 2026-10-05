@@ -12,6 +12,10 @@ import {
   buildNativeEffectBinding,
   nativeActionRequiresEffectBinding,
 } from './native-effect-binding.mjs';
+import {
+  assertNativeComputerEffectBindingMatches,
+  buildNativeComputerEffectBinding,
+} from './computer-effect-binding.mjs';
 import { classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
 import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
 import { buildDevosRuntimeObservability, mergeDevosRuntimeObservability } from './devos-runtime-observability.mjs';
@@ -305,7 +309,10 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       }
       // Only remote DB-leased commands carry command_id. Local supervisor lifecycle
       // and DevOS have their own durable proof contracts and are audited separately.
-      if (command?.command_id && nativeActionRequiresEffectBinding(command?.action)) {
+      if (command?.command_id && (
+        nativeActionRequiresEffectBinding(command?.action)
+        || String(command?.action || '').trim().toUpperCase() === 'COMPUTER_ACTION'
+      )) {
         if (!sealEffectRef) throw new Error('native_supervisor_effect_binding_not_initialized');
         return sealEffectRef(command);
       }
@@ -338,6 +345,22 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     };
 
     const observeEffectBinding = prepareEffectBinding || (async (command) => {
+      if (String(command?.action || '').trim().toUpperCase() === 'COMPUTER_ACTION') {
+        const verification = await executeCommand({
+          action: 'COMPUTER_OBSERVE',
+          payload: {
+            action: 'VERIFY_TARGET',
+            target: command?.payload?.target,
+          },
+          platform: null,
+        });
+        const observedTarget = verification?.result?.target || null;
+        if (!observedTarget) throw new Error('native_computer_effect_binding_local_observation_invalid');
+        return {
+          computer_target: observedTarget,
+          observed_at: new Date().toISOString(),
+        };
+      }
       const tabId = String(command?.payload?.tab_id || '');
       if (!tabId) throw new Error('native_supervisor_effect_binding_explicit_tab_required');
       const frame = await executeCommand({
@@ -360,15 +383,23 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     sealEffectRef = async (command) => {
       const observed = await observeEffectBinding(command);
       const identityState = await identity.ensure();
-      const binding = buildNativeEffectBinding({
-        command,
-        clientId: identityState.client_id,
-        processIncarnationId: observed?.process_incarnation_id,
-        tabId: observed?.tab_id,
-        targetId: observed?.target_id,
-        observedAt: observed?.observed_at,
-        runtimeObservationId: observed?.runtime_observation_id || null,
-      });
+      const computerEffect = String(command?.action || '').trim().toUpperCase() === 'COMPUTER_ACTION';
+      const binding = computerEffect
+        ? buildNativeComputerEffectBinding({
+            command,
+            clientId: identityState.client_id,
+            observedTarget: observed?.computer_target,
+            observedAt: observed?.observed_at,
+          })
+        : buildNativeEffectBinding({
+            command,
+            clientId: identityState.client_id,
+            processIncarnationId: observed?.process_incarnation_id,
+            tabId: observed?.tab_id,
+            targetId: observed?.target_id,
+            observedAt: observed?.observed_at,
+            runtimeObservationId: observed?.runtime_observation_id || null,
+          });
       const response = await signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/effect-intent`, {
         payload: { binding },
       });
@@ -376,14 +407,21 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       if (!response.ok || body?.accepted !== true || !body?.effect_binding) {
         throw new Error(`native_supervisor_effect_binding_http_${response.status}:${body?.reason || body?.error || 'rejected'}`);
       }
-      const sealed = assertNativeEffectBindingMatches({
-        command,
-        binding: body.effect_binding,
-        clientId: identityState.client_id,
-        processIncarnationId: observed.process_incarnation_id,
-        tabId: observed.tab_id,
-        targetId: observed.target_id,
-      });
+      const sealed = computerEffect
+        ? assertNativeComputerEffectBindingMatches({
+            command,
+            binding: body.effect_binding,
+            clientId: identityState.client_id,
+            observedTarget: observed.computer_target,
+          })
+        : assertNativeEffectBindingMatches({
+            command,
+            binding: body.effect_binding,
+            clientId: identityState.client_id,
+            processIncarnationId: observed.process_incarnation_id,
+            tabId: observed.tab_id,
+            targetId: observed.target_id,
+          });
       return executeCommand({
         ...command,
         effect_binding: sealed,

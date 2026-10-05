@@ -52,6 +52,8 @@ test('parseAgentToolRequests accepts valid fenced blocks and rejects invalid one
   assert.ok(parsed.invalid.length >= 3, 'invalid blocks are reported');
   assert.equal(parsed.authority_effect, false);
   assert.ok(!AGENT_TOOL_ACTIONS.includes('TYPED_CLICK'), 'conversation mutation is not a tool action');
+  assert.ok(AGENT_TOOL_ACTIONS.includes('COMPUTER_OBSERVE'));
+  assert.ok(AGENT_TOOL_ACTIONS.includes('COMPUTER_ACTION'));
   assert.equal(parseAgentToolRequests('no blocks here').requests.length, 0);
 });
 
@@ -178,7 +180,10 @@ test('AgentToolbelt enforces the per-lease command budget', async () => {
 
 test('edge issue-tool route is mounted with allowlist validation and river task context', () => {
   assert.match(edge, /const ISSUE_NATIVE_RPC='h205f22_a2_browser_supervisor_issue_native_v1'/);
-  assert.match(edge, /const TOOL_ISSUE_ACTIONS=new Set\(\['CAPTURE','READ_TRANSCRIPT','TAB_TELEMETRY','SYSTEM_TELEMETRY','SCROLL','SEMANTIC_FOCUS'\]\)/);
+  assert.match(edge, /const TOOL_ISSUE_ACTIONS=new Set\(\['CAPTURE','READ_TRANSCRIPT','TAB_TELEMETRY','SYSTEM_TELEMETRY','SCROLL','SEMANTIC_FOCUS','COMPUTER_OBSERVE','COMPUTER_ACTION'\]\)/);
+  assert.match(edge, /const ISSUE_COMPUTER_RPC='h205f22_a2_browser_supervisor_issue_computer_v1'/);
+  assert.match(edge, /agent_tool_computer_agent_mismatch/);
+  assert.match(edge, /computerAction[\s\S]*ISSUE_COMPUTER_RPC/);
   assert.match(edge, /path===\s*'\/v1\/commands\/issue-tool'/);
   assert.match(edge, /async function issueTool\(req:Request,body:any\)/);
   // Per-agent attribution + Outcome River binding context on every issued tool command.
@@ -188,5 +193,7 @@ test('edge issue-tool route is mounted with allowlist validation and river task 
   // Conversation mutation is not issuable through the tool route.
   assert.ok(!/TOOL_ISSUE_ACTIONS[^\]]*SEMANTIC_TYPE/.test(edge));
   assert.ok(agentToolbeltTrustRootSnapshot().issued_commands_ride_command_plane === true);
+  assert.equal(agentToolbeltTrustRootSnapshot().computer_typed_actuation_allowed, true);
+  assert.equal(agentToolbeltTrustRootSnapshot().computer_effects_require_existing_db_lease, true);
   assert.equal(agentToolbeltTrustRootSnapshot().authority_effect, false);
 });

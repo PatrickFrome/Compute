@@ -9,12 +9,15 @@ on:
       - 'work/client-v1-admission-readiness-submit-fence-v1'
       - 'work/chatgpt-only-agent-fleet-v1'
       - 'work/chatgpt-only-fenced-submit-v2'
+      - 'work/computer-authority-plane-v1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
       - 'apps/metaengine-browser/CONVERGENCE_CANDIDATE.md'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/test/**'
+      - 'apps/metaengine-browser/supabase/**'
+      - 'supabase/migrations/20261005080000_browser_computer_authority_plane_v1.sql'
       - 'apps/me2-ui/src/**'
       - 'apps/me2-daemon/**'
       - 'orchestration/sovereign/**'
@@ -51,6 +54,10 @@ jobs:
       - name: Install frozen Browser dependencies
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
+
+      - name: Prove Browser syntax and static checks
+        working-directory: apps/metaengine-browser
+        run: npm run check
 
       - name: Prove full Browser regression
         working-directory: apps/metaengine-browser
