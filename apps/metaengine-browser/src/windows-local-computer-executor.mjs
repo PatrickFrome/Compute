@@ -466,6 +466,102 @@ function Invoke-MetaengineComputerRequest([object]$request) {
       break
     }
 
+    'UIA_SET_VALUE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_value_pattern_unavailable" }
+      $effectStarted = $true
+      ([System.Windows.Automation.ValuePattern]$pattern).SetValue([string]$request.args.value)
+      Start-Sleep -Milliseconds 10
+      $afterPattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      $readback = ([string]([System.Windows.Automation.ValuePattern]$afterPattern).Current.Value -eq [string]$request.args.value)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SET_VALUE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_TOGGLE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_toggle_pattern_unavailable" }
+      $before = ([System.Windows.Automation.TogglePattern]$pattern).Current.ToggleState
+      $effectStarted = $true
+      ([System.Windows.Automation.TogglePattern]$pattern).Toggle()
+      Start-Sleep -Milliseconds 10
+      $after = ([System.Windows.Automation.TogglePattern]$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)).Current.ToggleState
+      $readback = ($after -ne $before)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_TOGGLE'
+        toggle_state = [string]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_SELECT' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_selection_pattern_unavailable" }
+      $effectStarted = $true
+      ([System.Windows.Automation.SelectionItemPattern]$pattern).Select()
+      Start-Sleep -Milliseconds 10
+      $after = ([System.Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)).Current.IsSelected
+      Write-Result ([ordered]@{
+        ok = [bool]$after
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = [bool]$after
+        action = 'UIA_SELECT'
+        selected = [bool]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = [bool]$after
+      })
+      break
+    }
+
+    'UIA_EXPAND_COLLAPSE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_expand_pattern_unavailable" }
+      $state = ([string]$request.args.state).ToUpperInvariant()
+      $effectStarted = $true
+      if ($state -eq 'EXPAND') {
+        ([System.Windows.Automation.ExpandCollapsePattern]$pattern).Expand()
+      } else {
+        ([System.Windows.Automation.ExpandCollapsePattern]$pattern).Collapse()
+      }
+      Start-Sleep -Milliseconds 10
+      $after = ([System.Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Current.ExpandCollapseState
+      $readback = (($state -eq 'EXPAND' -and $after -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) -or ($state -eq 'COLLAPSE' -and $after -eq [System.Windows.Automation.ExpandCollapseState]::Collapsed))
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_EXPAND_COLLAPSE'
+        expand_state = [string]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
     'TYPE_TEXT' {
       $identity = Assert-TargetIdentity $request.target
       $element = Find-UiaElement $identity @($request.args.runtime_id)
