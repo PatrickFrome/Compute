@@ -60,6 +60,7 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public static class MetaengineWin32 {
   [StructLayout(LayoutKind.Sequential)]
@@ -109,6 +110,24 @@ public static class MetaengineWin32 {
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
   [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder path, ref uint size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+
+  const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+  public static string GetProcessImagePath(uint processId) {
+    var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+    if (handle == IntPtr.Zero) return null;
+    try {
+      uint size = 32768;
+      var path = new StringBuilder((int)size);
+      if (!QueryFullProcessImageName(handle, 0, path, ref size)) return null;
+      return path.ToString();
+    } finally {
+      CloseHandle(handle);
+    }
+  }
 
   const uint INPUT_KEYBOARD = 1;
   const uint KEYEVENTF_KEYUP = 0x0002;
@@ -171,9 +190,16 @@ function Get-ProcessIdentity([int]$ProcessId) {
   if ($hwnd -le 0) { throw "computer_target_window_missing" }
   $start = [DateTimeOffset]::new($p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()
   $exeHash = $null
+  $exePath = $null
   try {
-    if ($p.Path) { $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $p.Path).Hash.ToLowerInvariant() }
+    if ($p.Path) { $exePath = [string]$p.Path }
   } catch {}
+  if (-not $exePath) {
+    try { $exePath = [MetaengineWin32]::GetProcessImagePath([UInt32]$p.Id) } catch {}
+  }
+  if ($exePath) {
+    try { $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant() } catch {}
+  }
   if (-not $exeHash) { throw "computer_target_executable_hash_unavailable" }
   $generation = [Int64](($start % 2147483646) + 1)
   return [ordered]@{
