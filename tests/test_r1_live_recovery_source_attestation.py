@@ -39,13 +39,37 @@ def source_environment():
     }
 
 
-def fence(*, head="metaengine-h205f22-recovery-dev-20260821-cp072", digest="a" * 64, ledger="b" * 64, rows=7, version="20260821125449", captured="2026-08-21T19:00:00Z"):
+def fence(
+    *,
+    project_ref=None,
+    checkpoint_rows=7,
+    checkpoint_ledger="a" * 64,
+    latest_checkpoint_id="b" * 64,
+    latest_payload_sha="c" * 64,
+    latest_source_sha="1" * 40,
+    latest_state="PARTIAL",
+    latest_kind="TEST_OPERATIONAL_CHECKPOINT",
+    roadmap_rows=1,
+    roadmap_digest="d" * 64,
+    migration_ledger="e" * 64,
+    migration_rows=11,
+    version="20261005192022",
+    captured="2026-10-05T20:44:17Z",
+):
     return {
         "schema": mod.FENCE_SCHEMA,
-        "semantic_head": head,
-        "canonical_digest": digest,
-        "migration_ledger_sha256": ledger,
-        "migration_rows": rows,
+        "project_ref": project_ref or mod.EXPECTED_PROJECT_REF,
+        "checkpoint_rows": checkpoint_rows,
+        "checkpoint_ledger_sha256": checkpoint_ledger,
+        "latest_checkpoint_id": latest_checkpoint_id,
+        "latest_checkpoint_payload_sha256": latest_payload_sha,
+        "latest_checkpoint_source_parent_sha": latest_source_sha,
+        "latest_checkpoint_evidence_state": latest_state,
+        "latest_checkpoint_kind": latest_kind,
+        "roadmap_authority_rows": roadmap_rows,
+        "roadmap_authority_sha256": roadmap_digest,
+        "migration_ledger_sha256": migration_ledger,
+        "migration_rows": migration_rows,
         "max_migration_version": version,
         "captured_at": captured,
     }
@@ -197,18 +221,26 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
         with self.assertRaisesRegex(mod.SourceAttestationError, "prevent_self_review_required"):
             mod.validate_source_environment(bad)
 
-    def test_control_fence_accepts_time_change_but_rejects_semantic_or_migration_drift(self):
-        stable = mod.validate_control_fences(fence(), fence(captured="2026-08-21T19:02:00Z"))
+    def test_control_fence_accepts_time_change_but_rejects_checkpoint_roadmap_or_migration_drift(self):
+        stable = mod.validate_control_fences(fence(), fence(captured="2026-10-05T20:45:17Z"))
         self.assertTrue(stable["stable"])
-        with self.assertRaisesRegex(mod.SourceAttestationError, "semantic_head"):
-            mod.validate_control_fences(fence(), fence(head="metaengine-h205f22-recovery-dev-20260821-cp999"))
+        self.assertEqual(stable["project_ref"], mod.EXPECTED_PROJECT_REF)
+        with self.assertRaisesRegex(mod.SourceAttestationError, "checkpoint_ledger_sha256"):
+            mod.validate_control_fences(fence(), fence(checkpoint_ledger="1" * 64))
+        with self.assertRaisesRegex(mod.SourceAttestationError, "roadmap_authority_sha256"):
+            mod.validate_control_fences(fence(), fence(roadmap_digest="2" * 64))
         with self.assertRaisesRegex(mod.SourceAttestationError, "migration_ledger_sha256"):
-            mod.validate_control_fences(fence(), fence(ledger="1" * 64))
+            mod.validate_control_fences(fence(), fence(migration_ledger="3" * 64))
+        with self.assertRaisesRegex(mod.SourceAttestationError, "project_ref"):
+            mod.validate_control_fences(fence(), fence(project_ref="xpeibufgzjknrhbhpffp"))
 
     def test_export_metadata_is_explicit_about_logical_and_storage_coverage(self):
         value = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:02:00Z"))
         self.assertEqual(value["tool_version"], "2.111.0")
         self.assertEqual(value["export_mode"], "SUPABASE_LOGICAL_ROLES_SCHEMA_DATA")
+        self.assertEqual(value["latest_checkpoint_id"], fence()["latest_checkpoint_id"])
+        self.assertEqual(value["checkpoint_ledger_sha256"], fence()["checkpoint_ledger_sha256"])
+        self.assertFalse(value["canonical_roadmap_claim"])
         self.assertFalse(value["physical_backup_export_claim"])
         self.assertFalse(value["storage_api_objects_included"])
 
@@ -226,7 +258,9 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
                 run_attempt=1,
             )
             self.assertEqual(predicate["source"]["workflow_path"], mod.SOURCE_WORKFLOW_PATH)
-            self.assertEqual(predicate["database_export"]["semantic_head"], fence()["semantic_head"])
+            self.assertEqual(predicate["database_export"]["latest_checkpoint_id"], fence()["latest_checkpoint_id"])
+            self.assertEqual(predicate["database_export"]["checkpoint_ledger_sha256"], fence()["checkpoint_ledger_sha256"])
+            self.assertFalse(predicate["database_export"]["canonical_roadmap_claim"])
             self.assertFalse(predicate["coverage"]["storage_api_object_bytes_included"])
             self.assertFalse(predicate["authority"]["r2_proven"])
 
