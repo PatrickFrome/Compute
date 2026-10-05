@@ -104,7 +104,11 @@ function normalizeArgs(action, args) {
   if (action === 'TYPE_TEXT') {
     const text = String(input.text ?? '');
     if (!text || text.length > 120000) throw new Error('computer_type_text_invalid');
-    return Object.freeze({ text });
+    const runtimeId = Array.isArray(input.runtime_id) ? input.runtime_id.map((v) => Number(v)) : [];
+    if (!runtimeId.length || runtimeId.length > 64 || runtimeId.some((v) => !Number.isSafeInteger(v))) {
+      throw new Error('computer_type_runtime_id_invalid');
+    }
+    return Object.freeze({ text, runtime_id: Object.freeze(runtimeId), replace: true });
   }
   if (action === 'KEY_PRESS') {
     const key = String(input.key || '').trim().toUpperCase();
@@ -115,7 +119,14 @@ function normalizeArgs(action, args) {
     const x = Number(input.x);
     const y = Number(input.y);
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) throw new Error('computer_pointer_coordinates_invalid');
-    return Object.freeze({ x: Math.floor(x), y: Math.floor(y), button: 'LEFT' });
+    const frameSha256 = String(input?.visual_fence?.frame_sha256 || '').toLowerCase();
+    if (!SHA256_RE.test(frameSha256)) throw new Error('computer_visual_frame_fence_required');
+    return Object.freeze({
+      x: Math.floor(x),
+      y: Math.floor(y),
+      button: 'LEFT',
+      visual_fence: Object.freeze({ frame_sha256: frameSha256, max_age_ms: 3000 }),
+    });
   }
   if (action === 'UIA_FOCUS' || action === 'UIA_INVOKE') {
     const runtimeId = Array.isArray(input.runtime_id) ? input.runtime_id.map((v) => Number(v)) : [];
@@ -248,6 +259,8 @@ export function computerAuthorityPlaneSnapshot() {
     typed_action_schema_required: true,
     exact_target_identity_required_for_mutation: true,
     post_effect_readback_required: true,
+    type_text_requires_exact_uia_runtime_id: true,
+    visual_pointer_requires_recent_capture_fence: true,
     automatic_retry_allowed: false,
     page_model_data_grants_authority: false,
     authority_effect: false,
