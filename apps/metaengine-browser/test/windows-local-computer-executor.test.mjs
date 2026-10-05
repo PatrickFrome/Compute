@@ -83,7 +83,7 @@ test('V2 read-only computer observations include display and exact-window surfac
           target,
           png_sha256:'e'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
-          target,
+          rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
         };
       }
@@ -183,10 +183,12 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
           png_sha256:'c'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
+          rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
         };
       }
       physicalCalls += 1;
+      assert.deepEqual(request.args.visual_fence.window_rect, { left:10, top:20, width:800, height:600 });
       return {
         ok:true,
         effect_started:true,
@@ -262,6 +264,7 @@ test('window capture cannot be replayed against a different exact target', async
           png_sha256:'9'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
+          rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
         };
       }
@@ -295,6 +298,7 @@ test('stale visual capture is rejected before physical execution', async () => {
           png_sha256:'d'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
+          rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
         };
       }
