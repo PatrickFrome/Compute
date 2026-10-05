@@ -86,6 +86,82 @@ test('pre-effect executor rejection is NO_EFFECT_PROVEN and still never auto-ret
   assert.equal(result.automatic_retry_allowed, false);
 });
 
+test('visual pointer fallback consumes one fresh capture and then fails closed', async () => {
+  let now = 1000;
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    clock:() => now,
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_DESKTOP') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'c'.repeat(64),
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return {
+        ok:true,
+        effect_started:true,
+        readback_proven:true,
+        schema:'metaengine.windows-computer-executor.effect.v1',
+        authority_effect:true,
+      };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_DESKTOP', args:{} });
+  const payload = {
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } },
+  };
+  const first = await executor.act(payload, context);
+  assert.equal(first.outcome, 'EFFECT_PROVEN');
+  assert.equal(physicalCalls, 1);
+
+  const second = await executor.act(payload, context);
+  assert.equal(second.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(second.error, /computer_visual_frame_not_observed/);
+  assert.equal(physicalCalls, 1);
+});
+
+test('stale visual capture is rejected before physical execution', async () => {
+  let now = 1000;
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    clock:() => now,
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_DESKTOP') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'d'.repeat(64),
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:true, authority_effect:true };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_DESKTOP', args:{} });
+  now += 3001;
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'d'.repeat(64) } },
+  }, context);
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_stale/);
+  assert.equal(physicalCalls, 0);
+});
+
 test('runner failure after dispatch boundary is conservatively ambiguous and terminal', async () => {
   const executor = new WindowsLocalComputerExecutor({
     platform:'win32',
