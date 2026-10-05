@@ -39,6 +39,7 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   const executor = new WindowsLocalComputerExecutor({ platform:'linux', runner:async () => ({ ok:true }) });
   const snapshot = executor.snapshot();
   assert.equal(snapshot.available, false);
+  assert.equal(snapshot.version, '2.0.0');
   assert.equal(snapshot.scheduler_authority, false);
   assert.equal(snapshot.raw_shell_input, false);
   assert.equal(snapshot.arbitrary_eval, false);
@@ -61,6 +62,77 @@ test('read-only observation carries no authority effect', async () => {
   assert.equal(result.request.action, 'OBSERVE_WINDOWS');
   assert.equal(result.authority_effect, false);
   assert.deepEqual(result.result.windows, []);
+});
+
+test('V2 read-only computer observations include display and exact-window surfaces', async () => {
+  const seen = [];
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async (request) => {
+      seen.push(request.action);
+      if (request.action === 'OBSERVE_DISPLAYS') {
+        return { ok:true, effect_started:false, displays:[{ index:0, primary:true }], authority_effect:false };
+      }
+      if (request.action === 'FOREGROUND_STATUS') {
+        return { ok:true, effect_started:false, target, authority_effect:false };
+      }
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          target,
+          png_sha256:'e'.repeat(64),
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          authority_effect:false,
+        };
+      }
+      throw new Error('unexpected');
+    },
+  });
+
+  const displays = await executor.observe({ action:'OBSERVE_DISPLAYS' });
+  assert.equal(displays.result.displays[0].primary, true);
+
+  const foreground = await executor.observe({ action:'FOREGROUND_STATUS' });
+  assert.match(foreground.result.target_identity_sha256, /^[0-9a-f]{64}$/);
+
+  const capture = await executor.observe({ action:'CAPTURE_WINDOW', target });
+  assert.equal(capture.result.png_sha256, 'e'.repeat(64));
+  assert.match(capture.result.target_identity_sha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(seen, ['OBSERVE_DISPLAYS','FOREGROUND_STATUS','CAPTURE_WINDOW']);
+});
+
+test('V2 direct UIA fast actions preserve lease and positive-readback semantics', async () => {
+  const actions = ['UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','UIA_SCROLL'];
+  for (const action of actions) {
+    const executor = new WindowsLocalComputerExecutor({
+      platform:'win32',
+      runner:async (request) => ({
+        ok:true,
+        effect_started:true,
+        readback_proven:true,
+        schema:'metaengine.windows-computer-executor.effect.v1',
+        action:request.action,
+        authority_effect:true,
+      }),
+    });
+    const args = action === 'UIA_SET_VALUE'
+      ? { runtime_id:[1,2], value:'fast' }
+      : action === 'UIA_EXPAND_COLLAPSE'
+        ? { runtime_id:[1,2], state:'EXPAND' }
+        : action === 'UIA_SCROLL'
+          ? { runtime_id:[1,2], vertical:'SMALL_INCREMENT' }
+          : { runtime_id:[1,2] };
+    const result = await executor.act({
+      action,
+      agent_id:'agent_test-12345678',
+      target,
+      args,
+    }, contextFor(action));
+    assert.equal(result.outcome, 'EFFECT_PROVEN', action);
+    assert.equal(result.authority_effect, true, action);
+    assert.equal(result.automatic_retry_allowed, false, action);
+  }
 });
 
 test('proven mutation becomes EFFECT_PROVEN only after positive readback', async () => {
