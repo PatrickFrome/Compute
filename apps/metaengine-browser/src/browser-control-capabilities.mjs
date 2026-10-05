@@ -5,7 +5,7 @@ import {
 
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.6.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.7.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows(publicBrowserControlActions().map((row) => ({
   action: row.action,
@@ -57,6 +57,8 @@ export const CONTROL_INVARIANTS = Object.freeze({
   computer_mutation_requires_agent_identity: true,
   computer_mutation_uses_existing_db_lease_scheduler: true,
   computer_visual_fallback_after_semantic_and_uia: true,
+  computer_direct_uia_fast_actions_v2: true,
+  computer_multi_display_observation_v2: true,
   process_lifecycle_events_are_event_driven: true,
   semantic_observation_is_event_driven: true,
   semantic_observation_uses_persistent_cdp_sessions: true,
