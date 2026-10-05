@@ -64,7 +64,7 @@ test('proven mutation becomes EFFECT_PROVEN only after positive readback', async
       authority_effect:true,
     }),
   });
-  const result = await executor.act({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target, args:{ text:'hello' } }, context);
+  const result = await executor.act({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target, args:{ text:'hello', runtime_id:[1,2,3] } }, context);
   assert.equal(result.outcome, 'EFFECT_PROVEN');
   assert.equal(result.authority_effect, true);
   assert.equal(result.automatic_retry_allowed, false);
@@ -80,7 +80,7 @@ test('pre-effect executor rejection is NO_EFFECT_PROVEN and still never auto-ret
       authority_effect:false,
     }),
   });
-  const result = await executor.act({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target, args:{ x:10, y:20 } }, context);
+  const result = await executor.act({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target, args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } } }, context);
   assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
   assert.equal(result.authority_effect, false);
   assert.equal(result.automatic_retry_allowed, false);
@@ -103,7 +103,7 @@ test('mutating executor path cannot bypass DB lease binding', async () => {
     runner:async () => ({ ok:true }),
   });
   await assert.rejects(
-    () => executor.act({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target, args:{ text:'x' } }, {}),
+    () => executor.act({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target, args:{ text:'x', runtime_id:[1,2,3] } }, {}),
     /computer_db_lease_command_id_required/
   );
 });
