@@ -641,6 +641,7 @@ try {
       $identity = Assert-TargetIdentity $request.target
       $element = Find-UiaElement $identity @($request.args.runtime_id)
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
       if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
       Start-Sleep -Milliseconds 40
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
@@ -655,7 +656,6 @@ try {
 
       $valueReadbackAvailable = $false
 
-      $effectStarted = $true
       if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
       if (-not [MetaengineWin32]::SendUnicode([string]$request.args.text)) { throw "computer_unicode_input_failed" }
       Start-Sleep -Milliseconds 20
@@ -698,11 +698,11 @@ try {
     'KEY_PRESS' {
       $identity = Assert-TargetIdentity $request.target
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
       if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
       Start-Sleep -Milliseconds 40
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
       $key = ([string]$request.args.key).ToUpperInvariant()
-      $effectStarted = $true
       $sent = $false
       if ($key -eq 'CTRL+A') {
         $sent = [MetaengineWin32]::SendCtrlA()
@@ -748,11 +748,11 @@ try {
       $screenX = $rect.left + $x
       $screenY = $rect.top + $y
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
       if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
       Start-Sleep -Milliseconds 40
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
       if (-not [MetaengineWin32]::SetCursorPos($screenX, $screenY)) { throw "computer_pointer_position_failed" }
-      $effectStarted = $true
       [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
       [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
       $point = New-Object MetaengineWin32+POINT
