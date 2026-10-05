@@ -48,6 +48,8 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes('PROCESS_QUERY_LIMITED_INFORMATION'));
   assert.ok(executor.includes('GetProcessImagePath'));
   assert.ok(executor.includes('GetProcessImageSha256'));
+  assert.ok(executor.includes('GetFileSha256'));
+  assert.equal(executor.includes('Get-FileHash'), false);
   assert.ok(executor.includes('FileShare.ReadWrite | FileShare.Delete'));
   assert.ok(executor.includes('SHA256.Create()'));
   assert.ok(plane.includes('typed_effect_readback_kind_required: true'));
