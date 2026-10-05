@@ -82,9 +82,11 @@ test('Computer V2 visual click never brings a stale frame to foreground and reva
   assert.ok(block.includes('Get-BitmapPixelSha256'));
   assert.ok(block.includes('computer_visual_frame_changed_before_click'));
   assert.ok(block.includes('computer_visual_frame_geometry_drift_after_pointer_move'));
-  assert.ok(executor.includes('foreground = $foregroundAtCapture'));
+  assert.ok(executor.includes('foreground = $foregroundStable'));
+  assert.ok(executor.includes('geometry_stable = $geometryStable'));
   assert.ok(executor.includes('pixel_sha256 = $pixelHash'));
   assert.ok(plane.includes('visual_pointer_requires_foreground_capture: true'));
+  assert.ok(plane.includes('visual_capture_requires_stable_foreground_geometry: true'));
   assert.ok(plane.includes('visual_pointer_revalidates_pixels_after_cursor_move: true'));
   assert.ok(plane.includes('visual_pointer_never_foregrounds_stale_frame: true'));
 });
