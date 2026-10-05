@@ -28,7 +28,7 @@ export const AGENT_PLATFORM_KNOWN_MODELS = Object.freeze([]);
 
 const CONVERSATION_PATH_RE = /^\/c\/[a-z0-9-]+\/?$/i;
 const AUTH_PATH_RE = /^\/auth(\/|$)/i;
-const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
+const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Спросить ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const LEGACY_GLM_HOST = 'chat.z.ai';
 
 function parsedUrl(value) {
