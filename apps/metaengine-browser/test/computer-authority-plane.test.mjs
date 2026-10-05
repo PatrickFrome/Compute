@@ -48,6 +48,11 @@ test('computer authority plane exposes one DB lease authority and no second sche
   assert.equal(snapshot.arbitrary_shell, false);
   assert.equal(snapshot.raw_powershell_command_input, false);
   assert.deepEqual(snapshot.router_order, ['BROWSER_SEMANTIC','WINDOWS_UIA','COMPUTER_VISUAL']);
+  assert.equal(snapshot.version, '2.0.0');
+  assert.equal(snapshot.multi_monitor_observation, true);
+  assert.equal(snapshot.window_management, true);
+  assert.equal(snapshot.rich_pointer_primitives, true);
+  assert.equal(snapshot.key_combinations, true);
 });
 
 test('read-only and mutating computer actions are explicitly classified', () => {
@@ -85,6 +90,56 @@ test('pointer and key payloads are bounded and allowlisted', () => {
     () => normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'WIN+R' } }, lease('KEY_PRESS')),
     /computer_key_not_allowlisted/
   );
+});
+
+test('Computer V2 normalizes direct UIA, window, combo and multi-monitor requests', () => {
+  const combo = normalizeComputerRequest({
+    action:'KEY_COMBO',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ keys:['CTRL','SHIFT','P'] },
+  }, lease('KEY_COMBO'));
+  assert.deepEqual(combo.args.keys, ['CTRL','SHIFT','P']);
+
+  const value = normalizeComputerRequest({
+    action:'UIA_SET_VALUE',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ runtime_id:[4,5,6], value:'direct value' },
+  }, lease('UIA_SET_VALUE'));
+  assert.equal(value.args.value, 'direct value');
+  assert.deepEqual(value.args.runtime_id, [4,5,6]);
+
+  const windowMove = normalizeComputerRequest({
+    action:'WINDOW_MOVE_RESIZE',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ x:-1200, y:80, width:1280, height:720 },
+  }, lease('WINDOW_MOVE_RESIZE'));
+  assert.deepEqual(windowMove.args, { x:-1200, y:80, width:1280, height:720 });
+
+  const drag = normalizeComputerRequest({
+    action:'POINTER_DRAG',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{
+      from_x:10, from_y:20, to_x:300, to_y:400, duration_ms:25,
+      visual_fence:{ frame_sha256:'d'.repeat(64) },
+    },
+  }, lease('POINTER_DRAG'));
+  assert.equal(drag.args.duration_ms, 25);
+  assert.equal(drag.args.visual_fence.max_age_ms, 3000);
+
+  const capture = normalizeComputerRequest({ action:'CAPTURE_DESKTOP', args:{ monitor:3 } });
+  assert.equal(capture.args.monitor, 3);
+  assert.equal(normalizeComputerRequest({ action:'OBSERVE_DISPLAYS' }).action, 'OBSERVE_DISPLAYS');
+
+  assert.throws(() => normalizeComputerRequest({
+    action:'KEY_COMBO',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ keys:['CTRL','CTRL'] },
+  }, lease('KEY_COMBO')), /computer_key_combo_duplicate/);
 });
 
 test('tool router prefers exact browser semantic, then UIA, then fresh visual fallback', () => {
