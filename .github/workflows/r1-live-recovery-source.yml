@@ -6,6 +6,8 @@ on:
       - 'work/r1-fresh-project-source-identity-v1'
     paths:
       - 'controller/r1/live_recovery_source_attestation.py'
+      - 'controller/r1/final_r2_evidence_package.py'
+      - 'tests/test_r1_final_r2_evidence_package.py'
       - 'tests/test_r1_live_recovery_source_attestation.py'
       - 'tests/test_r1_recovery_artifact_packager.py'
       - 'research/R1_FRESH_PROJECT_SOURCE_IDENTITY_CONVERGENCE_2026-10-05.md'
