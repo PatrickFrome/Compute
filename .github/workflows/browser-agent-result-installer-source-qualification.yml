@@ -12,6 +12,10 @@ on:
       - 'work/computer-authority-plane-v1'
       - 'work/computer-authority-plane-v2-fast-actions'
       - 'work/computer-authority-plane-v2-visual-fence-r1'
+      - 'work/computer-authority-plane-v2-effect-proof-r1'
+      - 'work/computer-authority-plane-v2-effect-barrier-r1'
+      - 'work/computer-authority-plane-v2-visual-freshness-r1'
+      - 'work/computer-authority-plane-v2-typed-readback-r1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
