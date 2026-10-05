@@ -114,7 +114,7 @@ begin
     if p_payload <> '{}'::jsonb then raise exception 'computer_status_payload_must_be_empty'; end if;
   else
     v_subaction := upper(trim(coalesce(p_payload->>'action','')));
-    if v_action='COMPUTER_OBSERVE' and v_subaction not in ('OBSERVE_WINDOWS','UIA_SNAPSHOT','CAPTURE_DESKTOP') then
+    if v_action='COMPUTER_OBSERVE' and v_subaction not in ('OBSERVE_WINDOWS','UIA_SNAPSHOT','CAPTURE_DESKTOP','VERIFY_TARGET') then
       raise exception 'computer_observe_action_invalid';
     end if;
     if v_action='COMPUTER_ACTION' and v_subaction not in ('UIA_FOCUS','UIA_INVOKE','TYPE_TEXT','KEY_PRESS','POINTER_CLICK') then
