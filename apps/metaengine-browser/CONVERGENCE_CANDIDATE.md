@@ -3,6 +3,7 @@
 Reserved package identity is `0.7.0-dev.37290000001.1`.
 
 Atomic Computer Authority Plane V2 visual-fence reservation (2026-10-05):
+- visual-fence source qualification re-arm: the dedicated source workflow now explicitly includes this successor branch and migration path; this note intentionally changes no runtime code and exists to obtain an exact-head source proof before the next package identity is reserved;
 - exact runtime/source predecessor `dbfecbfe1f8f99590db3002a219070f316918289` passed Critical Audit run `37285151841` and Browser Shell run `37285151942`; all compute-only Autonomous Soak jobs (1M Brain, 100k continuous, 2000-task/2048-peer scale and every chaos seed) also passed;
 - the predecessor physical consumers failed only because package identity `0.7.0-dev.37280000001.1` was already immutably reserved to source `c13c7c3b2c607afb4a40e7fa83f0b16e887e5dcb`, so Package Smoke correctly rejected rebuilding that version for a new source head;
 - this successor reserves a new monotonic identity after hardening visual POINTER_CLICK fallback to require a fresh exact-window capture, exact target identity, unchanged window geometry, V2 executor attestation and the existing DB lease/effect binding;
