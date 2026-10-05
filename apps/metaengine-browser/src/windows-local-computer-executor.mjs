@@ -291,6 +291,20 @@ try {
       break
     }
 
+    'VERIFY_TARGET' {
+      $identity = Assert-TargetIdentity $request.target
+      $rect = Get-WindowRectForIdentity $identity
+      Write-Result ([ordered]@{
+        ok = $true
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.verify-target.v1'
+        target = $identity
+        rect = $rect
+        authority_effect = $false
+      })
+      break
+    }
+
     'UIA_SNAPSHOT' {
       $identity = Assert-TargetIdentity $request.target
       $root = Get-UiaRoot $identity
