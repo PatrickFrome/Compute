@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   computerAuthorityPlaneSnapshot,
+  computerTargetIdentityDigest,
   normalizeComputerRequest,
   projectComputerEffectReceipt,
 } from './computer-authority-plane.mjs';
@@ -266,9 +267,10 @@ try {
 
     'OBSERVE_WINDOWS' {
       $limit = [Math]::Max(1, [Math]::Min(256, [int]$request.args.limit))
+      $offset = [Math]::Max(0, [int]$request.args.offset)
       $windows = @()
-      foreach ($p in (Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object Id)) {
-        if ($windows.Count -ge $limit) { break }
+      $eligible = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object Id)
+      foreach ($p in @($eligible | Select-Object -Skip $offset -First $limit)) {
         try {
           $identity = Get-ProcessIdentity $p.Id
           $rect = Get-WindowRectForIdentity $identity
@@ -286,6 +288,9 @@ try {
         schema = 'metaengine.windows-computer-executor.windows.v1'
         windows = $windows
         count = $windows.Count
+        offset = $offset
+        total_candidates = $eligible.Count
+        next_offset = $(if (($offset + $windows.Count) -lt $eligible.Count) { $offset + $windows.Count } else { $null })
         authority_effect = $false
       })
       break
@@ -309,16 +314,17 @@ try {
       $identity = Assert-TargetIdentity $request.target
       $root = Get-UiaRoot $identity
       $limit = [Math]::Max(1, [Math]::Min(1024, [int]$request.args.limit))
-      $rows = @()
-      $rows += Project-Uia $root
+      $offset = [Math]::Max(0, [int]$request.args.offset)
+      $allRows = @()
+      $allRows += Project-Uia $root
       $all = $root.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
       )
       foreach ($el in $all) {
-        if ($rows.Count -ge $limit) { break }
-        try { $rows += Project-Uia $el } catch {}
+        try { $allRows += Project-Uia $el } catch {}
       }
+      $rows = @($allRows | Select-Object -Skip $offset -First $limit)
       Write-Result ([ordered]@{
         ok = $true
         effect_started = $false
@@ -326,7 +332,10 @@ try {
         target = $identity
         elements = $rows
         count = $rows.Count
-        truncated = ($all.Count + 1 -gt $rows.Count)
+        offset = $offset
+        total_elements = $allRows.Count
+        next_offset = $(if (($offset + $rows.Count) -lt $allRows.Count) { $offset + $rows.Count } else { $null })
+        truncated = ($allRows.Count -gt ($offset + $rows.Count))
         authority_effect = $false
       })
       break
@@ -687,10 +696,25 @@ export class WindowsLocalComputerExecutor {
     const result = await this.#runner(request);
     if (result?.ok !== true) throw new Error(String(result?.error || 'computer_observe_failed'));
     if (request.action === 'CAPTURE_DESKTOP') this.#rememberVisualFrame(result);
+    let projected = result;
+    if (request.action === 'OBSERVE_WINDOWS' && Array.isArray(result?.windows)) {
+      projected = {
+        ...result,
+        windows: result.windows.map((row) => ({
+          ...row,
+          target_identity_sha256: row?.identity ? computerTargetIdentityDigest(row.identity) : null,
+        })),
+      };
+    } else if (['UIA_SNAPSHOT','VERIFY_TARGET'].includes(request.action) && result?.target) {
+      projected = {
+        ...result,
+        target_identity_sha256: computerTargetIdentityDigest(result.target),
+      };
+    }
     return Object.freeze({
       schema: 'metaengine.computer-observation.v1',
       request,
-      result,
+      result: projected,
       authority_effect: false,
     });
   }
