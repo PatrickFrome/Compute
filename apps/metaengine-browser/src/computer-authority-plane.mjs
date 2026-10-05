@@ -337,6 +337,7 @@ export function computerAuthorityPlaneSnapshot() {
     type_text_requires_exact_uia_runtime_id: true,
     visual_pointer_requires_recent_capture_fence: true,
     visual_pointer_requires_target_bound_window_capture: true,
+    visual_pointer_requires_unchanged_window_geometry: true,
     direct_uia_patterns: Object.freeze(['VALUE','INVOKE','TOGGLE','SELECTION_ITEM','EXPAND_COLLAPSE','SCROLL']),
     multi_monitor_observation: true,
     automatic_retry_allowed: false,
