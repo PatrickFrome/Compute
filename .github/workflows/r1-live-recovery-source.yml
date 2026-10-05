@@ -112,6 +112,10 @@ jobs:
           assert 'needs: [source-build, preflight-source]' in attest
           assert 'needs: [source-build, attest-source, preflight-source]' in verify
           assert 'SUPABASE_DB_URL' in source
+          assert 'validate-db-url' in source
+          assert '--env-name SUPABASE_DB_URL' in source
+          assert 'database_connection_identity' in source
+          assert source.index('validate-db-url') < source.index('capture_control before')
           assert 'id-token: write' not in source and 'attestations: write' not in source
           assert 'supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520' in source
           assert 'version: 2.111.0' in source
@@ -338,6 +342,18 @@ jobs:
           }
           trap cleanup EXIT
 
+          python3 controller/r1/live_recovery_source_attestation.py validate-db-url \
+            --env-name SUPABASE_DB_URL --output "$PRIVATE/db-url-identity.json"
+          PRIVATE="$PRIVATE" python3 - <<'PY'
+          import json,os
+          root=os.environ['PRIVATE']
+          identity=json.load(open(f'{root}/db-url-identity.json'))
+          assert identity['project_ref'] == 'jhriwwsryeqsvvvufkok'
+          assert identity['project_ref_verified'] is True
+          assert identity['secret_material_persisted'] is False
+          assert 'password' not in identity and 'url' not in identity and 'username' not in identity
+          PY
+
           pg_query() {
             local sql="$1"
             docker run --rm -e DATABASE_URL="$SUPABASE_DB_URL" "$POSTGRES_CLIENT_IMAGE" \
@@ -397,6 +413,12 @@ jobs:
           ledger={'schema':'metaengine.compute.migration-ledger.v1','row_count':len(rows),'rows':rows}
           json.dump(ledger,open(f'{root}/migration-ledger.json','w'),sort_keys=True,separators=(',',':'))
           meta=json.load(open(f'{root}/export-metadata.json'))
+          identity=json.load(open(f'{root}/db-url-identity.json'))
+          if identity.get('project_ref') != 'jhriwwsryeqsvvvufkok' or identity.get('project_ref_verified') is not True:
+              raise SystemExit('database connection project identity invalid')
+          if identity.get('secret_material_persisted') is not False:
+              raise SystemExit('database connection identity leaked secret state')
+          meta['database_connection_identity']=identity
           meta.update({
             'export_mode':'SUPABASE_ROLES_PLUS_POSTGRES_SINGLE_SNAPSHOT_SCHEMA_DATA',
             'schema_data_snapshot':'SINGLE_PG_DUMP_CUSTOM_ARCHIVE',
