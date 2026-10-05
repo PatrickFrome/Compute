@@ -192,9 +192,10 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
       return {
         ok:true,
         effect_started:true,
-        readback_proven:true,
+        readback_proven:false,
+        dispatch_proven:true,
         schema:'metaengine.windows-computer-executor.effect.v1',
-        authority_effect:true,
+        authority_effect:false,
       };
     },
   });
@@ -206,7 +207,9 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
     args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } },
   };
   const first = await executor.act(payload, contextFor('POINTER_CLICK'));
-  assert.equal(first.outcome, 'EFFECT_PROVEN');
+  assert.equal(first.outcome, 'AMBIGUOUS_NO_RETRY');
+  assert.equal(first.authority_effect, false);
+  assert.equal(first.automatic_retry_allowed, false);
   assert.equal(physicalCalls, 1);
 
   const second = await executor.act(payload, contextFor('POINTER_CLICK'));
@@ -317,6 +320,59 @@ test('stale visual capture is rejected before physical execution', async () => {
   assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
   assert.match(result.error, /computer_visual_frame_stale/);
   assert.equal(physicalCalls, 0);
+});
+
+test('dispatch-only physical mutations remain ambiguous without semantic effect readback', async () => {
+  for (const [action,args] of [
+    ['UIA_INVOKE',{ runtime_id:[1,2] }],
+    ['KEY_PRESS',{ key:'ENTER' }],
+  ]) {
+    const executor = new WindowsLocalComputerExecutor({
+      platform:'win32',
+      runner:async (request) => ({
+        ok:true,
+        effect_started:true,
+        readback_proven:false,
+        dispatch_proven:true,
+        schema:'metaengine.windows-computer-executor.effect.v1',
+        action:request.action,
+        authority_effect:false,
+      }),
+    });
+    const result = await executor.act({
+      action,
+      agent_id:'agent_test-12345678',
+      target,
+      args,
+    }, contextFor(action));
+    assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY', action);
+    assert.equal(result.authority_effect, false, action);
+    assert.equal(result.automatic_retry_allowed, false, action);
+  }
+});
+
+test('TYPE_TEXT without value readback is terminal ambiguous after dispatch', async () => {
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async () => ({
+      ok:true,
+      effect_started:true,
+      readback_proven:false,
+      dispatch_proven:true,
+      value_readback_available:false,
+      schema:'metaengine.windows-computer-executor.effect.v1',
+      authority_effect:false,
+    }),
+  });
+  const result = await executor.act({
+    action:'TYPE_TEXT',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ text:'hello', runtime_id:[1,2,3], replace:false },
+  }, contextFor('TYPE_TEXT'));
+  assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY');
+  assert.equal(result.authority_effect, false);
+  assert.equal(result.automatic_retry_allowed, false);
 });
 
 test('runner failure after dispatch boundary is conservatively ambiguous and terminal', async () => {
