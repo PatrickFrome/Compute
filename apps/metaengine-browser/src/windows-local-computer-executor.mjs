@@ -897,16 +897,23 @@ export async function runFixedWindowsPowerShell(request, {
   const timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-'));
   const requestPath = path.join(dir, `request-${randomUUID()}.json`);
+  const bridgePath = path.join(dir, `bridge-${WINDOWS_COMPUTER_BRIDGE_SHA256}.ps1`);
   await fs.writeFile(requestPath, JSON.stringify(request), { encoding:'utf8', flag:'wx', mode:0o600 });
+  await fs.writeFile(bridgePath, POWERSHELL_BRIDGE, { encoding:'utf8', flag:'wx', mode:0o600 });
+  const bridgeBytes = await fs.readFile(bridgePath);
+  const bridgeReadbackSha256 = createHash('sha256').update(bridgeBytes).digest('hex');
+  if (bridgeReadbackSha256 !== WINDOWS_COMPUTER_BRIDGE_SHA256) {
+    throw new Error('computer_executor_bridge_write_readback_mismatch');
+  }
 
   try {
     return await new Promise((resolve, reject) => {
       const child = spawn_impl(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', bridgePath],
         {
           windowsHide: true,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,
             METAENGINE_COMPUTER_REQUEST_PATH: requestPath,
@@ -958,7 +965,6 @@ export async function runFixedWindowsPowerShell(request, {
           finish(reject, new Error(diagnostic));
         }
       });
-      child.stdin.end(POWERSHELL_BRIDGE, 'utf8');
     });
   } finally {
     await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
@@ -1077,6 +1083,7 @@ export class WindowsLocalComputerExecutor {
       bridge_sha256: WINDOWS_COMPUTER_BRIDGE_SHA256,
       plane: computerAuthorityPlaneSnapshot(),
       executor_process_model: 'BOUNDED_FIXED_POWERSHELL_BRIDGE',
+      bridge_transport: 'HASH_VERIFIED_TEMP_SCRIPT',
       raw_shell_input: false,
       arbitrary_eval: false,
       automatic_retry_allowed: false,
