@@ -333,3 +333,9 @@ Computer Authority V2 typed-readback physical reservation (2026-10-05):
 - fresh repository search found no code, pull request or issue use of `0.7.0-dev.37330000001.1` before this reservation;
 - this atomic commit changes only package.json, the two package-lock root version fields, and this convergence checkpoint; runtime/authority source remains byte-identical to the terminal-green predecessor above;
 - Package Smoke remains the sole physical producer. Any new runtime/source change after this reservation retires `0.7.0-dev.37330000001.1` and requires a new monotonic identity; no blind retry, release, live install, scheduler authority, DB authority or promotion is authorized by this reservation.
+
+Computer Authority V2 persistent-bridge source-qualification re-arm (2026-10-05):
+- successor branch `work/computer-authority-plane-v2-persistent-bridge-r1` starts from fully physical-qualified source `5aebd807e81e40371e19459635fb392570fd1966` / package `0.7.0-dev.37340000001.1`;
+- inherited package identity `0.7.0-dev.37340000001.1` is consumed and MUST NOT be rebuilt for any successor source;
+- this re-arm changes no runtime authority or Computer action semantics; it only allows the dedicated source-only gate to verify the forthcoming persistent transport optimization;
+- any runtime change must remain source-only until a fresh exact-head qualification is green and a new monotonic package identity is reserved through the canonical physical producer line.
