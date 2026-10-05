@@ -309,3 +309,8 @@ Admission recovery no-replay successor (2026-10-03):
 - `a2-browser-native-supervisor-v1` deployment V11 preserves the V10 source except the exact `devos-routes.mjs` import pin, now bound to qualified source `6e859e109fe50e242859af5d2bd715d15afccb92`; the deployment is ACTIVE and existing signed heartbeat/command traffic remains healthy;
 - current authoritative workspace state remains CLOSED at generation floor 28; this source/package reservation does not reopen admission, promote an Agent, activate Guardian, dispatch a task, publish a release or install on the user machine;
 - fresh monotonic package reservation: `0.7.0-dev.37136054065.1`. It is physically unconsumed until Package Smoke creates its immutable reservation artifact. Move the physical branch only after this versioned source itself is source-qualified; then all ten physical workflows must consume the one Package Smoke installer at attempt 1.
+
+Computer Authority V2 typed-readback source qualification re-arm (2026-10-05):
+- successor branch `work/computer-authority-plane-v2-typed-readback-r1` is now included in the dedicated source-qualification workflow after the effect-proof / effect-barrier / visual-freshness stack;
+- the source gate must prove the exact current head before any fresh package identity is reserved; inherited `0.7.0-dev.37310000001.1` remains consumed and MUST NOT be reused for a physical build;
+- this metadata-only re-arm adds no runtime, scheduler, retry, DB, release, install, or authority effect.
