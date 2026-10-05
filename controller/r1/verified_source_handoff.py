@@ -25,13 +25,13 @@ EXPECTED_REPOSITORY = "PatrickFrome/Compute"
 EXPECTED_SOURCE_WORKFLOW_PATH = ".github/workflows/r1-live-recovery-source.yml"
 EXPECTED_SOURCE_BRANCH = "main"
 SOURCE_VERIFICATION_ARTIFACT_NAME = "r1-recovery-source-verification.json"
-SOURCE_VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v1"
+SOURCE_VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v2"
 SOURCE_VERIFICATION_CLASSIFICATION = "CRYPTOGRAPHICALLY_VERIFIED_RECOVERY_SOURCE_NONAUTHORITATIVE"
 SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME = "r1-source-environment-readiness.json"
 SOURCE_ENVIRONMENT_APPROVAL_ARTIFACT_NAME = "r1-source-environment-approval.json"
 SOURCE_ENVIRONMENT = "r1-recovery-source"
 PREFLIGHT_SCHEMA = "metaengine.compute.r1-live-two-domain-preflight.h205f22.v1"
-HANDOFF_SCHEMA = "metaengine.compute.r1-verified-source-handoff.h205f22.v1"
+HANDOFF_SCHEMA = "metaengine.compute.r1-verified-source-handoff.h205f22.v2"
 HANDOFF_CLASSIFICATION = "VERIFIED_SOURCE_HANDOFF_PROVIDER_ELIGIBILITY_NONAUTHORITATIVE"
 MAX_VERIFICATION_RECEIPT_BYTES = 1024 * 1024
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -205,8 +205,18 @@ def _validated_source_verification(value: Any, *, run_id: int, head_sha: str, ci
         raise HandoffError("final_r2_evidence_binding_requirement_missing")
     if value.get("authority_effect") is not False or value.get("r2_proven") is not False or value.get("r3_proven") is not False or value.get("persisted_seal_allowed") is not False:
         raise HandoffError("source_verification_authority_boundary_invalid")
-    for field in ("predicate_sha256", "canonical_digest_at_source", "migration_ledger_sha256"):
+    for field in (
+        "predicate_sha256",
+        "latest_checkpoint_id_at_source",
+        "latest_checkpoint_payload_sha256",
+        "checkpoint_ledger_sha256",
+        "roadmap_authority_sha256",
+        "migration_ledger_sha256",
+    ):
         _require_sha(value.get(field), field)
+    latest_source_sha = value.get("latest_checkpoint_source_parent_sha")
+    if not isinstance(latest_source_sha, str) or not SHA40.fullmatch(latest_source_sha):
+        raise HandoffError("latest_checkpoint_source_parent_sha_invalid")
 
     env_evidence = value.get("source_environment_evidence")
     if not isinstance(env_evidence, dict) or env_evidence.get("environment") != SOURCE_ENVIRONMENT:
@@ -230,8 +240,11 @@ def _validated_source_verification(value: Any, *, run_id: int, head_sha: str, ci
     return {
         "verification_receipt_sha256": receipt_sha,
         "predicate_sha256": value["predicate_sha256"],
-        "canonical_digest_at_source": value["canonical_digest_at_source"],
-        "semantic_head_at_source": value.get("semantic_head_at_source"),
+        "latest_checkpoint_id_at_source": value["latest_checkpoint_id_at_source"],
+        "latest_checkpoint_payload_sha256": value["latest_checkpoint_payload_sha256"],
+        "latest_checkpoint_source_parent_sha": latest_source_sha,
+        "checkpoint_ledger_sha256": value["checkpoint_ledger_sha256"],
+        "roadmap_authority_sha256": value["roadmap_authority_sha256"],
         "migration_ledger_sha256": value["migration_ledger_sha256"],
         "source_environment_readiness_artifact_id": readiness_artifact_id,
         "source_environment_readiness_sha256": readiness_sha,
@@ -283,8 +296,11 @@ def validate_handoff(*, preflight: Any, artifacts: Any, source_verification_arti
             "source_verification_artifact": artifact,
             "source_verification_receipt_sha256": sv["verification_receipt_sha256"],
             "predicate_sha256": sv["predicate_sha256"],
-            "semantic_head_at_source": sv["semantic_head_at_source"],
-            "canonical_digest_at_source": sv["canonical_digest_at_source"],
+            "latest_checkpoint_id_at_source": sv["latest_checkpoint_id_at_source"],
+            "latest_checkpoint_payload_sha256": sv["latest_checkpoint_payload_sha256"],
+            "latest_checkpoint_source_parent_sha": sv["latest_checkpoint_source_parent_sha"],
+            "checkpoint_ledger_sha256": sv["checkpoint_ledger_sha256"],
+            "roadmap_authority_sha256": sv["roadmap_authority_sha256"],
             "migration_ledger_sha256": sv["migration_ledger_sha256"],
             "source_environment_readiness_artifact_id": sv["source_environment_readiness_artifact_id"],
             "source_environment_readiness_sha256": sv["source_environment_readiness_sha256"],
