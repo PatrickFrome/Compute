@@ -53,6 +53,9 @@ test('computer authority plane exposes one DB lease authority and no second sche
   assert.equal(snapshot.multi_monitor_observation, true);
   assert.equal(snapshot.visual_pointer_requires_target_bound_window_capture, true);
   assert.equal(snapshot.visual_pointer_requires_unchanged_window_geometry, true);
+  assert.equal(snapshot.visual_pointer_requires_foreground_capture, true);
+  assert.equal(snapshot.visual_pointer_revalidates_pixels_after_cursor_move, true);
+  assert.equal(snapshot.visual_pointer_never_foregrounds_stale_frame, true);
   assert.equal(snapshot.effect_barrier_precedes_foreground_focus_pointer_side_effects, true);
   assert.equal(snapshot.dispatch_only_mutations_never_claim_effect_proven, true);
   assert.equal(snapshot.type_text_requires_value_readback_for_effect_proof, true);
