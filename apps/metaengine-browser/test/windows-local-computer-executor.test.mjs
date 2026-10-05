@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
+  runFixedWindowsPowerShell,
 } from '../src/windows-local-computer-executor.mjs';
-import { computerTargetIdentityDigest, normalizeComputerTargetIdentity } from '../src/computer-authority-plane.mjs';
+import {
+  computerTargetIdentityDigest,
+  normalizeComputerRequest,
+  normalizeComputerTargetIdentity,
+} from '../src/computer-authority-plane.mjs';
 
 const target = {
   machine_fingerprint_sha256:'a'.repeat(64),
@@ -46,6 +52,85 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   assert.match(WINDOWS_COMPUTER_BRIDGE_SHA256, /^[0-9a-f]{64}$/);
 });
 
+test('fixed Windows PowerShell bridge physically parses and serves STATUS', { skip: process.platform !== 'win32' }, async () => {
+  const result = await runFixedWindowsPowerShell(normalizeComputerRequest({ action:'STATUS' }), { timeout_ms:20000 });
+  assert.equal(result.ok, true);
+  assert.equal(result.effect_started, false);
+  assert.equal(result.schema, 'metaengine.windows-computer-executor.status.v1');
+  assert.equal(result.typed_actions_only, true);
+  assert.equal(result.arbitrary_shell, false);
+  assert.equal(result.raw_powershell_command_input, false);
+  assert.equal(result.authority_effect, false);
+});
+
+test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:30000 }, async () => {
+  const fixtureScript = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "Add-Type -AssemblyName System.Drawing",
+    "$form = [System.Windows.Forms.Form]::new()",
+    "$form.Text = 'METAENGINE Computer Capture Fixture'",
+    "$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual",
+    "$form.Location = [System.Drawing.Point]::new(80,80)",
+    "$form.Size = [System.Drawing.Size]::new(360,240)",
+    "$label = [System.Windows.Forms.Label]::new()",
+    "$label.Text = 'stable-pixel-fixture'",
+    "$label.AutoSize = $true",
+    "$label.Location = [System.Drawing.Point]::new(24,24)",
+    "$form.Controls.Add($label)",
+    "$form.Show()",
+    "[System.Windows.Forms.Application]::DoEvents()",
+    "[Console]::Out.WriteLine('READY')",
+    "[Console]::Out.Flush()",
+    "while ($true) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 20 }",
+  ].join('; ');
+  const child = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',fixtureScript], {
+    windowsHide:true,
+    stdio:['ignore','pipe','pipe'],
+  });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  child.stdout.setEncoding('utf8');
+
+  try {
+    await new Promise((resolve,reject) => {
+      const timer = setTimeout(() => reject(new Error('computer_fixture_ready_timeout:' + stderr.slice(-300))), 10000);
+      const onData = chunk => {
+        if (String(chunk).includes('READY')) {
+          clearTimeout(timer);
+          child.stdout.off('data', onData);
+          resolve();
+        }
+      };
+      child.stdout.on('data', onData);
+      child.once('error', error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
+    let identity = null;
+    for (let attempt=0; attempt<30 && !identity; attempt += 1) {
+      const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
+      identity = observed.result.windows.find(row => Number(row?.identity?.process_id) === child.pid)?.identity || null;
+      if (!identity) await new Promise(resolve => setTimeout(resolve,100));
+    }
+    assert.ok(identity, 'fixture window identity');
+
+    const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
+    assert.equal(capture.result.effect_started, false);
+    assert.match(capture.result.png_sha256, /^[0-9a-f]{64}$/);
+    assert.match(capture.result.pixel_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(typeof capture.result.foreground, 'boolean');
+    assert.equal(capture.result.geometry_stable, true);
+    assert.ok(capture.result.rect.width > 0);
+    assert.ok(capture.result.rect.height > 0);
+  } finally {
+    child.kill();
+  }
+});
+
 test('read-only observation carries no authority effect', async () => {
   const executor = new WindowsLocalComputerExecutor({
     platform:'win32',
@@ -82,6 +167,9 @@ test('V2 read-only computer observations include display and exact-window surfac
           effect_started:false,
           target,
           png_sha256:'e'.repeat(64),
+          pixel_sha256:'1'.repeat(64),
+          foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
@@ -181,6 +269,9 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
           ok:true,
           effect_started:false,
           png_sha256:'c'.repeat(64),
+          pixel_sha256:'2'.repeat(64),
+          foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
@@ -189,6 +280,9 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
       }
       physicalCalls += 1;
       assert.deepEqual(request.args.visual_fence.window_rect, { left:10, top:20, width:800, height:600 });
+      assert.equal(request.args.visual_fence.pixel_sha256, '2'.repeat(64));
+      assert.equal(request.args.visual_fence.foreground_at_capture, true);
+      assert.equal(request.args.visual_fence.geometry_stable_at_capture, true);
       return {
         ok:true,
         effect_started:true,
@@ -216,6 +310,110 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
   assert.equal(second.outcome, 'NO_EFFECT_PROVEN');
   assert.match(second.error, /computer_visual_frame_not_observed/);
   assert.equal(physicalCalls, 1);
+});
+
+test('background window capture cannot authorize visual pointer mutation', async () => {
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'8'.repeat(64),
+          pixel_sha256:'5'.repeat(64),
+          foreground:false,
+          geometry_stable:true,
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:false, authority_effect:false };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'8'.repeat(64) } },
+  }, contextFor('POINTER_CLICK'));
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_not_foreground_at_capture/);
+  assert.equal(physicalCalls, 0);
+});
+
+test('geometry-unstable window capture cannot authorize visual pointer mutation', async () => {
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'6'.repeat(64),
+          pixel_sha256:'6'.repeat(64),
+          foreground:true,
+          geometry_stable:false,
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:false, authority_effect:false };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'6'.repeat(64) } },
+  }, contextFor('POINTER_CLICK'));
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_geometry_unstable_at_capture/);
+  assert.equal(physicalCalls, 0);
+});
+
+test('window capture without raw pixel digest cannot authorize visual pointer mutation', async () => {
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'7'.repeat(64),
+          foreground:true,
+          geometry_stable:true,
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:false, authority_effect:false };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'7'.repeat(64) } },
+  }, contextFor('POINTER_CLICK'));
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_not_observed/);
+  assert.equal(physicalCalls, 0);
 });
 
 test('desktop capture cannot authorize a target-window pointer mutation', async () => {
@@ -265,6 +463,9 @@ test('window capture cannot be replayed against a different exact target', async
           ok:true,
           effect_started:false,
           png_sha256:'9'.repeat(64),
+          pixel_sha256:'3'.repeat(64),
+          foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },
@@ -299,6 +500,9 @@ test('stale visual capture is rejected before physical execution', async () => {
           ok:true,
           effect_started:false,
           png_sha256:'d'.repeat(64),
+          pixel_sha256:'4'.repeat(64),
+          foreground:true,
+          geometry_stable:true,
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           target,
           rect:{ left:10, top:20, width:800, height:600 },

@@ -256,6 +256,28 @@ function Resolve-ScrollAmount([string]$Value) {
   }
 }
 
+function Get-BitmapPixelSha256([System.Drawing.Bitmap]$Bitmap) {
+  $rect = [System.Drawing.Rectangle]::new(0,0,$Bitmap.Width,$Bitmap.Height)
+  $data = $Bitmap.LockBits(
+    $rect,
+    [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
+    [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+  )
+  try {
+    $length = [Math]::Abs([int]$data.Stride) * [int]$Bitmap.Height
+    $bytes = New-Object byte[] $length
+    [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0,$bytes,0,$length)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+      $sha.Dispose()
+    }
+  } finally {
+    $Bitmap.UnlockBits($data)
+  }
+}
+
 $requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
 if (-not $requestPath) { throw "computer_request_path_missing" }
 $request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
@@ -448,10 +470,13 @@ try {
       $identity = Assert-TargetIdentity $request.target
       $rect = Get-WindowRectForIdentity $identity
       if ($rect.width -le 0 -or $rect.height -le 0) { throw "computer_window_capture_bounds_invalid" }
-      $bitmap = New-Object System.Drawing.Bitmap $rect.width, $rect.height
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $foregroundBeforeCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      $bitmap = [System.Drawing.Bitmap]::new($rect.width,$rect.height,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
       try {
         $graphics.CopyFromScreen($rect.left, $rect.top, 0, 0, (New-Object System.Drawing.Size($rect.width, $rect.height)))
+        $pixelHash = Get-BitmapPixelSha256 $bitmap
         $dir = Join-Path ([System.IO.Path]::GetTempPath()) 'metaengine-computer-captures'
         [System.IO.Directory]::CreateDirectory($dir) | Out-Null
         $file = Join-Path $dir ("window-" + [Guid]::NewGuid().ToString('N') + ".png")
@@ -461,14 +486,26 @@ try {
         $bitmap.Dispose()
       }
       $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      $rectAfterCapture = Get-WindowRectForIdentity $identity
+      $foregroundAfterCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      $geometryStable = (
+        [int]$rectAfterCapture.left -eq [int]$rect.left -and
+        [int]$rectAfterCapture.top -eq [int]$rect.top -and
+        [int]$rectAfterCapture.width -eq [int]$rect.width -and
+        [int]$rectAfterCapture.height -eq [int]$rect.height
+      )
+      $foregroundStable = ($foregroundBeforeCapture -and $foregroundAfterCapture)
       Write-Result ([ordered]@{
         ok = $true
         effect_started = $false
         schema = 'metaengine.windows-computer-executor.window-capture.v1'
         target = $identity
         rect = $rect
+        foreground = $foregroundStable
+        geometry_stable = $geometryStable
         png_path = $file
         png_sha256 = $hash
+        pixel_sha256 = $pixelHash
         machine_fingerprint_sha256 = Get-MachineFingerprint
         authority_effect = $false
       })
@@ -748,11 +785,34 @@ try {
       $screenX = $rect.left + $x
       $screenY = $rect.top + $y
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_visual_foreground_drift" }
       $effectStarted = $true
-      if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
-      Start-Sleep -Milliseconds 40
-      if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
       if (-not [MetaengineWin32]::SetCursorPos($screenX, $screenY)) { throw "computer_pointer_position_failed" }
+
+      $currentRect = Get-WindowRectForIdentity $identity
+      if ([int]$capturedRect.left -ne [int]$currentRect.left -or
+          [int]$capturedRect.top -ne [int]$currentRect.top -or
+          [int]$capturedRect.width -ne [int]$currentRect.width -or
+          [int]$capturedRect.height -ne [int]$currentRect.height) {
+        throw "computer_visual_frame_geometry_drift_after_pointer_move"
+      }
+      $verifyBitmap = [System.Drawing.Bitmap]::new($currentRect.width,$currentRect.height,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+      $verifyGraphics = [System.Drawing.Graphics]::FromImage($verifyBitmap)
+      try {
+        $verifyGraphics.CopyFromScreen($currentRect.left,$currentRect.top,0,0,(New-Object System.Drawing.Size($currentRect.width,$currentRect.height)))
+        $currentPixelSha256 = Get-BitmapPixelSha256 $verifyBitmap
+      } finally {
+        $verifyGraphics.Dispose()
+        $verifyBitmap.Dispose()
+      }
+      if ([string]$currentPixelSha256 -ne [string]$request.args.visual_fence.pixel_sha256) {
+        throw "computer_visual_frame_changed_before_click"
+      }
+      $null = Assert-TargetIdentity $request.target
+      if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) {
+        throw "computer_visual_foreground_drift_before_click"
+      }
+
       [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
       [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
       $point = New-Object MetaengineWin32+POINT
@@ -910,12 +970,19 @@ export class WindowsLocalComputerExecutor {
       || rect.width <= 0
       || rect.height <= 0
     )) return false;
+    const pixelSha256 = request?.action === 'CAPTURE_WINDOW'
+      ? String(result?.pixel_sha256 || '').toLowerCase()
+      : null;
+    if (request?.action === 'CAPTURE_WINDOW' && !/^[0-9a-f]{64}$/.test(pixelSha256 || '')) return false;
     const now = Number(this.#clock());
     this.#visualFrames.set(hash, Object.freeze({
       observed_ms: now,
       machine_fingerprint_sha256: machine,
       target_identity_sha256: targetIdentitySha256,
       window_rect: rect,
+      pixel_sha256: pixelSha256,
+      foreground_at_capture: request?.action === 'CAPTURE_WINDOW' ? result?.foreground === true : false,
+      geometry_stable_at_capture: request?.action === 'CAPTURE_WINDOW' ? result?.geometry_stable === true : false,
     }));
     for (const [key, row] of this.#visualFrames) {
       if (now - Number(row.observed_ms || 0) > 10000) this.#visualFrames.delete(key);
@@ -949,6 +1016,18 @@ export class WindowsLocalComputerExecutor {
     if (!frame.window_rect) {
       this.#visualFrames.delete(hash);
       return { ok:false, reason:'computer_visual_frame_geometry_unbound' };
+    }
+    if (!frame.foreground_at_capture) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_not_foreground_at_capture' };
+    }
+    if (!frame.geometry_stable_at_capture) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_geometry_unstable_at_capture' };
+    }
+    if (!/^[0-9a-f]{64}$/.test(String(frame.pixel_sha256 || ''))) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_pixel_digest_unbound' };
     }
     this.#visualFrames.delete(hash);
     return { ok:true, frame };
@@ -1031,6 +1110,9 @@ export class WindowsLocalComputerExecutor {
           visual_fence:Object.freeze({
             ...request.args.visual_fence,
             window_rect:visualFence.frame.window_rect,
+            pixel_sha256:visualFence.frame.pixel_sha256,
+            foreground_at_capture:true,
+            geometry_stable_at_capture:true,
           }),
         }),
       });

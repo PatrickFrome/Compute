@@ -72,6 +72,31 @@ test('Computer V2 crosses the ambiguity barrier before foreground, focus or poin
   assert.ok(plane.includes('effect_barrier_precedes_foreground_focus_pointer_side_effects: true'));
 });
 
+test('Computer V2 visual click never brings a stale frame to foreground and revalidates raw pixels', () => {
+  const start = executor.indexOf("    'POINTER_CLICK' {");
+  const end = executor.indexOf("\n    default {", start);
+  const block = executor.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(block.includes('computer_visual_foreground_drift'));
+  assert.equal(block.includes('SetForegroundWindow'), false);
+  assert.ok(block.includes('Get-BitmapPixelSha256'));
+  assert.ok(block.includes('computer_visual_frame_changed_before_click'));
+  assert.ok(block.includes('computer_visual_frame_geometry_drift_after_pointer_move'));
+  assert.ok(block.includes('computer_visual_foreground_drift_before_click'));
+  const pixelFence = block.indexOf('computer_visual_frame_changed_before_click');
+  const finalTargetFence = block.lastIndexOf('Assert-TargetIdentity $request.target');
+  const mouseDown = block.indexOf('mouse_event(0x0002');
+  assert.ok(pixelFence >= 0 && finalTargetFence > pixelFence && mouseDown > finalTargetFence);
+  assert.ok(executor.includes('foreground = $foregroundStable'));
+  assert.ok(executor.includes('geometry_stable = $geometryStable'));
+  assert.ok(executor.includes('pixel_sha256 = $pixelHash'));
+  assert.ok(plane.includes('visual_pointer_requires_foreground_capture: true'));
+  assert.ok(plane.includes('visual_capture_requires_stable_foreground_geometry: true'));
+  assert.ok(plane.includes('visual_pointer_revalidates_pixels_after_cursor_move: true'));
+  assert.ok(plane.includes('visual_pointer_revalidates_target_and_foreground_before_mouse_down: true'));
+  assert.ok(plane.includes('visual_pointer_never_foregrounds_stale_frame: true'));
+});
+
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
   for (const action of [
     'OBSERVE_DISPLAYS','FOREGROUND_STATUS','CAPTURE_WINDOW',
