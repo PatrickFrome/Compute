@@ -131,12 +131,11 @@ public static class MetaengineWin32 {
     }
   }
 
-  public static string GetProcessImageSha256(uint processId) {
-    var imagePath = GetProcessImagePath(processId);
-    if (String.IsNullOrWhiteSpace(imagePath)) return null;
+  public static string GetFileSha256(string filePath) {
+    if (String.IsNullOrWhiteSpace(filePath)) return null;
     try {
       using (var stream = new FileStream(
-        imagePath,
+        filePath,
         FileMode.Open,
         FileAccess.Read,
         FileShare.ReadWrite | FileShare.Delete
@@ -151,6 +150,10 @@ public static class MetaengineWin32 {
     } catch {
       return null;
     }
+  }
+
+  public static string GetProcessImageSha256(uint processId) {
+    return GetFileSha256(GetProcessImagePath(processId));
   }
 
   const uint INPUT_KEYBOARD = 1;
@@ -224,7 +227,7 @@ function Get-ProcessIdentity([int]$ProcessId) {
       try { $exePath = [MetaengineWin32]::GetProcessImagePath([UInt32]$p.Id) } catch {}
     }
     if ($exePath) {
-      try { $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant() } catch {}
+      try { $exeHash = [MetaengineWin32]::GetFileSha256([string]$exePath) } catch {}
     }
   }
   if (-not $exeHash) { throw "computer_target_executable_hash_unavailable" }
@@ -549,7 +552,8 @@ try {
         $graphics.Dispose()
         $bitmap.Dispose()
       }
-      $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      $hash = [MetaengineWin32]::GetFileSha256([string]$file)
+      if (-not $hash) { throw "computer_capture_hash_unavailable" }
       Write-Result ([ordered]@{
         ok = $true
         effect_started = $false
@@ -585,7 +589,8 @@ try {
         $graphics.Dispose()
         $bitmap.Dispose()
       }
-      $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      $hash = [MetaengineWin32]::GetFileSha256([string]$file)
+      if (-not $hash) { throw "computer_capture_hash_unavailable" }
       $rectAfterCapture = Get-WindowRectForIdentity $identity
       $foregroundAfterCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
       $geometryStable = (
