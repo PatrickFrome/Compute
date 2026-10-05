@@ -1,0 +1,232 @@
+{
+  "schema": "metaengine.client.continuation-audit.v2",
+  "status": "LOCAL_ACTION_TARGET_PROOF_VALIDATED_DB_SIGNATURES_COMPATIBLE_SQL_SYNC_BLOCKED",
+  "audit_date": "2026-10-05",
+  "last_live_read_at": "2026-10-05T16:28:34.711Z",
+  "previous_checkpoint": "evidence/metaengine-client/checkpoint-typed-readback-v1.json",
+  "database_checkpoint": "evidence/metaengine-client/database-sync-checkpoint.json",
+  "scope": {
+    "repository": "PatrickFrome/Compute",
+    "native_client": "apps/metaengine-browser",
+    "workspace": "Separate Next.js integration surface with an imported native source slice, not a complete Electron checkout.",
+    "supabase_project_ref": "jhriwwsryeqsvvvufkok",
+    "connector_uid": "supabase",
+    "connector_name": "coffee-house",
+    "connector_subject": "app",
+    "new_resources_created": false
+  },
+  "github": {
+    "heads_read_at": "2026-10-05T16:23:40.435Z",
+    "main_sha": "b26f2d4693e7bab3648e0930b7a9e2c75baef58e",
+    "devos_integration_sha": "b69f6629ddc696daf19c122f8c0a3e7a9be44f63",
+    "native_source": {
+      "pull_request": 1116,
+      "branch": "work/computer-authority-plane-v2-typed-readback-r1",
+      "sha": "b5689a915ef578f0629322e33309824efb422fb2",
+      "state": "open",
+      "merged": false,
+      "package_version": "0.7.0-dev.37330000001.1",
+      "baseline_git_blobs_verified_before_edit": {
+        "src/computer-authority-plane.mjs": "f7fdc42ebc135b0c9ecc58010454497cf07dbd23",
+        "src/windows-local-computer-executor.mjs": "c0d4275fa64a6517c6a7dcc199b8bc9834daa20e",
+        "test/computer-authority-plane.test.mjs": "13c4220a94607b35e2a6c1a9bca77c81ec315022",
+        "test/windows-local-computer-executor.test.mjs": "b0ba99668ce50890c6279c264a92ce7a54d84e85"
+      }
+    },
+    "base_source_qualification": {
+      "run_id": 37302926312,
+      "read_at": "2026-10-05T16:25:35.053Z",
+      "ubuntu_24_04": "success",
+      "windows_2025": "success",
+      "applies_to": "Unmodified b5689a915ef578f0629322e33309824efb422fb2 only, not the local patch."
+    },
+    "package_blocker": {
+      "run_id": 37322001711,
+      "read_at": "2026-10-05T16:25:34.926Z",
+      "preflight": "success",
+      "package_smoke": "failure",
+      "failed_step": "Refuse duplicate source/version physical build",
+      "provenance_verification": "skipped",
+      "reservation_reused_or_deleted": false,
+      "new_identity_reserved": false
+    },
+    "performance_sibling": {
+      "pull_request": 1108,
+      "sha": "3a15f423267a5d10ec780f4d0fcf161e27af9dc6",
+      "state": "open",
+      "semantic_convergence": "pending; do not bulk merge or silently discard the unique persistent-bridge and richer-action capabilities"
+    },
+    "guardian_convergence": "Pending semantic convergence of the integration safety changes; no merge performed."
+  },
+  "supabase": {
+    "project_read_at": "2026-10-05T16:23:40.624Z",
+    "status": "ACTIVE_HEALTHY",
+    "region": "eu-central-1",
+    "schema_read_at": "2026-10-05T16:28:34.711Z",
+    "inspected_schemas": ["public", "destruktion_meta"],
+    "generated_type_table_count": 23,
+    "generated_type_table_counts": { "public": 16, "destruktion_meta": 7 },
+    "rpc_presence_confirmed": [
+      "h205f22_a2_browser_supervisor_issue_computer_v1",
+      "h205f22_a2_browser_supervisor_complete_v7",
+      "h205f22_a2_browser_supervisor_complete_batch_v1",
+      "h205f22_a2_browser_supervisor_bind_effect_v1",
+      "devos_runtime_capabilities_v1"
+    ],
+    "rpc_presence_is_not_implementation_or_execution_proof": true,
+    "public_rpc_signatures": "Five exact name/argument-type/optionality/return contracts matched using the TypeScript AST of the live generated schema.",
+    "synchronization_status": "PUBLIC_RPC_SIGNATURES_COMPATIBLE_FULL_LIVE_SYNC_BLOCKED_SQL_MCP_UNAVAILABLE",
+    "types_sha256": "b317055abec0f16e8aedcdc1dbbdfc1a71939b3005fda171a362394f8421dc6c",
+    "migration_metadata_sha256": "346c21f2900574d62c57bb5b284abc093b09a8dbef20e06457f1bae65d464fa9",
+    "migration_ledger_read_at": "2026-10-05T16:28:32.174Z",
+    "migration_count": 78,
+    "computer_ledger_entries": [
+      { "version": "20261005061108", "name": "browser_computer_authority_plane_v1_live_convergence" },
+      { "version": "20261005072701", "name": "browser_computer_authority_plane_v2_fast_actions_live_convergence" },
+      { "version": "20261005072852", "name": "browser_computer_authority_plane_v2_fast_actions_live_convergence" }
+    ],
+    "postgrest": {
+      "read_at": "2026-10-05T16:23:41.070Z",
+      "db_schema": "public,graphql_public",
+      "db_extra_search_path": "public, extensions",
+      "max_rows": 1000,
+      "private_schema_not_directly_exposed": true
+    },
+    "edge_metadata_read_at": "2026-10-05T16:23:40.972Z",
+    "active_edge_functions": [
+      { "slug": "a2-browser-native-supervisor-v14-canary", "version": 29, "verify_jwt": false },
+      { "slug": "a2-browser-native-supervisor-v1", "version": 11, "verify_jwt": false },
+      { "slug": "metaengine-client-installed-qualification-h205f22", "version": 8, "verify_jwt": false },
+      { "slug": "a2-chat-bridge-remote", "version": 2, "verify_jwt": false },
+      { "slug": "a2-browser-native-supervisor-v11-rollback-snapshot", "version": 1, "verify_jwt": false }
+    ],
+    "edge_auth_caveat": "verify_jwt=false is configuration, not proof of an unauthenticated vulnerability. Deployed custom device-auth implementation was not independently verified.",
+    "security_advisor": {
+      "read_at": "2026-10-05T16:05:25.953Z",
+      "info_rls_enabled_no_policy": 20,
+      "interpretation": "Default deny can be intentional for an RPC-only control plane. Do not add permissive policies to silence the advisor."
+    },
+    "performance_advisor": {
+      "read_at": "2026-10-05T16:15:25.992Z",
+      "info_unindexed_foreign_keys": 1,
+      "info_unused_indexes": 5,
+      "indexes_modified": false
+    },
+    "configuration_to_review": {
+      "auth_read_at": "2026-10-05T16:15:24.931Z",
+      "password_min_length": 6,
+      "site_url": "http://localhost:3000",
+      "uri_allow_list": "",
+      "email_confirmation_required": true,
+      "captcha_enabled": false,
+      "network_read_at": "2026-10-05T16:15:24.641Z",
+      "ipv4_allowed_cidrs": ["0.0.0.0/0"],
+      "ipv6_allowed_cidrs": ["::/0"],
+      "ssl_read_at": "2026-10-05T16:06:21.686Z",
+      "database_ssl_enforced": false,
+      "changed_here": false
+    },
+    "unverified": [
+      "Detailed live RPC definitions, grants and SECURITY DEFINER search paths; Supabase SQL MCP is unavailable in this chat.",
+      "Exact deployed visual-fence logic and Edge source binding.",
+      "User-installed executable SHA, runtime generation and Browser/Guardian/Supervisor heartbeat freshness.",
+      "Live task, claim and actuation-lease state; no private row data was fetched."
+    ]
+  },
+  "native_patch": {
+    "status": "LOCAL_NOT_COMMITTED_NOT_PUSHED_NOT_RELEASED",
+    "finding": "The prior patch fixed generic typed-readback admission, but positive proof still ignored the bridge's returned action and post-effect target. A valid-looking readback from another executable/window/session/generation was reproducibly admitted as EFFECT_PROVEN.",
+    "previous_finding": "The Windows executor already checked typed readback, but receipt projection trusted the caller's outcome. The original unit test admitted EFFECT_PROVEN with only {readback:true}.",
+    "changes": [
+      "One shared action-specific typed-readback predicate used by executor and receipt projection.",
+      "Positive proof additionally requires the fixed bridge effect schema and the exact returned action, including when different actions share UIA_VALUE_EXACT.",
+      "The recorded post-effect target is normalized and hashed; all seven identity fields must match the validated request target and declared request digest.",
+      "Missing/malformed identity, mismatched action, executable SHA or generation become AMBIGUOUS_NO_RETRY without a second physical dispatch.",
+      "Receipt projection revalidates the typed request, DB-lease binding and exact target identity.",
+      "Unsupported positive proof is downgraded to AMBIGUOUS_NO_RETRY; delivery-only invoke/key/pointer never becomes semantic proof.",
+      "NO_EFFECT_PROVEN requires an explicit boolean effect_started:false in recorded evidence.",
+      "Local visual-fence rejection records the pre-effect boundary without dispatch.",
+      "No automatic replay, new scheduler, arbitrary shell or eval introduced."
+    ],
+    "modified_native_files": [
+      "apps/metaengine-browser/src/computer-authority-plane.mjs",
+      "apps/metaengine-browser/src/windows-local-computer-executor.mjs",
+      "apps/metaengine-browser/test/computer-authority-plane.test.mjs",
+      "apps/metaengine-browser/test/computer-authority-plane-v2-contract.test.mjs",
+      "apps/metaengine-browser/test/windows-local-computer-executor.test.mjs"
+    ],
+    "new_native_test": "apps/metaengine-browser/test/computer-effect-receipt-proof.test.mjs",
+    "fixed_powershell_bridge_unchanged": true,
+    "fixed_powershell_bridge_sha256": "38aed55c7e0cf1f9327ff1d6470988864b86a4900b8df49ed06dba1db4a1bb01",
+    "source_sql_copied_for_static_contract_tests_only": [
+      "supabase/migrations/20261005110000_browser_computer_authority_plane_v2_fast_actions.sql",
+      "supabase/migrations/20261005123000_browser_computer_visual_fence_target_binding_v1.sql"
+    ],
+    "source_sql_applied_here": false
+  },
+  "validation": {
+    "platform": "Linux",
+    "node": "v24.16.0",
+    "verified_at": "2026-10-05T16:29:31.529Z",
+    "pre_fix_adversarial_regressions": "Failed as expected: drifted positive readback was incorrectly admitted as EFFECT_PROVEN.",
+    "proof_boundary_tests_passed": 93,
+    "native_tests": { "total": 146, "passed": 144, "failed": 0, "skipped": 2 },
+    "new_tests_since_previous_checkpoint": 37,
+    "skipped_tests": [
+      "fixed Windows PowerShell bridge physically parses and serves STATUS",
+      "fixed Windows bridge physically captures an exact window with raw pixel digest"
+    ],
+    "connection_tests": "Not rerun this turn: connection code is unchanged. Previous checkpoint records 28 passed.",
+    "typescript_no_emit": "Not rerun this turn: no TypeScript code changed. Previous checkpoint records a pass.",
+    "repository_source_check": {
+      "syntax_checks_passed": 148,
+      "method": "Execute every node --check command from the exact repository scripts.check; use the patched workspace files for the two modified source modules and the unchanged exact-SHA checkout for the other files."
+    },
+    "fixed_powershell_bridge_digest": "verified_unchanged",
+    "tracked_diff_whitespace_check": "passed",
+    "new_source_windows_ci": "not_run",
+    "electron_installed_runtime_matrix": "not_run",
+    "physical_windows_verification": "not_run",
+    "qualification_limit": "Local source-slice unit and syntax evidence only; not full Electron source/package/installed-runtime qualification."
+  },
+  "next_release_gate": [
+    "Review and publish the source patch only after explicit approval of the remote mutation.",
+    "Qualify the new exact source SHA on Ubuntu and Windows; the old green run does not qualify this patch.",
+    "Search collisions and reserve a fresh monotonic immutable package identity only after terminal-green source qualification.",
+    "Package and run the installed-runtime matrix using one verified installer digest and provenance.",
+    "Obtain direct user-installed live readback before claiming or changing the user's machine."
+  ],
+  "local_patch_manifest": {
+    "verified_at": "2026-10-05T16:31:57.955Z",
+    "base_source_sha": "b5689a915ef578f0629322e33309824efb422fb2",
+    "content_manifest_sha256": "40b5e5c9583ddee51b937c916d839cea2abe8765cb5bb9ec2e93af8361b8f4a6",
+    "hash_material": "JSON.stringify({base_source_sha,files}), with files lexicographically sorted by path and each item encoded as {path,sha256}.",
+    "files": [
+      { "path": "apps/metaengine-browser/src/computer-authority-plane.mjs", "sha256": "03c65d34d69a133ae645036c2c548b05a283a62af5febb7fb9924fadb0e574ba" },
+      { "path": "apps/metaengine-browser/src/windows-local-computer-executor.mjs", "sha256": "0cf6afb482573c4aef1592240fb9a6429d4dfaa3d64dec144c9e98d0d8282947" },
+      { "path": "apps/metaengine-browser/test/computer-authority-plane-v2-contract.test.mjs", "sha256": "93236f50545f09c5a7124035a3283df1535a7cdf90a161c8a1cd7ff64fff86c3" },
+      { "path": "apps/metaengine-browser/test/computer-authority-plane.test.mjs", "sha256": "e721ff0d5e30bf0bda97a2fc8835d647e46ae14c84e702c6a24e252a952ae337" },
+      { "path": "apps/metaengine-browser/test/computer-effect-receipt-proof.test.mjs", "sha256": "f954a0f31f7ca80231422c0b358dadbda53107442ec6c95ec35705f11a2fabb2" },
+      { "path": "apps/metaengine-browser/test/windows-local-computer-executor.test.mjs", "sha256": "8ffb05741c7151f8f8f6c449676f185ddba4fa8dff6c39c29a03edce86e910a4" }
+    ]
+  },
+  "research": [
+    {
+      "source": "https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getruntimeid",
+      "finding": "UIA RuntimeId is desktop-local, opaque and reusable over time. It is not a substitute for the exact machine/session/process-incarnation/window/executable/generation binding."
+    },
+    {
+      "source": "https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.automationelement.getruntimeid?view=windowsdesktop-9.0",
+      "finding": "A UIA element can disappear and GetRuntimeId can throw ElementNotAvailableException. Missing/malformed post-effect evidence must not become semantic success or proof of no effect."
+    },
+    {
+      "source": "https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.valuepattern.setvalue?view=windowsdesktop-9.0",
+      "finding": "ValuePattern is a control capability, not a generic transport success proof; unsupported/read-only controls and absent value readback must preserve conservative outcomes."
+    }
+  ],
+  "trust_limit": "The fixed hash-verified bridge remains the runner trust boundary. Matching envelope/schema strings are necessary consistency checks, not cryptographic authentication of arbitrary caller-supplied evidence.",
+  "remote_mutations_performed": false,
+  "database_mutations_performed": false,
+  "deployment_performed": false,
+  "user_machine_changed": false
+}

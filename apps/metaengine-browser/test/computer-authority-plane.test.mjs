@@ -61,6 +61,12 @@ test('computer authority plane exposes one DB lease authority and no second sche
   assert.equal(snapshot.effect_barrier_precedes_foreground_focus_pointer_side_effects, true);
   assert.equal(snapshot.dispatch_only_mutations_never_claim_effect_proven, true);
   assert.equal(snapshot.type_text_requires_value_readback_for_effect_proof, true);
+  assert.equal(snapshot.effect_readback_requires_fixed_bridge_schema, true);
+  assert.equal(snapshot.effect_readback_requires_exact_action, true);
+  assert.equal(snapshot.effect_readback_requires_exact_target_identity, true);
+  assert.equal(snapshot.effect_readback_requires_native_identity_field_types, true);
+  assert.equal(snapshot.sealed_request_binding_is_immutable, true);
+  assert.equal(snapshot.effect_receipt_evidence_is_immutable, true);
 });
 
 test('read-only and mutating computer actions are explicitly classified', () => {
@@ -175,6 +181,18 @@ test('unknown or ambiguous effect receipts never authorize automatic retry', () 
   const ambiguous = projectComputerEffectReceipt({ request, outcome:'AMBIGUOUS_NO_RETRY', error:'readback missing' });
   assert.equal(ambiguous.authority_effect, false);
   assert.equal(ambiguous.automatic_retry_allowed, false);
-  const proven = projectComputerEffectReceipt({ request, outcome:'EFFECT_PROVEN', result:{ readback:true } });
+  const proven = projectComputerEffectReceipt({
+    request,
+    outcome:'EFFECT_PROVEN',
+    result:{
+      schema:'metaengine.windows-computer-executor.effect.v1',
+      action:request.action,
+      target:request.target,
+      ok:true,
+      effect_started:true,
+      readback_proven:true,
+      readback_kind:'UIA_VALUE_EXACT',
+    },
+  });
   assert.equal(proven.authority_effect, true);
 });

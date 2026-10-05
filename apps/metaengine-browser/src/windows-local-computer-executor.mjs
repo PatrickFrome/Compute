@@ -6,33 +6,13 @@ import path from 'node:path';
 import {
   computerAuthorityPlaneSnapshot,
   computerTargetIdentityDigest,
+  hasAdmissibleEffectReadback,
   normalizeComputerRequest,
   projectComputerEffectReceipt,
 } from './computer-authority-plane.mjs';
 
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15000;
-
-const EFFECT_READBACK_KIND_BY_ACTION = Object.freeze({
-  UIA_FOCUS: 'UIA_FOCUS_EXACT',
-  UIA_SET_VALUE: 'UIA_VALUE_EXACT',
-  UIA_TOGGLE: 'UIA_TOGGLE_STATE_CHANGED',
-  UIA_SELECT: 'UIA_SELECTION_EXACT',
-  UIA_EXPAND_COLLAPSE: 'UIA_EXPAND_STATE_EXACT',
-  UIA_SCROLL: 'UIA_SCROLL_PERCENT_CHANGED',
-  TYPE_TEXT: 'UIA_VALUE_EXACT',
-});
-
-function hasAdmissibleEffectReadback(request, result) {
-  const expectedKind = EFFECT_READBACK_KIND_BY_ACTION[request?.action];
-  return Boolean(
-    expectedKind
-    && result?.ok === true
-    && result?.effect_started === true
-    && result?.readback_proven === true
-    && result?.readback_kind === expectedKind
-  );
-}
 
 const POWERSHELL_BRIDGE = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -1224,6 +1204,13 @@ export class WindowsLocalComputerExecutor {
     if (!visualFence.ok) {
       return projectComputerEffectReceipt({
         request,
+        result: {
+          schema: 'metaengine.windows-computer-executor.pre-effect.v1',
+          action: request.action,
+          ok: false,
+          effect_started: false,
+          authority_effect: false,
+        },
         outcome: 'NO_EFFECT_PROVEN',
         error: visualFence.reason,
       });

@@ -58,6 +58,19 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes("readback_kind = 'DELIVERY_ONLY'"));
 });
 
+test('executor and receipt projection share one typed readback policy', () => {
+  assert.ok(plane.includes('export function hasAdmissibleEffectReadback(request, result)'));
+  assert.ok(plane.includes('!hasAdmissibleEffectReadback(validatedRequest, projectedResult)'));
+  assert.ok(plane.includes('effect_readback_requires_fixed_bridge_schema: true'));
+  assert.ok(plane.includes('effect_readback_requires_exact_action: true'));
+  assert.ok(plane.includes('effect_readback_requires_exact_target_identity: true'));
+  assert.ok(plane.includes('projectedResult.effect_started !== false'));
+  assert.ok(executor.includes('  hasAdmissibleEffectReadback,'));
+  assert.equal(executor.includes('function hasAdmissibleEffectReadback('), false);
+  assert.equal(executor.includes('const EFFECT_READBACK_KIND_BY_ACTION'), false);
+  assert.ok(executor.includes("schema: 'metaengine.windows-computer-executor.pre-effect.v1'"));
+});
+
 test('Computer V2 does not confuse dispatch confirmation with effect proof', () => {
   const actionBlock = (action) => {
     const start = executor.indexOf("    '" + action + "' {");
