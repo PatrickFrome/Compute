@@ -128,7 +128,15 @@ public static class MetaengineWin32 {
 "@
 
 function Get-MachineFingerprint {
-  $material = "$($env:COMPUTERNAME)|windows"
+  $machineGuid = $null
+  try {
+    $machineGuid = [Microsoft.Win32.Registry]::GetValue(
+      'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography',
+      'MachineGuid',
+      $null
+    )
+  } catch {}
+  $material = "$($env:COMPUTERNAME)|windows|$([string]$machineGuid)"
   return Sha256-String $material
 }
 
@@ -334,6 +342,7 @@ try {
         height = [int]$screen.Height
         png_path = $file
         png_sha256 = $hash
+        machine_fingerprint_sha256 = Get-MachineFingerprint
         authority_effect = $false
       })
       break
@@ -384,21 +393,37 @@ try {
 
     'TYPE_TEXT' {
       $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
       if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
       Start-Sleep -Milliseconds 40
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
+      $element.SetFocus()
+      Start-Sleep -Milliseconds 20
+      $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+      $focusProven = $false
+      if ($focused) {
+        try { $focusProven = RuntimeId-Equal $focused.GetRuntimeId() @($request.args.runtime_id) } catch {}
+      }
+      if (-not $focusProven) { throw "computer_type_exact_focus_not_proven" }
       $effectStarted = $true
+      if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
       if (-not [MetaengineWin32]::SendUnicode([string]$request.args.text)) { throw "computer_unicode_input_failed" }
+      $focusedAfter = [System.Windows.Automation.AutomationElement]::FocusedElement
+      $readback = $false
+      if ($focusedAfter) {
+        try { $readback = RuntimeId-Equal $focusedAfter.GetRuntimeId() @($request.args.runtime_id) } catch {}
+      }
       $after = Get-ProcessIdentity ([int]$identity.process_id)
       Write-Result ([ordered]@{
-        ok = $true
+        ok = $readback
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $true
+        readback_proven = $readback
         action = 'TYPE_TEXT'
+        exact_uia_focus = $readback
         target = $after
-        authority_effect = $true
+        authority_effect = $readback
       })
       break
     }
@@ -571,14 +596,50 @@ export async function runFixedWindowsPowerShell(request, {
 export class WindowsLocalComputerExecutor {
   #platform;
   #runner;
+  #clock;
+  #visualFrames = new Map();
 
   constructor({
     platform = process.platform,
     runner = runFixedWindowsPowerShell,
+    clock = Date.now,
   } = {}) {
     this.#platform = String(platform);
     if (typeof runner !== 'function') throw new Error('computer_executor_runner_required');
+    if (typeof clock !== 'function') throw new Error('computer_executor_clock_required');
     this.#runner = runner;
+    this.#clock = clock;
+  }
+
+  #rememberVisualFrame(result) {
+    const hash = String(result?.png_sha256 || '').toLowerCase();
+    const machine = String(result?.machine_fingerprint_sha256 || '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(hash) || !/^[0-9a-f]{64}$/.test(machine)) return false;
+    const now = Number(this.#clock());
+    this.#visualFrames.set(hash, Object.freeze({ observed_ms: now, machine_fingerprint_sha256: machine }));
+    for (const [key, row] of this.#visualFrames) {
+      if (now - Number(row.observed_ms || 0) > 10000) this.#visualFrames.delete(key);
+    }
+    while (this.#visualFrames.size > 16) this.#visualFrames.delete(this.#visualFrames.keys().next().value);
+    return true;
+  }
+
+  #consumeVisualFence(request) {
+    if (request?.action !== 'POINTER_CLICK') return { ok:true };
+    const hash = String(request?.args?.visual_fence?.frame_sha256 || '').toLowerCase();
+    const frame = this.#visualFrames.get(hash);
+    if (!frame) return { ok:false, reason:'computer_visual_frame_not_observed' };
+    const age = Number(this.#clock()) - Number(frame.observed_ms || 0);
+    if (!Number.isFinite(age) || age < 0 || age > Number(request.args.visual_fence.max_age_ms || 3000)) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_stale' };
+    }
+    if (frame.machine_fingerprint_sha256 !== request.target?.machine_fingerprint_sha256) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_machine_mismatch' };
+    }
+    this.#visualFrames.delete(hash);
+    return { ok:true };
   }
 
   snapshot() {
@@ -611,6 +672,7 @@ export class WindowsLocalComputerExecutor {
     if (request.mutating) throw new Error('computer_observe_mutation_forbidden');
     const result = await this.#runner(request);
     if (result?.ok !== true) throw new Error(String(result?.error || 'computer_observe_failed'));
+    if (request.action === 'CAPTURE_DESKTOP') this.#rememberVisualFrame(result);
     return Object.freeze({
       schema: 'metaengine.computer-observation.v1',
       request,
@@ -623,6 +685,18 @@ export class WindowsLocalComputerExecutor {
     if (this.#platform !== 'win32') throw new Error('computer_executor_windows_required');
     const request = normalizeComputerRequest(input, context);
     if (!request.mutating) throw new Error('computer_act_read_only_forbidden');
+
+    const visualFence = this.#consumeVisualFence(request);
+    if (!visualFence.ok) {
+      return projectComputerEffectReceipt({
+        request,
+        outcome: 'NO_EFFECT_PROVEN',
+        error: visualFence.reason,
+      });
+    }
+
+    // Any physical effect can invalidate a previous screen observation.
+    this.#visualFrames.clear();
 
     let result;
     try {
