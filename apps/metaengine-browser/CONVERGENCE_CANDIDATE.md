@@ -1,5 +1,13 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37270000001.1`.
+
+Atomic Computer Authority Plane physical reservation (2026-10-05):
+- exact runtime/source predecessor `fd93231d2704320353747948092274859cc05ca7` is terminal-green in Browser Agent Result Installer Source Qualification run `37269153179` on Ubuntu and Windows; full Browser regression, Root Transport, OpenAI/ME2 contracts, Windows R97 visual source proof, SLSA/source-only checks and exact-source readback all passed;
+- predecessor package identity `0.7.0-dev.37230000001.1` is already immutably reserved by producer run `37205884480` for source `8c216ee0c67b247c7d80253836de2948d386aae4` and MUST NOT be rebuilt or relabelled; PR Package Smoke correctly fail-closed with `PACKAGE_IDENTITY_VERSION_ALREADY_RESERVED`;
+- this successor changes package.json, both package-lock version fields and this convergence reservation in ONE Git commit; runtime source is otherwise unchanged from the terminal-green predecessor above;
+- Package Smoke remains the sole physical producer. Every Installed Chat / Final Runtime / Dirty Profile / Autonomous Soak / Self Update consumer must bind the same exact source head, version and installer digest;
+- live Supabase migration/deployment and production promotion remain closed until the new exact-head package is terminal-green and Computer Authority Plane runtime evidence is proven on Windows.
 Reserved package identity is `0.7.0-dev.37230000001.1`.
 
 Atomic Root Transport contract correction and fresh physical reservation (2026-10-04):
