@@ -11,8 +11,8 @@ mod = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(mod)
 
-PROJECT_REF = "xpeibufgzjknrhbhpffp"
-SEMANTIC_HEAD = "metaengine-h205f22-recovery-dev-20260821-cp072"
+PROJECT_REF = "jhriwwsryeqsvvvufkok"
+SOURCE_CHECKPOINT_ID = "1" * 64
 GIT_SHA = "a" * 40
 SNAPSHOT_AT = "2026-08-21T15:00:00+00:00"
 
@@ -49,7 +49,7 @@ def build(root: Path, inputs, *, storage=False, suffix="a"):
     output_receipt = root / f"receipt-{suffix}.json"
     receipt = mod.build_bundle(
         project_ref=PROJECT_REF,
-        semantic_head=SEMANTIC_HEAD,
+        source_checkpoint_id=SOURCE_CHECKPOINT_ID,
         source_git_sha=GIT_SHA,
         snapshot_at=SNAPSHOT_AT,
         inputs=inputs,
@@ -115,6 +115,8 @@ class RecoveryArtifactPackagerTests(unittest.TestCase):
             tar_path, _, receipt = build(root, make_inputs(root))
             with tarfile.open(tar_path, "r") as tf:
                 manifest = json.load(tf.extractfile("MANIFEST.json"))
+            self.assertEqual(manifest["schema"], "metaengine.compute.r1-recovery-bundle-manifest.h205f22.v2")
+            self.assertEqual(manifest["source_checkpoint_id"], SOURCE_CHECKPOINT_ID)
             self.assertFalse(manifest["storage"]["storage_api_objects_included"])
             self.assertEqual(manifest["storage"]["coverage"], "NOT_INCLUDED")
             self.assertEqual(manifest["storage"]["warning"], "SUPABASE_DATABASE_BACKUP_DOES_NOT_INCLUDE_STORAGE_API_OBJECT_BYTES")
@@ -129,7 +131,7 @@ class RecoveryArtifactPackagerTests(unittest.TestCase):
             with self.assertRaisesRegex(mod.BundleError, "storage_inventory_and_archive_must_be_supplied_together"):
                 mod.build_bundle(
                     project_ref=PROJECT_REF,
-                    semantic_head=SEMANTIC_HEAD,
+                    source_checkpoint_id=SOURCE_CHECKPOINT_ID,
                     source_git_sha=GIT_SHA,
                     snapshot_at=SNAPSHOT_AT,
                     inputs=inputs,
@@ -168,11 +170,13 @@ class RecoveryArtifactPackagerTests(unittest.TestCase):
             root = Path(td)
             inputs = make_inputs(root)
             with self.assertRaisesRegex(mod.BundleError, "project_ref_invalid"):
-                mod.build_bundle(project_ref="BAD", semantic_head=SEMANTIC_HEAD, source_git_sha=GIT_SHA, snapshot_at=SNAPSHOT_AT, inputs=inputs, output_tar=root/"a.tar", output_receipt=root/"a.json")
+                mod.build_bundle(project_ref="BAD", source_checkpoint_id=SOURCE_CHECKPOINT_ID, source_git_sha=GIT_SHA, snapshot_at=SNAPSHOT_AT, inputs=inputs, output_tar=root/"a.tar", output_receipt=root/"a.json")
+            with self.assertRaisesRegex(mod.BundleError, "source_checkpoint_id_invalid"):
+                mod.build_bundle(project_ref=PROJECT_REF, source_checkpoint_id="not-a-checkpoint", source_git_sha=GIT_SHA, snapshot_at=SNAPSHOT_AT, inputs=inputs, output_tar=root/"checkpoint.tar", output_receipt=root/"checkpoint.json")
             with self.assertRaisesRegex(mod.BundleError, "source_git_sha_invalid"):
-                mod.build_bundle(project_ref=PROJECT_REF, semantic_head=SEMANTIC_HEAD, source_git_sha="deadbeef", snapshot_at=SNAPSHOT_AT, inputs=inputs, output_tar=root/"b.tar", output_receipt=root/"b.json")
+                mod.build_bundle(project_ref=PROJECT_REF, source_checkpoint_id=SOURCE_CHECKPOINT_ID, source_git_sha="deadbeef", snapshot_at=SNAPSHOT_AT, inputs=inputs, output_tar=root/"b.tar", output_receipt=root/"b.json")
             with self.assertRaisesRegex(mod.BundleError, "snapshot_at_timezone_required"):
-                mod.build_bundle(project_ref=PROJECT_REF, semantic_head=SEMANTIC_HEAD, source_git_sha=GIT_SHA, snapshot_at="2026-08-21T15:00:00", inputs=inputs, output_tar=root/"c.tar", output_receipt=root/"c.json")
+                mod.build_bundle(project_ref=PROJECT_REF, source_checkpoint_id=SOURCE_CHECKPOINT_ID, source_git_sha=GIT_SHA, snapshot_at="2026-08-21T15:00:00", inputs=inputs, output_tar=root/"c.tar", output_receipt=root/"c.json")
 
     def test_modifying_one_input_changes_bundle_sha(self):
         with tempfile.TemporaryDirectory() as ta, tempfile.TemporaryDirectory() as tb:
