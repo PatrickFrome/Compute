@@ -13,10 +13,12 @@ It does NOT establish two-domain durability, R2/R3, or any persisted mainline se
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import re
 import sys
+from urllib.parse import unquote, urlparse
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +50,66 @@ SEMANTIC_HEAD = re.compile(r"^[A-Za-z0-9._:-]{8,240}$")
 
 class SourceAttestationError(RuntimeError):
     pass
+
+
+def validate_database_url_project_identity(value: Any) -> dict[str, Any]:
+    raw = _require_text(value, "database_url", minimum=20, maximum=8192)
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise SourceAttestationError("database_url_invalid") from exc
+
+    scheme = parsed.scheme.lower()
+    if scheme not in {"postgres", "postgresql"}:
+        raise SourceAttestationError("database_url_scheme_invalid")
+    if parsed.fragment:
+        raise SourceAttestationError("database_url_fragment_forbidden")
+
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        raise SourceAttestationError("database_url_host_missing")
+    username = unquote(parsed.username or "")
+    if not username:
+        raise SourceAttestationError("database_url_username_missing")
+    if parsed.password in (None, ""):
+        raise SourceAttestationError("database_url_credential_missing")
+
+    database = (parsed.path or "").lstrip("/")
+    if database != "postgres":
+        raise SourceAttestationError("database_url_database_invalid")
+    if port not in (5432, 6543):
+        raise SourceAttestationError("database_url_port_invalid")
+
+    direct_host = f"db.{EXPECTED_PROJECT_REF}.supabase.co"
+    if host == direct_host:
+        binding = "HOST"
+        mode = "DIRECT_OR_DEDICATED_POOLER"
+    elif host.endswith(".pooler.supabase.com"):
+        role_and_ref = username.rsplit(".", 1)
+        if len(role_and_ref) != 2 or not role_and_ref[0]:
+            raise SourceAttestationError("database_url_pooler_username_invalid")
+        if role_and_ref[1] != EXPECTED_PROJECT_REF:
+            raise SourceAttestationError("database_url_project_ref_mismatch")
+        binding = "USERNAME_SUFFIX"
+        mode = "SHARED_POOLER"
+    elif host.startswith("db.") and host.endswith(".supabase.co"):
+        raise SourceAttestationError("database_url_project_ref_mismatch")
+    else:
+        raise SourceAttestationError("database_url_supabase_host_invalid")
+
+    return {
+        "schema": "metaengine.compute.r1-database-connection-identity.h205f22.v1",
+        "project_ref": EXPECTED_PROJECT_REF,
+        "project_ref_verified": True,
+        "binding": binding,
+        "connection_mode": mode,
+        "port": port,
+        "database": database,
+        "credential_present": True,
+        "secret_material_persisted": False,
+        "authority_effect": False,
+    }
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -272,6 +334,15 @@ def build_source_predicate(
         raise SourceAttestationError("export_metadata_schema_invalid")
     if metadata.get("tool_version") != SUPABASE_CLI_VERSION or metadata.get("project_ref") != EXPECTED_PROJECT_REF:
         raise SourceAttestationError("export_metadata_identity_invalid")
+    connection_identity = metadata.get("database_connection_identity")
+    if (
+        not isinstance(connection_identity, dict)
+        or connection_identity.get("project_ref") != EXPECTED_PROJECT_REF
+        or connection_identity.get("project_ref_verified") is not True
+        or connection_identity.get("secret_material_persisted") is not False
+        or connection_identity.get("authority_effect") is not False
+    ):
+        raise SourceAttestationError("export_database_connection_identity_invalid")
     if metadata.get("control_fence_stable") is not True:
         raise SourceAttestationError("export_control_fence_not_stable")
     if metadata.get("storage_api_objects_included") is not False:
@@ -309,6 +380,7 @@ def build_source_predicate(
             "migration_rows": metadata["migration_rows"],
             "max_migration_version": metadata["max_migration_version"],
             "control_fence_stable": True,
+            "connection_identity": connection_identity,
             "supabase_managed_schemas_complete_claim": False,
             "storage_api_objects_included": False,
         },
@@ -454,6 +526,10 @@ def main(argv: list[str] | None = None) -> int:
     env.add_argument("--input", required=True)
     env.add_argument("--output", required=True)
 
+    dburl = sub.add_parser("validate-db-url")
+    dburl.add_argument("--env-name", required=True)
+    dburl.add_argument("--output", required=True)
+
     meta = sub.add_parser("build-export-metadata")
     meta.add_argument("--before", required=True)
     meta.add_argument("--after", required=True)
@@ -481,6 +557,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "validate-environment":
             _write_json(Path(args.output), validate_source_environment(_read_json(Path(args.input), "environment")))
+            return 0
+        if args.command == "validate-db-url":
+            env_name = _require_text(args.env_name, "database_url_env_name", minimum=1, maximum=128)
+            value = os.environ.get(env_name)
+            if value in (None, ""):
+                raise SourceAttestationError("database_url_env_missing")
+            _write_json(Path(args.output), validate_database_url_project_identity(value))
             return 0
         if args.command == "build-export-metadata":
             _write_json(Path(args.output), build_export_metadata(
