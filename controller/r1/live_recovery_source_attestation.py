@@ -39,7 +39,7 @@ SOURCE_WORKFLOW_PATH = ".github/workflows/r1-live-recovery-source.yml"
 SOURCE_ARTIFACT_ATTESTATION_NAME = "r1-recovery-source-attestation.sigstore.jsonl"
 SOURCE_PREDICATE_TYPE = "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1"
 SUPABASE_CLI_VERSION = "2.111.0"
-FENCE_SCHEMA = "metaengine.compute.r1-source-control-fence.h205f22.v1"
+FENCE_SCHEMA = "metaengine.compute.r1-source-control-fence.h205f22.v2"
 EXPORT_METADATA_SCHEMA = "metaengine.compute.logical-export.v1"
 PREDICATE_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-predicate.h205f22.v1"
 VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v1"
@@ -262,17 +262,58 @@ def validate_source_environment(value: Any) -> dict[str, Any]:
 def _validate_fence(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema") != FENCE_SCHEMA:
         raise SourceAttestationError(f"{label}_schema_invalid")
-    semantic_head = _require_text(value.get("semantic_head"), f"{label}_semantic_head", minimum=8, maximum=240)
-    if not SEMANTIC_HEAD.fullmatch(semantic_head):
-        raise SourceAttestationError(f"{label}_semantic_head_invalid")
-    canonical_digest = _require_sha(value.get("canonical_digest"), f"{label}_canonical_digest")
+    project_ref = _require_text(value.get("project_ref"), f"{label}_project_ref", minimum=20, maximum=20)
+    if project_ref != EXPECTED_PROJECT_REF:
+        raise SourceAttestationError(f"{label}_project_ref_mismatch")
+    checkpoint_rows = _require_int(value.get("checkpoint_rows"), f"{label}_checkpoint_rows")
+    checkpoint_sha = _require_sha(value.get("checkpoint_ledger_sha256"), f"{label}_checkpoint_ledger_sha256")
+    latest_checkpoint_id = _require_sha(value.get("latest_checkpoint_id"), f"{label}_latest_checkpoint_id")
+    latest_payload_sha = _require_sha(
+        value.get("latest_checkpoint_payload_sha256"),
+        f"{label}_latest_checkpoint_payload_sha256",
+    )
+    latest_source_sha = _require_text(
+        value.get("latest_checkpoint_source_parent_sha"),
+        f"{label}_latest_checkpoint_source_parent_sha",
+        minimum=40,
+        maximum=40,
+    )
+    if not SHA40.fullmatch(latest_source_sha):
+        raise SourceAttestationError(f"{label}_latest_checkpoint_source_parent_sha_invalid")
+    latest_evidence_state = _require_text(
+        value.get("latest_checkpoint_evidence_state"),
+        f"{label}_latest_checkpoint_evidence_state",
+        maximum=32,
+    )
+    if latest_evidence_state not in {"LIVE_DB_ONLY", "EVIDENCE_READY", "PARTIAL"}:
+        raise SourceAttestationError(f"{label}_latest_checkpoint_evidence_state_invalid")
+    latest_kind = _require_text(
+        value.get("latest_checkpoint_kind"),
+        f"{label}_latest_checkpoint_kind",
+        minimum=3,
+        maximum=200,
+    )
+    roadmap_rows = _require_int(
+        value.get("roadmap_authority_rows"),
+        f"{label}_roadmap_authority_rows",
+        minimum=0,
+    )
+    roadmap_sha = _require_sha(value.get("roadmap_authority_sha256"), f"{label}_roadmap_authority_sha256")
     migration_sha = _require_sha(value.get("migration_ledger_sha256"), f"{label}_migration_ledger_sha256")
     migration_rows = _require_int(value.get("migration_rows"), f"{label}_migration_rows")
     max_version = _require_text(value.get("max_migration_version"), f"{label}_max_migration_version", maximum=64)
     captured_at = _require_text(value.get("captured_at"), f"{label}_captured_at", maximum=80)
     return {
-        "semantic_head": semantic_head,
-        "canonical_digest": canonical_digest,
+        "project_ref": project_ref,
+        "checkpoint_rows": checkpoint_rows,
+        "checkpoint_ledger_sha256": checkpoint_sha,
+        "latest_checkpoint_id": latest_checkpoint_id,
+        "latest_checkpoint_payload_sha256": latest_payload_sha,
+        "latest_checkpoint_source_parent_sha": latest_source_sha,
+        "latest_checkpoint_evidence_state": latest_evidence_state,
+        "latest_checkpoint_kind": latest_kind,
+        "roadmap_authority_rows": roadmap_rows,
+        "roadmap_authority_sha256": roadmap_sha,
         "migration_ledger_sha256": migration_sha,
         "migration_rows": migration_rows,
         "max_migration_version": max_version,
@@ -284,8 +325,16 @@ def validate_control_fences(before: Any, after: Any) -> dict[str, Any]:
     a = _validate_fence(before, "before")
     b = _validate_fence(after, "after")
     stable_fields = (
-        "semantic_head",
-        "canonical_digest",
+        "project_ref",
+        "checkpoint_rows",
+        "checkpoint_ledger_sha256",
+        "latest_checkpoint_id",
+        "latest_checkpoint_payload_sha256",
+        "latest_checkpoint_source_parent_sha",
+        "latest_checkpoint_evidence_state",
+        "latest_checkpoint_kind",
+        "roadmap_authority_rows",
+        "roadmap_authority_sha256",
         "migration_ledger_sha256",
         "migration_rows",
         "max_migration_version",
@@ -294,13 +343,9 @@ def validate_control_fences(before: Any, after: Any) -> dict[str, Any]:
     if changed:
         raise SourceAttestationError("source_control_fence_drift:" + ",".join(changed))
     return {
-        "schema": "metaengine.compute.r1-source-control-fence-validation.h205f22.v1",
+        "schema": "metaengine.compute.r1-source-control-fence-validation.h205f22.v2",
         "stable": True,
-        "semantic_head": a["semantic_head"],
-        "canonical_digest": a["canonical_digest"],
-        "migration_ledger_sha256": a["migration_ledger_sha256"],
-        "migration_rows": a["migration_rows"],
-        "max_migration_version": a["max_migration_version"],
+        **{field: a[field] for field in stable_fields},
         "captured_before": a["captured_at"],
         "captured_after": b["captured_at"],
     }
@@ -316,12 +361,20 @@ def build_export_metadata(before: Any, after: Any) -> dict[str, Any]:
         "export_mode": "SUPABASE_LOGICAL_ROLES_SCHEMA_DATA",
         "project_owned_schemas": ["destruktion_meta"],
         "migration_ledger_separate": True,
-        "semantic_head": fence["semantic_head"],
-        "canonical_digest": fence["canonical_digest"],
+        "checkpoint_rows": fence["checkpoint_rows"],
+        "checkpoint_ledger_sha256": fence["checkpoint_ledger_sha256"],
+        "latest_checkpoint_id": fence["latest_checkpoint_id"],
+        "latest_checkpoint_payload_sha256": fence["latest_checkpoint_payload_sha256"],
+        "latest_checkpoint_source_parent_sha": fence["latest_checkpoint_source_parent_sha"],
+        "latest_checkpoint_evidence_state": fence["latest_checkpoint_evidence_state"],
+        "latest_checkpoint_kind": fence["latest_checkpoint_kind"],
+        "roadmap_authority_rows": fence["roadmap_authority_rows"],
+        "roadmap_authority_sha256": fence["roadmap_authority_sha256"],
         "migration_ledger_sha256": fence["migration_ledger_sha256"],
         "migration_rows": fence["migration_rows"],
         "max_migration_version": fence["max_migration_version"],
         "control_fence_stable": True,
+        "canonical_roadmap_claim": False,
         "captured_before": fence["captured_before"],
         "captured_after": fence["captured_after"],
         "supabase_managed_schemas_complete_claim": False,
@@ -409,12 +462,20 @@ def build_source_predicate(
             "project_ref": EXPECTED_PROJECT_REF,
             "mode": metadata["export_mode"],
             "supabase_cli_version": SUPABASE_CLI_VERSION,
-            "semantic_head": metadata["semantic_head"],
-            "canonical_digest": metadata["canonical_digest"],
+            "checkpoint_rows": metadata["checkpoint_rows"],
+            "checkpoint_ledger_sha256": metadata["checkpoint_ledger_sha256"],
+            "latest_checkpoint_id": metadata["latest_checkpoint_id"],
+            "latest_checkpoint_payload_sha256": metadata["latest_checkpoint_payload_sha256"],
+            "latest_checkpoint_source_parent_sha": metadata["latest_checkpoint_source_parent_sha"],
+            "latest_checkpoint_evidence_state": metadata["latest_checkpoint_evidence_state"],
+            "latest_checkpoint_kind": metadata["latest_checkpoint_kind"],
+            "roadmap_authority_rows": metadata["roadmap_authority_rows"],
+            "roadmap_authority_sha256": metadata["roadmap_authority_sha256"],
             "migration_ledger_sha256": metadata["migration_ledger_sha256"],
             "migration_rows": metadata["migration_rows"],
             "max_migration_version": metadata["max_migration_version"],
             "control_fence_stable": True,
+            "canonical_roadmap_claim": False,
             "connection_identity": connection_identity,
             "supabase_managed_schemas_complete_claim": False,
             "storage_api_objects_included": False,
@@ -537,8 +598,11 @@ def validate_verification_result(
         "ciphertext_sha256": actual_sha,
         "ciphertext_bytes": actual_bytes,
         "envelope_receipt_sha256": envelope["receipt_sha256"],
-        "semantic_head_at_source": predicate["database_export"]["semantic_head"],
-        "canonical_digest_at_source": predicate["database_export"]["canonical_digest"],
+        "latest_checkpoint_id_at_source": predicate["database_export"]["latest_checkpoint_id"],
+        "latest_checkpoint_payload_sha256": predicate["database_export"]["latest_checkpoint_payload_sha256"],
+        "latest_checkpoint_source_parent_sha": predicate["database_export"]["latest_checkpoint_source_parent_sha"],
+        "checkpoint_ledger_sha256": predicate["database_export"]["checkpoint_ledger_sha256"],
+        "roadmap_authority_sha256": predicate["database_export"]["roadmap_authority_sha256"],
         "migration_ledger_sha256": predicate["database_export"]["migration_ledger_sha256"],
         "verified_timestamp_count": len(timestamps),
         "source_attestation_verified": True,
