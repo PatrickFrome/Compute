@@ -11,6 +11,7 @@ on:
       - 'work/chatgpt-only-fenced-submit-v2'
       - 'work/computer-authority-plane-v1'
       - 'work/computer-authority-plane-v2-fast-actions'
+      - 'work/computer-authority-plane-v2-visual-fence-r1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
@@ -20,6 +21,7 @@ on:
       - 'apps/metaengine-browser/supabase/**'
       - 'supabase/migrations/20261005080000_browser_computer_authority_plane_v1.sql'
       - 'supabase/migrations/20261005110000_browser_computer_authority_plane_v2_fast_actions.sql'
+      - 'supabase/migrations/20261005123000_browser_computer_visual_fence_target_binding_v1.sql'
       - 'apps/me2-ui/src/**'
       - 'apps/me2-daemon/**'
       - 'orchestration/sovereign/**'
