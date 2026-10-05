@@ -140,6 +140,10 @@ public static class MetaengineWin32 {
     }
     return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
   }
+
+  public static void MouseWheel(int delta) {
+    mouse_event(0x0800, 0, 0, unchecked((uint)delta), UIntPtr.Zero);
+  }
 }
 "@
 
