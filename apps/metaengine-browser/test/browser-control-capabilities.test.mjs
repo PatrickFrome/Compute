@@ -11,6 +11,8 @@ test('control plane advertises broad typed control without arbitrary eval or raw
   assert.ok(CONTROL_ACTIONS.some((row) => row.domain === 'TABS'));
   assert.ok(CONTROL_ACTIONS.some((row) => row.domain === 'PAGE_INPUT'));
   assert.ok(CONTROL_ACTIONS.some((row) => row.domain === 'SELF_UPDATE'));
+  assert.ok(CONTROL_ACTIONS.some((row) => row.domain === 'COMPUTER'));
+  assert.equal(CONTROL_ACTIONS.find((row) => row.action === 'COMPUTER_ACTION')?.backend, 'WINDOWS_COMPUTER_EXECUTOR');
   const capabilities = CONTROL_ACTIONS.find((row) => row.action === 'CONTROL_CAPABILITIES');
   assert.ok(capabilities);
   assert.equal(capabilities.effect, 'READ_ONLY');
