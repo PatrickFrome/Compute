@@ -219,3 +219,460 @@ grant execute on function public.h205f22_a2_browser_supervisor_issue_computer_v1
 
 comment on function public.h205f22_a2_browser_supervisor_issue_computer_v1(text,text,jsonb,integer,text,text) is
   'Issues typed provider-neutral Computer Authority Plane commands only to a live Browser that attests Windows Local Computer Executor V1. The RPC has no lease, scheduler, retry or execution authority.';
+
+
+-- 4) Extend the one existing durable effect-intent store. This preserves the
+-- same DB lease + effect-intent authority path for both Browser semantic and
+-- Computer effects; no second authority table/RPC is introduced.
+create or replace function public.h205f22_a2_browser_supervisor_bind_effect_v1(
+  p_workspace_id uuid,
+  p_command_id uuid,
+  p_client_id text,
+  p_binding jsonb,
+  p_authority_effect boolean default false
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_row public.compute_fabric_a2_browser_supervisor_command_h205f22%rowtype;
+  v_client text := left(trim(coalesce(p_client_id,'')),160);
+  v_binding jsonb := p_binding;
+  v_digest text;
+  v_replayed boolean := false;
+  v_schema text;
+  v_tab_actions constant text[] := array[
+    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'
+  ];
+begin
+  if p_authority_effect is distinct from false then raise exception 'native_effect_binding_authority_effect_invalid'; end if;
+  if v_client = '' then raise exception 'native_effect_binding_client_required'; end if;
+
+  if v_binding is not null and jsonb_typeof(v_binding) = 'string' then
+    begin
+      v_binding := (v_binding #>> '{}')::jsonb;
+    exception when others then
+      raise exception 'native_effect_binding_transport_invalid';
+    end;
+  end if;
+  if v_binding is null or jsonb_typeof(v_binding) <> 'object' or octet_length(v_binding::text) > 16384 then
+    raise exception 'native_effect_binding_object_invalid';
+  end if;
+
+  v_schema := coalesce(v_binding->>'schema','');
+  if v_schema not in (
+    'metaengine.native-supervisor.effect-binding.v1',
+    'metaengine.native-supervisor.effect-binding.v2',
+    'metaengine.native-supervisor.computer-effect-binding.v1'
+  ) then
+    raise exception 'native_effect_binding_schema_invalid';
+  end if;
+  if coalesce((v_binding->>'authority_effect')::boolean,true) is distinct from false
+     or coalesce((v_binding->>'page_data_authority')::boolean,true) is distinct from false
+     or coalesce((v_binding->>'automatic_retry_allowed')::boolean,true) is distinct from false then
+    raise exception 'native_effect_binding_safety_flags_invalid';
+  end if;
+  if v_binding->>'command_id' <> p_command_id::text then raise exception 'native_effect_binding_command_mismatch'; end if;
+  if v_binding->>'client_id' <> v_client then raise exception 'native_effect_binding_client_mismatch'; end if;
+
+  select * into v_row
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id=p_workspace_id and command_id=p_command_id
+   for update;
+  if not found then raise exception 'native_effect_binding_command_not_found'; end if;
+  if v_row.status <> 'LEASED' then raise exception 'native_effect_binding_command_not_leased'; end if;
+  if v_row.leased_by is distinct from v_client then raise exception 'native_effect_binding_wrong_lease_holder'; end if;
+  if v_row.leased_at is null or v_row.expires_at <= clock_timestamp() then raise exception 'native_effect_binding_lease_expired'; end if;
+  if v_row.idempotency_key is null or v_binding->>'idempotency_key' is distinct from v_row.idempotency_key then
+    raise exception 'native_effect_binding_idempotency_mismatch';
+  end if;
+  if v_binding->>'action' is distinct from v_row.action then raise exception 'native_effect_binding_action_mismatch'; end if;
+  if (v_binding->>'command_expires_at')::timestamptz is distinct from v_row.expires_at then
+    raise exception 'native_effect_binding_expiry_mismatch';
+  end if;
+
+  if v_schema in (
+    'metaengine.native-supervisor.effect-binding.v1',
+    'metaengine.native-supervisor.effect-binding.v2'
+  ) then
+    if not (v_row.action = any(v_tab_actions)) then raise exception 'native_effect_binding_action_not_tab_effect'; end if;
+    if coalesce(v_binding->>'process_incarnation_id','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+      raise exception 'native_effect_binding_process_incarnation_invalid';
+    end if;
+    if coalesce(v_binding->>'tab_id','') !~ '^tab_[0-9a-f-]{36}$' then raise exception 'native_effect_binding_tab_invalid'; end if;
+    if coalesce(v_binding->>'target_id','') !~ '^webcontents:[1-9][0-9]*$' then raise exception 'native_effect_binding_target_invalid'; end if;
+    if v_row.payload->>'tab_id' is null or v_binding->>'tab_id' is distinct from v_row.payload->>'tab_id' then
+      raise exception 'native_effect_binding_explicit_tab_mismatch';
+    end if;
+
+    if v_schema = 'metaengine.native-supervisor.effect-binding.v2' then
+      if coalesce(v_binding->>'runtime_observation_id','') !~ '^obs_[0-9a-f]{32}$' then raise exception 'native_effect_binding_runtime_observation_id_invalid'; end if;
+      if coalesce(v_binding->>'web_contents_id','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_webcontents_invalid'; end if;
+      if coalesce(v_binding->>'renderer_pid','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_renderer_pid_invalid'; end if;
+      if coalesce(v_binding->>'runtime_target_id','') !~ '^[A-Za-z0-9._:-]{1,192}$' then raise exception 'native_effect_binding_runtime_target_invalid'; end if;
+      if coalesce(v_binding->>'attachment_generation','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_attachment_generation_invalid'; end if;
+      if coalesce(v_binding->>'document_generation','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_document_generation_invalid'; end if;
+      if coalesce(v_binding->>'binding_generation','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_generation_invalid'; end if;
+      if coalesce(v_binding->>'document_url_sha256','') !~ '^[0-9a-f]{64}$' then raise exception 'native_effect_binding_document_url_hash_invalid'; end if;
+      if v_binding->>'runtime_observation_schema' is distinct from 'metaengine.native-supervisor.effect-runtime-observation.v1' then
+        raise exception 'native_effect_binding_runtime_observation_schema_invalid';
+      end if;
+      if v_binding->>'target_id' is distinct from ('webcontents:' || (v_binding->>'web_contents_id')) then
+        raise exception 'native_effect_binding_webcontents_target_mismatch';
+      end if;
+    end if;
+  else
+    if v_row.action is distinct from 'COMPUTER_ACTION' then raise exception 'native_computer_effect_binding_action_mismatch'; end if;
+    if coalesce(v_binding->>'agent_id','') !~ '^agent_[a-z0-9-]{8,64}$' then raise exception 'native_computer_effect_binding_agent_invalid'; end if;
+    if lower(coalesce(v_binding->>'agent_id','')) is distinct from lower(coalesce(v_row.payload->>'agent_id','')) then
+      raise exception 'native_computer_effect_binding_agent_mismatch';
+    end if;
+    if upper(coalesce(v_binding->>'computer_action','')) is distinct from upper(coalesce(v_row.payload->>'action','')) then
+      raise exception 'native_computer_effect_binding_subaction_mismatch';
+    end if;
+    if coalesce(v_binding->>'target_identity_sha256','') !~ '^[0-9a-f]{64}$' then
+      raise exception 'native_computer_effect_binding_target_digest_invalid';
+    end if;
+    if v_binding->>'target_identity_sha256' is distinct from lower(coalesce(v_row.payload->>'target_identity_sha256','')) then
+      raise exception 'native_computer_effect_binding_target_digest_mismatch';
+    end if;
+    if jsonb_typeof(v_binding->'target') <> 'object' or v_binding->'target' is distinct from v_row.payload->'target' then
+      raise exception 'native_computer_effect_binding_target_mismatch';
+    end if;
+    if coalesce(v_binding#>>'{target,machine_fingerprint_sha256}','') !~ '^[0-9a-f]{64}$'
+       or coalesce(v_binding#>>'{target,executable_sha256}','') !~ '^[0-9a-f]{64}$'
+       or coalesce(v_binding#>>'{target,window_handle}','') !~ '^0x[0-9a-f]+$'
+       or coalesce(v_binding#>>'{target,session_id}','') !~ '^[0-9]{1,10}$'
+       or coalesce(v_binding#>>'{target,process_id}','') !~ '^[1-9][0-9]{0,9}$'
+       or coalesce(v_binding#>>'{target,process_creation_time_ms}','') !~ '^[1-9][0-9]{10,16}$'
+       or coalesce(v_binding#>>'{target,generation}','') !~ '^[1-9][0-9]{0,15}$' then
+      raise exception 'native_computer_effect_binding_target_shape_invalid';
+    end if;
+  end if;
+
+  if v_row.effect_binding is not null then
+    if v_row.effect_binding is distinct from v_binding then raise exception 'native_effect_binding_conflict'; end if;
+    v_replayed := true;
+    return jsonb_build_object(
+      'accepted',true,'replayed',true,'command_id',v_row.command_id,
+      'effect_binding',v_row.effect_binding,'effect_binding_sha256',v_row.effect_binding_sha256,
+      'effect_bound_at',v_row.effect_bound_at,'authority_effect',false
+    );
+  end if;
+
+  v_digest := encode(extensions.digest(v_binding::text,'sha256'::text),'hex');
+  update public.compute_fabric_a2_browser_supervisor_command_h205f22
+     set effect_binding=v_binding,
+         effect_bound_at=clock_timestamp(),
+         effect_binding_sha256=v_digest
+   where workspace_id=p_workspace_id and command_id=p_command_id;
+
+  return jsonb_build_object(
+    'accepted',true,'replayed',v_replayed,'command_id',p_command_id,
+    'effect_binding',v_binding,'effect_binding_sha256',v_digest,
+    'effect_bound_at',clock_timestamp(),'authority_effect',false
+  );
+end;
+$function$;
+
+-- 5) Single-result completion: Computer effects need the same immutable seal and
+-- standard terminal readback. NO_EFFECT_PROVEN is successful command completion
+-- but explicitly carries no physical authority effect.
+create or replace function public.h205f22_a2_browser_supervisor_complete_v5(
+  p_workspace_id uuid,
+  p_command_id uuid,
+  p_client_id text,
+  p_ok boolean,
+  p_receipt jsonb default '{}'::jsonb,
+  p_error text default null,
+  p_authority_effect boolean default false
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'pg_temp'
+as $function$
+declare
+  v_row public.compute_fabric_a2_browser_supervisor_command_h205f22%rowtype;
+  v_client text := left(trim(coalesce(p_client_id,'')),160);
+  v_error text := left(coalesce(p_error,'command_failed'),500);
+  v_effect boolean;
+  v_ok boolean := coalesce(p_ok,false);
+  v_receipt jsonb := coalesce(p_receipt,'{}'::jsonb);
+  v_now timestamptz;
+  v_binding_digest text;
+  v_outcome text;
+  v_bound_effect_actions constant text[] := array[
+    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK','COMPUTER_ACTION'
+  ];
+begin
+  if p_workspace_id is null or p_command_id is null or v_client='' then
+    raise exception 'supervisor_result_identity_invalid';
+  end if;
+  if p_authority_effect is distinct from false then raise exception 'supervisor_result_authority_effect_invalid'; end if;
+  if jsonb_typeof(v_receipt)='string' then
+    begin v_receipt := (v_receipt #>> '{}')::jsonb;
+    exception when others then raise exception 'supervisor_result_receipt_transport_invalid'; end;
+  end if;
+  if jsonb_typeof(v_receipt)<>'object' then raise exception 'supervisor_result_receipt_invalid'; end if;
+
+  select * into v_row
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id=p_workspace_id and command_id=p_command_id
+   for update;
+  if not found then raise exception 'supervisor_command_not_found'; end if;
+
+  v_now := clock_timestamp();
+  if v_row.status <> 'LEASED' or v_row.leased_by is distinct from v_client then
+    return jsonb_build_object('accepted',false,'status',v_row.status,'error','supervisor_lease_not_current','authority_effect',false);
+  end if;
+  if v_row.expires_at <= v_now or v_row.leased_at is null or v_row.leased_at <= v_now - interval '10 minutes' then
+    return jsonb_build_object('accepted',false,'status','EXPIRED','error','supervisor_lease_expired','authority_effect',false);
+  end if;
+
+  v_outcome := upper(coalesce(v_receipt->>'effect_outcome',''));
+  if v_ok and v_row.action='COMPUTER_ACTION' and v_outcome not in ('CONFIRMED','NO_EFFECT_PROVEN') then
+    v_ok := false;
+    v_error := case when v_outcome='' then 'postcondition_readback_required'
+      else 'postcondition_not_confirmed:'||left(v_outcome,80) end;
+  end if;
+
+  if v_ok and v_row.action = any(v_bound_effect_actions) then
+    if v_row.effect_binding is null
+       or v_row.effect_bound_at is null
+       or coalesce(v_row.effect_binding_sha256,'') !~ '^[0-9a-f]{64}$'
+       or v_row.idempotency_key is null
+       or v_row.effect_binding->>'command_id' is distinct from v_row.command_id::text
+       or v_row.effect_binding->>'client_id' is distinct from v_client
+       or v_row.effect_binding->>'action' is distinct from v_row.action
+       or v_row.effect_binding->>'idempotency_key' is distinct from v_row.idempotency_key
+       or coalesce((v_row.effect_binding->>'authority_effect')::boolean,true) is distinct from false
+       or coalesce((v_row.effect_binding->>'page_data_authority')::boolean,true) is distinct from false
+       or coalesce((v_row.effect_binding->>'automatic_retry_allowed')::boolean,true) is distinct from false then
+      v_ok := false;
+      v_error := 'supervisor_effect_binding_required';
+    elsif v_row.action='COMPUTER_ACTION' then
+      if v_row.effect_binding->>'schema' is distinct from 'metaengine.native-supervisor.computer-effect-binding.v1'
+         or lower(coalesce(v_row.effect_binding->>'agent_id','')) is distinct from lower(coalesce(v_row.payload->>'agent_id',''))
+         or upper(coalesce(v_row.effect_binding->>'computer_action','')) is distinct from upper(coalesce(v_row.payload->>'action',''))
+         or v_row.effect_binding->>'target_identity_sha256' is distinct from lower(coalesce(v_row.payload->>'target_identity_sha256',''))
+         or v_row.effect_binding->'target' is distinct from v_row.payload->'target' then
+        v_ok := false;
+        v_error := 'supervisor_computer_effect_binding_required';
+      end if;
+    else
+      if coalesce(v_row.effect_binding->>'schema','') not in (
+           'metaengine.native-supervisor.effect-binding.v1',
+           'metaengine.native-supervisor.effect-binding.v2'
+         )
+         or v_row.effect_binding->>'tab_id' is distinct from v_row.payload->>'tab_id' then
+        v_ok := false;
+        v_error := 'supervisor_effect_binding_required';
+      end if;
+    end if;
+
+    if v_ok then
+      v_binding_digest := encode(extensions.digest(v_row.effect_binding::text,'sha256'::text),'hex');
+      if v_binding_digest is distinct from v_row.effect_binding_sha256 then
+        v_ok := false;
+        v_error := 'supervisor_effect_binding_digest_mismatch';
+      end if;
+    end if;
+  end if;
+
+  v_effect := v_ok and v_row.action in (
+    'ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE','STOP_GENERATION','SCROLL',
+    'SEMANTIC_FOCUS','SEMANTIC_TYPE','RESOLVE_PROMPT','TYPED_CLICK',
+    'NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD',
+    'FLEET_RECONCILE','FLEET_SET_PROFILE',
+    'DOWNLOAD_FILE','DOWNLOAD_CANCEL','SELF_UPDATE_CHECK','SELF_UPDATE_APPLY',
+    'COMPUTER_ACTION'
+  ) and not (v_row.action='COMPUTER_ACTION' and v_outcome='NO_EFFECT_PROVEN');
+
+  update public.compute_fabric_a2_browser_supervisor_command_h205f22
+     set status=case when v_ok then 'COMPLETED' else 'FAILED' end,
+         completed_at=clock_timestamp(),
+         receipt=case when v_ok
+           then jsonb_set(v_receipt,'{authority_effect}',to_jsonb(v_effect),true)
+           else v_receipt end,
+         error=case when v_ok then null else v_error end,
+         authority_effect=v_effect
+   where workspace_id=p_workspace_id and command_id=p_command_id
+     and status='LEASED' and leased_by=v_client
+     and expires_at>clock_timestamp() and leased_at is not null
+     and leased_at>clock_timestamp()-interval '10 minutes'
+  returning * into v_row;
+
+  if found then
+    return jsonb_build_object('accepted',true,'status',v_row.status,'authority_effect',v_row.authority_effect);
+  end if;
+
+  select * into v_row
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id=p_workspace_id and command_id=p_command_id;
+  if v_row.status='LEASED' and v_row.leased_by=v_client then
+    return jsonb_build_object('accepted',false,'status','EXPIRED','error','supervisor_lease_expired','authority_effect',false);
+  end if;
+  return jsonb_build_object('accepted',false,'status',v_row.status,'error','supervisor_lease_not_current','authority_effect',false);
+end;
+$function$;
+
+-- 6) Batch completion mirrors the exact same binding/readback contract.
+create or replace function public.h205f22_a2_browser_supervisor_complete_batch_v1(
+  p_workspace_id uuid,
+  p_client_id text,
+  p_results jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, public, pg_temp
+as $function$
+declare
+  v_client text := left(trim(coalesce(p_client_id,'')),160);
+  v_item jsonb;
+  v_command_id uuid;
+  v_ok boolean;
+  v_receipt jsonb;
+  v_error text;
+  v_row public.compute_fabric_a2_browser_supervisor_command_h205f22%rowtype;
+  v_out jsonb := '[]'::jsonb;
+  v_outcome text;
+  v_effect boolean;
+  v_binding_digest text;
+  v_bound_effects constant text[] := array[
+    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK','COMPUTER_ACTION'
+  ];
+begin
+  if p_workspace_id is null or v_client='' then raise exception 'supervisor_batch_complete_identity_invalid'; end if;
+  if p_results is null or jsonb_typeof(p_results)<>'array' or jsonb_array_length(p_results)>64 then
+    raise exception 'supervisor_batch_complete_results_invalid';
+  end if;
+
+  for v_item in select value from jsonb_array_elements(p_results)
+  loop
+    if jsonb_typeof(v_item)<>'object' then raise exception 'supervisor_batch_complete_item_invalid'; end if;
+    begin v_command_id := (v_item->>'command_id')::uuid;
+    exception when others then raise exception 'supervisor_batch_complete_command_id_invalid'; end;
+    v_ok := coalesce((v_item->>'ok')::boolean,false);
+    v_receipt := coalesce(v_item->'receipt','{}'::jsonb);
+    if jsonb_typeof(v_receipt)='string' then
+      begin v_receipt := (v_receipt #>> '{}')::jsonb;
+      exception when others then raise exception 'supervisor_batch_complete_receipt_transport_invalid'; end;
+    end if;
+    if jsonb_typeof(v_receipt)<>'object' then raise exception 'supervisor_batch_complete_receipt_invalid'; end if;
+    v_error := left(coalesce(v_item->>'error','command_failed'),500);
+
+    select * into v_row
+      from public.compute_fabric_a2_browser_supervisor_command_h205f22
+     where workspace_id=p_workspace_id and command_id=v_command_id
+     for update;
+    if not found then
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status','NOT_FOUND','authority_effect',false));
+      continue;
+    end if;
+    if v_row.status<>'LEASED' or v_row.leased_by is distinct from v_client then
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status',v_row.status,
+        'error','supervisor_lease_not_current','authority_effect',false));
+      continue;
+    end if;
+    if v_row.expires_at<=clock_timestamp() or v_row.leased_at is null
+       or v_row.leased_at<=clock_timestamp()-interval '10 minutes' then
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status','EXPIRED',
+        'error','supervisor_lease_expired','authority_effect',false));
+      continue;
+    end if;
+
+    v_outcome := upper(coalesce(v_receipt->>'effect_outcome',''));
+    if v_row.command_lane<>'READ_ONLY' and v_ok and v_outcome not in ('CONFIRMED','NO_EFFECT_PROVEN') then
+      v_ok := false;
+      v_error := case when v_outcome='' then 'postcondition_readback_required'
+        else 'postcondition_not_confirmed:'||left(v_outcome,80) end;
+    end if;
+
+    if v_ok and v_row.action=any(v_bound_effects) then
+      if v_row.effect_binding is null
+         or v_row.effect_bound_at is null
+         or coalesce(v_row.effect_binding_sha256,'') !~ '^[0-9a-f]{64}$'
+         or coalesce((v_row.effect_binding->>'authority_effect')::boolean,true) is distinct from false
+         or coalesce((v_row.effect_binding->>'page_data_authority')::boolean,true) is distinct from false
+         or coalesce((v_row.effect_binding->>'automatic_retry_allowed')::boolean,true) is distinct from false
+         or v_row.effect_binding->>'command_id' is distinct from v_row.command_id::text
+         or v_row.effect_binding->>'client_id' is distinct from v_client
+         or v_row.effect_binding->>'action' is distinct from v_row.action
+         or v_row.effect_binding->>'idempotency_key' is distinct from v_row.idempotency_key then
+        v_ok := false;
+        v_error := 'sealed_effect_binding_required';
+      elsif v_row.action='COMPUTER_ACTION' then
+        if v_row.effect_binding->>'schema' is distinct from 'metaengine.native-supervisor.computer-effect-binding.v1'
+           or lower(coalesce(v_row.effect_binding->>'agent_id','')) is distinct from lower(coalesce(v_row.payload->>'agent_id',''))
+           or upper(coalesce(v_row.effect_binding->>'computer_action','')) is distinct from upper(coalesce(v_row.payload->>'action',''))
+           or v_row.effect_binding->>'target_identity_sha256' is distinct from lower(coalesce(v_row.payload->>'target_identity_sha256',''))
+           or v_row.effect_binding->'target' is distinct from v_row.payload->'target' then
+          v_ok := false;
+          v_error := 'sealed_computer_effect_binding_required';
+        end if;
+      else
+        if coalesce(v_row.effect_binding->>'schema','') not in (
+          'metaengine.native-supervisor.effect-binding.v1','metaengine.native-supervisor.effect-binding.v2'
+        ) or v_row.effect_binding->>'tab_id' is distinct from v_row.payload->>'tab_id' then
+          v_ok := false;
+          v_error := 'sealed_effect_binding_required';
+        end if;
+      end if;
+
+      if v_ok then
+        v_binding_digest := encode(extensions.digest(v_row.effect_binding::text,'sha256'::text),'hex');
+        if v_binding_digest is distinct from v_row.effect_binding_sha256 then
+          v_ok := false;
+          v_error := 'sealed_effect_binding_digest_mismatch';
+        end if;
+      end if;
+    end if;
+
+    v_effect := v_ok and v_row.command_lane<>'READ_ONLY'
+      and not (v_row.action='COMPUTER_ACTION' and v_outcome='NO_EFFECT_PROVEN');
+
+    update public.compute_fabric_a2_browser_supervisor_command_h205f22
+       set status=case when v_ok then 'COMPLETED' else 'FAILED' end,
+           completed_at=clock_timestamp(),
+           receipt=case when v_ok then jsonb_set(v_receipt,'{authority_effect}',to_jsonb(v_effect),true) else v_receipt end,
+           error=case when v_ok then null else v_error end,
+           authority_effect=v_effect
+     where workspace_id=p_workspace_id and command_id=v_command_id
+       and status='LEASED' and leased_by=v_client
+       and expires_at>clock_timestamp() and leased_at is not null
+       and leased_at>clock_timestamp()-interval '10 minutes';
+    if not found then
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status','EXPIRED',
+        'error','supervisor_lease_expired_during_completion','authority_effect',false));
+      continue;
+    end if;
+
+    v_out := v_out || jsonb_build_array(jsonb_build_object(
+      'command_id',v_command_id,'accepted',true,
+      'status',case when v_ok then 'COMPLETED' else 'FAILED' end,
+      'effect_outcome',nullif(v_outcome,''),'authority_effect',v_effect));
+  end loop;
+
+  return jsonb_build_object(
+    'schema','metaengine.native-supervisor.command-batch-completion.v1',
+    'results',v_out,'authority_effect',false
+  );
+end;
+$function$;
+
+revoke all on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean)
+  from public,anon,authenticated;
+revoke all on function public.h205f22_a2_browser_supervisor_complete_v5(uuid,uuid,text,boolean,jsonb,text,boolean)
+  from public,anon,authenticated;
+revoke all on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uuid,text,jsonb)
+  from public,anon,authenticated;
+grant execute on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean) to service_role;
+grant execute on function public.h205f22_a2_browser_supervisor_complete_v5(uuid,uuid,text,boolean,jsonb,text,boolean) to service_role;
+grant execute on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uuid,text,jsonb) to service_role;
