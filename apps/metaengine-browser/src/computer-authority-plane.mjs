@@ -184,6 +184,16 @@ export function normalizeComputerRequest(input, context = {}) {
   const agentId = input.agent_id == null ? null : String(input.agent_id).trim().toLowerCase();
   if (classification.mutating && !AGENT_ID_RE.test(agentId || '')) throw new Error('computer_agent_id_required');
   if (agentId && !AGENT_ID_RE.test(agentId)) throw new Error('computer_agent_id_invalid');
+  if (classification.mutating) {
+    const binding = lease.effect_binding;
+    if (binding.schema !== 'metaengine.native-supervisor.computer-effect-binding.v1') throw new Error('computer_effect_binding_schema_invalid');
+    if (String(binding.action || '').toUpperCase() !== 'COMPUTER_ACTION') throw new Error('computer_effect_binding_action_invalid');
+    if (String(binding.computer_action || '').toUpperCase() !== classification.action) throw new Error('computer_effect_binding_subaction_mismatch');
+    if (String(binding.agent_id || '').toLowerCase() !== agentId) throw new Error('computer_effect_binding_agent_mismatch');
+    if (String(binding.target_identity_sha256 || '').toLowerCase() !== expectedDigest) throw new Error('computer_effect_binding_target_digest_mismatch');
+    if (JSON.stringify(binding.target || null) !== JSON.stringify(target)) throw new Error('computer_effect_binding_target_mismatch');
+    if (String(binding.command_id || '').toLowerCase() !== lease.command_id) throw new Error('computer_effect_binding_command_mismatch');
+  }
   return Object.freeze({
     schema: 'metaengine.computer-request.v1',
     action: classification.action,
