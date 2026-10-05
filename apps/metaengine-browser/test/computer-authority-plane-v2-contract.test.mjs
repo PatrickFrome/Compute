@@ -51,11 +51,27 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
 });
 
 test('Computer V2 does not confuse dispatch confirmation with effect proof', () => {
-  assert.match(executor, /'UIA_INVOKE'[\s\S]{0,1800}readback_proven = \$false/);
-  assert.match(executor, /'KEY_PRESS'[\s\S]{0,2600}readback_proven = \$false/);
-  assert.match(executor, /'POINTER_CLICK'[\s\S]{0,3200}readback_proven = \$false/);
-  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,4200}ValuePattern/);
-  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,5200}value_readback_proven = \$readback/);
+  const actionBlock = (action) => {
+    const start = executor.indexOf("    '" + action + "' {");
+    assert.ok(start >= 0, action + ':missing');
+    const end = action === 'POINTER_CLICK'
+      ? executor.indexOf("\n    default {", start)
+      : executor.indexOf("\n    '", start + 8);
+    assert.ok(end > start, action + ':block');
+    return executor.slice(start, end);
+  };
+
+  for (const action of ['UIA_INVOKE','KEY_PRESS','POINTER_CLICK']) {
+    const block = actionBlock(action);
+    assert.ok(block.includes('readback_proven = $false'), action + ':dispatch_only');
+    assert.ok(block.includes("readback_kind = 'DELIVERY_ONLY'"), action + ':delivery_kind');
+    assert.equal(block.includes('authority_effect = $true'), false, action + ':authority_effect');
+  }
+
+  const typeBlock = actionBlock('TYPE_TEXT');
+  assert.ok(typeBlock.includes('ValuePattern'), 'TYPE_TEXT:value_pattern');
+  assert.ok(typeBlock.includes('value_readback_proven = $readback'), 'TYPE_TEXT:value_readback');
+  assert.ok(typeBlock.includes("readback_kind = $(if ($readback) { 'UIA_VALUE_EXACT' } else { 'DELIVERY_ONLY' })"), 'TYPE_TEXT:typed_readback');
   assert.ok(plane.includes('computer_type_append_mode_unproven'));
   assert.ok(plane.includes('dispatch_only_mutations_never_claim_effect_proven: true'));
   assert.ok(plane.includes('type_text_requires_value_readback_for_effect_proof: true'));
