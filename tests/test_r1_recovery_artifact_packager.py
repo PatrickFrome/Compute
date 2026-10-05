@@ -27,7 +27,7 @@ def make_inputs(root: Path):
     data.write_text("insert into destruktion_meta.example values (1);\n")
     roles.write_text("-- roles export\n")
     ledger.write_text(json.dumps({"schema": "metaengine.compute.migration-ledger.v1", "row_count": 7}, sort_keys=True))
-    meta.write_text(json.dumps({"schema": "metaengine.compute.logical-export.v1", "tool": "supabase-cli", "project_owned_schema": "destruktion_meta"}, sort_keys=True))
+    meta.write_text(json.dumps({"schema": "metaengine.compute.logical-export.v2", "tool": "supabase-cli", "project_owned_schema": "destruktion_meta"}, sort_keys=True))
     return {
         "database/schema.sql": schema,
         "database/data.sql": data,
