@@ -128,10 +128,11 @@ function normalizeArgs(action, args) {
   if (action === 'TYPE_TEXT') {
     const text = String(input.text ?? '');
     if (!text || text.length > 120000) throw new Error('computer_type_text_invalid');
+    if (input.replace === false) throw new Error('computer_type_append_mode_unproven');
     return Object.freeze({
       text,
       runtime_id: normalizeRuntimeId(input.runtime_id, 'computer_type_runtime_id_invalid'),
-      replace: input.replace !== false,
+      replace: true,
     });
   }
 
@@ -334,7 +335,9 @@ export function computerAuthorityPlaneSnapshot() {
     typed_action_schema_required: true,
     exact_target_identity_required_for_mutation: true,
     post_effect_readback_required: true,
+    dispatch_only_mutations_never_claim_effect_proven: true,
     type_text_requires_exact_uia_runtime_id: true,
+    type_text_requires_value_readback_for_effect_proof: true,
     visual_pointer_requires_recent_capture_fence: true,
     visual_pointer_requires_target_bound_window_capture: true,
     visual_pointer_requires_unchanged_window_geometry: true,

@@ -500,9 +500,9 @@ try {
     'UIA_INVOKE' {
       $identity = Assert-TargetIdentity $request.target
       $element = Find-UiaElement $identity @($request.args.runtime_id)
-      $effectStarted = $true
       $pattern = $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
       if (-not $pattern) { throw "computer_uia_invoke_pattern_unavailable" }
+      $effectStarted = $true
       ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
       Start-Sleep -Milliseconds 50
       $after = Get-ProcessIdentity ([int]$identity.process_id)
@@ -510,10 +510,11 @@ try {
         ok = $true
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $true
+        readback_proven = $false
+        dispatch_proven = $true
         action = 'UIA_INVOKE'
         target = $after
-        authority_effect = $true
+        authority_effect = $false
       })
       break
     }
@@ -651,22 +652,43 @@ try {
         try { $focusProven = RuntimeId-Equal $focused.GetRuntimeId() @($request.args.runtime_id) } catch {}
       }
       if (-not $focusProven) { throw "computer_type_exact_focus_not_proven" }
+
+      $valueReadbackAvailable = $false
+
       $effectStarted = $true
       if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
       if (-not [MetaengineWin32]::SendUnicode([string]$request.args.text)) { throw "computer_unicode_input_failed" }
+      Start-Sleep -Milliseconds 20
+
       $focusedAfter = [System.Windows.Automation.AutomationElement]::FocusedElement
-      $readback = $false
+      $focusAfterProven = $false
       if ($focusedAfter) {
-        try { $readback = RuntimeId-Equal $focusedAfter.GetRuntimeId() @($request.args.runtime_id) } catch {}
+        try { $focusAfterProven = RuntimeId-Equal $focusedAfter.GetRuntimeId() @($request.args.runtime_id) } catch {}
       }
+
+      $afterValue = $null
+      $readback = $false
+      try {
+        $afterPattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        if ($afterPattern) {
+          $valueReadbackAvailable = $true
+          $afterValue = [string]$afterPattern.Current.Value
+          $expectedValue = [string]$request.args.text
+          $readback = ($afterValue -ceq $expectedValue)
+        }
+      } catch {}
+
       $after = Get-ProcessIdentity ([int]$identity.process_id)
       Write-Result ([ordered]@{
-        ok = $readback
+        ok = $true
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        dispatch_proven = $true
         action = 'TYPE_TEXT'
-        exact_uia_focus = $readback
+        exact_uia_focus = $focusAfterProven
+        value_readback_available = $valueReadbackAvailable
+        value_readback_proven = $readback
         target = $after
         authority_effect = $readback
       })
@@ -698,10 +720,11 @@ try {
         ok = $true
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $true
+        readback_proven = $false
+        dispatch_proven = $true
         action = 'KEY_PRESS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
-        authority_effect = $true
+        authority_effect = $false
       })
       break
     }
@@ -739,11 +762,12 @@ try {
         ok = $proven
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $proven
+        readback_proven = $false
+        dispatch_proven = $proven
         action = 'POINTER_CLICK'
         cursor = [ordered]@{ x=$point.X; y=$point.Y }
         target = Get-ProcessIdentity ([int]$identity.process_id)
-        authority_effect = $proven
+        authority_effect = $false
       })
       break
     }

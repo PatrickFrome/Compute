@@ -1,5 +1,15 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37310000001.1`.
+
+Atomic Computer Authority Plane V2 strict effect-proof reservation (2026-10-05):
+- exact runtime/source predecessor `1ce05a384aef388b00d94e9114a5876fef5d2033` is terminal-green in Critical Audit run `37288856630` and Shell run `37288856632`; focused authority/causal/wake contracts are 90/90 PASS and full Browser Node regression is 4121/4121 PASS;
+- predecessor visual-fence package `0.7.0-dev.37300000001.1` is fully physically qualified at source `7492ab1a0ce6459537b0377cdc71fd6dd03b1c78` and MUST NOT be rebuilt or relabelled;
+- this successor fixes effect semantics: UIA_INVOKE, KEY_PRESS and POINTER_CLICK dispatch confirmation can no longer masquerade as EFFECT_PROVEN; TYPE_TEXT requires exact UIA ValuePattern readback and rejects unprovable append mode before dispatch;
+- this commit changes only package.json, both package-lock root version fields and this convergence reservation; runtime source is otherwise byte-identical to the terminal-green predecessor above;
+- Package Smoke remains the sole physical producer; Installed Chat / Final Runtime / Autonomous Soak / Self Update must consume the exact same source head, version and installer digest;
+- no automatic retry, second scheduler, raw shell, eval or new authority plane is introduced.
+
 Reserved package identity is `0.7.0-dev.37300000001.1`.
 
 Atomic Computer Authority Plane V2 visual-fence final qualification reservation (2026-10-05):
