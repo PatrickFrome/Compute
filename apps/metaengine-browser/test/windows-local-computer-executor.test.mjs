@@ -115,6 +115,8 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
       count:lastObserved?.count,
       total_candidates:lastObserved?.total_candidates,
       process_ids:lastObserved?.windows?.map(row => row?.identity?.process_id),
+      rejected:lastObserved?.rejected_windows,
+      child_exit_code:child.exitCode,
       stderr:stderr.slice(-500),
     }));
 
