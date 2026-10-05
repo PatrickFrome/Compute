@@ -56,10 +56,10 @@ test('computer target identity is exact and digest-bound', () => {
 
 test('mutating computer requests require DB lease and effect binding', () => {
   assert.throws(
-    () => normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'hello' } }),
+    () => normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'hello', runtime_id:[1,2,3] } }),
     /computer_db_lease_command_id_required/
   );
-  const request = normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'hello' } }, lease());
+  const request = normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'hello', runtime_id:[1,2,3] } }, lease());
   assert.equal(request.mutating, true);
   assert.equal(request.lease.authority_source, 'DB_LEASE_ONLY');
   assert.equal(request.automatic_retry_allowed, false);
@@ -67,7 +67,7 @@ test('mutating computer requests require DB lease and effect binding', () => {
 });
 
 test('pointer and key payloads are bounded and allowlisted', () => {
-  const click = normalizeComputerRequest({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target:target(), args:{ x:14.8, y:22.2 } }, lease());
+  const click = normalizeComputerRequest({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target:target(), args:{ x:14.8, y:22.2, visual_fence:{ frame_sha256:'c'.repeat(64) } } }, lease());
   assert.deepEqual(click.args, { x:14, y:22, button:'LEFT' });
   const key = normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'Ctrl+A' } }, lease());
   assert.equal(key.args.key, 'CTRL+A');
@@ -97,7 +97,7 @@ test('tool router prefers exact browser semantic, then UIA, then fresh visual fa
 });
 
 test('unknown or ambiguous effect receipts never authorize automatic retry', () => {
-  const request = normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'x' } }, lease());
+  const request = normalizeComputerRequest({ action:'TYPE_TEXT', agent_id:'agent_test-12345678', target:target(), args:{ text:'x', runtime_id:[1,2,3] } }, lease());
   const ambiguous = projectComputerEffectReceipt({ request, outcome:'AMBIGUOUS_NO_RETRY', error:'readback missing' });
   assert.equal(ambiguous.authority_effect, false);
   assert.equal(ambiguous.automatic_retry_allowed, false);
