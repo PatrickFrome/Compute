@@ -1,5 +1,14 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37280000001.1`.
+
+Atomic Computer Authority Plane V2 fast-action reservation (2026-10-05):
+- exact runtime/source predecessor `71358abedf3730543e2452a21eba19e3620b6561` is terminal-green in Browser Agent Result Installer Source Qualification run `37275711465` on Ubuntu and Windows; full Browser regression, Root Transport, OpenAI/ME2 contracts, Windows R97 visual source proof, SLSA/source-only checks and exact-source readback all passed;
+- V2 adds provider-neutral multi-display/foreground/exact-window observation and direct UIA Value/Toggle/SelectionItem/ExpandCollapse/Scroll execution while preserving the V1 semantic->UIA->visual routing order;
+- predecessor package identity `0.7.0-dev.37270000001.1` is already immutably reserved for source `265583211e05d1ee5faf2b7bae0e9ef715a1c8ce` and MUST NOT be rebuilt or relabelled;
+- this successor changes package.json, both package-lock version fields and this convergence reservation in ONE Git commit; runtime source is otherwise unchanged from the terminal-green predecessor above;
+- Package Smoke remains the sole physical producer; Installed Chat / Final Runtime / Dirty Profile / Autonomous Soak / Self Update must consume the exact same source head, version and installer digest;
+- V2 DB migration and live Edge/source-binding convergence remain closed until the new exact-head package is terminal-green.
 Reserved package identity is `0.7.0-dev.37270000001.1`.
 
 Atomic Computer Authority Plane physical reservation (2026-10-05):
