@@ -241,13 +241,11 @@ function Project-Uia([System.Windows.Automation.AutomationElement]$Element) {
   }
 }
 
-$requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
-if (-not $requestPath) { throw "computer_request_path_missing" }
-$request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
-$effectStarted = $false
+function Invoke-MetaengineComputerRequest([object]$request) {
+  $effectStarted = $false
 
-try {
-  switch ([string]$request.action) {
+  try {
+    switch ([string]$request.action) {
     'STATUS' {
       Write-Result ([ordered]@{
         ok = $true
@@ -519,16 +517,44 @@ try {
     }
 
     default { throw "computer_action_not_allowlisted" }
+    }
+  } catch {
+    Write-Result ([ordered]@{
+      ok = $false
+      effect_started = [bool]$effectStarted
+      schema = 'metaengine.windows-computer-executor.error.v1'
+      error = [string]$_.Exception.Message
+      authority_effect = $false
+    })
   }
-} catch {
-  Write-Result ([ordered]@{
-    ok = $false
-    effect_started = [bool]$effectStarted
-    schema = 'metaengine.windows-computer-executor.error.v1'
-    error = [string]$_.Exception.Message
-    authority_effect = $false
-  })
 }
+
+if ([string]$env:METAENGINE_COMPUTER_PERSISTENT -eq '1') {
+  while ($true) {
+    $line = [Console]::In.ReadLine()
+    if ($null -eq $line) { break }
+    if ($line -eq '__METAENGINE_STOP__') { break }
+    if (-not $line.Trim()) { continue }
+    try {
+      $request = $line | ConvertFrom-Json
+      Invoke-MetaengineComputerRequest $request
+    } catch {
+      Write-Result ([ordered]@{
+        ok = $false
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.transport-error.v1'
+        error = [string]$_.Exception.Message
+        authority_effect = $false
+      })
+    }
+  }
+  exit 0
+}
+
+$requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
+if (-not $requestPath) { throw "computer_request_path_missing" }
+$request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
+Invoke-MetaengineComputerRequest $request
 `;
 
 export const WINDOWS_COMPUTER_BRIDGE_SHA256 = createHash('sha256')
