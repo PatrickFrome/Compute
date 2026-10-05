@@ -642,22 +642,211 @@ export async function runFixedWindowsPowerShell(request, {
   }
 }
 
+export class PersistentWindowsPowerShellBridge {
+  #platform;
+  #spawnImpl;
+  #timeoutMs;
+  #child = null;
+  #stdoutBuffer = '';
+  #stderrTail = '';
+  #pending = null;
+  #queue = Promise.resolve();
+  #stopping = false;
+  #spawnCount = 0;
+  #requestCount = 0;
+  #restartCount = 0;
+
+  constructor({
+    platform = process.platform,
+    spawn_impl = spawn,
+    timeout_ms = DEFAULT_TIMEOUT_MS,
+  } = {}) {
+    this.#platform = String(platform);
+    if (typeof spawn_impl !== 'function') throw new Error('computer_persistent_spawn_impl_required');
+    this.#spawnImpl = spawn_impl;
+    this.#timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
+  }
+
+  snapshot() {
+    return Object.freeze({
+      schema: 'metaengine.windows-computer-persistent-bridge.v1',
+      available: this.#platform === 'win32',
+      process_pid: Number(this.#child?.pid || 0) || null,
+      process_alive: !!this.#child && this.#child.killed !== true,
+      spawn_count: this.#spawnCount,
+      request_count: this.#requestCount,
+      restart_count: this.#restartCount,
+      one_request_in_flight: true,
+      session_input_serialized: true,
+      automatic_effect_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  #rejectPending(error) {
+    const pending = this.#pending;
+    if (!pending) return;
+    this.#pending = null;
+    clearTimeout(pending.timer);
+    pending.reject(error instanceof Error ? error : new Error(String(error || 'computer_persistent_bridge_failed')));
+  }
+
+  #resolvePending(value) {
+    const pending = this.#pending;
+    if (!pending) return;
+    this.#pending = null;
+    clearTimeout(pending.timer);
+    pending.resolve(value);
+  }
+
+  #onStdout(chunk) {
+    this.#stdoutBuffer += String(chunk || '');
+    if (Buffer.byteLength(this.#stdoutBuffer, 'utf8') > MAX_STDOUT_BYTES) {
+      this.#rejectPending(new Error('computer_persistent_stdout_limit'));
+      try { this.#child?.kill(); } catch {}
+      return;
+    }
+    while (true) {
+      const newline = this.#stdoutBuffer.indexOf('\n');
+      if (newline < 0) break;
+      const line = this.#stdoutBuffer.slice(0, newline).trim();
+      this.#stdoutBuffer = this.#stdoutBuffer.slice(newline + 1);
+      if (!line) continue;
+      if (!this.#pending) continue;
+      try {
+        const row = JSON.parse(line);
+        if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('computer_executor_response_invalid');
+        this.#resolvePending(row);
+      } catch (error) {
+        this.#rejectPending(new Error(`computer_persistent_response_invalid:${String(error?.message || error)}`));
+        try { this.#child?.kill(); } catch {}
+      }
+    }
+  }
+
+  #spawn() {
+    if (this.#platform !== 'win32') throw new Error('computer_executor_windows_required');
+    if (this.#child && this.#child.killed !== true && this.#child.exitCode == null) return this.#child;
+
+    this.#stopping = false;
+    this.#stdoutBuffer = '';
+    this.#stderrTail = '';
+    const child = this.#spawnImpl(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+      {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          METAENGINE_COMPUTER_PERSISTENT: '1',
+        },
+      },
+    );
+    this.#child = child;
+    this.#spawnCount += 1;
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => this.#onStdout(chunk));
+    child.stderr.on('data', (chunk) => {
+      this.#stderrTail += String(chunk || '');
+      if (this.#stderrTail.length > 8192) this.#stderrTail = this.#stderrTail.slice(-8192);
+    });
+    child.once('error', (error) => {
+      this.#rejectPending(error);
+    });
+    child.once('exit', (code) => {
+      const wasStopping = this.#stopping;
+      if (this.#child === child) this.#child = null;
+      if (!wasStopping) {
+        this.#restartCount += 1;
+        this.#rejectPending(new Error(`computer_persistent_exit_${code}:${this.#stderrTail.slice(-500)}`));
+      } else {
+        this.#rejectPending(new Error('computer_persistent_bridge_stopped'));
+      }
+    });
+    child.stdin.write(POWERSHELL_BRIDGE, 'utf8');
+    child.stdin.write('\n', 'utf8');
+    return child;
+  }
+
+  async #runOne(request) {
+    const child = this.#spawn();
+    this.#requestCount += 1;
+    return await new Promise((resolve, reject) => {
+      if (this.#pending) {
+        reject(new Error('computer_persistent_parallel_dispatch_forbidden'));
+        return;
+      }
+      const timer = setTimeout(() => {
+        if (!this.#pending) return;
+        this.#pending = null;
+        try { child.kill(); } catch {}
+        reject(new Error('computer_persistent_request_timeout'));
+      }, this.#timeoutMs);
+      this.#pending = { resolve, reject, timer };
+      try {
+        child.stdin.write(`${JSON.stringify(request)}\n`, 'utf8');
+      } catch (error) {
+        this.#pending = null;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  }
+
+  run(request) {
+    const job = this.#queue.then(() => this.#runOne(request));
+    this.#queue = job.then(() => undefined, () => undefined);
+    return job;
+  }
+
+  async stop() {
+    this.#stopping = true;
+    const child = this.#child;
+    this.#child = null;
+    if (!child) return;
+    try { child.stdin.write('__METAENGINE_STOP__\n', 'utf8'); } catch {}
+    try { child.stdin.end(); } catch {}
+    await new Promise((resolve) => {
+      if (child.exitCode != null) { resolve(); return; }
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch {}
+        resolve();
+      }, 1000);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+}
+
 export class WindowsLocalComputerExecutor {
   #platform;
   #runner;
   #clock;
+  #persistentBridge = null;
   #visualFrames = new Map();
 
   constructor({
     platform = process.platform,
-    runner = runFixedWindowsPowerShell,
+    runner = null,
     clock = Date.now,
+    persistent_bridge = null,
   } = {}) {
     this.#platform = String(platform);
-    if (typeof runner !== 'function') throw new Error('computer_executor_runner_required');
     if (typeof clock !== 'function') throw new Error('computer_executor_clock_required');
-    this.#runner = runner;
     this.#clock = clock;
+    if (runner != null) {
+      if (typeof runner !== 'function') throw new Error('computer_executor_runner_required');
+      this.#runner = runner;
+      this.#persistentBridge = persistent_bridge || null;
+    } else {
+      this.#persistentBridge = persistent_bridge || new PersistentWindowsPowerShellBridge({ platform:this.#platform });
+      if (typeof this.#persistentBridge?.run !== 'function') throw new Error('computer_persistent_bridge_required');
+      this.#runner = (request) => this.#persistentBridge.run(request);
+    }
   }
 
   #rememberVisualFrame(result) {
@@ -694,12 +883,13 @@ export class WindowsLocalComputerExecutor {
   snapshot() {
     return Object.freeze({
       schema: 'metaengine.windows-local-computer-executor.v1',
-      version: '1.0.0',
+      version: '2.0.0',
       platform: this.#platform,
       available: this.#platform === 'win32',
       bridge_sha256: WINDOWS_COMPUTER_BRIDGE_SHA256,
       plane: computerAuthorityPlaneSnapshot(),
-      executor_process_model: 'BOUNDED_FIXED_POWERSHELL_BRIDGE',
+      executor_process_model: this.#persistentBridge ? 'PERSISTENT_FIXED_POWERSHELL_BRIDGE' : 'INJECTED_TEST_RUNNER',
+      persistent_bridge: this.#persistentBridge?.snapshot?.() || null,
       raw_shell_input: false,
       arbitrary_eval: false,
       automatic_retry_allowed: false,
