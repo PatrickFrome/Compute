@@ -27,6 +27,16 @@ const MUTATING_ACTIONS = new Set([
   'POINTER_CLICK',
 ]);
 
+const EFFECT_READBACK_KIND_BY_ACTION = Object.freeze({
+  UIA_FOCUS: 'UIA_FOCUS_EXACT',
+  UIA_SET_VALUE: 'UIA_VALUE_EXACT',
+  UIA_TOGGLE: 'UIA_TOGGLE_STATE_CHANGED',
+  UIA_SELECT: 'UIA_SELECTION_EXACT',
+  UIA_EXPAND_COLLAPSE: 'UIA_EXPAND_STATE_EXACT',
+  UIA_SCROLL: 'UIA_SCROLL_PERCENT_CHANGED',
+  TYPE_TEXT: 'UIA_VALUE_EXACT',
+});
+
 const SAFE_KEYS = new Set([
   'ENTER',
   'ESCAPE',
@@ -48,9 +58,32 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 const HWND_RE = /^0x[0-9a-f]+$/i;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const AGENT_ID_RE = /^agent_[a-z0-9-]{8,64}$/i;
+const OBSERVED_TARGET_FIELD_TYPES = Object.freeze({
+  machine_fingerprint_sha256: 'string',
+  session_id: 'number',
+  process_id: 'number',
+  process_creation_time_ms: 'number',
+  window_handle: 'string',
+  executable_sha256: 'string',
+  generation: 'number',
+});
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
+}
+
+function immutableClone(value) {
+  const copied = clone(value);
+  const pending = [copied];
+  const seen = new WeakSet();
+  while (pending.length) {
+    const entry = pending.pop();
+    if (!entry || typeof entry !== 'object' || seen.has(entry)) continue;
+    seen.add(entry);
+    for (const child of Object.values(entry)) pending.push(child);
+    Object.freeze(entry);
+  }
+  return copied;
 }
 
 function positiveSafeInt(value, name) {
@@ -227,7 +260,7 @@ function assertLeaseBinding(context) {
   }
   return Object.freeze({
     command_id: commandId.toLowerCase(),
-    effect_binding: clone(binding),
+    effect_binding: immutableClone(binding),
     authority_source: 'DB_LEASE_ONLY',
   });
 }
@@ -336,6 +369,12 @@ export function computerAuthorityPlaneSnapshot() {
     exact_target_identity_required_for_mutation: true,
     post_effect_readback_required: true,
     typed_effect_readback_kind_required: true,
+    effect_readback_requires_fixed_bridge_schema: true,
+    effect_readback_requires_exact_action: true,
+    effect_readback_requires_exact_target_identity: true,
+    effect_readback_requires_native_identity_field_types: true,
+    sealed_request_binding_is_immutable: true,
+    effect_receipt_evidence_is_immutable: true,
     delivery_only_is_never_effect_proof: true,
     effect_barrier_precedes_foreground_focus_pointer_side_effects: true,
     dispatch_only_mutations_never_claim_effect_proven: true,
@@ -359,6 +398,31 @@ export function computerAuthorityPlaneSnapshot() {
   });
 }
 
+export function hasAdmissibleEffectReadback(request, result) {
+  const action = request?.action;
+  if (request?.schema !== 'metaengine.computer-request.v1'
+      || request.mutating !== true
+      || !Object.hasOwn(EFFECT_READBACK_KIND_BY_ACTION, action)
+      || !result || typeof result !== 'object' || Array.isArray(result)) return false;
+  if (result.schema !== 'metaengine.windows-computer-executor.effect.v1'
+      || result.action !== action
+      || result.ok !== true
+      || result.effect_started !== true
+      || result.readback_proven !== true
+      || result.readback_kind !== EFFECT_READBACK_KIND_BY_ACTION[action]) return false;
+  try {
+    const observedTarget = result.target;
+    if (!observedTarget || typeof observedTarget !== 'object' || Array.isArray(observedTarget)
+        || !Object.entries(OBSERVED_TARGET_FIELD_TYPES).every(([field, type]) =>
+          Object.hasOwn(observedTarget, field) && typeof observedTarget[field] === type)) return false;
+    const requestedTargetDigest = computerTargetIdentityDigest(request.target);
+    return request.target_identity_sha256 === requestedTargetDigest
+      && computerTargetIdentityDigest(observedTarget) === requestedTargetDigest;
+  } catch {
+    return false;
+  }
+}
+
 export function projectComputerEffectReceipt({
   request,
   result,
@@ -366,19 +430,32 @@ export function projectComputerEffectReceipt({
   error = null,
 } = {}) {
   if (!request || request.schema !== 'metaengine.computer-request.v1') throw new Error('computer_receipt_request_invalid');
-  const normalizedOutcome = String(outcome || '').toUpperCase();
+  let normalizedOutcome = String(outcome || '').toUpperCase();
   if (!['NO_EFFECT_PROVEN', 'EFFECT_PROVEN', 'AMBIGUOUS_NO_RETRY'].includes(normalizedOutcome)) {
     throw new Error('computer_effect_outcome_invalid');
   }
+  const validatedRequest = normalizeComputerRequest(request, request.lease);
+  if (!validatedRequest.mutating) throw new Error('computer_receipt_mutation_required');
+  const projectedResult = immutableClone(result);
+  let projectedError = error == null ? null : String(error).slice(0, 500);
+  if (normalizedOutcome === 'EFFECT_PROVEN' && !hasAdmissibleEffectReadback(validatedRequest, projectedResult)) {
+    normalizedOutcome = 'AMBIGUOUS_NO_RETRY';
+    projectedError ||= 'computer_effect_readback_not_proven';
+  } else if (normalizedOutcome === 'NO_EFFECT_PROVEN'
+      && (!projectedResult || typeof projectedResult !== 'object'
+        || Array.isArray(projectedResult) || projectedResult.effect_started !== false)) {
+    normalizedOutcome = 'AMBIGUOUS_NO_RETRY';
+    projectedError ||= 'computer_effect_start_unconfirmed';
+  }
   return Object.freeze({
     schema: COMPUTER_EFFECT_RECEIPT_SCHEMA,
-    command_id: request.lease?.command_id || null,
-    agent_id: request.agent_id || null,
-    action: request.action,
-    target_identity_sha256: request.target_identity_sha256,
+    command_id: validatedRequest.lease.command_id,
+    agent_id: validatedRequest.agent_id,
+    action: validatedRequest.action,
+    target_identity_sha256: validatedRequest.target_identity_sha256,
     outcome: normalizedOutcome,
-    result: clone(result),
-    error: error == null ? null : String(error).slice(0, 500),
+    result: projectedResult,
+    error: projectedError,
     automatic_retry_allowed: false,
     scheduler_authority: false,
     page_data_authority: false,

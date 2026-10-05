@@ -213,6 +213,7 @@ test('V2 direct UIA fast actions preserve lease and typed positive-readback sema
         readback_kind:readbackKinds[request.action],
         schema:'metaengine.windows-computer-executor.effect.v1',
         action:request.action,
+        target:request.target,
         authority_effect:true,
       }),
     });
@@ -238,12 +239,14 @@ test('V2 direct UIA fast actions preserve lease and typed positive-readback sema
 test('proven mutation becomes EFFECT_PROVEN only after positive readback', async () => {
   const executor = new WindowsLocalComputerExecutor({
     platform:'win32',
-    runner:async () => ({
+    runner:async (request) => ({
       ok:true,
       effect_started:true,
       readback_proven:true,
       readback_kind:'UIA_VALUE_EXACT',
       schema:'metaengine.windows-computer-executor.effect.v1',
+      action:request.action,
+      target:request.target,
       authority_effect:true,
     }),
   });

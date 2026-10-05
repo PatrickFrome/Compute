@@ -1,5 +1,16 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37350000001.1`.
+
+Computer proof convergence physical-promotion staging reservation (2026-10-05):
+- current physical producer parent is `5aebd807e81e40371e19459635fb392570fd1966`; this promotion commit is a strict fast-forward descendant and preserves the one-producer lineage;
+- qualified native proof source is `ecebc30a47bdd8e60ed29e88afd0fafd8351bbfe`; source-only staging SHA `04a7c4026162274e28ee42649b2c134c040092a7` passed Browser Agent Result Installer Source Qualification run `37357335723` / #58 on Ubuntu 24.04 and Windows 2025, including Windows R97 physical visual flow;
+- this commit semantically ports the exact 13 proof/audit-source files from the qualified fix onto the current physical producer lineage, adds only this promotion branch to the source-qualification allowlist, and advances package metadata to `0.7.0-dev.37350000001.1`;
+- prior identity `0.7.0-dev.37340000001.1` is consumed by source `5aebd807e81e40371e19459635fb392570fd1966` and MUST NOT be rebuilt or relabelled;
+- repository code/issue collision search found no use of `0.7.0-dev.37350000001.1` before this commit; immutable artifact reservation is NOT YET PROVEN and remains delegated to Package Smoke;
+- this exact promotion SHA must pass Ubuntu and Windows source qualification before `physical/build-slsa-provenance-v1` may fast-forward to it;
+- no live DB migration replay, main update, user-machine install, automatic retry authority, scheduler authority or milestone promotion is authorized by this commit.
+
 Reserved package identity is `0.7.0-dev.37340000001.1`.
 
 Atomic Computer Authority V2 Windows boundary hardening build reservation (2026-10-05):

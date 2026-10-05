@@ -1,0 +1,21 @@
+{
+  "schema": "metaengine.source-publication-manifest.v1",
+  "source_parent_sha": "b5689a915ef578f0629322e33309824efb422fb2",
+  "source_branch": "work/computer-proof-convergence-audit-r1-20261005",
+  "manifest_sha256": "ad08bc3de8db0df1cc54d993f99473b0570dba522ec234e3e515c1a5f19c5f37",
+  "hash_material": "SHA-256 of JSON.stringify(files), lexicographically sorted path, keys path then sha256",
+  "files": [
+    { "path": "apps/metaengine-browser/src/computer-authority-plane.mjs", "sha256": "946e32da0e10a20d41bfe74494fc3d06a3c144441e52ace728be54391958deea" },
+    { "path": "apps/metaengine-browser/src/windows-local-computer-executor.mjs", "sha256": "0cf6afb482573c4aef1592240fb9a6429d4dfaa3d64dec144c9e98d0d8282947" },
+    { "path": "apps/metaengine-browser/test/computer-authority-plane-v2-contract.test.mjs", "sha256": "93236f50545f09c5a7124035a3283df1535a7cdf90a161c8a1cd7ff64fff86c3" },
+    { "path": "apps/metaengine-browser/test/computer-authority-plane.test.mjs", "sha256": "deae131d999b32616592d1be1f9ac8148cb6f15017fa810b118ddc3b8fd9b9fd" },
+    { "path": "apps/metaengine-browser/test/computer-effect-receipt-proof.test.mjs", "sha256": "5b7cf4560e643f0a158c667edcd559fd76fa78d5929754e043fdafbca7c72b48" },
+    { "path": "apps/metaengine-browser/test/windows-local-computer-executor.test.mjs", "sha256": "8ffb05741c7151f8f8f6c449676f185ddba4fa8dff6c39c29a03edce86e910a4" },
+    { "path": "scripts/metaengine-checkpoint-canaries.sql", "sha256": "c5c4402928f5264f9a27d201174f6242ff0b02afc3b99e046b792c5d874c04ee" },
+    { "path": "scripts/metaengine-computer-proof-canaries.sql", "sha256": "ab9756d0aff8956e692dfac992dddde592ad0c2330b844d1c86427211126110d" },
+    { "path": "supabase/operations/20261005174000_browser_computer_proof_contract_convergence_v1.sql", "sha256": "ab2a586c6977c04ba63fa86ea66d07f657f2395e9f8dcce0c652ee838eca6fa1" }
+  ],
+  "release_identity_reserved": false,
+  "source_qualification": "NEW_EXACT_SHA_UBUNTU_WINDOWS_OPEN",
+  "live_specific_sql": "Already applied convergence artifact; not an automatically replayable bootstrap migration. Preserve exact preimage guards."
+}

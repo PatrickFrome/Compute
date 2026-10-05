@@ -17,6 +17,7 @@ on:
       - 'work/computer-authority-plane-v2-visual-freshness-r1'
       - 'work/computer-authority-plane-v2-typed-readback-r1'
       - 'work/computer-authority-plane-v2-typed-readback-build-r1'
+      - 'work/computer-proof-convergence-physical-build-r1'
     paths:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
