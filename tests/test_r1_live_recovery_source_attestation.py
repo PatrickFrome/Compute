@@ -144,12 +144,30 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
                 with self.assertRaises(mod.SourceAttestationError):
                     mod.validate_database_url_project_identity(value)
 
+    def test_database_identity_receipt_rejects_generic_boolean_shape_and_secret_fields(self):
+        valid = mod.validate_database_url_project_identity(
+            f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+        )
+        bad_values = [
+            {"project_ref": mod.EXPECTED_PROJECT_REF, "project_ref_verified": True},
+            {**valid, "schema": "forged"},
+            {**valid, "binding": "HOST", "connection_mode": "SHARED_POOLER"},
+            {**valid, "password": "must-not-persist"},
+        ]
+        for value in bad_values:
+            with self.subTest(keys=sorted(value)):
+                with self.assertRaises(mod.SourceAttestationError):
+                    mod.validate_database_connection_identity_receipt(value)
+
     def test_predicate_rejects_export_without_verified_database_connection_identity(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             ciphertext, envelope, bundle, meta = build_files(root)
             value = json.loads(meta.read_text())
-            value.pop("database_connection_identity")
+            value["database_connection_identity"] = {
+                "project_ref": mod.EXPECTED_PROJECT_REF,
+                "project_ref_verified": True,
+            }
             meta.write_text(json.dumps(value))
             with self.assertRaisesRegex(mod.SourceAttestationError, "export_database_connection_identity_invalid"):
                 mod.build_source_predicate(
