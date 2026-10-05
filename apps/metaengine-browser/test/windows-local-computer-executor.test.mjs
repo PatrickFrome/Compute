@@ -368,11 +368,29 @@ test('TYPE_TEXT without value readback is terminal ambiguous after dispatch', as
     action:'TYPE_TEXT',
     agent_id:'agent_test-12345678',
     target,
-    args:{ text:'hello', runtime_id:[1,2,3], replace:false },
+    args:{ text:'hello', runtime_id:[1,2,3] },
   }, contextFor('TYPE_TEXT'));
   assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY');
   assert.equal(result.authority_effect, false);
   assert.equal(result.automatic_retry_allowed, false);
+});
+
+test('TYPE_TEXT append mode fails before physical dispatch because exact caret semantics are unproven', async () => {
+  let calls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async () => { calls += 1; return { ok:true }; },
+  });
+  await assert.rejects(
+    () => executor.act({
+      action:'TYPE_TEXT',
+      agent_id:'agent_test-12345678',
+      target,
+      args:{ text:'hello', runtime_id:[1,2,3], replace:false },
+    }, contextFor('TYPE_TEXT')),
+    /computer_type_append_mode_unproven/,
+  );
+  assert.equal(calls, 0);
 });
 
 test('runner failure after dispatch boundary is conservatively ambiguous and terminal', async () => {
