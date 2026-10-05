@@ -78,14 +78,9 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     "$label.AutoSize = $true",
     "$label.Location = [System.Drawing.Point]::new(24,24)",
     "$form.Controls.Add($label)",
-    "$form.Show()",
-    "$form.Activate()",
-    "$deadline = [DateTime]::UtcNow.AddSeconds(5)",
-    "do { [System.Windows.Forms.Application]::DoEvents(); $p = Get-Process -Id $PID; $p.Refresh(); if ($p.MainWindowHandle -eq $form.Handle -and $p.MainWindowHandle -ne 0) { break }; Start-Sleep -Milliseconds 20 } while ([DateTime]::UtcNow -lt $deadline)",
-    "if ($p.MainWindowHandle -eq 0 -or $p.MainWindowHandle -ne $form.Handle) { throw 'computer_fixture_main_window_unavailable' }",
-    "[Console]::Out.WriteLine('READY:' + [Int64]$p.MainWindowHandle)",
-    "[Console]::Out.Flush()",
-    "while ($true) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 20 }",
+    "$form.ShowInTaskbar = $true",
+    "$form.Add_Shown({ [Console]::Out.WriteLine('READY:' + [Int64]$form.Handle); [Console]::Out.Flush() })",
+    "[System.Windows.Forms.Application]::Run($form)",
   ].join('; ');
   const child = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',fixtureScript], {
     windowsHide:true,
