@@ -1,5 +1,17 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37340000001.1`.
+
+Atomic Computer Authority V2 Windows boundary hardening build reservation (2026-10-05):
+- exact runtime/source predecessor `71201d7634a8acb504e75680044c7efb9107437b` passed Browser Agent Result Installer Source Qualification run `37303167521` on Ubuntu 24.04 and Windows 2025, including full Browser regression, physical fixed-bridge STATUS and exact-window capture, R97 source visual flow, updater verification and exact-source cleanliness;
+- this successor contains the complete typed-readback/effect-barrier/visual-freshness ancestry plus commit `b5689a915ef578f0629322e33309824efb422fb2`: missing or non-boolean Windows bridge effect boundaries are terminal `AMBIGUOUS_NO_RETRY`, and only explicit boolean `false` can retain `NO_EFFECT_PROVEN`;
+- predecessor package `0.7.0-dev.37330000001.1` was consumed by pull-request producer run `37300742509` at source `43758774f0829900d82486645413172c2133f46c` and MUST NOT be rebuilt, relabelled or represented as canonical physical-push SLSA evidence;
+- fresh GitHub code, pull-request, issue, tag and immutable-reservation-artifact searches found no use of `0.7.0-dev.37340000001.1` immediately before this atomic reservation;
+- this commit changes only package.json, both package-lock root version fields and this convergence checkpoint; runtime and authority source remain byte-identical to the terminal-green predecessor above;
+- staging branch `work/computer-authority-plane-v2-typed-readback-build-r1` has no pull request and runs source qualification only. The versioned exact head MUST pass that source gate before one fast-forward push to `physical/build-slsa-provenance-v1`;
+- Package Smoke remains the sole physical installer producer. All ten physical workflows MUST bind the same exact source head, version, producer run/attempt and installer digest; any later source change consumes this identity and requires a new monotonic version;
+- no automatic retry, second scheduler, arbitrary shell/eval, live database migration, release, production promotion or live user installation is authorized by this reservation.
+
 Reserved package identity is `0.7.0-dev.37330000001.1`.
 
 Atomic Computer Authority Plane V2 strict effect-proof reservation (2026-10-05):
