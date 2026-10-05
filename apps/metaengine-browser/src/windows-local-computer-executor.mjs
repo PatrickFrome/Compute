@@ -654,14 +654,6 @@ try {
       if (-not $focusProven) { throw "computer_type_exact_focus_not_proven" }
 
       $valueReadbackAvailable = $false
-      $beforeValue = $null
-      try {
-        $beforePattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-        if ($beforePattern) {
-          $beforeValue = [string]$beforePattern.Current.Value
-          $valueReadbackAvailable = $true
-        }
-      } catch {}
 
       $effectStarted = $true
       if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
@@ -676,16 +668,15 @@ try {
 
       $afterValue = $null
       $readback = $false
-      if ($valueReadbackAvailable) {
-        try {
-          $afterPattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-          if ($afterPattern) {
-            $afterValue = [string]$afterPattern.Current.Value
-            $expectedValue = [string]$request.args.text
-            $readback = ($afterValue -ceq $expectedValue)
-          }
-        } catch {}
-      }
+      try {
+        $afterPattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        if ($afterPattern) {
+          $valueReadbackAvailable = $true
+          $afterValue = [string]$afterPattern.Current.Value
+          $expectedValue = [string]$request.args.text
+          $readback = ($afterValue -ceq $expectedValue)
+        }
+      } catch {}
 
       $after = Get-ProcessIdentity ([int]$identity.process_id)
       Write-Result ([ordered]@{
