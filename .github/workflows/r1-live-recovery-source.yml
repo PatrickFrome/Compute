@@ -1,6 +1,15 @@
 name: R1 Trusted Live Recovery Source
 
 on:
+  push:
+    branches:
+      - 'work/r1-fresh-project-source-identity-v1'
+    paths:
+      - 'controller/r1/live_recovery_source_attestation.py'
+      - 'tests/test_r1_live_recovery_source_attestation.py'
+      - 'tests/test_r1_recovery_artifact_packager.py'
+      - 'research/R1_FRESH_PROJECT_SOURCE_IDENTITY_CONVERGENCE_2026-10-05.md'
+      - '.github/workflows/r1-live-recovery-source.yml'
   pull_request:
     branches: [main]
     paths:
@@ -37,7 +46,7 @@ concurrency:
 permissions: {}
 
 env:
-  R1_PROJECT_REF: xpeibufgzjknrhbhpffp
+  R1_PROJECT_REF: jhriwwsryeqsvvvufkok
   R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1
   POSTGRES_CLIENT_IMAGE: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
 
@@ -75,6 +84,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           raw=Path('.github/workflows/r1-live-recovery-source.yml').read_text()
+          attester=Path('controller/r1/live_recovery_source_attestation.py').read_text()
+          assert 'R1_PROJECT_REF: jhriwwsryeqsvvvufkok' in raw
+          assert 'R1_PROJECT_REF: xpeibufgzjknrhbhpffp' not in raw
+          assert 'EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"' in attester
+          assert 'EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"' not in attester
           before,remainder=raw.split('      - name: Validate source workflow contract',1)
           _checker,after=remainder.split('\n  preflight-source:',1)
           p=before+'\n  preflight-source:'+after
