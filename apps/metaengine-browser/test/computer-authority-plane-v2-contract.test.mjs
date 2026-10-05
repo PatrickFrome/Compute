@@ -51,6 +51,27 @@ test('Computer V2 does not confuse dispatch confirmation with effect proof', () 
   assert.ok(plane.includes('type_text_requires_value_readback_for_effect_proof: true'));
 });
 
+test('Computer V2 crosses the ambiguity barrier before foreground, focus or pointer side effects', () => {
+  for (const action of ['TYPE_TEXT','KEY_PRESS','POINTER_CLICK']) {
+    const start = executor.indexOf("    '" + action + "' {");
+    assert.ok(start >= 0, action);
+    const next = executor.indexOf("\n    '", start + 8);
+    const block = executor.slice(start, next > start ? next : executor.length);
+    const barrier = block.indexOf('$effectStarted = $true');
+    const foreground = block.indexOf('SetForegroundWindow');
+    assert.ok(barrier >= 0 && foreground >= 0 && barrier < foreground, action + ':foreground');
+    if (action === 'TYPE_TEXT') {
+      const focus = block.indexOf('$element.SetFocus()');
+      assert.ok(focus >= 0 && barrier < focus, action + ':focus');
+    }
+    if (action === 'POINTER_CLICK') {
+      const cursor = block.indexOf('SetCursorPos');
+      assert.ok(cursor >= 0 && barrier < cursor, action + ':pointer');
+    }
+  }
+  assert.ok(plane.includes('effect_barrier_precedes_foreground_focus_pointer_side_effects: true'));
+});
+
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
   for (const action of [
     'OBSERVE_DISPLAYS','FOREGROUND_STATUS','CAPTURE_WINDOW',
