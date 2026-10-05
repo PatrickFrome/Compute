@@ -385,7 +385,7 @@ jobs:
                         scope || ':' ||
                         canonical_checkpoint::text || ':' ||
                         authority_effect::text,
-                        E'\\n' order by checkpoint_id
+                        E'\n' order by checkpoint_id
                       ),
                       ''
                     ),
@@ -424,7 +424,7 @@ jobs:
                         alignment_epoch::text || ':' ||
                         extract(epoch from updated_at)::text || ':' ||
                         authority_effect::text,
-                        E'\\n' order by authority_key
+                        E'\n' order by authority_key
                       ),
                       ''
                     ),
