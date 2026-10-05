@@ -3,27 +3,7 @@ name: R1 Supervisor R2 DB Ingestion
 on:
   push:
     branches:
-      - 'work/r1-step09b-fresh-project-convergence-v1'
       - 'work/r1-fresh-project-source-identity-v1'
-    paths:
-      - 'supabase/operations/20261005200000_r1_step09b_fresh_project_convergence_v1.sql'
-      - 'scripts/metaengine-r1-step09b-fresh-project-canaries.sql'
-      - 'research/R1_STEP09B_FRESH_PROJECT_CONVERGENCE_2026-10-05.md'
-      - '.github/workflows/r1-supervisor-r2-db-ingestion.yml'
-      - '.github/workflows/r1-live-recovery-source.yml'
-      - 'controller/r1/live_recovery_source_attestation.py'
-      - 'controller/r1/source_environment_evidence_binding.py'
-      - 'controller/r1/verified_source_handoff.py'
-      - 'controller/r1/source_bound_quorum_candidate.py'
-      - 'controller/r1/final_r2_evidence_package.py'
-      - 'tests/test_r1_source_environment_evidence_binding.py'
-      - 'tests/test_r1_verified_source_handoff.py'
-      - 'tests/test_r1_source_bound_quorum_candidate.py'
-      - 'tests/test_r1_final_r2_evidence_package.py'
-      - 'tests/test_r1_supervisor_r2_ingestion_authority_gate.py'
-      - 'tests/test_r1_live_recovery_source_attestation.py'
-      - 'tests/test_r1_recovery_artifact_packager.py'
-      - 'research/R1_FRESH_PROJECT_SOURCE_IDENTITY_CONVERGENCE_2026-10-05.md'
   pull_request:
     branches: [main]
     paths:
