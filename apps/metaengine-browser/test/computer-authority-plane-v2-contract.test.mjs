@@ -34,7 +34,10 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.equal(/create\s+or\s+replace\s+function\s+public\.h205f22_a2_browser_supervisor_lease/i.test(visualFenceMigration), false);
   assert.ok(executor.includes('computer_visual_frame_target_unbound'));
   assert.ok(executor.includes('computer_visual_frame_target_mismatch'));
+  assert.ok(executor.includes('computer_visual_frame_geometry_required'));
+  assert.ok(executor.includes('computer_visual_frame_geometry_drift'));
   assert.ok(plane.includes('visual_pointer_requires_target_bound_window_capture: true'));
+  assert.ok(plane.includes('visual_pointer_requires_unchanged_window_geometry: true'));
 });
 
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
