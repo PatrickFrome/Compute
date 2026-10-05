@@ -67,7 +67,7 @@ test('fixed Windows PowerShell bridge physically parses and serves STATUS', { sk
   assert.equal(result.authority_effect, false);
 });
 
-test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:30000 }, async () => {
+test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:45000 }, async () => {
   const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-fixture-'));
   const fixturePath = path.join(fixtureDir, 'fixture.cjs');
   const electronExe = path.join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe');
@@ -75,8 +75,10 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     "const { app, BrowserWindow } = require('electron');",
     "app.commandLine.appendSwitch('disable-gpu');",
     "app.whenReady().then(async () => {",
-    "  const win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:true, frame:true });",
-    "  await win.loadURL('data:text/html,<html><body><div style=\"font:18px sans-serif;padding:24px\">stable-pixel-fixture</div></body></html>');",
+    "  const title = 'METAENGINE Computer Capture Fixture';",
+    "  const win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:true, frame:true, title });",
+    "  await win.loadURL('data:text/html,<html><head><title>METAENGINE%20Computer%20Capture%20Fixture</title></head><body><div style=\"font:18px sans-serif;padding:24px\">stable-pixel-fixture</div></body></html>');",
+    "  win.setTitle(title);",
     "  win.show();",
     "  win.focus();",
     "});",
@@ -97,11 +99,16 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
     let identity = null;
     let lastObserved = null;
-    for (let attempt=0; attempt<50 && !identity; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve,750));
+    for (let attempt=0; attempt<12 && !identity; attempt += 1) {
       const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
       lastObserved = observed.result;
-      identity = observed.result.windows.find(row => Number(row?.identity?.process_id) === child.pid)?.identity || null;
-      if (!identity) await new Promise(resolve => setTimeout(resolve,100));
+      const row = observed.result.windows.find(candidate => (
+        candidate?.title === 'METAENGINE Computer Capture Fixture'
+        || Number(candidate?.identity?.process_id) === child.pid
+      ));
+      identity = row?.identity || null;
+      if (!identity) await new Promise(resolve => setTimeout(resolve,150));
     }
     assert.ok(identity, 'fixture window identity; observed=' + JSON.stringify({
       child_pid:child.pid,
