@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
@@ -60,6 +61,74 @@ test('fixed Windows PowerShell bridge physically parses and serves STATUS', { sk
   assert.equal(result.arbitrary_shell, false);
   assert.equal(result.raw_powershell_command_input, false);
   assert.equal(result.authority_effect, false);
+});
+
+test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:30000 }, async () => {
+  const fixtureScript = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "Add-Type -AssemblyName System.Drawing",
+    "$form = [System.Windows.Forms.Form]::new()",
+    "$form.Text = 'METAENGINE Computer Capture Fixture'",
+    "$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual",
+    "$form.Location = [System.Drawing.Point]::new(80,80)",
+    "$form.Size = [System.Drawing.Size]::new(360,240)",
+    "$label = [System.Windows.Forms.Label]::new()",
+    "$label.Text = 'stable-pixel-fixture'",
+    "$label.AutoSize = $true",
+    "$label.Location = [System.Drawing.Point]::new(24,24)",
+    "$form.Controls.Add($label)",
+    "$form.Show()",
+    "[System.Windows.Forms.Application]::DoEvents()",
+    "[Console]::Out.WriteLine('READY')",
+    "[Console]::Out.Flush()",
+    "while ($true) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 20 }",
+  ].join('; ');
+  const child = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',fixtureScript], {
+    windowsHide:true,
+    stdio:['ignore','pipe','pipe'],
+  });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  child.stdout.setEncoding('utf8');
+
+  try {
+    await new Promise((resolve,reject) => {
+      const timer = setTimeout(() => reject(new Error('computer_fixture_ready_timeout:' + stderr.slice(-300))), 10000);
+      const onData = chunk => {
+        if (String(chunk).includes('READY')) {
+          clearTimeout(timer);
+          child.stdout.off('data', onData);
+          resolve();
+        }
+      };
+      child.stdout.on('data', onData);
+      child.once('error', error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
+    let identity = null;
+    for (let attempt=0; attempt<30 && !identity; attempt += 1) {
+      const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
+      identity = observed.result.windows.find(row => Number(row?.identity?.process_id) === child.pid)?.identity || null;
+      if (!identity) await new Promise(resolve => setTimeout(resolve,100));
+    }
+    assert.ok(identity, 'fixture window identity');
+
+    const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
+    assert.equal(capture.result.effect_started, false);
+    assert.match(capture.result.png_sha256, /^[0-9a-f]{64}$/);
+    assert.match(capture.result.pixel_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(typeof capture.result.foreground, 'boolean');
+    assert.equal(capture.result.geometry_stable, true);
+    assert.ok(capture.result.rect.width > 0);
+    assert.ok(capture.result.rect.height > 0);
+  } finally {
+    child.kill();
+  }
 });
 
 test('read-only observation carries no authority effect', async () => {
