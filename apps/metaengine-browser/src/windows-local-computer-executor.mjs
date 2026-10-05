@@ -261,6 +261,41 @@ function Project-Uia([System.Windows.Automation.AutomationElement]$Element) {
   }
 }
 
+function Get-ExactWindowHandle([object]$Identity) {
+  return [IntPtr]([Convert]::ToInt64(([string]$Identity.window_handle).Substring(2), 16))
+}
+
+function Resolve-WindowRelativePoint([object]$Identity, [int]$X, [int]$Y) {
+  $rect = Get-WindowRectForIdentity $Identity
+  if ($X -lt 0 -or $Y -lt 0 -or $X -ge $rect.width -or $Y -ge $rect.height) {
+    throw "computer_pointer_outside_exact_window"
+  }
+  return [ordered]@{
+    screen_x = $rect.left + $X
+    screen_y = $rect.top + $Y
+    rect = $rect
+  }
+}
+
+function Activate-ExactWindow([object]$Identity) {
+  $hwnd = Get-ExactWindowHandle $Identity
+  $null = [MetaengineWin32]::ShowWindow($hwnd, 9)
+  if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
+  Start-Sleep -Milliseconds 10
+  if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
+  return $hwnd
+}
+
+function Read-CursorAt([int]$ScreenX, [int]$ScreenY, [IntPtr]$Hwnd) {
+  $point = New-Object MetaengineWin32+POINT
+  [MetaengineWin32]::GetCursorPos([ref]$point) | Out-Null
+  return [ordered]@{
+    proven = ($point.X -eq $ScreenX -and $point.Y -eq $ScreenY -and [MetaengineWin32]::GetForegroundWindow() -eq $Hwnd)
+    x = $point.X
+    y = $point.Y
+  }
+}
+
 function Invoke-MetaengineComputerRequest([object]$request) {
   $effectStarted = $false
 
@@ -755,36 +790,137 @@ function Invoke-MetaengineComputerRequest([object]$request) {
       break
     }
 
-    'POINTER_CLICK' {
+    'POINTER_MOVE' {
       $identity = Assert-TargetIdentity $request.target
-      $rect = Get-WindowRectForIdentity $identity
-      $x = [int]$request.args.x
-      $y = [int]$request.args.y
-      if ($x -lt 0 -or $y -lt 0 -or $x -ge $rect.width -or $y -ge $rect.height) {
-        throw "computer_pointer_outside_exact_window"
-      }
-      $screenX = $rect.left + $x
-      $screenY = $rect.top + $y
-      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
-      if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
-      Start-Sleep -Milliseconds 40
-      if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
-      if (-not [MetaengineWin32]::SetCursorPos($screenX, $screenY)) { throw "computer_pointer_position_failed" }
+      $pointSpec = Resolve-WindowRelativePoint $identity ([int]$request.args.x) ([int]$request.args.y)
       $effectStarted = $true
-      [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-      [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-      $point = New-Object MetaengineWin32+POINT
-      [MetaengineWin32]::GetCursorPos([ref]$point) | Out-Null
-      $proven = ($point.X -eq $screenX -and $point.Y -eq $screenY -and [MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      $hwnd = Activate-ExactWindow $identity
+      if (-not [MetaengineWin32]::SetCursorPos([int]$pointSpec.screen_x, [int]$pointSpec.screen_y)) { throw "computer_pointer_position_failed" }
+      $cursor = Read-CursorAt ([int]$pointSpec.screen_x) ([int]$pointSpec.screen_y) $hwnd
       Write-Result ([ordered]@{
-        ok = $proven
+        ok = [bool]$cursor.proven
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $proven
-        action = 'POINTER_CLICK'
-        cursor = [ordered]@{ x=$point.X; y=$point.Y }
+        readback_proven = [bool]$cursor.proven
+        action = 'POINTER_MOVE'
+        cursor = [ordered]@{ x=$cursor.x; y=$cursor.y }
         target = Get-ProcessIdentity ([int]$identity.process_id)
-        authority_effect = $proven
+        authority_effect = [bool]$cursor.proven
+      })
+      break
+    }
+
+    'POINTER_CLICK' {
+      $identity = Assert-TargetIdentity $request.target
+      $pointSpec = Resolve-WindowRelativePoint $identity ([int]$request.args.x) ([int]$request.args.y)
+      $effectStarted = $true
+      $hwnd = Activate-ExactWindow $identity
+      if (-not [MetaengineWin32]::SetCursorPos([int]$pointSpec.screen_x, [int]$pointSpec.screen_y)) { throw "computer_pointer_position_failed" }
+      [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+      [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+      $cursor = Read-CursorAt ([int]$pointSpec.screen_x) ([int]$pointSpec.screen_y) $hwnd
+      Write-Result ([ordered]@{
+        ok = [bool]$cursor.proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = [bool]$cursor.proven
+        action = 'POINTER_CLICK'
+        cursor = [ordered]@{ x=$cursor.x; y=$cursor.y }
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = [bool]$cursor.proven
+      })
+      break
+    }
+
+    'POINTER_DOUBLE_CLICK' {
+      $identity = Assert-TargetIdentity $request.target
+      $pointSpec = Resolve-WindowRelativePoint $identity ([int]$request.args.x) ([int]$request.args.y)
+      $effectStarted = $true
+      $hwnd = Activate-ExactWindow $identity
+      if (-not [MetaengineWin32]::SetCursorPos([int]$pointSpec.screen_x, [int]$pointSpec.screen_y)) { throw "computer_pointer_position_failed" }
+      1..2 | ForEach-Object {
+        [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+        [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+        if ($_ -eq 1) { Start-Sleep -Milliseconds 40 }
+      }
+      $cursor = Read-CursorAt ([int]$pointSpec.screen_x) ([int]$pointSpec.screen_y) $hwnd
+      Write-Result ([ordered]@{
+        ok = [bool]$cursor.proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = [bool]$cursor.proven
+        action = 'POINTER_DOUBLE_CLICK'
+        cursor = [ordered]@{ x=$cursor.x; y=$cursor.y }
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = [bool]$cursor.proven
+      })
+      break
+    }
+
+    'POINTER_RIGHT_CLICK' {
+      $identity = Assert-TargetIdentity $request.target
+      $pointSpec = Resolve-WindowRelativePoint $identity ([int]$request.args.x) ([int]$request.args.y)
+      $effectStarted = $true
+      $hwnd = Activate-ExactWindow $identity
+      if (-not [MetaengineWin32]::SetCursorPos([int]$pointSpec.screen_x, [int]$pointSpec.screen_y)) { throw "computer_pointer_position_failed" }
+      [MetaengineWin32]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero)
+      [MetaengineWin32]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero)
+      $cursor = Read-CursorAt ([int]$pointSpec.screen_x) ([int]$pointSpec.screen_y) $hwnd
+      Write-Result ([ordered]@{
+        ok = [bool]$cursor.proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = [bool]$cursor.proven
+        action = 'POINTER_RIGHT_CLICK'
+        cursor = [ordered]@{ x=$cursor.x; y=$cursor.y }
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = [bool]$cursor.proven
+      })
+      break
+    }
+
+    'POINTER_DRAG' {
+      $identity = Assert-TargetIdentity $request.target
+      $from = Resolve-WindowRelativePoint $identity ([int]$request.args.from_x) ([int]$request.args.from_y)
+      $to = Resolve-WindowRelativePoint $identity ([int]$request.args.to_x) ([int]$request.args.to_y)
+      $effectStarted = $true
+      $hwnd = Activate-ExactWindow $identity
+      if (-not [MetaengineWin32]::SetCursorPos([int]$from.screen_x, [int]$from.screen_y)) { throw "computer_pointer_position_failed" }
+      [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+      if ([int]$request.args.duration_ms -gt 0) { Start-Sleep -Milliseconds ([int]$request.args.duration_ms) }
+      if (-not [MetaengineWin32]::SetCursorPos([int]$to.screen_x, [int]$to.screen_y)) { throw "computer_pointer_drag_failed" }
+      [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+      $cursor = Read-CursorAt ([int]$to.screen_x) ([int]$to.screen_y) $hwnd
+      Write-Result ([ordered]@{
+        ok = [bool]$cursor.proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = [bool]$cursor.proven
+        action = 'POINTER_DRAG'
+        cursor = [ordered]@{ x=$cursor.x; y=$cursor.y }
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = [bool]$cursor.proven
+      })
+      break
+    }
+
+    'POINTER_SCROLL' {
+      $identity = Assert-TargetIdentity $request.target
+      $pointSpec = Resolve-WindowRelativePoint $identity ([int]$request.args.x) ([int]$request.args.y)
+      $effectStarted = $true
+      $hwnd = Activate-ExactWindow $identity
+      if (-not [MetaengineWin32]::SetCursorPos([int]$pointSpec.screen_x, [int]$pointSpec.screen_y)) { throw "computer_pointer_position_failed" }
+      [MetaengineWin32]::MouseWheel([int]$request.args.delta)
+      $cursor = Read-CursorAt ([int]$pointSpec.screen_x) ([int]$pointSpec.screen_y) $hwnd
+      Write-Result ([ordered]@{
+        ok = [bool]$cursor.proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = [bool]$cursor.proven
+        action = 'POINTER_SCROLL'
+        cursor = [ordered]@{ x=$cursor.x; y=$cursor.y }
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = [bool]$cursor.proven
       })
       break
     }
@@ -1162,7 +1298,7 @@ export class WindowsLocalComputerExecutor {
   }
 
   #consumeVisualFence(request) {
-    if (request?.action !== 'POINTER_CLICK') return { ok:true };
+    if (!['POINTER_MOVE','POINTER_CLICK','POINTER_DOUBLE_CLICK','POINTER_RIGHT_CLICK','POINTER_DRAG','POINTER_SCROLL'].includes(request?.action)) return { ok:true };
     const hash = String(request?.args?.visual_fence?.frame_sha256 || '').toLowerCase();
     const frame = this.#visualFrames.get(hash);
     if (!frame) return { ok:false, reason:'computer_visual_frame_not_observed' };
