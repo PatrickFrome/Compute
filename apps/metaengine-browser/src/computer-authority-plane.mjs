@@ -24,13 +24,7 @@ const MUTATING_ACTIONS = new Set([
   'UIA_SCROLL',
   'TYPE_TEXT',
   'KEY_PRESS',
-  'HOTKEY',
-  'WINDOW_FOCUS',
-  'WINDOW_MOVE_RESIZE',
-  'WINDOW_STATE',
   'POINTER_CLICK',
-  'POINTER_SCROLL',
-  'POINTER_DRAG',
 ]);
 
 const SAFE_KEYS = new Set([
@@ -47,9 +41,6 @@ const SAFE_KEYS = new Set([
   'END',
   'PAGEUP',
   'PAGEDOWN',
-  'SPACE',
-  'INSERT',
-  'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
   'CTRL+A',
 ]);
 
@@ -183,95 +174,14 @@ function normalizeArgs(action, args) {
     return Object.freeze({ key });
   }
 
-  if (action === 'HOTKEY') {
-    const modifiers = Array.isArray(input.modifiers)
-      ? [...new Set(input.modifiers.map((v) => String(v || '').trim().toUpperCase()))]
-      : [];
-    if (!modifiers.length || modifiers.length > 3 || modifiers.some((v) => !['CTRL','ALT','SHIFT'].includes(v))) {
-      throw new Error('computer_hotkey_modifiers_invalid');
-    }
-    const key = String(input.key || '').trim().toUpperCase();
-    const simpleKey = /^[A-Z0-9]$/.test(key) || /^F(?:[1-9]|1[0-2])$/.test(key) || SAFE_KEYS.has(key);
-    if (!simpleKey || key === 'CTRL+A') throw new Error('computer_hotkey_key_invalid');
-    return Object.freeze({ modifiers: Object.freeze(modifiers.sort()), key });
-  }
-
-  if (action === 'WINDOW_FOCUS') return Object.freeze({});
-
-  if (action === 'WINDOW_MOVE_RESIZE') {
-    const x = Number(input.x);
-    const y = Number(input.y);
-    const width = Number(input.width);
-    const height = Number(input.height);
-    if (![x,y,width,height].every(Number.isFinite) || width < 100 || height < 100 || width > 16384 || height > 16384) {
-      throw new Error('computer_window_bounds_invalid');
-    }
-    return Object.freeze({
-      x: Math.trunc(x),
-      y: Math.trunc(y),
-      width: Math.trunc(width),
-      height: Math.trunc(height),
-    });
-  }
-
-  if (action === 'WINDOW_STATE') {
-    const state = String(input.state || '').trim().toUpperCase();
-    if (!['MINIMIZE','MAXIMIZE','RESTORE'].includes(state)) throw new Error('computer_window_state_invalid');
-    return Object.freeze({ state });
-  }
 
   if (action === 'POINTER_CLICK') {
     const x = Number(input.x);
     const y = Number(input.y);
-    const button = String(input.button || 'LEFT').trim().toUpperCase();
-    const clickCount = Number(input.click_count ?? 1);
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) throw new Error('computer_pointer_coordinates_invalid');
-    if (!['LEFT','RIGHT','MIDDLE'].includes(button)) throw new Error('computer_pointer_button_invalid');
-    if (![1,2].includes(clickCount)) throw new Error('computer_pointer_click_count_invalid');
     return Object.freeze({
       x: Math.floor(x),
       y: Math.floor(y),
-      button,
-      click_count: clickCount,
-      visual_fence: normalizeVisualFence(input.visual_fence),
-    });
-  }
-
-  if (action === 'POINTER_SCROLL') {
-    const x = Number(input.x);
-    const y = Number(input.y);
-    const deltaX = Number(input.delta_x || 0);
-    const deltaY = Number(input.delta_y || 0);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) throw new Error('computer_pointer_coordinates_invalid');
-    if (![deltaX,deltaY].every(Number.isFinite) || (deltaX === 0 && deltaY === 0) || Math.abs(deltaX) > 2400 || Math.abs(deltaY) > 2400) {
-      throw new Error('computer_pointer_scroll_invalid');
-    }
-    return Object.freeze({
-      x: Math.floor(x),
-      y: Math.floor(y),
-      delta_x: Math.trunc(deltaX),
-      delta_y: Math.trunc(deltaY),
-      visual_fence: normalizeVisualFence(input.visual_fence),
-    });
-  }
-
-  if (action === 'POINTER_DRAG') {
-    const startX = Number(input.start_x);
-    const startY = Number(input.start_y);
-    const endX = Number(input.end_x);
-    const endY = Number(input.end_y);
-    const durationMs = Number(input.duration_ms ?? 120);
-    if (![startX,startY,endX,endY,durationMs].every(Number.isFinite)
-      || Math.min(startX,startY,endX,endY) < 0
-      || durationMs < 0 || durationMs > 2000) {
-      throw new Error('computer_pointer_drag_invalid');
-    }
-    return Object.freeze({
-      start_x: Math.floor(startX),
-      start_y: Math.floor(startY),
-      end_x: Math.floor(endX),
-      end_y: Math.floor(endY),
-      duration_ms: Math.floor(durationMs),
       button: 'LEFT',
       visual_fence: normalizeVisualFence(input.visual_fence),
     });
@@ -427,10 +337,7 @@ export function computerAuthorityPlaneSnapshot() {
     type_text_requires_exact_uia_runtime_id: true,
     visual_pointer_requires_recent_capture_fence: true,
     direct_uia_patterns: Object.freeze(['VALUE','INVOKE','TOGGLE','SELECTION_ITEM','EXPAND_COLLAPSE','SCROLL']),
-    direct_window_management: true,
     multi_monitor_observation: true,
-    bounded_hotkeys_without_win_modifier: true,
-    pointer_drag_scroll_multi_button: true,
     automatic_retry_allowed: false,
     page_model_data_grants_authority: false,
     authority_effect: false,
