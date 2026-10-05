@@ -114,10 +114,10 @@ begin
     if p_payload <> '{}'::jsonb then raise exception 'computer_status_payload_must_be_empty'; end if;
   else
     v_subaction := upper(trim(coalesce(p_payload->>'action','')));
-    if v_action='COMPUTER_OBSERVE' and v_subaction not in ('OBSERVE_WINDOWS','UIA_SNAPSHOT','CAPTURE_DESKTOP','VERIFY_TARGET') then
+    if v_action='COMPUTER_OBSERVE' and v_subaction not in ('OBSERVE_WINDOWS','OBSERVE_DISPLAYS','UIA_SNAPSHOT','CAPTURE_DESKTOP','VERIFY_TARGET') then
       raise exception 'computer_observe_action_invalid';
     end if;
-    if v_action='COMPUTER_ACTION' and v_subaction not in ('UIA_FOCUS','UIA_INVOKE','TYPE_TEXT','KEY_PRESS','POINTER_CLICK') then
+    if v_action='COMPUTER_ACTION' and v_subaction not in ('UIA_FOCUS','UIA_INVOKE','UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','TYPE_TEXT','KEY_PRESS','KEY_COMBO','WINDOW_ACTIVATE','WINDOW_MINIMIZE','WINDOW_MAXIMIZE','WINDOW_RESTORE','WINDOW_MOVE_RESIZE','POINTER_MOVE','POINTER_CLICK','POINTER_DOUBLE_CLICK','POINTER_RIGHT_CLICK','POINTER_DRAG','POINTER_SCROLL') then
       raise exception 'computer_mutation_action_invalid';
     end if;
   end if;
@@ -701,7 +701,8 @@ select jsonb_build_object(
     'meta_orchestrator_controller_lease_v1', true,
     'meta_atomic_frontier_v2', true,
     'post_lock_transport_revalidation_v1', true,
-    'computer_authority_plane_v1', true
+    'computer_authority_plane_v1', true,
+    'computer_authority_plane_v2_fast', true
   ),
   'ambiguity_recovery_classes', jsonb_build_array('PRE_EFFECT_ABORTED', 'EFFECT_PROVEN'),
   'scheduler_source', 'NATIVE_SUPERVISOR_HEARTBEAT',
