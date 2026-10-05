@@ -1,6 +1,14 @@
 name: R1 Supervisor R2 DB Ingestion
 
 on:
+  push:
+    branches:
+      - 'work/r1-step09b-fresh-project-convergence-v1'
+    paths:
+      - 'supabase/operations/20261005200000_r1_step09b_fresh_project_convergence_v1.sql'
+      - 'scripts/metaengine-r1-step09b-fresh-project-canaries.sql'
+      - 'research/R1_STEP09B_FRESH_PROJECT_CONVERGENCE_2026-10-05.md'
+      - '.github/workflows/r1-supervisor-r2-db-ingestion.yml'
   pull_request:
     branches: [main]
     paths:
@@ -72,4 +80,12 @@ jobs:
           assert 'DB_ENV_ALLOWLIST' in runner
           assert 'decode(' in runner and 'base64' in runner
           assert 'canonical_roadmap_r2_promoted' in runner
+          operation=Path('supabase/operations/20261005200000_r1_step09b_fresh_project_convergence_v1.sql').read_text()
+          historical=Path('supabase/migrations/20260821235859_r1_step09b_idempotency_truthfulness_v2.sql').read_text().strip()
+          canary=Path('scripts/metaengine-r1-step09b-fresh-project-canaries.sql').read_text().lower()
+          assert historical in operation
+          assert 'r1_step09b_target_function_already_present' in operation
+          assert 'r1_step09b_data_api_execute_exposed' in operation
+          assert 'structural_and_negative_only' in canary
+          assert 'r2_production_claim' in canary and 'r3_production_claim' in canary
           PY
