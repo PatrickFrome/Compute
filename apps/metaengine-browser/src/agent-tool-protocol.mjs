@@ -40,8 +40,8 @@ export const AGENT_TOOL_ACTIONS = Object.freeze([
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$/;
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
 const ACTION_RE = /^[A-Z][A-Z0-9_]{1,31}$/;
-const MAX_REQUESTS_PER_MESSAGE = 4;
-const MAX_PAYLOAD_JSON_CHARS = 2048;
+const MAX_REQUESTS_PER_MESSAGE = 8;
+const MAX_PAYLOAD_JSON_CHARS = 4096;
 const MAX_RESULT_SUMMARY_CHARS = 4000;
 
 function clip(value, max) { return String(value ?? '').slice(0, max); }
@@ -123,7 +123,9 @@ export function renderAgentToolProtocol({ tab_id = null, max_requests = MAX_REQU
     'request_id=<4-64 chars unique per task>',
     'action=<one of the actions above>',
     `tab_id=${tab_id ? clip(tab_id, 40) : '<your assigned tab or omit>'}`,
-    'payload_json=<single-line JSON object, max 2048 chars>',
+    'payload_json=<single-line JSON object, max 4096 chars>',
+    'COMPUTER_OBSERVE subactions=OBSERVE_WINDOWS|OBSERVE_DISPLAYS|UIA_SNAPSHOT|CAPTURE_DESKTOP|VERIFY_TARGET',
+    'COMPUTER_ACTION subactions=UIA_FOCUS|UIA_INVOKE|UIA_SET_VALUE|UIA_TOGGLE|UIA_SELECT|UIA_EXPAND_COLLAPSE|TYPE_TEXT|KEY_PRESS|KEY_COMBO|WINDOW_ACTIVATE|WINDOW_MINIMIZE|WINDOW_MAXIMIZE|WINDOW_RESTORE|WINDOW_MOVE_RESIZE|POINTER_MOVE|POINTER_CLICK|POINTER_DOUBLE_CLICK|POINTER_RIGHT_CLICK|POINTER_DRAG|POINTER_SCROLL',
     '```',
     `limits=max ${max_requests} requests per reply; requests beyond the limit are dropped`,
     `results=${result_delivery}: confirmed outcomes arrive as ${AGENT_TOOL_RESULT_MARKER} blocks in your NEXT task message; never invent a tool result; keep working with what you have if a result is late`,
@@ -160,7 +162,7 @@ export function renderAgentToolResults(results) {
 export function agentToolProtocolSnapshot() {
   return Object.freeze({
     schema: AGENT_TOOL_PROTOCOL_SCHEMA,
-    version: 1.1,
+    version: 2.0,
     actions: [...AGENT_TOOL_ACTIONS],
     max_requests_per_message: MAX_REQUESTS_PER_MESSAGE,
     max_payload_json_chars: MAX_PAYLOAD_JSON_CHARS,
@@ -170,6 +172,8 @@ export function agentToolProtocolSnapshot() {
     computer_observation_allowed: true,
     computer_typed_actuation_allowed: true,
     per_agent_attribution_required: true,
+    computer_fast_runtime: true,
+    max_parallel_requests_per_reply: MAX_REQUESTS_PER_MESSAGE,
     authority_effect: false,
   });
 }

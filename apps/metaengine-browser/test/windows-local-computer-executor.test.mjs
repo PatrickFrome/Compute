@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
+  PersistentWindowsPowerShellBridge,
   WindowsLocalComputerExecutor,
 } from '../src/windows-local-computer-executor.mjs';
 import { computerTargetIdentityDigest, normalizeComputerTargetIdentity } from '../src/computer-authority-plane.mjs';
@@ -35,6 +38,92 @@ const contextFor = (computerAction, exactTarget = target, agentId = 'agent_test-
     },
   };
 };
+test('persistent Windows bridge reuses one hot process and serializes concurrent requests', async () => {
+  let spawnCalls = 0;
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+
+  const spawnImpl = (file, args, options) => {
+    spawnCalls += 1;
+    assert.equal(file, 'powershell.exe');
+    assert.ok(args.includes('-File'));
+    assert.equal(options.env.METAENGINE_COMPUTER_PERSISTENT, '1');
+
+    const child = new EventEmitter();
+    child.pid = 9000 + spawnCalls;
+    child.killed = false;
+    child.exitCode = null;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let exited = false;
+
+    const emitExit = (code) => {
+      if (exited) return;
+      exited = true;
+      child.exitCode = code;
+      queueMicrotask(() => child.emit('exit', code));
+    };
+
+    child.kill = () => {
+      child.killed = true;
+      emitExit(1);
+      return true;
+    };
+
+    child.stdin = {
+      write(data) {
+        const line = String(data || '').trim();
+        if (line === '__METAENGINE_STOP__') {
+          emitExit(0);
+          return true;
+        }
+        if (!line.startsWith('{')) return true;
+        const request = JSON.parse(line);
+        activeRequests += 1;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        setTimeout(() => {
+          activeRequests -= 1;
+          child.stdout.write(JSON.stringify({
+            ok:true,
+            effect_started:false,
+            action:request.action,
+            authority_effect:false,
+          }) + '\n');
+        }, 5);
+        return true;
+      },
+      end() {
+        emitExit(0);
+      },
+    };
+    return child;
+  };
+
+  const bridge = new PersistentWindowsPowerShellBridge({
+    platform:'win32',
+    spawn_impl:spawnImpl,
+    timeout_ms:2000,
+  });
+
+  const [a, b] = await Promise.all([
+    bridge.run({ action:'STATUS' }),
+    bridge.run({ action:'OBSERVE_WINDOWS', args:{ offset:0, limit:1 } }),
+  ]);
+
+  assert.equal(a.action, 'STATUS');
+  assert.equal(b.action, 'OBSERVE_WINDOWS');
+  assert.equal(spawnCalls, 1);
+  assert.equal(maxActiveRequests, 1);
+  const snapshot = bridge.snapshot();
+  assert.equal(snapshot.spawn_count, 1);
+  assert.equal(snapshot.request_count, 2);
+  assert.equal(snapshot.restart_count, 0);
+  assert.equal(snapshot.process_alive, true);
+
+  await bridge.stop();
+  assert.equal(bridge.snapshot().process_alive, false);
+});
+
 test('executor snapshot exposes fixed bridge identity and no scheduler authority', () => {
   const executor = new WindowsLocalComputerExecutor({ platform:'linux', runner:async () => ({ ok:true }) });
   const snapshot = executor.snapshot();

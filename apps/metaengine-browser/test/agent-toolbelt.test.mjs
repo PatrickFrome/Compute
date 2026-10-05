@@ -58,9 +58,9 @@ test('parseAgentToolRequests accepts valid fenced blocks and rejects invalid one
 });
 
 test('parseAgentToolRequests bounds requests per message', () => {
-  const text = [1, 2, 3, 4, 5, 6].map((i) => requestBlock({ request_id: `req-000${i}` })).join('\n');
+  const text = [1,2,3,4,5,6,7,8,9,10].map((i) => requestBlock({ request_id: `req-${String(i).padStart(4,'0')}` })).join('\n');
   const parsed = parseAgentToolRequests(text);
-  assert.equal(parsed.requests.length, 4);
+  assert.equal(parsed.requests.length, 8);
   assert.equal(parsed.overflow, 2);
 });
 
@@ -68,7 +68,11 @@ test('renderAgentToolProtocol and renderAgentToolResults are prompt-bounded and 
   const protocol = renderAgentToolProtocol({ tab_id: LEASE.tab_id });
   assert.ok(protocol.includes(AGENT_TOOL_REQUEST_MARKER));
   assert.ok(protocol.includes('CAPTURE'));
-  assert.ok(protocol.length <= 1200, `protocol must fit the prompt clip budget (got ${protocol.length})`);
+  assert.ok(protocol.includes('OBSERVE_DISPLAYS'));
+  assert.ok(protocol.includes('UIA_SET_VALUE'));
+  assert.ok(protocol.includes('POINTER_DRAG'));
+  assert.ok(protocol.includes('WINDOW_MOVE_RESIZE'));
+  assert.ok(protocol.length <= 1800, `protocol must fit the prompt clip budget (got ${protocol.length})`);
   const results = renderAgentToolResults([
     { request_id: 'req-0001', status: 'COMPLETED', summary: 'page captured; 42 interactive elements' },
     { request_id: 'req-0002', status: 'UNAVAILABLE', summary: 'reason=EDGE_ROUTE_UNAVAILABLE' },
@@ -79,6 +83,9 @@ test('renderAgentToolProtocol and renderAgentToolResults are prompt-bounded and 
   assert.equal(renderAgentToolResults([]), '');
   const snapshot = agentToolProtocolSnapshot();
   assert.equal(snapshot.conversation_mutation_allowed, false);
+  assert.equal(snapshot.version, 2.0);
+  assert.equal(snapshot.max_requests_per_message, 8);
+  assert.equal(snapshot.computer_fast_runtime, true);
   assert.equal(snapshot.authority_effect, false);
 });
 
