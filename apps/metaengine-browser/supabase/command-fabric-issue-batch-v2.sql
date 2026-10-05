@@ -16,7 +16,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  v_expected_manifest_revision constant text := 'sha256:e7e47b9031563954512fe77ec91a967fb46860b5fc3c652b96e9d861af6339ac';
+  v_expected_manifest_revision constant text := 'sha256:5dc72866ee638039c0495853892fdd1b5d0f9845857173153c0fbca5d26d840d';
   v_item jsonb;
   v_action text;
   v_result jsonb;
