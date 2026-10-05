@@ -603,21 +603,14 @@ function Invoke-MetaengineComputerRequest([object]$request) {
       $identity = Assert-TargetIdentity $request.target
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
       if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
-      Start-Sleep -Milliseconds 40
+      Start-Sleep -Milliseconds 10
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
       $key = ([string]$request.args.key).ToUpperInvariant()
       $effectStarted = $true
-      $sent = $false
       if ($key -eq 'CTRL+A') {
         $sent = [MetaengineWin32]::SendCtrlA()
       } else {
-        $map = @{
-          'ENTER'=0x0D; 'ESCAPE'=0x1B; 'TAB'=0x09; 'BACKSPACE'=0x08; 'DELETE'=0x2E;
-          'ARROWUP'=0x26; 'ARROWDOWN'=0x28; 'ARROWLEFT'=0x25; 'ARROWRIGHT'=0x27;
-          'HOME'=0x24; 'END'=0x23; 'PAGEUP'=0x21; 'PAGEDOWN'=0x22
-        }
-        if (-not $map.ContainsKey($key)) { throw "computer_key_not_allowlisted" }
-        $sent = [MetaengineWin32]::SendVirtualKey([UInt16]$map[$key])
+        $sent = [MetaengineWin32]::SendVirtualKey((Get-VirtualKey $key))
       }
       if (-not $sent) { throw "computer_key_input_failed" }
       Write-Result ([ordered]@{
@@ -628,6 +621,132 @@ function Invoke-MetaengineComputerRequest([object]$request) {
         action = 'KEY_PRESS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $true
+      })
+      break
+    }
+
+    'KEY_COMBO' {
+      $identity = Assert-TargetIdentity $request.target
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      if (-not [MetaengineWin32]::SetForegroundWindow($hwnd)) { throw "computer_foreground_activation_failed" }
+      Start-Sleep -Milliseconds 10
+      if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_foreground_readback_failed" }
+      $keys = @($request.args.keys)
+      $virtual = New-Object 'System.Collections.Generic.List[UInt16]'
+      foreach ($key in $keys) { $virtual.Add((Get-VirtualKey ([string]$key))) }
+      $effectStarted = $true
+      if (-not [MetaengineWin32]::SendVirtualCombo($virtual.ToArray())) { throw "computer_key_combo_failed" }
+      Write-Result ([ordered]@{
+        ok = $true
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $true
+        action = 'KEY_COMBO'
+        keys = $keys
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $true
+      })
+      break
+    }
+
+    'WINDOW_ACTIVATE' {
+      $identity = Assert-TargetIdentity $request.target
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
+      $null = [MetaengineWin32]::ShowWindow($hwnd, 9)
+      $null = [MetaengineWin32]::SetForegroundWindow($hwnd)
+      Start-Sleep -Milliseconds 10
+      $proven = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      Write-Result ([ordered]@{
+        ok = $proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $proven
+        action = 'WINDOW_ACTIVATE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $proven
+      })
+      break
+    }
+
+    'WINDOW_MINIMIZE' {
+      $identity = Assert-TargetIdentity $request.target
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
+      $null = [MetaengineWin32]::ShowWindow($hwnd, 2)
+      Start-Sleep -Milliseconds 10
+      $proven = [MetaengineWin32]::IsIconic($hwnd)
+      Write-Result ([ordered]@{
+        ok = $proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $proven
+        action = 'WINDOW_MINIMIZE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $proven
+      })
+      break
+    }
+
+    'WINDOW_MAXIMIZE' {
+      $identity = Assert-TargetIdentity $request.target
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
+      $null = [MetaengineWin32]::ShowWindow($hwnd, 3)
+      Start-Sleep -Milliseconds 10
+      $proven = [MetaengineWin32]::IsZoomed($hwnd)
+      Write-Result ([ordered]@{
+        ok = $proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $proven
+        action = 'WINDOW_MAXIMIZE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $proven
+      })
+      break
+    }
+
+    'WINDOW_RESTORE' {
+      $identity = Assert-TargetIdentity $request.target
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $effectStarted = $true
+      $null = [MetaengineWin32]::ShowWindow($hwnd, 9)
+      Start-Sleep -Milliseconds 10
+      $proven = (-not [MetaengineWin32]::IsIconic($hwnd))
+      Write-Result ([ordered]@{
+        ok = $proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $proven
+        action = 'WINDOW_RESTORE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $proven
+      })
+      break
+    }
+
+    'WINDOW_MOVE_RESIZE' {
+      $identity = Assert-TargetIdentity $request.target
+      $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
+      $x = [int]$request.args.x
+      $y = [int]$request.args.y
+      $width = [int]$request.args.width
+      $height = [int]$request.args.height
+      $effectStarted = $true
+      if (-not [MetaengineWin32]::MoveWindow($hwnd, $x, $y, $width, $height, $true)) { throw "computer_window_move_failed" }
+      Start-Sleep -Milliseconds 10
+      $rect = Get-WindowRectForIdentity $identity
+      $proven = ($rect.left -eq $x -and $rect.top -eq $y -and $rect.width -eq $width -and $rect.height -eq $height)
+      Write-Result ([ordered]@{
+        ok = $proven
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $proven
+        action = 'WINDOW_MOVE_RESIZE'
+        rect = $rect
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $proven
       })
       break
     }
