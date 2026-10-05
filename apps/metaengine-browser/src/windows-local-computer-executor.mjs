@@ -951,7 +951,11 @@ export async function runFixedWindowsPowerShell(request, {
         try {
           finish(resolve, parseSingleJson(stdout));
         } catch (error) {
-          finish(reject, error);
+          const stderrTail = stderr.slice(-500).replace(/[\r\n]+/g, ' ').trim();
+          const diagnostic = stderrTail
+            ? `${String(error?.message || error)}:${stderrTail}`
+            : String(error?.message || error);
+          finish(reject, new Error(diagnostic));
         }
       });
       child.stdin.end(POWERSHELL_BRIDGE, 'utf8');
