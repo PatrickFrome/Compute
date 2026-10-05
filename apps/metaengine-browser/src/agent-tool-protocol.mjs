@@ -22,9 +22,10 @@ export const AGENT_TOOL_REQUEST_MARKER = 'TOOL_REQUEST_V1';
 export const AGENT_TOOL_RESULT_MARKER = 'TOOL_RESULT_V1';
 export const AGENT_TOOL_FENCE = 'tool';
 
-// v1 allowlist: observation + bounded navigation. Conversation mutation
-// (SEMANTIC_TYPE) stays dispatch-only — the task prompt is the only text the
-// supervisor types into an agent conversation.
+// v1.1 allowlist: Browser observation/navigation plus provider-neutral
+// Computer Authority Plane observation and typed actuation. Conversation
+// mutation (SEMANTIC_TYPE) stays dispatch-only — the task prompt remains the
+// only text the supervisor types into an agent conversation.
 export const AGENT_TOOL_ACTIONS = Object.freeze([
   'CAPTURE',
   'READ_TRANSCRIPT',
@@ -32,14 +33,16 @@ export const AGENT_TOOL_ACTIONS = Object.freeze([
   'SYSTEM_TELEMETRY',
   'SCROLL',
   'SEMANTIC_FOCUS',
+  'COMPUTER_OBSERVE',
+  'COMPUTER_ACTION',
 ]);
 
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$/;
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
 const ACTION_RE = /^[A-Z][A-Z0-9_]{1,31}$/;
 const MAX_REQUESTS_PER_MESSAGE = 4;
-const MAX_PAYLOAD_JSON_CHARS = 512;
-const MAX_RESULT_SUMMARY_CHARS = 1200;
+const MAX_PAYLOAD_JSON_CHARS = 2048;
+const MAX_RESULT_SUMMARY_CHARS = 4000;
 
 function clip(value, max) { return String(value ?? '').slice(0, max); }
 
@@ -120,7 +123,7 @@ export function renderAgentToolProtocol({ tab_id = null, max_requests = MAX_REQU
     'request_id=<4-64 chars unique per task>',
     'action=<one of the actions above>',
     `tab_id=${tab_id ? clip(tab_id, 40) : '<your assigned tab or omit>'}`,
-    'payload_json=<single-line JSON object, max 512 chars>',
+    'payload_json=<single-line JSON object, max 2048 chars>',
     '```',
     `limits=max ${max_requests} requests per reply; requests beyond the limit are dropped`,
     `results=${result_delivery}: confirmed outcomes arrive as ${AGENT_TOOL_RESULT_MARKER} blocks in your NEXT task message; never invent a tool result; keep working with what you have if a result is late`,
@@ -157,13 +160,16 @@ export function renderAgentToolResults(results) {
 export function agentToolProtocolSnapshot() {
   return Object.freeze({
     schema: AGENT_TOOL_PROTOCOL_SCHEMA,
-    version: 1,
+    version: 1.1,
     actions: [...AGENT_TOOL_ACTIONS],
     max_requests_per_message: MAX_REQUESTS_PER_MESSAGE,
     max_payload_json_chars: MAX_PAYLOAD_JSON_CHARS,
     fenced_block: AGENT_TOOL_FENCE,
     result_delivery: 'NEXT_TASK_MESSAGE',
     conversation_mutation_allowed: false,
+    computer_observation_allowed: true,
+    computer_typed_actuation_allowed: true,
+    per_agent_attribution_required: true,
     authority_effect: false,
   });
 }
