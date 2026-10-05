@@ -53,6 +53,8 @@ test('computer authority plane exposes one DB lease authority and no second sche
   assert.equal(snapshot.multi_monitor_observation, true);
   assert.equal(snapshot.visual_pointer_requires_target_bound_window_capture, true);
   assert.equal(snapshot.visual_pointer_requires_unchanged_window_geometry, true);
+  assert.equal(snapshot.dispatch_only_mutations_never_claim_effect_proven, true);
+  assert.equal(snapshot.type_text_requires_value_readback_for_effect_proof, true);
 });
 
 test('read-only and mutating computer actions are explicitly classified', () => {
