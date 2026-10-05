@@ -343,6 +343,7 @@ export function computerAuthorityPlaneSnapshot() {
     visual_pointer_requires_target_bound_window_capture: true,
     visual_pointer_requires_unchanged_window_geometry: true,
     visual_pointer_requires_foreground_capture: true,
+    visual_capture_requires_stable_foreground_geometry: true,
     visual_pointer_revalidates_pixels_after_cursor_move: true,
     visual_pointer_never_foregrounds_stale_frame: true,
     direct_uia_patterns: Object.freeze(['VALUE','INVOKE','TOGGLE','SELECTION_ITEM','EXPAND_COLLAPSE','SCROLL']),
