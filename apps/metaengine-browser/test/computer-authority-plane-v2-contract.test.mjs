@@ -14,7 +14,7 @@ test('Computer V2 issuer adds only typed UIA/display subactions and requires V2 
 
   assert.match(migration, /computer_authority_v2_not_attested/);
   assert.match(migration, /computer_authority,version/);
-  assert.match(migration, /<> '2\\.0\\.0'/);
+  assert.ok(migration.includes("<> '2.0.0'"));
   assert.match(migration, /h205f22_a2_browser_supervisor_issue_computer_v1/);
   assert.doesNotMatch(migration, /insert\\s+into\\s+public\\.compute_fabric_a2_browser_supervisor_command_h205f22/i);
   assert.doesNotMatch(migration, /create\\s+table/i);
