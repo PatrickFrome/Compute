@@ -20,15 +20,25 @@ const target = () => ({
   generation: 7,
 });
 
-const lease = () => ({
-  command_id: '7fa7dca5-8fb5-4c79-bfca-a2ab323542f9',
-  effect_binding: {
-    schema:'metaengine.native-supervisor.effect-binding.v2',
-    automatic_retry_allowed:false,
-    page_data_authority:false,
-    authority_effect:false,
-  },
-});
+const lease = (computerAction = 'TYPE_TEXT', exactTarget = target(), agentId = 'agent_test-12345678') => {
+  const commandId = '7fa7dca5-8fb5-4c79-bfca-a2ab323542f9';
+  const normalizedTarget = normalizeComputerTargetIdentity(exactTarget);
+  return {
+    command_id: commandId,
+    effect_binding: {
+      schema:'metaengine.native-supervisor.computer-effect-binding.v1',
+      command_id:commandId,
+      action:'COMPUTER_ACTION',
+      computer_action:computerAction,
+      agent_id:agentId,
+      target_identity_sha256:computerTargetIdentityDigest(normalizedTarget),
+      target:normalizedTarget,
+      automatic_retry_allowed:false,
+      page_data_authority:false,
+      authority_effect:false,
+    },
+  };
+};
 
 test('computer authority plane exposes one DB lease authority and no second scheduler', () => {
   const snapshot = computerAuthorityPlaneSnapshot();
@@ -67,12 +77,12 @@ test('mutating computer requests require DB lease and effect binding', () => {
 });
 
 test('pointer and key payloads are bounded and allowlisted', () => {
-  const click = normalizeComputerRequest({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target:target(), args:{ x:14.8, y:22.2, visual_fence:{ frame_sha256:'c'.repeat(64) } } }, lease());
-  assert.deepEqual(click.args, { x:14, y:22, button:'LEFT' });
-  const key = normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'Ctrl+A' } }, lease());
+  const click = normalizeComputerRequest({ action:'POINTER_CLICK', agent_id:'agent_test-12345678', target:target(), args:{ x:14.8, y:22.2, visual_fence:{ frame_sha256:'c'.repeat(64) } } }, lease('POINTER_CLICK'));
+  assert.deepEqual(click.args, { x:14, y:22, button:'LEFT', visual_fence:{ frame_sha256:'c'.repeat(64), max_age_ms:3000 } });
+  const key = normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'Ctrl+A' } }, lease('KEY_PRESS'));
   assert.equal(key.args.key, 'CTRL+A');
   assert.throws(
-    () => normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'WIN+R' } }, lease()),
+    () => normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'WIN+R' } }, lease('KEY_PRESS')),
     /computer_key_not_allowlisted/
   );
 });
