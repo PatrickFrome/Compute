@@ -224,13 +224,16 @@ function Find-UiaElement([object]$Identity, [object[]]$RuntimeId) {
 function Project-Uia([System.Windows.Automation.AutomationElement]$Element) {
   $rect = $Element.Current.BoundingRectangle
   $runtime = @()
+  $patterns = @()
   try { $runtime = @($Element.GetRuntimeId()) } catch {}
+  try { $patterns = @($Element.GetSupportedPatterns() | ForEach-Object { [string]$_.ProgrammaticName }) } catch {}
   return [ordered]@{
     runtime_id = $runtime
     name = [string]$Element.Current.Name
     automation_id = [string]$Element.Current.AutomationId
     control_type = [string]$Element.Current.ControlType.ProgrammaticName
     class_name = [string]$Element.Current.ClassName
+    supported_patterns = $patterns
     enabled = [bool]$Element.Current.IsEnabled
     offscreen = [bool]$Element.Current.IsOffscreen
     bounds = [ordered]@{
@@ -239,6 +242,17 @@ function Project-Uia([System.Windows.Automation.AutomationElement]$Element) {
       width = [double]$rect.Width
       height = [double]$rect.Height
     }
+  }
+}
+
+function Resolve-ScrollAmount([string]$Value) {
+  switch (([string]$Value).ToUpperInvariant()) {
+    'LARGE_DECREMENT' { return [System.Windows.Automation.ScrollAmount]::LargeDecrement }
+    'SMALL_DECREMENT' { return [System.Windows.Automation.ScrollAmount]::SmallDecrement }
+    'NO_AMOUNT' { return [System.Windows.Automation.ScrollAmount]::NoAmount }
+    'LARGE_INCREMENT' { return [System.Windows.Automation.ScrollAmount]::LargeIncrement }
+    'SMALL_INCREMENT' { return [System.Windows.Automation.ScrollAmount]::SmallIncrement }
+    default { throw "computer_uia_scroll_amount_invalid" }
   }
 }
 
@@ -500,6 +514,124 @@ try {
         action = 'UIA_INVOKE'
         target = $after
         authority_effect = $true
+      })
+      break
+    }
+
+    'UIA_SET_VALUE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_value_pattern_unavailable" }
+      $effectStarted = $true
+      ([System.Windows.Automation.ValuePattern]$pattern).SetValue([string]$request.args.value)
+      $afterPattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      $readback = ([string]$afterPattern.Current.Value -ceq [string]$request.args.value)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SET_VALUE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_TOGGLE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.TogglePattern]$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_toggle_pattern_unavailable" }
+      $before = $pattern.Current.ToggleState
+      $effectStarted = $true
+      $pattern.Toggle()
+      $afterPattern = [System.Windows.Automation.TogglePattern]$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+      $after = $afterPattern.Current.ToggleState
+      $readback = ($after -ne $before)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_TOGGLE'
+        toggle_state = [string]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_SELECT' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_selection_pattern_unavailable" }
+      $effectStarted = $true
+      $pattern.Select()
+      $afterPattern = [System.Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      $readback = [bool]$afterPattern.Current.IsSelected
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SELECT'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_EXPAND_COLLAPSE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_expand_pattern_unavailable" }
+      $desired = ([string]$request.args.state).ToUpperInvariant()
+      $effectStarted = $true
+      if ($desired -eq 'EXPAND') { $pattern.Expand() } else { $pattern.Collapse() }
+      $afterPattern = [System.Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      $after = $afterPattern.Current.ExpandCollapseState
+      $readback = (($desired -eq 'EXPAND' -and $after -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) -or
+                   ($desired -eq 'COLLAPSE' -and $after -eq [System.Windows.Automation.ExpandCollapseState]::Collapsed))
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_EXPAND_COLLAPSE'
+        expand_state = [string]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_SCROLL' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.ScrollPattern]$element.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_scroll_pattern_unavailable" }
+      $beforeH = [double]$pattern.Current.HorizontalScrollPercent
+      $beforeV = [double]$pattern.Current.VerticalScrollPercent
+      $effectStarted = $true
+      $pattern.Scroll((Resolve-ScrollAmount $request.args.horizontal),(Resolve-ScrollAmount $request.args.vertical))
+      $afterPattern = [System.Windows.Automation.ScrollPattern]$element.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+      $afterH = [double]$afterPattern.Current.HorizontalScrollPercent
+      $afterV = [double]$afterPattern.Current.VerticalScrollPercent
+      $readback = ($beforeH -ne $afterH -or $beforeV -ne $afterV)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SCROLL'
+        horizontal_scroll_percent = $afterH
+        vertical_scroll_percent = $afterV
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
       })
       break
     }
