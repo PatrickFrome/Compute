@@ -808,6 +808,10 @@ try {
       if ([string]$currentPixelSha256 -ne [string]$request.args.visual_fence.pixel_sha256) {
         throw "computer_visual_frame_changed_before_click"
       }
+      $null = Assert-TargetIdentity $request.target
+      if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) {
+        throw "computer_visual_foreground_drift_before_click"
+      }
 
       [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
       [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
