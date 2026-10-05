@@ -168,6 +168,21 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
                 with self.assertRaises(mod.SourceAttestationError):
                     mod.validate_database_url_project_identity(value)
 
+    def test_database_url_identity_rejects_libpq_routing_overrides(self):
+        direct = f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+        pooler_host = "aws-1-eu-central-1.pooler.supabase.com"
+        bad_values = [
+            direct + "?host=example.com",
+            direct + "?hostaddr=203.0.113.10",
+            direct + "?sslmode=require",
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@evil.example,{pooler_host}:6543/postgres",
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@evil.example%2C{pooler_host}:6543/postgres",
+        ]
+        for value in bad_values:
+            with self.subTest(value=value.split("@")[-1]):
+                with self.assertRaises(mod.SourceAttestationError):
+                    mod.validate_database_url_project_identity(value)
+
     def test_database_identity_receipt_rejects_generic_boolean_shape_and_secret_fields(self):
         valid = mod.validate_database_url_project_identity(
             f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
