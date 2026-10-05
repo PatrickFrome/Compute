@@ -38,6 +38,10 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes('computer_visual_frame_geometry_drift'));
   assert.ok(plane.includes('visual_pointer_requires_target_bound_window_capture: true'));
   assert.ok(plane.includes('visual_pointer_requires_unchanged_window_geometry: true'));
+  assert.ok(plane.includes('typed_effect_readback_kind_required: true'));
+  assert.ok(plane.includes('delivery_only_is_never_effect_proof: true'));
+  assert.ok(executor.includes('hasAdmissibleEffectReadback(request, result)'));
+  assert.ok(executor.includes("readback_kind = 'DELIVERY_ONLY'"));
 });
 
 test('Computer V2 does not confuse dispatch confirmation with effect proof', () => {
