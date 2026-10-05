@@ -47,12 +47,18 @@ test('computer authority plane exposes one DB lease authority and no second sche
   assert.equal(snapshot.arbitrary_eval, false);
   assert.equal(snapshot.arbitrary_shell, false);
   assert.equal(snapshot.raw_powershell_command_input, false);
+  assert.equal(snapshot.version, '2.0.0');
   assert.deepEqual(snapshot.router_order, ['BROWSER_SEMANTIC','WINDOWS_UIA','COMPUTER_VISUAL']);
+  assert.deepEqual(snapshot.direct_uia_patterns, ['VALUE','INVOKE','TOGGLE','SELECTION_ITEM','EXPAND_COLLAPSE','SCROLL']);
+  assert.equal(snapshot.multi_monitor_observation, true);
 });
 
 test('read-only and mutating computer actions are explicitly classified', () => {
   assert.deepEqual(classifyComputerAction('status'), { action:'STATUS', lane:'READ_ONLY', mutating:false });
   assert.deepEqual(classifyComputerAction('pointer_click'), { action:'POINTER_CLICK', lane:'GLOBAL_MUTATION', mutating:true });
+  assert.deepEqual(classifyComputerAction('observe_displays'), { action:'OBSERVE_DISPLAYS', lane:'READ_ONLY', mutating:false });
+  assert.deepEqual(classifyComputerAction('capture_window'), { action:'CAPTURE_WINDOW', lane:'READ_ONLY', mutating:false });
+  assert.deepEqual(classifyComputerAction('uia_set_value'), { action:'UIA_SET_VALUE', lane:'GLOBAL_MUTATION', mutating:true });
   assert.throws(() => classifyComputerAction('EXEC_SHELL'), /computer_action_not_allowlisted/);
 });
 
@@ -85,6 +91,49 @@ test('pointer and key payloads are bounded and allowlisted', () => {
     () => normalizeComputerRequest({ action:'KEY_PRESS', agent_id:'agent_test-12345678', target:target(), args:{ key:'WIN+R' } }, lease('KEY_PRESS')),
     /computer_key_not_allowlisted/
   );
+});
+
+test('V2 direct UIA requests are exact-target and DB-effect-bound', () => {
+  const setValue = normalizeComputerRequest({
+    action:'UIA_SET_VALUE',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ runtime_id:[7,8,9], value:'fast-path' },
+  }, lease('UIA_SET_VALUE'));
+  assert.deepEqual(setValue.args, { runtime_id:[7,8,9], value:'fast-path' });
+
+  const expand = normalizeComputerRequest({
+    action:'UIA_EXPAND_COLLAPSE',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ runtime_id:[1,2], state:'expand' },
+  }, lease('UIA_EXPAND_COLLAPSE'));
+  assert.deepEqual(expand.args, { runtime_id:[1,2], state:'EXPAND' });
+
+  const scroll = normalizeComputerRequest({
+    action:'UIA_SCROLL',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ runtime_id:[3,4], vertical:'small_increment' },
+  }, lease('UIA_SCROLL'));
+  assert.equal(scroll.args.vertical, 'SMALL_INCREMENT');
+  assert.equal(scroll.args.horizontal, 'NO_AMOUNT');
+
+  assert.throws(() => normalizeComputerRequest({
+    action:'UIA_SET_VALUE',
+    agent_id:'agent_test-12345678',
+    target:target(),
+    args:{ runtime_id:[7], value:'x' },
+  }, lease('UIA_TOGGLE')), /computer_effect_binding_subaction_mismatch/);
+});
+
+test('V2 computer observations cover displays, foreground and exact window capture', () => {
+  assert.equal(normalizeComputerRequest({ action:'OBSERVE_DISPLAYS' }).mutating, false);
+  assert.equal(normalizeComputerRequest({ action:'FOREGROUND_STATUS' }).mutating, false);
+  const capture = normalizeComputerRequest({ action:'CAPTURE_WINDOW', target:target() });
+  assert.equal(capture.target.window_handle, '0x10af');
+  const monitor = normalizeComputerRequest({ action:'CAPTURE_DESKTOP', args:{ monitor:3 } });
+  assert.equal(monitor.args.monitor, 3);
 });
 
 test('tool router prefers exact browser semantic, then UIA, then fresh visual fallback', () => {

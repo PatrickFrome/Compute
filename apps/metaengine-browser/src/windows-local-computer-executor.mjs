@@ -81,6 +81,7 @@ public static class MetaengineWin32 {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
@@ -223,13 +224,16 @@ function Find-UiaElement([object]$Identity, [object[]]$RuntimeId) {
 function Project-Uia([System.Windows.Automation.AutomationElement]$Element) {
   $rect = $Element.Current.BoundingRectangle
   $runtime = @()
+  $patterns = @()
   try { $runtime = @($Element.GetRuntimeId()) } catch {}
+  try { $patterns = @($Element.GetSupportedPatterns() | ForEach-Object { [string]$_.ProgrammaticName }) } catch {}
   return [ordered]@{
     runtime_id = $runtime
     name = [string]$Element.Current.Name
     automation_id = [string]$Element.Current.AutomationId
     control_type = [string]$Element.Current.ControlType.ProgrammaticName
     class_name = [string]$Element.Current.ClassName
+    supported_patterns = $patterns
     enabled = [bool]$Element.Current.IsEnabled
     offscreen = [bool]$Element.Current.IsOffscreen
     bounds = [ordered]@{
@@ -238,6 +242,17 @@ function Project-Uia([System.Windows.Automation.AutomationElement]$Element) {
       width = [double]$rect.Width
       height = [double]$rect.Height
     }
+  }
+}
+
+function Resolve-ScrollAmount([string]$Value) {
+  switch (([string]$Value).ToUpperInvariant()) {
+    'LARGE_DECREMENT' { return [System.Windows.Automation.ScrollAmount]::LargeDecrement }
+    'SMALL_DECREMENT' { return [System.Windows.Automation.ScrollAmount]::SmallDecrement }
+    'NO_AMOUNT' { return [System.Windows.Automation.ScrollAmount]::NoAmount }
+    'LARGE_INCREMENT' { return [System.Windows.Automation.ScrollAmount]::LargeIncrement }
+    'SMALL_INCREMENT' { return [System.Windows.Automation.ScrollAmount]::SmallIncrement }
+    default { throw "computer_uia_scroll_amount_invalid" }
   }
 }
 
@@ -310,6 +325,60 @@ try {
       break
     }
 
+    'OBSERVE_DISPLAYS' {
+      $rows = @()
+      $index = 0
+      foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+        $rows += [ordered]@{
+          index = $index
+          device_name = [string]$screen.DeviceName
+          primary = [bool]$screen.Primary
+          bounds = [ordered]@{
+            x = [int]$screen.Bounds.X
+            y = [int]$screen.Bounds.Y
+            width = [int]$screen.Bounds.Width
+            height = [int]$screen.Bounds.Height
+          }
+          working_area = [ordered]@{
+            x = [int]$screen.WorkingArea.X
+            y = [int]$screen.WorkingArea.Y
+            width = [int]$screen.WorkingArea.Width
+            height = [int]$screen.WorkingArea.Height
+          }
+        }
+        $index += 1
+      }
+      Write-Result ([ordered]@{
+        ok = $true
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.displays.v1'
+        displays = $rows
+        count = $rows.Count
+        authority_effect = $false
+      })
+      break
+    }
+
+    'FOREGROUND_STATUS' {
+      $hwnd = [MetaengineWin32]::GetForegroundWindow()
+      $pid = [UInt32]0
+      $identity = $null
+      if ($hwnd -ne [IntPtr]::Zero) {
+        [MetaengineWin32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
+        if ($pid -gt 0) {
+          try { $identity = Get-ProcessIdentity ([int]$pid) } catch {}
+        }
+      }
+      Write-Result ([ordered]@{
+        ok = $true
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.foreground.v1'
+        target = $identity
+        authority_effect = $false
+      })
+      break
+    }
+
     'UIA_SNAPSHOT' {
       $identity = Assert-TargetIdentity $request.target
       $root = Get-UiaRoot $identity
@@ -342,7 +411,10 @@ try {
     }
 
     'CAPTURE_DESKTOP' {
-      $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+      $screens = @([System.Windows.Forms.Screen]::AllScreens)
+      $monitor = [int]$request.args.monitor
+      if ($monitor -lt 0 -or $monitor -ge $screens.Count) { throw "computer_monitor_not_found" }
+      $screen = $screens[$monitor].Bounds
       $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
       try {
@@ -360,9 +432,41 @@ try {
         ok = $true
         effect_started = $false
         schema = 'metaengine.windows-computer-executor.capture.v1'
-        monitor = 0
+        monitor = $monitor
+        origin = [ordered]@{ x=[int]$screen.X; y=[int]$screen.Y }
         width = [int]$screen.Width
         height = [int]$screen.Height
+        png_path = $file
+        png_sha256 = $hash
+        machine_fingerprint_sha256 = Get-MachineFingerprint
+        authority_effect = $false
+      })
+      break
+    }
+
+    'CAPTURE_WINDOW' {
+      $identity = Assert-TargetIdentity $request.target
+      $rect = Get-WindowRectForIdentity $identity
+      if ($rect.width -le 0 -or $rect.height -le 0) { throw "computer_window_capture_bounds_invalid" }
+      $bitmap = New-Object System.Drawing.Bitmap $rect.width, $rect.height
+      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+      try {
+        $graphics.CopyFromScreen($rect.left, $rect.top, 0, 0, (New-Object System.Drawing.Size($rect.width, $rect.height)))
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) 'metaengine-computer-captures'
+        [System.IO.Directory]::CreateDirectory($dir) | Out-Null
+        $file = Join-Path $dir ("window-" + [Guid]::NewGuid().ToString('N') + ".png")
+        $bitmap.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+      } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+      }
+      $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      Write-Result ([ordered]@{
+        ok = $true
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.window-capture.v1'
+        target = $identity
+        rect = $rect
         png_path = $file
         png_sha256 = $hash
         machine_fingerprint_sha256 = Get-MachineFingerprint
@@ -410,6 +514,124 @@ try {
         action = 'UIA_INVOKE'
         target = $after
         authority_effect = $true
+      })
+      break
+    }
+
+    'UIA_SET_VALUE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_value_pattern_unavailable" }
+      $effectStarted = $true
+      ([System.Windows.Automation.ValuePattern]$pattern).SetValue([string]$request.args.value)
+      $afterPattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      $readback = ([string]$afterPattern.Current.Value -ceq [string]$request.args.value)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SET_VALUE'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_TOGGLE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.TogglePattern]$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_toggle_pattern_unavailable" }
+      $before = $pattern.Current.ToggleState
+      $effectStarted = $true
+      $pattern.Toggle()
+      $afterPattern = [System.Windows.Automation.TogglePattern]$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+      $after = $afterPattern.Current.ToggleState
+      $readback = ($after -ne $before)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_TOGGLE'
+        toggle_state = [string]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_SELECT' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_selection_pattern_unavailable" }
+      $effectStarted = $true
+      $pattern.Select()
+      $afterPattern = [System.Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      $readback = [bool]$afterPattern.Current.IsSelected
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SELECT'
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_EXPAND_COLLAPSE' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_expand_pattern_unavailable" }
+      $desired = ([string]$request.args.state).ToUpperInvariant()
+      $effectStarted = $true
+      if ($desired -eq 'EXPAND') { $pattern.Expand() } else { $pattern.Collapse() }
+      $afterPattern = [System.Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      $after = $afterPattern.Current.ExpandCollapseState
+      $readback = (($desired -eq 'EXPAND' -and $after -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) -or
+                   ($desired -eq 'COLLAPSE' -and $after -eq [System.Windows.Automation.ExpandCollapseState]::Collapsed))
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_EXPAND_COLLAPSE'
+        expand_state = [string]$after
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
+      })
+      break
+    }
+
+    'UIA_SCROLL' {
+      $identity = Assert-TargetIdentity $request.target
+      $element = Find-UiaElement $identity @($request.args.runtime_id)
+      $pattern = [System.Windows.Automation.ScrollPattern]$element.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+      if (-not $pattern) { throw "computer_uia_scroll_pattern_unavailable" }
+      $beforeH = [double]$pattern.Current.HorizontalScrollPercent
+      $beforeV = [double]$pattern.Current.VerticalScrollPercent
+      $effectStarted = $true
+      $pattern.Scroll((Resolve-ScrollAmount $request.args.horizontal),(Resolve-ScrollAmount $request.args.vertical))
+      $afterPattern = [System.Windows.Automation.ScrollPattern]$element.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+      $afterH = [double]$afterPattern.Current.HorizontalScrollPercent
+      $afterV = [double]$afterPattern.Current.VerticalScrollPercent
+      $readback = ($beforeH -ne $afterH -or $beforeV -ne $afterV)
+      Write-Result ([ordered]@{
+        ok = $readback
+        effect_started = $true
+        schema = 'metaengine.windows-computer-executor.effect.v1'
+        readback_proven = $readback
+        action = 'UIA_SCROLL'
+        horizontal_scroll_percent = $afterH
+        vertical_scroll_percent = $afterV
+        target = Get-ProcessIdentity ([int]$identity.process_id)
+        authority_effect = $readback
       })
       break
     }
@@ -668,7 +890,7 @@ export class WindowsLocalComputerExecutor {
   snapshot() {
     return Object.freeze({
       schema: 'metaengine.windows-local-computer-executor.v1',
-      version: '1.0.0',
+      version: '2.0.0',
       platform: this.#platform,
       available: this.#platform === 'win32',
       bridge_sha256: WINDOWS_COMPUTER_BRIDGE_SHA256,
@@ -695,7 +917,7 @@ export class WindowsLocalComputerExecutor {
     if (request.mutating) throw new Error('computer_observe_mutation_forbidden');
     const result = await this.#runner(request);
     if (result?.ok !== true) throw new Error(String(result?.error || 'computer_observe_failed'));
-    if (request.action === 'CAPTURE_DESKTOP') this.#rememberVisualFrame(result);
+    if (['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(request.action)) this.#rememberVisualFrame(result);
     let projected = result;
     if (request.action === 'OBSERVE_WINDOWS' && Array.isArray(result?.windows)) {
       projected = {
@@ -705,7 +927,7 @@ export class WindowsLocalComputerExecutor {
           target_identity_sha256: row?.identity ? computerTargetIdentityDigest(row.identity) : null,
         })),
       };
-    } else if (['UIA_SNAPSHOT','VERIFY_TARGET'].includes(request.action) && result?.target) {
+    } else if (['UIA_SNAPSHOT','CAPTURE_WINDOW','VERIFY_TARGET','FOREGROUND_STATUS'].includes(request.action) && result?.target) {
       projected = {
         ...result,
         target_identity_sha256: computerTargetIdentityDigest(result.target),

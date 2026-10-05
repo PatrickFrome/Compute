@@ -6,14 +6,22 @@ export const COMPUTER_EFFECT_RECEIPT_SCHEMA = 'metaengine.computer-effect-receip
 const READ_ONLY_ACTIONS = new Set([
   'STATUS',
   'OBSERVE_WINDOWS',
+  'OBSERVE_DISPLAYS',
+  'FOREGROUND_STATUS',
   'UIA_SNAPSHOT',
   'CAPTURE_DESKTOP',
+  'CAPTURE_WINDOW',
   'VERIFY_TARGET',
 ]);
 
 const MUTATING_ACTIONS = new Set([
   'UIA_FOCUS',
   'UIA_INVOKE',
+  'UIA_SET_VALUE',
+  'UIA_TOGGLE',
+  'UIA_SELECT',
+  'UIA_EXPAND_COLLAPSE',
+  'UIA_SCROLL',
   'TYPE_TEXT',
   'KEY_PRESS',
   'POINTER_CLICK',
@@ -55,6 +63,20 @@ function nonNegativeSafeInt(value, name) {
   const out = Number(value);
   if (!Number.isSafeInteger(out) || out < 0) throw new Error(`computer_${name}_invalid`);
   return out;
+}
+
+function normalizeRuntimeId(value, code = 'computer_uia_runtime_id_invalid') {
+  const runtimeId = Array.isArray(value) ? value.map((v) => Number(v)) : [];
+  if (!runtimeId.length || runtimeId.length > 64 || runtimeId.some((v) => !Number.isSafeInteger(v))) {
+    throw new Error(code);
+  }
+  return Object.freeze(runtimeId);
+}
+
+function normalizeVisualFence(value) {
+  const frameSha256 = String(value?.frame_sha256 || '').toLowerCase();
+  if (!SHA256_RE.test(frameSha256)) throw new Error('computer_visual_frame_fence_required');
+  return Object.freeze({ frame_sha256: frameSha256, max_age_ms: 3000 });
 }
 
 export function classifyComputerAction(action) {
@@ -102,40 +124,69 @@ export function computerTargetIdentityDigest(identity) {
 
 function normalizeArgs(action, args) {
   const input = args && typeof args === 'object' && !Array.isArray(args) ? clone(args) : {};
+
   if (action === 'TYPE_TEXT') {
     const text = String(input.text ?? '');
     if (!text || text.length > 120000) throw new Error('computer_type_text_invalid');
-    const runtimeId = Array.isArray(input.runtime_id) ? input.runtime_id.map((v) => Number(v)) : [];
-    if (!runtimeId.length || runtimeId.length > 64 || runtimeId.some((v) => !Number.isSafeInteger(v))) {
-      throw new Error('computer_type_runtime_id_invalid');
-    }
-    return Object.freeze({ text, runtime_id: Object.freeze(runtimeId), replace: true });
+    return Object.freeze({
+      text,
+      runtime_id: normalizeRuntimeId(input.runtime_id, 'computer_type_runtime_id_invalid'),
+      replace: input.replace !== false,
+    });
   }
+
+  if (action === 'UIA_SET_VALUE') {
+    const value = String(input.value ?? '');
+    if (value.length > 120000) throw new Error('computer_uia_value_invalid');
+    return Object.freeze({
+      runtime_id: normalizeRuntimeId(input.runtime_id),
+      value,
+    });
+  }
+
+  if (['UIA_FOCUS','UIA_INVOKE','UIA_TOGGLE','UIA_SELECT'].includes(action)) {
+    return Object.freeze({ runtime_id: normalizeRuntimeId(input.runtime_id) });
+  }
+
+  if (action === 'UIA_EXPAND_COLLAPSE') {
+    const state = String(input.state || '').trim().toUpperCase();
+    if (!['EXPAND','COLLAPSE'].includes(state)) throw new Error('computer_uia_expand_state_invalid');
+    return Object.freeze({ runtime_id: normalizeRuntimeId(input.runtime_id), state });
+  }
+
+  if (action === 'UIA_SCROLL') {
+    const allowed = new Set(['LARGE_DECREMENT','SMALL_DECREMENT','NO_AMOUNT','LARGE_INCREMENT','SMALL_INCREMENT']);
+    const horizontal = String(input.horizontal || 'NO_AMOUNT').trim().toUpperCase();
+    const vertical = String(input.vertical || 'NO_AMOUNT').trim().toUpperCase();
+    if (!allowed.has(horizontal) || !allowed.has(vertical) || (horizontal === 'NO_AMOUNT' && vertical === 'NO_AMOUNT')) {
+      throw new Error('computer_uia_scroll_amount_invalid');
+    }
+    return Object.freeze({
+      runtime_id: normalizeRuntimeId(input.runtime_id),
+      horizontal,
+      vertical,
+    });
+  }
+
   if (action === 'KEY_PRESS') {
     const key = String(input.key || '').trim().toUpperCase();
     if (!SAFE_KEYS.has(key)) throw new Error('computer_key_not_allowlisted');
     return Object.freeze({ key });
   }
+
+
   if (action === 'POINTER_CLICK') {
     const x = Number(input.x);
     const y = Number(input.y);
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) throw new Error('computer_pointer_coordinates_invalid');
-    const frameSha256 = String(input?.visual_fence?.frame_sha256 || '').toLowerCase();
-    if (!SHA256_RE.test(frameSha256)) throw new Error('computer_visual_frame_fence_required');
     return Object.freeze({
       x: Math.floor(x),
       y: Math.floor(y),
       button: 'LEFT',
-      visual_fence: Object.freeze({ frame_sha256: frameSha256, max_age_ms: 3000 }),
+      visual_fence: normalizeVisualFence(input.visual_fence),
     });
   }
-  if (action === 'UIA_FOCUS' || action === 'UIA_INVOKE') {
-    const runtimeId = Array.isArray(input.runtime_id) ? input.runtime_id.map((v) => Number(v)) : [];
-    if (!runtimeId.length || runtimeId.length > 64 || runtimeId.some((v) => !Number.isSafeInteger(v))) {
-      throw new Error('computer_uia_runtime_id_invalid');
-    }
-    return Object.freeze({ runtime_id: Object.freeze(runtimeId) });
-  }
+
   if (action === 'UIA_SNAPSHOT') {
     const limitRaw = input.limit == null ? 256 : Number(input.limit);
     const offsetRaw = input.offset == null ? 0 : Number(input.offset);
@@ -143,6 +194,7 @@ function normalizeArgs(action, args) {
     const offset = Number.isSafeInteger(offsetRaw) ? Math.max(0, Math.min(65535, offsetRaw)) : 0;
     return Object.freeze({ offset, limit });
   }
+
   if (action === 'OBSERVE_WINDOWS') {
     const limitRaw = input.limit == null ? 128 : Number(input.limit);
     const offsetRaw = input.offset == null ? 0 : Number(input.offset);
@@ -150,9 +202,17 @@ function normalizeArgs(action, args) {
     const offset = Number.isSafeInteger(offsetRaw) ? Math.max(0, Math.min(65535, offsetRaw)) : 0;
     return Object.freeze({ offset, limit });
   }
+
+  if (action === 'OBSERVE_DISPLAYS' || action === 'FOREGROUND_STATUS') return Object.freeze({});
+
   if (action === 'CAPTURE_DESKTOP') {
-    return Object.freeze({ monitor: 0 });
+    const monitorRaw = input.monitor == null ? 0 : Number(input.monitor);
+    const monitor = Number.isSafeInteger(monitorRaw) ? Math.max(0, Math.min(31, monitorRaw)) : 0;
+    return Object.freeze({ monitor });
   }
+
+  if (action === 'CAPTURE_WINDOW') return Object.freeze({});
+
   return Object.freeze({});
 }
 
@@ -174,7 +234,7 @@ function assertLeaseBinding(context) {
 export function normalizeComputerRequest(input, context = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('computer_request_invalid');
   const classification = classifyComputerAction(input.action);
-  const targetRequired = classification.mutating || ['UIA_SNAPSHOT','VERIFY_TARGET'].includes(classification.action);
+  const targetRequired = classification.mutating || ['UIA_SNAPSHOT','CAPTURE_WINDOW','VERIFY_TARGET'].includes(classification.action);
   const target = targetRequired ? normalizeComputerTargetIdentity(input.target) : null;
   const expectedDigest = target ? computerTargetIdentityDigest(target) : null;
   if (target && input.target_identity_sha256 && String(input.target_identity_sha256).toLowerCase() !== expectedDigest) {
@@ -258,7 +318,7 @@ export function planComputerToolRoute({ browser_semantic = null, windows_uia = n
 export function computerAuthorityPlaneSnapshot() {
   return Object.freeze({
     schema: COMPUTER_AUTHORITY_PLANE_SCHEMA,
-    version: '1.0.0',
+    version: '2.0.0',
     scheduler_authority: false,
     command_authority: 'DB_LEASE_ONLY',
     agent_observation_scope: 'FULL_SHARED_COMPUTER_AND_BROWSER',
@@ -276,6 +336,8 @@ export function computerAuthorityPlaneSnapshot() {
     post_effect_readback_required: true,
     type_text_requires_exact_uia_runtime_id: true,
     visual_pointer_requires_recent_capture_fence: true,
+    direct_uia_patterns: Object.freeze(['VALUE','INVOKE','TOGGLE','SELECTION_ITEM','EXPAND_COLLAPSE','SCROLL']),
+    multi_monitor_observation: true,
     automatic_retry_allowed: false,
     page_model_data_grants_authority: false,
     authority_effect: false,
