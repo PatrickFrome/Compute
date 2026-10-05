@@ -676,3 +676,46 @@ revoke all on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uu
 grant execute on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean) to service_role;
 grant execute on function public.h205f22_a2_browser_supervisor_complete_v5(uuid,uuid,text,boolean,jsonb,text,boolean) to service_role;
 grant execute on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uuid,text,jsonb) to service_role;
+
+
+-- 7) Exact runtime capability attestation. The Edge only advertises this source
+-- contract when the DB returns the identical envelope.
+create or replace function public.devos_runtime_capabilities_v1()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $function$
+select jsonb_build_object(
+  'schema', 'metaengine.native-browser-supervisor.capabilities.v1',
+  'protocol_generation', 2,
+  'features', jsonb_build_object(
+    'signed_device_auth_v1', true,
+    'typed_commands_only_v1', true,
+    'devos_cycle_v1', true,
+    'devos_ambiguity_reconcile_v2', true,
+    'devos_transport_promotion_v1', true,
+    'devos_scheduler_capacity_v1', true,
+    'meta_orchestrator_superstep_v1', true,
+    'meta_orchestrator_controller_lease_v1', true,
+    'meta_atomic_frontier_v2', true,
+    'post_lock_transport_revalidation_v1', true,
+    'computer_authority_plane_v1', true
+  ),
+  'ambiguity_recovery_classes', jsonb_build_array('PRE_EFFECT_ABORTED', 'EFFECT_PROVEN'),
+  'scheduler_source', 'NATIVE_SUPERVISOR_HEARTBEAT',
+  'second_scheduler_loop', false,
+  'automatic_retry_allowed', false,
+  'arbitrary_eval', false,
+  'page_model_text_authority', false,
+  'authority_effect', false
+)
+$function$;
+
+revoke all on function public.devos_runtime_capabilities_v1()
+  from public, anon, authenticated;
+grant execute on function public.devos_runtime_capabilities_v1() to service_role;
+
+comment on function public.devos_runtime_capabilities_v1() is
+  'Exact non-authoritative native supervisor runtime capability attestation including Computer Authority Plane V1. Service-role only; grants no scheduler, browser, retry, or effect authority.';
