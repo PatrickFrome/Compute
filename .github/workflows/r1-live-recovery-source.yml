@@ -119,6 +119,13 @@ jobs:
           assert '--env-name SUPABASE_DB_URL' in source
           assert 'database_connection_identity' in source
           assert source.index('validate-db-url') < source.index('capture_control before')
+          assert 'metaengine.compute.r1-source-control-fence.h205f22.v2' in source
+          assert 'metaengine_audit_checkpoint_v1' in source
+          assert 'metaengine_devos_roadmap_authority_h205f22' in source
+          assert 'checkpoint_ledger_sha256' in source
+          assert 'roadmap_authority_sha256' in source
+          assert 'compute_fabric_roadmap_status_h205f22' not in source
+          assert 'compute_fabric_roadmap_alignment_status_h205f22' not in source
           assert 'id-token: write' not in source and 'attestations: write' not in source
           assert 'supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520' in source
           assert 'version: 2.111.0' in source
@@ -362,32 +369,134 @@ jobs:
             docker run --rm -e DATABASE_URL="$SUPABASE_DB_URL" "$POSTGRES_CLIENT_IMAGE" \
               bash -ceu 'psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -qAtc "$1"' -- "$sql"
           }
+          cat > "$PRIVATE/control-fence.sql" <<'SQL'
+          with cp as (
+            select
+              count(*)::bigint as checkpoint_rows,
+              encode(
+                extensions.digest(
+                  convert_to(
+                    coalesce(
+                      string_agg(
+                        checkpoint_id || ':' ||
+                        coalesce(payload_sha256,'') || ':' ||
+                        source_parent_sha || ':' ||
+                        evidence_state || ':' ||
+                        scope || ':' ||
+                        canonical_checkpoint::text || ':' ||
+                        authority_effect::text,
+                        E'\\n' order by checkpoint_id
+                      ),
+                      ''
+                    ),
+                    'UTF8'
+                  ),
+                  'sha256'
+                ),
+                'hex'
+              ) as checkpoint_ledger_sha256
+            from destruktion_meta.metaengine_audit_checkpoint_v1
+          ),
+          latest as (
+            select
+              checkpoint_id,
+              payload_sha256,
+              source_parent_sha,
+              evidence_state,
+              coalesce(payload->>'kind','UNSPECIFIED') as kind
+            from destruktion_meta.metaengine_audit_checkpoint_v1
+            order by created_at desc,checkpoint_id desc
+            limit 1
+          ),
+          ra as (
+            select
+              count(*)::bigint as roadmap_authority_rows,
+              encode(
+                extensions.digest(
+                  convert_to(
+                    coalesce(
+                      string_agg(
+                        authority_key || ':' ||
+                        roadmap_id || ':' ||
+                        active_milestone_key || ':' ||
+                        integration_line || ':' ||
+                        baseline_sha || ':' ||
+                        alignment_epoch::text || ':' ||
+                        extract(epoch from updated_at)::text || ':' ||
+                        authority_effect::text,
+                        E'\\n' order by authority_key
+                      ),
+                      ''
+                    ),
+                    'UTF8'
+                  ),
+                  'sha256'
+                ),
+                'hex'
+              ) as roadmap_authority_sha256
+            from destruktion_meta.metaengine_devos_roadmap_authority_h205f22
+          ),
+          ml as (
+            select
+              count(*)::bigint as migration_rows,
+              max(version) as max_migration_version,
+              coalesce(
+                jsonb_agg(
+                  jsonb_build_object(
+                    'version',version,
+                    'name',name,
+                    'statements',statements,
+                    'created_by',created_by,
+                    'idempotency_key',idempotency_key,
+                    'rollback',rollback
+                  )
+                  order by version
+                ),
+                '[]'::jsonb
+              ) as ledger
+            from supabase_migrations.schema_migrations
+          )
+          select jsonb_build_object(
+            'fence',jsonb_build_object(
+              'schema','metaengine.compute.r1-source-control-fence.h205f22.v2',
+              'project_ref','jhriwwsryeqsvvvufkok',
+              'checkpoint_rows',cp.checkpoint_rows,
+              'checkpoint_ledger_sha256',cp.checkpoint_ledger_sha256,
+              'latest_checkpoint_id',latest.checkpoint_id,
+              'latest_checkpoint_payload_sha256',latest.payload_sha256,
+              'latest_checkpoint_source_parent_sha',latest.source_parent_sha,
+              'latest_checkpoint_evidence_state',latest.evidence_state,
+              'latest_checkpoint_kind',latest.kind,
+              'roadmap_authority_rows',ra.roadmap_authority_rows,
+              'roadmap_authority_sha256',ra.roadmap_authority_sha256,
+              'migration_rows',ml.migration_rows,
+              'migration_ledger_sha256',
+                encode(extensions.digest(convert_to(ml.ledger::text,'UTF8'),'sha256'),'hex'),
+              'max_migration_version',ml.max_migration_version,
+              'captured_at',clock_timestamp()
+            ),
+            'migration_ledger',ml.ledger
+          )::text
+          from cp,latest,ra,ml;
+          SQL
+
           capture_control() {
             local label="$1"
-            pg_query 'select destruktion_meta.compute_fabric_roadmap_status_h205f22()::text' > "$PRIVATE/roadmap-${label}.json"
-            pg_query 'select destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22()::text' > "$PRIVATE/alignment-${label}.json"
-            pg_query "select coalesce(jsonb_agg(jsonb_build_object('version',version,'name',name,'statements',statements,'created_by',created_by,'idempotency_key',idempotency_key,'rollback',rollback) order by version),'[]'::jsonb)::text from supabase_migrations.schema_migrations" > "$PRIVATE/migrations-${label}.json"
+            docker run --rm -e DATABASE_URL="$SUPABASE_DB_URL" -v "$PRIVATE:/work" "$POSTGRES_CLIENT_IMAGE" \
+              bash -ceu 'psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -qAtf /work/control-fence.sql' \
+              > "$PRIVATE/control-${label}.json"
             LABEL="$label" PRIVATE="$PRIVATE" python3 - <<'PY'
-          import hashlib,json,os
-          from datetime import datetime,timezone
+          import json,os
           label=os.environ['LABEL']; root=os.environ['PRIVATE']
-          status=json.load(open(f'{root}/roadmap-{label}.json'))
-          alignment=json.load(open(f'{root}/alignment-{label}.json'))
-          rows=json.load(open(f'{root}/migrations-{label}.json'))
+          value=json.load(open(f'{root}/control-{label}.json'))
+          fence=value.get('fence')
+          rows=value.get('migration_ledger')
+          if not isinstance(fence,dict):
+              raise SystemExit('control fence missing')
           if not isinstance(rows,list) or not rows:
               raise SystemExit('migration ledger empty')
-          body=json.dumps(rows,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
-          versions=[str(r.get('version','')) for r in rows]
-          value={
-            'schema':'metaengine.compute.r1-source-control-fence.h205f22.v1',
-            'semantic_head':((status.get('semantic_head') or {}).get('checkpoint_id')),
-            'canonical_digest':alignment.get('canonical_digest'),
-            'migration_ledger_sha256':hashlib.sha256(body).hexdigest(),
-            'migration_rows':len(rows),
-            'max_migration_version':max(versions),
-            'captured_at':datetime.now(timezone.utc).isoformat(),
-          }
-          json.dump(value,open(f'{root}/fence-{label}.json','w'),sort_keys=True,separators=(',',':'))
+          json.dump(fence,open(f'{root}/fence-{label}.json','w'),sort_keys=True,separators=(',',':'))
+          json.dump(rows,open(f'{root}/migrations-{label}.json','w'),sort_keys=True,separators=(',',':'))
           PY
           }
 
@@ -431,10 +540,10 @@ jobs:
           })
           json.dump(meta,open(f'{root}/export-metadata.json','w'),sort_keys=True,separators=(',',':'))
           PY
-          SEMANTIC_HEAD="$(python3 -c "import json;print(json.load(open('$PRIVATE/export-metadata.json'))['semantic_head'])")"
+          SOURCE_CHECKPOINT_ID="$(python3 -c "import json;print(json.load(open('$PRIVATE/export-metadata.json'))['latest_checkpoint_id'])")"
 
           python3 controller/r1/recovery_artifact_packager.py \
-            --project-ref "$R1_PROJECT_REF" --semantic-head "$SEMANTIC_HEAD" \
+            --project-ref "$R1_PROJECT_REF" --semantic-head "$SOURCE_CHECKPOINT_ID" \
             --source-git-sha "$GITHUB_SHA" --snapshot-at "$SNAPSHOT_AT" \
             --schema "$PRIVATE/schema.sql" --data "$PRIVATE/data.sql" --roles "$PRIVATE/roles.sql" \
             --migration-ledger "$PRIVATE/migration-ledger.json" --export-metadata "$PRIVATE/export-metadata.json" \
