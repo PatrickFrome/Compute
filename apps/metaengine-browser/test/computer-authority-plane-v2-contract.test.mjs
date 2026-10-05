@@ -44,6 +44,9 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes('GetAncestor'));
   assert.ok(executor.includes('computer_visual_hit_test_target_mismatch'));
   assert.ok(executor.includes('computer_visual_hit_test_drift_before_click'));
+  assert.ok(executor.includes('QueryFullProcessImageName'));
+  assert.ok(executor.includes('PROCESS_QUERY_LIMITED_INFORMATION'));
+  assert.ok(executor.includes('GetProcessImagePath'));
   assert.ok(plane.includes('typed_effect_readback_kind_required: true'));
   assert.ok(plane.includes('delivery_only_is_never_effect_proof: true'));
   assert.ok(executor.includes('hasAdmissibleEffectReadback(request, result)'));
