@@ -13,6 +13,27 @@ import {
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15000;
 
+const EFFECT_READBACK_KIND_BY_ACTION = Object.freeze({
+  UIA_FOCUS: 'UIA_FOCUS_EXACT',
+  UIA_SET_VALUE: 'UIA_VALUE_EXACT',
+  UIA_TOGGLE: 'UIA_TOGGLE_STATE_CHANGED',
+  UIA_SELECT: 'UIA_SELECTION_EXACT',
+  UIA_EXPAND_COLLAPSE: 'UIA_EXPAND_STATE_EXACT',
+  UIA_SCROLL: 'UIA_SCROLL_PERCENT_CHANGED',
+  TYPE_TEXT: 'UIA_VALUE_EXACT',
+});
+
+function hasAdmissibleEffectReadback(request, result) {
+  const expectedKind = EFFECT_READBACK_KIND_BY_ACTION[request?.action];
+  return Boolean(
+    expectedKind
+    && result?.ok === true
+    && result?.effect_started === true
+    && result?.readback_proven === true
+    && result?.readback_kind === expectedKind
+  );
+}
+
 const POWERSHELL_BRIDGE = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -527,6 +548,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $proven
+        readback_kind = 'UIA_FOCUS_EXACT'
         action = 'UIA_FOCUS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $proven
@@ -548,6 +570,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
         dispatch_proven = $true
         action = 'UIA_INVOKE'
         target = $after
@@ -570,6 +593,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_VALUE_EXACT'
         action = 'UIA_SET_VALUE'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $readback
@@ -593,6 +617,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_TOGGLE_STATE_CHANGED'
         action = 'UIA_TOGGLE'
         toggle_state = [string]$after
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -615,6 +640,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_SELECTION_EXACT'
         action = 'UIA_SELECT'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $readback
@@ -639,6 +665,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_EXPAND_STATE_EXACT'
         action = 'UIA_EXPAND_COLLAPSE'
         expand_state = [string]$after
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -665,6 +692,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_SCROLL_PERCENT_CHANGED'
         action = 'UIA_SCROLL'
         horizontal_scroll_percent = $afterH
         vertical_scroll_percent = $afterV
@@ -721,6 +749,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = $(if ($readback) { 'UIA_VALUE_EXACT' } else { 'DELIVERY_ONLY' })
         dispatch_proven = $true
         action = 'TYPE_TEXT'
         exact_uia_focus = $focusAfterProven
@@ -758,6 +787,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
         dispatch_proven = $true
         action = 'KEY_PRESS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -823,6 +853,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
         dispatch_proven = $proven
         action = 'POINTER_CLICK'
         cursor = [ordered]@{ x=$point.X; y=$point.Y }
@@ -1132,7 +1163,7 @@ export class WindowsLocalComputerExecutor {
       });
     }
 
-    if (result?.ok === true && result?.effect_started === true && result?.readback_proven === true) {
+    if (hasAdmissibleEffectReadback(request, result)) {
       return projectComputerEffectReceipt({
         request,
         result,
