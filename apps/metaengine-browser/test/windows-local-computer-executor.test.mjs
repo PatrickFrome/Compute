@@ -103,8 +103,15 @@ test('V2 read-only computer observations include display and exact-window surfac
   assert.deepEqual(seen, ['OBSERVE_DISPLAYS','FOREGROUND_STATUS','CAPTURE_WINDOW']);
 });
 
-test('V2 direct UIA fast actions preserve lease and positive-readback semantics', async () => {
-  const actions = ['UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','UIA_SCROLL'];
+test('V2 direct UIA fast actions preserve lease and typed positive-readback semantics', async () => {
+  const readbackKinds = {
+    UIA_SET_VALUE:'UIA_VALUE_EXACT',
+    UIA_TOGGLE:'UIA_TOGGLE_STATE_CHANGED',
+    UIA_SELECT:'UIA_SELECTION_EXACT',
+    UIA_EXPAND_COLLAPSE:'UIA_EXPAND_STATE_EXACT',
+    UIA_SCROLL:'UIA_SCROLL_PERCENT_CHANGED',
+  };
+  const actions = Object.keys(readbackKinds);
   for (const action of actions) {
     const executor = new WindowsLocalComputerExecutor({
       platform:'win32',
@@ -112,6 +119,7 @@ test('V2 direct UIA fast actions preserve lease and positive-readback semantics'
         ok:true,
         effect_started:true,
         readback_proven:true,
+        readback_kind:readbackKinds[request.action],
         schema:'metaengine.windows-computer-executor.effect.v1',
         action:request.action,
         authority_effect:true,
@@ -143,6 +151,7 @@ test('proven mutation becomes EFFECT_PROVEN only after positive readback', async
       ok:true,
       effect_started:true,
       readback_proven:true,
+      readback_kind:'UIA_VALUE_EXACT',
       schema:'metaengine.windows-computer-executor.effect.v1',
       authority_effect:true,
     }),
@@ -206,7 +215,9 @@ test('visual pointer fallback consumes one fresh exact-window capture and then f
     args:{ x:10, y:20, visual_fence:{ frame_sha256:'c'.repeat(64) } },
   };
   const first = await executor.act(payload, contextFor('POINTER_CLICK'));
-  assert.equal(first.outcome, 'EFFECT_PROVEN');
+  assert.equal(first.outcome, 'AMBIGUOUS_NO_RETRY');
+  assert.match(first.error, /computer_effect_readback_not_proven/);
+  assert.equal(first.authority_effect, false);
   assert.equal(physicalCalls, 1);
 
   const second = await executor.act(payload, contextFor('POINTER_CLICK'));
@@ -317,6 +328,27 @@ test('stale visual capture is rejected before physical execution', async () => {
   assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
   assert.match(result.error, /computer_visual_frame_stale/);
   assert.equal(physicalCalls, 0);
+});
+
+test('delivery-only invoke and key input can never be promoted to EFFECT_PROVEN by generic runner readback', async () => {
+  for (const action of ['UIA_INVOKE','KEY_PRESS']) {
+    const executor = new WindowsLocalComputerExecutor({
+      platform:'win32',
+      runner:async () => ({
+        ok:true,
+        effect_started:true,
+        readback_proven:true,
+        readback_kind:'DELIVERY_ONLY',
+        delivery_proven:true,
+        authority_effect:true,
+      }),
+    });
+    const args = action === 'UIA_INVOKE' ? { runtime_id:[1,2,3] } : { key:'ENTER' };
+    const result = await executor.act({ action, agent_id:'agent_test-12345678', target, args }, contextFor(action));
+    assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY', action);
+    assert.equal(result.authority_effect, false, action);
+    assert.equal(result.automatic_retry_allowed, false, action);
+  }
 });
 
 test('runner failure after dispatch boundary is conservatively ambiguous and terminal', async () => {
