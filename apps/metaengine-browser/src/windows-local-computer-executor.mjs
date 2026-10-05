@@ -714,6 +714,14 @@ try {
       if ($x -lt 0 -or $y -lt 0 -or $x -ge $rect.width -or $y -ge $rect.height) {
         throw "computer_pointer_outside_exact_window"
       }
+      $capturedRect = $request.args.visual_fence.window_rect
+      if (-not $capturedRect) { throw "computer_visual_frame_geometry_required" }
+      if ([int]$capturedRect.left -ne [int]$rect.left -or
+          [int]$capturedRect.top -ne [int]$rect.top -or
+          [int]$capturedRect.width -ne [int]$rect.width -or
+          [int]$capturedRect.height -ne [int]$rect.height) {
+        throw "computer_visual_frame_geometry_drift"
+      }
       $screenX = $rect.left + $x
       $screenY = $rect.top + $y
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
@@ -856,12 +864,35 @@ export class WindowsLocalComputerExecutor {
     this.#clock = clock;
   }
 
-  #rememberVisualFrame(result) {
+  #rememberVisualFrame(request, result) {
     const hash = String(result?.png_sha256 || '').toLowerCase();
     const machine = String(result?.machine_fingerprint_sha256 || '').toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(hash) || !/^[0-9a-f]{64}$/.test(machine)) return false;
+    const targetIdentitySha256 = request?.action === 'CAPTURE_WINDOW'
+      ? String(request?.target_identity_sha256 || '').toLowerCase()
+      : null;
+    if (request?.action === 'CAPTURE_WINDOW' && !/^[0-9a-f]{64}$/.test(targetIdentitySha256 || '')) return false;
+    const rect = request?.action === 'CAPTURE_WINDOW' && result?.rect && typeof result.rect === 'object'
+      ? Object.freeze({
+          left:Number(result.rect.left),
+          top:Number(result.rect.top),
+          width:Number(result.rect.width),
+          height:Number(result.rect.height),
+        })
+      : null;
+    if (request?.action === 'CAPTURE_WINDOW' && (
+      !rect
+      || ![rect.left,rect.top,rect.width,rect.height].every(Number.isSafeInteger)
+      || rect.width <= 0
+      || rect.height <= 0
+    )) return false;
     const now = Number(this.#clock());
-    this.#visualFrames.set(hash, Object.freeze({ observed_ms: now, machine_fingerprint_sha256: machine }));
+    this.#visualFrames.set(hash, Object.freeze({
+      observed_ms: now,
+      machine_fingerprint_sha256: machine,
+      target_identity_sha256: targetIdentitySha256,
+      window_rect: rect,
+    }));
     for (const [key, row] of this.#visualFrames) {
       if (now - Number(row.observed_ms || 0) > 10000) this.#visualFrames.delete(key);
     }
@@ -883,8 +914,20 @@ export class WindowsLocalComputerExecutor {
       this.#visualFrames.delete(hash);
       return { ok:false, reason:'computer_visual_frame_machine_mismatch' };
     }
+    if (!frame.target_identity_sha256) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_target_unbound' };
+    }
+    if (frame.target_identity_sha256 !== request.target_identity_sha256) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_target_mismatch' };
+    }
+    if (!frame.window_rect) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_geometry_unbound' };
+    }
     this.#visualFrames.delete(hash);
-    return { ok:true };
+    return { ok:true, frame };
   }
 
   snapshot() {
@@ -917,7 +960,7 @@ export class WindowsLocalComputerExecutor {
     if (request.mutating) throw new Error('computer_observe_mutation_forbidden');
     const result = await this.#runner(request);
     if (result?.ok !== true) throw new Error(String(result?.error || 'computer_observe_failed'));
-    if (['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(request.action)) this.#rememberVisualFrame(result);
+    if (['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(request.action)) this.#rememberVisualFrame(request, result);
     let projected = result;
     if (request.action === 'OBSERVE_WINDOWS' && Array.isArray(result?.windows)) {
       projected = {
@@ -955,12 +998,26 @@ export class WindowsLocalComputerExecutor {
       });
     }
 
+    let dispatchRequest = request;
+    if (request.action === 'POINTER_CLICK') {
+      dispatchRequest = Object.freeze({
+        ...request,
+        args:Object.freeze({
+          ...request.args,
+          visual_fence:Object.freeze({
+            ...request.args.visual_fence,
+            window_rect:visualFence.frame.window_rect,
+          }),
+        }),
+      });
+    }
+
     // Any physical effect can invalidate a previous screen observation.
     this.#visualFrames.clear();
 
     let result;
     try {
-      result = await this.#runner(request);
+      result = await this.#runner(dispatchRequest);
     } catch (error) {
       return projectComputerEffectReceipt({
         request,

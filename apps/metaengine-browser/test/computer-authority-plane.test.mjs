@@ -51,6 +51,8 @@ test('computer authority plane exposes one DB lease authority and no second sche
   assert.deepEqual(snapshot.router_order, ['BROWSER_SEMANTIC','WINDOWS_UIA','COMPUTER_VISUAL']);
   assert.deepEqual(snapshot.direct_uia_patterns, ['VALUE','INVOKE','TOGGLE','SELECTION_ITEM','EXPAND_COLLAPSE','SCROLL']);
   assert.equal(snapshot.multi_monitor_observation, true);
+  assert.equal(snapshot.visual_pointer_requires_target_bound_window_capture, true);
+  assert.equal(snapshot.visual_pointer_requires_unchanged_window_geometry, true);
 });
 
 test('read-only and mutating computer actions are explicitly classified', () => {

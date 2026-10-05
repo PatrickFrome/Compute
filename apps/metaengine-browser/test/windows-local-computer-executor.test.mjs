@@ -83,6 +83,7 @@ test('V2 read-only computer observations include display and exact-window surfac
           target,
           png_sha256:'e'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
         };
       }
@@ -168,23 +169,26 @@ test('pre-effect executor rejection is NO_EFFECT_PROVEN and still never auto-ret
   assert.equal(result.automatic_retry_allowed, false);
 });
 
-test('visual pointer fallback consumes one fresh capture and then fails closed', async () => {
+test('visual pointer fallback consumes one fresh exact-window capture and then fails closed', async () => {
   let now = 1000;
   let physicalCalls = 0;
   const executor = new WindowsLocalComputerExecutor({
     platform:'win32',
     clock:() => now,
     runner:async (request) => {
-      if (request.action === 'CAPTURE_DESKTOP') {
+      if (request.action === 'CAPTURE_WINDOW') {
         return {
           ok:true,
           effect_started:false,
           png_sha256:'c'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
           authority_effect:false,
         };
       }
       physicalCalls += 1;
+      assert.deepEqual(request.args.visual_fence.window_rect, { left:10, top:20, width:800, height:600 });
       return {
         ok:true,
         effect_started:true,
@@ -194,7 +198,7 @@ test('visual pointer fallback consumes one fresh capture and then fails closed',
       };
     },
   });
-  await executor.observe({ action:'CAPTURE_DESKTOP', args:{} });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
   const payload = {
     action:'POINTER_CLICK',
     agent_id:'agent_test-12345678',
@@ -211,18 +215,16 @@ test('visual pointer fallback consumes one fresh capture and then fails closed',
   assert.equal(physicalCalls, 1);
 });
 
-test('stale visual capture is rejected before physical execution', async () => {
-  let now = 1000;
+test('desktop capture cannot authorize a target-window pointer mutation', async () => {
   let physicalCalls = 0;
   const executor = new WindowsLocalComputerExecutor({
     platform:'win32',
-    clock:() => now,
     runner:async (request) => {
       if (request.action === 'CAPTURE_DESKTOP') {
         return {
           ok:true,
           effect_started:false,
-          png_sha256:'d'.repeat(64),
+          png_sha256:'f'.repeat(64),
           machine_fingerprint_sha256:target.machine_fingerprint_sha256,
           authority_effect:false,
         };
@@ -232,6 +234,79 @@ test('stale visual capture is rejected before physical execution', async () => {
     },
   });
   await executor.observe({ action:'CAPTURE_DESKTOP', args:{} });
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'f'.repeat(64) } },
+  }, contextFor('POINTER_CLICK'));
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_target_unbound/);
+  assert.equal(physicalCalls, 0);
+});
+
+test('window capture cannot be replayed against a different exact target', async () => {
+  let physicalCalls = 0;
+  const otherTarget = {
+    ...target,
+    process_id:101,
+    process_creation_time_ms:1791122744585,
+    window_handle:'0x4321',
+    generation:4,
+  };
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'9'.repeat(64),
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:true, authority_effect:true };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
+  const result = await executor.act({
+    action:'POINTER_CLICK',
+    agent_id:'agent_test-12345678',
+    target:otherTarget,
+    args:{ x:10, y:20, visual_fence:{ frame_sha256:'9'.repeat(64) } },
+  }, contextFor('POINTER_CLICK', otherTarget));
+  assert.equal(result.outcome, 'NO_EFFECT_PROVEN');
+  assert.match(result.error, /computer_visual_frame_target_mismatch/);
+  assert.equal(physicalCalls, 0);
+});
+
+test('stale visual capture is rejected before physical execution', async () => {
+  let now = 1000;
+  let physicalCalls = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    clock:() => now,
+    runner:async (request) => {
+      if (request.action === 'CAPTURE_WINDOW') {
+        return {
+          ok:true,
+          effect_started:false,
+          png_sha256:'d'.repeat(64),
+          machine_fingerprint_sha256:target.machine_fingerprint_sha256,
+          target,
+          rect:{ left:10, top:20, width:800, height:600 },
+          authority_effect:false,
+        };
+      }
+      physicalCalls += 1;
+      return { ok:true, effect_started:true, readback_proven:true, authority_effect:true };
+    },
+  });
+  await executor.observe({ action:'CAPTURE_WINDOW', target });
   now += 3001;
   const result = await executor.act({
     action:'POINTER_CLICK',

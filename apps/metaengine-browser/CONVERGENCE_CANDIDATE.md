@@ -1,5 +1,26 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37300000001.1`.
+
+Atomic Computer Authority Plane V2 visual-fence final qualification reservation (2026-10-05):
+- runtime code is unchanged from visual-fence source head `dbfecbfe1f8f99590db3002a219070f316918289`, which passed exact-head Critical Audit and Shell with 4117/4117 full Browser Node tests and 90/90 focused authority/causal/wake contracts;
+- successor commits after that proof changed only package identity/convergence metadata and the source-qualification workflow allowlist so this branch and additive migration are covered explicitly;
+- package identity `0.7.0-dev.37290000001.1` was already reserved to the prior exact head and MUST NOT be rebuilt for this successor;
+- this commit atomically advances package.json, both package-lock root version fields and this convergence reservation to a fresh monotonic identity; no runtime or authority code changes are included;
+- final acceptance still requires exact-head Critical/Shell plus Package Smoke as sole producer and Installed Chat / Final Runtime / Dirty Profile / Autonomous Soak / Self Update consuming the same installer digest;
+- live Supabase migration/Edge promotion remains blocked until authorized apply/readback is available.
+
+Reserved package identity is `0.7.0-dev.37290000001.1`.
+
+Atomic Computer Authority Plane V2 visual-fence reservation (2026-10-05):
+- visual-fence source qualification re-arm: the dedicated source workflow now explicitly includes this successor branch and migration path; this note intentionally changes no runtime code and exists to obtain an exact-head source proof before the next package identity is reserved;
+- exact runtime/source predecessor `dbfecbfe1f8f99590db3002a219070f316918289` passed Critical Audit run `37285151841` and Browser Shell run `37285151942`; all compute-only Autonomous Soak jobs (1M Brain, 100k continuous, 2000-task/2048-peer scale and every chaos seed) also passed;
+- the predecessor physical consumers failed only because package identity `0.7.0-dev.37280000001.1` was already immutably reserved to source `c13c7c3b2c607afb4a40e7fa83f0b16e887e5dcb`, so Package Smoke correctly rejected rebuilding that version for a new source head;
+- this successor reserves a new monotonic identity after hardening visual POINTER_CLICK fallback to require a fresh exact-window capture, exact target identity, unchanged window geometry, V2 executor attestation and the existing DB lease/effect binding;
+- this reservation changes package.json, both package-lock version fields and this convergence reservation together; runtime source is otherwise unchanged from the source-qualified predecessor above;
+- Package Smoke remains the sole physical producer; Installed Chat / Final Runtime / Autonomous Soak installed phase / Self Update must consume the exact same source head, version and installer digest;
+- the additive Supabase visual-fence migration remains source-only until an authorized live apply/readback is available.
+
 Reserved package identity is `0.7.0-dev.37280000001.1`.
 
 Atomic Computer Authority Plane V2 fast-action reservation (2026-10-05):
