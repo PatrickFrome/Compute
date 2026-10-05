@@ -79,8 +79,11 @@ jobs:
           from pathlib import Path
           raw=Path('.github/workflows/r1-live-recovery-source.yml').read_text()
           attester=Path('controller/r1/live_recovery_source_attestation.py').read_text()
-          assert 'R1_PROJECT_REF: jhriwwsryeqsvvvufkok' in raw
-          assert 'R1_PROJECT_REF: xpeibufgzjknrhbhpffp' not in raw
+          _pre_jobs=raw.split('\njobs:\n',1)[0]
+          env_block=_pre_jobs.split('\nenv:\n',1)[1]
+          assert env_block.count('R1_PROJECT_REF:') == 1
+          assert 'R1_PROJECT_REF: jhriwwsryeqsvvvufkok' in env_block
+          assert 'xpeibufgzjknrhbhpffp' not in env_block
           assert 'EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"' in attester
           assert 'EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"' not in attester
           assert 'R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2' in raw
