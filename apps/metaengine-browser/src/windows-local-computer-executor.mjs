@@ -664,10 +664,9 @@ try {
       } catch {}
 
       $effectStarted = $true
-      if ([bool]$request.args.replace) {
-        if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
-      }
+      if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
       if (-not [MetaengineWin32]::SendUnicode([string]$request.args.text)) { throw "computer_unicode_input_failed" }
+      Start-Sleep -Milliseconds 20
 
       $focusedAfter = [System.Windows.Automation.AutomationElement]::FocusedElement
       $focusAfterProven = $false
@@ -682,7 +681,7 @@ try {
           $afterPattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
           if ($afterPattern) {
             $afterValue = [string]$afterPattern.Current.Value
-            $expectedValue = $(if ([bool]$request.args.replace) { [string]$request.args.text } else { [string]$beforeValue + [string]$request.args.text })
+            $expectedValue = [string]$request.args.text
             $readback = ($afterValue -ceq $expectedValue)
           }
         } catch {}
