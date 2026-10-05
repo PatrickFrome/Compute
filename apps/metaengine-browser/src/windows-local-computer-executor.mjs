@@ -652,6 +652,9 @@ export class PersistentWindowsPowerShellBridge {
   #pending = null;
   #queue = Promise.resolve();
   #stopping = false;
+  #scriptDir = null;
+  #scriptPath = null;
+  #scriptPromise = null;
   #spawnCount = 0;
   #requestCount = 0;
   #restartCount = 0;
@@ -724,16 +727,35 @@ export class PersistentWindowsPowerShellBridge {
     }
   }
 
-  #spawn() {
+  async #ensureScript() {
+    if (this.#scriptPath) return this.#scriptPath;
+    if (this.#scriptPromise) return this.#scriptPromise;
+    this.#scriptPromise = (async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-hot-'));
+      const scriptPath = path.join(dir, 'metaengine-computer-bridge.ps1');
+      await fs.writeFile(scriptPath, POWERSHELL_BRIDGE, { encoding:'utf8', flag:'wx', mode:0o600 });
+      this.#scriptDir = dir;
+      this.#scriptPath = scriptPath;
+      return scriptPath;
+    })();
+    try {
+      return await this.#scriptPromise;
+    } finally {
+      this.#scriptPromise = null;
+    }
+  }
+
+  async #spawn() {
     if (this.#platform !== 'win32') throw new Error('computer_executor_windows_required');
     if (this.#child && this.#child.killed !== true && this.#child.exitCode == null) return this.#child;
 
+    const scriptPath = await this.#ensureScript();
     this.#stopping = false;
     this.#stdoutBuffer = '';
     this.#stderrTail = '';
     const child = this.#spawnImpl(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
       {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -765,13 +787,11 @@ export class PersistentWindowsPowerShellBridge {
         this.#rejectPending(new Error('computer_persistent_bridge_stopped'));
       }
     });
-    child.stdin.write(POWERSHELL_BRIDGE, 'utf8');
-    child.stdin.write('\n', 'utf8');
     return child;
   }
 
   async #runOne(request) {
-    const child = this.#spawn();
+    const child = await this.#spawn();
     this.#requestCount += 1;
     return await new Promise((resolve, reject) => {
       if (this.#pending) {
@@ -805,20 +825,26 @@ export class PersistentWindowsPowerShellBridge {
     this.#stopping = true;
     const child = this.#child;
     this.#child = null;
-    if (!child) return;
-    try { child.stdin.write('__METAENGINE_STOP__\n', 'utf8'); } catch {}
-    try { child.stdin.end(); } catch {}
-    await new Promise((resolve) => {
-      if (child.exitCode != null) { resolve(); return; }
-      const timer = setTimeout(() => {
-        try { child.kill(); } catch {}
-        resolve();
-      }, 1000);
-      child.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
+    if (child) {
+      try { child.stdin.write('__METAENGINE_STOP__\n', 'utf8'); } catch {}
+      try { child.stdin.end(); } catch {}
+      await new Promise((resolve) => {
+        if (child.exitCode != null) { resolve(); return; }
+        const timer = setTimeout(() => {
+          try { child.kill(); } catch {}
+          resolve();
+        }, 1000);
+        child.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
-    });
+    }
+    const dir = this.#scriptDir;
+    this.#scriptDir = null;
+    this.#scriptPath = null;
+    this.#scriptPromise = null;
+    if (dir) await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
   }
 }
 
