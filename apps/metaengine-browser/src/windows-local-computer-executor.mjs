@@ -13,6 +13,27 @@ import {
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15000;
 
+const EFFECT_READBACK_KIND_BY_ACTION = Object.freeze({
+  UIA_FOCUS: 'UIA_FOCUS_EXACT',
+  UIA_SET_VALUE: 'UIA_VALUE_EXACT',
+  UIA_TOGGLE: 'UIA_TOGGLE_STATE_CHANGED',
+  UIA_SELECT: 'UIA_SELECTION_EXACT',
+  UIA_EXPAND_COLLAPSE: 'UIA_EXPAND_STATE_EXACT',
+  UIA_SCROLL: 'UIA_SCROLL_PERCENT_CHANGED',
+  TYPE_TEXT: 'UIA_VALUE_EXACT',
+});
+
+function hasAdmissibleEffectReadback(request, result) {
+  const expectedKind = EFFECT_READBACK_KIND_BY_ACTION[request?.action];
+  return Boolean(
+    expectedKind
+    && result?.ok === true
+    && result?.effect_started === true
+    && result?.readback_proven === true
+    && result?.readback_kind === expectedKind
+  );
+}
+
 const POWERSHELL_BRIDGE = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -38,7 +59,10 @@ Add-Type -AssemblyName UIAutomationTypes
 
 Add-Type -TypeDefinition @"
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 
 public static class MetaengineWin32 {
   [StructLayout(LayoutKind.Sequential)]
@@ -82,10 +106,55 @@ public static class MetaengineWin32 {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
   [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder path, ref uint size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+
+  const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+  public static string GetProcessImagePath(uint processId) {
+    var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+    if (handle == IntPtr.Zero) return null;
+    try {
+      uint size = 32768;
+      var path = new StringBuilder((int)size);
+      if (!QueryFullProcessImageName(handle, 0, path, ref size)) return null;
+      return path.ToString();
+    } finally {
+      CloseHandle(handle);
+    }
+  }
+
+  public static string GetFileSha256(string filePath) {
+    if (String.IsNullOrWhiteSpace(filePath)) return null;
+    try {
+      using (var stream = new FileStream(
+        filePath,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.ReadWrite | FileShare.Delete
+      )) {
+        using (var sha = SHA256.Create()) {
+          var digest = sha.ComputeHash(stream);
+          var result = new StringBuilder(digest.Length * 2);
+          foreach (var value in digest) result.Append(value.ToString("x2"));
+          return result.ToString();
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  public static string GetProcessImageSha256(uint processId) {
+    return GetFileSha256(GetProcessImagePath(processId));
+  }
 
   const uint INPUT_KEYBOARD = 1;
   const uint KEYEVENTF_KEYUP = 0x0002;
@@ -148,9 +217,19 @@ function Get-ProcessIdentity([int]$ProcessId) {
   if ($hwnd -le 0) { throw "computer_target_window_missing" }
   $start = [DateTimeOffset]::new($p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()
   $exeHash = $null
-  try {
-    if ($p.Path) { $exeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $p.Path).Hash.ToLowerInvariant() }
-  } catch {}
+  try { $exeHash = [MetaengineWin32]::GetProcessImageSha256([UInt32]$p.Id) } catch {}
+  if (-not $exeHash) {
+    $exePath = $null
+    try {
+      if ($p.Path) { $exePath = [string]$p.Path }
+    } catch {}
+    if (-not $exePath) {
+      try { $exePath = [MetaengineWin32]::GetProcessImagePath([UInt32]$p.Id) } catch {}
+    }
+    if ($exePath) {
+      try { $exeHash = [MetaengineWin32]::GetFileSha256([string]$exePath) } catch {}
+    }
+  }
   if (-not $exeHash) { throw "computer_target_executable_hash_unavailable" }
   $generation = [Int64](($start % 2147483646) + 1)
   return [ordered]@{
@@ -189,6 +268,18 @@ function Get-WindowRectForIdentity([object]$Identity) {
     width = $rect.Right - $rect.Left
     height = $rect.Bottom - $rect.Top
   }
+}
+
+function Assert-PointTargetsWindow([int]$ScreenX,[int]$ScreenY,[IntPtr]$ExpectedRoot,[string]$Reason) {
+  $point = New-Object MetaengineWin32+POINT
+  $point.X = $ScreenX
+  $point.Y = $ScreenY
+  $hit = [MetaengineWin32]::WindowFromPoint($point)
+  if ($hit -eq [IntPtr]::Zero) { throw $Reason }
+  $root = [MetaengineWin32]::GetAncestor($hit, 2)
+  if ($root -eq [IntPtr]::Zero) { $root = $hit }
+  if ($root -ne $ExpectedRoot) { throw $Reason }
+  return $true
 }
 
 function RuntimeId-Equal([int[]]$A, [object[]]$B) {
@@ -306,6 +397,7 @@ try {
       $limit = [Math]::Max(1, [Math]::Min(256, [int]$request.args.limit))
       $offset = [Math]::Max(0, [int]$request.args.offset)
       $windows = @()
+      $rejected = @()
       $eligible = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object Id)
       foreach ($p in @($eligible | Select-Object -Skip $offset -First $limit)) {
         try {
@@ -317,7 +409,16 @@ try {
             process_name = [string]$p.ProcessName
             rect = $rect
           }
-        } catch {}
+        } catch {
+          if ($rejected.Count -lt 16) {
+            $rejected += [ordered]@{
+              process_id = [int]$p.Id
+              process_name = [string]$p.ProcessName
+              title = [string]$p.MainWindowTitle
+              error = ([string]$_.Exception.Message).Substring(0,[Math]::Min(240,([string]$_.Exception.Message).Length))
+            }
+          }
+        }
       }
       Write-Result ([ordered]@{
         ok = $true
@@ -325,9 +426,11 @@ try {
         schema = 'metaengine.windows-computer-executor.windows.v1'
         windows = $windows
         count = $windows.Count
+        rejected_windows = $rejected
+        rejected_count = $rejected.Count
         offset = $offset
         total_candidates = $eligible.Count
-        next_offset = $(if (($offset + $windows.Count) -lt $eligible.Count) { $offset + $windows.Count } else { $null })
+        next_offset = $(if (($offset + $windows.Count + $rejected.Count) -lt $eligible.Count) { $offset + $windows.Count + $rejected.Count } else { $null })
         authority_effect = $false
       })
       break
@@ -449,7 +552,8 @@ try {
         $graphics.Dispose()
         $bitmap.Dispose()
       }
-      $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      $hash = [MetaengineWin32]::GetFileSha256([string]$file)
+      if (-not $hash) { throw "computer_capture_hash_unavailable" }
       Write-Result ([ordered]@{
         ok = $true
         effect_started = $false
@@ -485,7 +589,8 @@ try {
         $graphics.Dispose()
         $bitmap.Dispose()
       }
-      $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      $hash = [MetaengineWin32]::GetFileSha256([string]$file)
+      if (-not $hash) { throw "computer_capture_hash_unavailable" }
       $rectAfterCapture = Get-WindowRectForIdentity $identity
       $foregroundAfterCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
       $geometryStable = (
@@ -527,6 +632,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $proven
+        readback_kind = 'UIA_FOCUS_EXACT'
         action = 'UIA_FOCUS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $proven
@@ -548,6 +654,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
         dispatch_proven = $true
         action = 'UIA_INVOKE'
         target = $after
@@ -570,6 +677,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_VALUE_EXACT'
         action = 'UIA_SET_VALUE'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $readback
@@ -593,6 +701,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_TOGGLE_STATE_CHANGED'
         action = 'UIA_TOGGLE'
         toggle_state = [string]$after
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -615,6 +724,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_SELECTION_EXACT'
         action = 'UIA_SELECT'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $readback
@@ -639,6 +749,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_EXPAND_STATE_EXACT'
         action = 'UIA_EXPAND_COLLAPSE'
         expand_state = [string]$after
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -665,6 +776,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_SCROLL_PERCENT_CHANGED'
         action = 'UIA_SCROLL'
         horizontal_scroll_percent = $afterH
         vertical_scroll_percent = $afterV
@@ -721,6 +833,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = $(if ($readback) { 'UIA_VALUE_EXACT' } else { 'DELIVERY_ONLY' })
         dispatch_proven = $true
         action = 'TYPE_TEXT'
         exact_uia_focus = $focusAfterProven
@@ -758,6 +871,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
         dispatch_proven = $true
         action = 'KEY_PRESS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -786,6 +900,7 @@ try {
       $screenY = $rect.top + $y
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) { throw "computer_visual_foreground_drift" }
+      $null = Assert-PointTargetsWindow $screenX $screenY $hwnd "computer_visual_hit_test_target_mismatch"
       $effectStarted = $true
       if (-not [MetaengineWin32]::SetCursorPos($screenX, $screenY)) { throw "computer_pointer_position_failed" }
 
@@ -812,6 +927,7 @@ try {
       if ([MetaengineWin32]::GetForegroundWindow() -ne $hwnd) {
         throw "computer_visual_foreground_drift_before_click"
       }
+      $null = Assert-PointTargetsWindow $screenX $screenY $hwnd "computer_visual_hit_test_drift_before_click"
 
       [MetaengineWin32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
       [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
@@ -823,6 +939,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
         dispatch_proven = $proven
         action = 'POINTER_CLICK'
         cursor = [ordered]@{ x=$point.X; y=$point.Y }
@@ -866,16 +983,23 @@ export async function runFixedWindowsPowerShell(request, {
   const timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-'));
   const requestPath = path.join(dir, `request-${randomUUID()}.json`);
+  const bridgePath = path.join(dir, `bridge-${WINDOWS_COMPUTER_BRIDGE_SHA256}.ps1`);
   await fs.writeFile(requestPath, JSON.stringify(request), { encoding:'utf8', flag:'wx', mode:0o600 });
+  await fs.writeFile(bridgePath, POWERSHELL_BRIDGE, { encoding:'utf8', flag:'wx', mode:0o600 });
+  const bridgeBytes = await fs.readFile(bridgePath);
+  const bridgeReadbackSha256 = createHash('sha256').update(bridgeBytes).digest('hex');
+  if (bridgeReadbackSha256 !== WINDOWS_COMPUTER_BRIDGE_SHA256) {
+    throw new Error('computer_executor_bridge_write_readback_mismatch');
+  }
 
   try {
     return await new Promise((resolve, reject) => {
       const child = spawn_impl(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', bridgePath],
         {
           windowsHide: true,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,
             METAENGINE_COMPUTER_REQUEST_PATH: requestPath,
@@ -920,10 +1044,13 @@ export async function runFixedWindowsPowerShell(request, {
         try {
           finish(resolve, parseSingleJson(stdout));
         } catch (error) {
-          finish(reject, error);
+          const stderrTail = stderr.slice(-500).replace(/[\r\n]+/g, ' ').trim();
+          const diagnostic = stderrTail
+            ? `${String(error?.message || error)}:${stderrTail}`
+            : String(error?.message || error);
+          finish(reject, new Error(diagnostic));
         }
       });
-      child.stdin.end(POWERSHELL_BRIDGE, 'utf8');
     });
   } finally {
     await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
@@ -1042,6 +1169,7 @@ export class WindowsLocalComputerExecutor {
       bridge_sha256: WINDOWS_COMPUTER_BRIDGE_SHA256,
       plane: computerAuthorityPlaneSnapshot(),
       executor_process_model: 'BOUNDED_FIXED_POWERSHELL_BRIDGE',
+      bridge_transport: 'HASH_VERIFIED_TEMP_SCRIPT',
       raw_shell_input: false,
       arbitrary_eval: false,
       automatic_retry_allowed: false,
@@ -1132,7 +1260,7 @@ export class WindowsLocalComputerExecutor {
       });
     }
 
-    if (result?.ok === true && result?.effect_started === true && result?.readback_proven === true) {
+    if (hasAdmissibleEffectReadback(request, result)) {
       return projectComputerEffectReceipt({
         request,
         result,
@@ -1140,12 +1268,14 @@ export class WindowsLocalComputerExecutor {
       });
     }
 
-    if (result?.effect_started === true) {
+    if (result?.effect_started !== false) {
       return projectComputerEffectReceipt({
         request,
         result,
         outcome: 'AMBIGUOUS_NO_RETRY',
-        error: result?.error || 'computer_effect_readback_not_proven',
+        error: result?.error || (result?.effect_started === true
+          ? 'computer_effect_readback_not_proven'
+          : 'computer_effect_start_unconfirmed'),
       });
     }
 

@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37310000001.1`.
+Reserved package identity is `0.7.0-dev.37330000001.1`.
 
 Atomic Computer Authority Plane V2 strict effect-proof reservation (2026-10-05):
 - exact runtime/source predecessor `1ce05a384aef388b00d94e9114a5876fef5d2033` is terminal-green in Critical Audit run `37288856630` and Shell run `37288856632`; focused authority/causal/wake contracts are 90/90 PASS and full Browser Node regression is 4121/4121 PASS;
@@ -309,3 +309,15 @@ Admission recovery no-replay successor (2026-10-03):
 - `a2-browser-native-supervisor-v1` deployment V11 preserves the V10 source except the exact `devos-routes.mjs` import pin, now bound to qualified source `6e859e109fe50e242859af5d2bd715d15afccb92`; the deployment is ACTIVE and existing signed heartbeat/command traffic remains healthy;
 - current authoritative workspace state remains CLOSED at generation floor 28; this source/package reservation does not reopen admission, promote an Agent, activate Guardian, dispatch a task, publish a release or install on the user machine;
 - fresh monotonic package reservation: `0.7.0-dev.37136054065.1`. It is physically unconsumed until Package Smoke creates its immutable reservation artifact. Move the physical branch only after this versioned source itself is source-qualified; then all ten physical workflows must consume the one Package Smoke installer at attempt 1.
+
+Computer Authority V2 typed-readback source qualification re-arm (2026-10-05):
+- successor branch `work/computer-authority-plane-v2-typed-readback-r1` is now included in the dedicated source-qualification workflow after the effect-proof / effect-barrier / visual-freshness stack;
+- the source gate must prove the exact current head before any fresh package identity is reserved; inherited `0.7.0-dev.37310000001.1` remains consumed and MUST NOT be reused for a physical build;
+- this metadata-only re-arm adds no runtime, scheduler, retry, DB, release, install, or authority effect.
+
+Computer Authority V2 typed-readback physical reservation (2026-10-05):
+- exact runtime/source predecessor `df2fe05f9ca09e7ce1d204bb42f2b13ad47aae73` passed Browser Agent Result Installer Source Qualification run `37299883365` on Ubuntu 24.04 and Windows 2025, including full Browser regression, Windows physical fixed-bridge STATUS + exact-window capture, R97 source visual flow, updater verification and exact-source cleanliness;
+- inherited `0.7.0-dev.37310000001.1` was previously consumed by another exact source and remains permanently non-reusable;
+- fresh repository search found no code, pull request or issue use of `0.7.0-dev.37330000001.1` before this reservation;
+- this atomic commit changes only package.json, the two package-lock root version fields, and this convergence checkpoint; runtime/authority source remains byte-identical to the terminal-green predecessor above;
+- Package Smoke remains the sole physical producer. Any new runtime/source change after this reservation retires `0.7.0-dev.37330000001.1` and requires a new monotonic identity; no blind retry, release, live install, scheduler authority, DB authority or promotion is authorized by this reservation.

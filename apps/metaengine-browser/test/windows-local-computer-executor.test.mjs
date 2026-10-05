@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
@@ -47,6 +50,7 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   assert.equal(snapshot.available, false);
   assert.equal(snapshot.version, '2.0.0');
   assert.equal(snapshot.scheduler_authority, false);
+  assert.equal(snapshot.bridge_transport, 'HASH_VERIFIED_TEMP_SCRIPT');
   assert.equal(snapshot.raw_shell_input, false);
   assert.equal(snapshot.arbitrary_eval, false);
   assert.match(WINDOWS_COMPUTER_BRIDGE_SHA256, /^[0-9a-f]{64}$/);
@@ -63,60 +67,58 @@ test('fixed Windows PowerShell bridge physically parses and serves STATUS', { sk
   assert.equal(result.authority_effect, false);
 });
 
-test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:30000 }, async () => {
-  const fixtureScript = [
-    "Add-Type -AssemblyName System.Windows.Forms",
-    "Add-Type -AssemblyName System.Drawing",
-    "$form = [System.Windows.Forms.Form]::new()",
-    "$form.Text = 'METAENGINE Computer Capture Fixture'",
-    "$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual",
-    "$form.Location = [System.Drawing.Point]::new(80,80)",
-    "$form.Size = [System.Drawing.Size]::new(360,240)",
-    "$label = [System.Windows.Forms.Label]::new()",
-    "$label.Text = 'stable-pixel-fixture'",
-    "$label.AutoSize = $true",
-    "$label.Location = [System.Drawing.Point]::new(24,24)",
-    "$form.Controls.Add($label)",
-    "$form.Show()",
-    "[System.Windows.Forms.Application]::DoEvents()",
-    "[Console]::Out.WriteLine('READY')",
-    "[Console]::Out.Flush()",
-    "while ($true) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 20 }",
-  ].join('; ');
-  const child = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',fixtureScript], {
-    windowsHide:true,
-    stdio:['ignore','pipe','pipe'],
+test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:45000 }, async () => {
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-fixture-'));
+  const fixturePath = path.join(fixtureDir, 'fixture.cjs');
+  const electronExe = path.join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe');
+  const fixtureSource = [
+    "const { app, BrowserWindow } = require('electron');",
+    "app.commandLine.appendSwitch('disable-gpu');",
+    "app.whenReady().then(async () => {",
+    "  const title = 'METAENGINE Computer Capture Fixture';",
+    "  const win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:true, frame:true, title });",
+    "  await win.loadURL('data:text/html,<html><head><title>METAENGINE%20Computer%20Capture%20Fixture</title></head><body><div style=\"font:18px sans-serif;padding:24px\">stable-pixel-fixture</div></body></html>');",
+    "  win.setTitle(title);",
+    "  win.show();",
+    "  win.focus();",
+    "});",
+    "app.on('window-all-closed', () => app.quit());",
+  ].join('\n');
+  await fs.writeFile(fixturePath, fixtureSource, 'utf8');
+
+  const child = spawn(electronExe, [fixturePath], {
+    windowsHide:false,
+    stdio:['ignore','ignore','pipe'],
+    env:{ ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS:'true' },
   });
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { stderr += chunk; });
-  child.stdout.setEncoding('utf8');
 
   try {
-    await new Promise((resolve,reject) => {
-      const timer = setTimeout(() => reject(new Error('computer_fixture_ready_timeout:' + stderr.slice(-300))), 10000);
-      const onData = chunk => {
-        if (String(chunk).includes('READY')) {
-          clearTimeout(timer);
-          child.stdout.off('data', onData);
-          resolve();
-        }
-      };
-      child.stdout.on('data', onData);
-      child.once('error', error => {
-        clearTimeout(timer);
-        reject(error);
-      });
-    });
-
     const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
     let identity = null;
-    for (let attempt=0; attempt<30 && !identity; attempt += 1) {
+    let lastObserved = null;
+    await new Promise(resolve => setTimeout(resolve,750));
+    for (let attempt=0; attempt<12 && !identity; attempt += 1) {
       const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
-      identity = observed.result.windows.find(row => Number(row?.identity?.process_id) === child.pid)?.identity || null;
-      if (!identity) await new Promise(resolve => setTimeout(resolve,100));
+      lastObserved = observed.result;
+      const row = observed.result.windows.find(candidate => (
+        candidate?.title === 'METAENGINE Computer Capture Fixture'
+        || Number(candidate?.identity?.process_id) === child.pid
+      ));
+      identity = row?.identity || null;
+      if (!identity) await new Promise(resolve => setTimeout(resolve,150));
     }
-    assert.ok(identity, 'fixture window identity');
+    assert.ok(identity, 'fixture window identity; observed=' + JSON.stringify({
+      child_pid:child.pid,
+      count:lastObserved?.count,
+      total_candidates:lastObserved?.total_candidates,
+      process_ids:lastObserved?.windows?.map(row => row?.identity?.process_id),
+      rejected:lastObserved?.rejected_windows,
+      child_exit_code:child.exitCode,
+      stderr:stderr.slice(-500),
+    }));
 
     const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
     assert.equal(capture.result.effect_started, false);
@@ -128,6 +130,7 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     assert.ok(capture.result.rect.height > 0);
   } finally {
     child.kill();
+    await fs.rm(fixtureDir, { recursive:true, force:true });
   }
 });
 
@@ -191,8 +194,15 @@ test('V2 read-only computer observations include display and exact-window surfac
   assert.deepEqual(seen, ['OBSERVE_DISPLAYS','FOREGROUND_STATUS','CAPTURE_WINDOW']);
 });
 
-test('V2 direct UIA fast actions preserve lease and positive-readback semantics', async () => {
-  const actions = ['UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','UIA_SCROLL'];
+test('V2 direct UIA fast actions preserve lease and typed positive-readback semantics', async () => {
+  const readbackKinds = {
+    UIA_SET_VALUE:'UIA_VALUE_EXACT',
+    UIA_TOGGLE:'UIA_TOGGLE_STATE_CHANGED',
+    UIA_SELECT:'UIA_SELECTION_EXACT',
+    UIA_EXPAND_COLLAPSE:'UIA_EXPAND_STATE_EXACT',
+    UIA_SCROLL:'UIA_SCROLL_PERCENT_CHANGED',
+  };
+  const actions = Object.keys(readbackKinds);
   for (const action of actions) {
     const executor = new WindowsLocalComputerExecutor({
       platform:'win32',
@@ -200,6 +210,7 @@ test('V2 direct UIA fast actions preserve lease and positive-readback semantics'
         ok:true,
         effect_started:true,
         readback_proven:true,
+        readback_kind:readbackKinds[request.action],
         schema:'metaengine.windows-computer-executor.effect.v1',
         action:request.action,
         authority_effect:true,
@@ -231,6 +242,7 @@ test('proven mutation becomes EFFECT_PROVEN only after positive readback', async
       ok:true,
       effect_started:true,
       readback_proven:true,
+      readback_kind:'UIA_VALUE_EXACT',
       schema:'metaengine.windows-computer-executor.effect.v1',
       authority_effect:true,
     }),
@@ -239,6 +251,27 @@ test('proven mutation becomes EFFECT_PROVEN only after positive readback', async
   assert.equal(result.outcome, 'EFFECT_PROVEN');
   assert.equal(result.authority_effect, true);
   assert.equal(result.automatic_retry_allowed, false);
+});
+
+test('generic readback boolean cannot promote a delivery-only action to EFFECT_PROVEN', async () => {
+  for (const action of ['UIA_INVOKE','KEY_PRESS']) {
+    const executor = new WindowsLocalComputerExecutor({
+      platform:'win32',
+      runner:async () => ({
+        ok:true,
+        effect_started:true,
+        readback_proven:true,
+        readback_kind:'DELIVERY_ONLY',
+        dispatch_proven:true,
+        authority_effect:true,
+      }),
+    });
+    const args = action === 'UIA_INVOKE' ? { runtime_id:[1,2,3] } : { key:'ENTER' };
+    const result = await executor.act({ action, agent_id:'agent_test-12345678', target, args }, contextFor(action));
+    assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY', action);
+    assert.equal(result.authority_effect, false, action);
+    assert.equal(result.automatic_retry_allowed, false, action);
+  }
 });
 
 test('pre-effect executor rejection is NO_EFFECT_PROVEN and still never auto-retries', async () => {
@@ -606,6 +639,67 @@ test('runner failure after dispatch boundary is conservatively ambiguous and ter
   assert.equal(result.outcome, 'AMBIGUOUS_NO_RETRY');
   assert.equal(result.authority_effect, false);
   assert.equal(result.automatic_retry_allowed, false);
+});
+
+test('missing or malformed effect boundary is conservatively ambiguous and terminal', async (t) => {
+  const readback = { ok:true, readback_proven:true, readback_kind:'UIA_VALUE_EXACT' };
+  const cases = [
+    ['missing response', undefined],
+    ['null response', null],
+    ['empty response', {}],
+    ['array response', []],
+    ['incomplete error response', { ok:false, error:'incomplete_bridge_result' }],
+    ['readback without effect boundary', readback],
+    ['null effect boundary', { ...readback, effect_started:null }],
+    ['undefined effect boundary', { ...readback, effect_started:undefined }],
+    ['string false effect boundary', { ...readback, effect_started:'false' }],
+    ['string true effect boundary', { ...readback, effect_started:'true' }],
+    ['zero effect boundary', { ...readback, effect_started:0 }],
+    ['nonzero effect boundary', { ...readback, effect_started:1 }],
+    ['object effect boundary', { ...readback, effect_started:{} }],
+  ];
+  for (const [name, bridgeResult] of cases) {
+    await t.test(name, async () => {
+      let dispatches = 0;
+      const executor = new WindowsLocalComputerExecutor({
+        platform:'win32',
+        runner:async () => { dispatches += 1; return bridgeResult; },
+      });
+      const receipt = await executor.act({
+        action:'UIA_SET_VALUE',
+        agent_id:'agent_test-12345678',
+        target,
+        args:{ runtime_id:[1,2], value:'value' },
+      }, contextFor('UIA_SET_VALUE'));
+      assert.equal(receipt.outcome, 'AMBIGUOUS_NO_RETRY');
+      assert.equal(receipt.authority_effect, false);
+      assert.equal(receipt.automatic_retry_allowed, false);
+      assert.equal(receipt.error, bridgeResult?.error || 'computer_effect_start_unconfirmed');
+      assert.equal(dispatches, 1);
+    });
+  }
+});
+
+test('explicit false effect boundary preserves proven pre-actuation rejection', async () => {
+  let dispatches = 0;
+  const executor = new WindowsLocalComputerExecutor({
+    platform:'win32',
+    runner:async () => {
+      dispatches += 1;
+      return { ok:false, effect_started:false, error:'computer_target_identity_drift:window_handle' };
+    },
+  });
+  const receipt = await executor.act({
+    action:'UIA_SET_VALUE',
+    agent_id:'agent_test-12345678',
+    target,
+    args:{ runtime_id:[1,2], value:'value' },
+  }, contextFor('UIA_SET_VALUE'));
+  assert.equal(receipt.outcome, 'NO_EFFECT_PROVEN');
+  assert.equal(receipt.authority_effect, false);
+  assert.equal(receipt.automatic_retry_allowed, false);
+  assert.equal(receipt.error, 'computer_target_identity_drift:window_handle');
+  assert.equal(dispatches, 1);
 });
 
 test('mutating executor path cannot bypass DB lease binding', async () => {

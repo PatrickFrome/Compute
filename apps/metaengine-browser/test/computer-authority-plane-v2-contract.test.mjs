@@ -38,21 +38,55 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes('computer_visual_frame_geometry_drift'));
   assert.ok(plane.includes('visual_pointer_requires_target_bound_window_capture: true'));
   assert.ok(plane.includes('visual_pointer_requires_unchanged_window_geometry: true'));
+  assert.ok(plane.includes('visual_pointer_requires_exact_hit_test_root: true'));
+  assert.ok(plane.includes('visual_pointer_revalidates_hit_test_before_mouse_down: true'));
+  assert.ok(executor.includes('WindowFromPoint'));
+  assert.ok(executor.includes('GetAncestor'));
+  assert.ok(executor.includes('computer_visual_hit_test_target_mismatch'));
+  assert.ok(executor.includes('computer_visual_hit_test_drift_before_click'));
+  assert.ok(executor.includes('QueryFullProcessImageName'));
+  assert.ok(executor.includes('PROCESS_QUERY_LIMITED_INFORMATION'));
+  assert.ok(executor.includes('GetProcessImagePath'));
+  assert.ok(executor.includes('GetProcessImageSha256'));
+  assert.ok(executor.includes('GetFileSha256'));
+  assert.equal(executor.includes('Get-FileHash'), false);
+  assert.ok(executor.includes('FileShare.ReadWrite | FileShare.Delete'));
+  assert.ok(executor.includes('SHA256.Create()'));
+  assert.ok(plane.includes('typed_effect_readback_kind_required: true'));
+  assert.ok(plane.includes('delivery_only_is_never_effect_proof: true'));
+  assert.ok(executor.includes('hasAdmissibleEffectReadback(request, result)'));
+  assert.ok(executor.includes("readback_kind = 'DELIVERY_ONLY'"));
 });
 
 test('Computer V2 does not confuse dispatch confirmation with effect proof', () => {
-  assert.match(executor, /'UIA_INVOKE'[\s\S]{0,1800}readback_proven = \$false/);
-  assert.match(executor, /'KEY_PRESS'[\s\S]{0,2600}readback_proven = \$false/);
-  assert.match(executor, /'POINTER_CLICK'[\s\S]{0,3200}readback_proven = \$false/);
-  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,4200}ValuePattern/);
-  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,5200}value_readback_proven = \$readback/);
+  const actionBlock = (action) => {
+    const start = executor.indexOf("    '" + action + "' {");
+    assert.ok(start >= 0, action + ':missing');
+    const end = action === 'POINTER_CLICK'
+      ? executor.indexOf("\n    default {", start)
+      : executor.indexOf("\n    '", start + 8);
+    assert.ok(end > start, action + ':block');
+    return executor.slice(start, end);
+  };
+
+  for (const action of ['UIA_INVOKE','KEY_PRESS','POINTER_CLICK']) {
+    const block = actionBlock(action);
+    assert.ok(block.includes('readback_proven = $false'), action + ':dispatch_only');
+    assert.ok(block.includes("readback_kind = 'DELIVERY_ONLY'"), action + ':delivery_kind');
+    assert.equal(block.includes('authority_effect = $true'), false, action + ':authority_effect');
+  }
+
+  const typeBlock = actionBlock('TYPE_TEXT');
+  assert.ok(typeBlock.includes('ValuePattern'), 'TYPE_TEXT:value_pattern');
+  assert.ok(typeBlock.includes('value_readback_proven = $readback'), 'TYPE_TEXT:value_readback');
+  assert.ok(typeBlock.includes("readback_kind = $(if ($readback) { 'UIA_VALUE_EXACT' } else { 'DELIVERY_ONLY' })"), 'TYPE_TEXT:typed_readback');
   assert.ok(plane.includes('computer_type_append_mode_unproven'));
   assert.ok(plane.includes('dispatch_only_mutations_never_claim_effect_proven: true'));
   assert.ok(plane.includes('type_text_requires_value_readback_for_effect_proof: true'));
 });
 
-test('Computer V2 crosses the ambiguity barrier before foreground, focus or pointer side effects', () => {
-  for (const action of ['TYPE_TEXT','KEY_PRESS','POINTER_CLICK']) {
+test('Computer V2 crosses the ambiguity barrier before every pre-dispatch physical side effect', () => {
+  for (const action of ['TYPE_TEXT','KEY_PRESS']) {
     const start = executor.indexOf("    '" + action + "' {");
     assert.ok(start >= 0, action);
     const next = executor.indexOf("\n    '", start + 8);
@@ -64,11 +98,18 @@ test('Computer V2 crosses the ambiguity barrier before foreground, focus or poin
       const focus = block.indexOf('$element.SetFocus()');
       assert.ok(focus >= 0 && barrier < focus, action + ':focus');
     }
-    if (action === 'POINTER_CLICK') {
-      const cursor = block.indexOf('SetCursorPos');
-      assert.ok(cursor >= 0 && barrier < cursor, action + ':pointer');
-    }
   }
+
+  const pointerStart = executor.indexOf("    'POINTER_CLICK' {");
+  assert.ok(pointerStart >= 0, 'POINTER_CLICK');
+  const pointerEnd = executor.indexOf("\n    default {", pointerStart);
+  const pointerBlock = executor.slice(pointerStart, pointerEnd > pointerStart ? pointerEnd : executor.length);
+  const pointerBarrier = pointerBlock.indexOf('$effectStarted = $true');
+  const cursor = pointerBlock.indexOf('SetCursorPos');
+  assert.ok(pointerBarrier >= 0 && cursor >= 0 && pointerBarrier < cursor, 'POINTER_CLICK:pointer');
+  assert.equal(pointerBlock.includes('SetForegroundWindow'), false, 'POINTER_CLICK:must_not_foreground_stale_frame');
+  assert.ok(pointerBlock.indexOf('computer_visual_foreground_drift') >= 0, 'POINTER_CLICK:foreground_fence');
+
   assert.ok(plane.includes('effect_barrier_precedes_foreground_focus_pointer_side_effects: true'));
 });
 
@@ -85,8 +126,9 @@ test('Computer V2 visual click never brings a stale frame to foreground and reva
   assert.ok(block.includes('computer_visual_foreground_drift_before_click'));
   const pixelFence = block.indexOf('computer_visual_frame_changed_before_click');
   const finalTargetFence = block.lastIndexOf('Assert-TargetIdentity $request.target');
+  const finalHitTestFence = block.indexOf('computer_visual_hit_test_drift_before_click');
   const mouseDown = block.indexOf('mouse_event(0x0002');
-  assert.ok(pixelFence >= 0 && finalTargetFence > pixelFence && mouseDown > finalTargetFence);
+  assert.ok(pixelFence >= 0 && finalTargetFence > pixelFence && finalHitTestFence > finalTargetFence && mouseDown > finalHitTestFence);
   assert.ok(executor.includes('foreground = $foregroundStable'));
   assert.ok(executor.includes('geometry_stable = $geometryStable'));
   assert.ok(executor.includes('pixel_sha256 = $pixelHash'));
