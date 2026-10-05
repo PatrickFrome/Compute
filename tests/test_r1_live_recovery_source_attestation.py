@@ -107,12 +107,61 @@ def build_files(root: Path):
     envelope_path.write_text(json.dumps(envelope))
 
     meta = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:01:00Z"))
+    meta["database_connection_identity"] = mod.validate_database_url_project_identity(
+        f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+    )
     meta_path = root / "export-metadata.json"
     meta_path.write_text(json.dumps(meta))
     return ciphertext, envelope_path, bundle_path, meta_path
 
 
 class LiveRecoverySourceAttestationTests(unittest.TestCase):
+    def test_database_url_identity_accepts_direct_and_shared_pooler_for_fresh_project(self):
+        direct = mod.validate_database_url_project_identity(
+            f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+        )
+        self.assertTrue(direct["project_ref_verified"])
+        self.assertEqual(direct["binding"], "HOST")
+        self.assertEqual(direct["project_ref"], mod.EXPECTED_PROJECT_REF)
+        self.assertFalse(direct["secret_material_persisted"])
+
+        shared = mod.validate_database_url_project_identity(
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+        )
+        self.assertTrue(shared["project_ref_verified"])
+        self.assertEqual(shared["binding"], "USERNAME_SUFFIX")
+        self.assertEqual(shared["connection_mode"], "SHARED_POOLER")
+
+    def test_database_url_identity_rejects_old_project_and_non_supabase_host(self):
+        old = "xpeibufgzjknrhbhpffp"
+        bad_values = [
+            f"postgresql://postgres:secret@db.{old}.supabase.co:5432/postgres",
+            f"postgresql://postgres.{old}:secret@aws-1-eu-central-1.pooler.supabase.com:6543/postgres",
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@example.com:5432/postgres",
+        ]
+        for value in bad_values:
+            with self.subTest(value=value.split("@")[-1]):
+                with self.assertRaises(mod.SourceAttestationError):
+                    mod.validate_database_url_project_identity(value)
+
+    def test_predicate_rejects_export_without_verified_database_connection_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ciphertext, envelope, bundle, meta = build_files(root)
+            value = json.loads(meta.read_text())
+            value.pop("database_connection_identity")
+            meta.write_text(json.dumps(value))
+            with self.assertRaisesRegex(mod.SourceAttestationError, "export_database_connection_identity_invalid"):
+                mod.build_source_predicate(
+                    ciphertext=ciphertext,
+                    envelope_receipt_path=envelope,
+                    bundle_receipt_path=bundle,
+                    export_metadata_path=meta,
+                    source_head_sha="1" * 40,
+                    run_id=123,
+                    run_attempt=1,
+                )
+
     def test_fresh_project_identity_is_pinned_across_workflow_and_export_metadata(self):
         self.assertEqual(mod.EXPECTED_PROJECT_REF, "jhriwwsryeqsvvvufkok")
         workflow = (ROOT / ".github" / "workflows" / "r1-live-recovery-source.yml").read_text()
