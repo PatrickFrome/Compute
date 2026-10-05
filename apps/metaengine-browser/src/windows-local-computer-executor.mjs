@@ -856,12 +856,20 @@ export class WindowsLocalComputerExecutor {
     this.#clock = clock;
   }
 
-  #rememberVisualFrame(result) {
+  #rememberVisualFrame(request, result) {
     const hash = String(result?.png_sha256 || '').toLowerCase();
     const machine = String(result?.machine_fingerprint_sha256 || '').toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(hash) || !/^[0-9a-f]{64}$/.test(machine)) return false;
+    const targetIdentitySha256 = request?.action === 'CAPTURE_WINDOW'
+      ? String(request?.target_identity_sha256 || '').toLowerCase()
+      : null;
+    if (request?.action === 'CAPTURE_WINDOW' && !/^[0-9a-f]{64}$/.test(targetIdentitySha256 || '')) return false;
     const now = Number(this.#clock());
-    this.#visualFrames.set(hash, Object.freeze({ observed_ms: now, machine_fingerprint_sha256: machine }));
+    this.#visualFrames.set(hash, Object.freeze({
+      observed_ms: now,
+      machine_fingerprint_sha256: machine,
+      target_identity_sha256: targetIdentitySha256,
+    }));
     for (const [key, row] of this.#visualFrames) {
       if (now - Number(row.observed_ms || 0) > 10000) this.#visualFrames.delete(key);
     }
@@ -882,6 +890,14 @@ export class WindowsLocalComputerExecutor {
     if (frame.machine_fingerprint_sha256 !== request.target?.machine_fingerprint_sha256) {
       this.#visualFrames.delete(hash);
       return { ok:false, reason:'computer_visual_frame_machine_mismatch' };
+    }
+    if (!frame.target_identity_sha256) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_target_unbound' };
+    }
+    if (frame.target_identity_sha256 !== request.target_identity_sha256) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_target_mismatch' };
     }
     this.#visualFrames.delete(hash);
     return { ok:true };
@@ -917,7 +933,7 @@ export class WindowsLocalComputerExecutor {
     if (request.mutating) throw new Error('computer_observe_mutation_forbidden');
     const result = await this.#runner(request);
     if (result?.ok !== true) throw new Error(String(result?.error || 'computer_observe_failed'));
-    if (['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(request.action)) this.#rememberVisualFrame(result);
+    if (['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(request.action)) this.#rememberVisualFrame(request, result);
     let projected = result;
     if (request.action === 'OBSERVE_WINDOWS' && Array.isArray(result?.windows)) {
       projected = {
