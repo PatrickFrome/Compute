@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
@@ -65,53 +68,36 @@ test('fixed Windows PowerShell bridge physically parses and serves STATUS', { sk
 });
 
 test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:30000 }, async () => {
-  const fixtureScript = [
-    "Add-Type -AssemblyName System.Windows.Forms",
-    "Add-Type -AssemblyName System.Drawing",
-    "$form = [System.Windows.Forms.Form]::new()",
-    "$form.Text = 'METAENGINE Computer Capture Fixture'",
-    "$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual",
-    "$form.Location = [System.Drawing.Point]::new(80,80)",
-    "$form.Size = [System.Drawing.Size]::new(360,240)",
-    "$label = [System.Windows.Forms.Label]::new()",
-    "$label.Text = 'stable-pixel-fixture'",
-    "$label.AutoSize = $true",
-    "$label.Location = [System.Drawing.Point]::new(24,24)",
-    "$form.Controls.Add($label)",
-    "$form.ShowInTaskbar = $true",
-    "$form.Add_Shown({ [Console]::Out.WriteLine('READY:' + [Int64]$form.Handle); [Console]::Out.Flush() })",
-    "[System.Windows.Forms.Application]::Run($form)",
-  ].join('; ');
-  const child = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',fixtureScript], {
-    windowsHide:true,
-    stdio:['ignore','pipe','pipe'],
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-fixture-'));
+  const fixturePath = path.join(fixtureDir, 'fixture.cjs');
+  const electronExe = path.join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe');
+  const fixtureSource = [
+    "const { app, BrowserWindow } = require('electron');",
+    "app.commandLine.appendSwitch('disable-gpu');",
+    "app.whenReady().then(async () => {",
+    "  const win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:true, frame:true });",
+    "  await win.loadURL('data:text/html,<html><body><div style=\"font:18px sans-serif;padding:24px\">stable-pixel-fixture</div></body></html>');",
+    "  win.show();",
+    "  win.focus();",
+    "});",
+    "app.on('window-all-closed', () => app.quit());",
+  ].join('\n');
+  await fs.writeFile(fixturePath, fixtureSource, 'utf8');
+
+  const child = spawn(electronExe, [fixturePath], {
+    windowsHide:false,
+    stdio:['ignore','ignore','pipe'],
+    env:{ ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS:'true' },
   });
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { stderr += chunk; });
-  child.stdout.setEncoding('utf8');
 
   try {
-    await new Promise((resolve,reject) => {
-      const timer = setTimeout(() => reject(new Error('computer_fixture_ready_timeout:' + stderr.slice(-300))), 10000);
-      const onData = chunk => {
-        if (String(chunk).includes('READY')) {
-          clearTimeout(timer);
-          child.stdout.off('data', onData);
-          resolve();
-        }
-      };
-      child.stdout.on('data', onData);
-      child.once('error', error => {
-        clearTimeout(timer);
-        reject(error);
-      });
-    });
-
     const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
     let identity = null;
     let lastObserved = null;
-    for (let attempt=0; attempt<10 && !identity; attempt += 1) {
+    for (let attempt=0; attempt<50 && !identity; attempt += 1) {
       const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
       lastObserved = observed.result;
       identity = observed.result.windows.find(row => Number(row?.identity?.process_id) === child.pid)?.identity || null;
@@ -122,7 +108,7 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
       count:lastObserved?.count,
       total_candidates:lastObserved?.total_candidates,
       process_ids:lastObserved?.windows?.map(row => row?.identity?.process_id),
-      stderr:stderr.slice(-300),
+      stderr:stderr.slice(-500),
     }));
 
     const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
@@ -135,6 +121,7 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     assert.ok(capture.result.rect.height > 0);
   } finally {
     child.kill();
+    await fs.rm(fixtureDir, { recursive:true, force:true });
   }
 });
 
