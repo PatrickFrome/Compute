@@ -471,7 +471,7 @@ try {
       $rect = Get-WindowRectForIdentity $identity
       if ($rect.width -le 0 -or $rect.height -le 0) { throw "computer_window_capture_bounds_invalid" }
       $hwnd = [IntPtr]([Convert]::ToInt64(([string]$identity.window_handle).Substring(2), 16))
-      $foregroundAtCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      $foregroundBeforeCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
       $bitmap = [System.Drawing.Bitmap]::new($rect.width,$rect.height,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
       try {
@@ -486,13 +486,23 @@ try {
         $bitmap.Dispose()
       }
       $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+      $rectAfterCapture = Get-WindowRectForIdentity $identity
+      $foregroundAfterCapture = ([MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      $geometryStable = (
+        [int]$rectAfterCapture.left -eq [int]$rect.left -and
+        [int]$rectAfterCapture.top -eq [int]$rect.top -and
+        [int]$rectAfterCapture.width -eq [int]$rect.width -and
+        [int]$rectAfterCapture.height -eq [int]$rect.height
+      )
+      $foregroundStable = ($foregroundBeforeCapture -and $foregroundAfterCapture)
       Write-Result ([ordered]@{
         ok = $true
         effect_started = $false
         schema = 'metaengine.windows-computer-executor.window-capture.v1'
         target = $identity
         rect = $rect
-        foreground = $foregroundAtCapture
+        foreground = $foregroundStable
+        geometry_stable = $geometryStable
         png_path = $file
         png_sha256 = $hash
         pixel_sha256 = $pixelHash
@@ -968,6 +978,7 @@ export class WindowsLocalComputerExecutor {
       window_rect: rect,
       pixel_sha256: pixelSha256,
       foreground_at_capture: request?.action === 'CAPTURE_WINDOW' ? result?.foreground === true : false,
+      geometry_stable_at_capture: request?.action === 'CAPTURE_WINDOW' ? result?.geometry_stable === true : false,
     }));
     for (const [key, row] of this.#visualFrames) {
       if (now - Number(row.observed_ms || 0) > 10000) this.#visualFrames.delete(key);
@@ -1005,6 +1016,10 @@ export class WindowsLocalComputerExecutor {
     if (!frame.foreground_at_capture) {
       this.#visualFrames.delete(hash);
       return { ok:false, reason:'computer_visual_frame_not_foreground_at_capture' };
+    }
+    if (!frame.geometry_stable_at_capture) {
+      this.#visualFrames.delete(hash);
+      return { ok:false, reason:'computer_visual_frame_geometry_unstable_at_capture' };
     }
     if (!/^[0-9a-f]{64}$/.test(String(frame.pixel_sha256 || ''))) {
       this.#visualFrames.delete(hash);
@@ -1093,6 +1108,7 @@ export class WindowsLocalComputerExecutor {
             window_rect:visualFence.frame.window_rect,
             pixel_sha256:visualFence.frame.pixel_sha256,
             foreground_at_capture:true,
+            geometry_stable_at_capture:true,
           }),
         }),
       });
