@@ -16,8 +16,8 @@ test('Computer V2 issuer adds only typed UIA/display subactions and requires V2 
   assert.match(migration, /computer_authority,version/);
   assert.ok(migration.includes("<> '2.0.0'"));
   assert.match(migration, /h205f22_a2_browser_supervisor_issue_computer_v1/);
-  assert.doesNotMatch(migration, /insert\\s+into\\s+public\\.compute_fabric_a2_browser_supervisor_command_h205f22/i);
-  assert.doesNotMatch(migration, /create\\s+table/i);
+  assert.equal(/insert\s+into\s+public\.compute_fabric_a2_browser_supervisor_command_h205f22/i.test(migration), false);
+  assert.equal(/create\s+table/i.test(migration), false);
 });
 
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
@@ -31,15 +31,15 @@ test('Computer V2 executor implements every newly admitted action without raw sh
 
   assert.doesNotMatch(executor, /Invoke-Expression/);
   assert.doesNotMatch(executor, /-EncodedCommand/);
-  assert.match(executor, /raw_shell_input:\\s*false/);
-  assert.match(executor, /automatic_retry_allowed:\\s*false/);
+  assert.ok(executor.includes('raw_shell_input: false'));
+  assert.ok(executor.includes('automatic_retry_allowed: false'));
 });
 
 test('Computer V2 policy still routes Browser semantic before UIA before visual fallback', () => {
-  assert.match(plane, /version:\\s*'2\\.0\\.0'/);
+  assert.ok(plane.includes("version: '2.0.0'"));
   assert.ok(plane.includes("router_order: Object.freeze(['BROWSER_SEMANTIC', 'WINDOWS_UIA', 'COMPUTER_VISUAL'])"));
   assert.match(plane, /direct_uia_patterns:/);
-  assert.match(plane, /multi_monitor_observation:\\s*true/);
-  assert.match(plane, /arbitrary_shell:\\s*false/);
-  assert.match(plane, /automatic_retry_allowed:\\s*false/);
+  assert.ok(plane.includes('multi_monitor_observation: true'));
+  assert.ok(plane.includes('arbitrary_shell: false'));
+  assert.ok(plane.includes('automatic_retry_allowed: false'));
 });
