@@ -16,8 +16,11 @@ test('Computer V2 issuer adds only typed UIA/display subactions and requires V2 
   assert.match(migration, /computer_authority,version/);
   assert.ok(migration.includes("<> '2.0.0'"));
   assert.match(migration, /h205f22_a2_browser_supervisor_issue_computer_v1/);
-  assert.equal(/insert\s+into\s+public\.compute_fabric_a2_browser_supervisor_command_h205f22/i.test(migration), false);
+  assert.match(migration, /insert\s+into\s+public\.compute_fabric_a2_browser_supervisor_command_h205f22/i);
   assert.equal(/create\s+table/i.test(migration), false);
+  assert.equal(/create\s+or\s+replace\s+function\s+public\.h205f22_a2_browser_supervisor_lease/i.test(migration), false);
+  assert.ok(migration.includes("'scheduler_authority',false"));
+  assert.ok(migration.includes("'execution_authority',false"));
 });
 
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
