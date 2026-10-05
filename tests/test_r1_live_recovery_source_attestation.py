@@ -113,6 +113,14 @@ def build_files(root: Path):
 
 
 class LiveRecoverySourceAttestationTests(unittest.TestCase):
+    def test_fresh_project_identity_is_pinned_across_workflow_and_export_metadata(self):
+        self.assertEqual(mod.EXPECTED_PROJECT_REF, "jhriwwsryeqsvvvufkok")
+        workflow = (ROOT / ".github" / "workflows" / "r1-live-recovery-source.yml").read_text()
+        self.assertIn("R1_PROJECT_REF: jhriwwsryeqsvvvufkok", workflow)
+        self.assertNotIn("R1_PROJECT_REF: xpeibufgzjknrhbhpffp", workflow)
+        value = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:02:00Z"))
+        self.assertEqual(value["project_ref"], mod.EXPECTED_PROJECT_REF)
+
     def test_source_environment_requires_reviewers_self_review_block_and_branch_policy(self):
         result = mod.validate_source_environment(source_environment())
         self.assertTrue(result["ready_for_source_generation"])
