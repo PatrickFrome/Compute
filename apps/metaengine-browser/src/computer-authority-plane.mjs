@@ -138,13 +138,17 @@ function normalizeArgs(action, args) {
   }
   if (action === 'UIA_SNAPSHOT') {
     const limitRaw = input.limit == null ? 256 : Number(input.limit);
+    const offsetRaw = input.offset == null ? 0 : Number(input.offset);
     const limit = Number.isSafeInteger(limitRaw) ? Math.max(1, Math.min(1024, limitRaw)) : 256;
-    return Object.freeze({ limit });
+    const offset = Number.isSafeInteger(offsetRaw) ? Math.max(0, Math.min(65535, offsetRaw)) : 0;
+    return Object.freeze({ offset, limit });
   }
   if (action === 'OBSERVE_WINDOWS') {
     const limitRaw = input.limit == null ? 128 : Number(input.limit);
+    const offsetRaw = input.offset == null ? 0 : Number(input.offset);
     const limit = Number.isSafeInteger(limitRaw) ? Math.max(1, Math.min(256, limitRaw)) : 128;
-    return Object.freeze({ limit });
+    const offset = Number.isSafeInteger(offsetRaw) ? Math.max(0, Math.min(65535, offsetRaw)) : 0;
+    return Object.freeze({ offset, limit });
   }
   if (action === 'CAPTURE_DESKTOP') {
     return Object.freeze({ monitor: 0 });
