@@ -16,9 +16,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-HANDOFF_SCHEMA = "metaengine.compute.r1-verified-source-handoff.h205f22.v1"
+HANDOFF_SCHEMA = "metaengine.compute.r1-verified-source-handoff.h205f22.v2"
 BASE_SCHEMA = "metaengine.compute.r1-live-two-domain-orchestration-result.h205f22.v1"
-OUT_SCHEMA = "metaengine.compute.r1-source-bound-two-domain-candidate.h205f22.v1"
+OUT_SCHEMA = "metaengine.compute.r1-source-bound-two-domain-candidate.h205f22.v2"
+SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -110,6 +111,16 @@ def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
     if bc.get("sha256")!=hs.get("ciphertext_sha256") or bc.get("bytes")!=hs.get("ciphertext_bytes"):
         raise SourceBoundQuorumError("ciphertext_identity_mismatch")
 
+    predicate_sha=_require_sha(hs.get("predicate_sha256"),"predicate_sha256")
+    latest_checkpoint_id=_require_sha(hs.get("latest_checkpoint_id_at_source"),"latest_checkpoint_id_at_source")
+    latest_payload_sha=_require_sha(hs.get("latest_checkpoint_payload_sha256"),"latest_checkpoint_payload_sha256")
+    latest_source_sha=hs.get("latest_checkpoint_source_parent_sha")
+    if not isinstance(latest_source_sha,str) or not SHA40.fullmatch(latest_source_sha):
+        raise SourceBoundQuorumError("latest_checkpoint_source_parent_sha_invalid")
+    checkpoint_ledger_sha=_require_sha(hs.get("checkpoint_ledger_sha256"),"checkpoint_ledger_sha256")
+    roadmap_authority_sha=_require_sha(hs.get("roadmap_authority_sha256"),"roadmap_authority_sha256")
+    migration_ledger_sha=_require_sha(hs.get("migration_ledger_sha256"),"migration_ledger_sha256")
+
     readiness_id=_require_positive_int(hs.get("source_environment_readiness_artifact_id"),"source_environment_readiness_artifact_id")
     readiness_sha=_require_sha(hs.get("source_environment_readiness_sha256"),"source_environment_readiness_sha256")
     approval_id=_require_positive_int(hs.get("source_environment_approval_artifact_id"),"source_environment_approval_artifact_id")
@@ -130,10 +141,13 @@ def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
             "handoff_sha256":handoff_sha,
             "source_verification_artifact":hs.get("source_verification_artifact"),
             "source_verification_receipt_sha256":hs.get("source_verification_receipt_sha256"),
-            "predicate_sha256":hs.get("predicate_sha256"),
-            "canonical_digest_at_source":hs.get("canonical_digest_at_source"),
-            "semantic_head_at_source":hs.get("semantic_head_at_source"),
-            "migration_ledger_sha256":hs.get("migration_ledger_sha256"),
+            "predicate_sha256":predicate_sha,
+            "latest_checkpoint_id_at_source":latest_checkpoint_id,
+            "latest_checkpoint_payload_sha256":latest_payload_sha,
+            "latest_checkpoint_source_parent_sha":latest_source_sha,
+            "checkpoint_ledger_sha256":checkpoint_ledger_sha,
+            "roadmap_authority_sha256":roadmap_authority_sha,
+            "migration_ledger_sha256":migration_ledger_sha,
             "source_environment_readiness_artifact_id":readiness_id,
             "source_environment_readiness_sha256":readiness_sha,
             "source_environment_approval_artifact_id":approval_id,

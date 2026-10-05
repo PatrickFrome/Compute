@@ -273,9 +273,12 @@ class FinalR2EvidencePackageTests(unittest.TestCase):
             "ciphertext_sha256": self.cipher_sha,
             "ciphertext_bytes": self.cipher_bytes,
             "envelope_receipt_sha256": envelope["receipt_sha256"],
-            "semantic_head_at_source": "metaengine-h205f22-recovery-dev-20260821-cp072",
-            "canonical_digest_at_source": "4" * 64,
-            "migration_ledger_sha256": "5" * 64,
+            "latest_checkpoint_id_at_source": "4" * 64,
+            "latest_checkpoint_payload_sha256": "5" * 64,
+            "latest_checkpoint_source_parent_sha": "6" * 40,
+            "checkpoint_ledger_sha256": "7" * 64,
+            "roadmap_authority_sha256": "8" * 64,
+            "migration_ledger_sha256": "9" * 64,
             "verified_timestamp_count": 1,
             "source_attestation_verified": True,
             "source_environment_evidence": {
@@ -294,7 +297,7 @@ class FinalR2EvidencePackageTests(unittest.TestCase):
         self.source_verification = self._write_json("source-verification.json", source_verification)
 
         handoff_core = {
-            "schema": "metaengine.compute.r1-verified-source-handoff.h205f22.v1",
+            "schema": "metaengine.compute.r1-verified-source-handoff.h205f22.v2",
             "classification": "VERIFIED_SOURCE_HANDOFF_PROVIDER_ELIGIBILITY_NONAUTHORITATIVE",
             "source": {
                 "run_id": self.run_id,
@@ -307,8 +310,11 @@ class FinalR2EvidencePackageTests(unittest.TestCase):
                 "source_verification_artifact": {"id": 3003, "name": "r1-recovery-source-verification.json", "size_in_bytes": self.source_verification.stat().st_size, "digest_sha256": hashlib.sha256(self.source_verification.read_bytes()).hexdigest()},
                 "source_verification_receipt_sha256": source_verification["verification_receipt_sha256"],
                 "predicate_sha256": predicate["predicate_sha256"],
-                "semantic_head_at_source": source_verification["semantic_head_at_source"],
-                "canonical_digest_at_source": source_verification["canonical_digest_at_source"],
+                "latest_checkpoint_id_at_source": source_verification["latest_checkpoint_id_at_source"],
+                "latest_checkpoint_payload_sha256": source_verification["latest_checkpoint_payload_sha256"],
+                "latest_checkpoint_source_parent_sha": source_verification["latest_checkpoint_source_parent_sha"],
+                "checkpoint_ledger_sha256": source_verification["checkpoint_ledger_sha256"],
+                "roadmap_authority_sha256": source_verification["roadmap_authority_sha256"],
                 "migration_ledger_sha256": source_verification["migration_ledger_sha256"],
                 "source_environment_readiness_artifact_id": self.readiness_id,
                 "source_environment_readiness_sha256": hashlib.sha256(canon(readiness)).hexdigest(),

@@ -39,13 +39,37 @@ def source_environment():
     }
 
 
-def fence(*, head="metaengine-h205f22-recovery-dev-20260821-cp072", digest="a" * 64, ledger="b" * 64, rows=7, version="20260821125449", captured="2026-08-21T19:00:00Z"):
+def fence(
+    *,
+    project_ref=None,
+    checkpoint_rows=7,
+    checkpoint_ledger="a" * 64,
+    latest_checkpoint_id="b" * 64,
+    latest_payload_sha="c" * 64,
+    latest_source_sha="1" * 40,
+    latest_state="PARTIAL",
+    latest_kind="TEST_OPERATIONAL_CHECKPOINT",
+    roadmap_rows=1,
+    roadmap_digest="d" * 64,
+    migration_ledger="e" * 64,
+    migration_rows=11,
+    version="20261005192022",
+    captured="2026-10-05T20:44:17Z",
+):
     return {
         "schema": mod.FENCE_SCHEMA,
-        "semantic_head": head,
-        "canonical_digest": digest,
-        "migration_ledger_sha256": ledger,
-        "migration_rows": rows,
+        "project_ref": project_ref or mod.EXPECTED_PROJECT_REF,
+        "checkpoint_rows": checkpoint_rows,
+        "checkpoint_ledger_sha256": checkpoint_ledger,
+        "latest_checkpoint_id": latest_checkpoint_id,
+        "latest_checkpoint_payload_sha256": latest_payload_sha,
+        "latest_checkpoint_source_parent_sha": latest_source_sha,
+        "latest_checkpoint_evidence_state": latest_state,
+        "latest_checkpoint_kind": latest_kind,
+        "roadmap_authority_rows": roadmap_rows,
+        "roadmap_authority_sha256": roadmap_digest,
+        "migration_ledger_sha256": migration_ledger,
+        "migration_rows": migration_rows,
         "max_migration_version": version,
         "captured_at": captured,
     }
@@ -57,7 +81,7 @@ def build_files(root: Path):
     cipher_sha = hashlib.sha256(ciphertext.read_bytes()).hexdigest()
 
     bundle = {
-        "schema": "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v1",
+        "schema": "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v2",
         "classification": "PLAINTEXT_BUNDLE_BUILD_RECEIPT_NONAUTHORITATIVE",
         "manifest_sha256": "c" * 64,
         "bundle_sha256": "d" * 64,
@@ -107,12 +131,105 @@ def build_files(root: Path):
     envelope_path.write_text(json.dumps(envelope))
 
     meta = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:01:00Z"))
+    meta["database_connection_identity"] = mod.validate_database_url_project_identity(
+        f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+    )
     meta_path = root / "export-metadata.json"
     meta_path.write_text(json.dumps(meta))
     return ciphertext, envelope_path, bundle_path, meta_path
 
 
 class LiveRecoverySourceAttestationTests(unittest.TestCase):
+    def test_database_url_identity_accepts_direct_and_shared_pooler_for_fresh_project(self):
+        direct = mod.validate_database_url_project_identity(
+            f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+        )
+        self.assertTrue(direct["project_ref_verified"])
+        self.assertEqual(direct["binding"], "HOST")
+        self.assertEqual(direct["project_ref"], mod.EXPECTED_PROJECT_REF)
+        self.assertFalse(direct["secret_material_persisted"])
+
+        shared = mod.validate_database_url_project_identity(
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+        )
+        self.assertTrue(shared["project_ref_verified"])
+        self.assertEqual(shared["binding"], "USERNAME_SUFFIX")
+        self.assertEqual(shared["connection_mode"], "SHARED_POOLER")
+
+    def test_database_url_identity_rejects_old_project_and_non_supabase_host(self):
+        old = "xpeibufgzjknrhbhpffp"
+        bad_values = [
+            f"postgresql://postgres:secret@db.{old}.supabase.co:5432/postgres",
+            f"postgresql://postgres.{old}:secret@aws-1-eu-central-1.pooler.supabase.com:6543/postgres",
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@example.com:5432/postgres",
+        ]
+        for value in bad_values:
+            with self.subTest(value=value.split("@")[-1]):
+                with self.assertRaises(mod.SourceAttestationError):
+                    mod.validate_database_url_project_identity(value)
+
+    def test_database_url_identity_rejects_libpq_routing_overrides(self):
+        direct = f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+        pooler_host = "aws-1-eu-central-1.pooler.supabase.com"
+        bad_values = [
+            direct + "?host=example.com",
+            direct + "?hostaddr=203.0.113.10",
+            direct + "?sslmode=require",
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@evil.example,{pooler_host}:6543/postgres",
+            f"postgresql://postgres.{mod.EXPECTED_PROJECT_REF}:secret@evil.example%2C{pooler_host}:6543/postgres",
+        ]
+        for value in bad_values:
+            with self.subTest(value=value.split("@")[-1]):
+                with self.assertRaises(mod.SourceAttestationError):
+                    mod.validate_database_url_project_identity(value)
+
+    def test_database_identity_receipt_rejects_generic_boolean_shape_and_secret_fields(self):
+        valid = mod.validate_database_url_project_identity(
+            f"postgresql://postgres:secret@db.{mod.EXPECTED_PROJECT_REF}.supabase.co:5432/postgres"
+        )
+        bad_values = [
+            {"project_ref": mod.EXPECTED_PROJECT_REF, "project_ref_verified": True},
+            {**valid, "schema": "forged"},
+            {**valid, "binding": "HOST", "connection_mode": "SHARED_POOLER"},
+            {**valid, "password": "must-not-persist"},
+        ]
+        for value in bad_values:
+            with self.subTest(keys=sorted(value)):
+                with self.assertRaises(mod.SourceAttestationError):
+                    mod.validate_database_connection_identity_receipt(value)
+
+    def test_predicate_rejects_export_without_verified_database_connection_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ciphertext, envelope, bundle, meta = build_files(root)
+            value = json.loads(meta.read_text())
+            value["database_connection_identity"] = {
+                "project_ref": mod.EXPECTED_PROJECT_REF,
+                "project_ref_verified": True,
+            }
+            meta.write_text(json.dumps(value))
+            with self.assertRaisesRegex(mod.SourceAttestationError, "export_database_connection_identity_invalid"):
+                mod.build_source_predicate(
+                    ciphertext=ciphertext,
+                    envelope_receipt_path=envelope,
+                    bundle_receipt_path=bundle,
+                    export_metadata_path=meta,
+                    source_head_sha="1" * 40,
+                    run_id=123,
+                    run_attempt=1,
+                )
+
+    def test_fresh_project_identity_is_pinned_across_workflow_and_export_metadata(self):
+        self.assertEqual(mod.EXPECTED_PROJECT_REF, "jhriwwsryeqsvvvufkok")
+        workflow = (ROOT / ".github" / "workflows" / "r1-live-recovery-source.yml").read_text()
+        pre_jobs = workflow.split("\njobs:\n", 1)[0]
+        env_block = pre_jobs.split("\nenv:\n", 1)[1]
+        self.assertEqual(env_block.count("R1_PROJECT_REF:"), 1)
+        self.assertIn("R1_PROJECT_REF: jhriwwsryeqsvvvufkok", env_block)
+        self.assertNotIn("xpeibufgzjknrhbhpffp", env_block)
+        value = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:02:00Z"))
+        self.assertEqual(value["project_ref"], mod.EXPECTED_PROJECT_REF)
+
     def test_source_environment_requires_reviewers_self_review_block_and_branch_policy(self):
         result = mod.validate_source_environment(source_environment())
         self.assertTrue(result["ready_for_source_generation"])
@@ -122,18 +239,26 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
         with self.assertRaisesRegex(mod.SourceAttestationError, "prevent_self_review_required"):
             mod.validate_source_environment(bad)
 
-    def test_control_fence_accepts_time_change_but_rejects_semantic_or_migration_drift(self):
-        stable = mod.validate_control_fences(fence(), fence(captured="2026-08-21T19:02:00Z"))
+    def test_control_fence_accepts_time_change_but_rejects_checkpoint_roadmap_or_migration_drift(self):
+        stable = mod.validate_control_fences(fence(), fence(captured="2026-10-05T20:45:17Z"))
         self.assertTrue(stable["stable"])
-        with self.assertRaisesRegex(mod.SourceAttestationError, "semantic_head"):
-            mod.validate_control_fences(fence(), fence(head="metaengine-h205f22-recovery-dev-20260821-cp999"))
+        self.assertEqual(stable["project_ref"], mod.EXPECTED_PROJECT_REF)
+        with self.assertRaisesRegex(mod.SourceAttestationError, "checkpoint_ledger_sha256"):
+            mod.validate_control_fences(fence(), fence(checkpoint_ledger="1" * 64))
+        with self.assertRaisesRegex(mod.SourceAttestationError, "roadmap_authority_sha256"):
+            mod.validate_control_fences(fence(), fence(roadmap_digest="2" * 64))
         with self.assertRaisesRegex(mod.SourceAttestationError, "migration_ledger_sha256"):
-            mod.validate_control_fences(fence(), fence(ledger="1" * 64))
+            mod.validate_control_fences(fence(), fence(migration_ledger="3" * 64))
+        with self.assertRaisesRegex(mod.SourceAttestationError, "project_ref"):
+            mod.validate_control_fences(fence(), fence(project_ref="xpeibufgzjknrhbhpffp"))
 
     def test_export_metadata_is_explicit_about_logical_and_storage_coverage(self):
         value = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:02:00Z"))
         self.assertEqual(value["tool_version"], "2.111.0")
         self.assertEqual(value["export_mode"], "SUPABASE_LOGICAL_ROLES_SCHEMA_DATA")
+        self.assertEqual(value["latest_checkpoint_id"], fence()["latest_checkpoint_id"])
+        self.assertEqual(value["checkpoint_ledger_sha256"], fence()["checkpoint_ledger_sha256"])
+        self.assertFalse(value["canonical_roadmap_claim"])
         self.assertFalse(value["physical_backup_export_claim"])
         self.assertFalse(value["storage_api_objects_included"])
 
@@ -151,7 +276,9 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
                 run_attempt=1,
             )
             self.assertEqual(predicate["source"]["workflow_path"], mod.SOURCE_WORKFLOW_PATH)
-            self.assertEqual(predicate["database_export"]["semantic_head"], fence()["semantic_head"])
+            self.assertEqual(predicate["database_export"]["latest_checkpoint_id"], fence()["latest_checkpoint_id"])
+            self.assertEqual(predicate["database_export"]["checkpoint_ledger_sha256"], fence()["checkpoint_ledger_sha256"])
+            self.assertFalse(predicate["database_export"]["canonical_roadmap_claim"])
             self.assertFalse(predicate["coverage"]["storage_api_object_bytes_included"])
             self.assertFalse(predicate["authority"]["r2_proven"])
 

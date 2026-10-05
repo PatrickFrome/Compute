@@ -13,10 +13,12 @@ It does NOT establish two-domain durability, R2/R3, or any persisted mainline se
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import re
 import sys
+from urllib.parse import unquote, urlparse
 from pathlib import Path
 from typing import Any
 
@@ -31,16 +33,17 @@ from controller.r1.recovery_encryption_envelope import (
 
 EXPECTED_REPOSITORY_ID = 1341371143
 EXPECTED_REPOSITORY = "PatrickFrome/Compute"
-EXPECTED_PROJECT_REF = "xpeibufgzjknrhbhpffp"
+EXPECTED_PROJECT_REF = "jhriwwsryeqsvvvufkok"
 SOURCE_ENVIRONMENT = "r1-recovery-source"
 SOURCE_WORKFLOW_PATH = ".github/workflows/r1-live-recovery-source.yml"
 SOURCE_ARTIFACT_ATTESTATION_NAME = "r1-recovery-source-attestation.sigstore.jsonl"
-SOURCE_PREDICATE_TYPE = "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1"
+SOURCE_PREDICATE_TYPE = "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2"
 SUPABASE_CLI_VERSION = "2.111.0"
-FENCE_SCHEMA = "metaengine.compute.r1-source-control-fence.h205f22.v1"
-EXPORT_METADATA_SCHEMA = "metaengine.compute.logical-export.v1"
-PREDICATE_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-predicate.h205f22.v1"
-VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v1"
+FENCE_SCHEMA = "metaengine.compute.r1-source-control-fence.h205f22.v2"
+EXPORT_METADATA_SCHEMA = "metaengine.compute.logical-export.v2"
+PREDICATE_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-predicate.h205f22.v2"
+VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v2"
+DATABASE_CONNECTION_IDENTITY_SCHEMA = "metaengine.compute.r1-database-connection-identity.h205f22.v1"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SEMANTIC_HEAD = re.compile(r"^[A-Za-z0-9._:-]{8,240}$")
@@ -48,6 +51,107 @@ SEMANTIC_HEAD = re.compile(r"^[A-Za-z0-9._:-]{8,240}$")
 
 class SourceAttestationError(RuntimeError):
     pass
+
+
+def validate_database_connection_identity_receipt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise SourceAttestationError("database_connection_identity_invalid")
+    expected_keys = {
+        "schema",
+        "project_ref",
+        "project_ref_verified",
+        "binding",
+        "connection_mode",
+        "port",
+        "database",
+        "credential_present",
+        "secret_material_persisted",
+        "authority_effect",
+    }
+    if set(value) != expected_keys:
+        raise SourceAttestationError("database_connection_identity_shape_invalid")
+    if value.get("schema") != DATABASE_CONNECTION_IDENTITY_SCHEMA:
+        raise SourceAttestationError("database_connection_identity_schema_invalid")
+    if value.get("project_ref") != EXPECTED_PROJECT_REF or value.get("project_ref_verified") is not True:
+        raise SourceAttestationError("database_connection_identity_project_ref_invalid")
+    binding = value.get("binding")
+    mode = value.get("connection_mode")
+    if (binding, mode) not in {
+        ("HOST", "DIRECT_OR_DEDICATED_POOLER"),
+        ("USERNAME_SUFFIX", "SHARED_POOLER"),
+    }:
+        raise SourceAttestationError("database_connection_identity_binding_invalid")
+    if value.get("port") not in (5432, 6543) or value.get("database") != "postgres":
+        raise SourceAttestationError("database_connection_identity_endpoint_invalid")
+    if value.get("credential_present") is not True:
+        raise SourceAttestationError("database_connection_identity_credential_state_invalid")
+    if value.get("secret_material_persisted") is not False or value.get("authority_effect") is not False:
+        raise SourceAttestationError("database_connection_identity_authority_boundary_invalid")
+    return dict(value)
+
+
+def validate_database_url_project_identity(value: Any) -> dict[str, Any]:
+    raw = _require_text(value, "database_url", minimum=20, maximum=8192)
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise SourceAttestationError("database_url_invalid") from exc
+
+    scheme = parsed.scheme.lower()
+    if scheme not in {"postgres", "postgresql"}:
+        raise SourceAttestationError("database_url_scheme_invalid")
+    if parsed.fragment:
+        raise SourceAttestationError("database_url_fragment_forbidden")
+    if parsed.query:
+        raise SourceAttestationError("database_url_query_forbidden")
+
+    host = unquote(parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        raise SourceAttestationError("database_url_host_missing")
+    if "," in host:
+        raise SourceAttestationError("database_url_multiple_hosts_forbidden")
+    username = unquote(parsed.username or "")
+    if not username:
+        raise SourceAttestationError("database_url_username_missing")
+    if parsed.password in (None, ""):
+        raise SourceAttestationError("database_url_credential_missing")
+
+    database = (parsed.path or "").lstrip("/")
+    if database != "postgres":
+        raise SourceAttestationError("database_url_database_invalid")
+    if port not in (5432, 6543):
+        raise SourceAttestationError("database_url_port_invalid")
+
+    direct_host = f"db.{EXPECTED_PROJECT_REF}.supabase.co"
+    if host == direct_host:
+        binding = "HOST"
+        mode = "DIRECT_OR_DEDICATED_POOLER"
+    elif host.endswith(".pooler.supabase.com"):
+        role_and_ref = username.rsplit(".", 1)
+        if len(role_and_ref) != 2 or not role_and_ref[0]:
+            raise SourceAttestationError("database_url_pooler_username_invalid")
+        if role_and_ref[1] != EXPECTED_PROJECT_REF:
+            raise SourceAttestationError("database_url_project_ref_mismatch")
+        binding = "USERNAME_SUFFIX"
+        mode = "SHARED_POOLER"
+    elif host.startswith("db.") and host.endswith(".supabase.co"):
+        raise SourceAttestationError("database_url_project_ref_mismatch")
+    else:
+        raise SourceAttestationError("database_url_supabase_host_invalid")
+
+    return validate_database_connection_identity_receipt({
+        "schema": DATABASE_CONNECTION_IDENTITY_SCHEMA,
+        "project_ref": EXPECTED_PROJECT_REF,
+        "project_ref_verified": True,
+        "binding": binding,
+        "connection_mode": mode,
+        "port": port,
+        "database": database,
+        "credential_present": True,
+        "secret_material_persisted": False,
+        "authority_effect": False,
+    })
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -162,17 +266,58 @@ def validate_source_environment(value: Any) -> dict[str, Any]:
 def _validate_fence(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema") != FENCE_SCHEMA:
         raise SourceAttestationError(f"{label}_schema_invalid")
-    semantic_head = _require_text(value.get("semantic_head"), f"{label}_semantic_head", minimum=8, maximum=240)
-    if not SEMANTIC_HEAD.fullmatch(semantic_head):
-        raise SourceAttestationError(f"{label}_semantic_head_invalid")
-    canonical_digest = _require_sha(value.get("canonical_digest"), f"{label}_canonical_digest")
+    project_ref = _require_text(value.get("project_ref"), f"{label}_project_ref", minimum=20, maximum=20)
+    if project_ref != EXPECTED_PROJECT_REF:
+        raise SourceAttestationError(f"{label}_project_ref_mismatch")
+    checkpoint_rows = _require_int(value.get("checkpoint_rows"), f"{label}_checkpoint_rows")
+    checkpoint_sha = _require_sha(value.get("checkpoint_ledger_sha256"), f"{label}_checkpoint_ledger_sha256")
+    latest_checkpoint_id = _require_sha(value.get("latest_checkpoint_id"), f"{label}_latest_checkpoint_id")
+    latest_payload_sha = _require_sha(
+        value.get("latest_checkpoint_payload_sha256"),
+        f"{label}_latest_checkpoint_payload_sha256",
+    )
+    latest_source_sha = _require_text(
+        value.get("latest_checkpoint_source_parent_sha"),
+        f"{label}_latest_checkpoint_source_parent_sha",
+        minimum=40,
+        maximum=40,
+    )
+    if not SHA40.fullmatch(latest_source_sha):
+        raise SourceAttestationError(f"{label}_latest_checkpoint_source_parent_sha_invalid")
+    latest_evidence_state = _require_text(
+        value.get("latest_checkpoint_evidence_state"),
+        f"{label}_latest_checkpoint_evidence_state",
+        maximum=32,
+    )
+    if latest_evidence_state not in {"LIVE_DB_ONLY", "EVIDENCE_READY", "PARTIAL"}:
+        raise SourceAttestationError(f"{label}_latest_checkpoint_evidence_state_invalid")
+    latest_kind = _require_text(
+        value.get("latest_checkpoint_kind"),
+        f"{label}_latest_checkpoint_kind",
+        minimum=3,
+        maximum=200,
+    )
+    roadmap_rows = _require_int(
+        value.get("roadmap_authority_rows"),
+        f"{label}_roadmap_authority_rows",
+        minimum=0,
+    )
+    roadmap_sha = _require_sha(value.get("roadmap_authority_sha256"), f"{label}_roadmap_authority_sha256")
     migration_sha = _require_sha(value.get("migration_ledger_sha256"), f"{label}_migration_ledger_sha256")
     migration_rows = _require_int(value.get("migration_rows"), f"{label}_migration_rows")
     max_version = _require_text(value.get("max_migration_version"), f"{label}_max_migration_version", maximum=64)
     captured_at = _require_text(value.get("captured_at"), f"{label}_captured_at", maximum=80)
     return {
-        "semantic_head": semantic_head,
-        "canonical_digest": canonical_digest,
+        "project_ref": project_ref,
+        "checkpoint_rows": checkpoint_rows,
+        "checkpoint_ledger_sha256": checkpoint_sha,
+        "latest_checkpoint_id": latest_checkpoint_id,
+        "latest_checkpoint_payload_sha256": latest_payload_sha,
+        "latest_checkpoint_source_parent_sha": latest_source_sha,
+        "latest_checkpoint_evidence_state": latest_evidence_state,
+        "latest_checkpoint_kind": latest_kind,
+        "roadmap_authority_rows": roadmap_rows,
+        "roadmap_authority_sha256": roadmap_sha,
         "migration_ledger_sha256": migration_sha,
         "migration_rows": migration_rows,
         "max_migration_version": max_version,
@@ -184,8 +329,16 @@ def validate_control_fences(before: Any, after: Any) -> dict[str, Any]:
     a = _validate_fence(before, "before")
     b = _validate_fence(after, "after")
     stable_fields = (
-        "semantic_head",
-        "canonical_digest",
+        "project_ref",
+        "checkpoint_rows",
+        "checkpoint_ledger_sha256",
+        "latest_checkpoint_id",
+        "latest_checkpoint_payload_sha256",
+        "latest_checkpoint_source_parent_sha",
+        "latest_checkpoint_evidence_state",
+        "latest_checkpoint_kind",
+        "roadmap_authority_rows",
+        "roadmap_authority_sha256",
         "migration_ledger_sha256",
         "migration_rows",
         "max_migration_version",
@@ -194,13 +347,9 @@ def validate_control_fences(before: Any, after: Any) -> dict[str, Any]:
     if changed:
         raise SourceAttestationError("source_control_fence_drift:" + ",".join(changed))
     return {
-        "schema": "metaengine.compute.r1-source-control-fence-validation.h205f22.v1",
+        "schema": "metaengine.compute.r1-source-control-fence-validation.h205f22.v2",
         "stable": True,
-        "semantic_head": a["semantic_head"],
-        "canonical_digest": a["canonical_digest"],
-        "migration_ledger_sha256": a["migration_ledger_sha256"],
-        "migration_rows": a["migration_rows"],
-        "max_migration_version": a["max_migration_version"],
+        **{field: a[field] for field in stable_fields},
         "captured_before": a["captured_at"],
         "captured_after": b["captured_at"],
     }
@@ -216,12 +365,20 @@ def build_export_metadata(before: Any, after: Any) -> dict[str, Any]:
         "export_mode": "SUPABASE_LOGICAL_ROLES_SCHEMA_DATA",
         "project_owned_schemas": ["destruktion_meta"],
         "migration_ledger_separate": True,
-        "semantic_head": fence["semantic_head"],
-        "canonical_digest": fence["canonical_digest"],
+        "checkpoint_rows": fence["checkpoint_rows"],
+        "checkpoint_ledger_sha256": fence["checkpoint_ledger_sha256"],
+        "latest_checkpoint_id": fence["latest_checkpoint_id"],
+        "latest_checkpoint_payload_sha256": fence["latest_checkpoint_payload_sha256"],
+        "latest_checkpoint_source_parent_sha": fence["latest_checkpoint_source_parent_sha"],
+        "latest_checkpoint_evidence_state": fence["latest_checkpoint_evidence_state"],
+        "latest_checkpoint_kind": fence["latest_checkpoint_kind"],
+        "roadmap_authority_rows": fence["roadmap_authority_rows"],
+        "roadmap_authority_sha256": fence["roadmap_authority_sha256"],
         "migration_ledger_sha256": fence["migration_ledger_sha256"],
         "migration_rows": fence["migration_rows"],
         "max_migration_version": fence["max_migration_version"],
         "control_fence_stable": True,
+        "canonical_roadmap_claim": False,
         "captured_before": fence["captured_before"],
         "captured_after": fence["captured_after"],
         "supabase_managed_schemas_complete_claim": False,
@@ -272,6 +429,12 @@ def build_source_predicate(
         raise SourceAttestationError("export_metadata_schema_invalid")
     if metadata.get("tool_version") != SUPABASE_CLI_VERSION or metadata.get("project_ref") != EXPECTED_PROJECT_REF:
         raise SourceAttestationError("export_metadata_identity_invalid")
+    try:
+        connection_identity = validate_database_connection_identity_receipt(
+            metadata.get("database_connection_identity")
+        )
+    except SourceAttestationError as exc:
+        raise SourceAttestationError("export_database_connection_identity_invalid") from exc
     if metadata.get("control_fence_stable") is not True:
         raise SourceAttestationError("export_control_fence_not_stable")
     if metadata.get("storage_api_objects_included") is not False:
@@ -303,12 +466,21 @@ def build_source_predicate(
             "project_ref": EXPECTED_PROJECT_REF,
             "mode": metadata["export_mode"],
             "supabase_cli_version": SUPABASE_CLI_VERSION,
-            "semantic_head": metadata["semantic_head"],
-            "canonical_digest": metadata["canonical_digest"],
+            "checkpoint_rows": metadata["checkpoint_rows"],
+            "checkpoint_ledger_sha256": metadata["checkpoint_ledger_sha256"],
+            "latest_checkpoint_id": metadata["latest_checkpoint_id"],
+            "latest_checkpoint_payload_sha256": metadata["latest_checkpoint_payload_sha256"],
+            "latest_checkpoint_source_parent_sha": metadata["latest_checkpoint_source_parent_sha"],
+            "latest_checkpoint_evidence_state": metadata["latest_checkpoint_evidence_state"],
+            "latest_checkpoint_kind": metadata["latest_checkpoint_kind"],
+            "roadmap_authority_rows": metadata["roadmap_authority_rows"],
+            "roadmap_authority_sha256": metadata["roadmap_authority_sha256"],
             "migration_ledger_sha256": metadata["migration_ledger_sha256"],
             "migration_rows": metadata["migration_rows"],
             "max_migration_version": metadata["max_migration_version"],
             "control_fence_stable": True,
+            "canonical_roadmap_claim": False,
+            "connection_identity": connection_identity,
             "supabase_managed_schemas_complete_claim": False,
             "storage_api_objects_included": False,
         },
@@ -430,8 +602,11 @@ def validate_verification_result(
         "ciphertext_sha256": actual_sha,
         "ciphertext_bytes": actual_bytes,
         "envelope_receipt_sha256": envelope["receipt_sha256"],
-        "semantic_head_at_source": predicate["database_export"]["semantic_head"],
-        "canonical_digest_at_source": predicate["database_export"]["canonical_digest"],
+        "latest_checkpoint_id_at_source": predicate["database_export"]["latest_checkpoint_id"],
+        "latest_checkpoint_payload_sha256": predicate["database_export"]["latest_checkpoint_payload_sha256"],
+        "latest_checkpoint_source_parent_sha": predicate["database_export"]["latest_checkpoint_source_parent_sha"],
+        "checkpoint_ledger_sha256": predicate["database_export"]["checkpoint_ledger_sha256"],
+        "roadmap_authority_sha256": predicate["database_export"]["roadmap_authority_sha256"],
         "migration_ledger_sha256": predicate["database_export"]["migration_ledger_sha256"],
         "verified_timestamp_count": len(timestamps),
         "source_attestation_verified": True,
@@ -453,6 +628,10 @@ def main(argv: list[str] | None = None) -> int:
     env = sub.add_parser("validate-environment")
     env.add_argument("--input", required=True)
     env.add_argument("--output", required=True)
+
+    dburl = sub.add_parser("validate-db-url")
+    dburl.add_argument("--env-name", required=True)
+    dburl.add_argument("--output", required=True)
 
     meta = sub.add_parser("build-export-metadata")
     meta.add_argument("--before", required=True)
@@ -481,6 +660,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "validate-environment":
             _write_json(Path(args.output), validate_source_environment(_read_json(Path(args.input), "environment")))
+            return 0
+        if args.command == "validate-db-url":
+            env_name = _require_text(args.env_name, "database_url_env_name", minimum=1, maximum=128)
+            value = os.environ.get(env_name)
+            if value in (None, ""):
+                raise SourceAttestationError("database_url_env_missing")
+            _write_json(Path(args.output), validate_database_url_project_identity(value))
             return 0
         if args.command == "build-export-metadata":
             _write_json(Path(args.output), build_export_metadata(

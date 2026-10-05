@@ -28,8 +28,8 @@ from controller.r1.source_environment_approval_evidence import (
 
 READINESS_SCHEMA = "metaengine.compute.r1-source-environment-readiness.h205f22.v1"
 READINESS_ARTIFACT_NAME = "r1-source-environment-readiness.json"
-PREDICATE_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-predicate.h205f22.v1"
-VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v1"
+PREDICATE_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-predicate.h205f22.v2"
+VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v2"
 SOURCE_ENVIRONMENT = "r1-recovery-source"
 BOUND_PREDICATE_CLASSIFICATION = "TRUSTED_RECOVERY_SOURCE_ATTESTATION_PREDICATE"
 VERIFICATION_CLASSIFICATION = "CRYPTOGRAPHICALLY_VERIFIED_RECOVERY_SOURCE_NONAUTHORITATIVE"

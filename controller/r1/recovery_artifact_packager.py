@@ -23,7 +23,7 @@ from typing import Any
 
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 PROJECT_REF = re.compile(r"^[a-z0-9]{20}$")
-SEMANTIC_HEAD = re.compile(r"^[A-Za-z0-9._:-]{8,240}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 REQUIRED_INPUTS = {
     "database/schema.sql": "schema",
@@ -130,7 +130,7 @@ def _add_file(tar: tarfile.TarFile, name: str, path: Path) -> None:
 def build_bundle(
     *,
     project_ref: str,
-    semantic_head: str,
+    source_checkpoint_id: str,
     source_git_sha: str,
     snapshot_at: str,
     inputs: dict[str, Path],
@@ -141,8 +141,8 @@ def build_bundle(
 ) -> dict[str, Any]:
     if not PROJECT_REF.fullmatch(project_ref):
         raise BundleError("project_ref_invalid")
-    if not SEMANTIC_HEAD.fullmatch(semantic_head):
-        raise BundleError("semantic_head_invalid")
+    if not SHA256.fullmatch(source_checkpoint_id):
+        raise BundleError("source_checkpoint_id_invalid")
     if not SHA40.fullmatch(source_git_sha):
         raise BundleError("source_git_sha_invalid")
     snapshot_at_norm = _parse_time(snapshot_at)
@@ -176,10 +176,10 @@ def build_bundle(
         })
 
     manifest_core = {
-        "schema": "metaengine.compute.r1-recovery-bundle-manifest.h205f22.v1",
+        "schema": "metaengine.compute.r1-recovery-bundle-manifest.h205f22.v2",
         "classification": "SENSITIVE_RECOVERY_BUNDLE_PLAINTEXT_LOCAL_ONLY",
         "project_ref": project_ref,
-        "semantic_head": semantic_head,
+        "source_checkpoint_id": source_checkpoint_id,
         "source_git_sha": source_git_sha,
         "snapshot_at": snapshot_at_norm,
         "database_export": {
@@ -227,7 +227,7 @@ def build_bundle(
 
     bundle_sha, bundle_bytes = _hash_file(output_tar)
     receipt_core = {
-        "schema": "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v1",
+        "schema": "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v2",
         "classification": "PLAINTEXT_BUNDLE_BUILD_RECEIPT_NONAUTHORITATIVE",
         "manifest_sha256": manifest["manifest_sha256"],
         "bundle_sha256": bundle_sha,
@@ -251,7 +251,7 @@ def build_bundle(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project-ref", required=True)
-    parser.add_argument("--semantic-head", required=True)
+    parser.add_argument("--source-checkpoint-id", required=True)
     parser.add_argument("--source-git-sha", required=True)
     parser.add_argument("--snapshot-at", required=True)
     parser.add_argument("--schema", required=True)
@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         build_bundle(
             project_ref=args.project_ref,
-            semantic_head=args.semantic_head,
+            source_checkpoint_id=args.source_checkpoint_id,
             source_git_sha=args.source_git_sha,
             snapshot_at=args.snapshot_at,
             inputs=inputs,

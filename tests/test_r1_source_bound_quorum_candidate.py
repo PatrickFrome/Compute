@@ -43,8 +43,12 @@ def handoff():
             'envelope_receipt_sha256':'6'*64,
             'source_verification_artifact':{'id':3003,'name':'r1-recovery-source-verification.json','size_in_bytes':900,'digest_sha256':'7'*64},
             'source_verification_receipt_sha256':'8'*64,'predicate_sha256':'9'*64,
-            'semantic_head_at_source':'metaengine-h205f22-recovery-dev-20260821-cp072',
-            'canonical_digest_at_source':'a'*64,'migration_ledger_sha256':'b'*64,
+            'latest_checkpoint_id_at_source':'a'*64,
+            'latest_checkpoint_payload_sha256':'b'*64,
+            'latest_checkpoint_source_parent_sha':'3'*40,
+            'checkpoint_ledger_sha256':'c'*64,
+            'roadmap_authority_sha256':'d'*64,
+            'migration_ledger_sha256':'e'*64,
             'source_environment_readiness_artifact_id':4004,
             'source_environment_readiness_sha256':'c'*64,
             'source_environment_approval_artifact_id':4005,
@@ -101,7 +105,7 @@ class SourceBoundQuorumTests(unittest.TestCase):
         b=base(); b['ciphertext']['bytes']=999
         with self.assertRaisesRegex(mod.SourceBoundQuorumError,'base_orchestration_result_sha256_mismatch'):
             mod.bind_candidate(b,handoff())
-        h=handoff(); h['source']['semantic_head_at_source']='forged'
+        h=handoff(); h['source']['latest_checkpoint_id_at_source']='forged'
         with self.assertRaisesRegex(mod.SourceBoundQuorumError,'handoff_handoff_sha256_mismatch'):
             mod.bind_candidate(base(),h)
 

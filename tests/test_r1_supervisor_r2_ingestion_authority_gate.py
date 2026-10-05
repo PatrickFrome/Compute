@@ -84,7 +84,7 @@ class SupervisorR2IngestionAuthorityGateTests(unittest.TestCase):
         self.assertIn("--source-ref refs/heads/main", joined)
         self.assertIn(f"--source-digest {HEAD}", joined)
         self.assertIn("--cert-oidc-issuer https://token.actions.githubusercontent.com", joined)
-        self.assertIn("--predicate-type https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1", joined)
+        self.assertIn("--predicate-type https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2", joined)
         self.assertIn("--deny-self-hosted-runners", command)
         self.assertIn("--custom-trusted-root", command)
         self.assertEqual(command[-2:], ["--format", "json"])

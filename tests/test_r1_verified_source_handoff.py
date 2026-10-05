@@ -110,14 +110,17 @@ def build_fixture(root: Path):
         "schema": h.SOURCE_VERIFICATION_SCHEMA,
         "classification": h.SOURCE_VERIFICATION_CLASSIFICATION,
         "source": {"repository_id": 1341371143, "repository": "PatrickFrome/Compute", "workflow_path": ".github/workflows/r1-live-recovery-source.yml", "head_sha": HEAD, "run_id": RUN_ID},
-        "predicate_type": "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1",
+        "predicate_type": "https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v2",
         "predicate_sha256": "5" * 64,
         "ciphertext_sha256": cipher_sha,
         "ciphertext_bytes": len(ciphertext.read_bytes()),
         "envelope_receipt_sha256": envelope["receipt_sha256"],
-        "semantic_head_at_source": "metaengine-h205f22-recovery-dev-20260821-cp072",
-        "canonical_digest_at_source": "6" * 64,
-        "migration_ledger_sha256": "7" * 64,
+        "latest_checkpoint_id_at_source": "6" * 64,
+        "latest_checkpoint_payload_sha256": "7" * 64,
+        "latest_checkpoint_source_parent_sha": "2" * 40,
+        "checkpoint_ledger_sha256": "8" * 64,
+        "roadmap_authority_sha256": "9" * 64,
+        "migration_ledger_sha256": "a" * 64,
         "verified_timestamp_count": 1,
         "source_attestation_verified": True,
         "source_environment_evidence": {
@@ -211,7 +214,7 @@ class VerifiedSourceHandoffTests(unittest.TestCase):
     def test_receipt_self_hash_tamper_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
-            verification["semantic_head_at_source"]="forged"
+            verification["latest_checkpoint_id_at_source"]="forged"
             with self.assertRaisesRegex(h.HandoffError,"verification_receipt_sha256_mismatch"):
                 h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
 

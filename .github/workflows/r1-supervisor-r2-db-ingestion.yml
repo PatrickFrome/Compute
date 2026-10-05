@@ -3,12 +3,7 @@ name: R1 Supervisor R2 DB Ingestion
 on:
   push:
     branches:
-      - 'work/r1-step09b-fresh-project-convergence-v1'
-    paths:
-      - 'supabase/operations/20261005200000_r1_step09b_fresh_project_convergence_v1.sql'
-      - 'scripts/metaengine-r1-step09b-fresh-project-canaries.sql'
-      - 'research/R1_STEP09B_FRESH_PROJECT_CONVERGENCE_2026-10-05.md'
-      - '.github/workflows/r1-supervisor-r2-db-ingestion.yml'
+      - 'work/r1-fresh-project-source-identity-v1'
   pull_request:
     branches: [main]
     paths:
