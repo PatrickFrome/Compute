@@ -45,8 +45,8 @@ test('Computer V2 does not confuse dispatch confirmation with effect proof', () 
   assert.match(executor, /'KEY_PRESS'[\s\S]{0,2600}readback_proven = \$false/);
   assert.match(executor, /'POINTER_CLICK'[\s\S]{0,3200}readback_proven = \$false/);
   assert.match(executor, /'TYPE_TEXT'[\s\S]{0,4200}ValuePattern/);
-  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,4200}request\.args\.replace/);
-  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,4200}value_readback_proven = \$readback/);
+  assert.match(executor, /'TYPE_TEXT'[\s\S]{0,5200}value_readback_proven = \$readback/);
+  assert.ok(plane.includes('computer_type_append_mode_unproven'));
   assert.ok(plane.includes('dispatch_only_mutations_never_claim_effect_proven: true'));
   assert.ok(plane.includes('type_text_requires_value_readback_for_effect_proof: true'));
 });
