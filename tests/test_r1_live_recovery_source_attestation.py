@@ -222,8 +222,11 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
     def test_fresh_project_identity_is_pinned_across_workflow_and_export_metadata(self):
         self.assertEqual(mod.EXPECTED_PROJECT_REF, "jhriwwsryeqsvvvufkok")
         workflow = (ROOT / ".github" / "workflows" / "r1-live-recovery-source.yml").read_text()
-        self.assertIn("R1_PROJECT_REF: jhriwwsryeqsvvvufkok", workflow)
-        self.assertNotIn("R1_PROJECT_REF: xpeibufgzjknrhbhpffp", workflow)
+        pre_jobs = workflow.split("\njobs:\n", 1)[0]
+        env_block = pre_jobs.split("\nenv:\n", 1)[1]
+        self.assertEqual(env_block.count("R1_PROJECT_REF:"), 1)
+        self.assertIn("R1_PROJECT_REF: jhriwwsryeqsvvvufkok", env_block)
+        self.assertNotIn("xpeibufgzjknrhbhpffp", env_block)
         value = mod.build_export_metadata(fence(), fence(captured="2026-08-21T19:02:00Z"))
         self.assertEqual(value["project_ref"], mod.EXPECTED_PROJECT_REF)
 
