@@ -38,6 +38,13 @@ test('Computer V2 visual fallback requires exact target binding at issuer and ex
   assert.ok(executor.includes('computer_visual_frame_geometry_drift'));
   assert.ok(plane.includes('visual_pointer_requires_target_bound_window_capture: true'));
   assert.ok(plane.includes('visual_pointer_requires_unchanged_window_geometry: true'));
+  assert.ok(plane.includes('delivery_only_is_never_effect_proof: true'));
+  assert.ok(plane.includes('uia_invoke_requires_semantic_postcondition_readback: true'));
+  assert.ok(plane.includes('key_press_delivery_is_not_effect_readback: true'));
+  assert.ok(plane.includes('pointer_delivery_is_not_effect_readback: true'));
+  assert.ok(plane.includes('type_text_replace_requires_exact_value_readback: true'));
+  assert.ok(executor.includes("readback_kind = 'DELIVERY_ONLY'"));
+  assert.ok(executor.includes('hasAdmissibleEffectReadback(request, result)'));
 });
 
 test('Computer V2 executor implements every newly admitted action without raw shell expansion', () => {
