@@ -341,6 +341,7 @@ try {
       $limit = [Math]::Max(1, [Math]::Min(256, [int]$request.args.limit))
       $offset = [Math]::Max(0, [int]$request.args.offset)
       $windows = @()
+      $rejected = @()
       $eligible = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object Id)
       foreach ($p in @($eligible | Select-Object -Skip $offset -First $limit)) {
         try {
@@ -352,7 +353,16 @@ try {
             process_name = [string]$p.ProcessName
             rect = $rect
           }
-        } catch {}
+        } catch {
+          if ($rejected.Count -lt 16) {
+            $rejected += [ordered]@{
+              process_id = [int]$p.Id
+              process_name = [string]$p.ProcessName
+              title = [string]$p.MainWindowTitle
+              error = ([string]$_.Exception.Message).Substring(0,[Math]::Min(240,([string]$_.Exception.Message).Length))
+            }
+          }
+        }
       }
       Write-Result ([ordered]@{
         ok = $true
@@ -360,9 +370,11 @@ try {
         schema = 'metaengine.windows-computer-executor.windows.v1'
         windows = $windows
         count = $windows.Count
+        rejected_windows = $rejected
+        rejected_count = $rejected.Count
         offset = $offset
         total_candidates = $eligible.Count
-        next_offset = $(if (($offset + $windows.Count) -lt $eligible.Count) { $offset + $windows.Count } else { $null })
+        next_offset = $(if (($offset + $windows.Count + $rejected.Count) -lt $eligible.Count) { $offset + $windows.Count + $rejected.Count } else { $null })
         authority_effect = $false
       })
       break
