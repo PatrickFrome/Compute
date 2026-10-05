@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'work/r1-step09b-fresh-project-convergence-v1'
+      - 'work/r1-fresh-project-source-identity-v1'
     paths:
       - 'supabase/operations/20261005200000_r1_step09b_fresh_project_convergence_v1.sql'
       - 'scripts/metaengine-r1-step09b-fresh-project-canaries.sql'
