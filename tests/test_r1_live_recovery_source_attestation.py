@@ -81,7 +81,7 @@ def build_files(root: Path):
     cipher_sha = hashlib.sha256(ciphertext.read_bytes()).hexdigest()
 
     bundle = {
-        "schema": "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v1",
+        "schema": "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v2",
         "classification": "PLAINTEXT_BUNDLE_BUILD_RECEIPT_NONAUTHORITATIVE",
         "manifest_sha256": "c" * 64,
         "bundle_sha256": "d" * 64,
