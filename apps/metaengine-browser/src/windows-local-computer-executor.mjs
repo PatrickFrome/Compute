@@ -369,13 +369,10 @@ function Get-BitmapPixelSha256([System.Drawing.Bitmap]$Bitmap) {
   }
 }
 
-$requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
-if (-not $requestPath) { throw "computer_request_path_missing" }
-$request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
-$effectStarted = $false
-
-try {
-  switch ([string]$request.action) {
+function Invoke-MetaengineComputerRequest([object]$request) {
+  $effectStarted = $false
+  try {
+    switch ([string]$request.action) {
     'STATUS' {
       Write-Result ([ordered]@{
         ok = $true
@@ -950,16 +947,44 @@ try {
     }
 
     default { throw "computer_action_not_allowlisted" }
+    }
+  } catch {
+    Write-Result ([ordered]@{
+      ok = $false
+      effect_started = [bool]$effectStarted
+      schema = 'metaengine.windows-computer-executor.error.v1'
+      error = [string]$_.Exception.Message
+      authority_effect = $false
+    })
   }
-} catch {
-  Write-Result ([ordered]@{
-    ok = $false
-    effect_started = [bool]$effectStarted
-    schema = 'metaengine.windows-computer-executor.error.v1'
-    error = [string]$_.Exception.Message
-    authority_effect = $false
-  })
 }
+
+if ([string]$env:METAENGINE_COMPUTER_PERSISTENT -eq '1') {
+  while ($true) {
+    $line = [Console]::In.ReadLine()
+    if ($null -eq $line) { break }
+    if ($line -eq '__METAENGINE_STOP__') { break }
+    if (-not $line.Trim()) { continue }
+    try {
+      $request = $line | ConvertFrom-Json
+      Invoke-MetaengineComputerRequest $request
+    } catch {
+      Write-Result ([ordered]@{
+        ok = $false
+        effect_started = $false
+        schema = 'metaengine.windows-computer-executor.transport-error.v1'
+        error = [string]$_.Exception.Message
+        authority_effect = $false
+      })
+    }
+  }
+  exit 0
+}
+
+$requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
+if (-not $requestPath) { throw "computer_request_path_missing" }
+$request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
+Invoke-MetaengineComputerRequest $request
 `;
 
 export const WINDOWS_COMPUTER_BRIDGE_SHA256 = createHash('sha256')
@@ -1054,6 +1079,233 @@ export async function runFixedWindowsPowerShell(request, {
     });
   } finally {
     await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
+  }
+}
+
+export class PersistentWindowsPowerShellBridge {
+  #platform;
+  #spawnImpl;
+  #timeoutMs;
+  #child = null;
+  #stdoutBuffer = '';
+  #stderrTail = '';
+  #pending = null;
+  #queue = Promise.resolve();
+  #stopping = false;
+  #closed = false;
+  #scriptDir = null;
+  #scriptPath = null;
+  #scriptPromise = null;
+  #spawnCount = 0;
+  #requestCount = 0;
+  #restartCount = 0;
+
+  constructor({
+    platform = process.platform,
+    spawn_impl = spawn,
+    timeout_ms = DEFAULT_TIMEOUT_MS,
+  } = {}) {
+    this.#platform = String(platform);
+    if (typeof spawn_impl !== 'function') throw new Error('computer_persistent_spawn_impl_required');
+    this.#spawnImpl = spawn_impl;
+    this.#timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
+  }
+
+  snapshot() {
+    return Object.freeze({
+      schema: 'metaengine.windows-computer-persistent-bridge.v1',
+      available: this.#platform === 'win32',
+      bridge_sha256: WINDOWS_COMPUTER_BRIDGE_SHA256,
+      bridge_transport: 'HASH_VERIFIED_PERSISTENT_TEMP_SCRIPT',
+      process_pid: Number(this.#child?.pid || 0) || null,
+      process_alive: !!this.#child && this.#child.killed !== true && this.#child.exitCode == null,
+      spawn_count: this.#spawnCount,
+      request_count: this.#requestCount,
+      restart_count: this.#restartCount,
+      one_request_in_flight: true,
+      session_input_serialized: true,
+      closed: this.#closed,
+      raw_shell_input: false,
+      arbitrary_eval: false,
+      automatic_effect_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  #rejectPending(error) {
+    const pending = this.#pending;
+    if (!pending) return;
+    this.#pending = null;
+    clearTimeout(pending.timer);
+    pending.reject(error instanceof Error ? error : new Error(String(error || 'computer_persistent_bridge_failed')));
+  }
+
+  #resolvePending(value) {
+    const pending = this.#pending;
+    if (!pending) return;
+    this.#pending = null;
+    clearTimeout(pending.timer);
+    pending.resolve(value);
+  }
+
+  #onStdout(chunk) {
+    this.#stdoutBuffer += String(chunk || '');
+    if (Buffer.byteLength(this.#stdoutBuffer, 'utf8') > MAX_STDOUT_BYTES) {
+      this.#rejectPending(new Error('computer_persistent_stdout_limit'));
+      try { this.#child?.kill(); } catch {}
+      return;
+    }
+    while (true) {
+      const newline = this.#stdoutBuffer.indexOf('\n');
+      if (newline < 0) break;
+      const line = this.#stdoutBuffer.slice(0, newline).trim();
+      this.#stdoutBuffer = this.#stdoutBuffer.slice(newline + 1);
+      if (!line) continue;
+      if (!this.#pending) continue;
+      try {
+        const row = JSON.parse(line);
+        if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('computer_executor_response_invalid');
+        this.#resolvePending(row);
+      } catch (error) {
+        this.#rejectPending(new Error(`computer_persistent_response_invalid:${String(error?.message || error)}`));
+        try { this.#child?.kill(); } catch {}
+      }
+    }
+  }
+
+  async #ensureScript() {
+    if (this.#scriptPath) return this.#scriptPath;
+    if (this.#scriptPromise) return this.#scriptPromise;
+    this.#scriptPromise = (async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-hot-'));
+      const scriptPath = path.join(dir, `bridge-${WINDOWS_COMPUTER_BRIDGE_SHA256}.ps1`);
+      try {
+        await fs.writeFile(scriptPath, POWERSHELL_BRIDGE, { encoding:'utf8', flag:'wx', mode:0o600 });
+        const bridgeBytes = await fs.readFile(scriptPath);
+        const bridgeReadbackSha256 = createHash('sha256').update(bridgeBytes).digest('hex');
+        if (bridgeReadbackSha256 !== WINDOWS_COMPUTER_BRIDGE_SHA256) {
+          throw new Error('computer_executor_bridge_write_readback_mismatch');
+        }
+      } catch (error) {
+        await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
+        throw error;
+      }
+      this.#scriptDir = dir;
+      this.#scriptPath = scriptPath;
+      return scriptPath;
+    })();
+    try {
+      return await this.#scriptPromise;
+    } finally {
+      this.#scriptPromise = null;
+    }
+  }
+
+  async #spawn() {
+    if (this.#closed) throw new Error('computer_persistent_bridge_closed');
+    if (this.#platform !== 'win32') throw new Error('computer_executor_windows_required');
+    if (this.#child && this.#child.killed !== true && this.#child.exitCode == null) return this.#child;
+
+    const scriptPath = await this.#ensureScript();
+    this.#stopping = false;
+    this.#stdoutBuffer = '';
+    this.#stderrTail = '';
+    const child = this.#spawnImpl(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+      {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          METAENGINE_COMPUTER_PERSISTENT: '1',
+        },
+      },
+    );
+    this.#child = child;
+    this.#spawnCount += 1;
+    child.stdout.setEncoding?.('utf8');
+    child.stderr.setEncoding?.('utf8');
+    child.stdout.on('data', (chunk) => this.#onStdout(chunk));
+    child.stderr.on('data', (chunk) => {
+      this.#stderrTail += String(chunk || '');
+      if (this.#stderrTail.length > 8192) this.#stderrTail = this.#stderrTail.slice(-8192);
+    });
+    child.once('error', (error) => {
+      this.#rejectPending(error);
+    });
+    child.once('exit', (code) => {
+      const wasStopping = this.#stopping;
+      if (this.#child === child) this.#child = null;
+      if (!wasStopping) {
+        this.#restartCount += 1;
+        this.#rejectPending(new Error(`computer_persistent_exit_${code}:${this.#stderrTail.slice(-500)}`));
+      } else {
+        this.#rejectPending(new Error('computer_persistent_bridge_stopped'));
+      }
+    });
+    return child;
+  }
+
+  async #runOne(request) {
+    const child = await this.#spawn();
+    this.#requestCount += 1;
+    return await new Promise((resolve, reject) => {
+      if (this.#pending) {
+        reject(new Error('computer_persistent_parallel_dispatch_forbidden'));
+        return;
+      }
+      const timer = setTimeout(() => {
+        if (!this.#pending) return;
+        this.#pending = null;
+        try { child.kill(); } catch {}
+        reject(new Error('computer_persistent_request_timeout'));
+      }, this.#timeoutMs);
+      this.#pending = { resolve, reject, timer };
+      try {
+        child.stdin.write(`${JSON.stringify(request)}\n`, 'utf8');
+      } catch (error) {
+        this.#pending = null;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  }
+
+  run(request) {
+    if (this.#closed) return Promise.reject(new Error('computer_persistent_bridge_closed'));
+    const job = this.#queue.then(() => this.#runOne(request));
+    this.#queue = job.then(() => undefined, () => undefined);
+    return job;
+  }
+
+  async stop() {
+    if (this.#closed) return;
+    this.#closed = true;
+    await this.#queue.catch(() => {});
+    this.#stopping = true;
+    const child = this.#child;
+    this.#child = null;
+    if (child) {
+      try { child.stdin.write('__METAENGINE_STOP__\n', 'utf8'); } catch {}
+      try { child.stdin.end(); } catch {}
+      await new Promise((resolve) => {
+        if (child.exitCode != null) { resolve(); return; }
+        const timer = setTimeout(() => {
+          try { child.kill(); } catch {}
+          resolve();
+        }, 1000);
+        child.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    const dir = this.#scriptDir;
+    this.#scriptDir = null;
+    this.#scriptPath = null;
+    this.#scriptPromise = null;
+    if (dir) await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
   }
 }
 
@@ -1170,6 +1422,9 @@ export class WindowsLocalComputerExecutor {
       plane: computerAuthorityPlaneSnapshot(),
       executor_process_model: 'BOUNDED_FIXED_POWERSHELL_BRIDGE',
       bridge_transport: 'HASH_VERIFIED_TEMP_SCRIPT',
+      persistent_bridge_available: true,
+      persistent_bridge_default_enabled: false,
+      persistent_bridge_transport: 'HASH_VERIFIED_PERSISTENT_TEMP_SCRIPT',
       raw_shell_input: false,
       arbitrary_eval: false,
       automatic_retry_allowed: false,

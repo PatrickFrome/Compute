@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
+  PersistentWindowsPowerShellBridge,
   WindowsLocalComputerExecutor,
   runFixedWindowsPowerShell,
 } from '../src/windows-local-computer-executor.mjs';
@@ -44,6 +47,97 @@ const contextFor = (computerAction, exactTarget = target, agentId = 'agent_test-
     },
   };
 };
+test('persistent fixed bridge reuses one hash-verified process and serializes requests', async () => {
+  let spawnCalls = 0;
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+
+  const spawnImpl = (file, args, options) => {
+    spawnCalls += 1;
+    assert.equal(file, 'powershell.exe');
+    assert.ok(args.includes('-File'));
+    assert.match(args.at(-1), /bridge-[0-9a-f]{64}\.ps1$/);
+    assert.equal(options.env.METAENGINE_COMPUTER_PERSISTENT, '1');
+
+    const child = new EventEmitter();
+    child.pid = 9000 + spawnCalls;
+    child.killed = false;
+    child.exitCode = null;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let exited = false;
+
+    const emitExit = (code) => {
+      if (exited) return;
+      exited = true;
+      child.exitCode = code;
+      queueMicrotask(() => child.emit('exit', code));
+    };
+
+    child.kill = () => {
+      child.killed = true;
+      emitExit(1);
+      return true;
+    };
+
+    child.stdin = {
+      write(data) {
+        const line = String(data || '').trim();
+        if (line === '__METAENGINE_STOP__') {
+          emitExit(0);
+          return true;
+        }
+        const request = JSON.parse(line);
+        activeRequests += 1;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        setTimeout(() => {
+          activeRequests -= 1;
+          child.stdout.write(JSON.stringify({
+            ok:true,
+            effect_started:false,
+            action:request.action,
+            authority_effect:false,
+          }) + '\n');
+        }, 5);
+        return true;
+      },
+      end() {
+        emitExit(0);
+      },
+    };
+    return child;
+  };
+
+  const bridge = new PersistentWindowsPowerShellBridge({
+    platform:'win32',
+    spawn_impl:spawnImpl,
+    timeout_ms:2000,
+  });
+  try {
+    const [a,b] = await Promise.all([
+      bridge.run({ action:'STATUS' }),
+      bridge.run({ action:'OBSERVE_WINDOWS', args:{ offset:0, limit:1 } }),
+    ]);
+    assert.equal(a.action, 'STATUS');
+    assert.equal(b.action, 'OBSERVE_WINDOWS');
+    assert.equal(spawnCalls, 1);
+    assert.equal(maxActiveRequests, 1);
+    const snapshot = bridge.snapshot();
+    assert.equal(snapshot.bridge_sha256, WINDOWS_COMPUTER_BRIDGE_SHA256);
+    assert.equal(snapshot.bridge_transport, 'HASH_VERIFIED_PERSISTENT_TEMP_SCRIPT');
+    assert.equal(snapshot.spawn_count, 1);
+    assert.equal(snapshot.request_count, 2);
+    assert.equal(snapshot.restart_count, 0);
+    assert.equal(snapshot.one_request_in_flight, true);
+    assert.equal(snapshot.session_input_serialized, true);
+    assert.equal(snapshot.automatic_effect_retry_allowed, false);
+  } finally {
+    await bridge.stop();
+  }
+  assert.equal(bridge.snapshot().closed, true);
+  await assert.rejects(() => bridge.run({ action:'STATUS' }), /computer_persistent_bridge_closed/);
+});
+
 test('executor snapshot exposes fixed bridge identity and no scheduler authority', () => {
   const executor = new WindowsLocalComputerExecutor({ platform:'linux', runner:async () => ({ ok:true }) });
   const snapshot = executor.snapshot();
@@ -51,6 +145,9 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   assert.equal(snapshot.version, '2.0.0');
   assert.equal(snapshot.scheduler_authority, false);
   assert.equal(snapshot.bridge_transport, 'HASH_VERIFIED_TEMP_SCRIPT');
+  assert.equal(snapshot.persistent_bridge_available, true);
+  assert.equal(snapshot.persistent_bridge_default_enabled, false);
+  assert.equal(snapshot.persistent_bridge_transport, 'HASH_VERIFIED_PERSISTENT_TEMP_SCRIPT');
   assert.equal(snapshot.raw_shell_input, false);
   assert.equal(snapshot.arbitrary_eval, false);
   assert.match(WINDOWS_COMPUTER_BRIDGE_SHA256, /^[0-9a-f]{64}$/);
