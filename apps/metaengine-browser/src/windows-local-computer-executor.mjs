@@ -13,6 +13,27 @@ import {
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15000;
 
+const EFFECT_READBACK_KIND_BY_ACTION = Object.freeze({
+  UIA_FOCUS: 'UIA_FOCUS_EXACT',
+  UIA_SET_VALUE: 'UIA_VALUE_EXACT',
+  UIA_TOGGLE: 'UIA_TOGGLE_STATE_CHANGED',
+  UIA_SELECT: 'UIA_SELECTION_EXACT',
+  UIA_EXPAND_COLLAPSE: 'UIA_EXPAND_STATE_EXACT',
+  UIA_SCROLL: 'UIA_SCROLL_PERCENT_CHANGED',
+  TYPE_TEXT: 'UIA_VALUE_EXACT',
+});
+
+function hasAdmissibleEffectReadback(request, result) {
+  const expectedKind = EFFECT_READBACK_KIND_BY_ACTION[request?.action];
+  return Boolean(
+    expectedKind
+    && result?.ok === true
+    && result?.effect_started === true
+    && result?.readback_proven === true
+    && result?.readback_kind === expectedKind
+  );
+}
+
 const POWERSHELL_BRIDGE = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -490,6 +511,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $proven
+        readback_kind = 'UIA_FOCUS_EXACT'
         action = 'UIA_FOCUS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $proven
@@ -510,10 +532,13 @@ try {
         ok = $true
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $true
+        readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
+        delivery_proven = $true
+        readback_reason = 'computer_uia_invoke_semantic_effect_unobserved'
         action = 'UIA_INVOKE'
         target = $after
-        authority_effect = $true
+        authority_effect = $false
       })
       break
     }
@@ -532,6 +557,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_VALUE_EXACT'
         action = 'UIA_SET_VALUE'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $readback
@@ -555,6 +581,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_TOGGLE_STATE_CHANGED'
         action = 'UIA_TOGGLE'
         toggle_state = [string]$after
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -577,6 +604,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_SELECTION_EXACT'
         action = 'UIA_SELECT'
         target = Get-ProcessIdentity ([int]$identity.process_id)
         authority_effect = $readback
@@ -601,6 +629,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_EXPAND_STATE_EXACT'
         action = 'UIA_EXPAND_COLLAPSE'
         expand_state = [string]$after
         target = Get-ProcessIdentity ([int]$identity.process_id)
@@ -627,6 +656,7 @@ try {
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = 'UIA_SCROLL_PERCENT_CHANGED'
         action = 'UIA_SCROLL'
         horizontal_scroll_percent = $afterH
         vertical_scroll_percent = $afterV
@@ -651,22 +681,41 @@ try {
         try { $focusProven = RuntimeId-Equal $focused.GetRuntimeId() @($request.args.runtime_id) } catch {}
       }
       if (-not $focusProven) { throw "computer_type_exact_focus_not_proven" }
+      $replace = [bool]$request.args.replace
       $effectStarted = $true
-      if (-not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
+      if ($replace -and -not [MetaengineWin32]::SendCtrlA()) { throw "computer_type_replace_select_failed" }
       if (-not [MetaengineWin32]::SendUnicode([string]$request.args.text)) { throw "computer_unicode_input_failed" }
+      Start-Sleep -Milliseconds 40
       $focusedAfter = [System.Windows.Automation.AutomationElement]::FocusedElement
-      $readback = $false
+      $exactFocus = $false
       if ($focusedAfter) {
-        try { $readback = RuntimeId-Equal $focusedAfter.GetRuntimeId() @($request.args.runtime_id) } catch {}
+        try { $exactFocus = RuntimeId-Equal $focusedAfter.GetRuntimeId() @($request.args.runtime_id) } catch {}
       }
+      $valuePatternAvailable = $false
+      $valueReadback = $false
+      if ($replace) {
+        try {
+          $valuePattern = [System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+          if ($valuePattern) {
+            $valuePatternAvailable = $true
+            $valueReadback = ([string]$valuePattern.Current.Value -ceq [string]$request.args.text)
+          }
+        } catch {}
+      }
+      $readback = ($replace -and $exactFocus -and $valuePatternAvailable -and $valueReadback)
+      $readbackKind = if ($readback) { 'UIA_VALUE_EXACT' } else { 'DELIVERY_ONLY' }
       $after = Get-ProcessIdentity ([int]$identity.process_id)
       Write-Result ([ordered]@{
         ok = $readback
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
         readback_proven = $readback
+        readback_kind = $readbackKind
+        delivery_proven = $exactFocus
+        readback_reason = if ($readback) { $null } elseif (-not $replace) { 'computer_type_append_effect_unobserved' } elseif (-not $valuePatternAvailable) { 'computer_type_value_pattern_unavailable' } else { 'computer_type_value_readback_mismatch' }
         action = 'TYPE_TEXT'
-        exact_uia_focus = $readback
+        exact_uia_focus = $exactFocus
+        value_pattern_available = $valuePatternAvailable
         target = $after
         authority_effect = $readback
       })
@@ -698,10 +747,13 @@ try {
         ok = $true
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $true
+        readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
+        delivery_proven = $true
+        readback_reason = 'computer_key_semantic_effect_unobserved'
         action = 'KEY_PRESS'
         target = Get-ProcessIdentity ([int]$identity.process_id)
-        authority_effect = $true
+        authority_effect = $false
       })
       break
     }
@@ -734,16 +786,19 @@ try {
       [MetaengineWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
       $point = New-Object MetaengineWin32+POINT
       [MetaengineWin32]::GetCursorPos([ref]$point) | Out-Null
-      $proven = ($point.X -eq $screenX -and $point.Y -eq $screenY -and [MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
+      $deliveryProven = ($point.X -eq $screenX -and $point.Y -eq $screenY -and [MetaengineWin32]::GetForegroundWindow() -eq $hwnd)
       Write-Result ([ordered]@{
-        ok = $proven
+        ok = $deliveryProven
         effect_started = $true
         schema = 'metaengine.windows-computer-executor.effect.v1'
-        readback_proven = $proven
+        readback_proven = $false
+        readback_kind = 'DELIVERY_ONLY'
+        delivery_proven = $deliveryProven
+        readback_reason = 'computer_pointer_semantic_effect_unobserved'
         action = 'POINTER_CLICK'
         cursor = [ordered]@{ x=$point.X; y=$point.Y }
         target = Get-ProcessIdentity ([int]$identity.process_id)
-        authority_effect = $proven
+        authority_effect = $false
       })
       break
     }
@@ -1026,7 +1081,7 @@ export class WindowsLocalComputerExecutor {
       });
     }
 
-    if (result?.ok === true && result?.effect_started === true && result?.readback_proven === true) {
+    if (hasAdmissibleEffectReadback(request, result)) {
       return projectComputerEffectReceipt({
         request,
         result,
