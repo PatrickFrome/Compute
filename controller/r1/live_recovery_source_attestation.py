@@ -43,6 +43,7 @@ FENCE_SCHEMA = "metaengine.compute.r1-source-control-fence.h205f22.v1"
 EXPORT_METADATA_SCHEMA = "metaengine.compute.logical-export.v1"
 PREDICATE_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-predicate.h205f22.v1"
 VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v1"
+DATABASE_CONNECTION_IDENTITY_SCHEMA = "metaengine.compute.r1-database-connection-identity.h205f22.v1"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SEMANTIC_HEAD = re.compile(r"^[A-Za-z0-9._:-]{8,240}$")
@@ -50,6 +51,43 @@ SEMANTIC_HEAD = re.compile(r"^[A-Za-z0-9._:-]{8,240}$")
 
 class SourceAttestationError(RuntimeError):
     pass
+
+
+def validate_database_connection_identity_receipt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise SourceAttestationError("database_connection_identity_invalid")
+    expected_keys = {
+        "schema",
+        "project_ref",
+        "project_ref_verified",
+        "binding",
+        "connection_mode",
+        "port",
+        "database",
+        "credential_present",
+        "secret_material_persisted",
+        "authority_effect",
+    }
+    if set(value) != expected_keys:
+        raise SourceAttestationError("database_connection_identity_shape_invalid")
+    if value.get("schema") != DATABASE_CONNECTION_IDENTITY_SCHEMA:
+        raise SourceAttestationError("database_connection_identity_schema_invalid")
+    if value.get("project_ref") != EXPECTED_PROJECT_REF or value.get("project_ref_verified") is not True:
+        raise SourceAttestationError("database_connection_identity_project_ref_invalid")
+    binding = value.get("binding")
+    mode = value.get("connection_mode")
+    if (binding, mode) not in {
+        ("HOST", "DIRECT_OR_DEDICATED_POOLER"),
+        ("USERNAME_SUFFIX", "SHARED_POOLER"),
+    }:
+        raise SourceAttestationError("database_connection_identity_binding_invalid")
+    if value.get("port") not in (5432, 6543) or value.get("database") != "postgres":
+        raise SourceAttestationError("database_connection_identity_endpoint_invalid")
+    if value.get("credential_present") is not True:
+        raise SourceAttestationError("database_connection_identity_credential_state_invalid")
+    if value.get("secret_material_persisted") is not False or value.get("authority_effect") is not False:
+        raise SourceAttestationError("database_connection_identity_authority_boundary_invalid")
+    return dict(value)
 
 
 def validate_database_url_project_identity(value: Any) -> dict[str, Any]:
@@ -98,8 +136,8 @@ def validate_database_url_project_identity(value: Any) -> dict[str, Any]:
     else:
         raise SourceAttestationError("database_url_supabase_host_invalid")
 
-    return {
-        "schema": "metaengine.compute.r1-database-connection-identity.h205f22.v1",
+    return validate_database_connection_identity_receipt({
+        "schema": DATABASE_CONNECTION_IDENTITY_SCHEMA,
         "project_ref": EXPECTED_PROJECT_REF,
         "project_ref_verified": True,
         "binding": binding,
@@ -109,7 +147,7 @@ def validate_database_url_project_identity(value: Any) -> dict[str, Any]:
         "credential_present": True,
         "secret_material_persisted": False,
         "authority_effect": False,
-    }
+    })
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -334,15 +372,12 @@ def build_source_predicate(
         raise SourceAttestationError("export_metadata_schema_invalid")
     if metadata.get("tool_version") != SUPABASE_CLI_VERSION or metadata.get("project_ref") != EXPECTED_PROJECT_REF:
         raise SourceAttestationError("export_metadata_identity_invalid")
-    connection_identity = metadata.get("database_connection_identity")
-    if (
-        not isinstance(connection_identity, dict)
-        or connection_identity.get("project_ref") != EXPECTED_PROJECT_REF
-        or connection_identity.get("project_ref_verified") is not True
-        or connection_identity.get("secret_material_persisted") is not False
-        or connection_identity.get("authority_effect") is not False
-    ):
-        raise SourceAttestationError("export_database_connection_identity_invalid")
+    try:
+        connection_identity = validate_database_connection_identity_receipt(
+            metadata.get("database_connection_identity")
+        )
+    except SourceAttestationError as exc:
+        raise SourceAttestationError("export_database_connection_identity_invalid") from exc
     if metadata.get("control_fence_stable") is not True:
         raise SourceAttestationError("export_control_fence_not_stable")
     if metadata.get("storage_api_objects_included") is not False:
