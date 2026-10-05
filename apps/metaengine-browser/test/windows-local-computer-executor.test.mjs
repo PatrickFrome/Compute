@@ -47,6 +47,7 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   assert.equal(snapshot.available, false);
   assert.equal(snapshot.version, '2.0.0');
   assert.equal(snapshot.scheduler_authority, false);
+  assert.equal(snapshot.bridge_transport, 'HASH_VERIFIED_TEMP_SCRIPT');
   assert.equal(snapshot.raw_shell_input, false);
   assert.equal(snapshot.arbitrary_eval, false);
   assert.match(WINDOWS_COMPUTER_BRIDGE_SHA256, /^[0-9a-f]{64}$/);
