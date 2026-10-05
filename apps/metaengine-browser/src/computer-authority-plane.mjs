@@ -128,10 +128,11 @@ function normalizeArgs(action, args) {
   if (action === 'TYPE_TEXT') {
     const text = String(input.text ?? '');
     if (!text || text.length > 120000) throw new Error('computer_type_text_invalid');
+    if (input.replace === false) throw new Error('computer_type_append_mode_unproven');
     return Object.freeze({
       text,
       runtime_id: normalizeRuntimeId(input.runtime_id, 'computer_type_runtime_id_invalid'),
-      replace: input.replace !== false,
+      replace: true,
     });
   }
 
