@@ -10,6 +10,7 @@ on:
       - 'scripts/metaengine-r1-step09b-fresh-project-canaries.sql'
       - 'research/R1_STEP09B_FRESH_PROJECT_CONVERGENCE_2026-10-05.md'
       - '.github/workflows/r1-supervisor-r2-db-ingestion.yml'
+      - '.github/workflows/r1-live-recovery-source.yml'
   pull_request:
     branches: [main]
     paths:
