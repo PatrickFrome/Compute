@@ -132,6 +132,45 @@ test('bootstrap requires an externally pinned root key exact to the manifest ent
   assert.equal(wrong.reason, 'PINNED_BOOTSTRAP_THRESHOLD_NOT_MET');
 });
 
+test('production bootstrap additionally requires the externally governed SPKI digest pin', () => {
+  const der = rootA.publicKey.export({ type: 'spki', format: 'der' });
+  const digest = sha256ClientC5(der);
+
+  const accepted = verifyClientC5SupervisorTrustRootBootstrap({
+    manifest: v1,
+    signature_envelope: v1Signature,
+    pinned_root_public_keys: { 'root:a': rootA.publicKey },
+    expected_pinned_root_spki_sha256: { 'root:a': digest },
+    now: new Date('2026-10-06T00:00:00Z'),
+    production_bootstrap: true,
+  });
+  assert.equal(accepted.action, 'TRUST_ROOT_ACCEPTED');
+  assert.equal(accepted.reason, 'PINNED_PRODUCTION_BOOTSTRAP_EXACT');
+  assert.equal(accepted.production_bootstrap_proven, true);
+
+  const wrongDigest = verifyClientC5SupervisorTrustRootBootstrap({
+    manifest: v1,
+    signature_envelope: v1Signature,
+    pinned_root_public_keys: { 'root:a': rootA.publicKey },
+    expected_pinned_root_spki_sha256: { 'root:a': '0'.repeat(64) },
+    now: new Date('2026-10-06T00:00:00Z'),
+    production_bootstrap: true,
+  });
+  assert.equal(wrongDigest.action, 'HOLD_TRUST_ROOT');
+  assert.equal(wrongDigest.reason, 'PINNED_BOOTSTRAP_DIGEST_THRESHOLD_NOT_MET');
+  assert.equal(wrongDigest.production_bootstrap_proven, false);
+
+  const absentDigest = verifyClientC5SupervisorTrustRootBootstrap({
+    manifest: v1,
+    signature_envelope: v1Signature,
+    pinned_root_public_keys: { 'root:a': rootA.publicKey },
+    now: new Date('2026-10-06T00:00:00Z'),
+    production_bootstrap: true,
+  });
+  assert.equal(absentDigest.action, 'HOLD_TRUST_ROOT');
+  assert.equal(absentDigest.reason, 'PINNED_BOOTSTRAP_DIGEST_THRESHOLD_NOT_MET');
+});
+
 test('root rotation requires exact lineage and both old and new root thresholds', () => {
   const v2 = manifest({
     generation: 2,
