@@ -9,6 +9,7 @@ on:
       - 'apps/metaengine-browser/scripts/client-c5-reference-producer.mjs'
       - 'apps/metaengine-browser/scripts/client-c5-reference-verifier.mjs'
       - 'apps/metaengine-browser/test/fixtures/client-c5-reference-project/**'
+      - 'research/METAENGINE_CLIENT_V1_C5_REFERENCE_USEFUL_WORK_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-reference-useful-work.yml'
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'apps/metaengine-browser/scripts/client-c5-reference-producer.mjs'
       - 'apps/metaengine-browser/scripts/client-c5-reference-verifier.mjs'
       - 'apps/metaengine-browser/test/fixtures/client-c5-reference-project/**'
+      - 'research/METAENGINE_CLIENT_V1_C5_REFERENCE_USEFUL_WORK_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-reference-useful-work.yml'
   workflow_dispatch:
 
