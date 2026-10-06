@@ -1,5 +1,17 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37398594087.1`.
+
+Client C5 installed restart continuity correction (2026-10-06):
+- predecessor source `0ca9f67c2a0d4901bdf4caa571170b82707782ae` started the sole Package Smoke producer run `37397781819` with `0.7.0-dev.37396852910.1`; immutable version reservation artifact `11384036085` and candidate artifact `11383882427` were created, so that identity is consumed and MUST NOT be rebuilt or relabelled;
+- the predecessor physically built and installed the exact NSIS package, passed the normal packaged UI + second-instance gate and survived the 190-second Sentinel startup-grace, then failed before the new Client journal probe could execute because PowerShell parsed `$stem:` inside a double-quoted diagnostic as invalid scoped-variable syntax;
+- Shell, Critical Audit and Self Update independently exposed the stale top convergence reservation: package metadata had advanced to `0.7.0-dev.37396852910.1` while this file still named `0.7.0-dev.37350000001.1`; Installed Chat also observed an unrelated Electron download HTTP 500 before installed qualification;
+- source-only successor `aea4124017f6543bdd7f815da8e2356ce17aec6f` replaces the ambiguous PowerShell interpolation with a parser-safe format expression and adds a regression fence that rejects `installed_restart_probe_exit:$stem:` in the canonical physical workflow;
+- exact successor preflight run `37398594087` / job `112060370013` is SUCCESS, including parse checks, journal/restart contracts, package-workflow ownership and clean checkout;
+- this atomic reservation advances package.json, both package-lock root version fields, this top convergence reservation and the preflight expected identity together to `0.7.0-dev.37398594087.1`;
+- Package Smoke remains the single physical installer producer. The next PR head must use attempt 1 and every installed consumer must bind the same exact source/version/installer digest; a later source change after producer start consumes this identity and requires another monotonic version;
+- this correction is PREPARE_ONLY / NON-LIVE: no live Client goal, provider effect, Supabase mutation, scheduler authority, release publication, canonical C2 promotion or automatic retry authority is granted.
+
 Reserved package identity is `0.7.0-dev.37350000001.1`.
 
 Computer proof convergence physical-promotion staging reservation (2026-10-05):
