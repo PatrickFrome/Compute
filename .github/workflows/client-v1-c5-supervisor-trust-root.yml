@@ -9,6 +9,7 @@ on:
       - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs'
       - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs'
       - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_SUPERVISOR_TRUST_ROOT_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-supervisor-trust-root.yml'
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs'
       - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs'
       - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_SUPERVISOR_TRUST_ROOT_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-supervisor-trust-root.yml'
   workflow_dispatch:
 
