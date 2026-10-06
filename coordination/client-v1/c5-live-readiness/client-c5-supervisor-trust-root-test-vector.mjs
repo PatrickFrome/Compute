@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -91,7 +91,7 @@ if (args['supervisor-public-key'] || args['supervisor-key-id']) {
     throw new Error('client_c5_trust_root_vector_supervisor_args_incomplete');
   }
   suppliedSupervisorPublicKey = crypto.createPublicKey(
-    await import('node:fs/promises').then(({ readFile }) => readFile(path.resolve(args['supervisor-public-key']), 'utf8')),
+    await readFile(path.resolve(args['supervisor-public-key']), 'utf8'),
   );
   if (suppliedSupervisorPublicKey.asymmetricKeyType !== 'ed25519') {
     throw new Error('client_c5_trust_root_vector_supervisor_key_not_ed25519');
