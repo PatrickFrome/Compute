@@ -349,10 +349,21 @@ test('active Supervisor key resolves only inside its cryptoperiod', () => {
   assert.equal(ok.key_state, 'ACTIVE');
   assert.match(ok.public_key_spki_sha256, /^[0-9a-f]{64}$/);
 
-  const before = resolveClientC5SupervisorReadbackKey({
-    manifest: v1,
+  const futureKey = keyEntry(supervisorA, {
     key_id: 'supervisor:a',
-    evidence_issued_at: '2026-09-30T23:59:59Z',
+    role: 'SUPERVISOR_READBACK',
+    valid_from: '2026-10-06T00:00:00Z',
+    valid_until: '2027-10-01T00:00:00Z',
+  });
+  const rootWithFutureKey = manifest({
+    generation: 1,
+    issued_at: '2026-10-05T00:00:00Z',
+    keys: [rootAEntry, futureKey],
+  });
+  const before = resolveClientC5SupervisorReadbackKey({
+    manifest: rootWithFutureKey,
+    key_id: 'supervisor:a',
+    evidence_issued_at: '2026-10-05T23:59:59Z',
     now: new Date('2026-10-06T00:01:00Z'),
   });
   assert.equal(before.ok, false);
