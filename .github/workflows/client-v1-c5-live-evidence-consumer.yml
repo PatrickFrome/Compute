@@ -1,0 +1,255 @@
+name: Client V1 C5 Live Evidence Consumer
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-live-evidence-consumer-v1'
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs'
+      - 'coordination/client-v1/c5-live-readiness/fixture/**'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_LIVE_EVIDENCE_CONSUMER_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-live-evidence-consumer.yml'
+  pull_request:
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs'
+      - 'coordination/client-v1/c5-live-readiness/fixture/**'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_LIVE_EVIDENCE_CONSUMER_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-live-evidence-consumer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  controlled-vector-producer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      vector_artifact_id: ${{ steps.vector.outputs.artifact-id }}
+      vector_artifact_digest: ${{ steps.vector.outputs.artifact-digest }}
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse consumer sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs
+
+      - name: Prove consumer code has no provider transport or credential dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs
+          )
+          if grep -En 'fetch\(|client-goal-submit|device/enrollment|supabase\.co|METAENGINE_CLIENT_V1_CANARY_BASE|service_role|private[_-]?key[^_a-z]' "${files[@]}"; then
+            echo "live_transport_or_credential_dependency_forbidden" >&2
+            exit 1
+          fi
+
+      - name: Prove adversarial consumer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs \
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs \
+            apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs
+
+      - name: Generate exact-head readiness capsule
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs \
+            --repository "$GITHUB_WORKSPACE" \
+            --repository-name "$GITHUB_REPOSITORY" \
+            --head "$EXPECTED_HEAD" \
+            --out "$RUNNER_TEMP/client-c5-live-readiness"
+
+      - name: Generate controlled signed evidence vector
+        shell: bash
+        run: |
+          set -euo pipefail
+          node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs \
+            --capsule "$RUNNER_TEMP/client-c5-live-readiness/client-c5-live-readiness-capsule.json" \
+            --artifact "$RUNNER_TEMP/client-c5-live-readiness/expected-live-artifact.json" \
+            --out "$RUNNER_TEMP/client-c5-live-evidence-vector"
+
+      - name: Prove test vector cannot persist signing authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/client-c5-live-evidence-vector/test-vector-supervisor-public-key.pem"
+          test ! -e "$RUNNER_TEMP/client-c5-live-evidence-vector/test-vector-supervisor-private-key.pem"
+          if grep -R -n --binary-files=without-match 'BEGIN .*PRIVATE KEY' "$RUNNER_TEMP/client-c5-live-evidence-vector"; then
+            echo "private_signing_key_persisted" >&2
+            exit 1
+          fi
+          test "$(node -p "require(process.argv[1]).evidence_context" "$RUNNER_TEMP/client-c5-live-evidence-vector/test-vector-manifest.json")" = "CONTROLLED_TEST_VECTOR"
+          test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$RUNNER_TEMP/client-c5-live-evidence-vector/test-vector-manifest.json")" = "false"
+          test "$(node -p "require(process.argv[1]).provider_contacted" "$RUNNER_TEMP/client-c5-live-evidence-vector/test-vector-manifest.json")" = "false"
+          test "$(node -p "require(process.argv[1]).goal_submitted" "$RUNNER_TEMP/client-c5-live-evidence-vector/test-vector-manifest.json")" = "false"
+
+      - name: Prove checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable controlled evidence vector
+        id: vector
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-live-evidence-test-vector-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/client-c5-live-evidence-vector/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  independent-consumer:
+    needs: controlled-vector-producer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact verifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove independent verifier head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Download immutable producer bundle by artifact id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.controlled-vector-producer.outputs.vector_artifact_id }}
+          path: ${{ runner.temp }}/client-c5-live-evidence-vector
+
+      - name: Prove exact controlled vector handoff
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-live-evidence-vector"
+          test "$(node -p "require(process.argv[1]).source_head" "$bundle/test-vector-manifest.json")" = "$EXPECTED_HEAD"
+          test "$(node -p "require(process.argv[1]).evidence_context" "$bundle/test-vector-manifest.json")" = "CONTROLLED_TEST_VECTOR"
+          test "$(node -p "require(process.argv[1]).private_key_persisted" "$bundle/test-vector-manifest.json")" = "false"
+          test "$(node -p "require(process.argv[1]).live_effect_authorized" "$bundle/test-vector-manifest.json")" = "false"
+          test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$bundle/test-vector-manifest.json")" = "false"
+
+      - name: Independently verify controlled signed bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-live-evidence-vector"
+          receipt="$RUNNER_TEMP/client-c5-live-independent-receipt.json"
+          node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs \
+            --bundle "$bundle" \
+            --trusted-key "$bundle/test-vector-supervisor-public-key.pem" \
+            --trust-root-kind CONTROLLED_TEST_VECTOR \
+            --out "$receipt"
+          test "$(node -p "require(process.argv[1]).verification_state" "$receipt")" = "CONTROLLED_TEST_VECTOR_VERIFIED"
+          test "$(node -p "require(process.argv[1]).signed_supervisor_readback_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).trusted_supervisor_key_verified" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).artifact_subject_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).provenance_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).independent_review_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).canonical_c2_promotion_authorized" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).authority_effect" "$receipt")" = "false"
+
+      - name: Prove bundle-controlled key cannot become pinned LIVE trust root
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-live-evidence-vector"
+          if node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs \
+            --bundle "$bundle" \
+            --trusted-key "$bundle/test-vector-supervisor-public-key.pem" \
+            --trust-root-kind PINNED_SUPERVISOR \
+            --out "$RUNNER_TEMP/forbidden-live-receipt.json"; then
+            echo "bundle_self_asserted_key_escalated_to_live" >&2
+            exit 1
+          fi
+
+      - name: Record independent receipt digest
+        id: digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/client-c5-live-independent-receipt.json"
+          sha="$(sha256sum "$receipt" | awk '{print $1}')"
+          test "${#sha}" = "64"
+          printf '%s  %s\n' "$sha" "client-c5-live-independent-receipt.json" > "$RUNNER_TEMP/client-c5-live-independent-receipt.sha256"
+          echo "receipt_sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Prove verifier checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload independent controlled verification receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-live-independent-verification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/client-c5-live-independent-receipt.json
+            ${{ runner.temp }}/client-c5-live-independent-receipt.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
