@@ -24,13 +24,15 @@ function parseArgs(argv) {
   return out;
 }
 
-function keyEntry(pair, {
+function keyEntry(pairOrPublicKey, {
   key_id,
   role,
   valid_from = '2026-10-01T00:00:00Z',
   valid_until = '2027-10-01T00:00:00Z',
 } = {}) {
-  const der = pair.publicKey.export({ type: 'spki', format: 'der' });
+  const publicKey = pairOrPublicKey?.type === 'public' ? pairOrPublicKey : pairOrPublicKey?.publicKey;
+  if (!publicKey || publicKey.asymmetricKeyType !== 'ed25519') throw new Error('client_c5_trust_root_vector_public_key_invalid');
+  const der = publicKey.export({ type: 'spki', format: 'der' });
   return {
     key_id,
     role,
@@ -82,10 +84,30 @@ const args = parseArgs(process.argv.slice(2));
 const outDir = path.resolve(args.out || '');
 if (!args.out) throw new Error('client_c5_trust_root_vector_out_missing');
 
+let suppliedSupervisorPublicKey = null;
+let suppliedSupervisorKeyId = null;
+if (args['supervisor-public-key'] || args['supervisor-key-id']) {
+  if (!args['supervisor-public-key'] || !args['supervisor-key-id']) {
+    throw new Error('client_c5_trust_root_vector_supervisor_args_incomplete');
+  }
+  suppliedSupervisorPublicKey = crypto.createPublicKey(
+    await import('node:fs/promises').then(({ readFile }) => readFile(path.resolve(args['supervisor-public-key']), 'utf8')),
+  );
+  if (suppliedSupervisorPublicKey.asymmetricKeyType !== 'ed25519') {
+    throw new Error('client_c5_trust_root_vector_supervisor_key_not_ed25519');
+  }
+  suppliedSupervisorKeyId = String(args['supervisor-key-id']);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/.test(suppliedSupervisorKeyId)) {
+    throw new Error('client_c5_trust_root_vector_supervisor_key_id_invalid');
+  }
+}
+
 const rootA = crypto.generateKeyPairSync('ed25519');
 const rootB = crypto.generateKeyPairSync('ed25519');
 const supervisorA = crypto.generateKeyPairSync('ed25519');
 const supervisorB = crypto.generateKeyPairSync('ed25519');
+const candidateSupervisorPublicKey = suppliedSupervisorPublicKey || supervisorB.publicKey;
+const candidateSupervisorKeyId = suppliedSupervisorKeyId || 'supervisor:test-b';
 
 const v1 = manifest({
   generation: 1,
@@ -106,7 +128,7 @@ const v2 = manifest({
   issued_at: '2026-10-06T02:00:00Z',
   keys: [
     keyEntry(rootB, { key_id: 'root:test-b', role: 'ROOT' }),
-    keyEntry(supervisorB, { key_id: 'supervisor:test-b', role: 'SUPERVISOR_READBACK' }),
+    keyEntry(candidateSupervisorPublicKey, { key_id: candidateSupervisorKeyId, role: 'SUPERVISOR_READBACK' }),
   ],
 });
 const v2Signature = signatureEnvelope(v2, [
@@ -134,7 +156,7 @@ const manifestOut = {
   bootstrap_manifest_sha256: clientC5SupervisorTrustRootDigest(v1),
   candidate_manifest_sha256: clientC5SupervisorTrustRootDigest(v2),
   controlled_bootstrap_spki_sha256: sha256ClientC5(rootA.publicKey.export({ type: 'spki', format: 'der' })),
-  expected_supervisor_key_id: 'supervisor:test-b',
+  expected_supervisor_key_id: candidateSupervisorKeyId,
   expected_evidence_issued_at: '2026-10-06T02:30:00Z',
   bootstrap_key_external_for_live_development: false,
   private_key_persisted: false,
