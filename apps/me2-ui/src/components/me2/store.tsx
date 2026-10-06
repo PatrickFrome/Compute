@@ -41,7 +41,7 @@ export const WORKFLOW_STAGES: Array<{
   pages: readonly PageKey[];
   hint: string;
 }> = [
-  { key: "run", label: "FLEET", primaryPage: "browser", pages: ["browser"], hint: "native z.ai Agent fleet and selected Browser surface" },
+  { key: "run", label: "FLEET", primaryPage: "browser", pages: ["browser"], hint: "native ChatGPT agent fleet and selected Browser surface" },
   { key: "plan", label: "PLAN", primaryPage: "tasks", pages: ["tasks"], hint: "tasks, dependencies, execution plan" },
   { key: "build", label: "BUILD", primaryPage: "code", pages: ["code"], hint: "code, diffs, tests, terminal" },
   { key: "fleet", label: "SUPERVISE", primaryPage: "supervisor", pages: ["supervisor"], hint: "objectives, coordination, recovery and approvals" },
