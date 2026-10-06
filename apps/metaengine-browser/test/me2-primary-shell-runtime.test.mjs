@@ -179,7 +179,8 @@ test('normal Browser startup prefers packaged ME2 and falls back only to generat
   assert.match(main, /recovery_surface_authority:\s*false/);
   assert.match(main, /metaengine:\/\/recovery\/\?reason=ME2_PRIMARY_DEGRADED/);
   assert.match(main, /metaengine:\/\/recovery\/\?reason=ME2_PRIMARY_LOAD_FAILED/);
-  assert.doesNotMatch(main, /LEGACY_RECOVERY_SHELL_VISIBLE|legacy_shell_is_normal_path|loadURL\('metaengine:\/\/shell\/'\)|metaengine-dark-workspace-v2/);
+  assert.match(main, /legacy_shell_is_normal_path:\s*false/);
+  assert.doesNotMatch(main, /LEGACY_RECOVERY_SHELL_VISIBLE|loadURL\('metaengine:\/\/shell\/'\)|metaengine-dark-workspace-v2/);
   assert.match(main, /surface_profile:\s*primaryShellMode === 'ME2_PRIMARY'/);
 });
 
