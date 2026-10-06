@@ -42,13 +42,14 @@ function keyEntry(pair, {
     valid_until,
     retired_at: null,
     revoked_at: null,
+    invalid_since: null,
   };
 }
 
 function manifest({ generation, previous, issued_at, keys }) {
   return {
     schema: CLIENT_C5_SUPERVISOR_TRUST_ROOT_SCHEMA,
-    version: '1.0.0',
+    version: '2.0.0',
     generation,
     issued_at,
     expires_at: '2027-01-01T00:00:00Z',
@@ -125,7 +126,7 @@ await Promise.all([
 ]);
 
 const manifestOut = {
-  schema: 'metaengine.client-v1.c5-supervisor-trust-root-test-vector.v1',
+  schema: 'metaengine.client-v1.c5-supervisor-trust-root-test-vector.v2',
   evidence_context: 'CONTROLLED_TEST_VECTOR',
   now: NOW,
   bootstrap_generation: 1,
@@ -135,7 +136,7 @@ const manifestOut = {
   controlled_bootstrap_spki_sha256: sha256ClientC5(rootA.publicKey.export({ type: 'spki', format: 'der' })),
   expected_supervisor_key_id: 'supervisor:test-b',
   expected_evidence_issued_at: '2026-10-06T02:30:00Z',
-  bootstrap_key_external_for_production: false,
+  bootstrap_key_external_for_live_development: false,
   private_key_persisted: false,
   production_bootstrap_proven: false,
   live_effect_authorized: false,
