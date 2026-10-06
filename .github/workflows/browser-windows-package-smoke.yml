@@ -187,6 +187,23 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
 
+      - name: Materialize exact Electron runtime for physical UI evidence
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageVersion = [string](node -p "require('./node_modules/electron/package.json').version")
+          if ($packageVersion -ne '44.0.0') { throw "electron_package_version_drift:$packageVersion" }
+          $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path $electron -PathType Leaf)) {
+            node .\node_modules\electron\install.js
+            if ($LASTEXITCODE -ne 0) { throw "electron_runtime_materialization_exit_$LASTEXITCODE" }
+          }
+          if (-not (Test-Path $electron -PathType Leaf)) { throw 'electron_runtime_binary_missing_after_materialization' }
+          $binaryVersion = [string](& $electron --version)
+          if ($LASTEXITCODE -ne 0) { throw "electron_runtime_version_probe_exit_$LASTEXITCODE" }
+          if ($binaryVersion.Trim() -ne 'v44.0.0') { throw "electron_runtime_version_drift:$binaryVersion" }
+
       - name: Capture exact installed dependency resolution
         working-directory: apps/metaengine-browser
         shell: powershell
