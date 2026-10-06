@@ -1,0 +1,136 @@
+name: Client V1 C5 Live Readiness
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-live-readiness-v1'
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/fixture/**'
+      - 'research/METAENGINE_CLIENT_V1_C5_LIVE_READINESS_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-live-readiness.yml'
+  pull_request:
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/fixture/**'
+      - 'research/METAENGINE_CLIENT_V1_C5_LIVE_READINESS_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-live-readiness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse readiness sources
+        run: |
+          set -euo pipefail
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs
+
+      - name: Prove readiness code has no live transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs
+          )
+          if grep -En 'fetch\(|client-goal-submit|device/enrollment|supabase\.co|METAENGINE_CLIENT_V1_CANARY_BASE' "${files[@]}"; then
+            echo "live_transport_forbidden_in_readiness" >&2
+            exit 1
+          fi
+          if grep -En 'apps/metaengine-browser/(src/client-c5-live-readiness|scripts/client-c5-live-readiness-capsule|test/client-v1-c5-live-readiness|test/fixtures/client-c5-live-project)' .github/workflows/client-v1-c5-live-readiness.yml coordination/client-v1/c5-live-readiness/*.mjs; then
+            echo "packaged_readiness_path_forbidden" >&2
+            exit 1
+          fi
+
+      - name: Prove fail-closed readiness and useful-work contracts
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs \
+            apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs \
+            apps/metaengine-browser/test/client-v1-c5-useful-work-restart-continuity.test.mjs
+
+      - name: Generate exact-head PREPARE_ONLY live capsule
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs \
+            --repository "$GITHUB_WORKSPACE" \
+            --repository-name "$GITHUB_REPOSITORY" \
+            --head "$EXPECTED_HEAD" \
+            --out "$RUNNER_TEMP/client-c5-live-readiness"
+
+      - name: Prove capsule remains non-executable and exact-head bound
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          capsule="$RUNNER_TEMP/client-c5-live-readiness/client-c5-live-readiness-capsule.json"
+          receipt="$RUNNER_TEMP/client-c5-live-readiness/client-c5-live-readiness-receipt.json"
+          test "$(node -p "require(process.argv[1]).source_head" "$capsule")" = "$EXPECTED_HEAD"
+          test "$(node -p "require(process.argv[1]).dispatch_gate.required_environment" "$capsule")" = "client-v1-c5-live"
+          test "$(node -p "require(process.argv[1]).dispatch_gate.environment_protection_verified" "$capsule")" = "false"
+          test "$(node -p "require(process.argv[1]).dispatch_gate.live_effect_authorized" "$capsule")" = "false"
+          test "$(node -p "require(process.argv[1]).dispatch_gate.provider_contacted" "$capsule")" = "false"
+          test "$(node -p "require(process.argv[1]).dispatch_gate.goal_submitted" "$capsule")" = "false"
+          test "$(node -p "require(process.argv[1]).dispatch_gate.execution_ready" "$capsule")" = "false"
+          test "$(node -p "require(process.argv[1]).live_readback_contract.evidence_class" "$capsule")" = "LIVE"
+          test "$(node -p "require(process.argv[1]).live_readback_contract.evidence_origin" "$capsule")" = "SIGNED_SUPERVISOR_READBACK"
+          test "$(node -p "require(process.argv[1]).fixture_pre_repair_failed" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).fixture_post_repair_passed" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).fixture_build_passed" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).execution_ready" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).authority_effect" "$receipt")" = "false"
+
+      - name: Prove checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload C5 live readiness capsule
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-live-readiness-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/client-c5-live-readiness/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
