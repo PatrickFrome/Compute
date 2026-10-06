@@ -445,6 +445,13 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       : usefulWork?.evidence_class === "SYNTHETIC"
         ? "Reference evidence only · not live"
         : "Not yet proven";
+  const usefulWorkDescription = usefulWork?.client_c5_useful_work_verified === true
+    && usefulWork.evidence_class === "LIVE"
+    && usefulWork.evidence_origin === "SIGNED_SUPERVISOR_READBACK"
+      ? "Useful-work evidence is independently verified. Canonical C2 promotion remains a separate Supervisor decision."
+      : usefulWork?.evidence_class === "SYNTHETIC"
+        ? "Reference evidence exercised the mechanics but is not live Client C5 evidence."
+        : "A received result still requires independent verification before acceptance.";
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
     COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
@@ -520,7 +527,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         <DialogContent showCloseButton={false} className="mc-dark border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
           onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
-          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. A queued task has been accepted for execution. A received result still requires independent verification before acceptance.</DialogDescription>
+          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. A queued task has been accepted for execution. {usefulWorkDescription}</DialogDescription>
           {readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
             Execution: {readiness.label}. {readiness.detail}
           </p> : null}
