@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   CLIENT_C5_LIVE_DISPATCH_AUTH_SCHEMA,
+  CLIENT_C5_LIVE_OBJECTIVE,
   CLIENT_C5_LIVE_READINESS_SCHEMA,
   clientC5LiveCapsuleDigest,
   clientC5LiveReadinessMatchesSubmission,
@@ -24,7 +25,7 @@ const answerBefore = '7'.repeat(64);
 const answerAfter = '8'.repeat(64);
 const testDigest = '9'.repeat(64);
 const buildDigest = 'a'.repeat(64);
-const objective = 'Repair the single bounded Client C5 canary in apps/metaengine-browser/test/fixtures/client-c5-live-project by changing only answer.mjs so the existing test passes, then run the existing build script to produce dist/live-artifact.json. Do not modify any other path, do not use network, and return only after the test and build pass.';
+const objective = CLIENT_C5_LIVE_OBJECTIVE;
 
 function capsule(mutator = null) {
   const material = {
@@ -373,6 +374,7 @@ test('dispatch authorization is a separate post-readiness proof and fails closed
     single_flight: true,
     automatic_retry_allowed: false,
     scheduler_authority: false,
+    browser_authority: false,
     release_authority: false,
     authority_effect: false,
   };
