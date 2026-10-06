@@ -1079,200 +1079,7 @@ jobs:
           }
 
           function Assert-ReadOnlyProbe($row, [bool]$expectUseful) {
-            $baseInvalid = $row.schema -ne 'metaengine.client.goal-journal-probe.v1' -or [string]$row.version -ne [string]$proof.package_version -or $row.primary_instance -ne $true -or [string]$row.user_data_path -ne $userData -or [string]$row.journal_path -ne $goalJournal -or $row.journal_present -ne $true -or $row.journal_unchanged -ne $true -or [string]$row.journal_sha256_before -notmatch '^[a-f0-9]{64}        shell: powershell
-        working-directory: apps/metaengine-browser
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $install = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
-          & ./test/browser-guardian-machine-bootstrap-physical.ps1 `
-            -BootstrapDir (Join-Path $install 'resources\guardian-bootstrap') `
-            -StagingDir (Join-Path $install 'resources\guardian-native') `
-            -ExpectedSourceHead '${{ github.event.pull_request.head.sha || github.sha }}' `
-            -EvidencePath "$env:RUNNER_TEMP\guardian-machine-bootstrap-physical-proof.json"
-          if ($LASTEXITCODE -ne 0) { throw 'guardian_machine_bootstrap_qualification_failed' }
-
-      - name: Prove source checkout unchanged
-        shell: bash
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
-
-      - name: Upload exact-head Windows qualification evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: metaengine-browser-windows-package-evidence-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            ${{ runner.temp }}/windows-package-proof.json
-            ${{ runner.temp }}/packaged-build-identity-proof.json
-            ${{ runner.temp }}/expected-build-identity.json
-            ${{ runner.temp }}/build-identity.json
-            ${{ runner.temp }}/dependency-resolution.json
-            ${{ runner.temp }}/npm-sbom.cdx.json
-            ${{ runner.temp }}/npm-sbom-evidence.json
-            ${{ runner.temp }}/browser-composed-sbom.cdx.json
-            ${{ runner.temp }}/browser-composed-sbom-evidence.json
-            ${{ runner.temp }}/me2-ui-manifest.json
-            ${{ runner.temp }}/me2-daemon-manifest.json
-            ${{ runner.temp }}/guardian-native-manifest.json
-            ${{ runner.temp }}/package-lock-material.json
-            ${{ runner.temp }}/package.json
-            ${{ runner.temp }}/package-lock.json
-            ${{ runner.temp }}/me2-ui-bun.lock
-            ${{ runner.temp }}/package-build-reservation.json
-            ${{ runner.temp }}/package-version-reservation-seal.json
-            ${{ runner.temp }}/guardian-machine-bootstrap-physical-proof.json
-            ${{ runner.temp }}/guardian-bootstrap-physical/*.out
-            ${{ runner.temp }}/guardian-bootstrap-physical/*.err
-            ${{ runner.temp }}/guardian-machine-bootstrap-binding.json
-            ${{ runner.temp }}/installed-me2-daemon-proof.json
-            ${{ runner.temp }}/browser-startup-journal-v1.json
-            ${{ runner.temp }}/browser-sentinel-v1.json
-            ${{ runner.temp }}/browser-parent-progress-v1.json
-            ${{ runner.temp }}/browser-sentinel-worker-heartbeat-v1.json
-            ${{ runner.temp }}/package-profile-probe.out
-            ${{ runner.temp }}/package-profile-probe.err
-            ${{ runner.temp }}/package-normal-ui.out
-            ${{ runner.temp }}/package-normal-ui.err
-            ${{ runner.temp }}/package-second-instance.out
-            ${{ runner.temp }}/package-second-instance.err
-            ${{ runner.temp }}/client-c5-installed-journal-probe-first.out
-            ${{ runner.temp }}/client-c5-installed-journal-probe-first.err
-            ${{ runner.temp }}/client-c5-installed-journal-probe-second.out
-            ${{ runner.temp }}/client-c5-installed-journal-probe-second.err
-            ${{ runner.temp }}/client-c5-installed-journal-probe-stale.out
-            ${{ runner.temp }}/client-c5-installed-journal-probe-stale.err
-            ${{ runner.temp }}/client-c5-installed-restart-continuity.json
-            ${{ runner.temp }}/browser-shell-visual/visual-evidence.json
-            ${{ runner.temp }}/browser-shell-visual/*.png
-            ${{ runner.temp }}/r85-primary-visual/r85-visual-evidence.json
-            ${{ runner.temp }}/r85-primary-visual/*.png
-            ${{ runner.temp }}/r85-primary-visual.stdout.log
-            ${{ runner.temp }}/r85-primary-visual.stderr.log
-          if-no-files-found: warn
-          retention-days: 30
-
-  slsa-provenance-verify:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/physical/build-slsa-provenance-v1'
-    needs:
-      - package_identity_preflight
-      - windows-nsis-package-smoke
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout exact physical candidate source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Setup exact Node runtime
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24.21.0'
-
-      - name: Download exact current-run immutable candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: metaengine-browser-windows-candidate-${{ github.sha }}
-          path: ${{ runner.temp }}/qualified-candidate
-
-      - name: Verify GitHub SLSA bundle and emit Browser Fabric provenance evidence
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = push
-          test "$GITHUB_REF" = refs/heads/physical/build-slsa-provenance-v1
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$GITHUB_SHA" = '${{ needs.package_identity_preflight.outputs.source_head }}'
-
-          candidate="$RUNNER_TEMP/qualified-candidate"
-          installer_count="$(find "$candidate" -maxdepth 1 -type f -name 'METAENGINE-Browser-Test-Setup-*-x64.exe' | wc -l | tr -d ' ')"
-          test "$installer_count" = 1
-          installer="$(find "$candidate" -maxdepth 1 -type f -name 'METAENGINE-Browser-Test-Setup-*-x64.exe' -print -quit)"
-          bundle="$candidate/browser-slsa-provenance/installer-slsa-provenance.bundle.json"
-          receipt="$candidate/browser-slsa-provenance/installer-slsa-provenance-receipt.json"
-          test -f "$installer"
-          test -f "$bundle"
-          test -f "$receipt"
-          installer_name="$(basename "$installer")"
-          installer_sha="$(sha256sum "$installer" | awk '{print $1}')"
-
-          node - "$receipt" "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$installer_name" "$installer_sha" <<'NODE'
-          const fs = require('node:fs');
-          const [path, sha, ref, runId, attempt, name, digest] = process.argv.slice(2);
-          const r = JSON.parse(fs.readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
-          const ok = r.schema === 'metaengine.browser.package-slsa-provenance-receipt.v1'
-            && r.source_head === sha
-            && r.source_ref === ref
-            && r.event === 'push'
-            && String(r.run_id) === String(runId)
-            && String(r.run_attempt) === String(attempt)
-            && r.installer_name === name
-            && r.installer_sha256 === digest
-            && r.promotion_authorized === false
-            && r.release_published === false
-            && r.authority_effect === false;
-          if (!ok) process.exit(2);
-          NODE
-
-          gh attestation verify "$installer" \
-            --repo "$GITHUB_REPOSITORY" \
-            --bundle "$bundle" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/browser-windows-package-smoke.yml" \
-            --source-digest "$GITHUB_SHA" \
-            --source-ref "$GITHUB_REF" \
-            --deny-self-hosted-runners \
-            --format json > "$RUNNER_TEMP/browser-package-slsa-verification.json"
-
-          node scripts/browser-slsa-provenance-verification.mjs \
-            --verification "$RUNNER_TEMP/browser-package-slsa-verification.json" \
-            --expected-source-sha "$GITHUB_SHA" \
-            --expected-source-ref "$GITHUB_REF" \
-            --expected-installer-name "$installer_name" \
-            --expected-installer-sha256 "$installer_sha" \
-            --expected-run-id "$GITHUB_RUN_ID" \
-            --expected-run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --expected-repository "$GITHUB_REPOSITORY" \
-            --expected-workflow-path '.github/workflows/browser-windows-package-smoke.yml' \
-            --verifier-id "github-slsa-package-smoke:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" \
-            --out "$RUNNER_TEMP/browser-package-slsa-provenance-evidence.json"
-
-          node - "$RUNNER_TEMP/browser-package-slsa-provenance-evidence.json" <<'NODE'
-          const fs = require('node:fs');
-          const p = process.argv[2];
-          const e = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (e.schema !== 'metaengine.browser-fabric.provenance-evidence.v1'
-              || e.verified !== true || e.builder_trusted !== true || e.authority_effect !== false) process.exit(2);
-          NODE
-
-      - name: Upload independently verified SLSA evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: metaengine-browser-package-slsa-verification-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/browser-package-slsa-verification.json
-            ${{ runner.temp }}/browser-package-slsa-provenance-evidence.json
-          if-no-files-found: error
-          retention-days: 90
-          compression-level: 0
-
-      - name: Prove exact verifier checkout unchanged
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git diff --name-only HEAD -- scripts/browser-slsa-provenance-verification.mjs .github/workflows/browser-windows-package-smoke.yml)"
- -or [string]$row.journal_sha256_after -ne [string]$row.journal_sha256_before -or [int]$row.entry_count -ne 1 -or $row.latest.execution_proof_present -ne $true -or [string]$row.latest.execution_task_state -ne 'COMPLETED' -or [int]$row.latest.execution_lease_generation -ne 1 -or [string]$row.latest.result_sha256 -ne ('1' * 64) -or $row.local_read_only -ne $true -or $row.browser_runtime_started -ne $false -or $row.native_supervisor_started -ne $false -or $row.network_started -ne $false -or $row.submit_effect_attempted -ne $false -or $row.automatic_retry_allowed -ne $false -or $row.authority_effect -ne $false
+            $baseInvalid = $row.schema -ne 'metaengine.client.goal-journal-probe.v1' -or [string]$row.version -ne [string]$proof.package_version -or $row.primary_instance -ne $true -or [string]$row.user_data_path -ne $userData -or [string]$row.journal_path -ne $goalJournal -or $row.journal_present -ne $true -or $row.journal_unchanged -ne $true -or [string]$row.journal_sha256_before -notmatch '^[a-f0-9]{64}$' -or [string]$row.journal_sha256_after -ne [string]$row.journal_sha256_before -or [int]$row.entry_count -ne 1 -or $row.latest.execution_proof_present -ne $true -or [string]$row.latest.execution_task_state -ne 'COMPLETED' -or [int]$row.latest.execution_lease_generation -ne 1 -or [string]$row.latest.result_sha256 -ne ('1' * 64) -or $row.local_read_only -ne $true -or $row.browser_runtime_started -ne $false -or $row.native_supervisor_started -ne $false -or $row.network_started -ne $false -or $row.submit_effect_attempted -ne $false -or $row.automatic_retry_allowed -ne $false -or $row.authority_effect -ne $false
             if ($baseInvalid) {
               $row | ConvertTo-Json -Depth 8 | Write-Host
               throw 'installed_restart_probe_base_contract_invalid'
@@ -1407,6 +1214,13 @@ jobs:
             ${{ runner.temp }}/package-normal-ui.err
             ${{ runner.temp }}/package-second-instance.out
             ${{ runner.temp }}/package-second-instance.err
+            ${{ runner.temp }}/client-c5-installed-journal-probe-first.out
+            ${{ runner.temp }}/client-c5-installed-journal-probe-first.err
+            ${{ runner.temp }}/client-c5-installed-journal-probe-second.out
+            ${{ runner.temp }}/client-c5-installed-journal-probe-second.err
+            ${{ runner.temp }}/client-c5-installed-journal-probe-stale.out
+            ${{ runner.temp }}/client-c5-installed-journal-probe-stale.err
+            ${{ runner.temp }}/client-c5-installed-restart-continuity.json
             ${{ runner.temp }}/browser-shell-visual/visual-evidence.json
             ${{ runner.temp }}/browser-shell-visual/*.png
             ${{ runner.temp }}/r85-primary-visual/r85-visual-evidence.json
