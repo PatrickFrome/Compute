@@ -14,6 +14,7 @@ on:
       - 'coordination/client-v1/c5-live-readiness/fixture/**'
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_LIVE_EVIDENCE_CONSUMER_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-live-evidence-consumer.yml'
   pull_request:
     paths:
@@ -26,6 +27,7 @@ on:
       - 'coordination/client-v1/c5-live-readiness/fixture/**'
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_LIVE_EVIDENCE_CONSUMER_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-live-evidence-consumer.yml'
   workflow_dispatch:
 
