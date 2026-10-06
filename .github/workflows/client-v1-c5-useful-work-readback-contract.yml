@@ -1,0 +1,74 @@
+name: Client V1 C5 Useful Work Readback Contract
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-useful-work-readback-contract-v1'
+    paths:
+      - 'apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs'
+      - '.github/workflows/client-v1-c5-useful-work-readback-contract.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs'
+      - '.github/workflows/client-v1-c5-useful-work-readback-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  useful-work-readback-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse Edge and native readback modules
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check supabase/a2-browser-native-supervisor-v1/meta-routes.mjs
+          node --check src/native-supervisor-client-base.mjs
+
+      - name: Prove PREPARE_ONLY useful-work readback boundary
+        working-directory: apps/metaengine-browser
+        run: |
+          node --test             test/client-v1-c5-useful-work-readback-contract.test.mjs             test/client-v1-c5-useful-work-proof.test.mjs             test/client-v1-c5-useful-work-restart.test.mjs             test/client-v1-c5-useful-work-projection.test.mjs             test/client-v1-execution-proof-integrity.test.mjs             test/client-v1-agent-origin-result-proof.test.mjs
+
+      - name: Prove no migration or deployment artifact was added
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql
+          test -z "$(git diff --name-only HEAD^ HEAD -- supabase/migrations)"
+          test -z "$(git diff --name-only HEAD^ HEAD -- supabase/functions)"
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test -z "$(git diff --name-only HEAD --             apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql             apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs             apps/metaengine-browser/src/native-supervisor-client-base.mjs             apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs)"
