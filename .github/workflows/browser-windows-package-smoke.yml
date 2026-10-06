@@ -1053,6 +1053,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app -PathType Leaf)) { throw 'installed_restart_browser_missing' }
