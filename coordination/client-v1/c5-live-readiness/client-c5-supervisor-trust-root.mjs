@@ -234,7 +234,12 @@ function verifyThreshold({ normalized, signatures, keySource, threshold, atMs })
   };
 }
 
-function externalPinnedRootEntries(normalized, pinnedPublicKeys) {
+function externalPinnedRootEntries(
+  normalized,
+  pinnedPublicKeys,
+  expectedPinnedSpkiSha256 = {},
+  requireExpectedPin = false,
+) {
   const map = new Map();
   for (const entry of normalized.keys) {
     if (entry.role !== 'ROOT') continue;
@@ -242,6 +247,13 @@ function externalPinnedRootEntries(normalized, pinnedPublicKeys) {
       ? pinnedPublicKeys[entry.key_id]
       : null;
     if (!supplied) continue;
+    if (
+      requireExpectedPin
+      && (
+        !Object.hasOwn(expectedPinnedSpkiSha256, entry.key_id)
+        || expectedPinnedSpkiSha256[entry.key_id] !== entry.public_key_spki_sha256
+      )
+    ) continue;
     try {
       const key = crypto.createPublicKey(supplied);
       const der = key.export({ type: 'spki', format: 'der' });
@@ -288,6 +300,7 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
   manifest,
   signature_envelope,
   pinned_root_public_keys = {},
+  expected_pinned_root_spki_sha256 = {},
   now = new Date(),
   production_bootstrap = false,
 } = {}) {
@@ -318,7 +331,12 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
     return receipt('HOLD_TRUST_ROOT', normalized, { reason: error.message });
   }
 
-  const pinned = externalPinnedRootEntries(normalized, pinned_root_public_keys);
+  const pinned = externalPinnedRootEntries(
+    normalized,
+    pinned_root_public_keys,
+    expected_pinned_root_spki_sha256,
+    production_bootstrap === true,
+  );
   const threshold = verifyThreshold({
     normalized,
     signatures,
@@ -328,7 +346,9 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
   });
   if (!threshold.ok) {
     return receipt('HOLD_TRUST_ROOT', normalized, {
-      reason: 'PINNED_BOOTSTRAP_THRESHOLD_NOT_MET',
+      reason: production_bootstrap === true
+        ? 'PINNED_BOOTSTRAP_DIGEST_THRESHOLD_NOT_MET'
+        : 'PINNED_BOOTSTRAP_THRESHOLD_NOT_MET',
       verified_root_signature_count: threshold.verified,
       verified_root_key_ids: threshold.accepted,
     });
