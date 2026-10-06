@@ -1,5 +1,16 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37399755569.1`.
+
+Client C5 exact-head installed restart evidence correction (2026-10-06):
+- predecessor candidate `cd5b06a0862288b46c5d300972af0829d5cd0e61` / package `0.7.0-dev.37398594087.1` completed Package Smoke run `37398731953` successfully, including exact NSIS install, normal UI + 190-second Sentinel startup-grace, two distinct installed journal probe processes and stale-binding rejection;
+- reservation artifact `11384267256` (digest `sha256:8d53727fac2330ee2a48b9182153699c27d8d1ad9d8b5c3a7bd74f4ed2657570`), candidate artifact `11383947839` (digest `sha256:ffc0fea330e39494ed08158118565d268474024b5324988945fc9982eede18d5`) and evidence artifact `11384780209` (digest `sha256:2f1f755f4565e938e0e1658ac0c3ff99443724b0a9e324684b8e84f7577b1ca2`) make that package identity consumed and immutable;
+- post-run artifact audit rejected that run as final C5 installed-restart evidence because `client-c5-installed-restart-continuity.json.source_head` and synthetic fixture `baseline_sha` used GitHub's PR merge SHA `1574090ef5de4baec41b3c74f1068ff876f24a27`, not the proven package source head `cd5b06a0862288b46c5d300972af0829d5cd0e61`;
+- source successor `150cf1885d33e10f0bf010905ea7fb9fb54082c6` binds both fixture modes and the continuity receipt to `windows-package-proof.json.source_head`, re-checks that package proof against `${{ github.event.pull_request.head.sha || github.sha }}` inside the Client restart step, and adds a regression test forbidding merge-ref/GITHUB_SHA rebinding;
+- source-only preflight run `37399755569` / job `112064064882` is SUCCESS before any new version reservation;
+- this atomic reservation advances package.json, package-lock and this convergence record together to `0.7.0-dev.37399755569.1`;
+- this remains PREPARE_ONLY / NON-LIVE: controlled SYNTHETIC journal evidence only; Client C5 LIVE=false, canonical C2 promotion=false, provider/Supabase/release/scheduler authority=false.
+
 Reserved package identity is `0.7.0-dev.37398594087.1`.
 
 Client C5 installed restart continuity correction (2026-10-06):
