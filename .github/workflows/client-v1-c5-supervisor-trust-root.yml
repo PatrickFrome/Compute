@@ -1,0 +1,239 @@
+name: Client V1 C5 Supervisor Trust Root
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-supervisor-trust-root-v1'
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_SUPERVISOR_TRUST_ROOT_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-supervisor-trust-root.yml'
+  pull_request:
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_SUPERVISOR_TRUST_ROOT_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-supervisor-trust-root.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  controlled-root-producer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      root_artifact_id: ${{ steps.root.outputs.artifact-id }}
+      root_artifact_digest: ${{ steps.root.outputs.artifact-digest }}
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse trust-root sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs
+
+      - name: Prove no provider transport or private signing material dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs
+          )
+          if grep -En 'fetch\(|client-goal-submit|device/enrollment|supabase\.co|METAENGINE_CLIENT_V1_CANARY_BASE|BEGIN .*PRIVATE KEY' "${files[@]}"; then
+            echo "trust_root_transport_or_private_key_dependency_forbidden" >&2
+            exit 1
+          fi
+
+      - name: Prove adversarial trust-root lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs
+
+      - name: Generate controlled root rotation vector
+        shell: bash
+        run: |
+          set -euo pipefail
+          node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs \
+            --out "$RUNNER_TEMP/client-c5-supervisor-trust-root"
+
+      - name: Prove root vector contains no private key
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-supervisor-trust-root"
+          test -f "$bundle/controlled-bootstrap-root-public-key.pem"
+          test ! -e "$bundle/controlled-bootstrap-root-private-key.pem"
+          if grep -R -n --binary-files=without-match 'BEGIN .*PRIVATE KEY' "$bundle"; then
+            echo "private_root_key_persisted" >&2
+            exit 1
+          fi
+          test "$(node -p "require(process.argv[1]).evidence_context" "$bundle/test-vector-manifest.json")" = "CONTROLLED_TEST_VECTOR"
+          test "$(node -p "require(process.argv[1]).production_bootstrap_proven" "$bundle/test-vector-manifest.json")" = "false"
+          test "$(node -p "require(process.argv[1]).live_effect_authorized" "$bundle/test-vector-manifest.json")" = "false"
+
+      - name: Prove checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable controlled trust-root vector
+        id: root
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-supervisor-trust-root-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/client-c5-supervisor-trust-root/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  independent-root-consumer:
+    needs: controlled-root-producer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact verifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove independent verifier head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+
+      - name: Download immutable root vector by artifact id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.controlled-root-producer.outputs.root_artifact_id }}
+          path: ${{ runner.temp }}/client-c5-supervisor-trust-root
+
+      - name: Verify controlled bootstrap, rotation and Supervisor key resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-supervisor-trust-root"
+          out="$RUNNER_TEMP/client-c5-supervisor-trust-root-resolution"
+          node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs \
+            --bundle "$bundle" \
+            --bootstrap-key "$bundle/controlled-bootstrap-root-public-key.pem" \
+            --trust-root-kind CONTROLLED_TEST_VECTOR \
+            --supervisor-key-id supervisor:test-b \
+            --evidence-issued-at 2026-10-06T02:30:00Z \
+            --now 2026-10-06T03:00:00Z \
+            --out "$out"
+          receipt="$out/trust-root-resolution-receipt.json"
+          test "$(node -p "require(process.argv[1]).trust_root_kind" "$receipt")" = "CONTROLLED_TEST_VECTOR"
+          test "$(node -p "require(process.argv[1]).bootstrap_generation" "$receipt")" = "1"
+          test "$(node -p "require(process.argv[1]).candidate_generation" "$receipt")" = "2"
+          test "$(node -p "require(process.argv[1]).old_root_threshold_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).new_root_threshold_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).supervisor_key_resolved" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).production_bootstrap_proven" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).live_effect_authorized" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).canonical_c2_promotion_authorized" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).authority_effect" "$receipt")" = "false"
+
+      - name: Prove bundle-contained root key cannot become production bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-supervisor-trust-root"
+          if node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs \
+            --bundle "$bundle" \
+            --bootstrap-key "$bundle/controlled-bootstrap-root-public-key.pem" \
+            --trust-root-kind PINNED_PRODUCTION \
+            --expected-bootstrap-spki-sha256 "$(node -p "require(process.argv[1]).controlled_bootstrap_spki_sha256" "$bundle/test-vector-manifest.json")" \
+            --supervisor-key-id supervisor:test-b \
+            --evidence-issued-at 2026-10-06T02:30:00Z \
+            --now 2026-10-06T03:00:00Z \
+            --out "$RUNNER_TEMP/forbidden-production"; then
+            echo "bundle_contained_root_escalated_to_production" >&2
+            exit 1
+          fi
+
+      - name: Prove external copy without independently pinned digest cannot become production bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/client-c5-supervisor-trust-root"
+          cp "$bundle/controlled-bootstrap-root-public-key.pem" "$RUNNER_TEMP/copied-root.pem"
+          if node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs \
+            --bundle "$bundle" \
+            --bootstrap-key "$RUNNER_TEMP/copied-root.pem" \
+            --trust-root-kind PINNED_PRODUCTION \
+            --supervisor-key-id supervisor:test-b \
+            --evidence-issued-at 2026-10-06T02:30:00Z \
+            --now 2026-10-06T03:00:00Z \
+            --out "$RUNNER_TEMP/forbidden-production-copy"; then
+            echo "un-pinned_external_copy_escalated_to_production" >&2
+            exit 1
+          fi
+
+      - name: Record trust-root receipt digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/client-c5-supervisor-trust-root-resolution"
+          receipt="$out/trust-root-resolution-receipt.json"
+          sha="$(sha256sum "$receipt" | awk '{print $1}')"
+          printf '%s  %s\n' "$sha" "trust-root-resolution-receipt.json" > "$out/trust-root-resolution-receipt.sha256"
+
+      - name: Prove verifier checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload independent trust-root resolution receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-supervisor-trust-root-resolution-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/client-c5-supervisor-trust-root-resolution/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
