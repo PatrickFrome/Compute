@@ -14,6 +14,7 @@ const root = new URL('..', import.meta.url);
 const mainEntry = await readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
 const finalEntry = await readFile(new URL('../src/final-runtime-entry.mjs', import.meta.url), 'utf8');
 const activationRegistry = await readFile(new URL('../src/final-runtime-activation-registry.mjs', import.meta.url), 'utf8');
+const packageWorkflow = await readFile(new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url), 'utf8');
 
 function runNode(args) {
   return new Promise((resolve, reject) => {
@@ -50,6 +51,12 @@ test('installed goal journal probe is machine-readable and excludes Browser runt
   for (const source of [finalEntry, activationRegistry]) {
     assert.match(source, /--metaengine-client-goal-journal-probe/);
   }
+});
+
+test('physical Windows restart step is PowerShell-parse-safe before expensive packaging', () => {
+  assert.match(packageWorkflow, /installed_restart_probe_exit:\{0\}:\{1\}/);
+  assert.doesNotMatch(packageWorkflow, /installed_restart_probe_exit:\$stem:/);
+  assert.match(packageWorkflow, /Prove installed Client useful-work journal survives process restart without replay/);
 });
 
 test('shared file store uses exact profile-local journal filename and atomic temp rename path', async () => {
