@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   CLIENT_C5_LIVE_ARTIFACT_VERIFICATION_SCHEMA,
@@ -397,6 +398,6 @@ async function main() {
   process.stdout.write(stableClientC5Json(manifest));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   await main();
 }
