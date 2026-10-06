@@ -364,33 +364,24 @@ export function normalizeClientUsefulWorkProof(value, executionProof) {
 
 
 export function clientUsefulWorkProofMatchesExecution(proof, executionProof) {
-  const row = object(proof);
+  let row;
+  try {
+    row = normalizeClientUsefulWorkProof(proof, executionProof);
+  } catch {
+    return false;
+  }
   const execution = object(executionProof);
-  const artifact = object(row?.artifact);
-  const review = object(row?.review);
   const result = object(execution?.result_proof);
   const origin = object(execution?.agent_origin_proof);
   if (
-    !row || !execution
-    || row.schema !== CLIENT_USEFUL_WORK_PROOF_SCHEMA
-    || row.found !== true
+    row.found !== true
     || row.user_goal_to_verified_artifact_readback !== true
     || row.serial_loop_end_to_end !== true
     || row.authority_effect !== false
     || row.automatic_retry_allowed !== false
+    || !execution
     || execution.schema !== 'metaengine.client.goal-execution-proof.v1'
     || execution.found !== true
-    || execution.authority_effect !== false
-    || execution.automatic_retry_allowed !== false
-    || !artifact
-    || artifact.artifact_verified !== true
-    || !digest(artifact.artifact_sha256)
-    || !digest(artifact.provenance_sha256)
-    || !digest(artifact.verification_receipt_sha256)
-    || !review
-    || review.accepted !== true
-    || review.independent_verifier !== true
-    || review.accepted_artifact_sha256 !== artifact.artifact_sha256
     || !result
     || !origin
   ) return false;
