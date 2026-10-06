@@ -1,0 +1,319 @@
+name: Client Windows Real VM Install E2E
+
+on:
+  push:
+    branches:
+      - 'work/client-windows-real-vm-install-e2e-v1'
+    paths:
+      - '.github/workflows/client-windows-real-vm-install-e2e.yml'
+      - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PRODUCER_HEAD: eb08a46ad5093bfb0b2e17da6acc6b01fb9996f8
+  PRODUCER_RUN_ID: '37359662845'
+  PRODUCER_RUN_NUMBER: '3381'
+  PRODUCER_RUN_ATTEMPT: '1'
+  PRODUCER_WORKFLOW: browser-windows-package-smoke.yml
+  PRODUCER_ARTIFACT_ID: '11366401470'
+  PRODUCER_ARTIFACT_NAME: metaengine-browser-windows-candidate-eb08a46ad5093bfb0b2e17da6acc6b01fb9996f8
+  PRODUCER_ARTIFACT_DIGEST: sha256:79c2a15ae91c45f3ae674e6f12d980177d7f50fdf6af5e22c1d95f6c6ff62380
+  PRODUCER_PACKAGE_VERSION: 0.7.0-dev.37350000001.1
+
+jobs:
+  fresh-windows-vm-install-e2e:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact qualification head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact qualification head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Prove client tree is byte-identical to immutable producer source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$PRODUCER_HEAD"
+          changed="$(git diff --name-only "$PRODUCER_HEAD" "$GITHUB_SHA" -- apps/metaengine-browser apps/me2-ui apps/me2-daemon)"
+          if [ -n "$changed" ]; then
+            printf '%s\n' "$changed" >&2
+            echo "client_tree_drift_from_producer" >&2
+            exit 1
+          fi
+          echo "client_tree_equal_to_producer:$PRODUCER_HEAD"
+
+      - name: Setup frozen Node runtime for evidence verification
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Capture and prove fresh GitHub Windows VM identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw "runner_os_invalid:$env:RUNNER_OS" }
+          $os = Get-CimInstance Win32_OperatingSystem
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          if (-not [bool]$computer.HypervisorPresent) { throw 'github_windows_runner_hypervisor_not_present' }
+          $proof = @{
+            schema='metaengine.client.github-windows-vm-identity.v1'
+            qualification_head=$env:GITHUB_SHA
+            runner_os=$env:RUNNER_OS
+            runner_arch=$env:RUNNER_ARCH
+            image_os=$env:ImageOS
+            image_version=$env:ImageVersion
+            computer_name=$env:COMPUTERNAME
+            os_caption=[string]$os.Caption
+            os_version=[string]$os.Version
+            os_build=[string]$os.BuildNumber
+            os_architecture=[string]$os.OSArchitecture
+            manufacturer=[string]$computer.Manufacturer
+            model=[string]$computer.Model
+            hypervisor_present=[bool]$computer.HypervisorPresent
+            logical_processors=[int]$computer.NumberOfLogicalProcessors
+            total_physical_memory_bytes=[int64]$computer.TotalPhysicalMemory
+            cpu_name=[string]$cpu.Name
+            fresh_host_preinstall_verified=$false
+            authority_effect=$false
+          }
+          $proof | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\windows-vm-identity.json" -Encoding utf8
+          Write-Host ($proof | ConvertTo-Json -Compress -Depth 5)
+
+      - name: Require clean pre-install host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          if (Test-Path $installRoot) { throw "preinstall_root_exists:$installRoot" }
+          $existing = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } | Where-Object { [string]$_.DisplayName -eq 'METAENGINE Browser Test' })
+          if ($existing.Count -ne 0) { throw "preinstall_uninstall_registry_exists:$($existing.Count)" }
+          $running = @(Get-CimInstance Win32_Process -Filter "Name='METAENGINE Browser Test.exe'" -ErrorAction SilentlyContinue)
+          if ($running.Count -ne 0) { throw "preinstall_process_exists:$($running.Count)" }
+          $proofPath = "$env:RUNNER_TEMP\windows-vm-identity.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $proof.fresh_host_preinstall_verified = $true
+          $proof | ConvertTo-Json -Depth 5 | Set-Content $proofPath -Encoding utf8
+
+      - name: Validate immutable producer artifact metadata and download exact bytes
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $artifactUri = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:PRODUCER_ARTIFACT_ID"
+          $meta = Invoke-RestMethod -Method Get -Uri $artifactUri -Headers $headers
+          if ([string]$meta.id -ne [string]$env:PRODUCER_ARTIFACT_ID) { throw 'producer_artifact_id_mismatch' }
+          if ([string]$meta.name -ne [string]$env:PRODUCER_ARTIFACT_NAME) { throw 'producer_artifact_name_mismatch' }
+          if ([bool]$meta.expired) { throw 'producer_artifact_expired' }
+          if ([string]$meta.digest -ne [string]$env:PRODUCER_ARTIFACT_DIGEST) { throw "producer_artifact_digest_mismatch:$($meta.digest)" }
+          if ([string]$meta.workflow_run.id -ne [string]$env:PRODUCER_RUN_ID) { throw 'producer_artifact_run_id_mismatch' }
+          if ([string]$meta.workflow_run.head_sha -ne [string]$env:PRODUCER_HEAD) { throw 'producer_artifact_head_mismatch' }
+          $downloadRoot = "$env:RUNNER_TEMP\immutable-candidate"
+          Remove-Item $downloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+          node scripts/installer-provenance.mjs download --repository "$env:GITHUB_REPOSITORY" --run-id "$env:PRODUCER_RUN_ID" --artifact "$env:PRODUCER_ARTIFACT_NAME" --artifact-id "$env:PRODUCER_ARTIFACT_ID" --out $downloadRoot
+          if ($LASTEXITCODE -ne 0) { throw 'immutable_candidate_download_failed' }
+          $zip = Join-Path $downloadRoot 'artifact.zip'
+          if (-not (Test-Path $zip -PathType Leaf)) { throw 'immutable_candidate_zip_missing' }
+          $payload = Join-Path $downloadRoot 'payload'
+          Expand-Archive -Path $zip -DestinationPath $payload -Force
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_CANDIDATE_PAYLOAD=$payload" -Encoding utf8
+          @{
+            schema='metaengine.client.windows-vm-producer-artifact.v1'
+            producer_head=$env:PRODUCER_HEAD
+            producer_run_id=[int64]$env:PRODUCER_RUN_ID
+            producer_run_number=[int64]$env:PRODUCER_RUN_NUMBER
+            producer_run_attempt=[int]$env:PRODUCER_RUN_ATTEMPT
+            artifact_id=[int64]$env:PRODUCER_ARTIFACT_ID
+            artifact_name=$env:PRODUCER_ARTIFACT_NAME
+            artifact_digest=$env:PRODUCER_ARTIFACT_DIGEST
+            artifact_expired=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP\producer-artifact-proof.json" -Encoding utf8
+
+      - name: Verify installer provenance, build identity and dependency material
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:ME2_CANDIDATE_PAYLOAD) { throw 'candidate_payload_env_missing' }
+          $binding = "$env:RUNNER_TEMP\consumer-binding.json"
+          node scripts/installer-provenance.mjs verify --dir "$env:ME2_CANDIDATE_PAYLOAD" --expect-head "$env:PRODUCER_HEAD" --expect-run-id "$env:PRODUCER_RUN_ID" --expect-run-number "$env:PRODUCER_RUN_NUMBER" --expect-run-attempt "$env:PRODUCER_RUN_ATTEMPT" --expect-workflow "$env:PRODUCER_WORKFLOW" --config electron-builder.test.json --state $binding
+          if ($LASTEXITCODE -ne 0) { throw 'immutable_candidate_provenance_verify_failed' }
+          $verified = Get-Content $binding -Raw | ConvertFrom-Json
+          if ([string]$verified.source_head -ne [string]$env:PRODUCER_HEAD -or [string]$verified.package_version -ne [string]$env:PRODUCER_PACKAGE_VERSION -or [string]$verified.provenance_run_id -ne [string]$env:PRODUCER_RUN_ID -or $verified.build_identity_verified -ne $true -or $verified.dependency_resolution_verified -ne $true -or $verified.package_lock_verified -ne $true -or $verified.me2_ui_bun_lock_verified -ne $true -or $verified.blockmap_verified -ne $true -or $verified.config_verified -ne $true) { throw 'immutable_candidate_binding_invalid' }
+          if (-not (Test-Path ([string]$verified.installer_path) -PathType Leaf)) { throw 'verified_installer_path_missing' }
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_INSTALLER_PATH=$([string]$verified.installer_path)" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_INSTALLER_SHA256=$([string]$verified.installer_sha256)" -Encoding utf8
+
+      - name: Install immutable candidate and qualify installed runtime
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = [string]$env:ME2_INSTALLER_PATH
+          if (-not (Test-Path $installer -PathType Leaf)) { throw 'qualified_installer_missing' }
+          $actualInstallerSha = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualInstallerSha -ne [string]$env:ME2_INSTALLER_SHA256) { throw 'qualified_installer_digest_drift' }
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "installer_exit_$($install.ExitCode)" }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw "installed_browser_missing:$app" }
+          Get-CimInstance Win32_Process -Filter "Name='METAENGINE Browser Test.exe'" -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }
+          Start-Sleep -Milliseconds 800
+
+          $uiEvidence = "$env:RUNNER_TEMP\windows-vm-installed-ui-proof.json"
+          node scripts/verify-me2-ui-bundle.mjs --root (Join-Path $installRoot 'resources\me2-ui') --expected-sha "$env:PRODUCER_HEAD" --runtime $app --smoke --evidence $uiEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'windows_vm_installed_ui_invalid' }
+          $ui = Get-Content $uiEvidence -Raw | ConvertFrom-Json
+          if ($ui.runtime_smoke -ne 'PASS' -or [int64]$ui.installed_size_bytes -ne [int64]$ui.manifest_size_bytes) { throw 'windows_vm_installed_ui_proof_invalid' }
+
+          $daemonEvidence = "$env:RUNNER_TEMP\windows-vm-installed-daemon-proof.json"
+          node scripts/verify-me2-daemon-bundle.mjs --root (Join-Path $installRoot 'resources\me2-daemon') --expected-sha "$env:PRODUCER_HEAD" --smoke --evidence $daemonEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'windows_vm_installed_daemon_invalid' }
+          $daemon = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
+          if ($daemon.runtime_smoke -ne 'PASS' -or $daemon.external_bun_required -ne $false -or $daemon.smoke_child_external_runtime_path_sanitized -ne $true) { throw 'windows_vm_installed_daemon_proof_invalid' }
+
+          $versionOut = "$env:RUNNER_TEMP\windows-vm-version.out"
+          $versionErr = "$env:RUNNER_TEMP\windows-vm-version.err"
+          $versionProcess = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $versionOut -RedirectStandardError $versionErr
+          $null = $versionProcess.Handle
+          if (-not $versionProcess.WaitForExit(15000)) { try { Stop-Process -Id $versionProcess.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'windows_vm_version_probe_timeout' }
+          if ($versionProcess.ExitCode -ne 0) { Get-Content $versionErr -ErrorAction SilentlyContinue; throw "windows_vm_version_probe_exit_$($versionProcess.ExitCode)" }
+          $versionLine = Get-Content $versionOut -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+          if (-not $versionLine) { throw 'windows_vm_version_probe_output_missing' }
+          $version = $versionLine | ConvertFrom-Json
+          if ([string]$version.version -ne [string]$env:PRODUCER_PACKAGE_VERSION -or $version.primary_instance -ne $true) { throw 'windows_vm_version_probe_mismatch' }
+
+          $profileOut = "$env:RUNNER_TEMP\windows-vm-profile.out"
+          $profileErr = "$env:RUNNER_TEMP\windows-vm-profile.err"
+          $priorProfileWrite = $env:METAENGINE_PROFILE_PROBE_WRITE
+          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+          try {
+            $profileProcess = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+            $null = $profileProcess.Handle
+            if (-not $profileProcess.WaitForExit(15000)) { try { Stop-Process -Id $profileProcess.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'windows_vm_profile_probe_timeout' }
+            if ($profileProcess.ExitCode -ne 0) { throw "windows_vm_profile_probe_exit_$($profileProcess.ExitCode)" }
+          } finally {
+            $env:METAENGINE_PROFILE_PROBE_WRITE = $priorProfileWrite
+          }
+          $profileLine = Get-Content $profileOut -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+          if (-not $profileLine) { throw 'windows_vm_profile_probe_output_missing' }
+          $profile = $profileLine | ConvertFrom-Json
+          if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or -not [string]$profile.user_data_path) { throw 'windows_vm_profile_probe_invalid' }
+
+          $normalOut = "$env:RUNNER_TEMP\windows-vm-normal.out"
+          $normalErr = "$env:RUNNER_TEMP\windows-vm-normal.err"
+          $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
+          $null = $normal.Handle
+          Start-Sleep -Seconds 10
+          $normal.Refresh()
+          if ($normal.HasExited) { Get-Content $normalOut -ErrorAction SilentlyContinue; Get-Content $normalErr -ErrorAction SilentlyContinue; throw "windows_vm_normal_ui_exited_early:$($normal.ExitCode)" }
+          $normalPid = $normal.Id
+          cmd.exe /d /c "taskkill.exe /PID $normalPid /T /F >nul 2>&1 & exit /b 0" | Out-Null
+          Start-Sleep -Milliseconds 500
+
+          $appSha = (Get-FileHash $app -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{
+            schema='metaengine.client.windows-real-vm-install-e2e.v1'
+            qualification_head=$env:GITHUB_SHA
+            producer_head=$env:PRODUCER_HEAD
+            producer_run_id=[int64]$env:PRODUCER_RUN_ID
+            producer_artifact_id=[int64]$env:PRODUCER_ARTIFACT_ID
+            producer_package_version=$env:PRODUCER_PACKAGE_VERSION
+            client_tree_equal_to_producer=$true
+            installer_sha256=$actualInstallerSha
+            installed_executable_path=$app
+            installed_executable_sha256=$appSha
+            me2_ui_runtime_smoke='PASS'
+            me2_daemon_runtime_smoke='PASS'
+            version_probe_verified=$true
+            profile_probe_verified=$true
+            user_data_path=[string]$profile.user_data_path
+            normal_ui_alive_after_10_seconds=$true
+            uninstall_verified=$false
+            install_root_removed=$false
+            uninstall_registry_removed=$false
+            signed_candidate=$false
+            published=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\windows-real-vm-install-e2e-proof.json" -Encoding utf8
+
+      - name: Uninstall candidate and prove clean removal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-real-vm-install-e2e-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          Get-CimInstance Win32_Process -Filter "Name='METAENGINE Browser Test.exe'" -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }
+          Start-Sleep -Milliseconds 500
+          $uninstallers = @(Get-ChildItem $installRoot -Filter 'Uninstall*.exe' -File -ErrorAction SilentlyContinue)
+          if ($uninstallers.Count -ne 1) { throw "uninstaller_cardinality_invalid:$($uninstallers.Count)" }
+          $uninstall = Start-Process -FilePath $uninstallers[0].FullName -ArgumentList '/S' -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) { throw "uninstaller_exit_$($uninstall.ExitCode)" }
+          $deadline = [DateTime]::UtcNow.AddSeconds(30)
+          while ([DateTime]::UtcNow -lt $deadline -and (Test-Path $installRoot)) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path $app -PathType Leaf) { throw 'installed_binary_survived_uninstall' }
+          if (Test-Path $installRoot) { throw 'install_root_survived_uninstall' }
+          $registry = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } | Where-Object { [string]$_.DisplayName -eq 'METAENGINE Browser Test' })
+          if ($registry.Count -ne 0) { throw "uninstall_registry_survived:$($registry.Count)" }
+          $processes = @(Get-CimInstance Win32_Process -Filter "Name='METAENGINE Browser Test.exe'" -ErrorAction SilentlyContinue)
+          if ($processes.Count -ne 0) { throw "browser_process_survived_uninstall:$($processes.Count)" }
+          $proof.uninstall_verified = $true
+          $proof.install_root_removed = $true
+          $proof.uninstall_registry_removed = $true
+          $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+          Write-Host ($proof | ConvertTo-Json -Compress -Depth 6)
+
+      - name: Prove qualification checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser apps/me2-ui apps/me2-daemon)"
+
+      - name: Upload Windows VM installation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-client-windows-real-vm-e2e-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/windows-vm-identity.json
+            ${{ runner.temp }}/producer-artifact-proof.json
+            ${{ runner.temp }}/consumer-binding.json
+            ${{ runner.temp }}/windows-vm-installed-ui-proof.json
+            ${{ runner.temp }}/windows-vm-installed-daemon-proof.json
+            ${{ runner.temp }}/windows-vm-version.out
+            ${{ runner.temp }}/windows-vm-version.err
+            ${{ runner.temp }}/windows-vm-profile.out
+            ${{ runner.temp }}/windows-vm-profile.err
+            ${{ runner.temp }}/windows-vm-normal.out
+            ${{ runner.temp }}/windows-vm-normal.err
+            ${{ runner.temp }}/windows-real-vm-install-e2e-proof.json
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 0
