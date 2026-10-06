@@ -1,0 +1,312 @@
+name: Client V1 LIVE Development Candidate Audit
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-live-development-candidate-v1'
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/**'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-fast-physical.ps1'
+      - 'apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - 'research/METAENGINE_CLIENT_V1_LIVE_DEVELOPMENT_CANDIDATE_AUDIT_2026-10-06.md'
+      - '.github/workflows/client-v1-live-development-candidate.yml'
+  pull_request:
+    paths:
+      - 'coordination/client-v1/c5-live-readiness/**'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-fast-physical.ps1'
+      - 'apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - 'research/METAENGINE_CLIENT_V1_LIVE_DEVELOPMENT_CANDIDATE_AUDIT_2026-10-06.md'
+      - '.github/workflows/client-v1-live-development-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prelive-vector-producer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    outputs:
+      material_artifact_id: ${{ steps.material.outputs.artifact-id }}
+      material_artifact_digest: ${{ steps.material.outputs.artifact-digest }}
+      pin_artifact_id: ${{ steps.pin.outputs.artifact-id }}
+      pin_artifact_digest: ${{ steps.pin.outputs.artifact-digest }}
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse all pre-live C5 sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs
+          )
+          for file in "${files[@]}"; do node --check "$file"; done
+
+      - name: Prove pre-live verifier surfaces have no provider transport or private keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs
+          )
+          if grep -En 'fetch\(|client-goal-submit|device/enrollment|supabase\.co|METAENGINE_CLIENT_V1_CANARY_BASE|BEGIN .*PRIVATE KEY|service_role' "${files[@]}"; then
+            echo "prelive_verifier_transport_or_secret_dependency_forbidden" >&2
+            exit 1
+          fi
+
+      - name: Run critical C5 adversarial suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs \
+            coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs \
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs \
+            apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs \
+            apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs
+
+      - name: Generate exact-head readiness capsule
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs \
+            --repository "$GITHUB_WORKSPACE" \
+            --repository-name "$GITHUB_REPOSITORY" \
+            --head "$EXPECTED_HEAD" \
+            --out "$RUNNER_TEMP/prelive/readiness"
+
+      - name: Generate controlled signed useful-work evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/prelive"
+          node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-test-vector.mjs \
+            --capsule "$RUNNER_TEMP/prelive/readiness/client-c5-live-readiness-capsule.json" \
+            --artifact "$RUNNER_TEMP/prelive/readiness/expected-live-artifact.json" \
+            --out "$RUNNER_TEMP/prelive/evidence"
+
+      - name: Bind trust-root candidate to the exact evidence signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/prelive/evidence"
+          key_id="$(node -p "require(process.argv[1]).key_id" "$evidence/supervisor-envelope.json")"
+          test -n "$key_id"
+          node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-test-vector.mjs \
+            --supervisor-public-key "$evidence/test-vector-supervisor-public-key.pem" \
+            --supervisor-key-id "$key_id" \
+            --out "$RUNNER_TEMP/prelive/trust"
+
+      - name: Create separately delivered controlled pre-live pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          trust="$RUNNER_TEMP/prelive/trust"
+          pin="$RUNNER_TEMP/prelive-pin"
+          mkdir -p "$pin"
+          cp "$trust/controlled-bootstrap-root-public-key.pem" "$pin/bootstrap-root-public-key.pem"
+          digest="$(node -p "require(process.argv[1]).controlled_bootstrap_spki_sha256" "$trust/test-vector-manifest.json")"
+          test "${#digest}" = "64"
+          printf '%s\n' "$digest" > "$pin/bootstrap-root-spki-sha256.txt"
+          cat > "$pin/pin-context.json" <<EOF
+          {
+            "schema": "metaengine.client-v1.c5-live-development-pin-context.v1",
+            "evidence_context": "CONTROLLED_PRELIVE_SIMULATION",
+            "source_head": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "production_governance_proven": false,
+            "production_trust_root_verified": false,
+            "live_effect_authorized": false,
+            "canonical_c2_promotion_authorized": false,
+            "authority_effect": false
+          }
+          EOF
+
+      - name: Prove producer material cannot claim real LIVE or production governance
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/prelive/evidence/test-vector-manifest.json"
+          trust="$RUNNER_TEMP/prelive/trust/test-vector-manifest.json"
+          pin="$RUNNER_TEMP/prelive-pin/pin-context.json"
+          test "$(node -p "require(process.argv[1]).evidence_context" "$evidence")" = "CONTROLLED_TEST_VECTOR"
+          test "$(node -p "require(process.argv[1]).provider_contacted" "$evidence")" = "false"
+          test "$(node -p "require(process.argv[1]).goal_submitted" "$evidence")" = "false"
+          test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$evidence")" = "false"
+          test "$(node -p "require(process.argv[1]).production_bootstrap_proven" "$trust")" = "false"
+          test "$(node -p "require(process.argv[1]).production_governance_proven" "$pin")" = "false"
+          if grep -R -n --binary-files=without-match 'BEGIN .*PRIVATE KEY' "$RUNNER_TEMP/prelive" "$RUNNER_TEMP/prelive-pin"; then
+            echo "prelive_private_key_persisted" >&2
+            exit 1
+          fi
+
+      - name: Prove checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable pre-live material
+        id: material
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-v1-prelive-material-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/prelive/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload separately delivered controlled pin
+        id: pin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-v1-prelive-pin-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/prelive-pin/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  independent-prelive-consumer:
+    needs: prelive-vector-producer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact verifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Prove independent exact verifier head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Download immutable pre-live material by id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.prelive-vector-producer.outputs.material_artifact_id }}
+          path: ${{ runner.temp }}/prelive
+
+      - name: Download separately delivered controlled pin by id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.prelive-vector-producer.outputs.pin_artifact_id }}
+          path: ${{ runner.temp }}/prelive-pin
+
+      - name: Reverify root chain and signed useful-work evidence together
+        shell: bash
+        run: |
+          set -euo pipefail
+          material="$RUNNER_TEMP/prelive"
+          pin="$RUNNER_TEMP/prelive-pin"
+          receipt="$RUNNER_TEMP/live-development-verification-receipt.json"
+          expected_pin="$(tr -d '\r\n' < "$pin/bootstrap-root-spki-sha256.txt")"
+          node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs \
+            --bundle "$material/evidence" \
+            --trust-root-kind LIVE_DEVELOPMENT_TRUST \
+            --trust-root-bundle "$material/trust" \
+            --bootstrap-key "$pin/bootstrap-root-public-key.pem" \
+            --expected-bootstrap-spki-sha256 "$expected_pin" \
+            --now 2026-10-06T03:00:00Z \
+            --out "$receipt"
+          test "$(node -p "require(process.argv[1]).verification_state" "$receipt")" = "LIVE_DEVELOPMENT_EVIDENCE_VERIFIED"
+          test "$(node -p "require(process.argv[1]).live_development_trust_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).production_trust_root_verified" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).canonical_c2_promotion_authorized" "$receipt")" = "false"
+          test "$(node -p "require(process.argv[1]).authority_effect" "$receipt")" = "false"
+
+      - name: Prove production shortcut does not exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          material="$RUNNER_TEMP/prelive"
+          pin="$RUNNER_TEMP/prelive-pin"
+          if node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs \
+            --bundle "$material/evidence" \
+            --trust-root-kind PINNED_PRODUCTION \
+            --trust-root-bundle "$material/trust" \
+            --bootstrap-key "$pin/bootstrap-root-public-key.pem" \
+            --expected-bootstrap-spki-sha256 "$(tr -d '\r\n' < "$pin/bootstrap-root-spki-sha256.txt")" \
+            --now 2026-10-06T03:00:00Z \
+            --out "$RUNNER_TEMP/forbidden-production-receipt.json"; then
+            echo "production_shortcut_unexpectedly_available" >&2
+            exit 1
+          fi
+
+      - name: Record independent pre-live receipt digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/live-development-verification-receipt.json"
+          sha="$(sha256sum "$receipt" | awk '{print $1}')"
+          test "${#sha}" = "64"
+          printf '%s  %s\n' "$sha" "live-development-verification-receipt.json" > "$RUNNER_TEMP/live-development-verification-receipt.sha256"
+
+      - name: Prove verifier checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload independent pre-live verification receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-v1-prelive-independent-verification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/live-development-verification-receipt.json
+            ${{ runner.temp }}/live-development-verification-receipt.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

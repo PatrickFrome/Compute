@@ -172,13 +172,15 @@ jobs:
           test "$(node -p "require(process.argv[1]).old_root_threshold_verified" "$receipt")" = "true"
           test "$(node -p "require(process.argv[1]).new_root_threshold_verified" "$receipt")" = "true"
           test "$(node -p "require(process.argv[1]).supervisor_key_resolved" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).bootstrap_material_verified" "$receipt")" = "true"
+          test "$(node -p "require(process.argv[1]).live_development_pin_verified" "$receipt")" = "false"
           test "$(node -p "require(process.argv[1]).production_bootstrap_proven" "$receipt")" = "false"
           test "$(node -p "require(process.argv[1]).live_effect_authorized" "$receipt")" = "false"
           test "$(node -p "require(process.argv[1]).client_c5_live_useful_work_verified" "$receipt")" = "false"
           test "$(node -p "require(process.argv[1]).canonical_c2_promotion_authorized" "$receipt")" = "false"
           test "$(node -p "require(process.argv[1]).authority_effect" "$receipt")" = "false"
 
-      - name: Prove bundle-contained root key cannot become production bootstrap
+      - name: Prove bundle-contained root key cannot become LIVE-development pin
         shell: bash
         run: |
           set -euo pipefail
@@ -186,17 +188,17 @@ jobs:
           if node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs \
             --bundle "$bundle" \
             --bootstrap-key "$bundle/controlled-bootstrap-root-public-key.pem" \
-            --trust-root-kind PINNED_PRODUCTION \
+            --trust-root-kind LIVE_DEVELOPMENT_PIN \
             --expected-bootstrap-spki-sha256 "$(node -p "require(process.argv[1]).controlled_bootstrap_spki_sha256" "$bundle/test-vector-manifest.json")" \
             --supervisor-key-id supervisor:test-b \
             --evidence-issued-at 2026-10-06T02:30:00Z \
             --now 2026-10-06T03:00:00Z \
-            --out "$RUNNER_TEMP/forbidden-production"; then
-            echo "bundle_contained_root_escalated_to_production" >&2
+            --out "$RUNNER_TEMP/forbidden-live-development"; then
+            echo "bundle_contained_root_escalated_to_live_development" >&2
             exit 1
           fi
 
-      - name: Prove external copy without independently pinned digest cannot become production bootstrap
+      - name: Prove external copy without digest pin cannot become LIVE-development trust
         shell: bash
         run: |
           set -euo pipefail
@@ -205,12 +207,12 @@ jobs:
           if node coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root-verify.mjs \
             --bundle "$bundle" \
             --bootstrap-key "$RUNNER_TEMP/copied-root.pem" \
-            --trust-root-kind PINNED_PRODUCTION \
+            --trust-root-kind LIVE_DEVELOPMENT_PIN \
             --supervisor-key-id supervisor:test-b \
             --evidence-issued-at 2026-10-06T02:30:00Z \
             --now 2026-10-06T03:00:00Z \
-            --out "$RUNNER_TEMP/forbidden-production-copy"; then
-            echo "un-pinned_external_copy_escalated_to_production" >&2
+            --out "$RUNNER_TEMP/forbidden-live-development-copy"; then
+            echo "un-pinned_external_copy_escalated_to_live_development" >&2
             exit 1
           fi
 

@@ -9,6 +9,11 @@ import {
   sha256ClientC5,
   stableClientC5Json,
 } from './client-c5-live-readiness.mjs';
+import {
+  resolveClientC5SupervisorReadbackKey,
+  verifyClientC5SupervisorTrustRootBootstrap,
+  verifyClientC5SupervisorTrustRootTransition,
+} from './client-c5-supervisor-trust-root.mjs';
 
 export const CLIENT_C5_LIVE_SUPERVISOR_READBACK_SCHEMA = 'metaengine.client-v1.c5-live-supervisor-readback.v1';
 export const CLIENT_C5_LIVE_SUPERVISOR_ENVELOPE_SCHEMA = 'metaengine.client-v1.c5-live-supervisor-envelope.v1';
@@ -23,7 +28,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const SAFE_KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
 const UTC_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const ED25519_SIGNATURE_BASE64URL_RE = /^[A-Za-z0-9_-]{86}$/;
-const LIVE_TRUST_ROOT_KIND = 'PINNED_SUPERVISOR';
+const LIVE_DEVELOPMENT_CONTEXT = 'LIVE_DEVELOPMENT_TRUST';
 const CONTROLLED_TRUST_ROOT_KIND = 'CONTROLLED_TEST_VECTOR';
 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -48,6 +53,8 @@ function fail(reason, extra = {}) {
     reason,
     signed_supervisor_readback_verified: false,
     trusted_supervisor_key_verified: false,
+    live_development_trust_verified: false,
+    production_trust_root_verified: false,
     exact_capsule_binding_verified: false,
     exact_dispatch_authorization_verified: false,
     exact_submission_binding_verified: false,
@@ -231,7 +238,7 @@ export function clientC5LiveSupervisorEnvelopeDigest(envelope) {
   });
 }
 
-export function verifyClientC5LiveEvidence({
+function verifyClientC5LiveEvidenceCore({
   capsule: capsuleValue,
   dispatch_authorization: dispatchAuthorizationValue,
   submission_receipt: submissionReceipt,
@@ -243,7 +250,8 @@ export function verifyClientC5LiveEvidence({
   review_receipt: reviewValue,
   supervisor_envelope: supervisorEnvelope,
   trusted_supervisor_public_keys = {},
-  trust_root_kind = LIVE_TRUST_ROOT_KIND,
+  verification_context = CONTROLLED_TRUST_ROOT_KIND,
+  trust_metadata = null,
 } = {}) {
   let capsule;
   let dispatchAuthorization;
@@ -476,9 +484,9 @@ export function verifyClientC5LiveEvidence({
     });
   }
 
-  const trustRootKind = String(trust_root_kind || '');
-  if (![LIVE_TRUST_ROOT_KIND, CONTROLLED_TRUST_ROOT_KIND].includes(trustRootKind)) {
-    return fail('TRUST_ROOT_KIND_INVALID', {
+  const verificationContext = String(verification_context || '');
+  if (![LIVE_DEVELOPMENT_CONTEXT, CONTROLLED_TRUST_ROOT_KIND].includes(verificationContext)) {
+    return fail('TRUST_CONTEXT_INVALID', {
       signed_supervisor_readback_verified: true,
       exact_capsule_binding_verified: true,
       exact_dispatch_authorization_verified: true,
@@ -492,11 +500,35 @@ export function verifyClientC5LiveEvidence({
     });
   }
 
-  const liveAccepted = trustRootKind === LIVE_TRUST_ROOT_KIND;
+  const liveAccepted = verificationContext === LIVE_DEVELOPMENT_CONTEXT;
+  if (liveAccepted && (
+    !trust_metadata
+    || trust_metadata.live_development_pin_verified !== true
+    || trust_metadata.bootstrap_material_verified !== true
+    || trust_metadata.production_bootstrap_proven !== false
+    || trust_metadata.supervisor_key_id !== signature.key_id
+    || trust_metadata.evidence_issued_at !== claims.issued_at
+  )) {
+    return fail('LIVE_DEVELOPMENT_TRUST_CONTEXT_INVALID', {
+      signed_supervisor_readback_verified: true,
+      exact_capsule_binding_verified: true,
+      exact_dispatch_authorization_verified: true,
+      exact_submission_binding_verified: true,
+      exact_execution_binding_verified: true,
+      exact_useful_work_binding_verified: true,
+      artifact_subject_verified: true,
+      provenance_verified: true,
+      artifact_verification_receipt_verified: true,
+      independent_review_verified: true,
+    });
+  }
   return Object.freeze({
     schema: CLIENT_C5_LIVE_INDEPENDENT_RECEIPT_SCHEMA,
-    verification_state: liveAccepted ? 'LIVE_EVIDENCE_VERIFIED' : 'CONTROLLED_TEST_VECTOR_VERIFIED',
-    reason: liveAccepted ? 'EXACT_SIGNED_LIVE_EVIDENCE' : 'STRUCTURAL_CRYPTOGRAPHIC_TEST_ONLY',
+    verification_state: liveAccepted ? 'LIVE_DEVELOPMENT_EVIDENCE_VERIFIED' : 'CONTROLLED_TEST_VECTOR_VERIFIED',
+    reason: liveAccepted ? 'EXACT_SIGNED_LIVE_DEVELOPMENT_EVIDENCE' : 'STRUCTURAL_CRYPTOGRAPHIC_TEST_ONLY',
+    trust_context: verificationContext,
+    live_development_trust_verified: liveAccepted,
+    production_trust_root_verified: false,
     capsule_sha256: capsule.capsule_sha256,
     source_head: capsule.source_head,
     supervisor_key_id: signature.key_id,
@@ -539,13 +571,95 @@ export function verifyClientC5LiveEvidence({
   });
 }
 
+export function verifyClientC5LiveEvidence(input = {}) {
+  return verifyClientC5LiveEvidenceCore({
+    ...input,
+    verification_context: CONTROLLED_TRUST_ROOT_KIND,
+    trust_metadata: null,
+  });
+}
+
+export function verifyClientC5LiveDevelopmentEvidence({
+  trust_root_bootstrap_manifest,
+  trust_root_bootstrap_signature_envelope,
+  trust_root_candidate_manifest,
+  trust_root_candidate_signature_envelope,
+  pinned_root_public_keys = {},
+  expected_pinned_root_spki_sha256 = {},
+  now = new Date(),
+  ...evidence
+} = {}) {
+  const supervisorEnvelope = evidence.supervisor_envelope;
+  const supervisorKeyId = String(supervisorEnvelope?.key_id || '');
+  const evidenceIssuedAt = String(supervisorEnvelope?.claims?.issued_at || '');
+
+  const bootstrap = verifyClientC5SupervisorTrustRootBootstrap({
+    manifest: trust_root_bootstrap_manifest,
+    signature_envelope: trust_root_bootstrap_signature_envelope,
+    pinned_root_public_keys,
+    expected_pinned_root_spki_sha256,
+    pin_mode: 'LIVE_DEVELOPMENT_PIN',
+    now,
+  });
+  if (
+    bootstrap.action !== 'TRUST_ROOT_ACCEPTED'
+    || bootstrap.bootstrap_material_verified !== true
+    || bootstrap.live_development_pin_verified !== true
+    || bootstrap.production_bootstrap_proven !== false
+  ) {
+    return fail('LIVE_DEVELOPMENT_TRUST_BOOTSTRAP_INVALID');
+  }
+
+  const transition = verifyClientC5SupervisorTrustRootTransition({
+    current_manifest: trust_root_bootstrap_manifest,
+    candidate_manifest: trust_root_candidate_manifest,
+    candidate_signature_envelope: trust_root_candidate_signature_envelope,
+    now,
+  });
+  if (transition.action !== 'TRUST_ROOT_ACCEPTED') {
+    return fail('LIVE_DEVELOPMENT_TRUST_TRANSITION_INVALID');
+  }
+
+  const resolved = resolveClientC5SupervisorReadbackKey({
+    manifest: trust_root_candidate_manifest,
+    key_id: supervisorKeyId,
+    evidence_issued_at: evidenceIssuedAt,
+    now,
+  });
+  if (
+    resolved.ok !== true
+    || resolved.key_state !== 'ACTIVE'
+    || !resolved.public_key_spki_sha256
+  ) {
+    return fail('LIVE_DEVELOPMENT_SUPERVISOR_KEY_INVALID');
+  }
+
+  return verifyClientC5LiveEvidenceCore({
+    ...evidence,
+    trusted_supervisor_public_keys: { [resolved.key_id]: resolved.key },
+    verification_context: LIVE_DEVELOPMENT_CONTEXT,
+    trust_metadata: Object.freeze({
+      bootstrap_material_verified: true,
+      live_development_pin_verified: true,
+      production_bootstrap_proven: false,
+      bootstrap_manifest_sha256: bootstrap.manifest_sha256,
+      candidate_manifest_sha256: transition.manifest_sha256,
+      supervisor_key_id: resolved.key_id,
+      supervisor_public_key_spki_sha256: resolved.public_key_spki_sha256,
+      evidence_issued_at: resolved.evidence_issued_at,
+    }),
+  });
+}
+
 export function clientC5LiveEvidenceConsumerContract() {
   return Object.freeze({
     schema: CLIENT_C5_LIVE_INDEPENDENT_RECEIPT_SCHEMA,
     detached_ed25519_supervisor_signature_required: true,
     trusted_key_id_required: true,
-    pinned_supervisor_trust_root_required_for_live_acceptance: true,
+    live_development_trust_root_reverified_in_consumer: true,
+    raw_key_map_cannot_claim_live: true,
     controlled_test_vector_cannot_claim_live: true,
+    production_trust_root_claim_supported: false,
     exact_capsule_binding_required: true,
     exact_dispatch_authorization_required: true,
     exact_submission_binding_required: true,

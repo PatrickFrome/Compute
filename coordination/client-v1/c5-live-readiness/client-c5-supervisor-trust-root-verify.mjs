@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  buildClientC5SupervisorTrustResolutionReceipt,
   resolveClientC5SupervisorReadbackKey,
   verifyClientC5SupervisorTrustRootBootstrap,
   verifyClientC5SupervisorTrustRootTransition,
@@ -45,15 +46,16 @@ if (
   || !nowValue
 ) throw new Error('client_c5_trust_root_verify_args_missing');
 
-if (!['CONTROLLED_TEST_VECTOR', 'PINNED_PRODUCTION'].includes(trustRootKind)) {
+if (!['CONTROLLED_TEST_VECTOR', 'LIVE_DEVELOPMENT_PIN'].includes(trustRootKind)) {
   throw new Error('client_c5_trust_root_kind_invalid');
 }
-if (trustRootKind === 'PINNED_PRODUCTION') {
+
+if (trustRootKind === 'LIVE_DEVELOPMENT_PIN') {
   if (inside(bundleDir, bootstrapKeyPath)) {
-    throw new Error('client_c5_production_bootstrap_key_must_be_external_to_bundle');
+    throw new Error('client_c5_live_development_bootstrap_key_must_be_external_to_bundle');
   }
   if (!/^[0-9a-f]{64}$/.test(expectedBootstrapSpkiSha256)) {
-    throw new Error('client_c5_production_bootstrap_spki_pin_required');
+    throw new Error('client_c5_live_development_bootstrap_spki_pin_required');
   }
 }
 
@@ -66,6 +68,10 @@ const [v1, v1Signature, v2, v2Signature, bootstrapPem] = await Promise.all([
 ]);
 
 const bootstrapKey = crypto.createPublicKey(bootstrapPem);
+if (bootstrapKey.asymmetricKeyType !== 'ed25519') {
+  throw new Error('client_c5_bootstrap_key_not_ed25519');
+}
+
 const bootstrapKeyId = String(v1Signature?.signatures?.[0]?.key_id || '');
 if (!bootstrapKeyId) throw new Error('client_c5_bootstrap_key_id_missing');
 
@@ -76,11 +82,11 @@ const bootstrap = verifyClientC5SupervisorTrustRootBootstrap({
   manifest: v1,
   signature_envelope: v1Signature,
   pinned_root_public_keys: { [bootstrapKeyId]: bootstrapKey },
-  expected_pinned_root_spki_sha256: trustRootKind === 'PINNED_PRODUCTION'
+  expected_pinned_root_spki_sha256: trustRootKind === 'LIVE_DEVELOPMENT_PIN'
     ? { [bootstrapKeyId]: expectedBootstrapSpkiSha256 }
     : {},
+  pin_mode: trustRootKind,
   now,
-  production_bootstrap: trustRootKind === 'PINNED_PRODUCTION',
 });
 if (bootstrap.action !== 'TRUST_ROOT_ACCEPTED') {
   throw new Error(`client_c5_trust_root_bootstrap_rejected:${bootstrap.reason}`);
@@ -104,32 +110,17 @@ const resolved = resolveClientC5SupervisorReadbackKey({
 });
 if (!resolved.ok) throw new Error(`client_c5_supervisor_key_resolution_rejected:${resolved.reason}`);
 
+const receipt = buildClientC5SupervisorTrustResolutionReceipt({
+  pin_mode: trustRootKind,
+  bootstrap_receipt: bootstrap,
+  transition_receipt: transition,
+  resolved_key: resolved,
+});
+
 await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
 
 const publicKeyPem = resolved.key.export({ type: 'spki', format: 'pem' });
 await writeFile(path.join(outDir, 'resolved-supervisor-public-key.pem'), publicKeyPem);
-
-const receipt = {
-  schema: 'metaengine.client-v1.c5-supervisor-trust-root-resolution.v1',
-  trust_root_kind: trustRootKind,
-  bootstrap_manifest_sha256: bootstrap.manifest_sha256,
-  candidate_manifest_sha256: transition.manifest_sha256,
-  bootstrap_generation: bootstrap.generation,
-  candidate_generation: transition.generation,
-  old_root_threshold_verified: true,
-  new_root_threshold_verified: true,
-  supervisor_key_id: resolved.key_id,
-  supervisor_key_state: resolved.key_state,
-  supervisor_key_resolved: true,
-  trust_root_manifest_sha256: resolved.trust_root_manifest_sha256,
-  trust_root_generation: resolved.trust_root_generation,
-  production_bootstrap_proven: trustRootKind === 'PINNED_PRODUCTION' && bootstrap.production_bootstrap_proven === true,
-  live_effect_authorized: false,
-  client_c5_live_useful_work_verified: false,
-  canonical_c2_promotion_authorized: false,
-  automatic_retry_allowed: false,
-  authority_effect: false,
-};
 await writeFile(path.join(outDir, 'trust-root-resolution-receipt.json'), stableClientC5Json(receipt), 'utf8');
 process.stdout.write(stableClientC5Json(receipt));

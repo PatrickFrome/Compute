@@ -15,26 +15,52 @@ function Read-LastJsonLine([string]$Path, [int]$TimeoutSeconds = 15) {
   throw "parseable_json_timeout:$Path"
 }
 
-function Wait-ExitOrThrow($Process, [int]$TimeoutMs, [string]$Label, [string]$ErrPath) {
-  $null = $Process.Handle
-  if (-not $Process.WaitForExit($TimeoutMs)) {
-    try { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue } catch {}
-    Get-Content $ErrPath -ErrorAction SilentlyContinue
-    throw "${Label}_timeout"
+function Start-CapturedProcess([string]$FilePath, [string]$Arguments, [string]$OutPath, [string]$ErrPath) {
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $FilePath
+  $startInfo.Arguments = $Arguments
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $startInfo
+  if (-not $process.Start()) { throw "captured_process_start_failed:$FilePath" }
+  return [pscustomobject]@{
+    Process = $process
+    StdoutTask = $process.StandardOutput.ReadToEndAsync()
+    StderrTask = $process.StandardError.ReadToEndAsync()
+    OutPath = $OutPath
+    ErrPath = $ErrPath
   }
-  # Complete redirected-stream drains before reading ExitCode. The timed overload
-  # alone can report HasExited while asynchronous output handling is still settling.
-  $Process.WaitForExit()
-  $Process.Refresh()
-  if (-not $Process.HasExited) { throw "${Label}_exit_state_unstable" }
-  $exitCode = $Process.ExitCode
-  if ($null -eq $exitCode -or [string]$exitCode -notmatch '^-?[0-9]+$') {
-    Get-Content $ErrPath -ErrorAction SilentlyContinue
-    throw "${Label}_exit_code_unavailable"
-  }
-  if ([int]$exitCode -ne 0) {
-    Get-Content $ErrPath -ErrorAction SilentlyContinue
-    throw "${Label}_exit_$exitCode"
+}
+
+function Complete-CapturedProcessOutput($Capture) {
+  $stdout = $Capture.StdoutTask.GetAwaiter().GetResult()
+  $stderr = $Capture.StderrTask.GetAwaiter().GetResult()
+  [System.IO.File]::WriteAllText($Capture.OutPath, [string]$stdout, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($Capture.ErrPath, [string]$stderr, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) {
+  $process = $Capture.Process
+  try {
+    if (-not $process.WaitForExit($TimeoutMs)) {
+      try { $process.Kill() } catch {}
+      try { $process.WaitForExit() } catch {}
+      try { Complete-CapturedProcessOutput $Capture } catch {}
+      Get-Content $Capture.ErrPath -ErrorAction SilentlyContinue
+      throw "${Label}_timeout"
+    }
+    $process.WaitForExit()
+    Complete-CapturedProcessOutput $Capture
+    $exitCode = [int]$process.ExitCode
+    if ($exitCode -ne 0) {
+      Get-Content $Capture.ErrPath -ErrorAction SilentlyContinue
+      throw "${Label}_exit_$exitCode"
+    }
+  } finally {
+    try { $process.Dispose() } catch {}
   }
 }
 
@@ -79,16 +105,16 @@ $app | Set-Content (Join-Path $temp 'installed-app-path.txt')
 
 $probeOut = Join-Path $temp 'baseline-version-probe.out'
 $probeErr = Join-Path $temp 'baseline-version-probe.err'
-$p = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
-Wait-ExitOrThrow $p 15000 'baseline_version_probe' $probeErr
+$p = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-version-probe' -OutPath $probeOut -ErrPath $probeErr
+Wait-CapturedProcessOrThrow -Capture $p -TimeoutMs 15000 -Label 'baseline_version_probe'
 $versionRow = Read-LastJsonLine $probeOut
 if ([string]$versionRow.version -ne $baseline -or $versionRow.primary_instance -ne $true) { throw 'baseline_version_probe_invalid' }
 
 $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
 $profileOut = Join-Path $temp 'baseline-profile-probe.out'
 $profileErr = Join-Path $temp 'baseline-profile-probe.err'
-$profile = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
-Wait-ExitOrThrow $profile 15000 'baseline_profile_probe' $profileErr
+$profile = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-profile-probe' -OutPath $profileOut -ErrPath $profileErr
+Wait-CapturedProcessOrThrow -Capture $profile -TimeoutMs 15000 -Label 'baseline_profile_probe'
 Remove-Item Env:METAENGINE_PROFILE_PROBE_WRITE -ErrorAction SilentlyContinue
 $profileRow = Read-LastJsonLine $profileOut
 if ($profileRow.marker_present -ne $true -or -not $profileRow.user_data_path) { throw 'baseline_profile_probe_invalid' }
@@ -195,9 +221,9 @@ try {
   Remove-Item $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -Force -ErrorAction SilentlyContinue
 
   $smokeOut = Join-Path $temp 'self-update-smoke.out'; $smokeErr = Join-Path $temp 'self-update-smoke.err'
-  $source = Start-Process -FilePath $app -ArgumentList '--metaengine-self-update-smoke' -PassThru -RedirectStandardOutput $smokeOut -RedirectStandardError $smokeErr
-  $sourcePid = $source.Id
-  Wait-ExitOrThrow $source 150000 'self_update_source' $smokeErr
+  $source = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-self-update-smoke' -OutPath $smokeOut -ErrPath $smokeErr
+  $sourcePid = $source.Process.Id
+  Wait-CapturedProcessOrThrow -Capture $source -TimeoutMs 150000 -Label 'self_update_source'
 
   $traceDeadline = (Get-Date).AddSeconds(10)
   $verified = $false; $feedActive = $false; $handoffPrepared = $false
@@ -249,14 +275,14 @@ try {
 
 # Successor version, profile continuity and singleton.
 $targetProbeOut = Join-Path $temp 'target-version-probe.out'; $targetProbeErr = Join-Path $temp 'target-version-probe.err'
-$targetProbe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $targetProbeOut -RedirectStandardError $targetProbeErr
-Wait-ExitOrThrow $targetProbe 15000 'target_version_probe' $targetProbeErr
+$targetProbe = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-version-probe' -OutPath $targetProbeOut -ErrPath $targetProbeErr
+Wait-CapturedProcessOrThrow -Capture $targetProbe -TimeoutMs 15000 -Label 'target_version_probe'
 $targetVersionRow = Read-LastJsonLine $targetProbeOut
 if ([string]$targetVersionRow.version -ne $target) { throw 'target_version_probe_mismatch' }
 
 $targetProfileOut = Join-Path $temp 'target-profile-probe.out'; $targetProfileErr = Join-Path $temp 'target-profile-probe.err'
-$targetProfile = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $targetProfileOut -RedirectStandardError $targetProfileErr
-Wait-ExitOrThrow $targetProfile 15000 'target_profile_probe' $targetProfileErr
+$targetProfile = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-profile-probe' -OutPath $targetProfileOut -ErrPath $targetProfileErr
+Wait-CapturedProcessOrThrow -Capture $targetProfile -TimeoutMs 15000 -Label 'target_profile_probe'
 $targetProfileRow = Read-LastJsonLine $targetProfileOut
 $baselinePath = (Get-Content (Join-Path $temp 'baseline-user-data-path.txt')).Trim()
 if ($targetProfileRow.marker_present -ne $true -or [string]$targetProfileRow.user_data_path -ne $baselinePath) { throw 'profile_continuity_invalid' }
@@ -273,8 +299,8 @@ $firstRow = Read-LastJsonLine $firstOut 10
 $first.Refresh()
 if ($first.HasExited -or $firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
 $secondOut = Join-Path $temp 'singleton-second.out'; $secondErr = Join-Path $temp 'singleton-second.err'
-$second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
-Wait-ExitOrThrow $second 5000 'singleton_secondary' $secondErr
+$second = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-single-instance-probe' -OutPath $secondOut -ErrPath $secondErr
+Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary'
 $first.Refresh()
 if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
 try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}

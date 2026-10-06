@@ -1,5 +1,27 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37416000001.1`.
+
+LIVE development physical exit-observation correction (2026-10-06):
+- predecessor exact source `ca98e9475102d8e0f4a16f8134fec8e2f85f3a38` atomically reserved `0.7.0-dev.37415000001.1` and Package Smoke run `37414725136` successfully produced immutable candidate artifact `11389839261`; installer SHA-256 `d3d0847e2623b0025330c6c36f80ede0fa9f849cb5bc76ab3cd0d3b197e8a433` and package/build provenance were verified by multiple installed consumers, so that source/version pair is consumed and MUST NOT be rebuilt or relabelled;
+- the same predecessor passed Installed Chat, Autonomous Soak, Final Runtime Activation, Shell, Critical Audit, C5 trust-root/evidence verification and the integrated LIVE-development audit, but Self Update E2E run `37414725143` failed at the published-baseline version probe with `baseline_version_probe_exit_code_unavailable`;
+- forensic logs prove the qualified installer was acquired and verified before the failure; the defect is the PowerShell `Start-Process`/adapted `Process.ExitCode` observation path used by short physical probes, not target package corruption;
+- this successor replaces those short probe launches with direct `System.Diagnostics.ProcessStartInfo` capture, `UseShellExecute=false`, asynchronous stdout/stderr drain, bounded `WaitForExit` and direct integer ExitCode verification; non-zero exits and timeouts remain fail-closed;
+- regression coverage rejects a return to the old unstable probe pattern, and the LIVE-development candidate audit now watches the physical harness/tests explicitly;
+- because source changed after `0.7.0-dev.37415000001.1` was physically built, this SAME atomic commit advances package.json, both package-lock root version fields, the convergence reservation and audit report to fresh identity `0.7.0-dev.37416000001.1`;
+- Package Smoke remains the sole physical producer. This exact successor must pass attempt-1 Package Smoke plus Self Update E2E, Installed Chat, Final Runtime, Autonomous Soak, Dirty Profile, Critical Audit, Shell, restart continuity and provenance consumers before it can be used for LIVE development;
+- this reservation grants no production trust, provider effect, release publication, canonical C2 promotion, scheduler authority or automatic retry.
+
+
+LIVE development candidate atomic reservation correction (2026-10-06):
+- predecessor source `59d16b69d264a013b17eff8fa7a91139a1329280` advanced package metadata to `0.7.0-dev.37413841825.1` and started the sole Package Smoke producer run `37414052914`; immutable reservation artifact `11391010236` (digest `sha256:ffda3a411cc696be2c2ccebaee9623af5386481bfafc581ac3a911a77eae418b`) exists, so that identity is consumed and MUST NOT be rebuilt or relabelled;
+- the predecessor trust/readiness implementation itself passed integrated two-VM LIVE-development audit run `37413951857`, but broader PR fan-out exposed one governance/source-contract defect: package metadata had advanced while the top authoritative reservation in this file still named `0.7.0-dev.37399755569.1`;
+- Critical Audit run `37414052847` full Browser suite failed exactly one package-identity assertion, Shell run `37414052767` failed the same convergence assertion, and Self Update run `37414052831` failed its contract fan-out before any successor may be accepted as final;
+- this successor changes package.json, both package-lock root version fields and this top convergence reservation in ONE Git commit to `0.7.0-dev.37415000001.1`, eliminating the half-updated identity state without changing runtime/trust code;
+- `0.7.0-dev.37415000001.1` is fresh and monotonic above every Actions run id observed before this reservation; Package Smoke remains the single physical producer and attempt 1 only; any later source change after its producer starts consumes this identity and requires another version;
+- the exact successor must re-pass integrated PRE-LIVE audit, full Browser suite, Shell, Self Update, Package Smoke, installed-process restart, Final Runtime, Dirty Profile, Autonomous Soak and downstream provenance consumers before it is called the LIVE-development client;
+- this reservation authorizes no provider/Agent effect, production trust claim, release publication, canonical C2 promotion, scheduler authority, Browser authority or automatic retry.
+
 Reserved package identity is `0.7.0-dev.37399755569.1`.
 
 Client C5 exact-head installed restart evidence correction (2026-10-06):

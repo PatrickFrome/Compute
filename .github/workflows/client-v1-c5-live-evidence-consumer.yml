@@ -212,7 +212,7 @@ jobs:
           test "$(node -p "require(process.argv[1]).canonical_c2_promotion_authorized" "$receipt")" = "false"
           test "$(node -p "require(process.argv[1]).authority_effect" "$receipt")" = "false"
 
-      - name: Prove bundle-controlled key cannot become pinned LIVE trust root
+      - name: Prove raw bundle key cannot become LIVE-development trust
         shell: bash
         run: |
           set -euo pipefail
@@ -220,9 +220,9 @@ jobs:
           if node coordination/client-v1/c5-live-readiness/client-c5-live-evidence-verify.mjs \
             --bundle "$bundle" \
             --trusted-key "$bundle/test-vector-supervisor-public-key.pem" \
-            --trust-root-kind PINNED_SUPERVISOR \
-            --out "$RUNNER_TEMP/forbidden-live-receipt.json"; then
-            echo "bundle_self_asserted_key_escalated_to_live" >&2
+            --trust-root-kind LIVE_DEVELOPMENT_TRUST \
+            --out "$RUNNER_TEMP/forbidden-live-development-receipt.json"; then
+            echo "raw_bundle_key_escalated_to_live_development" >&2
             exit 1
           fi
 
