@@ -11,6 +11,7 @@ on:
       - 'apps/metaengine-browser/src/preload-shell.cjs'
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-projection.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_USEFUL_WORK_PROJECTION_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-useful-work-projection.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'apps/metaengine-browser/src/preload-shell.cjs'
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-projection.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_USEFUL_WORK_PROJECTION_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-useful-work-projection.yml'
   workflow_dispatch:
 
