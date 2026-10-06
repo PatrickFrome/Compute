@@ -18,7 +18,6 @@
   },
   "files": [
     "src/**/*",
-    "ui/**/*",
     "package.json"
   ],
   "beforePack": "./scripts/electron-builder-before-pack.cjs",
