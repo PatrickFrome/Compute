@@ -9,6 +9,7 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_USEFUL_WORK_READBACK_CONTRACT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-useful-work-readback-contract.yml'
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_USEFUL_WORK_READBACK_CONTRACT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-useful-work-readback-contract.yml'
   workflow_dispatch:
 
