@@ -6,6 +6,8 @@ const OBJECTIVE_KEYS=new Set(['roadmap_id','objective','nodes']);
 const CLIENT_GOAL_SUBMIT_KEYS=new Set(['request_id','objective']);
 const CLIENT_GOAL_PROGRESS_KEYS=new Set(['request_id']);
 const CLIENT_GOAL_EXECUTION_PROOF_KEYS=new Set(['request_id']);
+const CLIENT_GOAL_USEFUL_WORK_PROOF_KEYS=new Set(['request_id']);
+const CLIENT_USEFUL_WORK_FORBIDDEN_KEYS=new Set(['agent_id','tab_id','target_id','repository_url','repository_path','workspace_path','git_dir','patch','diff','stdout','stderr','artifact_path','result_summary','model_output','page_content']);
 const CLIENT_GOAL_PROGRESS_STATES=new Set(['READY','LEASED','RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED']);
 const CLIENT_GOAL_EFFECT_STATES=new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION','PROVEN_COMPOSER_CLEARED']);
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -17,6 +19,8 @@ const ADMISSION_KEYS=new Set(['roadmap_id','plan_generation','point_id']);
 const FRONTIER_KEYS=new Set(['roadmap_id','plan_generation','point_ids']);
 const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
 const object=(v)=>v&&typeof v==='object'&&!Array.isArray(v)?v:null;
+const digest64=(v)=>/^[0-9a-f]{64}$/.test(String(v||''));
+function assertNoUsefulWorkRawFields(v,trail='proof'){if(Array.isArray(v)){for(let i=0;i<v.length;i+=1)assertNoUsefulWorkRawFields(v[i],`${trail}[${i}]`);return}const x=object(v);if(!x)return;for(const[k,value]of Object.entries(x)){if(CLIENT_USEFUL_WORK_FORBIDDEN_KEYS.has(k))throw new Error(`client_goal_useful_work_raw_field_forbidden:${trail}.${k}`);assertNoUsefulWorkRawFields(value,`${trail}.${k}`)}}
 const roadmap=(v)=>{const x=String(v||'').trim().toLowerCase();return ROADMAP_RE.test(x)?x:null};
 const point=(v)=>{const x=String(v||'').trim().toLowerCase();return POINT_RE.test(x)?x:null};
 function zero(v,label){const x=object(v);if(!x)throw new Error(`${label}_invalid`);for(const k of ['automatic_retry_allowed','task_content_authority','scheduler_authority','browser_authority','release_authority','authority_effect'])if(x[k]===true)throw new Error(`${label}_${k}_invalid`);return x}
@@ -28,7 +32,103 @@ function goalSubmission(v,workspaceId,roadmapId,expected,pointId){const x=zero(v
 function clientGoalSubmission(v,workspaceId,roadmapId,expected,pointId,requestId){const x=zero(v,'client_goal_submit_v2');if(x.schema!=='metaengine.client-v1.goal-submit.v2'||String(x.request_id||'').toLowerCase()!==requestId||String(x.workspace_id)!==workspaceId||String(x.roadmap_id||'').toLowerCase()!==roadmapId||Number(x.plan_generation)!==expected+1||String(x.point_id||'').toLowerCase()!==pointId||!UUID_RE.test(String(x.task_id||''))||typeof x.request_replayed!=='boolean'||x.atomic_plan_and_admission!==true||x.operator_initiated!==true||x.task_payload_returned!==false||x.scheduler_identity_returned!==false||x.reconciliation_required!==false||x.automatic_retry_allowed!==false||x.scheduler_authority!==false||x.browser_authority!==false||x.release_authority!==false||x.authority_effect!==false)throw new Error('client_goal_submit_v2_readback_invalid');const a=activation(x.activation,workspaceId,roadmapId,expected);const d=admission(x.admission,workspaceId,roadmapId,a.plan_generation,pointId);if(String(d.task_id)!==String(x.task_id))throw new Error('client_goal_submit_v2_task_binding_invalid');return Object.freeze({...x,activation:a,admission:d})}
 function clientGoalProgress(v,workspaceId,requestId){const x=zero(v,'client_goal_progress');if(x.schema!=='metaengine.client-v1.goal-progress.v1'||String(x.request_id||'').toLowerCase()!==requestId||String(x.workspace_id)!==workspaceId||x.task_payload_returned!==false||x.result_summary_returned!==false||x.scheduler_identity_returned!==false||x.automatic_retry_allowed!==false||x.scheduler_authority!==false||x.browser_authority!==false||x.release_authority!==false||x.authority_effect!==false)throw new Error('client_goal_progress_readback_invalid');if(x.found===false)return Object.freeze({...x});if(x.found!==true||String(x.roadmap_id||'')!=='metaengine-client-v1'||!Number.isSafeInteger(Number(x.plan_generation))||Number(x.plan_generation)<1||!Number.isSafeInteger(Number(x.alignment_epoch))||Number(x.alignment_epoch)<1||!UUID_RE.test(String(x.task_id||''))||!POINT_RE.test(String(x.point_id||''))||!/^[0-9a-f]{40}$/.test(String(x.baseline_sha||''))||!/^[0-9a-f]{64}$/.test(String(x.plan_sha256||''))||!/^[0-9a-f]{64}$/.test(String(x.task_spec_sha256||''))||!CLIENT_GOAL_PROGRESS_STATES.has(String(x.task_state||''))||typeof x.terminal!=='boolean'||x.survives_plan_retirement!==true)throw new Error('client_goal_progress_binding_invalid');const shouldTerminal=['BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(String(x.task_state));if(x.terminal!==shouldTerminal)throw new Error('client_goal_progress_terminal_invalid');return Object.freeze({...x})}
 function clientGoalExecutionProof(v,workspaceId,requestId){const x=zero(v,'client_goal_execution_proof');if(x.schema!=='metaengine.client-v1.goal-execution-proof.v1'||String(x.request_id||'').toLowerCase()!==requestId||String(x.workspace_id)!==workspaceId||typeof x.found!=='boolean'||x.task_payload_returned!==false||x.result_summary_returned!==false||x.page_content_returned!==false||x.model_output_returned!==false||x.scheduler_identity_returned!==false||x.automatic_retry_allowed!==false||x.scheduler_authority!==false||x.browser_authority!==false||x.release_authority!==false||x.authority_effect!==false)throw new Error('client_goal_execution_proof_readback_invalid');if(x.found===false){if(x.user_goal_to_agent_readback!==false||x.user_goal_to_result_readback!==false)throw new Error('client_goal_execution_proof_absent_invalid');return Object.freeze({...x})}if(String(x.roadmap_id||'')!=='metaengine-client-v1'||!Number.isSafeInteger(Number(x.plan_generation))||Number(x.plan_generation)<1||!Number.isSafeInteger(Number(x.alignment_epoch))||Number(x.alignment_epoch)<1||!UUID_RE.test(String(x.task_id||''))||!POINT_RE.test(String(x.point_id||''))||!/^[0-9a-f]{40}$/.test(String(x.baseline_sha||''))||!/^[0-9a-f]{64}$/.test(String(x.plan_sha256||''))||!/^[0-9a-f]{64}$/.test(String(x.task_spec_sha256||''))||!CLIENT_GOAL_PROGRESS_STATES.has(String(x.task_state||''))||typeof x.terminal!=='boolean'||x.survives_plan_retirement!==true||!Number.isSafeInteger(Number(x.lease_generation))||Number(x.lease_generation)<0)throw new Error('client_goal_execution_proof_binding_invalid');const shouldTerminal=['BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(String(x.task_state));if(x.terminal!==shouldTerminal)throw new Error('client_goal_execution_proof_terminal_invalid');const a=object(x.agent_origin_proof),r=object(x.result_proof);if(!a||!r||typeof a.proven!=='boolean'||a.agent_identity_returned!==false||a.tab_identity_returned!==false||a.target_identity_returned!==false||a.authority_effect!==false||typeof r.available!=='boolean'||typeof r.claim_valid!=='boolean'||typeof r.origin_bound!=='boolean'||typeof r.accepted!=='boolean'||r.result_summary_returned!==false||r.model_output_returned!==false||r.page_content_returned!==false||r.authority_effect!==false)throw new Error('client_goal_execution_proof_membrane_invalid');if(a.proven===true){if(a.contract!=='ZAI_AGENT_SURFACE_CAUSAL_V1'||!/^[0-9a-f]{64}$/.test(String(a.conversation_url_sha256||''))||!/^[0-9a-f]{64}$/.test(String(a.agent_surface_sha256||''))||!/^[0-9a-f]{64}$/.test(String(a.prompt_sha256||''))||!CLIENT_GOAL_EFFECT_STATES.has(String(a.effect_state||''))||Number(a.lease_generation)!==Number(x.lease_generation))throw new Error('client_goal_execution_proof_agent_origin_invalid')}if(r.available===true&&(!/^[0-9a-f]{64}$/.test(String(r.result_summary_sha256||''))||!/^[0-9a-f]{64}$/.test(String(r.result_sha256||''))))throw new Error('client_goal_execution_proof_result_digest_invalid');if(r.claim_valid===true){if(r.claim_schema!=='metaengine.agent-result-claim.v1'||!/^[0-9a-f]{64}$/.test(String(r.claim_sha256||''))||!['READY','BLOCKED','FAILED','ACCEPT','REJECT'].includes(String(r.claim_disposition||'')))throw new Error('client_goal_execution_proof_result_claim_invalid')}if(r.origin_bound===true&&(!a.proven||String(r.conversation_url_sha256||'')!==String(a.conversation_url_sha256||'')))throw new Error('client_goal_execution_proof_result_origin_invalid');if(r.accepted===true&&(!r.claim_valid||!r.origin_bound||!['RESULT_READY','COMPLETED'].includes(String(x.task_state||''))))throw new Error('client_goal_execution_proof_result_acceptance_invalid');if(x.user_goal_to_agent_readback!==a.proven||x.user_goal_to_result_readback!==r.accepted)throw new Error('client_goal_execution_proof_summary_invalid');for(const forbidden of ['agent_id','tab_id','target_id','result_summary','model_output','page_content'])if(Object.hasOwn(x,forbidden))throw new Error('client_goal_execution_proof_forbidden_field');return Object.freeze({...x,agent_origin_proof:Object.freeze({...a}),result_proof:Object.freeze({...r})})}
+
+function clientGoalUsefulWorkProof(v,workspaceId,requestId){
+  const x=zero(v,'client_goal_useful_work_proof');
+  if(x.schema!=='metaengine.client-v1.useful-work-proof.v1'
+    ||String(x.request_id||'').toLowerCase()!==requestId
+    ||String(x.workspace_id)!==workspaceId
+    ||typeof x.found!=='boolean'
+    ||x.automatic_retry_allowed!==false
+    ||x.scheduler_authority!==false
+    ||x.browser_authority!==false
+    ||x.release_authority!==false
+    ||x.authority_effect!==false
+    ||x.canonical_c2_promotion_authorized!==false
+  )throw new Error('client_goal_useful_work_proof_readback_invalid');
+  assertNoUsefulWorkRawFields(x);
+  if(x.found===false){
+    if(x.user_goal_to_verified_artifact_readback!==false||x.client_c5_useful_work_verified!==false)throw new Error('client_goal_useful_work_proof_absent_invalid');
+    return Object.freeze({...x});
+  }
+  if(String(x.roadmap_id||'')!=='metaengine-client-v1'
+    ||!Number.isSafeInteger(Number(x.plan_generation))||Number(x.plan_generation)<1
+    ||!Number.isSafeInteger(Number(x.alignment_epoch))||Number(x.alignment_epoch)<1
+    ||!UUID_RE.test(String(x.task_id||''))
+    ||!POINT_RE.test(String(x.point_id||''))
+    ||!/^[0-9a-f]{40}$/.test(String(x.baseline_sha||''))
+    ||!digest64(x.plan_sha256)
+    ||!digest64(x.task_spec_sha256)
+    ||!Number.isSafeInteger(Number(x.lease_generation))||Number(x.lease_generation)<1
+    ||!digest64(x.result_sha256)
+    ||!digest64(x.claim_sha256)
+    ||!digest64(x.conversation_url_sha256)
+    ||x.evidence_class!=='LIVE'
+    ||x.evidence_origin!=='SIGNED_SUPERVISOR_READBACK'
+    ||x.serial_loop_end_to_end!==true
+    ||x.user_goal_to_verified_artifact_readback!==true
+    ||x.client_c5_useful_work_verified!==true
+  )throw new Error('client_goal_useful_work_proof_binding_invalid');
+
+  const repository=object(x.repository),edit=object(x.edit),verification=object(x.verification),artifact=object(x.artifact),review=object(x.review);
+  if(!repository||!edit||!verification||!artifact||!review)throw new Error('client_goal_useful_work_proof_parts_missing');
+  if(!digest64(repository.repository_identity_sha256)
+    ||String(repository.checkout_sha||'').toLowerCase()!==String(x.baseline_sha).toLowerCase()
+    ||!digest64(repository.source_snapshot_sha256)
+    ||repository.isolated_workspace!==true
+    ||repository.host_repository_mounted!==false
+    ||repository.host_git_directory_mounted!==false
+    ||repository.linked_git_worktree_exposed!==false
+    ||repository.source_snapshot_read_only!==true
+    ||repository.authority_effect!==false
+  )throw new Error('client_goal_useful_work_proof_repository_invalid');
+  if(!digest64(edit.patch_sha256)
+    ||!digest64(edit.changed_file_manifest_sha256)
+    ||!Number.isSafeInteger(Number(edit.changed_file_count))||Number(edit.changed_file_count)<1
+    ||!Number.isSafeInteger(Number(edit.materialized_edit_operations))||Number(edit.materialized_edit_operations)<1
+    ||edit.edit_materialized!==true
+    ||edit.protected_root_modified!==false
+    ||edit.host_repository_modified!==false
+    ||edit.authority_effect!==false
+  )throw new Error('client_goal_useful_work_proof_edit_invalid');
+  if(!digest64(verification.command_contract_sha256)
+    ||!digest64(verification.pre_repair_receipt_sha256)
+    ||verification.pre_repair_test_observed!==true
+    ||!Number.isSafeInteger(Number(verification.pre_repair_exit_code))||Number(verification.pre_repair_exit_code)<1
+    ||!digest64(verification.post_repair_receipt_sha256)
+    ||verification.post_repair_test_observed!==true
+    ||Number(verification.post_repair_exit_code)!==0
+    ||verification.real_build_or_test!==true
+    ||verification.repair_verified!==true
+    ||verification.authority_effect!==false
+  )throw new Error('client_goal_useful_work_proof_verification_invalid');
+  if(!digest64(artifact.artifact_sha256)
+    ||!Number.isSafeInteger(Number(artifact.artifact_bytes))||Number(artifact.artifact_bytes)<1
+    ||artifact.artifact_subject_sha256!==artifact.artifact_sha256
+    ||!digest64(artifact.provenance_sha256)
+    ||!digest64(artifact.verification_receipt_sha256)
+    ||artifact.provenance_verified!==true
+    ||artifact.subject_digest_verified!==true
+    ||artifact.artifact_verified!==true
+    ||artifact.authority_effect!==false
+  )throw new Error('client_goal_useful_work_proof_artifact_invalid');
+  if(!digest64(review.review_receipt_sha256)
+    ||review.independent_verifier!==true
+    ||review.accepted!==true
+    ||review.accepted_artifact_sha256!==artifact.artifact_sha256
+    ||review.authority_effect!==false
+  )throw new Error('client_goal_useful_work_proof_review_invalid');
+  return Object.freeze({
+    ...x,
+    repository:Object.freeze({...repository}),
+    edit:Object.freeze({...edit}),
+    verification:Object.freeze({...verification}),
+    artifact:Object.freeze({...artifact}),
+    review:Object.freeze({...review}),
+  });
+}
 export function createMetaSupervisorRoutes({rpc,workspaceId}={}){if(typeof rpc!=='function')throw new Error('meta_provider_rpc_required');const fixed=String(workspaceId||'');if(!UUID_RE.test(fixed))throw new Error('meta_provider_workspace_invalid');return async({req,path,body,clientId}={})=>{if(!String(path||'').startsWith('/v1/meta/'))return null;if(!clientId)return json(401,{error:'device_auth_required',automatic_retry_allowed:false,authority_effect:false});const p=object(body)||{};if(Object.hasOwn(p,'workspace_id'))return json(400,{error:'workspace_override_forbidden',automatic_retry_allowed:false,authority_effect:false});
+if(req?.method==='POST'&&path==='/v1/meta/client-goal-useful-work-proof'){if(Object.keys(p).some(k=>!CLIENT_GOAL_USEFUL_WORK_PROOF_KEYS.has(k)))return json(400,{error:'client_goal_useful_work_proof_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});const requestId=String(p.request_id||'').trim().toLowerCase();if(!UUID_RE.test(requestId))return json(400,{error:'client_goal_request_id_invalid',automatic_retry_allowed:false,authority_effect:false});try{const result=await rpc('client_v1_goal_useful_work_proof_v1',{p_workspace_id:fixed,p_request_id:requestId});return json(200,clientGoalUsefulWorkProof(result,fixed,requestId))}catch(error){const message=String(error?.message||error||'client_goal_useful_work_proof_failed');if(message.includes('client_v1_goal_useful_work_proof_')||message.includes('client_v1_goal_execution_proof_'))return json(409,{error:'client_goal_useful_work_proof_drift',reason:message.slice(0,240),automatic_retry_allowed:false,authority_effect:false});throw error}}
 if(req?.method==='POST'&&path==='/v1/meta/client-goal-execution-proof'){if(Object.keys(p).some(k=>!CLIENT_GOAL_EXECUTION_PROOF_KEYS.has(k)))return json(400,{error:'client_goal_execution_proof_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});const requestId=String(p.request_id||'').trim().toLowerCase();if(!UUID_RE.test(requestId))return json(400,{error:'client_goal_request_id_invalid',automatic_retry_allowed:false,authority_effect:false});try{const result=await rpc('client_v1_goal_execution_proof_v1',{p_workspace_id:fixed,p_request_id:requestId});return json(200,clientGoalExecutionProof(result,fixed,requestId))}catch(error){const message=String(error?.message||error||'client_goal_execution_proof_failed');if(message.includes('client_v1_goal_execution_proof_task_missing')||message.includes('client_v1_goal_execution_proof_binding_drift'))return json(409,{error:'client_goal_execution_proof_drift',reason:message.slice(0,240),automatic_retry_allowed:false,authority_effect:false});throw error}}
 if(req?.method==='POST'&&path==='/v1/meta/client-goal-progress'){if(Object.keys(p).some(k=>!CLIENT_GOAL_PROGRESS_KEYS.has(k)))return json(400,{error:'client_goal_progress_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});const requestId=String(p.request_id||'').trim().toLowerCase();if(!UUID_RE.test(requestId))return json(400,{error:'client_goal_request_id_invalid',automatic_retry_allowed:false,authority_effect:false});try{const result=await rpc('client_v1_goal_progress_v1',{p_workspace_id:fixed,p_request_id:requestId});return json(200,clientGoalProgress(result,fixed,requestId))}catch(error){const message=String(error?.message||error||'client_goal_progress_failed');if(message.includes('client_v1_goal_progress_task_missing')||message.includes('client_v1_goal_progress_binding_drift'))return json(409,{error:'client_goal_progress_drift',reason:message.slice(0,240),automatic_retry_allowed:false,authority_effect:false});throw error}}
 if(req?.method==='POST'&&path==='/v1/meta/client-goal-submit'){if(Object.keys(p).some(k=>!CLIENT_GOAL_SUBMIT_KEYS.has(k)))return json(400,{error:'client_goal_submit_fields_forbidden',automatic_retry_allowed:false,authority_effect:false});const requestId=String(p.request_id||'').trim().toLowerCase();if(!UUID_RE.test(requestId)||typeof p.objective!=='string'||!p.objective.trim()||p.objective.trim().length>480)return json(400,{error:'client_goal_submit_request_invalid',automatic_retry_allowed:false,authority_effect:false});const id='metaengine-client-v1';try{const inputsRow=await rpc('meta_orchestrator_authoritative_inputs_v1',{p_workspace_id:fixed,p_roadmap_id:id});const bundle=inputs(inputsRow,fixed,id);const compiled=compileMetaObjectivePlan({authority:bundle.roadmap_authority,planState:bundle.plan_state,objective:p.objective});if(compiled.point_ids.length!==1)throw new Error('client_goal_submit_single_point_required');const pointId=compiled.point_ids[0];const result=await rpc('client_v1_goal_submit_v2',{p_request_id:requestId,p_workspace_id:fixed,p_roadmap_id:id,p_expected_current_generation:compiled.expected_current_generation,p_plan:compiled.plan,p_point_id:pointId});const submitted=clientGoalSubmission(result,fixed,id,compiled.expected_current_generation,pointId,requestId);return json(200,{schema:'metaengine.meta-orchestrator.objective-activation.v1',request_id:requestId,request_replayed:submitted.request_replayed,activation:submitted.activation,admission:submitted.admission,objective:compiled.plan.objective,roadmap_id:id,plan_generation:submitted.plan_generation,point_ids:compiled.point_ids,node_count:1,task_ids:[submitted.task_id],task_admission_state:'ADMITTED',atomic_plan_and_admission:true,exact_request_correlation:true,operator_initiated:true,automatic_retry_allowed:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false})}catch(error){const message=String(error?.message||error||'client_goal_submit_failed');if(message.includes('client_v1_goal_request_collision')||PLAN_CONFLICTS.some(x=>message.includes(x))||ADMISSION_CONFLICTS.some(x=>message.includes(x)))return json(409,{error:'client_goal_submit_fenced',reason:message.slice(0,240),request_id:requestId,automatic_retry_allowed:false,authority_effect:false});throw error}}
