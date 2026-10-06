@@ -170,13 +170,16 @@ test('R85 contextual drawer reserves native Browser height and degrades before s
   assert.ok(short.remote_bounds.height >= ME2_PRIMARY_MIN_BROWSER_HEIGHT);
 });
 
-test('normal Browser startup prefers packaged ME2 and retains legacy shell only as recovery', () => {
+test('normal Browser startup prefers packaged ME2 and falls back only to generated fail-closed recovery', () => {
   assert.match(main, /await preparePrimaryShellTarget\(\)/);
   assert.match(main, /PACKAGED_ME2_UI_PROVEN/);
   assert.match(main, /ME2_PRIMARY_SHELL_VISIBLE/);
-  assert.match(main, /LEGACY_RECOVERY_SHELL_VISIBLE/);
-  assert.match(main, /legacy_shell_is_normal_path:\s*false/);
-  assert.match(main, /loadURL\('metaengine:\/\/shell\/'\)/);
+  assert.match(main, /FAIL_CLOSED_RECOVERY_VISIBLE/);
+  assert.match(main, /deprecated_shell_bundle_present:\s*false/);
+  assert.match(main, /recovery_surface_authority:\s*false/);
+  assert.match(main, /metaengine:\/\/recovery\/\?reason=ME2_PRIMARY_DEGRADED/);
+  assert.match(main, /metaengine:\/\/recovery\/\?reason=ME2_PRIMARY_LOAD_FAILED/);
+  assert.doesNotMatch(main, /LEGACY_RECOVERY_SHELL_VISIBLE|legacy_shell_is_normal_path|loadURL\('metaengine:\/\/shell\/'\)|metaengine-dark-workspace-v2/);
   assert.match(main, /surface_profile:\s*primaryShellMode === 'ME2_PRIMARY'/);
 });
 
