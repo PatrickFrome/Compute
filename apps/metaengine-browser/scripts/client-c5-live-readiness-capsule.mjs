@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  CLIENT_C5_LIVE_OBJECTIVE,
   CLIENT_C5_LIVE_READINESS_SCHEMA,
   clientC5LiveCapsuleDigest,
   normalizeClientC5LiveReadinessCapsule,
@@ -137,12 +138,7 @@ try {
   const fixtureSnapshotSha256 = sha256ClientC5(stableClientC5Json(fixtureSnapshot));
   const repositoryIdentitySha256 = sha256ClientC5(`${repositoryName}\n`);
 
-  const objective = [
-    'Repair the single bounded Client C5 canary in',
-    FIXTURE_ROOT,
-    'by changing only answer.mjs so the existing test passes, then run the existing build script to produce',
-    'dist/live-artifact.json. Do not modify any other path, do not use network, and return only after the test and build pass.',
-  ].join(' ');
+  const objective = CLIENT_C5_LIVE_OBJECTIVE;
 
   const material = {
     schema: CLIENT_C5_LIVE_READINESS_SCHEMA,
