@@ -1,6 +1,15 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37437000001.1`.
+Reserved package identity is `0.7.0-dev.37485000001.1`.
+
+Final ChatGPT/ME2 physical reservation (2026-10-06):
+- exact source `dc76192e9a8ed269c62355464c36b96048a67732` passed source-only convergence run `37484297121` / job `112340249904` SUCCESS with full Browser Node regression, frozen Bun install, full Next build, compiled-output legacy-provider scan and source immutability proof;
+- deprecated `metaengine-dark-workspace-v2` and the entire `apps/metaengine-browser/ui/` renderer are absent; `metaengine://shell/` remains forbidden; packaged ME2 is the sole product UI and generated `metaengine://recovery/` is GET-only/non-authoritative;
+- previous identity `0.7.0-dev.37437000001.1` is consumed: PR Package Smoke run `37477684780` succeeded through package identity preflight, duplicate source/version check, immutable reservation publication and reservation seal before later failing at then-stale visual evidence; that identity MUST NOT be rebuilt or rebound to this newer source;
+- this atomic successor changes only package identity/ledger/report metadata and reserves `0.7.0-dev.37485000001.1` for exact source bytes already qualified at `dc76192e9a8ed269c62355464c36b96048a67732`;
+- no further source mutation is permitted after physical Package Smoke begins; any source change requires another fresh monotonic identity;
+- reservation grants no provider effect, production trust, release publication, scheduler authority or canonical C2 promotion.
+
 
 C4 stale branding assertion correction (2026-10-06):
 - exact source `2440c869b54bf96904f0a3e198a3a352854c9242` passed the ChatGPT UI source-convergence gate, but Client V1 C4 Goal Contracts run `37476944921` failed 87/88 because one test still required the retired presentation string `Verified z.ai Agent`;

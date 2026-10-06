@@ -321,3 +321,46 @@ Canonical C2:
 Promotion authority:
 
 **false**
+
+
+## Final source-only gate and physical reservation
+
+Final source before physical reservation:
+
+`dc76192e9a8ed269c62355464c36b96048a67732`
+
+Source-only workflow:
+
+`Client V1 ChatGPT UI Convergence`
+
+Run:
+
+`37484297121`
+
+Job:
+
+`112340249904`
+
+Conclusion:
+
+**SUCCESS**
+
+This exact source passed:
+
+- Browser parse/check without retired shell inputs;
+- ChatGPT UI + legacy-shell retirement contracts;
+- full Browser Node regression;
+- frozen Bun 1.3.3 dependency install;
+- full ME2 Next build;
+- compiled primary-UI scan proving no legacy provider branding/mutations;
+- source-input immutability verification.
+
+The earlier package identity `0.7.0-dev.37437000001.1` is now explicitly **CONSUMED** because Package Smoke run `37477684780` published and sealed its immutable reservation before failing at an old visual-evidence step. It must not represent the later source.
+
+Fresh exact-source package reservation:
+
+`0.7.0-dev.37485000001.1`
+
+This reservation commit changes no ME2 or Browser runtime source. It only advances package identity, package-lock root metadata, convergence ledger and this checkpoint.
+
+The deprecated `metaengine-dark-workspace-v2` is not a fallback and is not retained anywhere in the current source/package surface.
