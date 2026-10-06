@@ -18,9 +18,8 @@ on:
       - 'apps/metaengine-browser/test/workspace-binding-observer.test.mjs'
       - 'apps/metaengine-browser/test/workspace-observation-routes.test.mjs'
       - 'apps/metaengine-browser/test/workspace-workbench-projection.test.mjs'
-      - 'apps/metaengine-browser/test/shell-workbench-ui.test.mjs'
-      - 'apps/metaengine-browser/ui/app.js'
-      - 'apps/metaengine-browser/ui/index.html'
+      - 'apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs'
+      - 'apps/metaengine-browser/src/preload-shell.cjs'
       - 'supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql'
       - '.github/workflows/browser-typed-workspaces-v1.yml'
   push:
@@ -71,7 +70,6 @@ jobs:
           node --check apps/metaengine-browser/src/workspace-workbench-projection.mjs
           node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-promotion-routes.mjs
           node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/workspace-observation-routes.mjs
-          node --check apps/metaengine-browser/ui/app.js
 
       - name: Typed Workspaces falsification suite
         run: |
@@ -82,7 +80,7 @@ jobs:
             apps/metaengine-browser/test/workspace-binding-observer.test.mjs \
             apps/metaengine-browser/test/workspace-observation-routes.test.mjs \
             apps/metaengine-browser/test/workspace-workbench-projection.test.mjs \
-            apps/metaengine-browser/test/shell-workbench-ui.test.mjs
+            apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs
 
       - name: Static privacy and authority gates
         run: |
@@ -90,7 +88,7 @@ jobs:
           RPC=supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql
           CLIENT=apps/metaengine-browser/src/native-supervisor-client.mjs
           MAIN=apps/metaengine-browser/src/main.mjs
-          UI=apps/metaengine-browser/ui/app.js
+          PRELOAD=apps/metaengine-browser/src/preload-shell.cjs
           grep -q "bounded_rows', 64" "$RPC"
           grep -q "filesystem_paths_exposed', false" "$RPC"
           grep -q "browser_actuation_authority', false" "$RPC"
@@ -100,12 +98,13 @@ jobs:
           grep -q "current_command_payload_exposed: false" "$CLIENT"
           grep -q "DB_LEASED_TYPED_COMMAND_ONLY" "$CLIENT"
           grep -q "projectWorkspaceWorkbench" "$MAIN"
-          grep -q "const projection = next?.workspaces" "$UI"
-          grep -q "DURABLE_WORKSPACE_BINDING_ONLY" "$UI"
-          ! grep -q "workspace_bindings" "$UI"
-          ! grep -q "lease_current" "$UI"
-          ! grep -Eq "current_command\?\.payload|command\?\.payload" "$UI"
-          ! grep -Eq "automatic_retry_allowed:\s*true|browser_actuation_authority:\s*true" "$UI"
+          grep -q "const candidate = value?.workspaces?.devos" "$PRELOAD"
+          grep -q "browser_is_shell: false" "$PRELOAD"
+          grep -q "browser_is_surface: true" "$PRELOAD"
+          grep -q "browser_actuation_authority: false" "$PRELOAD"
+          grep -q "automatic_retry_allowed: false" "$PRELOAD"
+          ! grep -Eq "automatic_retry_allowed:\s*true|browser_actuation_authority:\s*true" "$PRELOAD"
+          ! grep -Eq "metaengine-dark-workspace-v2|dark-workspace\.css|metaengine://shell/" "$MAIN"
 
       - name: Prove branch-local clean checkout
         run: |
