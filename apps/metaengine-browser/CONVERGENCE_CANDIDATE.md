@@ -1,6 +1,17 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37416000001.1`.
+Reserved package identity is `0.7.0-dev.37434000001.1`.
+
+ChatGPT primary UI convergence reservation (2026-10-06):
+- parent LIVE-development candidate `e2e8f20e5d6abf0f84bf163066ed3ec15b69298a` / `0.7.0-dev.37416000001.1` remains immutable and physically qualified; it MUST NOT be rebuilt or relabelled with this UI correction;
+- source-only ChatGPT UI convergence run `37433550089` / job `112169785397` is SUCCESS after one fail-closed predecessor run `37433449834` exposed a remaining command-palette z.ai label;
+- primary ME2 UI now uses stable `ChatGPT` / `Agent` presentation without hard-coded model version; historical `ZAI_AGENT_SURFACE_CAUSAL_V1` remains only as a wire/readback compatibility token;
+- legacy `GET /glm` telemetry remains read-only; UI `probe` / `upgrade fleet` mutations and `mcxOp("glm", ...)` are removed;
+- unused `z-ai-web-dev-sdk` and dead GLM/vault `agent-factory/bootstrap.ts` are removed from the ME2 source/dependency surface;
+- compiled Next output is fail-closed scanned for legacy provider branding/mutation strings;
+- fresh Browser package identity is `0.7.0-dev.37434000001.1`; Package Smoke remains the sole physical producer and all installed/runtime/self-update consumers must qualify the same immutable candidate before this slice is considered physically proven;
+- no production trust, provider mutation, canonical C2 promotion, scheduler authority, release authority or automatic retry is granted by this reservation.
+
 
 LIVE development physical exit-observation correction (2026-10-06):
 - predecessor exact source `ca98e9475102d8e0f4a16f8134fec8e2f85f3a38` atomically reserved `0.7.0-dev.37415000001.1` and Package Smoke run `37414725136` successfully produced immutable candidate artifact `11389839261`; installer SHA-256 `d3d0847e2623b0025330c6c36f80ede0fa9f849cb5bc76ab3cd0d3b197e8a433` and package/build provenance were verified by multiple installed consumers, so that source/version pair is consumed and MUST NOT be rebuilt or relabelled;
