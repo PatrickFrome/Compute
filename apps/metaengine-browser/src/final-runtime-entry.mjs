@@ -14,12 +14,14 @@ const activatedNativeBrowserControlUrl = new URL('./native-browser-control-activ
 const probeStdoutReserved = process.argv.some((arg) => [
   '--metaengine-version-probe',
   '--metaengine-profile-probe',
+  '--metaengine-client-goal-journal-probe',
   '--metaengine-single-instance-probe',
   '--metaengine-self-update-smoke',
 ].includes(String(arg || '')));
 const primaryUiRecoveryEnabled = !process.argv.some((arg) => [
   '--metaengine-version-probe',
   '--metaengine-profile-probe',
+  '--metaengine-client-goal-journal-probe',
   '--metaengine-single-instance-probe',
   '--metaengine-self-update-smoke',
   '--metaengine-smoke',

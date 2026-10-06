@@ -746,6 +746,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
@@ -1044,6 +1046,117 @@ jobs:
             }
           }
 
+      - name: Prove installed Client useful-work journal survives process restart without replay
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw 'installed_restart_browser_missing' }
+          $userData = [string]$proof.user_data_path
+          if (-not $userData -or -not [System.IO.Path]::IsPathRooted($userData)) { throw 'installed_restart_user_data_missing' }
+          $goalJournal = Join-Path $userData 'metaengine-client-goal-journal-v1.json'
+          if (Test-Path $goalJournal -PathType Leaf) { throw 'installed_restart_goal_journal_preexists' }
+
+          function Invoke-GoalJournalProbe([string]$stem) {
+            $out = "$env:RUNNER_TEMP\$stem.out"
+            $err = "$env:RUNNER_TEMP\$stem.err"
+            Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+            $p = Start-Process -FilePath $app -ArgumentList '--metaengine-client-goal-journal-probe' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            $null = $p.Handle
+            if (-not $p.WaitForExit(15000)) {
+              try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+              throw "installed_restart_probe_timeout:$stem"
+            }
+            if ($p.ExitCode -ne 0) {
+              Get-Content $err -ErrorAction SilentlyContinue
+              throw ('installed_restart_probe_exit:{0}:{1}' -f $stem, $p.ExitCode)
+            }
+            $line = Get-Content $out -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+            if (-not $line) { throw "installed_restart_probe_output_missing:$stem" }
+            return ($line | ConvertFrom-Json)
+          }
+
+          function Assert-ReadOnlyProbe($row, [bool]$expectUseful) {
+            $baseInvalid = $row.schema -ne 'metaengine.client.goal-journal-probe.v1' -or [string]$row.version -ne [string]$proof.package_version -or $row.primary_instance -ne $true -or [string]$row.user_data_path -ne $userData -or [string]$row.journal_path -ne $goalJournal -or $row.journal_present -ne $true -or $row.journal_unchanged -ne $true -or [string]$row.journal_sha256_before -notmatch '^[a-f0-9]{64}$' -or [string]$row.journal_sha256_after -ne [string]$row.journal_sha256_before -or [int]$row.entry_count -ne 1 -or $row.latest.execution_proof_present -ne $true -or [string]$row.latest.execution_task_state -ne 'COMPLETED' -or [int]$row.latest.execution_lease_generation -ne 1 -or [string]$row.latest.result_sha256 -ne ('1' * 64) -or $row.local_read_only -ne $true -or $row.browser_runtime_started -ne $false -or $row.native_supervisor_started -ne $false -or $row.network_started -ne $false -or $row.submit_effect_attempted -ne $false -or $row.automatic_retry_allowed -ne $false -or $row.authority_effect -ne $false
+            if ($baseInvalid) {
+              $row | ConvertTo-Json -Depth 8 | Write-Host
+              throw 'installed_restart_probe_base_contract_invalid'
+            }
+            if ($expectUseful) {
+              $usefulInvalid = $row.latest.useful_work_proof_present -ne $true -or [string]$row.latest.evidence_class -ne 'SYNTHETIC' -or [string]$row.latest.evidence_origin -ne 'CONTROLLED_FIXTURE' -or [string]$row.latest.artifact_sha256 -ne ('3' * 64) -or $row.latest.user_goal_to_verified_artifact_readback -ne $true -or $row.latest.client_c5_useful_work_verified -ne $false -or $row.latest.canonical_c2_promotion_authorized -ne $false
+              if ($usefulInvalid) { throw 'installed_restart_useful_work_contract_invalid' }
+            } else {
+              $staleInvalid = $row.latest.useful_work_proof_present -ne $false -or $null -ne $row.latest.evidence_class -or $null -ne $row.latest.artifact_sha256 -or $row.latest.user_goal_to_verified_artifact_readback -ne $false -or $row.latest.client_c5_useful_work_verified -ne $false -or $row.latest.canonical_c2_promotion_authorized -ne $false
+              if ($staleInvalid) { throw 'installed_restart_stale_binding_not_rejected' }
+            }
+          }
+
+          node scripts/client-c5-installed-journal-fixture.mjs --out $goalJournal --baseline ([string]$proof.source_head) --mode valid
+          if ($LASTEXITCODE -ne 0) { throw 'installed_restart_valid_fixture_failed' }
+          $validDiskSha = (Get-FileHash $goalJournal -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $first = Invoke-GoalJournalProbe 'client-c5-installed-journal-probe-first'
+          Assert-ReadOnlyProbe $first $true
+          if ([string]$first.journal_sha256_before -ne $validDiskSha) { throw 'installed_restart_first_disk_digest_drift' }
+
+          $second = Invoke-GoalJournalProbe 'client-c5-installed-journal-probe-second'
+          Assert-ReadOnlyProbe $second $true
+          $secondDrift = [string]$second.journal_sha256_before -ne $validDiskSha -or [string]$second.latest.request_id -ne [string]$first.latest.request_id -or [string]$second.latest.artifact_sha256 -ne [string]$first.latest.artifact_sha256 -or [string]$second.latest.result_sha256 -ne [string]$first.latest.result_sha256
+          if ($secondDrift) { throw 'installed_restart_second_process_continuity_drift' }
+
+          node scripts/client-c5-installed-journal-fixture.mjs --out $goalJournal --baseline ([string]$proof.source_head) --mode stale
+          if ($LASTEXITCODE -ne 0) { throw 'installed_restart_stale_fixture_failed' }
+          $staleDisk = Get-Content $goalJournal -Raw | ConvertFrom-Json
+          if ([int]$staleDisk.entries[0].execution_proof.lease_generation -ne 1 -or [int]$staleDisk.entries[0].useful_work_proof.lease_generation -ne 2) { throw 'installed_restart_stale_fixture_not_stale' }
+          $staleDiskSha = (Get-FileHash $goalJournal -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $stale = Invoke-GoalJournalProbe 'client-c5-installed-journal-probe-stale'
+          Assert-ReadOnlyProbe $stale $false
+          if ([string]$stale.journal_sha256_before -ne $staleDiskSha) { throw 'installed_restart_stale_disk_digest_drift' }
+          $staleAfter = Get-Content $goalJournal -Raw | ConvertFrom-Json
+          if ([int]$staleAfter.entries[0].useful_work_proof.lease_generation -ne 2) { throw 'installed_restart_probe_mutated_stale_disk_state' }
+
+          @{
+            schema='metaengine.client-v1.c5-installed-restart-continuity.v1'
+            source_head=[string]$proof.source_head
+            package_version=[string]$proof.package_version
+            user_data_path=$userData
+            journal_path=$goalJournal
+            first_process_pid=[int64]$first.pid
+            second_process_pid=[int64]$second.pid
+            stale_process_pid=[int64]$stale.pid
+            distinct_restart_processes=([int64]$first.pid -ne [int64]$second.pid)
+            valid_journal_sha256=$validDiskSha
+            stale_journal_sha256=$staleDiskSha
+            execution_proof_restored=$true
+            useful_work_proof_restored=$true
+            useful_work_evidence_class='SYNTHETIC'
+            client_c5_useful_work_verified=$false
+            canonical_c2_promotion_authorized=$false
+            stale_useful_work_binding_rejected=$true
+            stale_execution_proof_retained=$true
+            journal_probe_read_only=$true
+            browser_runtime_started=$false
+            native_supervisor_started=$false
+            network_started=$false
+            submit_effect_attempted=$false
+            automatic_retry_allowed=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\client-c5-installed-restart-continuity.json" -Encoding utf8
+
+          $proof | Add-Member -NotePropertyName client_c5_installed_restart_continuity_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName client_c5_installed_restart_stale_binding_rejected -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName client_c5_installed_restart_live_useful_work_proven -NotePropertyValue $false -Force
+          $proof | ConvertTo-Json -Depth 7 | Set-Content $proofPath -Encoding utf8
+
+          Remove-Item $goalJournal -Force -ErrorAction SilentlyContinue
+
       - name: Qualify embedded one-shot Guardian machine bootstrap
         shell: powershell
         working-directory: apps/metaengine-browser
@@ -1105,6 +1218,13 @@ jobs:
             ${{ runner.temp }}/package-normal-ui.err
             ${{ runner.temp }}/package-second-instance.out
             ${{ runner.temp }}/package-second-instance.err
+            ${{ runner.temp }}/client-c5-installed-journal-probe-first.out
+            ${{ runner.temp }}/client-c5-installed-journal-probe-first.err
+            ${{ runner.temp }}/client-c5-installed-journal-probe-second.out
+            ${{ runner.temp }}/client-c5-installed-journal-probe-second.err
+            ${{ runner.temp }}/client-c5-installed-journal-probe-stale.out
+            ${{ runner.temp }}/client-c5-installed-journal-probe-stale.err
+            ${{ runner.temp }}/client-c5-installed-restart-continuity.json
             ${{ runner.temp }}/browser-shell-visual/visual-evidence.json
             ${{ runner.temp }}/browser-shell-visual/*.png
             ${{ runner.temp }}/r85-primary-visual/r85-visual-evidence.json

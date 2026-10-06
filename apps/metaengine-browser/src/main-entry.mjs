@@ -20,15 +20,17 @@ import {
 import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
 import { qualifyUpdatedSuccessorWhenHealthy, startSuccessorQualificationReprobeLoop } from './self-update-successor-qualification.mjs';
 import { shouldResumeSuccessorQualification } from './self-update-successor-recovery.mjs';
+import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
 const instanceHoldProbe = process.argv.includes('--metaengine-single-instance-probe');
 const versionProbe = process.argv.includes('--metaengine-version-probe');
 const profileProbe = process.argv.includes('--metaengine-profile-probe');
+const clientGoalJournalProbe = process.argv.includes('--metaengine-client-goal-journal-probe');
 const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
 const updatedLaunch = process.argv.includes('--updated');
-const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe;
+const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !clientGoalJournalProbe && !instanceHoldProbe;
 const interactiveNormalLaunch = browserRuntimeNeeded && !updatedLaunch;
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
@@ -208,7 +210,7 @@ if (!guard.primary) {
   }
 
   let startupUpdateInspection = null;
-  if (!selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe) {
+  if (!selfUpdateSmoke && !versionProbe && !profileProbe && !clientGoalJournalProbe && !instanceHoldProbe) {
     void recordStartup('SELF_UPDATE_INSPECTION_STARTED', 'STARTUP_INSPECTION_BEGIN');
     startupUpdateInspection = await inspectSelfUpdateStartup(app).catch((error) => ({
       schema: 'metaengine.self-update.startup-inspection.v1',
@@ -292,7 +294,7 @@ if (!guard.primary) {
       app.releaseSingleInstanceLock();
     }
     app.exit(0);
-  } else if (versionProbe || profileProbe || instanceHoldProbe || selfUpdateSmoke) {
+  } else if (versionProbe || profileProbe || clientGoalJournalProbe || instanceHoldProbe || selfUpdateSmoke) {
     app.once('ready', async () => {
       if (selfUpdateSmoke) {
         try {
@@ -308,6 +310,68 @@ if (!guard.primary) {
           }));
           app.exit(4);
         }
+        return;
+      }
+      if (clientGoalJournalProbe) {
+        const fs = await import('node:fs/promises');
+        const crypto = await import('node:crypto');
+        const userData = app.getPath('userData');
+        const store = createClientGoalJournalFileStore(userData, { maxEntries: 32 });
+        let beforeBytes = null;
+        try { beforeBytes = await fs.readFile(store.target); } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+        const beforeSha256 = beforeBytes
+          ? crypto.createHash('sha256').update(beforeBytes).digest('hex')
+          : null;
+        await store.journal.load();
+        const latest = store.journal.latest();
+        let afterBytes = null;
+        try { afterBytes = await fs.readFile(store.target); } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+        const afterSha256 = afterBytes
+          ? crypto.createHash('sha256').update(afterBytes).digest('hex')
+          : null;
+        const useful = latest?.useful_work_proof || null;
+        const execution = latest?.execution_proof || null;
+        console.log(JSON.stringify({
+          schema: 'metaengine.client.goal-journal-probe.v1',
+          version: app.getVersion(),
+          pid: process.pid,
+          primary_instance: true,
+          app_id: METAENGINE_BROWSER_APP_ID,
+          user_data_path: userData,
+          journal_path: store.target,
+          journal_present: beforeBytes != null,
+          journal_sha256_before: beforeSha256,
+          journal_sha256_after: afterSha256,
+          journal_unchanged: beforeSha256 === afterSha256,
+          entry_count: store.journal.snapshot().entries.length,
+          latest: latest ? {
+            request_id: latest.request_id,
+            state: latest.state,
+            execution_proof_present: execution != null,
+            execution_task_state: execution?.task_state || null,
+            execution_lease_generation: execution?.lease_generation ?? null,
+            result_sha256: execution?.result_proof?.result_sha256 || null,
+            useful_work_proof_present: useful != null,
+            evidence_class: useful?.evidence_class || null,
+            evidence_origin: useful?.evidence_origin || null,
+            artifact_sha256: useful?.artifact?.artifact_sha256 || null,
+            user_goal_to_verified_artifact_readback: useful?.user_goal_to_verified_artifact_readback === true,
+            client_c5_useful_work_verified: useful?.client_c5_useful_work_verified === true,
+            canonical_c2_promotion_authorized: useful?.canonical_c2_promotion_authorized === true,
+          } : null,
+          local_read_only: true,
+          browser_runtime_started: false,
+          native_supervisor_started: false,
+          network_started: false,
+          submit_effect_attempted: false,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        }));
+        app.exit(0);
         return;
       }
       if (profileProbe) {
