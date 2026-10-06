@@ -4,7 +4,7 @@
 --   * h205f22_a2_browser_device_consume_nonce_v2 was the highest lock-wait /
 --     statement-timeout PostgREST query in the inspected failure window.
 --   * v2 takes FOR UPDATE on the one device row for every authenticated request,
---     then updates last_used_at, serializing all signed requests from one Browser.
+--     deletes expired nonces on every request, then updates last_used_at.
 --   * the resulting queue contributes to PostgREST/Edge saturation across state,
 --     command wait/lease, admin status, workspace snapshot and heartbeat routes.
 --
@@ -17,9 +17,12 @@
 -- Performance invariant:
 --   * authenticated requests may share the device row concurrently;
 --   * no telemetry UPDATE occurs in the authentication transaction;
---   * expired nonce cleanup is removed from the request hot path and executed by
---     one bounded SKIP LOCKED maintenance job. This job has no Browser/task/effect
---     scheduling authority.
+--   * expiry cleanup is indexed, probabilistically amortized, advisory-singleton,
+--     bounded and SKIP LOCKED rather than an unconditional per-request sweep.
+--   * no pg_cron or second scheduler/event source is introduced.
+
+create index if not exists compute_fabric_a2_browser_device_nonce_expires_idx
+  on public.compute_fabric_a2_browser_device_nonce_h205f22(expires_at);
 
 create or replace function public.h205f22_a2_browser_device_consume_nonce_v3(
   p_device_id uuid,
@@ -54,7 +57,7 @@ begin
   -- enrolled device may authenticate together, while a revocation/rotation
   -- UPDATE must wait until all already-admitted authentication transactions
   -- leave this gate. This preserves the v2 revocation ordering without the
-  -- per-request FOR UPDATE convoy.
+  -- per-request exclusive device-row convoy.
   select * into v_device
     from public.compute_fabric_a2_browser_device_h205f22
    where device_id = p_device_id
@@ -89,6 +92,26 @@ begin
     return jsonb_build_object('accepted', false, 'reason', 'NONCE_REPLAY');
   end;
 
+  -- Browser nonces are crypto.randomBytes(24), and p_nonce_sha256 is therefore
+  -- uniformly distributed for normal enrolled clients. Roughly 1/256 accepted
+  -- requests attempts one bounded cleanup. The advisory lock is non-blocking:
+  -- overlapping cleaners skip rather than form another convoy. The batch can
+  -- retire 1024 rows per ~256 inserts, so cleanup capacity exceeds production.
+  if left(p_nonce_sha256, 2) = '00'
+     and pg_try_advisory_xact_lock(20522, 82703) then
+    with victims as (
+      select ctid
+        from public.compute_fabric_a2_browser_device_nonce_h205f22
+       where expires_at < v_now - interval '1 minute'
+       order by expires_at
+       limit 1024
+       for update skip locked
+    )
+    delete from public.compute_fabric_a2_browser_device_nonce_h205f22 n
+    using victims v
+     where n.ctid = v.ctid;
+  end if;
+
   -- last_used_at is telemetry, not admission authority. Updating it on every
   -- signed request would upgrade the shared lock back into a hot exclusive
   -- write and recreate the v2 convoy. Enrollment/rotation paths may continue to
@@ -109,77 +132,4 @@ grant execute on function public.h205f22_a2_browser_device_consume_nonce_v3(uuid
   to service_role;
 
 comment on function public.h205f22_a2_browser_device_consume_nonce_v3(uuid,text,text,timestamptz) is
-  'Concurrent durable anti-replay admission for signed Browser requests: shared device binding lock + unique nonce insert; no hot-row telemetry update.';
-
-create or replace function destruktion_meta.a2_browser_device_nonce_cleanup_h205f22()
-returns jsonb
-language plpgsql
-security definer
-set search_path to 'pg_catalog', 'destruktion_meta', 'public'
-as $$
-declare
-  v_deleted integer := 0;
-begin
-  -- Exactly one cleanup authority even if an operator invocation overlaps cron.
-  if not pg_try_advisory_xact_lock(20522, 82703) then
-    return jsonb_build_object(
-      'schema','metaengine.browser-device-nonce-cleanup.v1',
-      'skipped','CONCURRENT_CLEANUP',
-      'deleted',0,
-      'scheduler_authority',false,
-      'browser_authority',false,
-      'authority_effect',false
-    );
-  end if;
-
-  with victims as (
-    select ctid
-      from public.compute_fabric_a2_browser_device_nonce_h205f22
-     where expires_at < clock_timestamp() - interval '1 minute'
-     order by expires_at
-     limit 4096
-     for update skip locked
-  ),
-  deleted as (
-    delete from public.compute_fabric_a2_browser_device_nonce_h205f22 n
-    using victims v
-     where n.ctid = v.ctid
-    returning 1
-  )
-  select count(*)::integer into v_deleted from deleted;
-
-  return jsonb_build_object(
-    'schema','metaengine.browser-device-nonce-cleanup.v1',
-    'deleted',v_deleted,
-    'batch_limit',4096,
-    'scheduler_authority',false,
-    'browser_authority',false,
-    'automatic_retry_allowed',false,
-    'authority_effect',false
-  );
-end;
-$$;
-
-revoke all on function destruktion_meta.a2_browser_device_nonce_cleanup_h205f22()
-  from public, anon, authenticated, service_role;
-
--- DB housekeeping only; it never leases work and never performs a Browser effect.
-do $block$
-declare
-  v_jobid bigint;
-begin
-  for v_jobid in
-    select jobid
-      from cron.job
-     where jobname = 'metaengine-h205f22-browser-device-nonce-cleanup'
-  loop
-    perform cron.unschedule(v_jobid);
-  end loop;
-
-  perform cron.schedule(
-    'metaengine-h205f22-browser-device-nonce-cleanup',
-    '5 minutes',
-    'select destruktion_meta.a2_browser_device_nonce_cleanup_h205f22();'
-  );
-end
-$block$;
+  'Concurrent durable anti-replay admission: shared device binding lock + unique nonce insert + bounded amortized expiry cleanup; no hot-row telemetry update.';
