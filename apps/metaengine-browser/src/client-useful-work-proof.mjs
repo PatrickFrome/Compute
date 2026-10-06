@@ -421,19 +421,40 @@ export function clientUsefulWorkProofSameArtifact(left, right) {
   const a = object(left);
   const b = object(right);
   if (!a || !b) return false;
-  const aa = object(a.artifact);
-  const ba = object(b.artifact);
-  const ar = object(a.review);
-  const br = object(b.review);
-  if (!aa || !ba || !ar || !br) return false;
+  const repoA = object(a.repository);
+  const repoB = object(b.repository);
+  const editA = object(a.edit);
+  const editB = object(b.edit);
+  const verifyA = object(a.verification);
+  const verifyB = object(b.verification);
+  const artifactA = object(a.artifact);
+  const artifactB = object(b.artifact);
+  const reviewA = object(a.review);
+  const reviewB = object(b.review);
+  if (!repoA || !repoB || !editA || !editB || !verifyA || !verifyB || !artifactA || !artifactB || !reviewA || !reviewB) {
+    return false;
+  }
   return (
     a.evidence_class === b.evidence_class
     && a.evidence_origin === b.evidence_origin
     && a.client_c5_useful_work_verified === b.client_c5_useful_work_verified
-    && aa.artifact_sha256 === ba.artifact_sha256
-    && aa.provenance_sha256 === ba.provenance_sha256
-    && aa.verification_receipt_sha256 === ba.verification_receipt_sha256
-    && ar.review_receipt_sha256 === br.review_receipt_sha256
-    && ar.accepted_artifact_sha256 === br.accepted_artifact_sha256
+    && repoA.repository_identity_sha256 === repoB.repository_identity_sha256
+    && repoA.checkout_sha === repoB.checkout_sha
+    && repoA.source_snapshot_sha256 === repoB.source_snapshot_sha256
+    && editA.patch_sha256 === editB.patch_sha256
+    && editA.changed_file_manifest_sha256 === editB.changed_file_manifest_sha256
+    && editA.changed_file_count === editB.changed_file_count
+    && editA.materialized_edit_operations === editB.materialized_edit_operations
+    && verifyA.command_contract_sha256 === verifyB.command_contract_sha256
+    && verifyA.pre_repair_receipt_sha256 === verifyB.pre_repair_receipt_sha256
+    && verifyA.pre_repair_exit_code === verifyB.pre_repair_exit_code
+    && verifyA.post_repair_receipt_sha256 === verifyB.post_repair_receipt_sha256
+    && verifyA.post_repair_exit_code === verifyB.post_repair_exit_code
+    && artifactA.artifact_sha256 === artifactB.artifact_sha256
+    && artifactA.artifact_bytes === artifactB.artifact_bytes
+    && artifactA.provenance_sha256 === artifactB.provenance_sha256
+    && artifactA.verification_receipt_sha256 === artifactB.verification_receipt_sha256
+    && reviewA.review_receipt_sha256 === reviewB.review_receipt_sha256
+    && reviewA.accepted_artifact_sha256 === reviewB.accepted_artifact_sha256
   );
 }
