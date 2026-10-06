@@ -125,8 +125,8 @@ test('SQL derives execution identity from existing proof and useful-work accepta
     /v_execution := public\.client_v1_goal_execution_proof_v1\(p_workspace_id, p_request_id\)/,
   );
   assert.match(sql, /event_type = 'TASK_USEFUL_WORK_VERIFIED'/);
-  assert.match(sql, /proof_contract','METAENGINE_USEFUL_WORK_VERIFIED_V1'/);
-  assert.match(sql, /verifier_origin','TRUSTED_SERVER_VERIFIER'/);
+  assert.match(sql, /proof_contract[^\n]*METAENGINE_USEFUL_WORK_VERIFIED_V1/);
+  assert.match(sql, /verifier_origin[^\n]*TRUSTED_SERVER_VERIFIER/);
   assert.match(sql, /e\.workspace_id = p_workspace_id/);
   assert.match(sql, /e\.task_id = v_task_id/);
   assert.match(sql, /e\.point_id = v_execution->>'point_id'/);
