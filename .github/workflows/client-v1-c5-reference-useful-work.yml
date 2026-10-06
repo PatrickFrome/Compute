@@ -1,0 +1,155 @@
+name: Client V1 C5 Reference Useful Work
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-reference-producer-v1'
+    paths:
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/scripts/client-c5-reference-producer.mjs'
+      - 'apps/metaengine-browser/scripts/client-c5-reference-verifier.mjs'
+      - 'apps/metaengine-browser/test/fixtures/client-c5-reference-project/**'
+      - 'research/METAENGINE_CLIENT_V1_C5_REFERENCE_USEFUL_WORK_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-reference-useful-work.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/scripts/client-c5-reference-producer.mjs'
+      - 'apps/metaengine-browser/scripts/client-c5-reference-verifier.mjs'
+      - 'apps/metaengine-browser/test/fixtures/client-c5-reference-project/**'
+      - 'research/METAENGINE_CLIENT_V1_C5_REFERENCE_USEFUL_WORK_CHECKPOINT_2026-10-06.md'
+      - '.github/workflows/client-v1-c5-reference-useful-work.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reference-producer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse reference producer and verifier
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check scripts/client-c5-reference-producer.mjs
+          node --check scripts/client-c5-reference-verifier.mjs
+
+      - name: Prove checked-in reference baseline is intentionally red
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          node --test apps/metaengine-browser/test/fixtures/client-c5-reference-project/answer.test.mjs
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+
+      - name: Execute isolated-copy reference useful-work producer
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/client-c5-reference-producer.mjs             --repository "$GITHUB_WORKSPACE"             --head "$GITHUB_SHA"             --out "$RUNNER_TEMP/client-c5-reference-producer"
+
+      - name: Prove host checkout remained unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable producer evidence bundle
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-reference-producer-${{ github.sha }}
+          path: ${{ runner.temp }}/client-c5-reference-producer/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  independent-verifier:
+    needs: [reference-producer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact verifier head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove verifier exact head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -n "${{ needs.reference-producer.outputs.artifact_id }}"
+          test -n "${{ needs.reference-producer.outputs.artifact_digest }}"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Download producer evidence by immutable artifact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.reference-producer.outputs.artifact_id }}
+          path: ${{ runner.temp }}/client-c5-reference-producer
+          digest-mismatch: error
+
+      - name: Independently verify useful-work material and synthetic non-promotion
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/client-c5-reference-verifier.mjs             --bundle "$RUNNER_TEMP/client-c5-reference-producer"             --head "$GITHUB_SHA"             --out "$RUNNER_TEMP/client-c5-reference-verification"
+
+      - name: Re-run fail-closed Client C5 contract
+        working-directory: apps/metaengine-browser
+        run: node --test test/client-v1-c5-useful-work-proof.test.mjs
+
+      - name: Prove verifier checkout remained unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload independent verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: client-c5-reference-verification-${{ github.sha }}
+          path: ${{ runner.temp }}/client-c5-reference-verification/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
