@@ -519,6 +519,16 @@ export function resolveClientC5SupervisorReadbackKey({
     });
   }
 
+  if (issuedAt < normalized.issued_at_ms) {
+    return Object.freeze({
+      ok: false,
+      reason: 'SUPERVISOR_READBACK_EVIDENCE_PREDATES_TRUST_ROOT',
+      key: null,
+      key_id: String(key_id || ''),
+      authority_effect: false,
+    });
+  }
+
   const entry = normalized.keys.find((candidate) => candidate.key_id === key_id);
   if (!entry || entry.role !== 'SUPERVISOR_READBACK') {
     return Object.freeze({
