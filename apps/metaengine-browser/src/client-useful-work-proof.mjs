@@ -361,3 +361,91 @@ export function normalizeClientUsefulWorkProof(value, executionProof) {
     authority_effect: false,
   });
 }
+
+
+export function clientUsefulWorkProofMatchesExecution(proof, executionProof) {
+  let row;
+  try {
+    row = normalizeClientUsefulWorkProof(proof, executionProof);
+  } catch {
+    return false;
+  }
+  const execution = object(executionProof);
+  const result = object(execution?.result_proof);
+  const origin = object(execution?.agent_origin_proof);
+  if (
+    row.found !== true
+    || row.user_goal_to_verified_artifact_readback !== true
+    || row.serial_loop_end_to_end !== true
+    || row.authority_effect !== false
+    || row.automatic_retry_allowed !== false
+    || !execution
+    || execution.schema !== 'metaengine.client.goal-execution-proof.v1'
+    || execution.found !== true
+    || !result
+    || !origin
+  ) return false;
+
+  const binding = [
+    'request_id',
+    'workspace_id',
+    'roadmap_id',
+    'plan_generation',
+    'alignment_epoch',
+    'baseline_sha',
+    'plan_sha256',
+    'point_id',
+    'task_id',
+    'task_spec_sha256',
+    'lease_generation',
+  ];
+  if (binding.some((key) => row[key] == null || row[key] !== execution[key])) return false;
+
+  return (
+    row.result_sha256 === result.result_sha256
+    && row.claim_sha256 === result.claim_sha256
+    && row.conversation_url_sha256 === origin.conversation_url_sha256
+  );
+}
+
+export function clientUsefulWorkProofSameArtifact(left, right) {
+  const a = object(left);
+  const b = object(right);
+  if (!a || !b) return false;
+  const repoA = object(a.repository);
+  const repoB = object(b.repository);
+  const editA = object(a.edit);
+  const editB = object(b.edit);
+  const verifyA = object(a.verification);
+  const verifyB = object(b.verification);
+  const artifactA = object(a.artifact);
+  const artifactB = object(b.artifact);
+  const reviewA = object(a.review);
+  const reviewB = object(b.review);
+  if (!repoA || !repoB || !editA || !editB || !verifyA || !verifyB || !artifactA || !artifactB || !reviewA || !reviewB) {
+    return false;
+  }
+  return (
+    a.evidence_class === b.evidence_class
+    && a.evidence_origin === b.evidence_origin
+    && a.client_c5_useful_work_verified === b.client_c5_useful_work_verified
+    && repoA.repository_identity_sha256 === repoB.repository_identity_sha256
+    && repoA.checkout_sha === repoB.checkout_sha
+    && repoA.source_snapshot_sha256 === repoB.source_snapshot_sha256
+    && editA.patch_sha256 === editB.patch_sha256
+    && editA.changed_file_manifest_sha256 === editB.changed_file_manifest_sha256
+    && editA.changed_file_count === editB.changed_file_count
+    && editA.materialized_edit_operations === editB.materialized_edit_operations
+    && verifyA.command_contract_sha256 === verifyB.command_contract_sha256
+    && verifyA.pre_repair_receipt_sha256 === verifyB.pre_repair_receipt_sha256
+    && verifyA.pre_repair_exit_code === verifyB.pre_repair_exit_code
+    && verifyA.post_repair_receipt_sha256 === verifyB.post_repair_receipt_sha256
+    && verifyA.post_repair_exit_code === verifyB.post_repair_exit_code
+    && artifactA.artifact_sha256 === artifactB.artifact_sha256
+    && artifactA.artifact_bytes === artifactB.artifact_bytes
+    && artifactA.provenance_sha256 === artifactB.provenance_sha256
+    && artifactA.verification_receipt_sha256 === artifactB.verification_receipt_sha256
+    && reviewA.review_receipt_sha256 === reviewB.review_receipt_sha256
+    && reviewA.accepted_artifact_sha256 === reviewB.accepted_artifact_sha256
+  );
+}
