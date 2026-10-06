@@ -1,0 +1,92 @@
+name: Client V1 C5 Installed Restart Preflight
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-installed-restart-continuity-v1'
+    paths:
+      - 'apps/metaengine-browser/src/client-goal-journal-file-store.mjs'
+      - 'apps/metaengine-browser/src/client-goal-journal.mjs'
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/main-entry.mjs'
+      - 'apps/metaengine-browser/src/final-runtime-entry.mjs'
+      - 'apps/metaengine-browser/src/final-runtime-activation-registry.mjs'
+      - 'apps/metaengine-browser/scripts/client-c5-installed-journal-fixture.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-installed-journal-probe-contract.test.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-restart-continuity.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - '.github/workflows/browser-windows-package-smoke.yml'
+      - '.github/workflows/client-v1-c5-installed-restart-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installed-restart-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Checkout exact preflight head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact preflight head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse installed restart sources
+        working-directory: apps/metaengine-browser
+        run: |
+          set -euo pipefail
+          node --check src/client-goal-journal-file-store.mjs
+          node --check src/client-goal-journal.mjs
+          node --check src/client-useful-work-proof.mjs
+          node --check src/main-entry.mjs
+          node --check src/main.mjs
+          node --check src/final-runtime-entry.mjs
+          node --check src/final-runtime-activation-registry.mjs
+          node --check scripts/client-c5-installed-journal-fixture.mjs
+
+      - name: Prove journal probe and restart contracts
+        working-directory: apps/metaengine-browser
+        run: |
+          set -euo pipefail
+          node --test             test/client-v1-c5-installed-journal-probe-contract.test.mjs             test/client-v1-c5-useful-work-restart-continuity.test.mjs             test/client-v1-c5-useful-work-proof.test.mjs             test/client-v1-execution-proof-integrity.test.mjs
+
+      - name: Prove unique monotonic package identity
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./apps/metaengine-browser/package.json').version")"
+          lock_version="$(node -p "require('./apps/metaengine-browser/package-lock.json').version")"
+          root_lock_version="$(node -p "require('./apps/metaengine-browser/package-lock.json').packages[''].version")"
+          test "$package_version" = '0.7.0-dev.37396852910.1'
+          test "$lock_version" = "$package_version"
+          test "$root_lock_version" = "$package_version"
+
+      - name: Prove canonical Windows package workflow owns physical gate
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/browser-windows-package-smoke.yml
+          grep -Fq 'Prove installed Client useful-work journal survives process restart without replay' "$workflow"
+          grep -Fq -- '--metaengine-client-goal-journal-probe' "$workflow"
+          grep -Fq 'client-c5-installed-restart-continuity.json' "$workflow"
+          grep -Fq 'client_c5_installed_restart_live_useful_work_proven' "$workflow"
+          grep -Fq 'Publish immutable candidate for parallel downstream qualification' "$workflow"
+
+      - name: Prove checkout unchanged
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
