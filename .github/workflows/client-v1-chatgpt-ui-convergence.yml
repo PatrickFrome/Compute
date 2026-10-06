@@ -69,7 +69,14 @@ jobs:
             apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs \
             apps/metaengine-browser/test/shell-first-startup-boundary.test.mjs \
             apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs \
-            apps/metaengine-browser/test/browser-policy.test.mjs
+            apps/metaengine-browser/test/browser-policy.test.mjs \
+            apps/metaengine-browser/test/browser-agentic-workbench-ui.test.mjs \
+            apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs \
+            apps/metaengine-browser/test/browser-devos-now-ui.test.mjs \
+            apps/metaengine-browser/test/browser-devos-session-surface-ui.test.mjs \
+            apps/metaengine-browser/test/emergency-maintenance-trust-root.test.mjs \
+            apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs \
+            apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs
 
       - name: Install exact ME2 UI dependencies
         working-directory: apps/me2-ui
