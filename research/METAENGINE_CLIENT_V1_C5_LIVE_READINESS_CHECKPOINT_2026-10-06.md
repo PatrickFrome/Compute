@@ -3,7 +3,7 @@
 Date: 2026-10-06  
 Status: **EVIDENCE_READY — PREPARE_ONLY / NO LIVE ACTUATION**  
 Branch: `work/client-v1-c5-live-readiness-v1`  
-Qualified implementation head: `b303ef3111b18b3cafe665c7ab54f619e1217c3e`
+Qualification discipline: exact-head workflow; the final report-containing SHA/run is recorded in draft PR #1129 to avoid a self-referential report-update loop.
 
 ## Roadmap reconciliation
 
@@ -229,27 +229,15 @@ A future authorization must separately prove:
 
 No such authorization evidence was created in this checkpoint.
 
-## Exact CI evidence
+## CI evidence
 
 Workflow:
 
 `Client V1 C5 Live Readiness`
 
-Run:
+The first complete implementation run before the packaging-boundary relocation was `37402809051` / job `112073560720` and concluded **SUCCESS** with 32/32 tests.
 
-`37402809051`
-
-Job:
-
-`112073560720`
-
-Exact head:
-
-`b303ef3111b18b3cafe665c7ab54f619e1217c3e`
-
-Conclusion:
-
-**SUCCESS**
+After relocation into `coordination/client-v1/c5-live-readiness/`, the same workflow remains the exact-head qualifier. The final report-containing head/run is recorded in draft PR #1129, because writing that run id back into this report would itself create a new head and another run.
 
 Adversarial/test result:
 
@@ -272,21 +260,9 @@ The workflow also proved:
 
 ## Readiness artifact
 
-Artifact id:
+The first complete implementation artifact before relocation was artifact `11385692558`, digest `sha256:4dc8393fb11ca97ebbfbd82be49fd376af223960fc7a7aa8b0cb5327720b97f3`.
 
-`11385692558`
-
-Name:
-
-`client-c5-live-readiness-b303ef3111b18b3cafe665c7ab54f619e1217c3e`
-
-Artifact digest:
-
-`sha256:4dc8393fb11ca97ebbfbd82be49fd376af223960fc7a7aa8b0cb5327720b97f3`
-
-Capsule SHA-256:
-
-`d175f183854634dd3735c701dad87bd0e397e826f795b8cbd1af6c3c678eeee5`
+Final non-packaged capsule/artifact ids and digests are recorded in PR #1129 from the exact report-containing head.
 
 The artifact contains:
 
