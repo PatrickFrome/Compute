@@ -123,6 +123,71 @@ export function dispatchRealtimeObservationEdge({ cognitiveTransport, scheduleFu
   return Object.freeze({ transport: 'COGNITIVE_DELTA', reason: state, authority_effect: false });
 }
 
+function nativeSupervisorStateWriteTarget(value) {
+  try {
+    return new URL(String(value)).pathname.endsWith('/v1/state');
+  } catch {
+    return String(value || '').split('?')[0].endsWith('/v1/state');
+  }
+}
+
+function nativeSupervisorStateWriteAbortReason(signal) {
+  return signal?.reason instanceof Error
+    ? signal.reason
+    : new Error('native_supervisor_state_write_aborted');
+}
+
+// The Native Supervisor has two independent observation producers that can publish
+// the same durable /v1/state row: the primary full-state heartbeat and the realtime
+// full-state fallback used by the cognitive/process plane. Their payload ownership is
+// already safe under the server-side shallow plane merge, but concurrent POSTs still
+// serialize on the single (client_id) row in Postgres. Live readback on 2026-10-06
+// proved that self-contention could form a tuple-lock convoy, hit statement_timeout,
+// surface as Edge 504 and turn a pre-effect DevOS promotion lease into transport
+// ambiguity. Serialize only POST /v1/state at the shared raw-fetch boundary. Other
+// routes (command leasing/results, cognitive deltas, /v1/heartbeat) remain parallel.
+//
+// Each caller keeps its own bounded deadline. If a queued caller is aborted before its
+// turn, its reserved queue slot is released without dispatching a stale state write.
+export function createNativeSupervisorStateSingleWriterFetch(fetchImpl) {
+  if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
+  let tail = Promise.resolve();
+
+  return async (url, init = {}) => {
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (method !== 'POST' || !nativeSupervisorStateWriteTarget(url)) {
+      return fetchImpl(url, init);
+    }
+
+    const predecessor = tail;
+    let release;
+    const slot = new Promise((resolve) => { release = resolve; });
+    tail = predecessor.then(() => slot);
+
+    const signal = init?.signal || null;
+    let onAbort = null;
+    try {
+      if (signal?.aborted) throw nativeSupervisorStateWriteAbortReason(signal);
+      if (signal) {
+        await Promise.race([
+          predecessor,
+          new Promise((_, reject) => {
+            onAbort = () => reject(nativeSupervisorStateWriteAbortReason(signal));
+            signal.addEventListener('abort', onAbort, { once: true });
+          }),
+        ]);
+      } else {
+        await predecessor;
+      }
+      if (signal?.aborted) throw nativeSupervisorStateWriteAbortReason(signal);
+      return await fetchImpl(url, init);
+    } finally {
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      release();
+    }
+  };
+}
+
 export function exactCommandTargetProjection(command) {
   const commandId = String(command?.command_id || '').toLowerCase();
   const tabId = String(command?.payload?.tab_id || '');
@@ -249,6 +314,12 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #resolveBrowserCell = null;
 
   constructor(options = {}) {
+    const rawFetch = options.fetchImpl ?? globalThis.fetch;
+    if (typeof rawFetch !== 'function') throw new Error('native_supervisor_fetch_required');
+    // One shared state-write gate is deliberately passed through both inheritance
+    // layers. The core heartbeat transport and the public realtime fallback each
+    // create their own bounded wrapper, but both now converge on this single writer.
+    const stateSingleWriterFetch = createNativeSupervisorStateSingleWriterFetch(rawFetch);
     const executeCommand = options.executeCommand;
     const sourceGetState = options.getState;
     const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
@@ -338,15 +409,15 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
 
     super({
       ...options,
+      fetchImpl: stateSingleWriterFetch,
       getState: getStateWithHostResilience,
       executeCommand: trackedExecuteCommand,
       beforeSelfUpdateInstall,
     });
     if (!options.identity) throw new Error('native_supervisor_identity_required');
-    if (typeof (options.fetchImpl ?? globalThis.fetch) !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof sourceGetState !== 'function') throw new Error('native_supervisor_state_provider_required');
     this.#workspaceIdentity = options.identity;
-    this.#workspaceFetch = createBoundedSupervisorFetch(options.fetchImpl ?? globalThis.fetch, { deadlineMs: options.requestDeadlineMs });
+    this.#workspaceFetch = createBoundedSupervisorFetch(stateSingleWriterFetch, { deadlineMs: options.requestDeadlineMs });
     this.#commandTargetProjection = () => commandTargetProjection;
     this.#sourceGetState = sourceGetState;
     this.#processPlaneRef = () => realtimeProcessPlane;
