@@ -359,6 +359,22 @@ test('active Supervisor key resolves only inside its cryptoperiod', () => {
   assert.equal(before.reason, 'SUPERVISOR_READBACK_KEY_OUTSIDE_CRYPTOPERIOD');
 });
 
+test('Supervisor evidence cannot predate the trust-root generation that introduces the key', () => {
+  const current = manifest({
+    generation: 1,
+    issued_at: '2026-10-05T12:00:00Z',
+    keys: [rootAEntry, supervisorAEntry],
+  });
+  const rejected = resolveClientC5SupervisorReadbackKey({
+    manifest: current,
+    key_id: 'supervisor:a',
+    evidence_issued_at: '2026-10-05T11:59:59Z',
+    now: new Date('2026-10-06T00:00:00Z'),
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, 'SUPERVISOR_READBACK_EVIDENCE_PREDATES_TRUST_ROOT');
+});
+
 test('retired key verifies historical evidence only before retirement', () => {
   const retiredEntry = keyEntry(supervisorA, {
     key_id: 'supervisor:a',
