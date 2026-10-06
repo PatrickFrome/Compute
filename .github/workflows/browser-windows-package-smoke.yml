@@ -746,6 +746,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
@@ -1093,7 +1095,7 @@ jobs:
             }
           }
 
-          node scripts/client-c5-installed-journal-fixture.mjs --out $goalJournal --baseline "$env:GITHUB_SHA" --mode valid
+          node scripts/client-c5-installed-journal-fixture.mjs --out $goalJournal --baseline ([string]$proof.source_head) --mode valid
           if ($LASTEXITCODE -ne 0) { throw 'installed_restart_valid_fixture_failed' }
           $validDiskSha = (Get-FileHash $goalJournal -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -1106,7 +1108,7 @@ jobs:
           $secondDrift = [string]$second.journal_sha256_before -ne $validDiskSha -or [string]$second.latest.request_id -ne [string]$first.latest.request_id -or [string]$second.latest.artifact_sha256 -ne [string]$first.latest.artifact_sha256 -or [string]$second.latest.result_sha256 -ne [string]$first.latest.result_sha256
           if ($secondDrift) { throw 'installed_restart_second_process_continuity_drift' }
 
-          node scripts/client-c5-installed-journal-fixture.mjs --out $goalJournal --baseline "$env:GITHUB_SHA" --mode stale
+          node scripts/client-c5-installed-journal-fixture.mjs --out $goalJournal --baseline ([string]$proof.source_head) --mode stale
           if ($LASTEXITCODE -ne 0) { throw 'installed_restart_stale_fixture_failed' }
           $staleDisk = Get-Content $goalJournal -Raw | ConvertFrom-Json
           if ([int]$staleDisk.entries[0].execution_proof.lease_generation -ne 1 -or [int]$staleDisk.entries[0].useful_work_proof.lease_generation -ne 2) { throw 'installed_restart_stale_fixture_not_stale' }
@@ -1120,7 +1122,7 @@ jobs:
 
           @{
             schema='metaengine.client-v1.c5-installed-restart-continuity.v1'
-            source_head=$env:GITHUB_SHA
+            source_head=[string]$proof.source_head
             package_version=[string]$proof.package_version
             user_data_path=$userData
             journal_path=$goalJournal
