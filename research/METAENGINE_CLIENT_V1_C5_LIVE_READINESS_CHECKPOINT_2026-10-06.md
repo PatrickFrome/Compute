@@ -57,29 +57,39 @@ The live call itself must not be the place where these decisions are invented.
 
 New contract:
 
-`apps/metaengine-browser/src/client-c5-live-readiness.mjs`
+`coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs`
 
 New generator:
 
-`apps/metaengine-browser/scripts/client-c5-live-readiness-capsule.mjs`
+`coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs`
 
 New adversarial suite:
 
-`apps/metaengine-browser/test/client-v1-c5-live-readiness.test.mjs`
+`coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs`
 
 Dedicated bounded fixture:
 
-`apps/metaengine-browser/test/fixtures/client-c5-live-project/`
+`coordination/client-v1/c5-live-readiness/fixture/`
 
 Workflow:
 
 `.github/workflows/client-v1-c5-live-readiness.yml`
 
+## Packaging boundary
+
+The readiness contract, generator, adversarial tests and bounded fixture live under:
+
+`coordination/client-v1/c5-live-readiness/`
+
+They are intentionally outside `apps/metaengine-browser/src/**/*`, which is the Electron builder's packaged runtime surface.
+
+This prevents a PREPARE_ONLY launch contract from changing NSIS installer bytes or consuming a new immutable package identity.
+
 ## Canonical objective
 
 The objective is a source constant, not free workflow input:
 
-`Repair the single bounded Client C5 canary in apps/metaengine-browser/test/fixtures/client-c5-live-project by changing only answer.mjs so the existing test passes, then run the existing build script to produce dist/live-artifact.json. Do not modify any other path, do not use network, and return only after the test and build pass.`
+`Repair the single bounded Client C5 canary in coordination/client-v1/c5-live-readiness/fixture by changing only answer.mjs so the existing test passes, then run the existing build script to produce dist/live-artifact.json. Do not modify any other path, do not use network, and return only after the test and build pass.`
 
 The contract requires both:
 
@@ -92,11 +102,11 @@ Changing the objective and recomputing only a new hash is therefore rejected.
 
 Fixture root:
 
-`apps/metaengine-browser/test/fixtures/client-c5-live-project`
+`coordination/client-v1/c5-live-readiness/fixture`
 
 Only allowed changed file:
 
-`apps/metaengine-browser/test/fixtures/client-c5-live-project/answer.mjs`
+`coordination/client-v1/c5-live-readiness/fixture/answer.mjs`
 
 Maximum changed files:
 
@@ -124,7 +134,7 @@ The generator proves the baseline test really fails before repair.
 
 Pre-repair:
 
-`node --test apps/metaengine-browser/test/fixtures/client-c5-live-project/answer.test.mjs`
+`node --test coordination/client-v1/c5-live-readiness/fixture/answer.test.mjs`
 
 Post-repair:
 
@@ -132,7 +142,7 @@ same exact command.
 
 Build:
 
-`node apps/metaengine-browser/test/fixtures/client-c5-live-project/build.mjs`
+`node coordination/client-v1/c5-live-readiness/fixture/build.mjs`
 
 The generator executes all three in a separate `git clone --no-hardlinks` workspace.
 
@@ -147,7 +157,7 @@ Required observed states:
 
 Artifact path:
 
-`apps/metaengine-browser/test/fixtures/client-c5-live-project/dist/live-artifact.json`
+`coordination/client-v1/c5-live-readiness/fixture/dist/live-artifact.json`
 
 Schema:
 
