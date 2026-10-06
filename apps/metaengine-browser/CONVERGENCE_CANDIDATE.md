@@ -1,13 +1,22 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37435000001.1`.
+Reserved package identity is `0.7.0-dev.37436000001.1`.
+
+Workspace projection test retirement correction (2026-10-06):
+- predecessor identity `0.7.0-dev.37435000001.1` passed Package Smoke identity preflight on exact source `498a244a0484d0566bc91fa81fa1119175fb4eb0`; therefore it is consumed for governance purposes and MUST NOT be reused after any source change;
+- Browser Typed Workspaces run `37435008436` exposed one stale falsification test that still opened deleted `apps/metaengine-browser/ui/app.js`; 23/24 tests passed and the sole failure was ENOENT at `shell-workspace-projection-wiring.test.mjs`;
+- the repaired test preserves the original authority boundary by validating bounded DevOS projection acceptance in `preload-shell.cjs` and proving the current ME2 store does not reconstruct `workspace_bindings`, `lease_current`, exact binding identity or current command payload;
+- source-only ChatGPT UI convergence now includes this workspace wiring test before any physical producer is accepted;
+- fresh package identity is `0.7.0-dev.37436000001.1`; it is the only identity eligible for the repaired exact source, and any later source mutation after Package Smoke begins requires another monotonic version;
+- no live provider effect, production trust, release publication, scheduler authority or canonical C2 promotion is authorized.
+
 
 Legacy shell retirement successor reservation (2026-10-06):
 - intermediate ChatGPT UI candidate `0.7.0-dev.37434000001.1` reached Package Smoke preflight on PR #1133 before the deprecated `metaengine-dark-workspace-v2` renderer was fully removed; that identity is treated as potentially consumed and MUST NOT represent the final source even if its Windows producer never emits an artifact;
 - the final source removes the entire `apps/metaengine-browser/ui/` renderer bundle, all obsolete legacy-shell visual/UI tests, old Package Smoke visual capture, package inclusion `ui/**/*`, and runtime routing to `metaengine://shell/`;
 - packaged ME2 is now the only product UI. ME2 failure routes only to an inline GET-only `metaengine://recovery/` document with CSP `default-src 'none'`, no script/form/input/button/network path, and `recovery_surface_authority=false`;
 - `npm run check` no longer references deleted `ui/app.js` or `browser-shell-visual-evidence.mjs`; source-only convergence now runs full Browser parse checks plus ChatGPT/retirement/startup/policy contracts before any physical package is accepted;
-- final fresh package identity is `0.7.0-dev.37435000001.1`. Any source mutation after its physical producer begins consumes this identity and requires another monotonic version;
+- final fresh package identity is `0.7.0-dev.37436000001.1`. Any source mutation after its physical producer begins consumes this identity and requires another monotonic version;
 - old package `0.7.0-dev.37416000001.1` remains the immutable installed LIVE-development baseline; no production trust, provider effect, release publication, scheduler authority or canonical C2 promotion is granted here.
 
 
@@ -18,7 +27,7 @@ ChatGPT primary UI convergence reservation (2026-10-06):
 - legacy `GET /glm` telemetry remains read-only; UI `probe` / `upgrade fleet` mutations and `mcxOp("glm", ...)` are removed;
 - unused `z-ai-web-dev-sdk` and dead GLM/vault `agent-factory/bootstrap.ts` are removed from the ME2 source/dependency surface;
 - compiled Next output is fail-closed scanned for legacy provider branding/mutation strings;
-- fresh Browser package identity is `0.7.0-dev.37435000001.1`; Package Smoke remains the sole physical producer and all installed/runtime/self-update consumers must qualify the same immutable candidate before this slice is considered physically proven;
+- fresh Browser package identity is `0.7.0-dev.37436000001.1`; Package Smoke remains the sole physical producer and all installed/runtime/self-update consumers must qualify the same immutable candidate before this slice is considered physically proven;
 - no production trust, provider mutation, canonical C2 promotion, scheduler authority, release authority or automatic retry is granted by this reservation.
 
 
