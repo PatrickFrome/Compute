@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   CLIENT_C5_SUPERVISOR_TRUST_ROOT_SCHEMA,
   CLIENT_C5_SUPERVISOR_TRUST_ROOT_SIGNATURE_SCHEMA,
+  buildClientC5SupervisorTrustResolutionReceipt,
   clientC5SupervisorTrustRootContract,
   clientC5SupervisorTrustRootDigest,
   clientC5SupervisorTrustRootSigningBytes,
@@ -23,6 +24,7 @@ function keyEntry(pair, {
   valid_until = '2027-10-01T00:00:00Z',
   retired_at = null,
   revoked_at = null,
+  invalid_since = null,
 } = {}) {
   const der = pair.publicKey.export({ type: 'spki', format: 'der' });
   return {
@@ -36,6 +38,7 @@ function keyEntry(pair, {
     valid_until,
     retired_at,
     revoked_at,
+    invalid_since,
   };
 }
 
@@ -49,7 +52,7 @@ function manifest({
 } = {}) {
   return {
     schema: CLIENT_C5_SUPERVISOR_TRUST_ROOT_SCHEMA,
-    version: '1.0.0',
+    version: '2.0.0',
     generation,
     issued_at,
     expires_at,
@@ -100,39 +103,42 @@ const v1 = manifest({
 });
 const v1Signature = signatureEnvelope(v1, [{ key_id: 'root:a', privateKey: rootA.privateKey }]);
 
-test('bootstrap requires an externally pinned root key exact to the manifest entry', () => {
+test('controlled bootstrap requires a pinned root key exact to the manifest entry', () => {
   const ok = verifyClientC5SupervisorTrustRootBootstrap({
     manifest: v1,
     signature_envelope: v1Signature,
     pinned_root_public_keys: { 'root:a': rootA.publicKey },
+    pin_mode: 'CONTROLLED_TEST_VECTOR',
     now: new Date('2026-10-06T00:00:00Z'),
-    production_bootstrap: false,
   });
   assert.equal(ok.action, 'TRUST_ROOT_ACCEPTED');
   assert.equal(ok.reason, 'CONTROLLED_BOOTSTRAP_EXACT');
+  assert.equal(ok.bootstrap_material_verified, true);
+  assert.equal(ok.live_development_pin_verified, false);
   assert.equal(ok.production_bootstrap_proven, false);
-  assert.deepEqual(ok.verified_root_key_ids, ['root:a']);
 
   const missing = verifyClientC5SupervisorTrustRootBootstrap({
     manifest: v1,
     signature_envelope: v1Signature,
     pinned_root_public_keys: {},
+    pin_mode: 'CONTROLLED_TEST_VECTOR',
     now: new Date('2026-10-06T00:00:00Z'),
   });
   assert.equal(missing.action, 'HOLD_TRUST_ROOT');
-  assert.equal(missing.reason, 'PINNED_BOOTSTRAP_THRESHOLD_NOT_MET');
+  assert.equal(missing.reason, 'CONTROLLED_BOOTSTRAP_THRESHOLD_NOT_MET');
 
   const wrong = verifyClientC5SupervisorTrustRootBootstrap({
     manifest: v1,
     signature_envelope: v1Signature,
     pinned_root_public_keys: { 'root:a': rootB.publicKey },
+    pin_mode: 'CONTROLLED_TEST_VECTOR',
     now: new Date('2026-10-06T00:00:00Z'),
   });
   assert.equal(wrong.action, 'HOLD_TRUST_ROOT');
-  assert.equal(wrong.reason, 'PINNED_BOOTSTRAP_THRESHOLD_NOT_MET');
+  assert.equal(wrong.reason, 'CONTROLLED_BOOTSTRAP_THRESHOLD_NOT_MET');
 });
 
-test('production bootstrap additionally requires the externally governed SPKI digest pin', () => {
+test('LIVE development pin requires exact external SPKI digest but never claims production bootstrap', () => {
   const der = rootA.publicKey.export({ type: 'spki', format: 'der' });
   const digest = sha256ClientC5(der);
 
@@ -141,34 +147,44 @@ test('production bootstrap additionally requires the externally governed SPKI di
     signature_envelope: v1Signature,
     pinned_root_public_keys: { 'root:a': rootA.publicKey },
     expected_pinned_root_spki_sha256: { 'root:a': digest },
+    pin_mode: 'LIVE_DEVELOPMENT_PIN',
     now: new Date('2026-10-06T00:00:00Z'),
-    production_bootstrap: true,
   });
   assert.equal(accepted.action, 'TRUST_ROOT_ACCEPTED');
-  assert.equal(accepted.reason, 'PINNED_PRODUCTION_BOOTSTRAP_EXACT');
-  assert.equal(accepted.production_bootstrap_proven, true);
+  assert.equal(accepted.reason, 'LIVE_DEVELOPMENT_PIN_MATERIAL_EXACT');
+  assert.equal(accepted.bootstrap_material_verified, true);
+  assert.equal(accepted.live_development_pin_verified, true);
+  assert.equal(accepted.production_bootstrap_proven, false);
 
-  const wrongDigest = verifyClientC5SupervisorTrustRootBootstrap({
+  for (const expected of [{ 'root:a': '0'.repeat(64) }, {}]) {
+    const held = verifyClientC5SupervisorTrustRootBootstrap({
+      manifest: v1,
+      signature_envelope: v1Signature,
+      pinned_root_public_keys: { 'root:a': rootA.publicKey },
+      expected_pinned_root_spki_sha256: expected,
+      pin_mode: 'LIVE_DEVELOPMENT_PIN',
+      now: new Date('2026-10-06T00:00:00Z'),
+    });
+    assert.equal(held.action, 'HOLD_TRUST_ROOT');
+    assert.equal(held.reason, 'LIVE_DEVELOPMENT_PIN_THRESHOLD_NOT_MET');
+    assert.equal(held.production_bootstrap_proven, false);
+  }
+});
+
+test('no caller mode can manufacture production bootstrap proof from raw material', () => {
+  const invalid = verifyClientC5SupervisorTrustRootBootstrap({
     manifest: v1,
     signature_envelope: v1Signature,
     pinned_root_public_keys: { 'root:a': rootA.publicKey },
-    expected_pinned_root_spki_sha256: { 'root:a': '0'.repeat(64) },
+    expected_pinned_root_spki_sha256: {
+      'root:a': sha256ClientC5(rootA.publicKey.export({ type: 'spki', format: 'der' })),
+    },
+    pin_mode: 'PINNED_PRODUCTION',
     now: new Date('2026-10-06T00:00:00Z'),
-    production_bootstrap: true,
   });
-  assert.equal(wrongDigest.action, 'HOLD_TRUST_ROOT');
-  assert.equal(wrongDigest.reason, 'PINNED_BOOTSTRAP_DIGEST_THRESHOLD_NOT_MET');
-  assert.equal(wrongDigest.production_bootstrap_proven, false);
-
-  const absentDigest = verifyClientC5SupervisorTrustRootBootstrap({
-    manifest: v1,
-    signature_envelope: v1Signature,
-    pinned_root_public_keys: { 'root:a': rootA.publicKey },
-    now: new Date('2026-10-06T00:00:00Z'),
-    production_bootstrap: true,
-  });
-  assert.equal(absentDigest.action, 'HOLD_TRUST_ROOT');
-  assert.equal(absentDigest.reason, 'PINNED_BOOTSTRAP_DIGEST_THRESHOLD_NOT_MET');
+  assert.equal(invalid.action, 'HOLD_TRUST_ROOT');
+  assert.equal(invalid.reason, 'TRUST_ROOT_PIN_MODE_INVALID');
+  assert.equal(invalid.production_bootstrap_proven, false);
 });
 
 test('root rotation requires exact lineage and both old and new root thresholds', () => {
@@ -191,8 +207,6 @@ test('root rotation requires exact lineage and both old and new root thresholds'
   });
   assert.equal(accepted.action, 'TRUST_ROOT_ACCEPTED');
   assert.equal(accepted.reason, 'OLD_AND_NEW_ROOT_THRESHOLDS_EXACT');
-  assert.deepEqual(accepted.old_verified_root_key_ids, ['root:a']);
-  assert.deepEqual(accepted.new_verified_root_key_ids, ['root:b']);
 
   const oldOnly = verifyClientC5SupervisorTrustRootTransition({
     current_manifest: v1,
@@ -280,7 +294,7 @@ test('rollback, skipped generations and wrong previous digest fail closed', () =
   }
 });
 
-test('expired or future trust roots are rejected', () => {
+test('expired, future, duplicate and unordered roots are rejected', () => {
   const expired = manifest({
     generation: 1,
     issued_at: '2026-10-01T00:00:00Z',
@@ -301,9 +315,7 @@ test('expired or future trust roots are rejected', () => {
     () => normalizeClientC5SupervisorTrustRoot(future, { now: new Date('2026-10-06T00:00:00Z') }),
     /client_c5_supervisor_trust_root_time_invalid/,
   );
-});
 
-test('key ids must be unique and canonically ordered', () => {
   const duplicate = { ...v1, keys: [rootAEntry, rootAEntry] };
   assert.throws(
     () => normalizeClientC5SupervisorTrustRoot(duplicate, { now: new Date('2026-10-06T00:00:00Z') }),
@@ -317,7 +329,7 @@ test('key ids must be unique and canonically ordered', () => {
   );
 });
 
-test('private or unknown key material cannot be smuggled into the exact schema', () => {
+test('private or unknown key material cannot be smuggled into exact schema', () => {
   const injected = structuredClone(v1);
   injected.keys[0].private_key = 'forbidden';
   assert.throws(
@@ -326,7 +338,7 @@ test('private or unknown key material cannot be smuggled into the exact schema',
   );
 });
 
-test('active Supervisor readback key resolves only inside its cryptoperiod', () => {
+test('active Supervisor key resolves only inside its cryptoperiod', () => {
   const ok = resolveClientC5SupervisorReadbackKey({
     manifest: v1,
     key_id: 'supervisor:a',
@@ -335,6 +347,7 @@ test('active Supervisor readback key resolves only inside its cryptoperiod', () 
   });
   assert.equal(ok.ok, true);
   assert.equal(ok.key_state, 'ACTIVE');
+  assert.match(ok.public_key_spki_sha256, /^[0-9a-f]{64}$/);
 
   const before = resolveClientC5SupervisorReadbackKey({
     manifest: v1,
@@ -366,7 +379,6 @@ test('retired key verifies historical evidence only before retirement', () => {
     now: new Date('2026-10-06T00:00:00Z'),
   });
   assert.equal(historical.ok, true);
-  assert.equal(historical.reason, 'SUPERVISOR_READBACK_HISTORICAL_SIGNATURE_ALLOWED');
 
   const late = resolveClientC5SupervisorReadbackKey({
     manifest: m,
@@ -378,11 +390,12 @@ test('retired key verifies historical evidence only before retirement', () => {
   assert.equal(late.reason, 'SUPERVISOR_READBACK_KEY_RETIRED');
 });
 
-test('revoked key verifies only evidence strictly before recorded revocation time', () => {
+test('revoked key uses invalid_since rather than administrative revocation time', () => {
   const revokedEntry = keyEntry(supervisorA, {
     key_id: 'supervisor:a',
     role: 'SUPERVISOR_READBACK',
     state: 'REVOKED',
+    invalid_since: '2026-10-05T10:00:00Z',
     revoked_at: '2026-10-05T12:00:00Z',
   });
   const m = manifest({
@@ -394,28 +407,95 @@ test('revoked key verifies only evidence strictly before recorded revocation tim
   const historical = resolveClientC5SupervisorReadbackKey({
     manifest: m,
     key_id: 'supervisor:a',
-    evidence_issued_at: '2026-10-05T11:00:00Z',
+    evidence_issued_at: '2026-10-05T09:59:59Z',
     now: new Date('2026-10-06T00:00:00Z'),
   });
   assert.equal(historical.ok, true);
-  assert.equal(historical.reason, 'SUPERVISOR_READBACK_HISTORICAL_SIGNATURE_ALLOWED');
 
-  const revoked = resolveClientC5SupervisorReadbackKey({
-    manifest: m,
-    key_id: 'supervisor:a',
-    evidence_issued_at: '2026-10-05T12:00:00Z',
-    now: new Date('2026-10-06T00:00:00Z'),
-  });
-  assert.equal(revoked.ok, false);
-  assert.equal(revoked.reason, 'SUPERVISOR_READBACK_KEY_REVOKED');
+  for (const evidence_issued_at of ['2026-10-05T10:00:00Z', '2026-10-05T11:00:00Z', '2026-10-05T12:00:00Z']) {
+    const rejected = resolveClientC5SupervisorReadbackKey({
+      manifest: m,
+      key_id: 'supervisor:a',
+      evidence_issued_at,
+      now: new Date('2026-10-06T00:00:00Z'),
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.reason, 'SUPERVISOR_READBACK_KEY_REVOKED_OR_COMPROMISED');
+  }
 });
 
-test('trust-root contract remains PREPARE_ONLY and cannot grant live or C2 authority', () => {
+test('revoked key schema requires invalid_since no later than revoked_at', () => {
+  for (const invalid_since of [null, '2026-10-05T13:00:00Z']) {
+    const bad = keyEntry(supervisorA, {
+      key_id: 'supervisor:a',
+      role: 'SUPERVISOR_READBACK',
+      state: 'REVOKED',
+      invalid_since,
+      revoked_at: '2026-10-05T12:00:00Z',
+    });
+    const m = manifest({
+      generation: 1,
+      issued_at: '2026-10-05T00:00:00Z',
+      keys: [rootAEntry, bad, supervisorBEntry],
+    });
+    assert.throws(
+      () => normalizeClientC5SupervisorTrustRoot(m, { now: new Date('2026-10-06T00:00:00Z') }),
+      /key_state_invalid/,
+    );
+  }
+});
+
+test('trust resolution receipt carries key digest and cannot claim production', () => {
+  const liveBootstrap = verifyClientC5SupervisorTrustRootBootstrap({
+    manifest: v1,
+    signature_envelope: v1Signature,
+    pinned_root_public_keys: { 'root:a': rootA.publicKey },
+    expected_pinned_root_spki_sha256: {
+      'root:a': sha256ClientC5(rootA.publicKey.export({ type: 'spki', format: 'der' })),
+    },
+    pin_mode: 'LIVE_DEVELOPMENT_PIN',
+    now: new Date('2026-10-06T00:00:00Z'),
+  });
+  const v2 = manifest({
+    generation: 2,
+    previous: clientC5SupervisorTrustRootDigest(v1),
+    issued_at: '2026-10-06T00:10:00Z',
+    keys: [rootBEntry, supervisorBEntry],
+  });
+  const transition = verifyClientC5SupervisorTrustRootTransition({
+    current_manifest: v1,
+    candidate_manifest: v2,
+    candidate_signature_envelope: signatureEnvelope(v2, [
+      { key_id: 'root:a', privateKey: rootA.privateKey },
+      { key_id: 'root:b', privateKey: rootB.privateKey },
+    ]),
+    now: new Date('2026-10-06T00:20:00Z'),
+  });
+  const resolved = resolveClientC5SupervisorReadbackKey({
+    manifest: v2,
+    key_id: 'supervisor:b',
+    evidence_issued_at: '2026-10-06T00:15:00Z',
+    now: new Date('2026-10-06T00:20:00Z'),
+  });
+  const receipt = buildClientC5SupervisorTrustResolutionReceipt({
+    pin_mode: 'LIVE_DEVELOPMENT_PIN',
+    bootstrap_receipt: liveBootstrap,
+    transition_receipt: transition,
+    resolved_key: resolved,
+  });
+  assert.equal(receipt.live_development_pin_verified, true);
+  assert.equal(receipt.production_bootstrap_proven, false);
+  assert.equal(receipt.supervisor_key_id, 'supervisor:b');
+  assert.match(receipt.supervisor_public_key_spki_sha256, /^[0-9a-f]{64}$/);
+});
+
+test('trust-root contract remains non-authoritative and production proof is external', () => {
   const contract = clientC5SupervisorTrustRootContract();
   assert.equal(contract.monotonic_generation_required, true);
   assert.equal(contract.transition_requires_old_root_threshold, true);
   assert.equal(contract.transition_requires_new_root_threshold, true);
-  assert.equal(contract.supervisor_keys_separate_from_root_role, true);
+  assert.equal(contract.raw_material_cannot_claim_production_bootstrap, true);
+  assert.equal(contract.revoked_key_invalid_since_required, true);
   assert.equal(contract.private_key_material_allowed, false);
   assert.equal(contract.live_effect_authorized, false);
   assert.equal(contract.canonical_c2_promotion_authorized, false);
