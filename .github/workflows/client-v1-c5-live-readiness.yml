@@ -5,22 +5,22 @@ on:
     branches:
       - 'work/client-v1-c5-live-readiness-v1'
     paths:
-      - 'apps/metaengine-browser/src/client-c5-live-readiness.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs'
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
-      - 'apps/metaengine-browser/scripts/client-c5-live-readiness-capsule.mjs'
-      - 'apps/metaengine-browser/test/client-v1-c5-live-readiness.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
-      - 'apps/metaengine-browser/test/fixtures/client-c5-live-project/**'
+      - 'coordination/client-v1/c5-live-readiness/fixture/**'
       - 'research/METAENGINE_CLIENT_V1_C5_LIVE_READINESS_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-live-readiness.yml'
   pull_request:
     paths:
-      - 'apps/metaengine-browser/src/client-c5-live-readiness.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs'
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
-      - 'apps/metaengine-browser/scripts/client-c5-live-readiness-capsule.mjs'
-      - 'apps/metaengine-browser/test/client-v1-c5-live-readiness.test.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs'
+      - 'coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
-      - 'apps/metaengine-browser/test/fixtures/client-c5-live-project/**'
+      - 'coordination/client-v1/c5-live-readiness/fixture/**'
       - 'research/METAENGINE_CLIENT_V1_C5_LIVE_READINESS_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-live-readiness.yml'
   workflow_dispatch:
@@ -54,20 +54,19 @@ jobs:
           node-version: '24.21.0'
 
       - name: Parse readiness sources
-        working-directory: apps/metaengine-browser
         run: |
           set -euo pipefail
-          node --check src/client-c5-live-readiness.mjs
-          node --check scripts/client-c5-live-readiness-capsule.mjs
-          node --check test/client-v1-c5-live-readiness.test.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs
+          node --check coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs
 
       - name: Prove readiness code has no live transport
         shell: bash
         run: |
           set -euo pipefail
           files=(
-            apps/metaengine-browser/src/client-c5-live-readiness.mjs
-            apps/metaengine-browser/scripts/client-c5-live-readiness-capsule.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.mjs
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs
           )
           if grep -En 'fetch\(|client-goal-submit|device/enrollment|supabase\.co|METAENGINE_CLIENT_V1_CANARY_BASE' "${files[@]}"; then
             echo "live_transport_forbidden_in_readiness" >&2
@@ -81,7 +80,6 @@ jobs:
           node --test             test/client-v1-c5-live-readiness.test.mjs             test/client-v1-c5-useful-work-proof.test.mjs             test/client-v1-c5-useful-work-restart-continuity.test.mjs
 
       - name: Generate exact-head PREPARE_ONLY live capsule
-        working-directory: apps/metaengine-browser
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
