@@ -72,12 +72,18 @@ jobs:
             echo "live_transport_forbidden_in_readiness" >&2
             exit 1
           fi
+          if grep -En 'apps/metaengine-browser/(src/client-c5-live-readiness|scripts/client-c5-live-readiness-capsule|test/client-v1-c5-live-readiness|test/fixtures/client-c5-live-project)' .github/workflows/client-v1-c5-live-readiness.yml coordination/client-v1/c5-live-readiness/*.mjs; then
+            echo "packaged_readiness_path_forbidden" >&2
+            exit 1
+          fi
 
       - name: Prove fail-closed readiness and useful-work contracts
-        working-directory: apps/metaengine-browser
         run: |
           set -euo pipefail
-          node --test             test/client-v1-c5-live-readiness.test.mjs             test/client-v1-c5-useful-work-proof.test.mjs             test/client-v1-c5-useful-work-restart-continuity.test.mjs
+          node --test \
+            coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs \
+            apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs \
+            apps/metaengine-browser/test/client-v1-c5-useful-work-restart-continuity.test.mjs
 
       - name: Generate exact-head PREPARE_ONLY live capsule
         shell: bash
@@ -85,7 +91,11 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          node scripts/client-c5-live-readiness-capsule.mjs             --repository "$GITHUB_WORKSPACE"             --repository-name "$GITHUB_REPOSITORY"             --head "$EXPECTED_HEAD"             --out "$RUNNER_TEMP/client-c5-live-readiness"
+          node coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs \
+            --repository "$GITHUB_WORKSPACE" \
+            --repository-name "$GITHUB_REPOSITORY" \
+            --head "$EXPECTED_HEAD" \
+            --out "$RUNNER_TEMP/client-c5-live-readiness"
 
       - name: Prove capsule remains non-executable and exact-head bound
         shell: bash
