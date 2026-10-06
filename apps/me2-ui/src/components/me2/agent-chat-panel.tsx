@@ -207,7 +207,7 @@ export default function AgentChatPanel() {
     <div ref={wrapRef} className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" data-testid="agentchat-panel" aria-label="Флот агентных чатов">
       {/* заголовок + чипы */}
       <div className="flex items-center gap-2">
-        <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="G1/G2/ME35: флот из полноценных агентных чатов (пересборка механизма старого Electron-браузера: вкладки chat.z.ai + fleet leases → постоянные чат-сессии daemon'а). Ход = tool-цикл (файлы/shell/поиск/create_task/chat_send) с компакцией контекста; каждый ход — в hash-chain evidence. Вечно-живущие супервизоры координируют флот (тик 60с, перерождение)">
+        <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="G1/G2/ME35: флот из полноценных агентных чатов (persistent conversation sessions + fleet leases → постоянные чат-сессии daemon'а). Ход = tool-цикл (файлы/shell/поиск/create_task/chat_send) с компакцией контекста; каждый ход — в hash-chain evidence. Вечно-живущие супервизоры координируют флот (тик 60с, перерождение)">
           <Brain className={`h-3 w-3 ${status && status.active > 0 ? "text-emerald-300" : "text-zinc-600"}`} aria-hidden /> AGENT·CHAT
         </span>
         <span data-testid="agentchat-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
