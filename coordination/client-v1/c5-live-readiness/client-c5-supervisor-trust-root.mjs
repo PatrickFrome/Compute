@@ -255,7 +255,9 @@ function externalPinnedRootEntries(
       )
     ) continue;
     try {
-      const key = crypto.createPublicKey(supplied);
+      const key = supplied && supplied.type === 'public' && supplied.asymmetricKeyType
+        ? supplied
+        : crypto.createPublicKey(supplied);
       const der = key.export({ type: 'spki', format: 'der' });
       if (
         key.asymmetricKeyType === 'ed25519'
