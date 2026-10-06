@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { access, readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const me2 = (path) => new URL(`../../me2-ui/${path}`, import.meta.url);
@@ -19,6 +21,34 @@ async function walk(dirUrl) {
 }
 
 const bannedPrimary = /GLM-5\.3-Flash|z\.ai Agent|chat\.z\.ai|upgrade флот|Снять живую пробу GLM|z-ai-web-dev-sdk/i;
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const browserPath = (relative) => path.join(repoRoot, 'apps/metaengine-browser', relative);
+
+
+test('deprecated metaengine-dark-workspace-v2 bundle and route are absent', async () => {
+  await assert.rejects(
+    access(browserPath('ui')),
+    /ENOENT/,
+  );
+
+  const main = await readFile(browserPath('src/main.mjs'), 'utf8');
+  assert.match(main, /Packaged ME2 is the only product UI/);
+  assert.match(main, /metaengine:\/\/recovery\/\?reason=/);
+  assert.doesNotMatch(main, /metaengine:\/\/shell\//);
+  assert.doesNotMatch(main, /metaengine-dark-workspace-v2/);
+
+  const builder = JSON.parse(await readFile(browserPath('electron-builder.test.json'), 'utf8'));
+  assert.deepEqual(builder.files, ['src/**/*', 'package.json']);
+  assert.equal(
+    builder.extraResources.some((entry) => String(entry?.from || '') === 'ui' || String(entry?.to || '') === 'ui'),
+    false,
+  );
+
+  const startupBoundary = await readFile(browserPath('test/shell-first-startup-boundary.test.mjs'), 'utf8');
+  assert.match(startupBoundary, /metaengine-dark-workspace-v2/);
+  assert.match(startupBoundary, /assert\.doesNotMatch/);
+});
 
 test('primary ME2 UI is ChatGPT-aligned without hard-coded model version', async () => {
   const shell = await text('src/components/me2/shell/me2-shell.tsx');
