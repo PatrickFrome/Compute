@@ -30,7 +30,7 @@ const CLAIM_SHA256 = 'f'.repeat(64);
 const SOURCE_SNAPSHOT_SHA256 = '3'.repeat(64);
 const PRE_RECEIPT_SHA256 = '4'.repeat(64);
 const POST_RECEIPT_SHA256 = '5'.repeat(64);
-const ISSUED_AT = '2026-10-06T00:00:00Z';
+const ISSUED_AT = '2026-10-06T02:30:00Z';
 const KEY_ID = 'test-vector:c5-supervisor-01';
 
 const canonicalDigest = (value) => sha256ClientC5(stableClientC5Json(value));
