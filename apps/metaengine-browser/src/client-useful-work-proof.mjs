@@ -361,3 +361,79 @@ export function normalizeClientUsefulWorkProof(value, executionProof) {
     authority_effect: false,
   });
 }
+
+
+export function clientUsefulWorkProofMatchesExecution(proof, executionProof) {
+  const row = object(proof);
+  const execution = object(executionProof);
+  const artifact = object(row?.artifact);
+  const review = object(row?.review);
+  const result = object(execution?.result_proof);
+  const origin = object(execution?.agent_origin_proof);
+  if (
+    !row || !execution
+    || row.schema !== CLIENT_USEFUL_WORK_PROOF_SCHEMA
+    || row.found !== true
+    || row.user_goal_to_verified_artifact_readback !== true
+    || row.serial_loop_end_to_end !== true
+    || row.authority_effect !== false
+    || row.automatic_retry_allowed !== false
+    || execution.schema !== 'metaengine.client.goal-execution-proof.v1'
+    || execution.found !== true
+    || execution.authority_effect !== false
+    || execution.automatic_retry_allowed !== false
+    || !artifact
+    || artifact.artifact_verified !== true
+    || !digest(artifact.artifact_sha256)
+    || !digest(artifact.provenance_sha256)
+    || !digest(artifact.verification_receipt_sha256)
+    || !review
+    || review.accepted !== true
+    || review.independent_verifier !== true
+    || review.accepted_artifact_sha256 !== artifact.artifact_sha256
+    || !result
+    || !origin
+  ) return false;
+
+  const binding = [
+    'request_id',
+    'workspace_id',
+    'roadmap_id',
+    'plan_generation',
+    'alignment_epoch',
+    'baseline_sha',
+    'plan_sha256',
+    'point_id',
+    'task_id',
+    'task_spec_sha256',
+    'lease_generation',
+  ];
+  if (binding.some((key) => row[key] == null || row[key] !== execution[key])) return false;
+
+  return (
+    row.result_sha256 === result.result_sha256
+    && row.claim_sha256 === result.claim_sha256
+    && row.conversation_url_sha256 === origin.conversation_url_sha256
+  );
+}
+
+export function clientUsefulWorkProofSameArtifact(left, right) {
+  const a = object(left);
+  const b = object(right);
+  if (!a || !b) return false;
+  const aa = object(a.artifact);
+  const ba = object(b.artifact);
+  const ar = object(a.review);
+  const br = object(b.review);
+  if (!aa || !ba || !ar || !br) return false;
+  return (
+    a.evidence_class === b.evidence_class
+    && a.evidence_origin === b.evidence_origin
+    && a.client_c5_useful_work_verified === b.client_c5_useful_work_verified
+    && aa.artifact_sha256 === ba.artifact_sha256
+    && aa.provenance_sha256 === ba.provenance_sha256
+    && aa.verification_receipt_sha256 === ba.verification_receipt_sha256
+    && ar.review_receipt_sha256 === br.review_receipt_sha256
+    && ar.accepted_artifact_sha256 === br.accepted_artifact_sha256
+  );
+}
