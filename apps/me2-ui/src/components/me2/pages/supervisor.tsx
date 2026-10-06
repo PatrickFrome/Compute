@@ -1,9 +1,9 @@
 "use client";
 // ── ME2 PAGE: SUPERVISOR (R74) — control-plane оркестрации ─────────────────────
 // Порт legacy (docs/legacy-mission-control.tsx.txt): OBJECTIVES/WORKGRAPH (L2925-2980),
-// HANDOFFS (L2983-3046), GLM·REVIEWS (L3049-3095), APPROVALS (L3098-3138), BRAIN (L3191-3217),
+// HANDOFFS (L2983-3046), LEGACY PROVIDER TELEMETRY·REVIEWS (L3049-3095), APPROVALS (L3098-3138), BRAIN (L3191-3217),
 // ROADMAP M1–M7 (L3437-3507), GOVERNOR·G11 + АВТОПИЛОТ·G10 (L4261-4293).
-// Payload'ы POST сверены с daemon 1:1. Поллинги: wg/ho 15s · glm/rev/appr 20s ·
+// Payload'ы POST сверены с daemon 1:1. /glm здесь только read-only GET telemetry. Поллинги: wg/ho 15s · glm/rev/appr 20s ·
 // governor/demand 30s · brain/roadmap 60s (все с cleanup).
 
 import { useCallback, useEffect, useState } from "react";
@@ -197,10 +197,7 @@ export function SupervisorPage() {
     if (ok) { setHoReason(""); setHoNext(""); setHoDone(""); }
   }, [hoTask, hoReason, hoNext, hoDone, hoRole, mcxOp, loadHo, loadWg, toast]);
 
-  // R29: GLM probe/upgrade + ручной запуск антифальшь-ревью (POST /reviews/run {task_id})
-  const glmOp = useCallback(async (op: "probe" | "upgrade") => {
-    await mcxOp("glm", { op }, op === "probe" ? "probe GLM снята — факт в /glm" : "флот переведён на канонический тег GLM", loadGlm);
-  }, [mcxOp, loadGlm]);
+  // Legacy provider telemetry remains GET/read-only; reviews retain their own explicit POST path.
   const runReview = useCallback(async () => {
     const id = reviewTaskId.trim();
     if (!id) {
@@ -324,7 +321,7 @@ export function SupervisorPage() {
           </Sec>
         </div>
 
-        {/* ══ колонка 2: HANDOFFS + GLM·REVIEWS + APPROVALS ══ */}
+        {/* ══ колонка 2: HANDOFFS + LEGACY PROVIDER TELEMETRY·REVIEWS + APPROVALS ══ */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
           <Sec id="sup-handoffs" title="HANDOFFS" icon={ArrowLeftRight} tone="violet"
             right={
@@ -389,7 +386,7 @@ export function SupervisorPage() {
             </div>
           </Sec>
 
-          <Sec id="sup-reviews" title="GLM · REVIEWS" icon={Cpu} tone="cyan"
+          <Sec id="sup-reviews" title="LEGACY PROVIDER · REVIEWS" icon={Cpu} tone="cyan"
             right={
               <span data-testid="glm-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`канонический тег: ${glmData?.agent_tag ?? "—"};probe'ов снято: ${glmData?.probes_total ?? 0}`}>canon {glmData?.canonical ?? "—"}</span>
@@ -398,8 +395,7 @@ export function SupervisorPage() {
             }
           >
             <div className="mb-1.5 flex gap-1.5">
-              <button type="button" onClick={() => void glmOp("probe")} disabled={mcxBusy} aria-label="Снять живую пробу GLM" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">probe</button>
-              <button type="button" onClick={() => void glmOp("upgrade")} disabled={mcxBusy} aria-label="Перевести флот на канонический тег GLM" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">upgrade флот</button>
+              <span className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">legacy · read-only</span>
               <input
                 value={reviewTaskId}
                 onChange={(e) => setReviewTaskId(e.target.value)}
@@ -412,11 +408,11 @@ export function SupervisorPage() {
                 {(snap?.tasks ?? []).slice(0, 40).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </datalist>
               <button type="button" onClick={() => void runReview()} disabled={mcxBusy || !reviewTaskId.trim()} aria-label="Запустить антифальшь-ревью задачи" data-testid="reviews-run" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40 disabled:opacity-40">ревью</button>
-              <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить GLM и ревью" className="ml-auto text-zinc-600 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>
+              <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить legacy provider telemetry и ревью" className="ml-auto text-zinc-600 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>
             </div>
             {glmData?.last_probe && (
               <div className="mb-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`probe: ${glmData.last_probe.at} · requested=${glmData.last_probe.requested_tag}`}>
-                <span className={glmData.last_probe.ok ? "text-cyan-300" : "text-rose-300"}>probe:</span> <span className="text-zinc-400">запрошен {glmData.last_probe.requested_tag} → бэкенд {glmData.last_probe.api_model ?? `ошибка: ${glmData.last_probe.error ?? "?"}`}</span>
+                <span className={glmData.last_probe.ok ? "text-cyan-300" : "text-rose-300"}>legacy probe:</span> <span className="text-zinc-400">запрошен {glmData.last_probe.requested_tag} → бэкенд {glmData.last_probe.api_model ?? `ошибка: ${glmData.last_probe.error ?? "?"}`}</span>
               </div>
             )}
             <div className="mb-0.5 flex items-center gap-1.5" title="ME26: ревью COMPLETED-задач — сверка результата со спеком и телеметрией lease; suspect/empty уходят в память с высоким весом">
