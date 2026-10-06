@@ -364,3 +364,52 @@ Fresh exact-source package reservation:
 This reservation commit changes no ME2 or Browser runtime source. It only advances package identity, package-lock root metadata, convergence ledger and this checkpoint.
 
 The deprecated `metaengine-dark-workspace-v2` is not a fallback and is not retained anywhere in the current source/package surface.
+
+
+## Windows Electron materialization correction
+
+Package Smoke run:
+
+`37487078168`
+
+Exact source:
+
+`540f83c48501ca27a893cfcc4b62ea28e7c4f228`
+
+Consumed package identity:
+
+`0.7.0-dev.37485000001.1`
+
+Immutable reservation artifact:
+
+`11424395709`
+
+Reservation digest:
+
+`sha256:b370faf8f67ebfeca9c0ecab65825bc41479db5c2d4175389be4cd867cdea1c1`
+
+The Windows producer passed identity preflight, duplicate protection, reservation publication/seal, package-lock proof and dependency install. It then failed before visual evidence at:
+
+`Materialize exact Electron runtime for physical UI evidence`
+
+Observed failure:
+
+`$binaryVersion = [string](& $electron --version)`
+
+returned a null value even though the executable invocation itself did not report a non-zero exit. PowerShell then failed on `$binaryVersion.Trim()`.
+
+This is a harness defect: a Windows GUI-subsystem executable is not a reliable stdout version probe.
+
+The corrected producer now requires:
+
+- Electron package metadata version = `44.0.0`;
+- materialized `electron.exe` exists;
+- Windows PE `ProductVersion` matches `44.0.0` or `44.0.0.0`;
+- SHA-256 of the materialized executable is a valid 64-hex digest;
+- `authority_effect=false`.
+
+Fresh successor identity:
+
+`0.7.0-dev.37490000001.1`
+
+No installer from `0.7.0-dev.37485000001.1` is accepted.

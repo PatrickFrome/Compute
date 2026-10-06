@@ -1,6 +1,15 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37485000001.1`.
+Reserved package identity is `0.7.0-dev.37490000001.1`.
+
+Electron runtime materialization correction (2026-10-06):
+- exact source `540f83c48501ca27a893cfcc4b62ea28e7c4f228` / package `0.7.0-dev.37485000001.1` passed package identity preflight and published+sealed immutable reservation artifact `11424395709` (digest `sha256:b370faf8f67ebfeca9c0ecab65825bc41479db5c2d4175389be4cd867cdea1c1`) in Package Smoke run `37487078168`;
+- that run then failed at `Materialize exact Electron runtime for physical UI evidence`: `electron.exe --version` exited successfully but PowerShell captured no stdout from the Windows GUI-subsystem executable, leaving `$binaryVersion` null; no visual evidence, NSIS build or candidate artifact was accepted;
+- the successor keeps materialization fail-closed without launching the GUI binary as a CLI probe: exact Electron package version `44.0.0`, binary presence, PE `FileVersionInfo.ProductVersion` matching `44.0.0(.0)`, and a valid SHA-256 of `electron.exe` are all required;
+- regression contract forbids returning to `& $electron --version` / nullable stdout semantics;
+- because `0.7.0-dev.37485000001.1` was already reserved and sealed, this SAME atomic commit advances package.json + package-lock + convergence/report metadata to fresh identity `0.7.0-dev.37490000001.1`;
+- no further source mutation is permitted after physical Package Smoke begins; any later fix requires another fresh monotonic identity.
+
 
 Final ChatGPT/ME2 physical reservation (2026-10-06):
 - exact source `dc76192e9a8ed269c62355464c36b96048a67732` passed source-only convergence run `37484297121` / job `112340249904` SUCCESS with full Browser Node regression, frozen Bun install, full Next build, compiled-output legacy-provider scan and source immutability proof;
