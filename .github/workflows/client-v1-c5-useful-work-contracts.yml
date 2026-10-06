@@ -1,0 +1,60 @@
+name: Client V1 C5 Useful Work Contracts
+
+on:
+  push:
+    branches:
+      - 'work/client-v1-c5-useful-work-proof-v1'
+    paths:
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - '.github/workflows/client-v1-c5-useful-work-contracts.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
+      - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - '.github/workflows/client-v1-c5-useful-work-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  useful-work-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Parse useful-work verifier
+        working-directory: apps/metaengine-browser
+        run: node --check src/client-useful-work-proof.mjs
+
+      - name: Prove fail-closed useful-work contract
+        working-directory: apps/metaengine-browser
+        run: |
+          node --test             test/client-v1-c5-useful-work-proof.test.mjs             test/client-v1-agent-origin-result-proof.test.mjs             test/client-v1-execution-proof-integrity.test.mjs
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/client-useful-work-proof.mjs apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs)"
