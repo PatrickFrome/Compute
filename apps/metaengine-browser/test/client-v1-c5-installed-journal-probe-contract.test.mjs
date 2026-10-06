@@ -59,6 +59,21 @@ test('physical Windows restart step is PowerShell-parse-safe before expensive pa
   assert.match(packageWorkflow, /Prove installed Client useful-work journal survives process restart without replay/);
 });
 
+test('physical restart evidence binds to the exact package source rather than the PR merge ref', () => {
+  const start = packageWorkflow.indexOf('- name: Prove installed Client useful-work journal survives process restart without replay');
+  const end = packageWorkflow.indexOf('- name: Qualify embedded one-shot Guardian machine bootstrap', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const step = packageWorkflow.slice(start, end);
+  assert.match(step, /expectedSourceHead = '\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}'/);
+  assert.match(step, /proof\.source_head -ne \$expectedSourceHead/);
+  assert.match(step, /--baseline \(\[string\]\$proof\.source_head\) --mode valid/);
+  assert.match(step, /--baseline \(\[string\]\$proof\.source_head\) --mode stale/);
+  assert.match(step, /source_head=\[string\]\$proof\.source_head/);
+  assert.doesNotMatch(step, /--baseline "\$env:GITHUB_SHA"/);
+  assert.doesNotMatch(step, /source_head=\$env:GITHUB_SHA/);
+});
+
 test('shared file store uses exact profile-local journal filename and atomic temp rename path', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'metaengine-client-journal-store-'));
   try {
