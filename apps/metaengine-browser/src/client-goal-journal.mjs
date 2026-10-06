@@ -274,11 +274,11 @@ export class ClientGoalJournal {
       if (!clientUsefulWorkProofMatchesExecution(proof, existing.execution_proof)) {
         throw new Error('client_goal_journal_useful_work_execution_drift');
       }
-      if (
-        existing.useful_work_proof
-        && !clientUsefulWorkProofSameArtifact(existing.useful_work_proof, proof)
-      ) {
-        throw new Error('client_goal_journal_useful_work_proof_collision');
+      if (existing.useful_work_proof) {
+        if (!clientUsefulWorkProofSameArtifact(existing.useful_work_proof, proof)) {
+          throw new Error('client_goal_journal_useful_work_proof_collision');
+        }
+        return existing;
       }
       return {
         ...existing,
