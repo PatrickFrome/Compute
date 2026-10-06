@@ -10,6 +10,7 @@ on:
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-restart.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_USEFUL_WORK_RESTART_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-useful-work-restart.yml'
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-restart.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
       - 'apps/metaengine-browser/test/client-v1-execution-proof-integrity.test.mjs'
+      - 'research/METAENGINE_CLIENT_V1_C5_USEFUL_WORK_RESTART_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-useful-work-restart.yml'
   workflow_dispatch:
 
