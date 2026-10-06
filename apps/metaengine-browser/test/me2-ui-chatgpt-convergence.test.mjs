@@ -95,6 +95,17 @@ test('ME2 source tree has no active legacy provider branding or Z.ai SDK imports
   assert.deepEqual(violations, []);
 });
 
+test('installed Windows observers bind to current ME2 shell contract without retired legacy field', async () => {
+  const soak = await readFile(browserPath('scripts/windows-autonomous-session-soak.ps1'), 'utf8');
+  const installedChat = await readFile(path.join(repoRoot, '.github/workflows/browser-windows-installed-chat-qualification.yml'), 'utf8');
+
+  for (const source of [soak, installedChat]) {
+    assert.doesNotMatch(source, /legacy_shell_is_normal_path/);
+    assert.match(source, /deprecated_shell_bundle_present/);
+    assert.match(source, /recovery_surface_authority/);
+  }
+});
+
 test('unused Z.ai SDK and dead vault bootstrap are removed from dependency/source surface', async () => {
   const pkg = await text('package.json');
   const lock = await text('bun.lock');

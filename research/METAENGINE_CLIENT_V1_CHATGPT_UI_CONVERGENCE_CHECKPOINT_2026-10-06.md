@@ -1,7 +1,7 @@
 # METAENGINE Client V1 — ChatGPT Primary UI Convergence Checkpoint
 
 Date: 2026-10-06  
-Status: **SOURCE_REQUALIFICATION_REQUIRED — C4 STALE BRANDING ASSERTION REPAIRED / NOT YET PHYSICALLY INSTALLED**  
+Status: **PHYSICAL_REQUALIFICATION_REQUIRED — INSTALLED OBSERVER CONTRACT CORRECTED**  
 Branch: `work/client-v1-chatgpt-ui-convergence-v1`  
 Qualified source head before package reservation: `2e6570ce69986a51caea3ed61dffb44644ec0310`  
 Parent LIVE-development candidate: `e2e8f20e5d6abf0f84bf163066ed3ec15b69298a` / `0.7.0-dev.37416000001.1`
@@ -902,3 +902,41 @@ Fresh successor identity: `0.7.0-dev.37491000001.1`
 The failed `0.7.0-dev.37490000001.1` reservation remains immutable historical evidence and is not reused.
 
 Checkpoint after this correction: **SOURCE_REQUALIFICATION_REQUIRED / PHYSICAL_SUCCESS_NOT_YET_PROVEN**.
+
+
+## Installed observer correction after physical candidate
+
+Exact predecessor:
+
+`0f9b2aeca26c145163d92dbb32a3961a18e1dac5`
+
+Consumed package:
+
+`0.7.0-dev.37491000001.1`
+
+Package Smoke:
+
+`37492085860` — **SUCCESS**
+
+The immutable installer was valid and installed successfully. Two downstream consumers failed on stale test observers:
+
+- Installed Chat `37492085738`: `installed_me2_primary_shell_not_visible`;
+- Autonomous Soak `37492085795`: PowerShell property access failed because `legacy_shell_is_normal_path` no longer exists.
+
+Failure diagnostics proved the current healthy runtime event instead contains:
+
+- `state=ME2_PRIMARY_SHELL_VISIBLE`;
+- `shell_mode=ME2_PRIMARY`;
+- `deprecated_shell_bundle_present=false`;
+- `recovery_surface_authority=false`;
+- `authority_effect=false`.
+
+The same runtime also emitted `ME2_R97_UI_CONTRACT_CONFIRMED` before ChatGPT `ARMED` preconnect and persistent `USER_SESSION` readiness.
+
+This successor changes only physical observer expectations plus a regression fence. It does not restore the retired dark workspace or change Client/provider authority.
+
+Fresh package identity:
+
+`0.7.0-dev.37493000001.1`
+
+The old `0.7.0-dev.37491000001.1` source/version pair is consumed and immutable.

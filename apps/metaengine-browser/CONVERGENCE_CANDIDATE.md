@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37491000001.1`.
+Reserved package identity is `0.7.0-dev.37493000001.1`.
+
+Installed observer successor after full dark-workspace retirement (2026-10-06):
+- exact predecessor `0f9b2aeca26c145163d92dbb32a3961a18e1dac5` / `0.7.0-dev.37491000001.1` successfully produced immutable Windows candidate bytes in Package Smoke run `37492085860`; that source/version identity is consumed and MUST NOT be rebuilt or relabelled;
+- Installed Chat run `37492085738` and Autonomous Soak run `37492085795` both consumed those exact bytes and failed only in stale physical observers that still accessed removed field `legacy_shell_is_normal_path`;
+- diagnostic runtime output proved the current healthy event contract instead: `ME2_PRIMARY_SHELL_VISIBLE`, `shell_mode=ME2_PRIMARY`, `deprecated_shell_bundle_present=false`, `recovery_surface_authority=false`, followed by `ME2_R97_UI_CONTRACT_CONFIRMED` and ChatGPT preconnect;
+- observers now bind to those current fields and explicitly fail if the deprecated shell bundle is present or recovery authority is enabled;
+- source regression coverage forbids reintroduction of `legacy_shell_is_normal_path` in those installed observers;
+- this SAME atomic successor reserves fresh package identity `0.7.0-dev.37493000001.1`; no runtime authority, provider mutation, release publication or canonical C2 promotion is granted.
 
 DevOS bounded source snapshot successor after legacy-shell retirement (2026-10-06):
 - exact predecessor head `92f9967324d5da2103c5c9d3f4b63e2b89e421f1` entered Package Smoke run `37490042782` under `0.7.0-dev.37490000001.1`; identity preflight, duplicate protection, immutable reservation publication and reservation seal all succeeded, so that source/version pair is consumed and MUST NOT be rebuilt or relabelled;

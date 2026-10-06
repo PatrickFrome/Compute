@@ -194,7 +194,7 @@ try {
         if ($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_SPAWN','UI_ADOPTED') -contains $event) { $me2UiStarted = $true }
         if ($schema -eq 'metaengine.browser.me2.ui-gateway.v1' -and $event -eq 'GATEWAY_LIVE') { $me2GatewayLive = $true }
         if ($schema -eq 'metaengine.browser.me2.integration.v1' -and $event -eq 'DAEMON_MISSION_CONTROL_REMOVED' -and [string]$row.replacement -eq 'NATIVE_BROWSER_FLEET_AND_SUPERVISOR' -and $row.authority_effect -eq $false) { $me2MissionControlRemoved = $true }
-        if ($schema -eq 'metaengine.browser-local-shell.v2' -and [string]$row.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' -and [string]$row.shell_mode -eq 'ME2_PRIMARY' -and $row.legacy_shell_is_normal_path -eq $false) { $me2PrimaryShellReady = $true }
+        if ($schema -eq 'metaengine.browser-local-shell.v2' -and [string]$row.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' -and [string]$row.shell_mode -eq 'ME2_PRIMARY' -and $row.deprecated_shell_bundle_present -eq $false -and $row.recovery_surface_authority -eq $false -and $row.authority_effect -eq $false) { $me2PrimaryShellReady = $true }
         if ($schema -eq 'metaengine.browser.me2-r97-installed-ui.v1' -and [string]$row.state -eq 'ME2_R97_UI_CONTRACT_CONFIRMED') { $me2R97UiConfirmed = $true }
         if ($schema -eq 'metaengine.browser.me2-r97-installed-ui.v1' -and [string]$row.state -eq 'ME2_R97_UI_CONTRACT_INCOMPLETE') { $me2Fatal = "$schema/ME2_R97_UI_CONTRACT_INCOMPLETE" }
         if (($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_DIR_NOT_FOUND','SPAWN_ERROR','RESTARTS_EXHAUSTED') -contains $event) `
