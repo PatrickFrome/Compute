@@ -1,7 +1,7 @@
 # METAENGINE Client V1 — ChatGPT Primary UI Convergence Checkpoint
 
 Date: 2026-10-06  
-Status: **SOURCE_REQUALIFICATION_REQUIRED — TYPED WORKSPACE TEST REPAIRED / NOT YET PHYSICALLY INSTALLED**  
+Status: **SOURCE_REQUALIFICATION_REQUIRED — C4 STALE BRANDING ASSERTION REPAIRED / NOT YET PHYSICALLY INSTALLED**  
 Branch: `work/client-v1-chatgpt-ui-convergence-v1`  
 Qualified source head before package reservation: `2e6570ce69986a51caea3ed61dffb44644ec0310`  
 Parent LIVE-development candidate: `e2e8f20e5d6abf0f84bf163066ed3ec15b69298a` / `0.7.0-dev.37416000001.1`
@@ -223,6 +223,30 @@ This was a stale test dependency, not a runtime regression. The test is now rebo
 
 Because package identity `0.7.0-dev.37435000001.1` had already passed Package Smoke identity preflight, it is treated as consumed. The repaired source advances to `0.7.0-dev.37436000001.1`.
 
+## C4 stale branding assertion correction
+
+After the legacy-shell retirement source was reopened as PR #1133, exact-head C4 Goal Contracts run `37476944921` passed 87/88 tests.
+
+The single failure was a stale presentation assertion in:
+
+`apps/metaengine-browser/test/client-v1-agent-origin-result-proof.test.mjs`
+
+It still required:
+
+`Verified z.ai Agent`
+
+while the primary ME2 product UI now intentionally renders:
+
+`Verified ChatGPT Agent`
+
+The underlying historical proof contract token `ZAI_AGENT_SURFACE_CAUSAL_V1` remains unchanged for wire/readback compatibility. Only the user-facing assertion is corrected.
+
+Package Smoke run `37476944927` had already passed identity preflight for `0.7.0-dev.37436000001.1` before its Windows job stopped at duplicate source/version protection. No NSIS build from that run is accepted, but the identity is treated as consumed.
+
+Fresh successor identity:
+
+`0.7.0-dev.37437000001.1`
+
 ## Non-claims
 
 This checkpoint does not prove:
@@ -248,9 +272,9 @@ It MUST NOT be rebuilt or relabelled with this UI correction.
 
 Intermediate identity `0.7.0-dev.37434000001.1` reached PR Package Smoke preflight before complete legacy-shell retirement and is treated as potentially consumed.
 
-Fresh final identity for the physical successor after Typed Workspaces repair:
+Fresh final identity after the C4 stale-branding correction:
 
-`0.7.0-dev.37436000001.1`
+`0.7.0-dev.37437000001.1`
 
 Before reopening PR #1133, the final source must re-pass the source-only convergence workflow with:
 

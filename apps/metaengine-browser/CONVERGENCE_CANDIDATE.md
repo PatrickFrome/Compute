@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37436000001.1`.
+Reserved package identity is `0.7.0-dev.37437000001.1`.
+
+C4 stale branding assertion correction (2026-10-06):
+- exact source `2440c869b54bf96904f0a3e198a3a352854c9242` passed the ChatGPT UI source-convergence gate, but Client V1 C4 Goal Contracts run `37476944921` failed 87/88 because one test still required the retired presentation string `Verified z.ai Agent`;
+- this is a stale assertion against user-visible branding, not a rollback of the historical internal wire token `ZAI_AGENT_SURFACE_CAUSAL_V1`;
+- Package Smoke run `37476944927` had already accepted identity preflight for `0.7.0-dev.37436000001.1`; its Windows job then failed closed at duplicate source/version protection before dependency install or NSIS build, so no installer from that run is accepted, and `0.7.0-dev.37436000001.1` is consumed for governance purposes;
+- this SAME atomic successor changes the stale assertion to `Verified ChatGPT Agent` and advances package.json + package-lock + convergence/report metadata to fresh identity `0.7.0-dev.37437000001.1`;
+- the deprecated `metaengine-dark-workspace-v2` source bundle remains absent, `metaengine://shell/` remains forbidden, and packaged ME2 remains the sole product UI with generated read-only recovery only;
+- any later source mutation after Package Smoke begins requires another fresh monotonic package identity.
 
 Workspace projection test retirement correction (2026-10-06):
 - predecessor identity `0.7.0-dev.37435000001.1` passed Package Smoke identity preflight on exact source `498a244a0484d0566bc91fa81fa1119175fb4eb0`; therefore it is consumed for governance purposes and MUST NOT be reused after any source change;
