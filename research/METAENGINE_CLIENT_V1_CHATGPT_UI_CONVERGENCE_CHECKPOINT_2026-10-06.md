@@ -1,7 +1,7 @@
 # METAENGINE Client V1 — ChatGPT Primary UI Convergence Checkpoint
 
 Date: 2026-10-06  
-Status: **EVIDENCE_READY — SOURCE_ONLY / NOT YET PHYSICALLY INSTALLED**  
+Status: **SOURCE_REQUALIFICATION_REQUIRED — LEGACY SHELL RETIRED / NOT YET PHYSICALLY INSTALLED**  
 Branch: `work/client-v1-chatgpt-ui-convergence-v1`  
 Qualified source head before package reservation: `2e6570ce69986a51caea3ed61dffb44644ec0310`  
 Parent LIVE-development candidate: `e2e8f20e5d6abf0f84bf163066ed3ec15b69298a` / `0.7.0-dev.37416000001.1`
@@ -13,6 +13,23 @@ Canonical owner remains **C2 — First Serial Coding Loop**.
 This slice corrects the primary ME2 presentation/execution alignment before the first real LIVE useful-work loop.
 
 It does not change Client goal authority, wake/recovery semantics, signed useful-work proof schemas, Supervisor trust-root semantics, release authority or automatic retry behavior.
+
+## Legacy shell retirement correction
+
+The operator clarified that `metaengine-dark-workspace-v2` is not a supported recovery UI; it is an obsolete product UI that must not remain packaged.
+
+The source successor therefore removes:
+
+- `apps/metaengine-browser/ui/index.html`;
+- `ui/app.js`;
+- `ui/app.css`;
+- `ui/dark-workspace.css`;
+- obsolete tests and visual harnesses that asserted that renderer;
+- `ui/**/*` from electron-builder package inputs;
+- runtime `metaengine://shell/` routing;
+- Package Smoke's legacy-shell visual capture.
+
+Recovery is now a generated, read-only `metaengine://recovery/` document. It has no execution controls and is not a second product workspace.
 
 ## Root cause
 
@@ -213,11 +230,23 @@ is immutable and remains bound to source:
 
 It MUST NOT be rebuilt or relabelled with this UI correction.
 
-Fresh proposed identity for the physical successor:
+Intermediate identity `0.7.0-dev.37434000001.1` reached PR Package Smoke preflight before complete legacy-shell retirement and is treated as potentially consumed.
 
-`0.7.0-dev.37434000001.1`
+Fresh final identity for the physical successor:
 
-The final collision check is delegated to the existing package-identity preflight before the sole physical producer runs.
+`0.7.0-dev.37435000001.1`
+
+Before reopening PR #1133, the final source must re-pass the source-only convergence workflow with:
+
+- full Browser `npm run check`;
+- ChatGPT UI convergence contract;
+- legacy shell bundle retirement contract;
+- shell-first startup boundary;
+- Browser navigation policy;
+- frozen Bun install + full Next build;
+- compiled-output legacy-provider scan.
+
+Only that exact head may enter Package Smoke.
 
 ## Checkpoint
 
