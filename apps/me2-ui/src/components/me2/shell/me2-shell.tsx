@@ -496,7 +496,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           <dl className="grid grid-cols-[90px_1fr] gap-2 text-[12px]">
             <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || receipt?.task_id || "Awaiting readback"}</dd>
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
-            <dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified z.ai Agent" : "Not yet verified"}</dd>
+            <dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified ChatGPT Agent" : "Not yet verified"}</dd>
             <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Received · review pending" : "No result received"}</dd>
           </dl>
           {error ? <p role="alert" className="break-words text-[12px] text-rose-300">{error}</p> : null}
@@ -636,7 +636,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
   const content = <>
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-3">
         <div><strong className="block text-[13px] font-medium text-zinc-200">Agents</strong>
-          <span className="text-[11px] text-zinc-400">GLM-5.3-Flash · {state === "LIVE" ? `${roster.actor_count} sessions` : state === "LOADING" ? "Connecting…" : "Roster unavailable"}</span></div>
+          <span className="text-[11px] text-zinc-400">ChatGPT · {state === "LIVE" ? `${roster.actor_count} sessions` : state === "LOADING" ? "Connecting…" : "Roster unavailable"}</span></div>
         <button type="button" onClick={() => void refresh()} className="h-8 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800">Refresh</button>
       </div>
       <div className="shrink-0 p-3"><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Find an agent…"
@@ -664,7 +664,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
         onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="fleet-picker-toggle"]')?.focus(); }}>
         <div className="flex items-center justify-between px-3 pt-3"><DialogTitle className="text-[14px]">Choose an agent</DialogTitle>
           <button type="button" onClick={() => onPickerOpenChange(false)} className="h-8 px-2 text-[12px]">Close</button></div>
-        <DialogDescription className="px-3 pb-2 text-[12px] text-zinc-400">Open an existing z.ai Agent conversation.</DialogDescription>
+        <DialogDescription className="px-3 pb-2 text-[12px] text-zinc-400">Open an existing ChatGPT agent conversation.</DialogDescription>
         {content}
       </DialogContent>
     </Dialog> : null}
