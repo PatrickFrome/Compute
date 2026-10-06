@@ -132,6 +132,7 @@ const manifestOut = {
   candidate_generation: 2,
   bootstrap_manifest_sha256: clientC5SupervisorTrustRootDigest(v1),
   candidate_manifest_sha256: clientC5SupervisorTrustRootDigest(v2),
+  controlled_bootstrap_spki_sha256: sha256ClientC5(rootA.publicKey.export({ type: 'spki', format: 'der' })),
   expected_supervisor_key_id: 'supervisor:test-b',
   expected_evidence_issued_at: '2026-10-06T02:30:00Z',
   bootstrap_key_external_for_production: false,
