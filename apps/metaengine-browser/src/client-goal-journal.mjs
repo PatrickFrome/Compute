@@ -1,4 +1,5 @@
 import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
+import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
 
 const SCHEMA = 'metaengine.client.goal-journal.v1';
 const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
@@ -38,6 +39,15 @@ function normalizeEntry(value) {
   if (value.authority_effect !== false || value.automatic_retry_allowed !== false) {
     throw new Error('client_goal_journal_authority_invalid');
   }
+  const progress = value.progress && typeof value.progress === 'object' && !Array.isArray(value.progress)
+    ? clone(value.progress)
+    : null;
+  const executionProof = clientGoalExecutionProofMatchesProgress(value.execution_proof, progress)
+    ? clone(value.execution_proof)
+    : null;
+  const usefulWorkProof = executionProof && clientUsefulWorkProofMatchesExecutionProof(value.useful_work_proof, executionProof)
+    ? clone(value.useful_work_proof)
+    : null;
   return Object.freeze({
     schema: ENTRY_SCHEMA,
     request_id: id,
@@ -46,12 +56,9 @@ function normalizeEntry(value) {
     receipt: value.receipt && typeof value.receipt === 'object' && !Array.isArray(value.receipt)
       ? Object.freeze(clone(value.receipt))
       : null,
-    progress: value.progress && typeof value.progress === 'object' && !Array.isArray(value.progress)
-      ? Object.freeze(clone(value.progress))
-      : null,
-    execution_proof: clientGoalExecutionProofMatchesProgress(value.execution_proof, value.progress)
-      ? Object.freeze(clone(value.execution_proof))
-      : null,
+    progress: progress ? Object.freeze(progress) : null,
+    execution_proof: executionProof ? Object.freeze(executionProof) : null,
+    useful_work_proof: usefulWorkProof ? Object.freeze(usefulWorkProof) : null,
     last_error: value.last_error == null ? null : String(value.last_error).slice(0, 240),
     created_at: String(value.created_at || nowIso()),
     updated_at: String(value.updated_at || nowIso()),
@@ -174,6 +181,7 @@ export class ClientGoalJournal {
         receipt: null,
         progress: null,
         execution_proof: null,
+        useful_work_proof: null,
         last_error: null,
         created_at: observed,
         updated_at: observed,
@@ -209,12 +217,16 @@ export class ClientGoalJournal {
     if (!STATES.has(state)) throw new Error('client_goal_journal_progress_state_invalid');
     return this.#replace(id, existing => {
       if (!existing) throw new Error('client_goal_journal_request_missing');
+      const executionProof = clientGoalExecutionProofMatchesProgress(existing.execution_proof, progress)
+        ? existing.execution_proof : null;
+      const usefulWorkProof = executionProof && clientUsefulWorkProofMatchesExecutionProof(existing.useful_work_proof, executionProof)
+        ? existing.useful_work_proof : null;
       return {
         ...existing,
         state,
         progress: clone(progress),
-        execution_proof: clientGoalExecutionProofMatchesProgress(existing.execution_proof, progress)
-          ? existing.execution_proof : null,
+        execution_proof: executionProof,
+        useful_work_proof: usefulWorkProof,
         last_error: progress.found === true ? null : existing.last_error,
         updated_at: nowIso(),
         automatic_retry_allowed: false,
@@ -238,6 +250,31 @@ export class ClientGoalJournal {
       return {
         ...existing,
         execution_proof: clone(proof),
+        useful_work_proof: clientUsefulWorkProofMatchesExecutionProof(existing.useful_work_proof, proof)
+          ? existing.useful_work_proof : null,
+        updated_at: nowIso(),
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    });
+  }
+
+  async recordUsefulWorkProof(proof) {
+    const id = requestId(proof?.request_id);
+    if (
+      proof?.schema !== 'metaengine.client-v1.useful-work-proof.v1'
+      || proof?.authority_effect !== false
+      || proof?.automatic_retry_allowed !== false
+      || proof?.canonical_c2_promotion_authorized !== false
+    ) throw new Error('client_goal_journal_useful_work_proof_invalid');
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      if (!clientUsefulWorkProofMatchesExecutionProof(proof, existing.execution_proof)) {
+        throw new Error('client_goal_journal_useful_work_proof_execution_drift');
+      }
+      return {
+        ...existing,
+        useful_work_proof: clone(proof),
         updated_at: nowIso(),
         automatic_retry_allowed: false,
         authority_effect: false,
