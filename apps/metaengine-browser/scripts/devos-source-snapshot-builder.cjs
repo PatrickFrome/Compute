@@ -7,7 +7,7 @@ const SNAPSHOT_SCHEMA = 'metaengine.devos.packaged-source-snapshot.v1';
 const PROVENANCE_FILE = '.metaengine-source-provenance.json';
 const FIXED_SOURCE_FILES = Object.freeze([
   'apps/metaengine-browser/src/main.mjs',
-  'apps/metaengine-browser/ui/app.js',
+  'apps/me2-ui/src/components/me2/shell/me2-shell.tsx',
 ]);
 
 async function readGitHead(repoRoot) {

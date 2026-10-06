@@ -24,7 +24,7 @@ const SOURCE_SNAPSHOT = Object.freeze({
   ref: 'refs/heads/release/self-update-ambiguity-live-v2',
   source_files: [
     'apps/metaengine-browser/src/main.mjs',
-    'apps/metaengine-browser/ui/app.js',
+    'apps/me2-ui/src/components/me2/shell/me2-shell.tsx',
   ],
   source_file_count: 2,
   bounded: true,

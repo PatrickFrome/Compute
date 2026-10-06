@@ -1,6 +1,17 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37490000001.1`.
+Reserved package identity is `0.7.0-dev.37491000001.1`.
+
+DevOS bounded source snapshot successor after legacy-shell retirement (2026-10-06):
+- exact predecessor head `92f9967324d5da2103c5c9d3f4b63e2b89e421f1` entered Package Smoke run `37490042782` under `0.7.0-dev.37490000001.1`; identity preflight, duplicate protection, immutable reservation publication and reservation seal all succeeded, so that source/version pair is consumed and MUST NOT be rebuilt or relabelled;
+- immutable reservation artifact `11424936946`, digest `sha256:a0ed8df6d7ba487de23d931a9ced8b82b7807f6e2c807b8f7148cc25552c6f1d`;
+- full Browser source regressions, C4 contracts, Shell, PRE-LIVE evidence and fleet/brain stress gates were green, but physical Windows package job `112360142997` failed at NSIS beforePack with `ENOENT: apps/metaengine-browser/ui/app.js`;
+- root cause was a hidden host-fixed source dependency in `scripts/devos-source-snapshot-builder.cjs` and the matching read-only DevOS repo model, both still naming the retired legacy renderer after `apps/metaengine-browser/ui/` had been deleted;
+- this successor keeps the bounded two-file source contract but rebinds it to `apps/metaengine-browser/src/main.mjs` plus the current primary ME2 shell `apps/me2-ui/src/components/me2/shell/me2-shell.tsx`; no arbitrary renderer path selection or authority is added;
+- stale DevOS/RSI fixtures are updated and the source-only convergence workflow now runs these snapshot/read-model contracts before any Windows package reservation can be accepted;
+- this SAME atomic successor advances Browser package metadata and convergence evidence to fresh identity `0.7.0-dev.37491000001.1`;
+- any later source mutation after `0.7.0-dev.37491000001.1` preflight begins requires another fresh monotonic package identity; no rerun/relabel of `0.7.0-dev.37490000001.1` is permitted.
+
 
 YAML validation correction before physical reservation (2026-10-06):
 - commit `a5628c46c9632ef97ba9b1236be964fc40a12125` attempted the PE metadata correction, but GitHub rejected workflow `browser-windows-package-smoke.yml` at validation time in run `37487828226`; there were **zero jobs**, no package preflight and no reservation artifact;

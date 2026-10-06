@@ -14,6 +14,11 @@ const {
 } = require('../scripts/devos-source-snapshot-builder.cjs');
 
 test('packaged source snapshot copies only host-fixed sources with exact provenance', async () => {
+  assert.deepEqual([...FIXED_SOURCE_FILES], [
+    'apps/metaengine-browser/src/main.mjs',
+    'apps/me2-ui/src/components/me2/shell/me2-shell.tsx',
+  ]);
+  assert.equal(FIXED_SOURCE_FILES.some((relativePath) => relativePath.startsWith('apps/metaengine-browser/ui/')), false);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-source-root-'));
   const out = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-source-out-'));
   try {

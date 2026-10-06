@@ -872,3 +872,33 @@ Root cause: JavaScript replacement-string semantics interpreted the literal Powe
 ` sequence in the generated block as the special unmatched-suffix replacement token. This duplicated most of `.github/workflows/browser-windows-package-smoke.yml` and truncated the intended PE-version block, so GitHub rejected the workflow before jobs were created.
 
 Correction: remove the fragile inline regex and parse `ProductVersion` as PowerShell `[version]`, requiring Major=44, Minor=0 and Build=0, while retaining executable presence and SHA-256 validation.
+
+
+## DevOS bounded source snapshot packaging correction
+
+Physical Package Smoke for exact head `92f9967324d5da2103c5c9d3f4b63e2b89e421f1` with consumed identity `0.7.0-dev.37490000001.1` entered run `37490042782` / Windows job `112360142997`.
+
+The run passed exact-head checkout, package reservation publication/seal, frozen dependency proof, Electron materialization, SBOM/build-identity gates, legacy-shell retirement and the full ME2 build. It then failed at the NSIS native beforePack hook with:
+
+`ENOENT: no such file or directory, stat 'apps/metaengine-browser/ui/app.js'`
+
+Root cause: `apps/metaengine-browser/scripts/devos-source-snapshot-builder.cjs` still treated the deleted legacy renderer as a mandatory host-fixed source. The matching read-only descriptor in `apps/metaengine-browser/src/devos-repo-read-model.cjs` was stale as well.
+
+This is a provenance/read-model dependency exposed by physical packaging, not a rollback of the product UI. The product/runtime/package surface already had no `apps/metaengine-browser/ui/**`.
+
+Correction:
+- the packaged source snapshot stays bounded to exactly two host-fixed files;
+- the pair is now `apps/metaengine-browser/src/main.mjs` plus `apps/me2-ui/src/components/me2/shell/me2-shell.tsx`;
+- DevOS read-only repo model uses the same exact pair;
+- RSI/source-surface fixtures are updated;
+- focused source convergence explicitly runs packaged snapshot/read-model contracts;
+- tests fail closed if a fixed source path returns under `apps/metaengine-browser/ui/`.
+
+Consumed reservation artifact: `11424936946`  
+Consumed reservation digest: `sha256:a0ed8df6d7ba487de23d931a9ced8b82b7807f6e2c807b8f7148cc25552c6f1d`
+
+Fresh successor identity: `0.7.0-dev.37491000001.1`
+
+The failed `0.7.0-dev.37490000001.1` reservation remains immutable historical evidence and is not reused.
+
+Checkpoint after this correction: **SOURCE_REQUALIFICATION_REQUIRED / PHYSICAL_SUCCESS_NOT_YET_PROVEN**.

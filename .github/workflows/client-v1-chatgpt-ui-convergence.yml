@@ -7,6 +7,11 @@ on:
     paths:
       - 'apps/me2-ui/**'
       - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/scripts/devos-source-snapshot-builder.cjs'
+      - 'apps/metaengine-browser/src/devos-repo-read-model.cjs'
+      - 'apps/metaengine-browser/test/browser-devos-packaged-source-snapshot.test.mjs'
+      - 'apps/metaengine-browser/test/browser-devos-source-backed-surfaces.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-isolated-candidate-builder.test.mjs'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
@@ -84,7 +89,10 @@ jobs:
             apps/metaengine-browser/test/browser-devos-session-surface-ui.test.mjs \
             apps/metaengine-browser/test/emergency-maintenance-trust-root.test.mjs \
             apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs \
-            apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs
+            apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs \
+            apps/metaengine-browser/test/browser-devos-packaged-source-snapshot.test.mjs \
+            apps/metaengine-browser/test/browser-devos-source-backed-surfaces.test.mjs \
+            apps/metaengine-browser/test/rsi-isolated-candidate-builder.test.mjs
 
       - name: Run full Browser Node regression before package reservation
         working-directory: apps/metaengine-browser
@@ -126,8 +134,13 @@ jobs:
             apps/me2-ui/package.json \
             apps/me2-ui/bun.lock \
             apps/metaengine-browser/src/main.mjs \
+            apps/metaengine-browser/scripts/devos-source-snapshot-builder.cjs \
+            apps/metaengine-browser/src/devos-repo-read-model.cjs \
             apps/metaengine-browser/electron-builder.test.json \
             apps/metaengine-browser/package.json \
             apps/metaengine-browser/package-lock.json \
             apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs \
-            apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs
+            apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs \
+            apps/metaengine-browser/test/browser-devos-packaged-source-snapshot.test.mjs \
+            apps/metaengine-browser/test/browser-devos-source-backed-surfaces.test.mjs \
+            apps/metaengine-browser/test/rsi-isolated-candidate-builder.test.mjs
