@@ -43,8 +43,8 @@ Before any repository, database, deployment, release, Browser, or other authorit
 3. Read current Supabase roadmap/authority metadata relevant to the task.
 4. Read current live migrations/Edge/function state when the task touches them.
 5. Read current Browser/Supervisor/task/lease state when the task touches live execution.
-6. Build an explicit drift table: SOURCE / LIVE / EVIDENCE / STATUS.
-7. Classify every old Project-file claim as CURRENT, SUPERSEDED, HISTORICAL, or UNVERIFIED before relying on it.
+6. Build an explicit multi-frontier drift table.
+7. Classify every old Project-file claim as CURRENT, CONTAINED, SUPERSEDED, HISTORICAL, or UNVERIFIED before relying on it.
 
 If live sources are unavailable, fail closed and state exactly which fact cannot be refreshed.
 
@@ -69,7 +69,34 @@ Development-session continuity lives as a structured GitHub PR/issue handoff, no
 
 Project files should be minimized. Keep at most a small router/instructions file in the ChatGPT Project; do not upload periodic snapshots as if they were live truth.
 
-See:
-- PROJECT_INSTRUCTIONS.md
-- HANDOFF_PROTOCOL.md
-- LIVE_AUDIT_2026-10-06.md
+## Documents
+
+- `PROJECT_ROUTER.md` — minimal router suitable for the ChatGPT Project.
+- `PROJECT_INSTRUCTIONS.md` — Project instruction template.
+- `LIVE_PREFLIGHT_PROTOCOL.md` — mandatory fresh-chat startup and mutation gate.
+- `FRONTIER_MODEL.md` — source/package/runtime/authority/continuity/session model.
+- `HANDOFF_PROTOCOL.md` — durable `CHAT_HANDOFF_V1`.
+- `CROSS_PROJECT_AUDIT_2026-10-06.md` — branch/PR/CI ↔ Supabase reconciliation.
+- `LIVE_AUDIT_2026-10-06.md` — initial live snapshot retained as audit history.
+
+## Normal development loop
+
+```text
+fresh Project chat
+      ↓
+LIVE_PREFLIGHT
+      ↓
+multi-frontier reconciliation
+      ↓
+one bounded objective
+      ↓
+small mutation/test batches
+      ↓
+exact evidence/readback
+      ↓
+CHAT_HANDOFF_V1 on PR/issue
+      ↓
+new chat when needed
+```
+
+The conversation is disposable. The evidence and durable state are not.
