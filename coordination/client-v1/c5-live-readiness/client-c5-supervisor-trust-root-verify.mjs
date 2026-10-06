@@ -33,6 +33,7 @@ const trustRootKind = String(args['trust-root-kind'] || '');
 const supervisorKeyId = String(args['supervisor-key-id'] || '');
 const evidenceIssuedAt = String(args['evidence-issued-at'] || '');
 const nowValue = String(args.now || '');
+const expectedBootstrapSpkiSha256 = String(args['expected-bootstrap-spki-sha256'] || '');
 
 if (
   !args.bundle
@@ -47,8 +48,13 @@ if (
 if (!['CONTROLLED_TEST_VECTOR', 'PINNED_PRODUCTION'].includes(trustRootKind)) {
   throw new Error('client_c5_trust_root_kind_invalid');
 }
-if (trustRootKind === 'PINNED_PRODUCTION' && inside(bundleDir, bootstrapKeyPath)) {
-  throw new Error('client_c5_production_bootstrap_key_must_be_external_to_bundle');
+if (trustRootKind === 'PINNED_PRODUCTION') {
+  if (inside(bundleDir, bootstrapKeyPath)) {
+    throw new Error('client_c5_production_bootstrap_key_must_be_external_to_bundle');
+  }
+  if (!/^[0-9a-f]{64}$/.test(expectedBootstrapSpkiSha256)) {
+    throw new Error('client_c5_production_bootstrap_spki_pin_required');
+  }
 }
 
 const [v1, v1Signature, v2, v2Signature, bootstrapPem] = await Promise.all([
@@ -70,6 +76,9 @@ const bootstrap = verifyClientC5SupervisorTrustRootBootstrap({
   manifest: v1,
   signature_envelope: v1Signature,
   pinned_root_public_keys: { [bootstrapKeyId]: bootstrapKey },
+  expected_pinned_root_spki_sha256: trustRootKind === 'PINNED_PRODUCTION'
+    ? { [bootstrapKeyId]: expectedBootstrapSpkiSha256 }
+    : {},
   now,
   production_bootstrap: trustRootKind === 'PINNED_PRODUCTION',
 });
