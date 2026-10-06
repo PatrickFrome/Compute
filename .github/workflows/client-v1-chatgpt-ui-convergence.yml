@@ -14,6 +14,7 @@ on:
       - 'apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs'
       - 'apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs'
       - 'apps/metaengine-browser/test/shell-first-startup-boundary.test.mjs'
+      - 'apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs'
       - 'apps/metaengine-browser/test/browser-policy.test.mjs'
       - '.github/workflows/browser-windows-package-smoke.yml'
       - '.github/workflows/browser-typed-workspaces-v1.yml'
@@ -67,6 +68,7 @@ jobs:
             apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs \
             apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs \
             apps/metaengine-browser/test/shell-first-startup-boundary.test.mjs \
+            apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs \
             apps/metaengine-browser/test/browser-policy.test.mjs
 
       - name: Install exact ME2 UI dependencies
