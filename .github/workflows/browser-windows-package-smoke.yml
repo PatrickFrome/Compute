@@ -1071,7 +1071,7 @@ jobs:
             }
             if ($p.ExitCode -ne 0) {
               Get-Content $err -ErrorAction SilentlyContinue
-              throw "installed_restart_probe_exit:$stem:$($p.ExitCode)"
+              throw ('installed_restart_probe_exit:{0}:{1}' -f $stem, $p.ExitCode)
             }
             $line = Get-Content $out -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
             if (-not $line) { throw "installed_restart_probe_output_missing:$stem" }
