@@ -23,6 +23,7 @@ on:
       - 'apps/metaengine-browser/test/emergency-maintenance-trust-root.test.mjs'
       - 'apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs'
       - 'apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs'
+      - 'apps/metaengine-browser/test/me2-primary-shell-runtime.test.mjs'
       - '.github/workflows/browser-windows-package-smoke.yml'
       - '.github/workflows/browser-typed-workspaces-v1.yml'
       - 'research/METAENGINE_CLIENT_V1_CHATGPT_UI_CONVERGENCE_CHECKPOINT_2026-10-06.md'
