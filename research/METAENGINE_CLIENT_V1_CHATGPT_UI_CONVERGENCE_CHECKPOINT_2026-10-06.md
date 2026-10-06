@@ -1,7 +1,7 @@
 # METAENGINE Client V1 — ChatGPT Primary UI Convergence Checkpoint
 
 Date: 2026-10-06  
-Status: **SOURCE_REQUALIFICATION_REQUIRED — LEGACY SHELL RETIRED / NOT YET PHYSICALLY INSTALLED**  
+Status: **SOURCE_REQUALIFICATION_REQUIRED — TYPED WORKSPACE TEST REPAIRED / NOT YET PHYSICALLY INSTALLED**  
 Branch: `work/client-v1-chatgpt-ui-convergence-v1`  
 Qualified source head before package reservation: `2e6570ce69986a51caea3ed61dffb44644ec0310`  
 Parent LIVE-development candidate: `e2e8f20e5d6abf0f84bf163066ed3ec15b69298a` / `0.7.0-dev.37416000001.1`
@@ -207,6 +207,22 @@ https://help.openai.com/en/articles/12003714-chatgpt-business-models-and-limits
 
 https://help.openai.com/en/articles/11165333-chatgpt-enterprise-and-edu-models-limits
 
+## Typed Workspaces stale-test correction
+
+After reopening PR #1133, Browser Typed Workspaces run `37435008436` failed exactly one test.
+
+The failing test still read the retired file:
+
+`apps/metaengine-browser/ui/app.js`
+
+This was a stale test dependency, not a runtime regression. The test is now rebound to the current architecture:
+
+- `preload-shell.cjs` must accept only bounded, non-authority DevOS projections;
+- current ME2 store may use the presentation bridge but may not reconstruct durable workspace bindings;
+- `workspace_bindings`, `lease_current`, exact binding target/generation and current command payload remain absent from renderer-visible sources.
+
+Because package identity `0.7.0-dev.37435000001.1` had already passed Package Smoke identity preflight, it is treated as consumed. The repaired source advances to `0.7.0-dev.37436000001.1`.
+
 ## Non-claims
 
 This checkpoint does not prove:
@@ -232,9 +248,9 @@ It MUST NOT be rebuilt or relabelled with this UI correction.
 
 Intermediate identity `0.7.0-dev.37434000001.1` reached PR Package Smoke preflight before complete legacy-shell retirement and is treated as potentially consumed.
 
-Fresh final identity for the physical successor:
+Fresh final identity for the physical successor after Typed Workspaces repair:
 
-`0.7.0-dev.37435000001.1`
+`0.7.0-dev.37436000001.1`
 
 Before reopening PR #1133, the final source must re-pass the source-only convergence workflow with:
 
