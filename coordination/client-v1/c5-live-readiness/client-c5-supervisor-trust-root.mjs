@@ -5,9 +5,10 @@ import {
   stableClientC5Json,
 } from './client-c5-live-readiness.mjs';
 
-export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root.v1';
-export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_SIGNATURE_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root-signature.v1';
-export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_RECEIPT_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root-verification.v1';
+export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root.v2';
+export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_SIGNATURE_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root-signature.v2';
+export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_RECEIPT_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root-verification.v2';
+export const CLIENT_C5_SUPERVISOR_TRUST_ROOT_RESOLUTION_SCHEMA = 'metaengine.client-v1.c5-supervisor-trust-root-resolution.v2';
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
@@ -16,6 +17,7 @@ const ED25519_SIGNATURE_BASE64URL_RE = /^[A-Za-z0-9_-]{86}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 const KEY_ROLES = new Set(['ROOT', 'SUPERVISOR_READBACK']);
 const KEY_STATES = new Set(['ACTIVE', 'RETIRED', 'REVOKED']);
+const PIN_MODES = new Set(['CONTROLLED_TEST_VECTOR', 'LIVE_DEVELOPMENT_PIN']);
 const MANIFEST_KEYS = Object.freeze([
   'schema', 'version', 'generation', 'issued_at', 'expires_at',
   'previous_manifest_sha256', 'root_signature_threshold', 'usage',
@@ -23,7 +25,7 @@ const MANIFEST_KEYS = Object.freeze([
 ]);
 const KEY_KEYS = Object.freeze([
   'key_id', 'role', 'alg', 'public_key_spki_base64', 'public_key_spki_sha256',
-  'state', 'valid_from', 'valid_until', 'retired_at', 'revoked_at',
+  'state', 'valid_from', 'valid_until', 'retired_at', 'revoked_at', 'invalid_since',
 ]);
 const SIGNATURE_ENVELOPE_KEYS = Object.freeze([
   'schema', 'manifest_sha256', 'signatures',
@@ -80,18 +82,30 @@ function normalizeKeyEntry(value) {
   const validUntil = parseUtc(row.valid_until);
   const retiredAt = row.retired_at === null ? null : parseUtc(row.retired_at);
   const revokedAt = row.revoked_at === null ? null : parseUtc(row.revoked_at);
+  const invalidSince = row.invalid_since === null ? null : parseUtc(row.invalid_since);
+
   if (
     validFrom === null
     || validUntil === null
     || validUntil <= validFrom
     || (retiredAt !== null && (retiredAt <= validFrom || retiredAt > validUntil))
     || (revokedAt !== null && (revokedAt <= validFrom || revokedAt > validUntil))
+    || (invalidSince !== null && (invalidSince < validFrom || invalidSince > validUntil))
   ) throw new Error('client_c5_supervisor_trust_root_key_time_invalid');
 
+  if (row.state === 'ACTIVE' && (retiredAt !== null || revokedAt !== null || invalidSince !== null)) {
+    throw new Error('client_c5_supervisor_trust_root_key_state_invalid');
+  }
+  if (row.state === 'RETIRED' && (retiredAt === null || revokedAt !== null || invalidSince !== null)) {
+    throw new Error('client_c5_supervisor_trust_root_key_state_invalid');
+  }
   if (
-    (row.state === 'ACTIVE' && (retiredAt !== null || revokedAt !== null))
-    || (row.state === 'RETIRED' && (retiredAt === null || revokedAt !== null))
-    || (row.state === 'REVOKED' && revokedAt === null)
+    row.state === 'REVOKED'
+    && (
+      revokedAt === null
+      || invalidSince === null
+      || invalidSince > revokedAt
+    )
   ) throw new Error('client_c5_supervisor_trust_root_key_state_invalid');
 
   const key = decodeSpki(row);
@@ -103,6 +117,7 @@ function normalizeKeyEntry(value) {
     _valid_until_ms: validUntil,
     _retired_at_ms: retiredAt,
     _revoked_at_ms: revokedAt,
+    _invalid_since_ms: invalidSince,
     _key_object: key,
   });
 }
@@ -198,13 +213,10 @@ function normalizeSignatureEnvelope(value, manifestDigest) {
 }
 
 function keyOperationalForRootSignature(entry, atMs) {
-  if (
-    entry.role !== 'ROOT'
-    || entry.state !== 'ACTIVE'
-    || atMs < entry._valid_from_ms
-    || atMs >= entry._valid_until_ms
-  ) return false;
-  return true;
+  return entry.role === 'ROOT'
+    && entry.state === 'ACTIVE'
+    && atMs >= entry._valid_from_ms
+    && atMs < entry._valid_until_ms;
 }
 
 function verifyThreshold({ normalized, signatures, keySource, threshold, atMs }) {
@@ -266,7 +278,7 @@ function externalPinnedRootEntries(
         map.set(entry.key_id, Object.freeze({ ...entry, _key_object: key }));
       }
     } catch {
-      // Ignore malformed or mismatched externally pinned keys.
+      // Ignore malformed or mismatched externally supplied public keys.
     }
   }
   return map;
@@ -289,6 +301,8 @@ function receipt(action, normalized, extra = {}) {
       (entry) => entry.role === 'SUPERVISOR_READBACK' && entry.state === 'ACTIVE',
     ).length,
     trust_root_verified: action === 'TRUST_ROOT_ACCEPTED',
+    bootstrap_material_verified: false,
+    live_development_pin_verified: false,
     production_bootstrap_proven: false,
     live_effect_authorized: false,
     canonical_c2_promotion_authorized: false,
@@ -303,9 +317,25 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
   signature_envelope,
   pinned_root_public_keys = {},
   expected_pinned_root_spki_sha256 = {},
+  pin_mode = 'CONTROLLED_TEST_VECTOR',
   now = new Date(),
-  production_bootstrap = false,
 } = {}) {
+  if (!PIN_MODES.has(pin_mode)) {
+    return Object.freeze({
+      schema: CLIENT_C5_SUPERVISOR_TRUST_ROOT_RECEIPT_SCHEMA,
+      action: 'HOLD_TRUST_ROOT',
+      reason: 'TRUST_ROOT_PIN_MODE_INVALID',
+      trust_root_verified: false,
+      bootstrap_material_verified: false,
+      live_development_pin_verified: false,
+      production_bootstrap_proven: false,
+      live_effect_authorized: false,
+      canonical_c2_promotion_authorized: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
   let normalized;
   try {
     normalized = normalizeClientC5SupervisorTrustRoot(manifest, { now });
@@ -315,6 +345,8 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
       action: 'HOLD_TRUST_ROOT',
       reason: error.message,
       trust_root_verified: false,
+      bootstrap_material_verified: false,
+      live_development_pin_verified: false,
       production_bootstrap_proven: false,
       live_effect_authorized: false,
       canonical_c2_promotion_authorized: false,
@@ -322,6 +354,7 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
       authority_effect: false,
     });
   }
+
   if (normalized.manifest.generation !== 1 || normalized.manifest.previous_manifest_sha256 !== null) {
     return receipt('HOLD_TRUST_ROOT', normalized, { reason: 'BOOTSTRAP_GENERATION_INVALID' });
   }
@@ -333,11 +366,12 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
     return receipt('HOLD_TRUST_ROOT', normalized, { reason: error.message });
   }
 
+  const liveDevelopment = pin_mode === 'LIVE_DEVELOPMENT_PIN';
   const pinned = externalPinnedRootEntries(
     normalized,
     pinned_root_public_keys,
     expected_pinned_root_spki_sha256,
-    production_bootstrap === true,
+    liveDevelopment,
   );
   const threshold = verifyThreshold({
     normalized,
@@ -348,21 +382,23 @@ export function verifyClientC5SupervisorTrustRootBootstrap({
   });
   if (!threshold.ok) {
     return receipt('HOLD_TRUST_ROOT', normalized, {
-      reason: production_bootstrap === true
-        ? 'PINNED_BOOTSTRAP_DIGEST_THRESHOLD_NOT_MET'
-        : 'PINNED_BOOTSTRAP_THRESHOLD_NOT_MET',
+      reason: liveDevelopment
+        ? 'LIVE_DEVELOPMENT_PIN_THRESHOLD_NOT_MET'
+        : 'CONTROLLED_BOOTSTRAP_THRESHOLD_NOT_MET',
       verified_root_signature_count: threshold.verified,
       verified_root_key_ids: threshold.accepted,
     });
   }
 
   return receipt('TRUST_ROOT_ACCEPTED', normalized, {
-    reason: production_bootstrap
-      ? 'PINNED_PRODUCTION_BOOTSTRAP_EXACT'
+    reason: liveDevelopment
+      ? 'LIVE_DEVELOPMENT_PIN_MATERIAL_EXACT'
       : 'CONTROLLED_BOOTSTRAP_EXACT',
     verified_root_signature_count: threshold.verified,
     verified_root_key_ids: threshold.accepted,
-    production_bootstrap_proven: production_bootstrap === true,
+    bootstrap_material_verified: true,
+    live_development_pin_verified: liveDevelopment,
+    production_bootstrap_proven: false,
   });
 }
 
@@ -386,6 +422,8 @@ export function verifyClientC5SupervisorTrustRootTransition({
       action: 'HOLD_TRUST_ROOT',
       reason: error.message,
       trust_root_verified: false,
+      bootstrap_material_verified: false,
+      live_development_pin_verified: false,
       production_bootstrap_proven: false,
       live_effect_authorized: false,
       canonical_c2_promotion_authorized: false,
@@ -510,10 +548,10 @@ export function resolveClientC5SupervisorReadbackKey({
       authority_effect: false,
     });
   }
-  if (entry.state === 'REVOKED' && issuedAt >= entry._revoked_at_ms) {
+  if (entry.state === 'REVOKED' && issuedAt >= entry._invalid_since_ms) {
     return Object.freeze({
       ok: false,
-      reason: 'SUPERVISOR_READBACK_KEY_REVOKED',
+      reason: 'SUPERVISOR_READBACK_KEY_REVOKED_OR_COMPROMISED',
       key: null,
       key_id: entry.key_id,
       authority_effect: false,
@@ -528,8 +566,62 @@ export function resolveClientC5SupervisorReadbackKey({
     key: entry._key_object,
     key_id: entry.key_id,
     key_state: entry.state,
+    public_key_spki_sha256: entry.public_key_spki_sha256,
     trust_root_manifest_sha256: normalized.digest,
     trust_root_generation: normalized.manifest.generation,
+    evidence_issued_at,
+    authority_effect: false,
+  });
+}
+
+export function buildClientC5SupervisorTrustResolutionReceipt({
+  pin_mode,
+  bootstrap_receipt,
+  transition_receipt,
+  resolved_key,
+} = {}) {
+  const liveDevelopment = pin_mode === 'LIVE_DEVELOPMENT_PIN';
+  if (
+    !PIN_MODES.has(pin_mode)
+    || bootstrap_receipt?.schema !== CLIENT_C5_SUPERVISOR_TRUST_ROOT_RECEIPT_SCHEMA
+    || bootstrap_receipt?.action !== 'TRUST_ROOT_ACCEPTED'
+    || bootstrap_receipt?.bootstrap_material_verified !== true
+    || bootstrap_receipt?.production_bootstrap_proven !== false
+    || transition_receipt?.schema !== CLIENT_C5_SUPERVISOR_TRUST_ROOT_RECEIPT_SCHEMA
+    || transition_receipt?.action !== 'TRUST_ROOT_ACCEPTED'
+    || resolved_key?.ok !== true
+    || resolved_key?.key_state !== 'ACTIVE'
+    || !SHA256_RE.test(String(resolved_key?.public_key_spki_sha256 || ''))
+  ) throw new Error('client_c5_supervisor_trust_resolution_material_invalid');
+
+  if (liveDevelopment && bootstrap_receipt.live_development_pin_verified !== true) {
+    throw new Error('client_c5_live_development_pin_not_verified');
+  }
+  if (!liveDevelopment && bootstrap_receipt.live_development_pin_verified !== false) {
+    throw new Error('client_c5_controlled_pin_state_invalid');
+  }
+
+  return Object.freeze({
+    schema: CLIENT_C5_SUPERVISOR_TRUST_ROOT_RESOLUTION_SCHEMA,
+    trust_root_kind: pin_mode,
+    bootstrap_manifest_sha256: bootstrap_receipt.manifest_sha256,
+    candidate_manifest_sha256: transition_receipt.manifest_sha256,
+    bootstrap_generation: bootstrap_receipt.generation,
+    candidate_generation: transition_receipt.generation,
+    old_root_threshold_verified: true,
+    new_root_threshold_verified: true,
+    supervisor_key_id: resolved_key.key_id,
+    supervisor_key_state: resolved_key.key_state,
+    supervisor_public_key_spki_sha256: resolved_key.public_key_spki_sha256,
+    evidence_issued_at: resolved_key.evidence_issued_at,
+    supervisor_key_resolved: true,
+    bootstrap_material_verified: true,
+    live_development_pin_verified: liveDevelopment,
+    production_bootstrap_proven: false,
+    live_effect_authorized: false,
+    client_c5_live_useful_work_verified: false,
+    canonical_c2_promotion_authorized: false,
+    automatic_retry_allowed: false,
     authority_effect: false,
   });
 }
@@ -542,12 +634,15 @@ export function clientC5SupervisorTrustRootContract() {
     expiry_required: true,
     root_signature_threshold_required: true,
     initial_bootstrap_requires_external_pinned_root: true,
+    live_development_pin_digest_required: true,
+    raw_material_cannot_claim_production_bootstrap: true,
     transition_requires_old_root_threshold: true,
     transition_requires_new_root_threshold: true,
     supervisor_keys_separate_from_root_role: true,
     key_lifecycle_states: Object.freeze(['ACTIVE', 'RETIRED', 'REVOKED']),
     historical_signature_time_binding_required: true,
-    revoked_key_rejected_at_or_after_revocation_time: true,
+    revoked_key_invalid_since_required: true,
+    revoked_key_rejected_at_or_after_invalid_since: true,
     retired_key_rejected_at_or_after_retirement_time: true,
     private_key_material_allowed: false,
     live_effect_authorized: false,
