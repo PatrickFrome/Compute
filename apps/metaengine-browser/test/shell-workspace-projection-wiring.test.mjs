@@ -64,16 +64,28 @@ test('trusted main process owns one full shell projection plus two bounded prese
 });
 
 test('renderer is presentation-only and cannot reconstruct durable binding authority', async () => {
-  const ui = await read('../ui/app.js');
-  assert.match(ui, /const projection = next\?\.workspaces/);
-  assert.match(ui, /projection\.grouping_authority !== 'DURABLE_WORKSPACE_BINDING_ONLY'/);
-  assert.match(ui, /unavailableWorkspaceProjection/);
-  assert.doesNotMatch(ui, /workspace_bindings/);
-  assert.doesNotMatch(ui, /lease_current/);
-  assert.doesNotMatch(ui, /binding\?\.target_id|binding\.target_id/);
-  assert.doesNotMatch(ui, /binding\?\.agent_generation_epoch|binding\.agent_generation_epoch/);
-  assert.doesNotMatch(ui, /new Map\([^\n]*workspace/i);
-  assert.doesNotMatch(ui, /current_command\?\.payload|command\?\.payload/);
+  const preload = await read('../src/preload-shell.cjs');
+  const me2Store = await read('../../me2-ui/src/components/me2/store.tsx');
+
+  assert.match(preload, /const candidate = value\?\.workspaces\?\.devos/);
+  assert.match(preload, /candidate\?\.projection_is_authority === false/);
+  assert.match(preload, /candidate\?\.scheduler_authority === false/);
+  assert.match(preload, /candidate\?\.execution_authority === false/);
+  assert.match(preload, /candidate\?\.command_leasing === false/);
+  assert.match(preload, /candidate\?\.authority_effect === false/);
+  assert.match(preload, /browser_is_shell: false/);
+  assert.match(preload, /browser_is_surface: true/);
+
+  for (const source of [preload, me2Store]) {
+    assert.doesNotMatch(source, /workspace_bindings/);
+    assert.doesNotMatch(source, /lease_current/);
+    assert.doesNotMatch(source, /binding\?\.target_id|binding\.target_id/);
+    assert.doesNotMatch(source, /binding\?\.agent_generation_epoch|binding\.agent_generation_epoch/);
+    assert.doesNotMatch(source, /current_command\?\.payload|command\?\.payload/);
+  }
+
+  assert.match(me2Store, /metaengineShell\?:/);
+  assert.doesNotMatch(me2Store, /DURABLE_WORKSPACE_BINDING_ONLY/);
 });
 
 test('pure workspace projection remains zero-authority and exact-fenced', async () => {
