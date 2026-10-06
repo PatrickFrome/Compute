@@ -1,5 +1,16 @@
 # METAENGINE Browser convergence candidate
 
+Reserved package identity is `0.7.0-dev.37415000001.1`.
+
+LIVE development candidate atomic reservation correction (2026-10-06):
+- predecessor source `59d16b69d264a013b17eff8fa7a91139a1329280` advanced package metadata to `0.7.0-dev.37413841825.1` and started the sole Package Smoke producer run `37414052914`; immutable reservation artifact `11391010236` (digest `sha256:ffda3a411cc696be2c2ccebaee9623af5386481bfafc581ac3a911a77eae418b`) exists, so that identity is consumed and MUST NOT be rebuilt or relabelled;
+- the predecessor trust/readiness implementation itself passed integrated two-VM LIVE-development audit run `37413951857`, but broader PR fan-out exposed one governance/source-contract defect: package metadata had advanced while the top authoritative reservation in this file still named `0.7.0-dev.37399755569.1`;
+- Critical Audit run `37414052847` full Browser suite failed exactly one package-identity assertion, Shell run `37414052767` failed the same convergence assertion, and Self Update run `37414052831` failed its contract fan-out before any successor may be accepted as final;
+- this successor changes package.json, both package-lock root version fields and this top convergence reservation in ONE Git commit to `0.7.0-dev.37415000001.1`, eliminating the half-updated identity state without changing runtime/trust code;
+- `0.7.0-dev.37415000001.1` is fresh and monotonic above every Actions run id observed before this reservation; Package Smoke remains the single physical producer and attempt 1 only; any later source change after its producer starts consumes this identity and requires another version;
+- the exact successor must re-pass integrated PRE-LIVE audit, full Browser suite, Shell, Self Update, Package Smoke, installed-process restart, Final Runtime, Dirty Profile, Autonomous Soak and downstream provenance consumers before it is called the LIVE-development client;
+- this reservation authorizes no provider/Agent effect, production trust claim, release publication, canonical C2 promotion, scheduler authority, Browser authority or automatic retry.
+
 Reserved package identity is `0.7.0-dev.37399755569.1`.
 
 Client C5 exact-head installed restart evidence correction (2026-10-06):
