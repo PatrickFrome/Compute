@@ -53,6 +53,8 @@ function fail(reason, extra = {}) {
     reason,
     signed_supervisor_readback_verified: false,
     trusted_supervisor_key_verified: false,
+    live_development_trust_verified: false,
+    production_trust_root_verified: false,
     exact_capsule_binding_verified: false,
     exact_dispatch_authorization_verified: false,
     exact_submission_binding_verified: false,
