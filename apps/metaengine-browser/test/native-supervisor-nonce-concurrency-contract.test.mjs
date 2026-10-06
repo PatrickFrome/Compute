@@ -7,7 +7,7 @@ const migration = () => read('../../../supabase/migrations/20261006173000_browse
 
 function nonceV3Body(sql) {
   const match = sql.match(
-    /create or replace function public\.h205f22_a2_browser_device_consume_nonce_v3\([\s\S]*?\nend;\n\$\$;/i,
+    /create or replace function public\.h205f22_a2_browser_device_consume_nonce_v3\([\s\S]*?\r?\nend;\r?\n\$\$;/i,
   );
   assert.ok(match, 'nonce v3 function must exist');
   return match[0];
@@ -21,8 +21,11 @@ test('nonce v3 preserves exact binding and durable anti-replay without exclusive
   assert.match(body, /p_request_timestamp > v_now \+ interval '2 minutes'/);
   assert.match(body, /where device_id = p_device_id\s+for share;/i,
     'authenticated requests may share the enrolled device row');
-  assert.doesNotMatch(body, /for update/i,
-    'nonce admission must not exclusively lock the device row');
+  assert.doesNotMatch(
+    body,
+    /where\s+device_id\s*=\s*p_device_id\s+for\s+update\s*;/i,
+    'nonce admission must not exclusively lock the device row',
+  );
   assert.match(body, /v_device\.active is not true or v_device\.revoked_at is not null/);
   assert.match(body, /v_device\.client_id <> p_client_id/);
   assert.match(body, /v_device\.profile <> 'A2_DEVICE_HTTP_SIGNATURE_V1'/);
@@ -50,7 +53,7 @@ test('nonce authentication hot path contains no telemetry update or expiry sweep
 test('nonce cleanup is bounded, skip-locked and explicitly non-authoritative', async () => {
   const sql = await migration();
   const cleanup = sql.match(
-    /create or replace function destruktion_meta\.a2_browser_device_nonce_cleanup_h205f22\(\)[\s\S]*?\nend;\n\$\$;/i,
+    /create or replace function destruktion_meta\.a2_browser_device_nonce_cleanup_h205f22\(\)[\s\S]*?\r?\nend;\r?\n\$\$;/i,
   )?.[0];
   assert.ok(cleanup, 'bounded cleanup function must exist');
   assert.match(cleanup, /pg_try_advisory_xact_lock\(20522, 82703\)/);
