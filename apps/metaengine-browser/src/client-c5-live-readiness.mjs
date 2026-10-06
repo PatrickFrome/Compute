@@ -263,21 +263,6 @@ export function normalizeClientC5LiveDispatchAuthorization(value, capsuleValue) 
     || row.required_reviewer_approved !== true
     || row.self_review_used !== false
     || row.explicit_live_effect_authorized !== true
-    || row.single_flight === true ? false : false
-  ) {
-    // Keep the structured checks below readable; the ternary above is
-    // intentionally not used as authority.
-  }
-  if (
-    !row
-    || row.schema !== CLIENT_C5_LIVE_DISPATCH_AUTH_SCHEMA
-    || row.capsule_sha256 !== capsule.capsule_sha256
-    || row.source_head !== capsule.source_head
-    || row.environment !== REQUIRED_ENVIRONMENT
-    || row.environment_protection_verified !== true
-    || row.required_reviewer_approved !== true
-    || row.self_review_used !== false
-    || row.explicit_live_effect_authorized !== true
     || row.single_flight !== true
     || row.automatic_retry_allowed !== false
     || row.scheduler_authority !== false
