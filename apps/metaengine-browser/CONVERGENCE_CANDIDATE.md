@@ -1,6 +1,15 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37434000001.1`.
+Reserved package identity is `0.7.0-dev.37435000001.1`.
+
+Legacy shell retirement successor reservation (2026-10-06):
+- intermediate ChatGPT UI candidate `0.7.0-dev.37434000001.1` reached Package Smoke preflight on PR #1133 before the deprecated `metaengine-dark-workspace-v2` renderer was fully removed; that identity is treated as potentially consumed and MUST NOT represent the final source even if its Windows producer never emits an artifact;
+- the final source removes the entire `apps/metaengine-browser/ui/` renderer bundle, all obsolete legacy-shell visual/UI tests, old Package Smoke visual capture, package inclusion `ui/**/*`, and runtime routing to `metaengine://shell/`;
+- packaged ME2 is now the only product UI. ME2 failure routes only to an inline GET-only `metaengine://recovery/` document with CSP `default-src 'none'`, no script/form/input/button/network path, and `recovery_surface_authority=false`;
+- `npm run check` no longer references deleted `ui/app.js` or `browser-shell-visual-evidence.mjs`; source-only convergence now runs full Browser parse checks plus ChatGPT/retirement/startup/policy contracts before any physical package is accepted;
+- final fresh package identity is `0.7.0-dev.37435000001.1`. Any source mutation after its physical producer begins consumes this identity and requires another monotonic version;
+- old package `0.7.0-dev.37416000001.1` remains the immutable installed LIVE-development baseline; no production trust, provider effect, release publication, scheduler authority or canonical C2 promotion is granted here.
+
 
 ChatGPT primary UI convergence reservation (2026-10-06):
 - parent LIVE-development candidate `e2e8f20e5d6abf0f84bf163066ed3ec15b69298a` / `0.7.0-dev.37416000001.1` remains immutable and physically qualified; it MUST NOT be rebuilt or relabelled with this UI correction;
@@ -9,7 +18,7 @@ ChatGPT primary UI convergence reservation (2026-10-06):
 - legacy `GET /glm` telemetry remains read-only; UI `probe` / `upgrade fleet` mutations and `mcxOp("glm", ...)` are removed;
 - unused `z-ai-web-dev-sdk` and dead GLM/vault `agent-factory/bootstrap.ts` are removed from the ME2 source/dependency surface;
 - compiled Next output is fail-closed scanned for legacy provider branding/mutation strings;
-- fresh Browser package identity is `0.7.0-dev.37434000001.1`; Package Smoke remains the sole physical producer and all installed/runtime/self-update consumers must qualify the same immutable candidate before this slice is considered physically proven;
+- fresh Browser package identity is `0.7.0-dev.37435000001.1`; Package Smoke remains the sole physical producer and all installed/runtime/self-update consumers must qualify the same immutable candidate before this slice is considered physically proven;
 - no production trust, provider mutation, canonical C2 promotion, scheduler authority, release authority or automatic retry is granted by this reservation.
 
 
