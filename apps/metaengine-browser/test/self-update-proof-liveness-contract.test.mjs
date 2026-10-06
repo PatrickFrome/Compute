@@ -8,13 +8,30 @@ const workflow = fs.readFileSync(
   'utf8',
 );
 
-test('physical self-update stabilizes Windows process exit observation', () => {
-  const wait = /function Wait-ExitOrThrow[\s\S]*?\r?\n}\r?\n\r?\n\$root/.exec(physicalScript)?.[0] || '';
+test('physical self-update uses direct ProcessStartInfo capture with stable exit codes', () => {
+  const start = /function Start-CapturedProcess[\s\S]*?\r?\n}\r?\n\r?\nfunction Complete-CapturedProcessOutput/.exec(physicalScript)?.[0] || '';
+  assert.match(start, /System\.Diagnostics\.ProcessStartInfo/);
+  assert.match(start, /UseShellExecute = \$false/);
+  assert.match(start, /RedirectStandardOutput = \$true/);
+  assert.match(start, /RedirectStandardError = \$true/);
+  assert.match(start, /ReadToEndAsync\(\)/);
+
+  const wait = /function Wait-CapturedProcessOrThrow[\s\S]*?\r?\n}\r?\n\r?\n\$root/.exec(physicalScript)?.[0] || '';
   assert.match(wait, /WaitForExit\(\$TimeoutMs\)/);
-  assert.match(wait, /\$Process\.WaitForExit\(\)/);
-  assert.match(wait, /\$Process\.Refresh\(\)/);
-  assert.match(wait, /exit_code_unavailable/);
-  assert.match(wait, /\[int\]\$exitCode -ne 0/);
+  assert.match(wait, /\$process\.WaitForExit\(\)/);
+  assert.match(wait, /Complete-CapturedProcessOutput \$Capture/);
+  assert.match(wait, /\[int\]\$process\.ExitCode/);
+  assert.match(wait, /\$exitCode -ne 0/);
+  assert.doesNotMatch(wait, /exit_code_unavailable/);
+
+  assert.doesNotMatch(
+    physicalScript,
+    /Start-Process -FilePath \$app -ArgumentList '--metaengine-version-probe'.*RedirectStandardOutput/,
+  );
+  assert.match(
+    physicalScript,
+    /Start-CapturedProcess -FilePath \$app -Arguments '--metaengine-self-update-smoke'/,
+  );
 });
 
 test('physical release discovery receives one read-only workflow token binding', () => {

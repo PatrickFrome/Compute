@@ -8,6 +8,8 @@ on:
       - 'coordination/client-v1/c5-live-readiness/**'
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-fast-physical.ps1'
+      - 'apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
       - 'research/METAENGINE_CLIENT_V1_LIVE_DEVELOPMENT_CANDIDATE_AUDIT_2026-10-06.md'
@@ -17,6 +19,8 @@ on:
       - 'coordination/client-v1/c5-live-readiness/**'
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
       - 'apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-fast-physical.ps1'
+      - 'apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/package-lock.json'
       - 'research/METAENGINE_CLIENT_V1_LIVE_DEVELOPMENT_CANDIDATE_AUDIT_2026-10-06.md'
@@ -98,7 +102,8 @@ jobs:
             coordination/client-v1/c5-live-readiness/client-c5-supervisor-trust-root.test.mjs \
             coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.test.mjs \
             coordination/client-v1/c5-live-readiness/client-c5-live-readiness.test.mjs \
-            apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs
+            apps/metaengine-browser/test/client-v1-c5-useful-work-proof.test.mjs \
+            apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs
 
       - name: Generate exact-head readiness capsule
         shell: bash

@@ -1,6 +1,17 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37415000001.1`.
+Reserved package identity is `0.7.0-dev.37416000001.1`.
+
+LIVE development physical exit-observation correction (2026-10-06):
+- predecessor exact source `ca98e9475102d8e0f4a16f8134fec8e2f85f3a38` atomically reserved `0.7.0-dev.37415000001.1` and Package Smoke run `37414725136` successfully produced immutable candidate artifact `11389839261`; installer SHA-256 `d3d0847e2623b0025330c6c36f80ede0fa9f849cb5bc76ab3cd0d3b197e8a433` and package/build provenance were verified by multiple installed consumers, so that source/version pair is consumed and MUST NOT be rebuilt or relabelled;
+- the same predecessor passed Installed Chat, Autonomous Soak, Final Runtime Activation, Shell, Critical Audit, C5 trust-root/evidence verification and the integrated LIVE-development audit, but Self Update E2E run `37414725143` failed at the published-baseline version probe with `baseline_version_probe_exit_code_unavailable`;
+- forensic logs prove the qualified installer was acquired and verified before the failure; the defect is the PowerShell `Start-Process`/adapted `Process.ExitCode` observation path used by short physical probes, not target package corruption;
+- this successor replaces those short probe launches with direct `System.Diagnostics.ProcessStartInfo` capture, `UseShellExecute=false`, asynchronous stdout/stderr drain, bounded `WaitForExit` and direct integer ExitCode verification; non-zero exits and timeouts remain fail-closed;
+- regression coverage rejects a return to the old unstable probe pattern, and the LIVE-development candidate audit now watches the physical harness/tests explicitly;
+- because source changed after `0.7.0-dev.37415000001.1` was physically built, this SAME atomic commit advances package.json, both package-lock root version fields, the convergence reservation and audit report to fresh identity `0.7.0-dev.37416000001.1`;
+- Package Smoke remains the sole physical producer. This exact successor must pass attempt-1 Package Smoke plus Self Update E2E, Installed Chat, Final Runtime, Autonomous Soak, Dirty Profile, Critical Audit, Shell, restart continuity and provenance consumers before it can be used for LIVE development;
+- this reservation grants no production trust, provider effect, release publication, canonical C2 promotion, scheduler authority or automatic retry.
+
 
 LIVE development candidate atomic reservation correction (2026-10-06):
 - predecessor source `59d16b69d264a013b17eff8fa7a91139a1329280` advanced package metadata to `0.7.0-dev.37413841825.1` and started the sole Package Smoke producer run `37414052914`; immutable reservation artifact `11391010236` (digest `sha256:ffda3a411cc696be2c2ccebaee9623af5386481bfafc581ac3a911a77eae418b`) exists, so that identity is consumed and MUST NOT be rebuilt or relabelled;

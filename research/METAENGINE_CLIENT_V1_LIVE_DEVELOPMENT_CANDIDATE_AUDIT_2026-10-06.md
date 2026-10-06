@@ -429,11 +429,11 @@ No code in this checkpoint may silently convert those unknowns into true.
 
 Critical trust defects found:
 
-**6**
+**7**
 
 Critical trust defects repaired:
 
-**6**
+**7**
 
 Integrated adversarial tests:
 
@@ -475,6 +475,14 @@ Canonical promotion authority:
 
 **false**
 
+Physical correction discovered after initial reservation:
+
+- predecessor source `ca98e9475102d8e0f4a16f8134fec8e2f85f3a38` / package `0.7.0-dev.37415000001.1` passed Package Smoke and the major installed consumers, but Self Update E2E run `37414725143` failed at `baseline_version_probe_exit_code_unavailable`;
+- qualified installer digest before failure: `sha256:d3d0847e2623b0025330c6c36f80ede0fa9f849cb5bc76ab3cd0d3b197e8a433`;
+- the failing boundary was the Windows PowerShell process-exit observer, not package provenance or installer bytes;
+- direct `System.Diagnostics.ProcessStartInfo` capture now replaces the unstable short-probe `Start-Process` path while preserving timeout and non-zero-exit rejection;
+- `0.7.0-dev.37415000001.1` is consumed and immutable; final successor reservation is `0.7.0-dev.37416000001.1`.
+
 Next release action:
 
-**reserve a new exact-source package identity and physically qualify the Windows installer**
+**physically qualify exact successor `0.7.0-dev.37416000001.1` on all Windows gates; no further source mutation is allowed without another fresh package identity**
