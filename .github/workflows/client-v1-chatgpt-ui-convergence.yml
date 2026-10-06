@@ -85,6 +85,13 @@ jobs:
             apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs \
             apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs
 
+      - name: Run full Browser Node regression before package reservation
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+
       - name: Install exact ME2 UI dependencies
         working-directory: apps/me2-ui
         shell: bash
