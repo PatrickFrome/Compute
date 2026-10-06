@@ -4,6 +4,7 @@ import { normalizeClientUsefulWorkProof } from './client-useful-work-proof.mjs';
 
 export const CLIENT_C5_LIVE_READINESS_SCHEMA = 'metaengine.client-v1.c5-live-readiness.v1';
 export const CLIENT_C5_LIVE_DISPATCH_AUTH_SCHEMA = 'metaengine.client-v1.c5-live-dispatch-authorization.v1';
+export const CLIENT_C5_LIVE_OBJECTIVE = 'Repair the single bounded Client C5 canary in apps/metaengine-browser/test/fixtures/client-c5-live-project by changing only answer.mjs so the existing test passes, then run the existing build script to produce dist/live-artifact.json. Do not modify any other path, do not use network, and return only after the test and build pass.';
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -87,7 +88,7 @@ export function normalizeClientC5LiveReadinessCapsule(value) {
 
   if (
     typeof row.objective !== 'string'
-    || !row.objective.trim()
+    || row.objective !== CLIENT_C5_LIVE_OBJECTIVE
     || row.objective.length > 480
     || sha256ClientC5(row.objective) !== row.objective_sha256
   ) throw new Error('client_c5_live_objective_invalid');
@@ -266,6 +267,7 @@ export function normalizeClientC5LiveDispatchAuthorization(value, capsuleValue) 
     || row.single_flight !== true
     || row.automatic_retry_allowed !== false
     || row.scheduler_authority !== false
+    || row.browser_authority !== false
     || row.release_authority !== false
     || row.authority_effect !== false
   ) throw new Error('client_c5_live_dispatch_authorization_invalid');
