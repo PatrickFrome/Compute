@@ -70,7 +70,6 @@ import { createBrowserGuardianStatusObserver } from './browser-guardian-status-o
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
-const UI_ROOT = path.join(APP_ROOT, 'ui');
 const TOOLBAR_HEIGHT = SHELL_TOP_HEIGHT;
 const PERCEPTION_CACHE_MS = 4000;
 const STARTUP_RETRY_BASE_MS = 1000;
@@ -186,10 +185,11 @@ tabNetworkActivity.setCompletionSink((entry) => agentObservationPlane.recordNetw
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let devosSurfaceGridPlan = null;
-// R84 primary Desktop convergence: the packaged R74/R75 ME2 UI is the normal
-// user-facing shell. The legacy metaengine://shell remains a local recovery
-// surface only when the packaged ME2 plane cannot prove itself healthy.
-let primaryShellMode = 'LEGACY_RECOVERY';
+// Packaged ME2 is the only product UI. If it cannot prove itself healthy,
+// Browser falls back to a generated, read-only recovery document with no
+// command or browser actuation surface. The deprecated legacy renderer bundle
+// is intentionally absent from source and package contents.
+let primaryShellMode = 'FAIL_CLOSED_RECOVERY';
 let primaryShellPage = 'browser';
 let primaryShellOverlayActive = false;
 let primaryCommandRailOpen = true;
@@ -203,7 +203,7 @@ let devosSourceSnapshot = null;
 let devosSessionLayoutsLoaded = false;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
 let shutdownRequested = false;
-let shellProtocolHandlerReady = false;
+let recoveryProtocolHandlerReady = false;
 let userSessionConfigured = false;
 let startupRetryTimer = null;
 let startupRetryAttempt = 0;
@@ -217,27 +217,48 @@ let lastComputeHealthState = null;
 let supervisorLoopbackRpc = null;
 const degradedStartupSubsystems = new Map();
 
-function mimeFor(filePath) {
-  if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
-  if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
-  if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
-  return 'application/octet-stream';
+function failClosedRecoveryDocument(reason = 'ME2_PRIMARY_UNAVAILABLE') {
+  const safeReason = String(reason || 'ME2_PRIMARY_UNAVAILABLE').replace(/[^A-Z0-9_.:-]/gi, '_').slice(0, 96);
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="color-scheme" content="dark">
+<title>METAENGINE Recovery</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0b0f14;color:#d8e1ec;font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:720px;margin:12vh auto;padding:28px;border:1px solid #273241;border-radius:12px;background:#111821}
+h1{margin:0 0 10px;font-size:20px}p{margin:8px 0;color:#aebccd}code{color:#91bfff}
+.notice{margin-top:18px;padding:12px;border-left:3px solid #e1b45f;background:#171b20;color:#d8c8a8}
+</style>
+</head>
+<body>
+<main data-metaengine-recovery="fail-closed">
+<h1>METAENGINE recovery</h1>
+<p>The packaged ME2 interface is unavailable.</p>
+<p>Reason: <code>${safeReason}</code></p>
+<div class="notice">No execution, scheduling, browser-control, provider, retry, or update controls are exposed on this recovery surface.</div>
+</main>
+</body>
+</html>`;
 }
 
-async function registerShellProtocol() {
-  if (shellProtocolHandlerReady || protocol.isProtocolHandled('metaengine')) {
-    shellProtocolHandlerReady = true;
+async function registerRecoveryProtocol() {
+  if (recoveryProtocolHandlerReady || protocol.isProtocolHandled('metaengine')) {
+    recoveryProtocolHandlerReady = true;
     return;
   }
   await protocol.handle('metaengine', async (request) => {
     const url = new URL(request.url);
-    if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
-    const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-    if (!['index.html', 'app.js', 'app.css', 'dark-workspace.css'].includes(rel)) return new Response('not found', { status: 404 });
-    const body = await fs.readFile(path.join(UI_ROOT, rel));
-    return new Response(body, { status: 200, headers: { 'content-type': mimeFor(rel), 'cache-control': 'no-store' } });
+    if (url.hostname !== 'recovery' || url.pathname !== '/') return new Response('not found', { status: 404 });
+    if (request.method && request.method !== 'GET') return new Response('method not allowed', { status: 405 });
+    return new Response(failClosedRecoveryDocument(url.searchParams.get('reason') || undefined), {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    });
   });
-  shellProtocolHandlerReady = true;
+  recoveryProtocolHandlerReady = true;
 }
 
 function configureUserSession() {
@@ -851,9 +872,9 @@ function nativeBrowserSurfaceAllowed() {
 
 async function preparePrimaryShellTarget() {
   if (process.env.ME2_INTEGRATION === '0') {
-    primaryShellMode = 'LEGACY_RECOVERY';
+    primaryShellMode = 'FAIL_CLOSED_RECOVERY';
     primaryShellUrl = null;
-    return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_INTEGRATION_DISABLED' };
+    return { mode: primaryShellMode, url: 'metaengine://recovery/?reason=ME2_INTEGRATION_DISABLED', reason: 'ME2_INTEGRATION_DISABLED' };
   }
   try {
     const me2 = await import('./me2/me2-integration-entry.mjs');
@@ -881,9 +902,9 @@ async function preparePrimaryShellTarget() {
   } catch (error) {
     recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL', error);
   }
-  primaryShellMode = 'LEGACY_RECOVERY';
+  primaryShellMode = 'FAIL_CLOSED_RECOVERY';
   primaryShellUrl = null;
-  return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
+  return { mode: primaryShellMode, url: 'metaengine://recovery/?reason=ME2_PRIMARY_DEGRADED', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
 const ME2_R97_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'admin-connection-badge', 'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
@@ -2271,11 +2292,11 @@ async function createWindow() {
   });
   layout();
 
-  // R84/R75 Desktop convergence: packaged ME2 is the normal shell. The old
-  // metaengine://shell is retained only as a deterministic local recovery path.
-  // Remote agent/browser views remain native WebContentsViews and are composed
-  // above the ME2 command-center stage; ME2 renderer pixels never gain browser
-  // execution authority.
+  // Packaged ME2 is the only normal product shell. If it fails its exact
+  // readiness/DOM contract, Browser shows only the generated fail-closed
+  // recovery document. No deprecated renderer bundle is packaged or loadable.
+  // Remote agent/browser views remain native WebContentsViews; ME2 renderer
+  // pixels never gain browser execution authority.
   const shellTarget = await preparePrimaryShellTarget();
   try {
     await shellView.webContents.loadURL(shellTarget.url);
@@ -2288,25 +2309,26 @@ async function createWindow() {
   } catch (error) {
     if (shellTarget.mode !== 'ME2_PRIMARY') throw error;
     recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL_LOAD', error);
-    primaryShellMode = 'LEGACY_RECOVERY';
-    primaryShellPage = 'command';
+    primaryShellMode = 'FAIL_CLOSED_RECOVERY';
+    primaryShellPage = 'browser';
     primaryShellOverlayActive = false;
     primaryShellUrl = null;
-    await shellView.webContents.loadURL('metaengine://shell/');
+    await shellView.webContents.loadURL('metaengine://recovery/?reason=ME2_PRIMARY_LOAD_FAILED');
   }
   layout();
   windowRef.show();
   windowRef.focus();
   console.log(JSON.stringify({
     schema: 'metaengine.browser-local-shell.v2',
-    state: primaryShellMode === 'ME2_PRIMARY' ? 'ME2_PRIMARY_SHELL_VISIBLE' : 'LEGACY_RECOVERY_SHELL_VISIBLE',
+    state: primaryShellMode === 'ME2_PRIMARY' ? 'ME2_PRIMARY_SHELL_VISIBLE' : 'FAIL_CLOSED_RECOVERY_VISIBLE',
     shell_mode: primaryShellMode,
-    shell_url_class: primaryShellMode === 'ME2_PRIMARY' ? 'PACKAGED_ME2_LOOPBACK' : 'METAENGINE_RECOVERY_PROTOCOL',
+    shell_url_class: primaryShellMode === 'ME2_PRIMARY' ? 'PACKAGED_ME2_LOOPBACK' : 'METAENGINE_FAIL_CLOSED_RECOVERY_PROTOCOL',
     version: app.getVersion(),
     pid: process.pid,
     remote_network_required: false,
     fleet_state_required: false,
-    legacy_shell_is_normal_path: false,
+    deprecated_shell_bundle_present: false,
+    recovery_surface_authority: false,
     authority_effect: false,
   }));
 
@@ -2783,7 +2805,7 @@ ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
 });
 
 async function startAfterReady() {
-  await registerShellProtocol();
+  await registerRecoveryProtocol();
   runtimeGenesisState = await ensureRuntimeGenesis({ userDataPath: app.getPath('userData') });
   startupControlState = await loadNativeSupervisorControlState(supervisorControlStatePath());
   await initDevOSSessionLayouts();
