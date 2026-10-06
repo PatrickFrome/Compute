@@ -112,6 +112,31 @@ type ClientGoalExecutionProof = {
   authority_effect: false;
 };
 
+type ClientUsefulWorkProof = {
+  schema: "metaengine.client-v1.useful-work-proof.v1";
+  found: true;
+  evidence_class: "LIVE" | "SYNTHETIC";
+  evidence_origin: "SIGNED_SUPERVISOR_READBACK" | "CONTROLLED_FIXTURE";
+  user_goal_to_verified_artifact_readback: true;
+  client_c5_useful_work_verified: boolean;
+  canonical_c2_promotion_authorized: false;
+  artifact: {
+    artifact_sha256: string;
+    provenance_sha256: string;
+    verification_receipt_sha256: string;
+    artifact_verified: true;
+    provenance_verified: true;
+    subject_digest_verified: true;
+  };
+  review: {
+    independent_verifier: true;
+    accepted: true;
+    accepted_artifact_sha256: string;
+  };
+  automatic_retry_allowed: false;
+  authority_effect: false;
+};
+
 type ClientGoalJournalEntry = {
   schema: "metaengine.client.goal-journal-entry.v1";
   request_id: string;
@@ -120,6 +145,7 @@ type ClientGoalJournalEntry = {
   receipt: ClientGoalSubmission | null;
   progress: ClientGoalProgress | null;
   execution_proof: ClientGoalExecutionProof | null;
+  useful_work_proof: ClientUsefulWorkProof | null;
   last_error: string | null;
   automatic_retry_allowed: false;
   authority_effect: false;
@@ -410,6 +436,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   const progress = journalEntry?.progress;
   const proof = journalEntry?.execution_proof;
+  const usefulWork = journalEntry?.useful_work_proof;
+  const shortDigest = (value?: string | null) => value && /^[0-9a-f]{64}$/.test(value) ? `${value.slice(0, 12)}…` : "Unavailable";
+  const usefulWorkLabel = usefulWork?.client_c5_useful_work_verified === true
+    && usefulWork.evidence_class === "LIVE"
+    && usefulWork.evidence_origin === "SIGNED_SUPERVISOR_READBACK"
+      ? "Live useful work verified"
+      : usefulWork?.evidence_class === "SYNTHETIC"
+        ? "Reference evidence only · not live"
+        : "Not yet proven";
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
     COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
@@ -498,6 +533,17 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
             <dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified z.ai Agent" : "Not yet verified"}</dd>
             <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Received · review pending" : "No result received"}</dd>
+            <dt className="text-zinc-400">Verified work</dt>
+            <dd data-testid="client-useful-work-proof">
+              {usefulWorkLabel}
+              {usefulWork ? ` · ${usefulWork.evidence_class}` : ""}
+            </dd>
+            <dt className="text-zinc-400">Artifact</dt>
+            <dd className="font-mono" data-testid="client-useful-work-artifact-digest">{shortDigest(usefulWork?.artifact?.artifact_sha256)}</dd>
+            <dt className="text-zinc-400">Provenance</dt>
+            <dd className="font-mono" data-testid="client-useful-work-provenance-digest">{shortDigest(usefulWork?.artifact?.provenance_sha256)}</dd>
+            <dt className="text-zinc-400">Canonical C2</dt>
+            <dd data-testid="client-useful-work-canonical-boundary">{usefulWork ? "Evidence only · not promoted" : "Not proven"}</dd>
           </dl>
           {error ? <p role="alert" className="break-words text-[12px] text-rose-300">{error}</p> : null}
           <div className="flex justify-end gap-2">
