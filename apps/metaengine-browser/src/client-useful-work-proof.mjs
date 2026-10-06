@@ -361,3 +361,17 @@ export function normalizeClientUsefulWorkProof(value, executionProof) {
     authority_effect: false,
   });
 }
+
+
+export function clientUsefulWorkProofMatchesExecutionProof(proof, executionProof) {
+  try {
+    const normalized = normalizeClientUsefulWorkProof(proof, executionProof);
+    return normalized.found === true
+      && normalized.user_goal_to_verified_artifact_readback === true
+      && normalized.canonical_c2_promotion_authorized === false
+      && normalized.authority_effect === false
+      && normalized.automatic_retry_allowed === false;
+  } catch {
+    return false;
+  }
+}
