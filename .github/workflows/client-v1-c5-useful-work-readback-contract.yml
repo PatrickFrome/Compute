@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Prove exact candidate head
@@ -58,13 +58,17 @@ jobs:
         run: |
           node --test             test/client-v1-c5-useful-work-readback-contract.test.mjs             test/client-v1-c5-useful-work-proof.test.mjs             test/client-v1-c5-useful-work-restart.test.mjs             test/client-v1-c5-useful-work-projection.test.mjs             test/client-v1-execution-proof-integrity.test.mjs             test/client-v1-agent-origin-result-proof.test.mjs
 
-      - name: Prove no migration or deployment artifact was added
+      - name: Prove no migration or deployment artifact exists in the whole readback slice
         shell: bash
+        env:
+          READBACK_BASE: '12020209e0cb1d1b8fd50438e1f1acef0aaac6ba'
         run: |
           set -euo pipefail
           test -f apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql
-          test -z "$(git diff --name-only HEAD^ HEAD -- supabase/migrations)"
-          test -z "$(git diff --name-only HEAD^ HEAD -- supabase/functions)"
+          git cat-file -e "$READBACK_BASE^{commit}"
+          test -z "$(git diff --name-only "$READBACK_BASE" "$GITHUB_SHA" -- supabase/migrations)"
+          test -z "$(git diff --name-only "$READBACK_BASE" "$GITHUB_SHA" -- supabase/functions)"
+          test -z "$(git diff --name-only "$READBACK_BASE" "$GITHUB_SHA" -- infra)"
 
       - name: Prove source checkout unchanged
         shell: bash
