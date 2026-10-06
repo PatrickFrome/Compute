@@ -12,7 +12,10 @@ test('Package Smoke materializes Electron with PE metadata instead of GUI stdout
   assert.match(workflow, /System\.Diagnostics\.FileVersionInfo/);
   assert.match(workflow, /ProductVersion/);
   assert.match(workflow, /electron_runtime_product_version_missing/);
-  assert.match(workflow, /\^44\\\.0\\\.0\(\?:\\\.0\)\?\$/);
+  assert.match(workflow, /\[version\]\$productVersion/);
+  assert.match(workflow, /parsedProductVersion\.Major -ne 44/);
+  assert.match(workflow, /parsedProductVersion\.Minor -ne 0/);
+  assert.match(workflow, /parsedProductVersion\.Build -ne 0/);
   assert.match(workflow, /Get-FileHash -Algorithm SHA256/);
   assert.match(workflow, /electron_runtime_sha256_invalid/);
   assert.match(workflow, /metaengine\.browser\.electron-runtime-materialization\.v1/);

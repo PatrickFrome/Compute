@@ -413,3 +413,24 @@ Fresh successor identity:
 `0.7.0-dev.37490000001.1`
 
 No installer from `0.7.0-dev.37485000001.1` is accepted.
+
+
+## Workflow validation correction before physical reservation
+
+Commit:
+
+`a5628c46c9632ef97ba9b1236be964fc40a12125`
+
+GitHub run:
+
+`37487828226`
+
+Result:
+
+**FAIL / WORKFLOW VALIDATION**
+
+The run contained zero jobs, so it did not execute package identity preflight, did not publish a reservation artifact and did not start a Windows runner. Therefore `0.7.0-dev.37490000001.1` remains unconsumed.
+
+Root cause: the generated PE-version regex line in `.github/workflows/browser-windows-package-smoke.yml` was truncated before YAML parsing.
+
+Correction: remove the fragile inline regex and parse `ProductVersion` as PowerShell `[version]`, requiring Major=44, Minor=0 and Build=0, while retaining executable presence and SHA-256 validation.

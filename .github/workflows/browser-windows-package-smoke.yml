@@ -203,7 +203,24 @@ jobs:
           $binaryInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($electron)
           $productVersion = ([string]$binaryInfo.ProductVersion).Trim()
           if ([string]::IsNullOrWhiteSpace($productVersion)) { throw 'electron_runtime_product_version_missing' }
-          if ($productVersion -notmatch '^44\.0\.0(?:\.0)?
+          try {
+            $parsedProductVersion = [version]$productVersion
+          } catch {
+            throw "electron_runtime_product_version_invalid:$productVersion"
+          }
+          if ($parsedProductVersion.Major -ne 44 -or $parsedProductVersion.Minor -ne 0 -or $parsedProductVersion.Build -ne 0) {
+            throw "electron_runtime_version_drift:$productVersion"
+          }
+          $binarySha256 = ((Get-FileHash -Algorithm SHA256 -LiteralPath $electron).Hash).ToLowerInvariant()
+          if ($binarySha256 -notmatch '^[a-f0-9]{64}$') { throw 'electron_runtime_sha256_invalid' }
+          Write-Host (@{
+            schema = 'metaengine.browser.electron-runtime-materialization.v1'
+            package_version = $packageVersion
+            product_version = $productVersion
+            binary_sha256 = $binarySha256
+            authority_effect = $false
+          } | ConvertTo-Json -Compress)
+
       - name: Capture exact installed dependency resolution
         working-directory: apps/metaengine-browser
         shell: powershell

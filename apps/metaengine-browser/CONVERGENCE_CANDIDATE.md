@@ -2,6 +2,12 @@
 
 Reserved package identity is `0.7.0-dev.37490000001.1`.
 
+YAML validation correction before physical reservation (2026-10-06):
+- commit `a5628c46c9632ef97ba9b1236be964fc40a12125` attempted the PE metadata correction, but GitHub rejected workflow `browser-windows-package-smoke.yml` at validation time in run `37487828226`; there were **zero jobs**, no package preflight and no reservation artifact;
+- therefore package identity `0.7.0-dev.37490000001.1` was NOT consumed and remains eligible;
+- the defect was an accidentally truncated inline regex in the generated workflow source, not a runtime/installer failure;
+- this successor replaces the fragile regex with PowerShell `[version]` parsing and exact Major/Minor/Build checks while retaining binary presence and SHA-256 requirements.
+
 Electron runtime materialization correction (2026-10-06):
 - exact source `540f83c48501ca27a893cfcc4b62ea28e7c4f228` / package `0.7.0-dev.37485000001.1` passed package identity preflight and published+sealed immutable reservation artifact `11424395709` (digest `sha256:b370faf8f67ebfeca9c0ecab65825bc41479db5c2d4175389be4cd867cdea1c1`) in Package Smoke run `37487078168`;
 - that run then failed at `Materialize exact Electron runtime for physical UI evidence`: `electron.exe --version` exited successfully but PowerShell captured no stdout from the Windows GUI-subsystem executable, leaving `$binaryVersion` null; no visual evidence, NSIS build or candidate artifact was accepted;
