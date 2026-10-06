@@ -251,7 +251,7 @@ test('Browser reconciliation reads execution proof without another goal effect',
 test('product readback distinguishes Agent proof and result receipt from independent acceptance', () => {
   assert.match(me2, /data-testid="client-goal-execution-proof"/);
   assert.match(me2, /proof\?\.user_goal_to_result_readback === true \? "Result received"/);
-  assert.match(me2, /proof\?\.user_goal_to_agent_readback \? "Verified z\.ai Agent" : "Not yet verified"/);
+  assert.match(me2, /proof\?\.user_goal_to_agent_readback \? "Verified ChatGPT Agent" : "Not yet verified"/);
   assert.match(me2, /proof\?\.user_goal_to_result_readback \? "Received · review pending" : "No result received"/);
   assert.doesNotMatch(me2, /"Result verified"|"Verified and accepted"/);
   assert.match(me2, /A received result still requires independent verification before acceptance\./);

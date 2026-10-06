@@ -1,82 +1,40 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const sourceUrl = new URL('../ui/app.js', import.meta.url);
-const source = await readFile(sourceUrl, 'utf8');
+const me2Shell = await readFile(new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url), 'utf8');
+const palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
+const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
+const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 
-function functionSlice(name, nextName) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `${name} must exist`);
-  const end = nextName ? source.indexOf(`function ${nextName}(`, start + 1) : source.length;
-  assert.notEqual(end, -1, `${nextName} must exist after ${name}`);
-  return source.slice(start, end);
-}
-
-test('Agentic Workbench exposes keyboard-first routing without replacing normal URL navigation', () => {
-  assert.match(source, /AGENTIC_CONTEXT_STORAGE_KEY/);
-  assert.match(source, /AGENTIC_CONTEXT_MAX_TABS = 8/);
-  assert.match(source, /event\.key\.toLowerCase\(\) === 'k'/);
-  assert.match(source, /address\.value = '>'/);
-  assert.match(source, /\^\[>@\/\]/);
-  assert.match(source, /api\.command\('NAVIGATE', \{ url: address\.value \}\)/);
+test('deprecated Agentic Workbench renderer is physically retired', async () => {
+  await assert.rejects(access(new URL('../ui/app.js', import.meta.url)), /ENOENT/);
+  assert.doesNotMatch(main, /metaengine:\/\/shell\/|metaengine-dark-workspace-v2|LEGACY_RECOVERY/);
+  assert.match(main, /Packaged ME2 is the only product UI/);
+  assert.match(main, /FAIL_CLOSED_RECOVERY/);
 });
 
-test('tab routing is ambiguity-safe: only one match selects a tab', () => {
-  const route = functionSlice('executeWorkbenchAddress', 'updateWorkbenchRouteKind');
-  assert.match(route, /matches\.length === 1/);
-  assert.match(route, /api\.command\('SELECT_TAB'/);
-  assert.match(route, /tabFilter = query/);
-  assert.match(route, /renderContextRail\(snapshot\)/);
-  assert.doesNotMatch(route, /matches\[0\].*matches\.length > 1/s);
+test('current primary workspace is native ChatGPT fleet plus selected Browser surface', () => {
+  assert.match(me2Shell, /PrimaryChatFleetWorkspace/);
+  assert.match(me2Shell, /Verified ChatGPT Agent/);
+  assert.match(me2Shell, /Open an existing ChatGPT agent conversation\./);
+  assert.match(store, /native ChatGPT agent fleet and selected Browser surface/);
+  assert.doesNotMatch(me2Shell, /GLM-5\.3-Flash|Verified z\.ai Agent|Open an existing z\.ai Agent conversation/i);
 });
 
-test('Attention consumes canonical zero-authority DevOS Now and has no actuator', () => {
-  const view = functionSlice('devosShellView', 'attentionTone');
-  const now = functionSlice('devosNowItems', 'installAgenticNav');
-  assert.match(view, /metaengine\.devos\.shell-view-model\.v1/);
-  assert.match(view, /view\.now/);
-  for (const fence of [
-    'renderer_selection_authority',
-    'renderer_routing_authority',
-    'projection_is_authority',
-    'scheduler_authority',
-    'execution_authority',
-    'command_leasing',
-    'automatic_effect_retry_allowed',
-    'page_model_authority',
-    'authority_effect',
-  ]) assert.match(view, new RegExp(`${fence} !== false`));
-  assert.match(now, /view\.now\.slice\(0, 256\)/);
-  assert.doesNotMatch(now, /fleet|workspaceProjection|supervisor|self_update|development_plane|compute|owner_safety_gates/);
-  assert.doesNotMatch(now, /perception|text_excerpt|semantic_targets|page_content/i);
-  assert.doesNotMatch(now, /api\.command|executeSemantic|TYPED_CLICK|SEMANTIC_TYPE|STOP_GENERATION/);
+test('command palette routes to the existing native fleet without creating daemon agents', () => {
+  assert.match(palette, /CommandGroup heading="Native Agent fleet"/);
+  assert.match(palette, /Open native ChatGPT agent fleet/);
+  assert.match(palette, /setPage\("browser"\)/);
+  assert.doesNotMatch(palette, /spawnAgent|AgentChat|Open native z\.ai Agent fleet/);
 });
 
-test('Workbench Skills remain bounded and do not create a page/model authority path', () => {
-  const skills = functionSlice('renderSkills', 'renderAgenticSection');
-  assert.match(skills, /Research Focus/);
-  assert.match(skills, /Triage Attention/);
-  assert.match(skills, /Authority Review/);
-  assert.match(skills, /New ChatGPT tab/);
-  assert.doesNotMatch(skills, /SEMANTIC_TYPE|TYPED_CLICK|STOP_GENERATION|GATE_DISABLE|SELF_UPDATE_APPLY|DOWNLOAD_FILE/);
-  assert.match(skills, /Arbitrary eval', 'FORBIDDEN'/);
-  assert.match(skills, /Automatic effect retry', 'NONE'/);
-});
-
-test('Context Set stores bounded tab identities rather than page content', () => {
-  const load = functionSlice('loadAgenticContextTabIds', 'persistAgenticContextTabIds');
-  const rows = functionSlice('agenticContextRows', 'devosShellView');
-  assert.match(load, /slice\(0, AGENTIC_CONTEXT_MAX_TABS\)/);
-  assert.match(rows, /tab_id/);
-  assert.doesNotMatch(rows, /text_excerpt|semantic_targets|page_content|document\.body/i);
-  assert.match(source, /Page text persistence', 'NONE'/);
-  assert.match(source, /Scheduler authority', 'NONE'/);
-  assert.match(source, /Browser actuation authority', 'NONE'/);
-});
-
-test('Agentic workbench source contains no arbitrary evaluation primitive', () => {
-  assert.doesNotMatch(source, /\beval\s*\(/);
-  assert.doesNotMatch(source, /new\s+Function\s*\(/);
-  assert.doesNotMatch(source, /child_process|execSync|spawnSync/);
+test('current primary renderer keeps legacy proof token internal and carries no arbitrary evaluation primitive', () => {
+  assert.match(me2Shell, /"ZAI_AGENT_SURFACE_CAUSAL_V1"/);
+  assert.doesNotMatch(me2Shell, />[^<]*z\.ai[^<]*</i);
+  for (const source of [me2Shell, palette, store]) {
+    assert.doesNotMatch(source, /\beval\s*\(/);
+    assert.doesNotMatch(source, /new\s+Function\s*\(/);
+    assert.doesNotMatch(source, /child_process|execSync|spawnSync/);
+  }
 });

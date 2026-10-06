@@ -10,13 +10,12 @@ on:
     paths:
       - 'apps/metaengine-browser/**'
       - 'apps/metaengine-browser/src/**'
-      - 'apps/metaengine-browser/ui/**'
       - 'apps/metaengine-browser/native/**'
       - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
       - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'
-      - 'apps/metaengine-browser/test/browser-shell-visual-evidence.mjs'
+      - 'apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs'
       - 'apps/metaengine-browser/test/me2-r85-visual-evidence.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
@@ -188,6 +187,40 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
 
+      - name: Materialize exact Electron runtime for physical UI evidence
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageVersion = [string](node -p "require('./node_modules/electron/package.json').version")
+          if ($packageVersion -ne '44.0.0') { throw "electron_package_version_drift:$packageVersion" }
+          $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path $electron -PathType Leaf)) {
+            node .\node_modules\electron\install.js
+            if ($LASTEXITCODE -ne 0) { throw "electron_runtime_materialization_exit_$LASTEXITCODE" }
+          }
+          if (-not (Test-Path $electron -PathType Leaf)) { throw 'electron_runtime_binary_missing_after_materialization' }
+          $binaryInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($electron)
+          $productVersion = ([string]$binaryInfo.ProductVersion).Trim()
+          if ([string]::IsNullOrWhiteSpace($productVersion)) { throw 'electron_runtime_product_version_missing' }
+          try {
+            $parsedProductVersion = [version]$productVersion
+          } catch {
+            throw "electron_runtime_product_version_invalid:$productVersion"
+          }
+          if ($parsedProductVersion.Major -ne 44 -or $parsedProductVersion.Minor -ne 0 -or $parsedProductVersion.Build -ne 0) {
+            throw "electron_runtime_version_drift:$productVersion"
+          }
+          $binarySha256 = ((Get-FileHash -Algorithm SHA256 -LiteralPath $electron).Hash).ToLowerInvariant()
+          if ($binarySha256 -notmatch '^[a-f0-9]{64}$') { throw 'electron_runtime_sha256_invalid' }
+          Write-Host (@{
+            schema = 'metaengine.browser.electron-runtime-materialization.v1'
+            package_version = $packageVersion
+            product_version = $productVersion
+            binary_sha256 = $binarySha256
+            authority_effect = $false
+          } | ConvertTo-Json -Compress)
+
       - name: Capture exact installed dependency resolution
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -265,33 +298,9 @@ jobs:
         working-directory: apps/metaengine-browser
         run: node --test test/browser-startup-observability.test.mjs
 
-      - name: Capture deterministic shell-only visual evidence
+      - name: Prove deprecated Browser shell bundle is retired
         working-directory: apps/metaengine-browser
-        shell: powershell
-        env:
-          METAENGINE_VISUAL_EVIDENCE_DIR: ${{ runner.temp }}\browser-shell-visual
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node --check test/browser-shell-visual-evidence.mjs
-          New-Item -ItemType Directory -Force -Path $env:METAENGINE_VISUAL_EVIDENCE_DIR | Out-Null
-          & .\node_modules\.bin\electron.cmd .\test\browser-shell-visual-evidence.mjs
-          if ($LASTEXITCODE -ne 0) { throw "visual_evidence_electron_exit_$LASTEXITCODE" }
-          $evidencePath = Join-Path $env:METAENGINE_VISUAL_EVIDENCE_DIR 'visual-evidence.json'
-          if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'visual_evidence_json_missing' }
-          $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
-          if ($evidence.schema -ne 'metaengine.browser-shell.visual-evidence.v1') { throw 'visual_evidence_schema_invalid' }
-          if ($evidence.shell_only_capture -ne $true -or $evidence.remote_browser_content_captured -ne $false) { throw 'visual_evidence_scope_invalid' }
-          if ($evidence.golden_comparison_enabled -ne $false -or $evidence.authority_effect -ne $false) { throw 'visual_evidence_authority_invalid' }
-          if ($evidence.route_reset.command_mode -ne 'CMD' -or $evidence.route_reset.restored_mode -ne 'CHAT' -or $evidence.route_reset.restored_chat_class -ne $true) { throw 'visual_evidence_route_reset_invalid' }
-          if (@($evidence.captures).Count -ne 2) { throw 'visual_evidence_capture_count_invalid' }
-          foreach ($capture in @($evidence.captures)) {
-            if ($capture.metrics.systems_visible -ne $false) { throw "visual_evidence_legacy_health_strip_visible:$($capture.name)" }
-            if ([string]$capture.metrics.body_operations -ne 'CLOSED') { throw "visual_evidence_advanced_panel_not_closed:$($capture.name)" }
-            if ([int64]$capture.bytes -lt 4096 -or -not [string]$capture.sha256) { throw "visual_evidence_png_invalid:$($capture.name)" }
-            $pngPath = Join-Path $env:METAENGINE_VISUAL_EVIDENCE_DIR ([string]$capture.file)
-            if (-not (Test-Path $pngPath -PathType Leaf)) { throw "visual_evidence_png_missing:$($capture.name)" }
-          }
-          Write-Host ($evidence | ConvertTo-Json -Compress -Depth 8)
+        run: node --test test/legacy-shell-bundle-retirement.test.mjs
 
       - name: Build and stage exact-head ME2 UI
         shell: pwsh
@@ -1177,7 +1186,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
 
       - name: Upload exact-head Windows qualification evidence
         if: always()
@@ -1225,8 +1234,6 @@ jobs:
             ${{ runner.temp }}/client-c5-installed-journal-probe-stale.out
             ${{ runner.temp }}/client-c5-installed-journal-probe-stale.err
             ${{ runner.temp }}/client-c5-installed-restart-continuity.json
-            ${{ runner.temp }}/browser-shell-visual/visual-evidence.json
-            ${{ runner.temp }}/browser-shell-visual/*.png
             ${{ runner.temp }}/r85-primary-visual/r85-visual-evidence.json
             ${{ runner.temp }}/r85-primary-visual/*.png
             ${{ runner.temp }}/r85-primary-visual.stdout.log

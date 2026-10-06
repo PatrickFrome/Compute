@@ -1,58 +1,84 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
 import test from 'node:test';
 
-const readUi = () => fs.readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
+import {
+  METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA,
+  projectDevOSShellViewModel,
+} from '../src/metaengine-devos-shell-view-model.mjs';
 
-function section(source, start, end) {
-  const from = source.indexOf(start);
-  const to = source.indexOf(end, from + start.length);
-  assert.ok(from >= 0, `missing start marker: ${start}`);
-  assert.ok(to > from, `missing end marker: ${end}`);
-  return source.slice(from, to);
-}
-
-test('Attention renders canonical snapshot.devos_shell.now instead of reconstructing runtime alerts', async () => {
-  const ui = await readUi();
-  assert.match(ui, /function devosShellView\(next\)/);
-  assert.match(ui, /const view = next\?\.devos_shell/);
-  assert.match(ui, /view\.schema !== 'metaengine\.devos\.shell-view-model\.v1'/);
-  assert.match(ui, /function devosNowItems\(next\)/);
-  assert.match(ui, /view\.now\.slice\(0, 256\)/);
-  assert.doesNotMatch(ui, /function attentionQueue\(next\)/);
-  assert.doesNotMatch(ui, /no derived attention items|Derived queue|Open derived read-only attention queue/);
-
-  const now = section(ui, 'function devosNowItems(next)', 'function installAgenticNav()');
-  for (const forbidden of [
-    /next\?\.fleet/,
-    /workspaceProjection\(next\)/,
-    /next\?\.supervisor/,
-    /next\?\.development_plane/,
-    /next\?\.compute/,
-    /next\?\.owner_safety_gates/,
-  ]) assert.doesNotMatch(now, forbidden);
-
-  const attention = section(ui, 'function renderAttention(next)', 'function renderActivity(next)');
-  assert.match(attention, /const view = devosShellView\(next\)/);
-  assert.match(attention, /const items = devosNowItems\(next\)/);
-  assert.match(attention, /Canonical snapshot\.devos_shell\.now only/);
-  assert.match(attention, /section\('Canonical Now'/);
-  assert.doesNotMatch(attention, /next\?\.fleet|workspaceProjection\(next\)|next\?\.supervisor|next\?\.development_plane|next\?\.compute|next\?\.owner_safety_gates/);
+const zero = Object.freeze({
+  projection_is_authority: false,
+  scheduler_authority: false,
+  execution_authority: false,
+  command_leasing: false,
+  automatic_effect_retry_allowed: false,
+  page_model_authority: false,
+  authority_effect: false,
 });
 
-test('renderer validates zero-authority DevOS shell ViewModel before using Now', async () => {
-  const ui = await readUi();
-  const validator = section(ui, 'function devosShellView(next)', 'function attentionTone(row)');
-  for (const field of [
-    'renderer_selection_authority',
-    'renderer_routing_authority',
-    'projection_is_authority',
-    'scheduler_authority',
-    'execution_authority',
-    'command_leasing',
-    'automatic_effect_retry_allowed',
-    'page_model_authority',
-    'authority_effect',
-  ]) assert.match(validator, new RegExp(`view\\.${field} !== false`));
-  assert.match(ui, /commandButton\('Triage Attention', 'Open canonical DevOS Now'/);
+function devosWithAttention(attention) {
+  return {
+    schema: 'metaengine.devos.projection.v1',
+    primary_object: 'SESSION',
+    browser_is_shell: false,
+    browser_is_surface: true,
+    sessions: [],
+    surfaces: [],
+    attention,
+    selected: { session_id: null, surface_id: null },
+    navigation: {
+      schema: 'metaengine.devos.navigation.v1',
+      roots: [],
+      session_groups: [],
+      ...zero,
+    },
+    ...zero,
+  };
+}
+
+test('canonical DevOS Now is projected only from zero-authority attention rows', () => {
+  const projected = projectDevOSShellViewModel(devosWithAttention([{
+    kind: 'TASK_BLOCKED',
+    severity: 'WARN',
+    priority: 'P1',
+    session_id: null,
+    task_id: 'task-1',
+    title: 'Operator attention required',
+    reason: 'bounded fixture',
+    ...zero,
+  }]));
+
+  assert.equal(projected.schema, METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA);
+  assert.equal(projected.valid, true);
+  assert.equal(projected.now.length, 1);
+  assert.equal(projected.now[0].title, 'Operator attention required');
+  assert.equal(projected.now[0].projection_is_authority, false);
+  assert.equal(projected.now[0].scheduler_authority, false);
+  assert.equal(projected.now[0].execution_authority, false);
+  assert.equal(projected.now[0].authority_effect, false);
+});
+
+test('authority-bearing attention fails closed instead of becoming trusted Now', () => {
+  const poisoned = projectDevOSShellViewModel(devosWithAttention([{
+    kind: 'TASK_BLOCKED',
+    severity: 'WARN',
+    priority: 'P1',
+    title: 'poisoned',
+    ...zero,
+    authority_effect: true,
+  }]));
+
+  assert.equal(poisoned.valid, false);
+  assert.equal(poisoned.reason, 'ATTENTION_ROW_INVALID');
+  assert.deepEqual(poisoned.now, []);
+  assert.equal(poisoned.authority_effect, false);
+});
+
+test('DevOS shell projection stays bounded and never turns Browser selection into renderer authority', () => {
+  const projected = projectDevOSShellViewModel(devosWithAttention([]));
+  assert.equal(projected.renderer_selection_authority, false);
+  assert.equal(projected.renderer_routing_authority, false);
+  assert.equal(projected.browser_is_shell, false);
+  assert.equal(projected.browser_is_surface, true);
+  assert.equal(projected.automatic_effect_retry_allowed, false);
 });

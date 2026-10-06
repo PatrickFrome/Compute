@@ -11,18 +11,21 @@ async function source() {
   return fs.readFile(sourcePath, 'utf8');
 }
 
-test('local packaged shell is the only normal-start readiness boundary', async () => {
+test('packaged ME2 is the only normal-start UI boundary', async () => {
   const text = await source();
   const createAt = text.indexOf('async function createWindow()');
-  const shellLoadAt = text.indexOf("await shellView.webContents.loadURL('metaengine://shell/')", createAt);
+  const targetAt = text.indexOf('const shellTarget = await preparePrimaryShellTarget()', createAt);
+  const shellLoadAt = text.indexOf('await shellView.webContents.loadURL(shellTarget.url)', targetAt);
   const showAt = text.indexOf('windowRef.show()', shellLoadAt);
   const backgroundAt = text.indexOf('void bootstrapDegradableSubsystems()', showAt);
-  assert.ok(createAt >= 0 && shellLoadAt > createAt, 'local shell load must exist inside createWindow');
-  assert.ok(showAt > shellLoadAt, 'window must be shown only after the packaged local shell loaded');
-  assert.ok(backgroundAt > showAt, 'degradable subsystem bootstrap must start only after the local shell is visible');
+  assert.ok(createAt >= 0 && targetAt > createAt && shellLoadAt > targetAt, 'ME2 shell target must be resolved and loaded inside createWindow');
+  assert.ok(showAt > shellLoadAt, 'window must be shown only after the resolved packaged UI/recovery surface loaded');
+  assert.ok(backgroundAt > showAt, 'degradable subsystem bootstrap must start only after the local UI is visible');
   assert.match(text.slice(createAt, shellLoadAt), /show:\s*false/);
-  assert.match(text.slice(showAt, backgroundAt + 160), /remote_network_required:\s*false/);
-  assert.match(text.slice(showAt, backgroundAt + 160), /fleet_state_required:\s*false/);
+  assert.match(text, /PACKAGED_ME2_UI_PROVEN/);
+  assert.doesNotMatch(text, /metaengine:\/\/shell\/|LEGACY_RECOVERY|metaengine-dark-workspace-v2/);
+  assert.match(text.slice(showAt, backgroundAt + 220), /remote_network_required:\s*false/);
+  assert.match(text.slice(showAt, backgroundAt + 220), /fleet_state_required:\s*false/);
 });
 
 test('initial remote navigation and Fleet persistence cannot close a healthy local shell', async () => {

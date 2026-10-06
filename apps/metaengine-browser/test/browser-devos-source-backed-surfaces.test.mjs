@@ -120,12 +120,16 @@ test('repo read model is root-confined, fixed-path, digest bound and bounded', a
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-devos-source-'));
   try {
     await fs.mkdir(path.join(root, 'apps/metaengine-browser/src'), { recursive: true });
-    await fs.mkdir(path.join(root, 'apps/metaengine-browser/ui'), { recursive: true });
+    await fs.mkdir(path.join(root, 'apps/me2-ui/src/components/me2/shell'), { recursive: true });
     await fs.writeFile(path.join(root, 'apps/metaengine-browser/src/main.mjs'), 'export const main = true;\n');
-    await fs.writeFile(path.join(root, 'apps/metaengine-browser/ui/app.js'), 'window.devos = true;\n');
+    await fs.writeFile(path.join(root, 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx'), 'export function Me2Shell() { return null; }\n');
     const out = await createDevOSRepoReadModel({ repoRoot: root, source: { repository: 'PatrickFrome/Compute', head: '1'.repeat(40), ref: 'refs/heads/work/test' } });
     assert.equal(out.schema, 'metaengine.development-plane.repo-read-model.v1');
     assert.equal(out.code_files.length, 2);
+    assert.deepEqual(out.code_files.map((row) => row.relative_path), [
+      'apps/metaengine-browser/src/main.mjs',
+      'apps/me2-ui/src/components/me2/shell/me2-shell.tsx',
+    ]);
     assert.equal(out.renderer_path_selection_allowed, false);
     assert.equal(out.arbitrary_path_read_allowed, false);
     assert.equal(out.process_spawn_used, false);

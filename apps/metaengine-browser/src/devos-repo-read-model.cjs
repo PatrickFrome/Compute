@@ -9,7 +9,7 @@ const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_EXPOSED_TEXT_BYTES = 24 * 1024;
 const SOURCE_FILES = Object.freeze([
   Object.freeze({ relative_path: 'apps/metaengine-browser/src/main.mjs', language: 'javascript' }),
-  Object.freeze({ relative_path: 'apps/metaengine-browser/ui/app.js', language: 'javascript' }),
+  Object.freeze({ relative_path: 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx', language: 'typescript' }),
 ]);
 
 function zeroAuthorityContract() {

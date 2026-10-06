@@ -18,7 +18,6 @@ const topbar = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/
 const palette = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
 const store = await fs.readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
 const settings = await fs.readFile(new URL('../../me2-ui/src/components/me2/pages/system.tsx', import.meta.url), 'utf8');
-const legacyApp = await fs.readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
 
 test('primary geometry reserves both renderer rows and the fleet rail for one native site', () => {
   const plan = planShellLayout({
@@ -99,9 +98,13 @@ test('R97 renderer keeps only chat fleet + native site persistent; advanced surf
 });
 
 
-test('R97 legacy fallback keeps chat-surface rendering callable', () => {
-  assert.match(legacyApp, /isChatSurfaceTab\(row\.tab\)/);
-  assert.doesNotMatch(legacyApp, /row\.isChatSurfaceTab\(tab\)/);
+test('R97 has no legacy renderer fallback and degrades only to generated fail-closed recovery', () => {
+  assert.match(main, /let primaryShellMode = 'FAIL_CLOSED_RECOVERY'/);
+  assert.match(main, /metaengine:\/\/recovery\/\?reason=ME2_PRIMARY_DEGRADED/);
+  assert.match(main, /metaengine:\/\/recovery\/\?reason=ME2_PRIMARY_LOAD_FAILED/);
+  assert.match(main, /deprecated_shell_bundle_present: false/);
+  assert.match(main, /recovery_surface_authority: false/);
+  assert.doesNotMatch(main, /metaengine:\/\/shell\/|LEGACY_RECOVERY|metaengine-dark-workspace-v2/);
 });
 
 

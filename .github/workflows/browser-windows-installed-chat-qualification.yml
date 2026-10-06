@@ -319,7 +319,8 @@ jobs:
                   if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v2' `
                       -and $runtimeEvent.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' `
                       -and $runtimeEvent.shell_mode -eq 'ME2_PRIMARY' `
-                      -and $runtimeEvent.legacy_shell_is_normal_path -eq $false `
+                      -and $runtimeEvent.deprecated_shell_bundle_present -eq $false `
+                      -and $runtimeEvent.recovery_surface_authority -eq $false `
                       -and $runtimeEvent.authority_effect -eq $false) {
                     $primaryShellIndex = $i
                   }

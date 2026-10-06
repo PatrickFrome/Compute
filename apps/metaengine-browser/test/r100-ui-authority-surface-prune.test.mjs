@@ -47,7 +47,8 @@ test('R100 primary shell imports no daemon Agent/Command/Compute page', () => {
 test('R100 production palette exposes native Browser fleet instead of daemon agent creation', () => {
   const palette = read('me2-ui/src/components/me2/shell/command-palette.tsx');
   assert.match(palette, /Native Agent fleet/);
-  assert.match(palette, /Open native z\.ai Agent fleet/);
+  assert.match(palette, /Open native ChatGPT agent fleet/);
+  assert.doesNotMatch(palette, /Open native z\.ai Agent fleet/);
   assert.equal(palette.includes('spawnAgent'), false);
   assert.equal(palette.includes('AgentChat'), false);
 });

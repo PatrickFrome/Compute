@@ -5,7 +5,7 @@ import { navigationDecision, newWindowDecision, parseUserUrl, REMOTE_WEB_PREFERE
 test('ChatGPT and normal HTTPS are allowed while privileged schemes are blocked', () => {
   assert.equal(navigationDecision('https://chatgpt.com/').kind, 'CHATGPT');
   assert.equal(navigationDecision('https://github.com/').allow, true);
-  for (const url of ['javascript:alert(1)', 'data:text/html,x', 'file:///tmp/x', 'devtools://devtools/', 'metaengine://shell/']) assert.equal(navigationDecision(url).allow, false);
+  for (const url of ['javascript:alert(1)', 'data:text/html,x', 'file:///tmp/x', 'devtools://devtools/', 'metaengine://shell/', 'metaengine://recovery/']) assert.equal(navigationDecision(url).allow, false);
 });
 
 test('localhost HTTP is allowed for development but public HTTP is blocked', () => {

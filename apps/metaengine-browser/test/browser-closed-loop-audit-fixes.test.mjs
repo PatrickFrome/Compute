@@ -317,8 +317,14 @@ test('mission control projection surfaces the authoritative work graph', async (
   assert.match(mainSource, /work_graph: supervisor\?\.devos_task_cycle\?\.work_graph \|\| null/);
 });
 
-test('UI renders the work graph section and RSI command output in place', () => {
-  const appSource = fs.readFileSync(path.join(HERE, '..', 'ui', 'app.js'), 'utf8');
-  assert.match(appSource, /Work graph \(authoritative\)/, 'Mission Control renders the work graph section');
-  assert.match(appSource, /renderRsiResult/, 'RSI buttons render results in the UI');
+test('ME2 supervisor renders the canonical work graph and keeps RSI adoption behind approvals', () => {
+  const supervisor = fs.readFileSync(
+    path.join(HERE, '..', '..', 'me2-ui', 'src', 'components', 'me2', 'pages', 'supervisor.tsx'),
+    'utf8',
+  );
+  assert.match(supervisor, /WORKGRAPH · ПРОЕКЦИЯ/);
+  assert.match(supervisor, /data-testid="wg-projection"/);
+  assert.match(supervisor, /загрузка work_graph/);
+  assert.match(supervisor, /rsi_adopt/);
+  assert.match(supervisor, /RSI adopt/);
 });

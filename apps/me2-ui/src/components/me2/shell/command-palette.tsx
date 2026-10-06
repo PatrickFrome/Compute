@@ -224,7 +224,7 @@ export function CommandPalette() {
             not spawn daemon/API agents or invent a second fleet projection. */}
         {mode === "all" ? (
           <CommandGroup heading="Native Agent fleet">
-            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}> Open native z.ai Agent fleet
+            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}> Open native ChatGPT agent fleet
               <span data-palette-detail className="ml-auto text-[12px] text-zinc-400">Existing sessions</span>
             </CommandItem>
           </CommandGroup>
