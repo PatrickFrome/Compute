@@ -5,6 +5,7 @@ on:
     branches:
       - 'work/client-v1-c5-installed-restart-continuity-v1'
       - 'work/client-v1-c5-installed-restart-continuity-v2'
+      - 'work/client-v1-c5-installed-restart-continuity-v3'
     paths:
       - 'apps/metaengine-browser/src/client-goal-journal-file-store.mjs'
       - 'apps/metaengine-browser/src/client-goal-journal.mjs'
