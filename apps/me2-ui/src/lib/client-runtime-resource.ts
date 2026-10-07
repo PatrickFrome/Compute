@@ -16,6 +16,9 @@ export type ClientWorkReadiness = {
   label: string;
   detail: string;
   execution_ready: boolean;
+  readiness_scope: "CHAT_DISPATCH";
+  capabilities: Record<"chat_dispatch" | "coding_execution" | "host_continuity" | "continuous_autonomy", { ready: boolean; reason: string | null }>;
+  continuous_autonomy_ready: boolean;
   heartbeat_fresh: boolean;
   generation_floor: number | null;
   local_generation_floor: number | null;
@@ -24,7 +27,9 @@ export type ClientWorkReadiness = {
   proven_agent_count: number;
   active_agent_count: number | null;
   bound_unverified_agent_count: number | null;
+  ambiguous_agent_count: number;
   useful_work_verified: false;
+  verified_self_improvement: false;
   recovery_effect_exposed: false;
   scheduler_authority: false;
   automatic_retry_allowed: false;
@@ -38,14 +43,26 @@ export const INITIAL_CLIENT_RUNTIME: ResourceSnapshot = Object.freeze({ state: "
 function validReadback(value: RuntimeReadback) {
   const connection = value?.connection;
   const work = value?.work;
+  const observed = Date.parse(work?.observed_at || '');
+  const now = Date.now();
   return connection?.schema === "metaengine.client.connection-status.v1"
     && connection.authority_effect === false
     && typeof connection.admin_ready === "boolean"
     && typeof connection.local_runtime_ready === "boolean"
     && typeof connection.cloud_control_state === "string"
     && work?.schema === "metaengine.client.work-readiness.v1"
+    && Number.isFinite(observed) && observed <= now + 5_000 && now - observed <= 30_000
     && ["READY", "PAUSED", "BLOCKED"].includes(work.state)
     && work.execution_ready === (work.state === "READY")
+    && work.readiness_scope === "CHAT_DISPATCH"
+    && ["chat_dispatch", "coding_execution", "host_continuity", "continuous_autonomy"].every((key) => {
+      const value = work.capabilities?.[key as keyof ClientWorkReadiness["capabilities"]];
+      return typeof value?.ready === "boolean" && (value.ready ? value.reason === null : typeof value.reason === "string");
+    })
+    && work.capabilities.chat_dispatch.ready === work.execution_ready
+    && work.continuous_autonomy_ready === work.capabilities.continuous_autonomy.ready
+    && (!work.capabilities.coding_execution.ready || work.execution_ready)
+    && (!work.continuous_autonomy_ready || (work.execution_ready && work.capabilities.coding_execution.ready && work.capabilities.host_continuity.ready))
     && typeof work.label === "string" && work.label.length <= 80
     && typeof work.detail === "string" && work.detail.length <= 320
     && typeof work.heartbeat_fresh === "boolean"
@@ -56,6 +73,7 @@ function validReadback(value: RuntimeReadback) {
       && typeof work.local_generation_floor === "number" && Number.isSafeInteger(work.local_generation_floor) && work.local_generation_floor >= 0
       && work.generation_floor >= work.local_generation_floor))
     && work.useful_work_verified === false
+    && work.verified_self_improvement === false
     && work.recovery_effect_exposed === false && work.scheduler_authority === false
     && work.automatic_retry_allowed === false && work.authority_effect === false;
 }

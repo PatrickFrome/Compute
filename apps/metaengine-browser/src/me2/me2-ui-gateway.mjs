@@ -6,7 +6,8 @@
  * с query `XTransformPort=NNNN`, WS — тот же принцип. Чтобы ЕДИНЫЙ UI работал внутри
  * METAENGINE Browser без единой правки:
  *   • обычные запросы → http://127.0.0.1:3000 (Next UI, см. me2-ui-host.mjs);
- *   • ?XTransformPort=NNNN → http://127.0.0.1:NNNN (daemon :3040/:3041, стримы :3042/:3043);
+ *   • ?XTransformPort=NNNN → configured, ownership-qualified UI or read-only probe;
+ *   • retired daemon WS/stream ports and all unconfigured ports are denied;
  *   • WebSocket-upgrade проксируется сырым TCP-pipe (socket.io, screencast).
  * Наследие K2/K6-решения: авторитетная оболочка — браузер; desktop/ остаётся источником
  * механизмов, но собственных ворот больше не несёт.
@@ -17,11 +18,14 @@
 import { createServer, request as httpRequest } from 'node:http';
 import { connect as tcpConnect } from 'node:net';
 import { me2UiHostStatus } from './me2-ui-host.mjs';
+import { me2DaemonStatus } from './me2-daemon-host.mjs';
+import { gatewayConfiguration, resolveGatewayRequest, gatewayUpstreamHeaders } from './me2-ui-gateway-policy.mjs';
 
 export const ME2_UI_GATEWAY_SCHEMA = 'metaengine.browser.me2.ui-gateway.v1';
 
-const GATEWAY_PORT = Number(process.env.ME2_UI_GATEWAY_PORT || 8137);
-const UI_PORT = Number(process.env.ME2_UI_PORT || 3000);
+const CONFIG = gatewayConfiguration();
+const GATEWAY_PORT = CONFIG.gateway_port;
+const UI_PORT = CONFIG.ui_port;
 
 let server = null;
 let state = 'IDLE';
@@ -43,43 +47,33 @@ function emitRow(row, { error = false } = {}) {
 }
 
 function uiRouteAuthorized(port) {
-  if (port !== UI_PORT) return true;
-  return me2UiHostStatus()?.routing_authorized === true;
-}
-
-function targetPort(reqUrl) {
-  const q = reqUrl.indexOf('XTransformPort=');
-  if (q < 0) return UI_PORT;
-  const end = reqUrl.indexOf('&', q);
-  const raw = reqUrl.slice(q + 'XTransformPort='.length, end < 0 ? undefined : end);
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 && n < 65536 ? n : UI_PORT;
-}
-
-/** URL без служебного query-параметра (upstream не должен его видеть). */
-function stripTransform(rawUrl) {
-  const [path, query = ''] = rawUrl.split('?');
-  if (!query) return path;
-  const parts = query.split('&').filter((kv) => !kv.startsWith('XTransformPort='));
-  return parts.length ? `${path}?${parts.join('&')}` : path;
+  if (port === UI_PORT) return me2UiHostStatus()?.routing_authorized === true;
+  return port === CONFIG.daemon_port && me2DaemonStatus()?.routing_authorized === true;
 }
 
 function proxyHttp(req, res) {
-  const port = targetPort(req.url ?? '/');
+  const route = resolveGatewayRequest(req, CONFIG);
+  if (!route.ok) {
+    stats.http_fail += 1;
+    res.writeHead(route.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: false, error: route.reason }));
+    return;
+  }
+  const { port, path } = route;
   if (!uiRouteAuthorized(port)) {
     stats.http_fail += 1;
     res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: 'gateway: ui_upstream_unowned' }));
+    res.end(JSON.stringify({ ok: false, error: port === UI_PORT ? 'gateway: ui_upstream_unowned' : 'gateway: daemon_upstream_unowned' }));
     return;
   }
-  const path = stripTransform(req.url ?? '/');
-  const headers = { ...req.headers, host: `127.0.0.1:${port}`, connection: 'close' };
+  const headers = gatewayUpstreamHeaders(req.headers, port);
   const upstream = httpRequest({ host: '127.0.0.1', port, path, method: req.method, headers }, (ur) => {
     if (ur.statusCode && ur.statusCode < 500) stats.http_ok += 1; else stats.http_fail += 1;
     res.writeHead(ur.statusCode ?? 502, ur.headers);
     ur.pipe(res);
   });
   upstream.on('socket', trackSocket);
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error('gateway_upstream_timeout')));
   res.on('close', () => upstream.destroy());
   upstream.on('error', (e) => {
     stats.http_fail += 1;
@@ -93,20 +87,24 @@ function proxyHttp(req, res) {
 
 /** WS-upgrade: переписываем первую строку (path без XTransformPort) и Host, дальше — сырой pipe. */
 function proxyUpgrade(req, socket, head) {
-  const port = targetPort(req.url ?? '/');
+  const route = resolveGatewayRequest(req, CONFIG);
+  if (!route.ok || route.port !== UI_PORT || req.method !== 'GET' || String(req.headers.upgrade || '').toLowerCase() !== 'websocket') {
+    stats.http_fail += 1;
+    try { socket.end(`HTTP/1.1 ${route.status || 400} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); } catch { socket.destroy(); }
+    return;
+  }
+  const { port, path } = route;
   if (!uiRouteAuthorized(port)) {
     stats.http_fail += 1;
     try { socket.destroy(); } catch { /* already closed */ }
     return;
   }
-  const path = stripTransform(req.url ?? '/');
   stats.ws_upgrades += 1;
   const upstream = trackSocket(tcpConnect({ host: '127.0.0.1', port }, () => {
     const lines = [`GET ${path} HTTP/1.1`, `Host: 127.0.0.1:${port}`];
-    for (let i = 0; i < req.rawHeaders.length; i += 2) {
-      const k = req.rawHeaders[i];
-      if (!k || /^host$/i.test(k) || /^connection$/i.test(k) || /^upgrade$/i.test(k)) continue;
-      lines.push(`${k}: ${req.rawHeaders[i + 1] ?? ''}`);
+    for (const [key, value] of Object.entries(gatewayUpstreamHeaders(req.headers, port))) {
+      if (key === 'host' || key === 'connection') continue;
+      lines.push(`${key}: ${value}`);
     }
     lines.push('Connection: Upgrade', 'Upgrade: websocket', '\r\n');
     upstream.write(lines.join('\r\n'));
@@ -177,6 +175,8 @@ export function me2UiGatewayStatus() {
     state,
     port: GATEWAY_PORT,
     ui_port: UI_PORT,
+    allowed_upstream_ports: CONFIG.upstream_ports,
+    same_origin_required: true,
     ui_route_authorized: me2UiHostStatus()?.routing_authorized === true,
     url: state === 'LIVE' ? `http://127.0.0.1:${GATEWAY_PORT}` : null,
     last_error: lastError,

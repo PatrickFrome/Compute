@@ -13,6 +13,7 @@ import { PageHeader, Sec, Chip, StateBadge, type SysState } from "@/components/m
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { useClientRuntimeStatus, refreshClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
+import { capabilityLabel } from "@/lib/client-readiness-labels";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type TokensT = {
@@ -82,7 +83,7 @@ export function SystemPage() {
   const [loadState, setLoadState] = useState<"LOADING" | "LIVE" | "UNAVAILABLE">("LIVE");
   const readsInFlight = useRef(new Set<SettingsArea>());
   const activeArea = useRef(area);
-  activeArea.current = area;
+  useEffect(() => { activeArea.current = area; }, [area]);
 
   const [tokensData, setTokensData] = useState<TokensT | null>(null);
   const [tokensBusy, setTokensBusy] = useState(false);
@@ -456,14 +457,21 @@ export function SystemPage() {
               <h2 id="native-work-readiness-title" className="text-[13px] font-medium text-zinc-200">Execution readiness</h2>
               <button type="button" onClick={() => void refreshClientRuntimeStatus()} className="h-7 border border-zinc-700 px-2 text-[12px] text-zinc-300">Refresh status</button>
             </div>
-            <p role="status" className={`mt-2 text-[13px] ${workReadiness?.execution_ready === true ? "text-emerald-300" : "text-amber-200"}`}>
+            <p role="status" className={`mt-2 text-[13px] ${workReadiness?.continuous_autonomy_ready === true ? "text-emerald-300" : "text-amber-200"}`}>
               {workReadiness?.label || "Status unavailable"}
             </p>
             <p className="mt-1 text-[12px] text-zinc-400">{workReadiness?.detail || "Waiting for a current readback from the Native Supervisor."}</p>
             <dl className="mt-3 grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 text-[12px]">
               <dt className="text-zinc-500">Admin connection</dt><dd>{nativeRuntime.readback?.connection.admin_ready === true ? "Connected" : "Unavailable"}</dd>
+              {([['chat_dispatch', 'Chat dispatch'], ['coding_execution', 'Coding environment'], ['host_continuity', 'Host continuity'], ['continuous_autonomy', 'Continuous autonomy']] as const).map(([key, name]) => (
+                <div key={key} className="contents" data-testid={`readiness-${key}`}>
+                  <dt className="text-zinc-500">{name}</dt><dd className="break-words">{capabilityLabel(workReadiness, key)}</dd>
+                </div>
+              ))}
+              <dt className="text-zinc-500">Verified improvement</dt><dd>Awaiting evaluated evidence</dd>
               <dt className="text-zinc-500">Supervisor</dt><dd>{workReadiness?.supervisor_state || "Unavailable"}</dd>
               <dt className="text-zinc-500">Verified agents</dt><dd>{workReadiness?.proven_agent_count ?? "Unavailable"}</dd>
+              <dt className="text-zinc-500">Ambiguous agents</dt><dd>{workReadiness?.ambiguous_agent_count ?? "Unavailable"}</dd>
               <dt className="text-zinc-500">Generation</dt><dd>{workReadiness ? `${workReadiness.generation_floor ?? "?"} / profile ${workReadiness.local_generation_floor ?? "?"}` : "Unavailable"}</dd>
             </dl>
           </section> : null}

@@ -6,7 +6,7 @@ const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf
 
 // One draft mutation, a fresh exact readback, then one Send effect. A missing
 // effect proof is ambiguous and never creates an Enter/click fallback.
-export async function submitFencedChatGptPrompt({ executeCommand, tab_id, frame, text, validateTypedFrame = null, beforeSend = null } = {}) {
+export async function submitFencedChatGptPrompt({ executeCommand, tab_id, frame, text, validateTypedFrame = null, beforeType = null, beforeSend = null } = {}) {
   const tabId = String(tab_id || '');
   const targetId = String(frame?.target_id || '').toLowerCase();
   const prompt = String(text || '');
@@ -23,6 +23,9 @@ export async function submitFencedChatGptPrompt({ executeCommand, tab_id, frame,
   };
   const composer = assertFrame(frame);
   if (!prompt || prompt.length > 120000) throw new Error('chatgpt_submit_prompt_invalid');
+  // Read-only preflight failures have no effect ambiguity. Persist the caller's
+  // replay fence only after preflight, immediately before the first draft write.
+  if (beforeType) await beforeType(frame);
   const typed = await executeCommand({ action: 'SEMANTIC_TYPE', platform: 'CHATGPT', payload: {
     tab_id: tabId, role: composer.role, accessible_name: composer.accessible_name,
     semantic_ref: composer.semantic_ref, text: prompt, replace_existing: true, submit_after_type: false,

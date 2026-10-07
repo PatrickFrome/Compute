@@ -2738,6 +2738,8 @@ function readClientWorkReadiness() {
     connection: nativeSupervisor?.connectionStatus?.() || {},
     snapshot: nativeSupervisor?.snapshot?.() || {},
     fleet: fleet?.snapshot?.() || {},
+    development: developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot?.() || {},
+    guardian: guardianStatusObserver?.snapshot?.() || {},
     isCurrentBinding: (binding) => {
       const current = canonicalTabRuntimeIdentity(binding.tab_id);
       const url = registry.get(binding.tab_id)?.url || '';

@@ -15,8 +15,9 @@ import { join } from 'node:path';
 
 export const ME2_DAEMON_HOST_SCHEMA = 'metaengine.browser.me2.daemon-host.v1';
 
-const HEALTH_URL = process.env.ME2_DAEMON_HEALTH_URL || 'http://127.0.0.1:3041/state';
-const REST_BASE = process.env.ME2_DAEMON_REST || 'http://127.0.0.1:3041';
+const REST_PORT = Number(process.env.ME2_REST_PORT || 3041);
+const HEALTH_URL = process.env.ME2_DAEMON_HEALTH_URL || `http://127.0.0.1:${REST_PORT}/state`;
+const REST_BASE = process.env.ME2_DAEMON_REST || `http://127.0.0.1:${REST_PORT}`;
 const MAX_RESTARTS = Number(process.env.ME2_DAEMON_MAX_RESTARTS || 8);
 const HEALTH_INTERVAL_MS = Number(process.env.ME2_DAEMON_HEALTH_INTERVAL_MS || 15000);
 const BACKOFF_BASE_MS = 2000;
@@ -62,6 +63,7 @@ function row(statePatch) {
 }
 
 export function me2DaemonStatus() {
+  const routing = projectMe2DaemonRoutingAuthority({ state, child, stopped, lastHealthOkAt });
   return {
     schema: ME2_DAEMON_HOST_SCHEMA,
     state,
@@ -77,7 +79,17 @@ export function me2DaemonStatus() {
     environment_launch_override_allowed: false,
     unsafe_external_daemon_adoption_allowed: false,
     stopped,
+    ...routing,
   };
+}
+
+export function projectMe2DaemonRoutingAuthority({ state = 'IDLE', child = null, stopped = false, lastHealthOkAt = null, now = Date.now() } = {}) {
+  const owned = !stopped && child != null && Number.isSafeInteger(child.pid) && child.pid > 0
+    && child.exitCode == null && child.signalCode == null;
+  const observed = Date.parse(lastHealthOkAt || '');
+  const fresh = Number.isFinite(observed) && observed <= now + 5_000 && now - observed <= 30_000;
+  return Object.freeze({ child_owned: owned, routing_authorized: owned && state === 'HEALTHY' && fresh,
+    health_observation_fresh: fresh, external_adoption_authorized: false });
 }
 
 function browserProbeContract(state) {
@@ -253,7 +265,7 @@ export async function waitForMe2DaemonReady({ attempts = 60, intervalMs = 250, p
   return { ok: false, reason: String(last?.reason || 'readiness_timeout'), attempt: maxAttempts };
 }
 
-/** Старт хоста: если daemon уже жив (внешняя инкарнация) — усыновляем, не спавним. */
+/** A healthy port is an observation, never evidence of child ownership. */
 export async function startMe2DaemonHost({
   dataDir = null,
   packaged = false,
@@ -266,11 +278,16 @@ export async function startMe2DaemonHost({
     resourcesPath: String(resourcesPath || ''),
   });
   const pre = await me2HealthProbe(2500);
-  if (pre.ok) {
-    state = 'ADOPTED';
-    lastLaunchMode = 'ADOPTED_EXTERNAL';
+  const owned = projectMe2DaemonRoutingAuthority({ child, stopped: false }).child_owned;
+  if (pre.ok && !owned) {
+    state = 'DEGRADED';
+    lastError = 'me2_daemon_upstream_unowned';
+    emitRow(row({ event: 'DAEMON_UNOWNED_PORT_DENIED' }), { error: true });
+    return me2DaemonStatus();
+  } else if (pre.ok && owned) {
+    state = 'HEALTHY';
     lastHealthOkAt = new Date().toISOString();
-    emitRow(row({ event: 'DAEMON_ADOPTED', last_seq: pre.last_seq }));
+    emitRow(row({ event: 'DAEMON_OWNED_READY', last_seq: pre.last_seq }));
   } else {
     const launch = resolveMe2DaemonLaunch({
       resourcesPath: daemonLaunchPolicy.resourcesPath,
@@ -297,14 +314,18 @@ export async function startMe2DaemonHost({
       }
     }
   }
+  if (healthTimer) clearInterval(healthTimer);
   healthTimer = setInterval(async () => {
     if (stopped) return;
     const h = await me2HealthProbe();
-    if (h.ok) {
-      if (state !== 'ADOPTED' && state !== 'HEALTHY') emitRow(row({ event: 'DAEMON_HEALTHY', last_seq: h.last_seq }));
-      state = child ? 'HEALTHY' : 'ADOPTED';
+    const owned = projectMe2DaemonRoutingAuthority({ child, stopped }).child_owned;
+    if (h.ok && owned) {
+      if (state !== 'HEALTHY') emitRow(row({ event: 'DAEMON_HEALTHY', last_seq: h.last_seq }));
+      state = 'HEALTHY';
       lastHealthOkAt = new Date().toISOString();
       restarts = 0; // живой daemon = счётчик перезапусков честно сброшен
+    } else if (h.ok && !owned) {
+      state = 'DEGRADED'; lastError = 'me2_daemon_upstream_unowned';
     } else if (!child && state !== 'DEGRADED' && state !== 'RESTARTING') {
       // принятый daemon умер — пробуем перерождение (наследие вечно-живущего супервизора)
       lastError = `health_${h.reason}`;

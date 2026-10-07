@@ -25,7 +25,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
     this.#fabric = fabric || new BrowserBrainCollaborationFabric({ clock });
     this.#journal = journal || new BrowserBrainCollaborationJournal({ clock });
     this.#memory = memory || new BrowserBrainEpisodicMemory({ clock });
-    this.#routing = routing || new BrowserBrainRoutingV2();
+    this.#routing = routing || new BrowserBrainRoutingV2({ clock });
     this.#stall = stallDetector || new BrowserBrainStallDetector();
     this.#a2a = a2aAdapter || new BrowserBrainA2AAdapter();
     this.#loadState = loadState;

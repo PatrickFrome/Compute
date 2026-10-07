@@ -15,10 +15,13 @@ import { recordSpan } from "./otel";
 import { memSearch } from "./memory";
 import { chat } from "../providers";
 import { activeAgentModelTag } from "./inference";
-import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync, realpathSync, lstatSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 const SKILLS_DIR = join(process.cwd(), "skills", "rsi");
+const DRAFT_ROOT = realpathSync(process.cwd());
+const digest = (body: string | Buffer) => createHash('sha256').update(body).digest('hex');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS rsi_proposals (
@@ -34,10 +37,13 @@ CREATE TABLE IF NOT EXISTS rsi_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_rsi_status ON rsi_proposals(status, created_at);
 `);
+if (!(db.query('PRAGMA table_info(rsi_proposals)').all() as { name: string }[]).some((r) => r.name === 'artifact_sha256')) {
+  db.exec('ALTER TABLE rsi_proposals ADD COLUMN artifact_sha256 TEXT');
+}
 
 export interface RsiProposal {
   id: string; title: string; body_md: string; source: string; evidence: string;
-  status: string; artifact: string | null; created_at: number; decided_at: number | null;
+  status: string; artifact: string | null; artifact_sha256?: string | null; created_at: number; decided_at: number | null;
 }
 
 function evidenceGather(): { lessons: string[]; rh: number } {
@@ -107,28 +113,51 @@ function getProposal(id: string): RsiProposal {
   return r;
 }
 
-function decide(id: string, status: string): RsiProposal {
-  const r = getProposal(id);
-  db.query(`UPDATE rsi_proposals SET status=?, decided_at=? WHERE id=?`).run(status, Date.now(), id);
-  return { ...r, status, decided_at: Date.now() };
+function draftPath(r: RsiProposal): string {
+  if (!/^rsi_[a-z0-9]{3,64}$/.test(r.id)) throw new Error('rsi_artifact_identity_invalid');
+  const file = join(SKILLS_DIR, `rsi-${r.id}-${slugify(r.title)}.md`);
+  mkdirSync(SKILLS_DIR, { recursive: true });
+  if (realpathSync(SKILLS_DIR) !== join(DRAFT_ROOT, 'skills', 'rsi')) throw new Error('rsi_artifact_directory_not_owned');
+  return file;
+}
+
+function exactDraft(file: string, expectedHash: string): boolean {
+  const stat = lstatSync(file);
+  return stat.isFile() && !stat.isSymbolicLink() && digest(readFileSync(file)) === expectedHash;
+}
+
+function decide(id: string, from: string, status: string): RsiProposal {
+  const row = db.query(`UPDATE rsi_proposals SET status=?, decided_at=? WHERE id=? AND status=? RETURNING *`)
+    .get(status, Date.now(), id, from) as RsiProposal | undefined;
+  if (!row) throw new Error(`invalid_state_${getProposal(id).status}`);
+  return row;
 }
 
 export function rsiAdopt(id: string): RsiProposal & { artifact_path: string } {
   const t0 = Date.now();
   const r = getProposal(id);
   if (r.status !== "PROPOSED") throw new Error(`invalid_state_${r.status}`);
-  mkdirSync(SKILLS_DIR, { recursive: true });
-  const file = join(SKILLS_DIR, `rsi-${r.id}-${slugify(r.title)}.md`);
-  writeFileSync(file, `# RSI ${r.id}: ${r.title}\n\n${r.body_md}\n`, "utf8");
-  db.query(`UPDATE rsi_proposals SET status='ADOPTED', decided_at=?, artifact=? WHERE id=?`).run(Date.now(), file, id);
+  const file = draftPath(r);
+  const body = `# RSI ${r.id}: ${r.title}\n\n> Operator-accepted advisory draft. Runtime activation and verified improvement require independent evaluation.\n\n${r.body_md}\n`;
+  const hash = digest(body);
+  // A crash after writing but before DB acknowledgement may leave this exact
+  // immutable draft. Reconcile it by digest; never overwrite an unrelated file.
+  if (existsSync(file)) {
+    if (!exactDraft(file, hash)) throw new Error('rsi_artifact_existing_content_mismatch');
+  } else {
+    writeFileSync(file, body, { encoding: 'utf8', flag: 'wx', flush: true });
+  }
+  const adopted = db.query(`UPDATE rsi_proposals SET status='ADOPTED', decided_at=?, artifact=?, artifact_sha256=? WHERE id=? AND status='PROPOSED' RETURNING *`)
+    .get(Date.now(), file, hash, id) as RsiProposal | undefined;
+  if (!adopted) throw new Error('rsi_adoption_state_changed');
   emit("RSI_ADOPTED", { id, artifact: file });
   recordSpan("rsi.adopt", { "me2.id": id }, t0);
-  return { ...r, status: "ADOPTED", decided_at: Date.now(), artifact: file, artifact_path: file };
+  return { ...adopted, artifact_path: file };
 }
 
 export function rsiReject(id: string): RsiProposal {
   const t0 = Date.now();
-  const r = decide(id, "REJECTED");
+  const r = decide(id, "PROPOSED", "REJECTED");
   emit("RSI_REJECTED", { id });
   recordSpan("rsi.reject", { "me2.id": id }, t0);
   return r;
@@ -138,8 +167,13 @@ export function rsiRollback(id: string): RsiProposal {
   const t0 = Date.now();
   const r = getProposal(id);
   if (r.status !== "ADOPTED") throw new Error(`invalid_state_${r.status}`);
-  if (r.artifact && existsSync(r.artifact)) rmSync(r.artifact);
-  const out = decide(id, "ROLLED_BACK");
+  const file = draftPath(r);
+  if (r.artifact !== file || !/^[a-f0-9]{64}$/.test(r.artifact_sha256 || '')) throw new Error('rsi_rollback_owned_digest_required');
+  if (existsSync(file)) {
+    if (!exactDraft(file, r.artifact_sha256!)) throw new Error('rsi_rollback_artifact_changed');
+    rmSync(file);
+  }
+  const out = decide(id, "ADOPTED", "ROLLED_BACK");
   emit("RSI_ROLLED_BACK", { id });
   recordSpan("rsi.rollback", { "me2.id": id }, t0);
   return out;
@@ -156,5 +190,6 @@ export function rsiList() {
   };
   let artifacts = 0;
   try { if (existsSync(SKILLS_DIR)) artifacts = readdirSync(SKILLS_DIR).length; } catch { /* noop */ }
-  return { ok: true, proposals, stats, artifacts_dir: "skills/rsi", artifacts };
+  return { ok: true, proposals, stats, artifacts_dir: "skills/rsi", artifacts,
+    advisory_draft_only: true, runtime_skill_activation: false, verified_improvement_count: 0 };
 }

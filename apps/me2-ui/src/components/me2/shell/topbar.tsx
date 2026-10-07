@@ -4,6 +4,7 @@
 
 import { useMe2 } from "@/components/me2/store";
 import { useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
+import { capabilityLabel } from "@/lib/client-readiness-labels";
 
 export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOpen?: boolean; onOpenFleet?: () => void }) {
   const page = useMe2((s) => s.page);
@@ -84,13 +85,13 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
           data-work-state={work?.state || "UNAVAILABLE"}
           data-work-reason={work?.reason || ""}
           className={`flex h-7 max-w-[184px] items-center border px-2 font-bold tracking-[0.04em] ${
-            work?.execution_ready === true
+            work?.continuous_autonomy_ready === true
               ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
               : connection?.admin_ready === true
                 ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
                 : "border-zinc-800 bg-zinc-950 text-zinc-400"
           }`}
-          title={work?.detail || "Native runtime status is unavailable. Open Settings for details."}
+          title={work ? `${work.detail} Continuous autonomy: ${capabilityLabel(work, 'continuous_autonomy')}` : "Native runtime status is unavailable. Open Settings for details."}
           aria-label={`Execution status: ${work?.label || "Status unavailable"}. Open Settings.`}
         >
           <span className="truncate">{work?.label || (runtime.state === "LOADING" ? "Starting" : "Status unavailable")}</span>

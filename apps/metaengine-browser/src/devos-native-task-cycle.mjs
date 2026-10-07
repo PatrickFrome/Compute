@@ -679,11 +679,6 @@ export class DevOsNativeTaskCycle {
           if ((!result.state || result.state === 'LEASE_NOT_ACQUIRED')
               && agentSurface
               && modelProof?.matches_required_model === true) {
-            if (!bootstrapBarrier) {
-              await beginFleetTransportBootstrapAttempt(binding);
-              bootstrapBarrier = true;
-            }
-
             // Step 3: create/reset a real Agent task session. The click receipt
             // is not success; the fresh surface/model/composer readback is.
             if (AGENT_PLATFORM_BOOTSTRAP_MODE === 'ROOT_COMPOSER_SEED') {
@@ -693,6 +688,10 @@ export class DevOsNativeTaskCycle {
               bootstrapEffectState = 'ROOT_COMPOSER_READY';
               frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
             } else {
+              if (!bootstrapBarrier) {
+                await beginFleetTransportBootstrapAttempt(binding);
+                bootstrapBarrier = true;
+              }
               bootstrapEffectState = 'NEW_TASK_DISPATCHED';
               await this.#executeCommand({
                 action: 'TYPED_CLICK',
@@ -710,14 +709,14 @@ export class DevOsNativeTaskCycle {
 
             if (!agentSurface || !modelProof || modelProof.matches_required_model !== true || !composer?.semantic_ref) {
               result = {
-                state: 'LOCAL_AGENT_NEW_TASK_AMBIGUOUS',
+                state: bootstrapBarrier ? 'LOCAL_AGENT_NEW_TASK_AMBIGUOUS' : 'LOCAL_BOOTSTRAP_PREFLIGHT_BLOCKED',
                 ...binding,
                 lease_id: lease.lease_id,
                 transport_stage: 'PRECONVERSATION_ROOT',
                 bootstrap_effect_state: bootstrapEffectState,
                 observed_model: modelProof?.model || null,
                 required_model: AGENT_PLATFORM_MODEL,
-                write_ahead_barrier_persisted: true,
+                write_ahead_barrier_persisted: bootstrapBarrier,
                 reason: !agentSurface
                   ? 'AGENT_SURFACE_LOST_AFTER_NEW_TASK'
                   : (!modelProof || modelProof.matches_required_model !== true
@@ -728,13 +727,13 @@ export class DevOsNativeTaskCycle {
               };
             } else if (composer.value_length !== 0) {
               result = {
-                state: 'LOCAL_AGENT_NEW_TASK_AMBIGUOUS',
+                state: bootstrapBarrier ? 'LOCAL_AGENT_NEW_TASK_AMBIGUOUS' : 'LOCAL_BOOTSTRAP_PREFLIGHT_BLOCKED',
                 ...binding,
                 lease_id: lease.lease_id,
                 transport_stage: 'PRECONVERSATION_ROOT',
                 bootstrap_effect_state: bootstrapEffectState,
                 composer_value_length: composer.value_length,
-                write_ahead_barrier_persisted: true,
+                write_ahead_barrier_persisted: bootstrapBarrier,
                 reason: 'AGENT_TASK_INPUT_NOT_CLEAN',
                 automatic_retry_allowed: false,
                 authority_effect: false,
@@ -746,6 +745,13 @@ export class DevOsNativeTaskCycle {
               // after Agent mode + model + clean input have all been proven.
               const submitted = await submitFencedChatGptPrompt({
                 executeCommand: this.#executeCommand, tab_id: binding.tab_id, frame, text: AGENT_ROOT_CONVERSATION_SEED,
+                beforeType: async () => {
+                  if (!bootstrapBarrier) {
+                    await beginFleetTransportBootstrapAttempt(binding);
+                    bootstrapBarrier = true;
+                  }
+                  bootstrapEffectState = 'AGENT_SESSION_SEED_DISPATCHED';
+                },
                 validateTypedFrame: async (typedFrame) => {
                   if (String(typedFrame.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_agent_session_target_drift');
                   if (!resolveAgentPlatformAgentSurface(typedFrame)) throw new Error('devos_agent_session_root_surface_lost');

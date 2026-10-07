@@ -7,11 +7,19 @@ function unique(v = [], max = 64) { return [...new Set((Array.isArray(v) ? v : [
 function agentId(v) { const s = String(v || '').trim().toLowerCase(); if (!/^[a-z0-9][a-z0-9._:-]{2,127}$/.test(s)) throw new Error('browser_brain_routing_agent_invalid'); return s; }
 
 export class BrowserBrainRoutingV2 {
-  #maxAgents; #agents = new Map(); #routes = 0;
-  constructor({ maxAgents = 256 } = {}) { this.#maxAgents = boundedInt(maxAgents, 256, 1, 1024); }
+  #maxAgents; #agents = new Map(); #routes = 0; #clock; #ttl;
+  constructor({ maxAgents = 256, clock = () => Date.now(), observationTtlMs = 30_000 } = {}) {
+    if (typeof clock !== 'function') throw new Error('browser_brain_routing_clock_invalid');
+    this.#maxAgents = boundedInt(maxAgents, 256, 1, 1024);
+    this.#clock = clock;
+    this.#ttl = boundedInt(observationTtlMs, 30_000, 1, 120_000);
+  }
 
-  observeAgent({ agent_id, role = 'AGENT', provider = 'unknown', capabilities = [], status = 'UNKNOWN', target_tab_id = null, contexts = [], load = 0, success_rate = 0.5, novelty = 0.5, recent_task_keys = [], generation = 1 } = {}) {
+  observeAgent({ agent_id, role = 'AGENT', provider = 'unknown', capabilities = [], status = 'UNKNOWN', target_tab_id = null, contexts = [], load = 0, success_rate = 0.5, novelty = 0.5, recent_task_keys = [], generation = 1, observed_at_ms = this.#clock() } = {}) {
     const id = agentId(agent_id);
+    const now = this.#clock();
+    if (!Number.isSafeInteger(now) || !Number.isSafeInteger(observed_at_ms) || observed_at_ms < 0
+      || observed_at_ms > now + 5_000) throw new Error('browser_brain_routing_observation_time_invalid');
     if (!this.#agents.has(id) && this.#agents.size >= this.#maxAgents) {
       const lost = [...this.#agents.values()].find((r) => r.status === 'LOST');
       if (!lost) throw new Error('browser_brain_routing_agent_capacity_exceeded');
@@ -20,6 +28,7 @@ export class BrowserBrainRoutingV2 {
     const prior = this.#agents.get(id);
     const gen = boundedInt(generation, 1, 1, Number.MAX_SAFE_INTEGER);
     if (prior && gen < prior.generation) throw new Error('browser_brain_routing_generation_regression');
+    if (prior && observed_at_ms < prior.observedAt) throw new Error('browser_brain_routing_observation_regression');
     const row = {
       agentId: id,
       role: String(role).toUpperCase().slice(0, 64),
@@ -33,6 +42,7 @@ export class BrowserBrainRoutingV2 {
       novelty: clamp01(novelty, 0.5),
       recentTaskKeys: unique(recent_task_keys, 128),
       generation: gen,
+      observedAt: observed_at_ms,
     };
     this.#agents.set(id, row);
     return Object.freeze({ agent_id: id, generation: gen, authority_effect: false });
@@ -46,8 +56,10 @@ export class BrowserBrainRoutingV2 {
     const key = task_key == null ? null : String(task_key).toLowerCase();
     const max = boundedInt(limit, 16, 1, 64);
     const candidates = [];
+    const now = this.#clock();
     for (const row of this.#agents.values()) {
-      if (row.status !== 'READY') continue;
+      if (row.status !== 'READY' || !Number.isSafeInteger(now)
+        || row.observedAt > now + 5_000 || now - row.observedAt > this.#ttl) continue;
       const matched = required.filter((cap) => row.capabilities.includes(cap)).length;
       const capabilityFit = required.length === 0 ? 1 : matched / required.length;
       if (required.length > 0 && capabilityFit < 1) continue;
@@ -82,28 +94,36 @@ export class BrowserBrainRoutingV2 {
     });
   }
 
-  snapshot() { return Object.freeze({ schema: BROWSER_BRAIN_ROUTING_V2_SCHEMA, agent_count: this.#agents.size, route_count: this.#routes, scoring: 'CAPABILITY_CONTEXT_LOAD_SUCCESS_NOVELTY', current_scheduler_remains_only_scheduler: true, scheduler_authority: false, execution_authority: false, authority_effect: false }); }
+  snapshot() { return Object.freeze({ schema: BROWSER_BRAIN_ROUTING_V2_SCHEMA, agent_count: this.#agents.size, route_count: this.#routes, observation_ttl_ms: this.#ttl, scoring: 'CAPABILITY_CONTEXT_LOAD_SUCCESS_NOVELTY', current_scheduler_remains_only_scheduler: true, scheduler_authority: false, execution_authority: false, authority_effect: false }); }
 }
 
 export function planAdaptiveSparseFanout({ parallelizability = 0, cost_budget_units = 1, unit_cost_per_agent = 1, verification_mode = false, risk = 0.5 } = {}) {
   const p = clamp01(parallelizability); const r = clamp01(risk, 0.5);
-  const budget = Math.max(0, Number(cost_budget_units) || 0); const unit = Math.max(0.001, Number(unit_cost_per_agent) || 1);
-  const budgetCap = Math.max(1, Math.min(5, Math.floor(budget / unit) || 1));
+  const budget = Number(cost_budget_units); const unit = Number(unit_cost_per_agent);
+  const validCost = Number.isFinite(budget) && budget >= 0 && Number.isFinite(unit) && unit > 0;
+  const budgetCap = validCost ? Math.max(0, Math.min(5, Math.floor(budget / unit))) : 0;
   let desired = p < 0.3 ? 1 : p < 0.55 ? 2 : p < 0.8 ? 3 : 5;
   if (r >= 0.8 && desired > 2) desired = 2;
   if (verification_mode === true) desired = Math.max(2, desired);
-  const fanout = Math.max(1, Math.min(5, desired, budgetCap));
+  const blocked = !validCost ? 'INVALID_COST_INPUT'
+    : budgetCap === 0 ? 'INSUFFICIENT_BUDGET'
+      : verification_mode === true && budgetCap < 2 ? 'INDEPENDENT_VERIFICATION_UNAFFORDABLE' : null;
+  const fanout = blocked ? 0 : Math.min(5, desired, budgetCap);
   return Object.freeze({
     schema: BROWSER_BRAIN_FANOUT_PLAN_SCHEMA,
     fanout,
     desired_fanout_before_budget: desired,
     parallelizability: p,
-    cost_budget_units: budget,
+    cost_budget_units: Number.isFinite(budget) ? budget : null,
+    unit_cost_per_agent: Number.isFinite(unit) ? unit : null,
     budget_cap: budgetCap,
+    blocked_reason: blocked,
+    estimated_cost_units: fanout * (validCost ? unit : 0),
+    independent_verification_possible: fanout >= 2,
     verification_mode: verification_mode === true,
     risk: r,
     sparse: true,
-    allowed_range: Object.freeze([1, 2, 3, 4, 5]),
+    allowed_range: Object.freeze([0, 1, 2, 3, 4, 5]),
     scheduler_authority: false,
     execution_authority: false,
     authority_effect: false,

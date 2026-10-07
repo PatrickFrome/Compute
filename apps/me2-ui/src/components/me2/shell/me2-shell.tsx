@@ -7,6 +7,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { useToast } from "@/hooks/use-toast";
+import { refreshClientRuntimeStatus, useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
@@ -261,7 +262,8 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const [journalEntry, setJournalEntry] = useState<ClientGoalJournalEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [readiness, setReadiness] = useState<ClientWorkReadiness | null>(null);
+  const nativeRuntime = useClientRuntimeStatus();
+  const readiness = nativeRuntime.readback?.work || null;
   const [recoveryPending, setRecoveryPending] = useState(false);
   const [recoveryResult, setRecoveryResult] = useState<ClientAdmissionRecoveryResult | null>(null);
   const operation = useRef<"submit" | "read" | "recovery" | null>(null);
@@ -280,34 +282,16 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   }, []);
 
   useEffect(() => {
+    let current = true;
     mounted.current = true;
-    void loadLatest();
-    return () => { mounted.current = false; loadSequence.current += 1; };
+    queueMicrotask(() => { if (current) void loadLatest(); });
+    return () => { current = false; mounted.current = false; loadSequence.current += 1; };
   }, [loadLatest]);
 
   const loadReadiness = useCallback(async () => {
-    const bridge = clientControlBridge();
-    if (!bridge?.workReadiness) return null;
-    const next = await bridge.workReadiness().catch(() => null);
-    if (mounted.current && next?.schema === "metaengine.client.work-readiness.v1"
-      && next.authority_effect === false && next.automatic_retry_allowed === false) {
-      setReadiness(next);
-      return next;
-    }
-    return null;
+    const current = await refreshClientRuntimeStatus();
+    return current.state === "LIVE" ? current.readback?.work || null : null;
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const observe = async () => {
-      if (!cancelled) await loadReadiness();
-    };
-    void observe();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void observe();
-    }, 5_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [loadReadiness]);
 
   const resumeExecution = useCallback(async () => {
     if (operation.current) return;

@@ -5,6 +5,10 @@ import { createClientRuntimeResource } from '../../me2-ui/src/lib/client-runtime
 const readback = () => ({
   connection: { schema: 'metaengine.client.connection-status.v1', admin_ready: true, local_runtime_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false },
   work: { schema: 'metaengine.client.work-readiness.v1', state: 'READY', execution_ready: true, heartbeat_fresh: true,
+    observed_at: new Date().toISOString(), ambiguous_agent_count: 0,
+    readiness_scope: 'CHAT_DISPATCH', continuous_autonomy_ready: false, verified_self_improvement: false,
+    capabilities: { chat_dispatch: { ready: true, reason: null }, coding_execution: { ready: false, reason: 'CODING_BACKEND_NOT_EXECUTABLE' },
+      host_continuity: { ready: false, reason: 'GUARDIAN_CONTINUITY_NOT_PROVEN' }, continuous_autonomy: { ready: false, reason: 'CODING_BACKEND_NOT_EXECUTABLE' } },
     proven_agent_count: 1, generation_floor: 28, local_generation_floor: 28,
     label: 'Ready for work', detail: 'Task results still require verification.', useful_work_verified: false,
     recovery_effect_exposed: false, scheduler_authority: false, automatic_retry_allowed: false, authority_effect: false },
@@ -88,8 +92,24 @@ test('a disconnected or stale heartbeat cannot be labeled ready', async () => {
 
 test('a valid blocked readback remains explanatory, rather than being conflated with an IPC outage', async () => {
   const value = readback(); Object.assign(value.work, { state: 'BLOCKED', execution_ready: false, heartbeat_fresh: false, label: 'Status unavailable' });
+  value.work.capabilities.chat_dispatch = { ready: false, reason: 'HEARTBEAT_READBACK_STALE' };
   const h = harness(async () => value); const stop = h.resource.subscribe(() => {});
   await flush(); assert.equal(h.resource.getSnapshot().readback.work.state, 'BLOCKED'); stop();
+});
+
+test('an expired or future native observation cannot retain a positive badge', async () => {
+  for (const offset of [-60_000, 60_000]) {
+    const value = readback(); value.work.observed_at = new Date(Date.now() + offset).toISOString();
+    const h = harness(async () => value); const stop = h.resource.subscribe(() => {});
+    await flush(); assert.equal(h.resource.getSnapshot().state, 'UNAVAILABLE'); stop();
+  }
+});
+
+test('chat admission cannot smuggle a positive autonomy capability without coding and continuity', async () => {
+  const value = readback(); value.work.continuous_autonomy_ready = true;
+  value.work.capabilities.continuous_autonomy = { ready: true, reason: null };
+  const h = harness(async () => value); const stop = h.resource.subscribe(() => {});
+  await flush(); assert.equal(h.resource.getSnapshot().state, 'UNAVAILABLE'); stop();
 });
 
 test('background and detached consumers perform no reads and no stale positive publication', async () => {

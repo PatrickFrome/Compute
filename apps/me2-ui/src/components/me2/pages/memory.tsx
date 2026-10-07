@@ -5,7 +5,7 @@
 // GET /memory/block (TEAM MEMORY — блок, уходящий в промпты агентам).
 // Payload'ы POST 1:1 с legacy: /memory {op:write|delete|economy} · /rsi {op:propose|adopt|reject|rollback}.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Brain, Coins, Database, Radar } from "lucide-react";
 import { me2Fetch } from "@/lib/me2-bus";
 import { Chip, PageHeader, Sec, StateBadge, mapState, type SysState } from "@/components/me2/ui/primitives";
@@ -17,7 +17,7 @@ type MemData = { ok: boolean; rows: MemRowT[]; status: { rows: number; by_kind: 
 type MemEconConsumerT = { consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number };
 type MemEconT = { ok: boolean; deliveries: number; avg_saved_pct: number; bytes_saved_total: number; by_consumer: MemEconConsumerT[] };
 type RsiP = { id: string; title: string; status: string; source: string; artifact: string | null; evidence: string; created_at: number };
-type RsiData = { ok: boolean; proposals: RsiP[]; stats: { total: number; proposed: number; adopted: number; rejected: number; rolled_back: number }; artifacts: number };
+type RsiData = { ok: boolean; advisory_draft_only: true; proposals: RsiP[]; stats: { total: number; proposed: number; adopted: number; rejected: number; rolled_back: number }; artifacts: number };
 type MemBlockT = { ok: boolean; block: string; used: MemRowT[] };
 type BrainData = { ok: boolean; thoughts: { key: string; content: string; at: number }[]; probe: { eventloop_ms: number; db_probe_ms: number; memory_rows: number } };
 
@@ -27,7 +27,7 @@ const MEM_KINDS = ["", "episodic", "semantic", "procedural"] as const;
 function rsiState(status: string): SysState {
   switch (status) {
     case "PROPOSED": return "Waiting";
-    case "ADOPTED": return "Completed";
+    case "ADOPTED": return "Waiting";
     case "REJECTED": return "Failed";
     case "ROLLED_BACK": return "Offline";
     default: return mapState(status);
@@ -46,25 +46,29 @@ export function MemoryPage() {
   const [memQ, setMemQ] = useState("");
   const [memKind, setMemKind] = useState<string>("");
   const [memBusy, setMemBusy] = useState(false);
+  const memoryReadRevision = useRef(0);
   // write-форма (kind/key/content/importance)
   const [wKind, setWKind] = useState<string>("semantic");
   const [wKey, setWKey] = useState("");
   const [wContent, setWContent] = useState("");
   const [wImportance, setWImportance] = useState("0.8");
-  const loadMem = useCallback(async (q = "", kind = "") => {
+  const loadMem = useCallback(async (q = memQ, kind = memKind, signal?: AbortSignal) => {
+    const revision = ++memoryReadRevision.current;
     try {
-      const r = await me2Fetch<MemData>(`/memory?XTransformPort=3041&limit=8${q ? `&q=${encodeURIComponent(q)}` : ""}${kind ? `&kind=${kind}` : ""}`);
-      if (r?.ok) setMem(r);
+      const r = await me2Fetch<MemData>(`/memory?XTransformPort=3041&limit=8${q ? `&q=${encodeURIComponent(q)}` : ""}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`, { signal });
+      if (!signal?.aborted && revision === memoryReadRevision.current) setMem(r?.ok === true ? r : null);
     } catch { /* daemon недоступен — панель просто без данных */ }
-  }, []);
+  }, [memQ, memKind]);
   const memOp = useCallback(async (body: Record<string, unknown>, okMsg: string) => {
+    if (!mem || memBusy) return false;
     setMemBusy(true);
     try {
-      const res = await fetch("/memory?XTransformPort=3041", {
+      const response = await fetch("/memory?XTransformPort=3041", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }).then((r) => r.json()) as { ok: boolean; error?: string } | null;
-      if (res?.ok !== false) {
+      });
+      const res = await response.json() as { ok: boolean; error?: string } | null;
+      if (response.ok && res?.ok === true) {
         toast({ title: okMsg });
         await loadMem(memQ, memKind);
         return true;
@@ -74,7 +78,7 @@ export function MemoryPage() {
       toast({ title: "memory ✗", description: "daemon недоступен", variant: "destructive" });
     } finally { setMemBusy(false); }
     return false;
-  }, [memQ, memKind, loadMem, toast]);
+  }, [memQ, memKind, loadMem, toast, mem, memBusy]);
   const memWrite = useCallback(async () => {
     const content = wContent.trim();
     if (!content) return;
@@ -93,40 +97,44 @@ export function MemoryPage() {
   // ── TOKEN·ECONOMY (legacy mem-econ-chips L3176) ──
   const [memEcon, setMemEcon] = useState<MemEconT | null>(null);
   const [econBusy, setEconBusy] = useState(false);
-  const loadMemEcon = useCallback(async () => {
-    const r = await me2Fetch<MemEconT>("/memory/economy?XTransformPort=3041");
-    if (r?.ok) setMemEcon(r);
+  const loadMemEcon = useCallback(async (signal?: AbortSignal) => {
+    const r = await me2Fetch<MemEconT>("/memory/economy?XTransformPort=3041", { signal });
+    if (!signal?.aborted) setMemEcon(r?.ok === true ? r : null);
   }, []);
   const econDeliver = useCallback(async () => {
+    if (!memEcon || econBusy) return;
     setEconBusy(true);
     try {
-      const res = await fetch("/memory?XTransformPort=3041", {
+      const response = await fetch("/memory?XTransformPort=3041", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ op: "economy", consumer: "ui-demo" }),
-      }).then((r) => r.json()) as { ok: boolean; error?: string } | null;
-      if (res?.ok !== false) toast({ title: "экономная доставка памяти выполнена (журнал в /memory/economy)" });
+      });
+      const res = await response.json() as { ok: boolean; error?: string } | null;
+      if (response.ok && res?.ok === true) toast({ title: "экономная доставка памяти выполнена (журнал в /memory/economy)" });
       else toast({ title: "economy ✗", description: String(res?.error ?? "ошибка"), variant: "destructive" });
       await loadMemEcon();
     } catch { toast({ title: "economy ✗", description: "daemon недоступен", variant: "destructive" }); }
     finally { setEconBusy(false); }
-  }, [loadMemEcon, toast]);
+  }, [loadMemEcon, toast, memEcon, econBusy]);
 
   // ── RSI (legacy ME8 L3256) ──
   const [rsi, setRsi] = useState<RsiData | null>(null);
   const [rsiBusy, setRsiBusy] = useState(false);
   const [rsiHint, setRsiHint] = useState("");
-  const loadRsi = useCallback(async () => {
-    const r = await me2Fetch<RsiData>("/rsi?XTransformPort=3041");
-    if (r?.ok) setRsi(r);
+  const loadRsi = useCallback(async (signal?: AbortSignal) => {
+    const r = await me2Fetch<RsiData>("/rsi?XTransformPort=3041", { signal });
+    if (!signal?.aborted) setRsi(r?.ok === true && r.advisory_draft_only === true ? r : null);
   }, []);
   const rsiOp = useCallback(async (body: Record<string, unknown>, okMsg: string) => {
+    if (!rsi || rsiBusy) return false;
     setRsiBusy(true);
     try {
-      const res = await fetch("/rsi?XTransformPort=3041", {
+      const response = await fetch("/rsi?XTransformPort=3041", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }).then((r) => r.json()) as { ok: boolean; error?: string; gate?: string; approval_id?: string | null } | null;
-      if (res?.ok !== false) {
+      });
+      const res = await response.json() as { ok: boolean; error?: string; gate?: string; approval_id?: string | null } | null;
+      if (response.ok && res?.ok === true) {
         toast({ title: okMsg });
         await loadRsi();
         return true;
@@ -136,7 +144,7 @@ export function MemoryPage() {
       toast({ title: "rsi ✗", description: "daemon недоступен", variant: "destructive" });
     } finally { setRsiBusy(false); }
     return false;
-  }, [loadRsi, toast]);
+  }, [loadRsi, toast, rsi, rsiBusy]);
   const rsiPropose = useCallback(async () => {
     const hint = rsiHint.trim();
     // legacy: {op:"propose"}; daemon rsiPropose({auto,hint}) — hint → source "operator" (честно)
@@ -151,36 +159,35 @@ export function MemoryPage() {
   // ── RECALL·BRAIN: блок памяти в промптах + self-probe (legacy BRAIN L3190) ──
   const [memBlock, setMemBlock] = useState<MemBlockT | null>(null);
   const [brain, setBrain] = useState<BrainData | null>(null);
-  const loadBlock = useCallback(async () => {
-    const r = await me2Fetch<MemBlockT>("/memory/block?n=8&XTransformPort=3041");
-    if (r?.ok) setMemBlock(r);
+  const loadBlock = useCallback(async (signal?: AbortSignal) => {
+    const r = await me2Fetch<MemBlockT>("/memory/block?n=8&XTransformPort=3041", { signal });
+    if (!signal?.aborted) setMemBlock(r?.ok === true ? r : null);
   }, []);
-  const loadBrain = useCallback(async () => {
-    const r = await me2Fetch<BrainData>("/brain?XTransformPort=3041");
-    if (r?.ok) setBrain(r);
+  const loadBrain = useCallback(async (signal?: AbortSignal) => {
+    const r = await me2Fetch<BrainData>("/brain?XTransformPort=3041", { signal });
+    if (!signal?.aborted) setBrain(r?.ok === true ? r : null);
   }, []);
 
-  // ── поллинги (cleanup при размонтировании страницы) ──
+  // A single observation owner for this diagnostic page. Filter changes and
+  // unmount abort earlier requests; hidden pages do not create another poll.
   useEffect(() => {
-    void loadMem();
-    const iv = setInterval(() => void loadMem(memQ, memKind), 30_000);
-    return () => clearInterval(iv);
-  }, [loadMem, memQ, memKind]);
-  useEffect(() => {
-    void loadMemEcon();
-    const iv = setInterval(() => void loadMemEcon(), 60_000);
-    return () => clearInterval(iv);
-  }, [loadMemEcon]);
-  useEffect(() => {
-    void loadRsi();
-    const iv = setInterval(() => void loadRsi(), 60_000);
-    return () => clearInterval(iv);
-  }, [loadRsi]);
-  useEffect(() => {
-    void loadBlock(); void loadBrain();
-    const iv = setInterval(() => { void loadBlock(); void loadBrain(); }, 60_000);
-    return () => clearInterval(iv);
-  }, [loadBlock, loadBrain]);
+    let active = true;
+    let inFlight = false;
+    let controller: AbortController | null = null;
+    const observe = async () => {
+      if (!active || inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      controller = new AbortController();
+      const signal = controller.signal;
+      try { await Promise.all([loadMem(memQ, memKind, signal), loadRsi(signal), loadMemEcon(signal), loadBlock(signal), loadBrain(signal)]); }
+      finally { inFlight = false; }
+    };
+    const visibility = () => { if (document.visibilityState !== 'visible') controller?.abort(); else void observe(); };
+    queueMicrotask(() => { if (active) void observe(); });
+    const timer = window.setInterval(() => void observe(), 30_000);
+    document.addEventListener('visibilitychange', visibility);
+    return () => { active = false; controller?.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', visibility); };
+  }, [loadMem, loadRsi, loadMemEcon, loadBlock, loadBrain, memQ, memKind]);
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-memory" data-panel-memory>
@@ -217,7 +224,7 @@ export function MemoryPage() {
                 <div className="flex gap-1.5">
                   <input value={wContent} onChange={(e) => setWContent(e.target.value)} placeholder="записать факт/урок в память…" aria-label="Содержимое записи"
                     className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900" />
-                  <button type="submit" disabled={memBusy} className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">+ зап</button>
+                  <button type="submit" disabled={memBusy || !mem} className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">+ зап</button>
                 </div>
               </form>
 
@@ -279,29 +286,30 @@ export function MemoryPage() {
                 )}
                 {!memEcon && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">daemon недоступен…</div>}
               </div>
-              <button type="button" onClick={() => void econDeliver()} disabled={econBusy}
+              <button type="button" onClick={() => void econDeliver()} disabled={econBusy || !memEcon}
                 title="Выполнить экономную доставку памяти (POST /memory op:economy consumer:ui-demo)"
                 className="w-full rounded border border-zinc-700 px-2 py-1 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">доставка</button>
             </div>
           </Sec>
 
-          <Sec id="memory-rsi" title="RSI" icon={Radar} tone="violet"
+          <Sec id="memory-rsi" title="Improvement drafts" icon={Radar} tone="violet"
             right={<>
               {rsi && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="adopt/reject — только оператор (zero-authority, порт M14)">adopted {rsi.stats.adopted} · rollback {rsi.stats.rolled_back} · артефактов {rsi.artifacts}</span>}
             </>}>
             <div data-testid="rsi-list" className="space-y-2">
               <div className="flex flex-wrap gap-1.5">
                 <Chip label="proposed" value={rsi?.stats.proposed ?? "—"} tone="violet" />
-                <Chip label="adopted" value={rsi?.stats.adopted ?? "—"} tone="emerald" />
+                <Chip label="saved drafts" value={rsi?.stats.adopted ?? "—"} tone="zinc" />
                 <Chip label="rejected" value={rsi?.stats.rejected ?? "—"} tone="rose" />
                 <Chip label="rolled_back" value={rsi?.stats.rolled_back ?? "—"} />
                 <Chip label="artifacts" value={rsi?.artifacts ?? "—"} />
               </div>
+              <p className="text-[12px] text-zinc-400">Saved drafts require independent evaluation before runtime activation. No verified improvement is claimed here.</p>
 
               <div className="flex gap-1.5">
                 <input value={rsiHint} onChange={(e) => setRsiHint(e.target.value)} placeholder="hint для LLM-черновика (пусто → авто по урокам памяти)…" aria-label="Hint для предложения RSI"
                   className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-violet-900" />
-                <button type="button" onClick={() => void rsiPropose()} disabled={rsiBusy}
+                <button type="button" onClick={() => void rsiPropose()} disabled={rsiBusy || !rsi}
                   title="evidence: уроки памяти + RH-вердикты → черновик улучшения (POST /rsi op:propose)"
                   className="h-7 shrink-0 rounded border border-violet-800/50 px-2 font-mono text-[9px] text-violet-300/90 transition hover:bg-zinc-800 disabled:opacity-40">+ предложить улучшение</button>
               </div>
