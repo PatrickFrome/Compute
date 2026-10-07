@@ -149,11 +149,15 @@ test('Edge independently refuses to persist full realtime process archives from 
   );
   assert.doesNotMatch(edge, /boundedObject\(s\.realtime_process_plane,262144\)/);
 
-  for (const forbidden of ['processes:', 'web_contents:', 'events:', 'contexts:']) {
-    const helper = edge.slice(
-      edge.indexOf('function boundedRealtimeProcessPlane'),
-      edge.indexOf('async function verifyEnrollment'),
+  const helper = edge.slice(
+    edge.indexOf('function boundedRealtimeProcessPlane'),
+    edge.indexOf('async function verifyEnrollment'),
+  );
+  for (const forbidden of ['processes', 'web_contents', 'events', 'contexts']) {
+    assert.doesNotMatch(
+      helper,
+      new RegExp(`\\b${forbidden}\\s*:`),
+      `Edge compact projector must not persist exact field ${forbidden}`,
     );
-    assert.equal(helper.includes(forbidden), false, `Edge compact projector must not persist ${forbidden}`);
   }
 });
