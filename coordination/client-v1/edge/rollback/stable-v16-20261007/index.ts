@@ -350,4 +350,3 @@ Deno.serve(async(req:Request)=>{
     return json(502,{error:'native_supervisor_failure',backend_transport:'DIRECT_POSTGRES'});
   }
 });
-

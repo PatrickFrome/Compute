@@ -47,7 +47,7 @@ PUBLIC/anon/authenticated execution is revoked. The new binding table has RLS an
 - Original stable-v16 bundle is preserved under `coordination/client-v1/edge/rollback/stable-v16-20261007/` with hashes.
   Rollback restores that Edge bundle; the additive native RPC can remain unused. No live rollback drill is asserted yet.
 
-Fresh package identity is `0.7.0-dev.37597000001.1`. Earlier 37593000001.1 is consumed and is not rebuilt.
+Fresh package identity is `0.7.0-dev.37597000002.1`. Bootstrap predecessor `d71307ad…` consumed `0.7.0-dev.37597000001.1`; its PostgreSQL17.11 RPC qualifications passed, but shallow CI history omitted the pinned starvation regression subject. Full-history checkout repairs that setup failure without weakening the expected predecessor failure assertion. Earlier 37593000001.1 is consumed and is not rebuilt.
 Do not claim trial completion until actual RUNNING → COMPLETED result, transcript/terminal evidence and independent
 verification exist. The expected arithmetic result is 38; planner, researcher and critic nodes are dependency ordered.
 Guardian Windows activation and actual executable coding sandbox remain separate unresolved frontiers.

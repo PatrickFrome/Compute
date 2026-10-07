@@ -244,4 +244,3 @@ export function createCognitiveDeltaRoutes({ rpc, workspaceId, json }) {
     });
   };
 }
-
