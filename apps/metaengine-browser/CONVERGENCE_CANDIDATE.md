@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37593000001.1`.
+Reserved package identity is `0.7.0-dev.37597000001.1`.
+
+This successor adds a device-bound bootstrap lease for the approved installed client when supervisor mesh is empty. It shares the existing client actuation lane, validates active ADMIN device grants and fresh exact fleet bindings, and never creates a synthetic mesh member. Prior source `8300ff4249546ec254fddc9866157a257ff0ab54` / `0.7.0-dev.37593000001.1` passed its recovery mechanics and Windows package workflows; that identity is consumed. Physical qualification of this successor remains required.
 
 This successor prevents advisory worker captures from starving the scheduler-owned DevOS turn. Advisory capture has one independent in-flight read slot; an admitted DevOS turn excludes a new maintenance pass, while remote command admission and authoritative task fences remain first. Regression CI replays the prior immutable wiring and requires the observed starvation assertion before qualifying this successor.
 

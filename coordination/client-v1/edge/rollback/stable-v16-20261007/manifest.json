@@ -1,0 +1,23 @@
+{
+  "schema": "metaengine.native-supervisor.rollback-bundle.v1",
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "function": "a2-browser-native-supervisor-v1",
+  "observed_version": 16,
+  "ezbr_sha256": "7d8debfa59ba7dcb547d657e313ca5361b4130d9ec0bfdcc92cbf13655855c4c",
+  "files": [
+    {
+      "path": "coordination/client-v1/edge/rollback/stable-v16-20261007/client-scoped-qualification-forwarder.mjs",
+      "sha256": "34aa92d18a939f727dd46d14f869b95533fa31d4f327960eb56fd59a8c28730f"
+    },
+    {
+      "path": "coordination/client-v1/edge/rollback/stable-v16-20261007/cognitive-delta-routes.mjs",
+      "sha256": "9b21266ddb113245302384eec50e2797bcc4f74cdb1e6cc91aaeee40181119f5"
+    },
+    {
+      "path": "coordination/client-v1/edge/rollback/stable-v16-20261007/index.ts",
+      "sha256": "20bd3b36b1dfe91be687b2fc30ddc1e5af36abba7b98dc397102197d1d0a6e66"
+    }
+  ],
+  "authority_effect": false,
+  "automatic_retry_allowed": false
+}
