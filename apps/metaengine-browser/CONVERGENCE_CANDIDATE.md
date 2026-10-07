@@ -1,6 +1,20 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37493000001.1`.
+Reserved package identity is `0.7.0-dev.37593000001.1`.
+
+This successor prevents advisory worker captures from starving the scheduler-owned DevOS turn. Advisory capture has one independent in-flight read slot; an admitted DevOS turn excludes a new maintenance pass, while remote command admission and authoritative task fences remain first. Regression CI replays the prior immutable wiring and requires the observed starvation assertion before qualifying this successor.
+
+The prior `45d73aa24b852d9de93e9af9c62808e65136c33b` / `0.7.0-dev.37592000001.1` passed full mechanics and produced installer SHA256 `39318750775fa20d7612b0edb0cb331741eaeb42c57e511b63ece035ef403379`; that identity is consumed and is not offered as the final live successor. Rich-text placeholder and honest actual-insert accounting fixes are inherited.
+
+Current live mechanics recovery successor (2026-10-07):
+- Previous installed package identity is `0.7.0-dev.37493000001.1`.
+- Previous qualified package identity is `0.7.0-dev.37493000001.1` from frozen #1135 source `be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c`.
+- Candidate `0.7.0-dev.37590000001.1` was reserved for #1139 head `ee91bc3efb755bac6dc9ff34908b532ecc9d95b4`; its CI is in flight and that identity is consumed for any future source change.
+- This successor fixes package reservation consistency, includes event-triggered recovery from a repaired cognitive HTTP route, preserves READ_ONLY Meta tasks and inherits the state-plane single-writer repair.
+- Full prior-head Windows mechanics: 4268 PASS / one reservation mismatch / zero skips. Linux: 4264 PASS / the same reservation mismatch / four platform skips. Both require exact successor-head requalification.
+- No installed successor, autonomous task completion, Guardian ownership, release publication or sandbox execution is asserted.
+
+The following sections record earlier consumed convergence identities and their historical qualification scope.
 
 Installed observer successor after full dark-workspace retirement (2026-10-06):
 - exact predecessor `0f9b2aeca26c145163d92dbb32a3961a18e1dac5` / `0.7.0-dev.37491000001.1` successfully produced immutable Windows candidate bytes in Package Smoke run `37492085860`; that source/version identity is consumed and MUST NOT be rebuilt or relabelled;

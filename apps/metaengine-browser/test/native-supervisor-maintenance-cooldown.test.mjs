@@ -35,9 +35,11 @@ test('maintenance completion creates a real DevOS idle turn instead of a same-pa
   );
   assert.match(
     coreSource,
-    /await this\.#observeWorkers\(\);[\s\S]*maintenance_in_flight === true[\s\S]*this\.#idleWorkLastError\s*=\s*null;[\s\S]*return;/,
-    'maintenance that races read-only observation must defer the DevOS turn without retaining a mutating-command fence',
+    /this\.#kickWorkerObservation\(\);[\s\S]*maintenance_in_flight === true[\s\S]*this\.#idleWorkLastError\s*=\s*null;[\s\S]*return;/,
+    'previously admitted maintenance must defer the task turn without awaiting advisory capture',
   );
+  assert.match(maintenance, /if \(this\.canStartMaintenance\(\) !== true\) return this\.#maintenancePromise;/, 'maintenance cannot start over an admitted task turn');
+  assert.match(coreSource, /canStartMaintenance\(\)[\s\S]*this\.#idleWorkPromise == null && super\.canStartMaintenance\(\)/, 'task turn owns the local mutation slot until settlement');
   assert.doesNotMatch(
     coreSource,
     /native_supervisor_idle_maintenance_wait_timeout|IDLE_MAINTENANCE_WAIT_MAX_MS|#waitForBaseMaintenanceIdle/,

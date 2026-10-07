@@ -1,0 +1,150 @@
+{
+  "schema": "metaengine.live-recovery-checkpoint.v1",
+  "project": "jhriwwsryeqsvvvufkok",
+  "authority": {
+    "authority": {
+      "roadmap_id": "metaengine-client-v1",
+      "updated_at": "2026-09-29T14:11:27.02271+00:00",
+      "baseline_sha": "1fde1e53549eafefd6c28b50cdcd384e86d14512",
+      "authority_key": "METAENGINE_CLIENT_V1",
+      "alignment_epoch": 3,
+      "authority_effect": false,
+      "integration_line": "work/client-v1-c4-typed-goal-bridge-v1",
+      "active_milestone_key": "C4_TYPED_PRODUCT_CONTROL"
+    },
+    "active_plans": 0,
+    "plan_generation": 8,
+    "realtime_partitions": 5
+  },
+  "trial_commit": [
+    {
+      "point_id": "live.coordination.20261007.plan.v1",
+      "task_id": "8167889f-6d9e-482c-a1d1-6895c0a510c9",
+      "claim_class": "READ_ONLY",
+      "state": "READY",
+      "task_spec_sha256": "ea1e7021ea4899494a3846480381e1d3c7e803a4d8c80375e411805cc58f0016"
+    }
+  ],
+  "admission": [
+    {
+      "admission": {
+        "state": "OPEN",
+        "reason": null,
+        "schema": "metaengine.devos.environment-state.v1",
+        "reset_at": null,
+        "reset_reason": "SIGNED_PROFILE_BOOTSTRAP_CLOSED",
+        "workspace_id": "2de9f84b-7c0a-4091-911c-894ff1d6eaf4",
+        "authoritative": true,
+        "refill_enabled": true,
+        "authority_effect": false,
+        "generation_floor": 28,
+        "authority_present": true,
+        "supervisor_admission_enabled": true
+      }
+    }
+  ],
+  "trial_latest": [
+    {
+      "point_id": "live.smoke.chatgpt-agent.37230000001.v1",
+      "state": "READY",
+      "error_code": null,
+      "lease_generation": 0,
+      "result_summary": null
+    },
+    {
+      "point_id": "live.coordination.20261007.plan.v1",
+      "state": "READY",
+      "error_code": null,
+      "lease_generation": 0,
+      "result_summary": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "action": "FLEET_STATUS",
+      "status": "COMPLETED",
+      "error": null,
+      "lane": "READ_ONLY",
+      "result_schema": "metaengine.browser.fleet-snapshot.v1"
+    },
+    {
+      "action": "CONTROL_CAPABILITIES",
+      "status": "COMPLETED",
+      "error": null,
+      "lane": "READ_ONLY",
+      "result_schema": "metaengine.browser-control-capabilities.v2"
+    },
+    {
+      "action": "CONTROL_LATENCY_STATUS",
+      "status": "COMPLETED",
+      "error": null,
+      "lane": "READ_ONLY",
+      "result_schema": "metaengine.browser.control-latency-status.v1"
+    },
+    {
+      "action": "DEV_PLANE_HEALTH",
+      "status": "COMPLETED",
+      "error": null,
+      "lane": "READ_ONLY"
+    },
+    {
+      "action": "COMPUTER_STATUS",
+      "status": "COMPLETED",
+      "error": null,
+      "lane": "READ_ONLY",
+      "result_schema": "metaengine.windows-local-computer-executor.v1"
+    },
+    {
+      "action": "SELF_UPDATE_STATUS",
+      "status": "COMPLETED",
+      "error": null,
+      "lane": "READ_ONLY",
+      "result_schema": "metaengine.self-update-runtime.v8"
+    }
+  ],
+  "installed_cognitive_transport": {
+    "state": "UNAVAILABLE",
+    "schema": "metaengine.browser.cognitive-delta-transport.v1",
+    "pending": true,
+    "in_flight": false,
+    "scheduled": false,
+    "stream_id": null,
+    "batch_size": 128,
+    "dedupe_key": "stream_id+sequence",
+    "last_error": "COGNITIVE_ROUTE_HTTP_501",
+    "sent_events": 0,
+    "event_driven": true,
+    "resync_count": 0,
+    "sent_batches": 0,
+    "fallback_edges": 1,
+    "timer_delay_ms": 0,
+    "command_leasing": false,
+    "last_attempt_at": "2026-10-07T04:15:56.596Z",
+    "last_success_at": null,
+    "authority_effect": false,
+    "control_authority": false,
+    "delivery_is_authority": false,
+    "duplicate_safe_retries": 0,
+    "second_command_scheduler": false,
+    "full_state_fallback_required": true,
+    "acknowledged_through_sequence": 0,
+    "automatic_effect_retry_allowed": false
+  },
+  "stable_v15": [
+    {
+      "id": "b94f0619-675a-40fc-b340-0299b0250b9a",
+      "slug": "a2-browser-native-supervisor-v1",
+      "name": "a2-browser-native-supervisor-v1",
+      "status": "ACTIVE",
+      "version": 15,
+      "created_at": 1790668439464,
+      "updated_at": 1791355292863,
+      "verify_jwt": false,
+      "import_map": false,
+      "entrypoint_path": "file:///tmp/user_fn_jhriwwsryeqsvvvufkok_b94f0619-675a-40fc-b340-0299b0250b9a_15/source/index.ts",
+      "ezbr_sha256": "c684dbeec6d83a1fd407c786c4bf1ff42be25ee5843f6903701df4db299a70c0"
+    }
+  ],
+  "authority_effect": false,
+  "physical_task_success": false
+}

@@ -43,12 +43,19 @@ export class BrowserCognitiveDeltaTransport {
   #duplicateSafeRetries = 0;
   #resyncCount = 0;
   #fallbackEdges = 0;
+  #clock;
+  #routeRetryCooldownMs;
+  #nextRouteProbeAt = 0;
+  #durableFallbackRequired = false;
 
-  constructor({ readDeltas, sendBatch, resync, onFallbackRequired = null, batchSize = 128 } = {}) {
+  constructor({ readDeltas, sendBatch, resync, onFallbackRequired = null, batchSize = 128, clock = Date.now, routeRetryCooldownMs = 30000 } = {}) {
     if (typeof readDeltas !== 'function') throw new Error('cognitive_transport_reader_required');
     if (typeof sendBatch !== 'function') throw new Error('cognitive_transport_sender_required');
     if (typeof resync !== 'function') throw new Error('cognitive_transport_resync_required');
     if (onFallbackRequired != null && typeof onFallbackRequired !== 'function') throw new Error('cognitive_transport_fallback_callback_invalid');
+    if (typeof clock !== 'function') throw new Error('cognitive_transport_clock_required');
+    this.#clock = clock;
+    this.#routeRetryCooldownMs = boundedInt(routeRetryCooldownMs, 30000, 1000, 300000);
     this.#readDeltas = readDeltas;
     this.#sendBatch = sendBatch;
     this.#resync = resync;
@@ -81,6 +88,13 @@ export class BrowserCognitiveDeltaTransport {
       void this.flush();
     });
     return true;
+  }
+
+  requestRecovery() {
+    if (this.#state !== 'UNAVAILABLE' || this.#clock() < this.#nextRouteProbeAt) return false;
+    this.#state = 'UNKNOWN';
+    this.#pending = false;
+    return this.notify();
   }
 
   notify() {
@@ -151,6 +165,7 @@ export class BrowserCognitiveDeltaTransport {
     const result = normalizeSendResult(await this.#sendBatch(envelope));
     if (UNSUPPORTED_HTTP.has(result.status)) {
       this.#state = 'UNAVAILABLE';
+      this.#nextRouteProbeAt = this.#clock() + this.#routeRetryCooldownMs;
       this.#lastError = `COGNITIVE_ROUTE_HTTP_${result.status}`;
       this.#requireFallback(this.#lastError);
       return false;
@@ -171,6 +186,8 @@ export class BrowserCognitiveDeltaTransport {
     this.#lastError = null;
     this.#sentBatches += 1;
     this.#sentEvents += events.length;
+    this.#durableFallbackRequired = ack.full_state_fallback_required === true;
+    if (this.#durableFallbackRequired) this.#requireFallback('REALTIME_DELIVERY_UNAVAILABLE');
     if (read.has_more === true) this.#pending = true;
     return true;
   }
@@ -229,7 +246,9 @@ export class BrowserCognitiveDeltaTransport {
       dedupe_key: 'stream_id+sequence',
       timer_delay_ms: 0,
       event_driven: true,
-      full_state_fallback_required: this.#state !== 'SUPPORTED',
+      full_state_fallback_required: this.#state !== 'SUPPORTED' || this.#durableFallbackRequired,
+      route_retry_cooldown_ms: this.#routeRetryCooldownMs,
+      route_recovery_event_driven: true,
       delivery_is_authority: false,
       second_command_scheduler: false,
       automatic_effect_retry_allowed: false,

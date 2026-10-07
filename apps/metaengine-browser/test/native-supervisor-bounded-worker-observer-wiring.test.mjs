@@ -66,17 +66,19 @@ test('worker observation and DevOS run only as idle work after remote command ad
   const commandAdmission = source.indexOf('await super.cycle();', cycleStart);
   const idleKick = source.indexOf('this.#kickIdleWork()', commandAdmission);
   const idleMethod = source.indexOf('#kickIdleWork()');
-  const observeIndex = source.indexOf('await this.#observeWorkers();', idleMethod);
+  const observeIndex = source.indexOf('this.#kickWorkerObservation();', idleMethod);
   const maintenanceDeferralIndex = source.indexOf("super.snapshot()?.control_fast_lane?.maintenance_in_flight === true", observeIndex);
   const admissionIndex = source.indexOf("supervisor?.continuous_service?.actuation_allowed !== true", maintenanceDeferralIndex);
   const devosIndex = source.indexOf('await this.#devosTaskCycle.runOnce();', admissionIndex);
 
   assert.ok(commandAdmission > cycleStart, 'remote command lane must be admitted first');
   assert.ok(idleKick > commandAdmission, 'idle observation/DevOS must be kicked only after command admission');
-  assert.ok(observeIndex > idleMethod, 'worker observation must remain inside idle work');
-  assert.ok(maintenanceDeferralIndex > observeIndex, 'idle work must defer if maintenance starts during observation');
+  assert.ok(observeIndex > idleMethod, 'worker observation must be kicked by the admitted idle turn');
+  assert.ok(maintenanceDeferralIndex > observeIndex, 'a previously admitted maintenance owner must fence task admission');
   assert.ok(admissionIndex > maintenanceDeferralIndex, 'DevOS must remain behind authoritative continuous-service admission');
-  assert.ok(devosIndex > admissionIndex, 'bounded DevOS runOnce must remain behind idle observation, maintenance, and admission fences');
+  assert.ok(devosIndex > admissionIndex, 'bounded DevOS runOnce must remain behind maintenance ownership and admission fences');
+  assert.match(source, /#workerObservationPromise = this\.#observeWorkers\(\)/, 'advisory capture must have a separate in-flight slot');
+  assert.doesNotMatch(source.slice(idleMethod, devosIndex), /await this\.#observeWorkers\(/, 'capture latency must not hold the task mutation fence');
   assert.doesNotMatch(source, /#devosTaskCycle\.cycle\(\)/, 'continuous DevOS cycle must not be reintroduced');
   assert.doesNotMatch(source, /native_supervisor_idle_maintenance_wait_timeout|IDLE_MAINTENANCE_WAIT_MAX_MS|#waitForBaseMaintenanceIdle/, 'maintenance overlap must defer rather than hold the mutation fence behind a timeout');
   assert.match(
