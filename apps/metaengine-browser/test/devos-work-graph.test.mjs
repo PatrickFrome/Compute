@@ -519,3 +519,10 @@ test('runtime observability carries bounded agent toolbelt + work graph planes (
   assert.match(edge, /if\('rsi_outcome_river'in s\)row\.rsi_outcome_river=boundedObject\(s\.rsi_outcome_river,16384\)/);
   assert.match(edge, /if\('rsi_operator_steering'in s\)row\.rsi_operator_steering=boundedObject\(s\.rsi_operator_steering,16384\)/);
 });
+
+test('typed plans preserve READ_ONLY and reject unknown claim classes',()=>{
+ const args={authority:AUTHORITY,planState:NO_PLAN,objective:'Read-only live trial',
+ nodes:[{point_id:'trial.read.v1',role:'RESEARCHER',objective:'Observe only',claim_class:'READ_ONLY'}]};
+ assert.equal(compileMetaObjectivePlan(args).plan.nodes[0].claim_class,'READ_ONLY');
+ assert.throws(()=>compileMetaObjectivePlan({...args,nodes:[{...args.nodes[0],claim_class:'ADMIN'}]}),/claim_class_invalid/);
+});

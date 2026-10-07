@@ -112,6 +112,7 @@ export function dispatchRealtimeObservationEdge({ cognitiveTransport, scheduleFu
   }
   const state = cognitiveTransport?.snapshot?.()?.state || 'UNAVAILABLE';
   if (!cognitiveTransport || state === 'UNAVAILABLE') {
+    cognitiveTransport?.requestRecovery?.();
     scheduleFullState();
     return Object.freeze({ transport: 'FULL_STATE', reason: state, authority_effect: false });
   }

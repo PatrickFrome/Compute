@@ -1,3 +1,5 @@
+> Correction, 2026-10-07: the initial schema inventory omitted `destruktion_meta`. The selected live project DOES contain roadmap authority, plan and fleet/task tables. Epoch 3 / baseline `1fde1e53…` was freshly verified. Statements below about absence of those tables describe an incorrect earlier inference and are superseded by [RECOVERY_CHECKPOINT.md](RECOVERY_CHECKPOINT.md). Live state also changed during the authorized recovery: see that checkpoint.
+
 # METAENGINE Browser — аудит экспорта, веток и установленного runtime
 
 Дата: 7 октября 2026 года. Начальный GitHub snapshot: до создания ветки этого аудита. Live readback: 04:29–04:39 UTC / 07:29–07:39 Europe/Moscow. Статус: **READ_ONLY_INSTALLED_RUNTIME_CONFIRMED; STATIC_V30_QUALIFICATION_IMPLEMENTED; USEFUL_WORK_NOT_QUALIFIED**.

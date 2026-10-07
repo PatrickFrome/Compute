@@ -120,6 +120,8 @@ function normalizeNodeInput(raw, index, authority, knownPoints) {
   const objective = boundedString(node.objective, `node_${index}_objective`, 480);
   const riskRaw = node.risk == null ? 'NORMAL' : String(node.risk).trim().toUpperCase();
   if (!META_OBJECTIVE_RISKS.includes(riskRaw)) fail(`node_${index}_risk_invalid`);
+  const claimClass = node.claim_class == null ? 'MUTATING' : String(node.claim_class).trim().toUpperCase();
+  if (!['READ_ONLY', 'MUTATING'].includes(claimClass)) fail(`node_${index}_claim_class_invalid`);
   const priority = node.priority == null ? 50 : Number(node.priority);
   if (!Number.isSafeInteger(priority) || priority < 0 || priority > 1000) fail(`node_${index}_priority_invalid`);
   const sourceBranch = node.source_branch == null ? authority.integration_line : String(node.source_branch).slice(0, 240);
@@ -160,6 +162,7 @@ function normalizeNodeInput(raw, index, authority, knownPoints) {
   return {
     point_id: pointId,
     role,
+    claim_class: claimClass,
     objective,
     base_sha: authority.baseline_sha,
     source_branch: sourceBranch,

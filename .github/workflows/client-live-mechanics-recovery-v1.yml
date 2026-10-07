@@ -1,0 +1,86 @@
+name: Client Live Mechanics Recovery
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'coordination/client-v1/edge/**'
+      - 'coordination/client-v1/sql/qualification/**'
+      - 'supabase/migrations/*cognitive*'
+      - 'supabase/migrations/*readonly_issuer_parity*'
+      - 'supabase/migrations/*claim_class_preservation*'
+      - '.github/workflows/client-live-mechanics-recovery-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-mechanics:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact source head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install locked Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm ci --no-audit --no-fund
+      - name: Parse runtime contracts
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Exercise all Browser mechanics including real local IPC
+        working-directory: apps/metaengine-browser
+        run: node --test --test-concurrency=4 test/*.test.mjs
+      - name: Prove clean source tree
+        shell: bash
+        run: test -z "$(git status --porcelain=v1 --untracked-files=all)"
+  cognitive-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17.11@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+        env:
+          POSTGRES_PASSWORD: qualification-only
+          POSTGRES_DB: qualification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qualification"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: qualification-only
+      PGDATABASE: qualification
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Qualify real PostgreSQL contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/COGNITIVE_ACCEPTOR_FIXTURE_V1.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007061415_cognitive_delta_live_acceptor_v1.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007062908_cognitive_broadcast_correlation_readback_v1.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007063940_cognitive_durable_latest_batch_v1.sql
+          psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/COGNITIVE_ACCEPTOR_QUALIFICATION_V1.sql
+          psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_READONLY_ISSUER_FIXTURE_V1.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007061807_native_supervisor_readonly_issuer_parity_v1.sql
+          psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_READONLY_ISSUER_QUALIFICATION_V1.sql

@@ -198,3 +198,27 @@ test('one in-flight send coalesces concurrent notify edges without a timer loop'
   assert.equal(transport.snapshot().acknowledged_through_sequence, 2);
   assert.equal(transport.snapshot().timer_delay_ms, 0);
 });
+
+test('a repaired route is re-probed on a later observation edge with a bounded cooldown', async () => {
+ const bus=new BrowserCognitiveDeltaBus({streamId:STREAM_A,maxEvents:16});bus.publish({type:'WEB_CONTENTS_CREATED'});
+ let clock=1000,calls=0;const success=senderFrom([]);
+ const transport=new BrowserCognitiveDeltaTransport({readDeltas:(a,l)=>bus.readSince(a,l),
+ sendBatch:async batch=>++calls===1?{status:501,body:{}}:success(batch),resync:async()=>true,
+ clock:()=>clock,routeRetryCooldownMs:30000});
+ assert.equal(await transport.flush(),false);assert.equal(transport.requestRecovery(),false);
+ clock+=29999;assert.equal(transport.requestRecovery(),false);assert.equal(calls,1);
+ clock+=1;assert.equal(transport.requestRecovery(),true);await new Promise(r=>setImmediate(r));
+ assert.equal(calls,2);assert.equal(transport.snapshot().state,'SUPPORTED');
+ assert.equal(transport.snapshot().acknowledged_through_sequence,1);
+ assert.equal(transport.snapshot().second_command_scheduler,false);
+});
+test('durable ACK retains full-state fallback when Realtime is absent', async () => {
+ const bus=new BrowserCognitiveDeltaBus({streamId:STREAM_A,maxEvents:16});bus.publish({type:'METRICS_SAMPLE'});const fallback=[];
+ const transport=new BrowserCognitiveDeltaTransport({readDeltas:(a,l)=>bus.readSince(a,l),
+ sendBatch:async batch=>({status:202,body:{schema:BROWSER_COGNITIVE_ACK_SCHEMA,accepted:true,stream_id:batch.stream_id,
+ accepted_through_sequence:batch.through_sequence,broadcasted:false,full_state_fallback_required:true}}),
+ resync:async()=>true,onFallbackRequired:edge=>fallback.push(edge)});
+ assert.equal(await transport.flush(),true);assert.equal(transport.snapshot().acknowledged_through_sequence,1);
+ assert.equal(transport.snapshot().full_state_fallback_required,true);
+ assert.equal(fallback[0].reason,'REALTIME_DELIVERY_UNAVAILABLE');assert.equal(fallback[0].authority_effect,false);
+});
