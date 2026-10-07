@@ -1,6 +1,14 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37597000002.1`.
+Reserved package identity is `0.7.0-dev.37628000001.1`.
+
+Pre-install critical audit successor (2026-10-07):
+- Runtime source `83aaafaf485e2bca50cadaaf058f87837e8d002f` passed source qualification run `37623582505`: 4351/4351 Browser tests on Windows, six isolated Bun RSI lifecycle tests, locked UI TypeScript and boundary lint.
+- Intermediate source `4570959b89c46f5084d3ae056f1751e2f725a76e` reserved `0.7.0-dev.37624000001.1` in Package Smoke run `37624314402` and reached physical NSIS build with `0.7.0-dev.37624000001.1`; its reservation is consumed. It is withdrawn as a final candidate because the top convergence ledger still named the previous package, correctly failing the full contract gates.
+- This atomic successor changes package.json, both package-lock root version fields, this authoritative reservation and the audit report together. Runtime code, dependencies and behavior tests remain byte-identical to the qualified source.
+- Confirmed source repairs cover local relay boundaries, sidecar ownership, read-only root bootstrap before effect fences, budget/freshness routing, truthful readiness, shared UI observations, memory request races and immutable advisory RSI drafts.
+- All source and installed-package consumers must qualify this exact successor. Package Smoke remains the sole physical producer; never rerun or relabel the consumed intermediate.
+- No user-machine install, canonical C1/C2 success, continuous-autonomy result or evaluated self-improvement is asserted by this reservation.
 
 The bootstrap predecessor `d71307ad6d4340b11d9be16942766166a2f90e5d` consumed `0.7.0-dev.37597000001.1`. Its PostgreSQL 17.11 qualification passed, but Browser recovery jobs failed before tests because depth-2 checkout omitted immutable regression subject `45d73aa24b852d9de93e9af9c62808e65136c33b`. Full history now makes that pinned comparison independent of descendant depth; no old installer identity is rebuilt.
 
@@ -12,7 +20,7 @@ The prior `45d73aa24b852d9de93e9af9c62808e65136c33b` / `0.7.0-dev.37592000001.1`
 
 Current live mechanics recovery successor (2026-10-07):
 - Previous installed package identity is `0.7.0-dev.37493000001.1`.
-- Previous qualified package identity is `0.7.0-dev.37493000001.1` from frozen #1135 source `be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c`.
+- Previous qualified package identity is `0.7.0-dev.37597000002.1` from frozen source `43f2bb8d5e1090bad68ce9942eac40d2deab4b66` / Package Smoke run `37608920991`.
 - Candidate `0.7.0-dev.37590000001.1` was reserved for #1139 head `ee91bc3efb755bac6dc9ff34908b532ecc9d95b4`; its CI is in flight and that identity is consumed for any future source change.
 - This successor fixes package reservation consistency, includes event-triggered recovery from a repaired cognitive HTTP route, preserves READ_ONLY Meta tasks and inherits the state-plane single-writer repair.
 - Full prior-head Windows mechanics: 4268 PASS / one reservation mismatch / zero skips. Linux: 4264 PASS / the same reservation mismatch / four platform skips. Both require exact successor-head requalification.
