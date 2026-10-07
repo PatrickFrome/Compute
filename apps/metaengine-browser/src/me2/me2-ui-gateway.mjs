@@ -63,7 +63,7 @@ function proxyHttp(req, res) {
   if (!uiRouteAuthorized(port)) {
     stats.http_fail += 1;
     res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: 'gateway: upstream_unowned' }));
+    res.end(JSON.stringify({ ok: false, error: port === UI_PORT ? 'gateway: ui_upstream_unowned' : 'gateway: daemon_upstream_unowned' }));
     return;
   }
   const headers = gatewayUpstreamHeaders(req.headers, port);
