@@ -100,3 +100,7 @@ More control-plane abstractions, additional test counts, or a saved proposal
 are not substitutes for these gates. This change repairs confirmed source
 defects and truthful observability; it does not assert that the user's machine
 has already passed the autonomous-development or self-improvement gates.
+
+## Source qualification before packaging
+
+Source `83aaafaf485e2bca50cadaaf058f87837e8d002f` passed [Critical Audit run 37623582505](https://github.com/PatrickFrome/Compute/actions/runs/37623582505): all 4351 Browser Node tests on Windows, the 97 focused contracts (a subset, not additional independent tests), all 6 isolated Bun RSI lifecycle tests, frozen UI dependency installation, TypeScript and modified-boundary ESLint checks. No test failures or skips were reported in the full Windows run. The next package identity is `0.7.0-dev.37624000001.1`; its package and visual evidence must bind to its own source head. These tests are not evidence of canonical C1/C2 or live self-improvement on the user's machine.
