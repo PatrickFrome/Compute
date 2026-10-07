@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 1
+          fetch-depth: 2
           persist-credentials: false
       - name: Prove exact source head
         shell: bash
@@ -37,6 +37,23 @@ jobs:
       - name: Install locked Browser dependencies
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
+      - name: Prove the prior installed wiring stalls behind advisory capture
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          idle_proof_source=src/idle-progress-predecessor-proof.mjs
+          idle_proof_log="$RUNNER_TEMP/idle-progress-predecessor-proof.log"
+          trap 'rm -f "$idle_proof_source"' EXIT
+          git show 45d73aa24b852d9de93e9af9c62808e65136c33b:apps/metaengine-browser/src/native-supervisor-client-core-base.mjs > "$idle_proof_source"
+          set +e
+          METAENGINE_IDLE_PROGRESS_SUBJECT=../src/idle-progress-predecessor-proof.mjs node --test --test-name-pattern="slow advisory capture cannot starve" test/native-supervisor-idle-progress.test.mjs > "$idle_proof_log" 2>&1
+          idle_proof_status=$?
+          set -e
+          cat "$idle_proof_log"
+          test "$idle_proof_status" = 1
+          node --input-type=module -e 'import fs from "node:fs"; if (!fs.readFileSync(process.argv[1], "utf8").includes("DevOS must progress before an advisory CAPTURE settles")) process.exit(1)' "$idle_proof_log"
+          rm -f "$idle_proof_source"
       - name: Parse runtime contracts
         working-directory: apps/metaengine-browser
         run: npm run check

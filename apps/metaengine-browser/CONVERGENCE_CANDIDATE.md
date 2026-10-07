@@ -1,8 +1,10 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37592000001.1`.
+Reserved package identity is `0.7.0-dev.37593000001.1`.
 
-This successor normalizes a rich-text AX newline only with exact DOM placeholder proof and reports zero inserted characters when clear verification prevented insertion. The prior 37591000001.1 identity was consumed by earlier CI.
+This successor prevents advisory worker captures from starving the scheduler-owned DevOS turn. Advisory capture has one independent in-flight read slot; an admitted DevOS turn excludes a new maintenance pass, while remote command admission and authoritative task fences remain first. Regression CI replays the prior immutable wiring and requires the observed starvation assertion before qualifying this successor.
+
+The prior `45d73aa24b852d9de93e9af9c62808e65136c33b` / `0.7.0-dev.37592000001.1` passed full mechanics and produced installer SHA256 `39318750775fa20d7612b0edb0cb331741eaeb42c57e511b63ece035ef403379`; that identity is consumed and is not offered as the final live successor. Rich-text placeholder and honest actual-insert accounting fixes are inherited.
 
 Current live mechanics recovery successor (2026-10-07):
 - Previous installed package identity is `0.7.0-dev.37493000001.1`.

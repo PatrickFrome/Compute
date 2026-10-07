@@ -1426,8 +1426,16 @@ export class NativeSupervisorClient {
     return this.#heartbeatPromise;
   }
 
+  // One local mutation owner at a time. The DevOS layer overrides this read-only
+  // admission hook while its bounded turn is active; the DB remains the sole
+  // task/command lease authority.
+  canStartMaintenance() {
+    return true;
+  }
+
   #kickMaintenance() {
     if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
+    if (this.canStartMaintenance() !== true) return this.#maintenancePromise;
     const now = Date.now();
     if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
     this.#maintenancePromise = (async () => {

@@ -236,6 +236,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #workerObservationSignals = [];
   #workerObservationLastAt = null;
   #workerObservationLastError = null;
+  #workerObservationPromise = null;
   #idleWorkPromise = null;
   #idleWorkLastAt = null;
   #idleWorkLastError = null;
@@ -545,16 +546,27 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#bootstrapTimer = null;
   }
 
+  canStartMaintenance() {
+    return this.#idleWorkPromise == null && super.canStartMaintenance();
+  }
+
+  #kickWorkerObservation() {
+    if (!this.#workerObserver || this.#workerObservationPromise) return this.#workerObservationPromise;
+    this.#workerObservationPromise = this.#observeWorkers()
+      .finally(() => { this.#workerObservationPromise = null; });
+    return this.#workerObservationPromise;
+  }
+
   #kickIdleWork() {
     if (this.#idleWorkPromise) return this.#idleWorkPromise;
+    // Advisory captures have their own bounded in-flight observation slot.
+    // Their latency cannot delay DevOS admission or retain the mutation fence.
+    // Both are kicked by this same empty command turn; no new timer/lease loop.
+    this.#kickWorkerObservation();
     this.#idleWorkPromise = (async () => {
-      // Observation is read-only and may overlap the next command wait.
-      await this.#observeWorkers();
-
-      // Maintenance may start while the read-only worker observation is running.
-      // Never hold an idle promise (and therefore a future mutating command)
-      // behind an arbitrary timeout. Yield this DevOS turn; the next empty
-      // command cycle can re-admit it after maintenance settles.
+      // Maintenance already admitted before this turn keeps ownership. Once the
+      // DevOS promise is set, canStartMaintenance() prevents a later maintenance
+      // pass from racing this bounded task turn.
       if (super.snapshot()?.control_fast_lane?.maintenance_in_flight === true) {
         this.#idleWorkLastError = null;
         return;
@@ -626,6 +638,9 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         last_at: this.#idleWorkLastAt,
         last_error: this.#idleWorkLastError,
         read_only_can_overlap: true,
+        advisory_observation_in_flight: this.#workerObservationPromise != null,
+        advisory_observation_blocks_task_admission: false,
+        maintenance_waits_for_existing_task_turn: true,
         mutating_remote_waits_for_existing_idle_work: true,
         command_lease_precedes_idle_work: true,
         authority_effect: false,
