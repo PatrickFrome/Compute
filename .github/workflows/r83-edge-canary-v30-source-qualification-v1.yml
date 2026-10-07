@@ -1,0 +1,51 @@
+name: R83 v30 Backend Client Source Pair
+
+on:
+  pull_request:
+    paths:
+      - 'coordination/client-v1/r83-v30-source-qualification.mjs'
+      - 'coordination/client-v1/test/r83-v30-source-qualification.test.mjs'
+      - 'coordination/convergence/R83_EDGE_CANARY_V30_SOURCE_QUALIFICATION_V1.json'
+      - '.github/workflows/r83-edge-canary-v30-source-qualification-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-source-pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact qualification head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prove exact qualification head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Qualify exact v30 source pair with live gates open
+        run: node coordination/client-v1/r83-v30-source-qualification.mjs
+      - name: Reject subject drift and false promotion claims
+        run: node --test coordination/client-v1/test/r83-v30-source-qualification.test.mjs
+      - name: Verify inherited Edge and signed transport contracts
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --test
+          test/native-supervisor-state-single-writer.test.mjs
+          test/native-supervisor-nonce-concurrency-contract.test.mjs
+          test/postgres-command-wake.test.mjs
+          test/native-supervisor-realtime-command-wake-migration.test.mjs
+          test/rsi-result-delivery-integration.test.mjs
+          test/rsi-result-delivery-runtime-wiring.test.mjs
+          test/emergency-routes.test.mjs
+          test/cognitive-delta-edge-route.test.mjs
+      - name: Prove no deployment or candidate-source mutation
+        run: test -z "$(git status --porcelain=v1 --untracked-files=all)"

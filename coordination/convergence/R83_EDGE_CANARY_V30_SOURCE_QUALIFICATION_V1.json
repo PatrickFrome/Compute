@@ -1,0 +1,122 @@
+{
+  "schema": "metaengine.r83.edge-canary-v30-source-qualification.v1",
+  "qualification_id": "R83_V30_20261007",
+  "captured_at": "2026-10-07T04:34:58.079Z",
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "candidate": {
+    "slug": "a2-browser-native-supervisor-v14-canary",
+    "function_id": "c634795b-e5f4-4863-8e2e-5ae57a5df057",
+    "deployed_version": 30,
+    "ezbr_sha256": "2197ca6ef50ae9a00f59a05edecf094b383824ebfddd19d917b73610feb831e6",
+    "source_pin": "6aeea9f68fa91ef38f4d0aea4eddaf1e4d29c0f9",
+    "source_binding_complete": true,
+    "observed_import_pins": [
+      "6aeea9f68fa91ef38f4d0aea4eddaf1e4d29c0f9"
+    ],
+    "index_git_blob_sha1": "6f35c8380f442652a1ae3b31d4d3a6a4b9fda797",
+    "imports": [
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/enrollment-metadata.mjs",
+        "git_blob_sha1": "fc491c03b8303f087a1aca49c4fba573f0cc239d"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs",
+        "git_blob_sha1": "e81e79226e76af665bee10ef57472a9cc94d2be6"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/db-inspect-routes.mjs",
+        "git_blob_sha1": "1ab22b2e35b907814e7ace20f5f1821b35ddb157"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-promotion-routes.mjs",
+        "git_blob_sha1": "74ab5dbfc7bfbd77f08b225922a3b5d742252f05"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs",
+        "git_blob_sha1": "f06fe57f0b1496ef17c92a00cc27cf9aada3fcb9"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs",
+        "git_blob_sha1": "d559219aeb199c706fb0d03530d71b4dc13528ec"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/emergency-routes.mjs",
+        "git_blob_sha1": "fe51384293f5b92fffa939dfbf46a1f00f11d21f"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capability-health.mjs",
+        "git_blob_sha1": "d26cc771bef57de820e07083be402e540ea00df7"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs",
+        "git_blob_sha1": "1d16afe3bbe74e51d499115c0b92288cfe5a25b6"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/postgres-command-wake.mjs",
+        "git_blob_sha1": "db0532fd7d59d12701a7284683bfd5cfaf2481ec"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/result-receipt-readback.mjs",
+        "git_blob_sha1": "efc9e0f2ebb62532fb6d6582ed88376e798bf7fe"
+      }
+    ]
+  },
+  "installed_client": {
+    "source_head": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+    "package_version": "0.7.0-dev.37493000001.1",
+    "installer_sha256": "81504d8e433704629d350eecadd29ffb30883f0250310bc8d69399840b09884a"
+  },
+  "stable": {
+    "slug": "a2-browser-native-supervisor-v1",
+    "deployed_version": 14,
+    "ezbr_sha256": "5adc4cf2b05246c76a909697b4e613260296c93dc3d73ee9ed5f7bdec653731a"
+  },
+  "rollback": {
+    "slug": "a2-browser-native-supervisor-v12-rollback-snapshot",
+    "function_id": "3c1c014e-89f3-4297-801b-557ad71b7ec6",
+    "deployed_version": 1,
+    "ezbr_sha256": "5adc4cf2b05246c76a909697b4e613260296c93dc3d73ee9ed5f7bdec653731a",
+    "source_binding_mode": "PINNED_MIXED_IMPORT_CLOSURE_EXACT_ARTIFACT_CLONE",
+    "observed_import_pins": [
+      "ec20a79e45a686aa840853b7ee404b6816730bd0",
+      "6e859e109fe50e242859af5d2bd715d15afccb92",
+      "00d7c814213a97ac17504d5c598818bd99c588cb"
+    ],
+    "exact_stable_artifact_digest_match": true,
+    "rollback_snapshot_deployed": true
+  },
+  "required_capabilities": [
+    "createDbInspectRoutes",
+    "createEmergencyCommandRoutes",
+    "createPostgresCommandWakeHub",
+    "createRsiResultReceiptReadback",
+    "createCognitiveDeltaRoutes",
+    "h205f22_a2_browser_supervisor_issue_native_v1",
+    "/v1/commands/issue-tool"
+  ],
+  "live_qualification": {
+    "signed_health_required": true,
+    "installed_electron_signed_e2e_required": true,
+    "bounded_durable_lease_readback_required": true,
+    "result_receipt_readback_required": true,
+    "rollback_drill_required": true,
+    "postgres_notify_accelerator_required": false,
+    "completed": false
+  },
+  "evidence_policy": {
+    "mode": "EXTERNAL_SHA_BOUND",
+    "build_once_test_exact_artifact": true,
+    "live_evidence_must_bind_exact_backend_and_client_subjects": true,
+    "source_manifest_mutation_after_live_evidence": false,
+    "authority_effect": false
+  },
+  "live_evidence": {
+    "completed": false,
+    "recorded_in_source_manifest": false,
+    "rollback_drill_completed": false,
+    "authority_effect": false
+  },
+  "promotion_authorized": false,
+  "automatic_promotion_allowed": false,
+  "authority_effect": false
+}

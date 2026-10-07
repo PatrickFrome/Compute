@@ -1,0 +1,54 @@
+[
+  {
+    "pr": 1122,
+    "source_files_equal_in_candidate": [],
+    "source_files_differ_in_candidate": [
+      "apps/metaengine-browser/src/client-goal-journal.mjs",
+      "apps/metaengine-browser/src/client-useful-work-proof.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-restart.test.mjs"
+    ]
+  },
+  {
+    "pr": 1123,
+    "source_files_equal_in_candidate": [],
+    "source_files_differ_in_candidate": [
+      "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+      "apps/metaengine-browser/src/client-goal-journal.mjs",
+      "apps/metaengine-browser/src/client-useful-work-proof.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-projection.test.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-restart.test.mjs"
+    ]
+  },
+  {
+    "pr": 1125,
+    "source_files_equal_in_candidate": [],
+    "source_files_differ_in_candidate": [
+      "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+      "apps/metaengine-browser/src/client-goal-journal.mjs",
+      "apps/metaengine-browser/src/client-useful-work-proof.mjs",
+      "apps/metaengine-browser/src/native-supervisor-client-base.mjs",
+      "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs",
+      "apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-projection.test.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-restart.test.mjs"
+    ]
+  },
+  {
+    "pr": 1126,
+    "source_files_equal_in_candidate": [],
+    "source_files_differ_in_candidate": [
+      "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+      "apps/metaengine-browser/package-lock.json",
+      "apps/metaengine-browser/package.json",
+      "apps/metaengine-browser/src/client-goal-journal.mjs",
+      "apps/metaengine-browser/src/client-useful-work-proof.mjs",
+      "apps/metaengine-browser/src/native-supervisor-client-base.mjs",
+      "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs",
+      "apps/metaengine-browser/supabase/client-v1-c5-useful-work-readback-v1.sql",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-projection.test.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-readback-contract.test.mjs",
+      "apps/metaengine-browser/test/client-v1-c5-useful-work-restart.test.mjs"
+    ]
+  }
+]
