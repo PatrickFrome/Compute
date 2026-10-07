@@ -26,7 +26,7 @@ The new Edge candidate projects durable fallback metadata and selects the actual
 
 Installed Client remains immutable source be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c / version 0.7.0-dev.37493000001.1. It had permanently disabled cognitive transport at startup after HTTP501.
 
-New candidate version 0.7.0-dev.37590000001.1:
+New candidate version 0.7.0-dev.37591000001.1:
 - event-triggered route recovery after a bounded cooldown; no new timer or command scheduler;
 - exact durable ACK still advances a cursor, but absence of Realtime retains full-state fallback;
 - typed objective compiler preserves READ_ONLY before RPC;
@@ -78,3 +78,9 @@ Original local full-suite logs are in blocker-repair-20261007. Local exec-server
 The new recovery workflow runs the entire Browser test directory on Ubuntu24 and Windows2025 and SQL fixtures on real PostgreSQL17.11. Existing package workflow is expected to build the fresh version and produce immutable artifact provenance. Inspect all jobs at the exact head; fix failures before declaring readiness.
 
 Keep Guardian HOLD truthful. Native installation/UAC and service-account access cannot be simulated by unit tests. Require fresh installed source/version/installer evidence, successful transport bootstrap, RUNNING→COMPLETED with durable result, independent verifier evidence, and controlled restart/rollback before claiming autonomous continuous development. Sandbox execution C1/C2 still needs an actual admitted worker and isolated executable artifact environment.
+
+## First exact-head CI readback
+
+Head ee91bc3efb755bac6dc9ff34908b532ecc9d95b4: PostgreSQL17.11 SQL SUCCESS; Browser Linux 4264 PASS, one stale reservation mismatch, four platform skips; Windows 4268 PASS, the same reservation mismatch, zero skips. Real native IPC failures from the restricted environment did not reproduce. Corrected active reservation and advanced version again rather than reuse a source-changing candidate identity. New exact-head CI remains required.
+
+Historical R83 v14 source-equivalence workflow failed its explicit full Edge/migration equality check against its older source pin. The old manifest is preserved. This new recovery subject is not qualified as the historical unchanged canary, and that failure is not counted as successful qualification.
