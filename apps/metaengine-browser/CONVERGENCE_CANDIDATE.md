@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37591000001.1`.
+Reserved package identity is `0.7.0-dev.37592000001.1`.
+
+This successor normalizes a rich-text AX newline only with exact DOM placeholder proof and reports zero inserted characters when clear verification prevented insertion. The prior 37591000001.1 identity was consumed by earlier CI.
 
 Current live mechanics recovery successor (2026-10-07):
 - Previous installed package identity is `0.7.0-dev.37493000001.1`.

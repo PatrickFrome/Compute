@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { hasExactEmptyRichTextPlaceholder } from './rich-text-empty-placeholder.mjs';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 import { openCdpOutcomeLatch } from './browser-cdp-outcome-latch.mjs';
 import {
@@ -375,7 +376,16 @@ async function readBackendNodeValue(dbg, backendNodeId) {
   const tree = await dbg.sendCommand('Accessibility.getFullAXTree').catch(() => null);
   const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
   const node = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId || 0) === Number(backendNodeId));
-  return node ? axRawValue(node, 'value') : null;
+  const value = node ? axRawValue(node, 'value') : null;
+  if (value === '\n' && await exactEmptyRichTextPlaceholder(dbg, backendNodeId)) return '';
+  return value;
+}
+
+async function exactEmptyRichTextPlaceholder(dbg, backendNodeId) {
+  try {
+    const result = await dbg.sendCommand('DOM.describeNode', { backendNodeId, depth: 3 });
+    return hasExactEmptyRichTextPlaceholder(result?.node);
+  } catch { return false; }
 }
 
 async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}) {
@@ -554,6 +564,16 @@ export async function captureSemanticFrame(webContents) {
         }
       : null;
     const semanticTargets = uniqueSemanticTargets(nodes, { semanticRefContext });
+    // Preserve literal text/newlines; normalize only the proven rich-editor placeholder.
+    await Promise.all(semanticTargets.map(async (row) => {
+      if (TEXT_INPUT_ROLES.has(row.role) && row.value_length === 1
+        && row.value_sha256 === sha256('\n')
+        && await exactEmptyRichTextPlaceholder(dbg, row.backend_node_id)) {
+        row.value_length = 0;
+        row.value_sha256 = null;
+        row.empty_placeholder_proven = true;
+      }
+    }));
     const focusedTargets = semanticTargets.filter((row) => row.focused === true);
     return {
       schema: 'metaengine.native-browser.perception.v1',
@@ -1010,6 +1030,7 @@ export async function executeSemanticCommand(webContents, command) {
       const replaceRequested = command?.payload?.replace_existing !== false;
       const verifyReplace = replaceRequested && ['GLM_ZAI', 'CHATGPT'].includes(semanticPlatform);
       let typeReadback = null;
+      let insertedChars = 0;
       let replaceVerified = !verifyReplace;
       let replaceGesture = null;
       if (replaceRequested) {
@@ -1114,6 +1135,7 @@ export async function executeSemanticCommand(webContents, command) {
               assertCurrentEffectRuntime(webContents, dbg, effectBinding);
               await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
               await dbg.sendCommand('Input.insertText', { text });
+              insertedChars = text.length;
               valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
               replaceVerified = valueAfter === text;
             }
@@ -1133,11 +1155,13 @@ export async function executeSemanticCommand(webContents, command) {
           liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);
           await dbg.sendCommand('Input.insertText', { text });
+              insertedChars = text.length;
         }
       } else {
         liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.insertText', { text });
+              insertedChars = text.length;
       }
       if (submitAfterType && verifyReplace && !replaceVerified) {
         throw new Error('native_semantic_type_replace_unverified');
@@ -1146,7 +1170,7 @@ export async function executeSemanticCommand(webContents, command) {
         return {
           action,
           target,
-          inserted_chars: text.length,
+          inserted_chars: insertedChars,
           replace_existing: replaceRequested,
           replace_verified: verifyReplace ? replaceVerified : null,
           replace_gesture: verifyReplace ? replaceGesture : null,
@@ -1184,7 +1208,7 @@ export async function executeSemanticCommand(webContents, command) {
           return {
             action,
             target,
-            inserted_chars: text.length,
+            inserted_chars: insertedChars,
             replace_existing: replaceRequested,
             replace_verified: verifyReplace ? replaceVerified : null,
             replace_gesture: verifyReplace ? replaceGesture : null,

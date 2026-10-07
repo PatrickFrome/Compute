@@ -43,9 +43,13 @@ jobs:
       - name: Exercise all Browser mechanics including real local IPC
         working-directory: apps/metaengine-browser
         run: node --test --test-concurrency=4 test/*.test.mjs
-      - name: Prove clean source tree
+      - name: Inspect generated artifacts and prove tracked source unchanged
         shell: bash
-        run: test -z "$(git status --porcelain=v1 --untracked-files=all)"
+        run: |
+          git status --porcelain=v1 --untracked-files=all
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard -- apps/metaengine-browser/src apps/metaengine-browser/native apps/metaengine-browser/scripts)"
+
   cognitive-postgres:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
