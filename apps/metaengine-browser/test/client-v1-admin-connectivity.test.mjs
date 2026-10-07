@@ -123,7 +123,7 @@ test('top bar no longer treats legacy Socket.IO feed as product connection autho
   assert.match(topbar, /data-admin-ready/);
   assert.match(topbar, /data-work-state/);
   assert.match(topbar, /data-work-reason/);
-  assert.match(topbar, /work\?\.execution_ready === true/);
+  assert.match(topbar, /work\?\.continuous_autonomy_ready === true/);
   assert.doesNotMatch(topbar, /useEffect|setInterval|Socket\.IO/);
 });
 

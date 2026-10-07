@@ -24,4 +24,7 @@ export function useClientRuntimeStatus() {
   return useSyncExternalStore(resource.subscribe, resource.getSnapshot, () => INITIAL_CLIENT_RUNTIME);
 }
 
-export const refreshClientRuntimeStatus = resource.refresh;
+export async function refreshClientRuntimeStatus() {
+  await resource.refresh();
+  return resource.getSnapshot();
+}

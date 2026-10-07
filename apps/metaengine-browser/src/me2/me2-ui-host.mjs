@@ -23,8 +23,8 @@ import { dirname, join } from 'node:path';
 
 export const ME2_UI_HOST_SCHEMA = 'metaengine.browser.me2.ui-host.v1';
 
-const UI_HEALTH_URL = process.env.ME2_UI_HEALTH_URL || 'http://127.0.0.1:3000/';
 const UI_PORT = Number(process.env.ME2_UI_PORT || 3000);
+const UI_HEALTH_URL = process.env.ME2_UI_HEALTH_URL || `http://127.0.0.1:${UI_PORT}/`;
 const MAX_RESTARTS = Number(process.env.ME2_UI_MAX_RESTARTS || 6);
 const HEALTH_INTERVAL_MS = Number(process.env.ME2_UI_HEALTH_INTERVAL_MS || 20000);
 const BACKOFF_BASE_MS = 2000;

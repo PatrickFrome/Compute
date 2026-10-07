@@ -12,6 +12,7 @@ function input() {
     isCurrentBinding: () => true,
     connection: { local_runtime_ready: true, admin_ready: true, cloud_control_state: 'CONNECTED' },
     snapshot: {
+      supervisor_mode: 'CONTROL', armed: true,
       started_at: '2026-09-30T23:00:00Z', last_heartbeat_at: new Date(now - 1_000).toISOString(),
       continuous_service: { actuation_allowed: true, runtime_control: {
         state: 'OPEN', authoritative: true, generation_floor: 28,
@@ -21,7 +22,7 @@ function input() {
       control_fast_lane: { maintenance_in_flight: true, scheduler: { pressure_band: 'NORMAL' } },
     },
     fleet: { counts: { ACTIVE: 1, BOUND_UNVERIFIED: 0 }, agents: [{
-      lifecycle_state: 'ACTIVE', tab_id: 'tab_agent', target_id: 'target_agent', generation_epoch: 28,
+      agent_id: 'agent_impl', role: 'IMPLEMENTER', lifecycle_state: 'ACTIVE', tab_id: 'tab_agent', target_id: 'target_agent', generation_epoch: 28,
       transport_proof: { tab_id: 'tab_agent', target_id: 'target_agent', generation_epoch: 28,
         agent_surface_sha256: 'a'.repeat(64), conversation_url_sha256: 'b'.repeat(64) },
     }] },
@@ -38,6 +39,9 @@ test('positive readiness requires current admission and exact Agent origin; comp
 });
 
 for (const [name, mutate, reason, state] of [
+  ['unarmed control', x => { x.snapshot.armed = false; }, 'NATIVE_CONTROL_NOT_ARMED', 'BLOCKED'],
+  ['observe-only control', x => { x.snapshot.supervisor_mode = 'OBSERVE'; }, 'NATIVE_CONTROL_NOT_ARMED', 'BLOCKED'],
+  ['actuation held', x => { x.snapshot.continuous_service.actuation_allowed = false; }, 'NATIVE_CONTROL_NOT_ARMED', 'BLOCKED'],
   ['connection alone', x => { x.snapshot.continuous_service.runtime_control.authoritative = false; }, 'WORKSPACE_AUTHORITY_UNAVAILABLE', 'BLOCKED'],
   ['missing heartbeat', x => { x.snapshot.last_heartbeat_at = null; }, 'HEARTBEAT_READBACK_STALE', 'BLOCKED'],
   ['stale heartbeat', x => { x.snapshot.last_heartbeat_at = new Date(now - 30_001).toISOString(); }, 'HEARTBEAT_READBACK_STALE', 'BLOCKED'],
@@ -64,6 +68,41 @@ for (const [name, mutate, reason, state] of [
     assert.equal(result.execution_ready, false);
   });
 }
+
+test('chat admission and READY preparation never assert an executable coding or continuous autonomy capability', () => {
+  const value = input();
+  value.development = { schema: 'metaengine.development-plane.snapshot.v1', state: 'READY',
+    sandbox_backend_bound: false, verification_sandbox_execution: false,
+    verification_sandbox_prepare_only: true, candidate_capsules_executable: false };
+  const result = projectClientWorkReadiness(value);
+  assert.equal(result.capabilities.chat_dispatch.ready, true);
+  assert.equal(result.capabilities.coding_execution.ready, false);
+  assert.equal(result.continuous_autonomy_ready, false);
+  assert.equal(result.verified_self_improvement, false);
+});
+
+test('coding requires every executable backend fact; continuity requires fresh exact Guardian proofs', () => {
+  const value = input();
+  value.development = { schema: 'metaengine.development-plane.snapshot.v1', state: 'READY',
+    sandbox_backend_bound: true, verification_sandbox_execution: true,
+    verification_sandbox_prepare_only: false, candidate_capsules_executable: true };
+  value.guardian = { schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1', state: 'READY', ready: true,
+    stale: false, observed_at: new Date(now - 1000).toISOString(), expires_at: new Date(now + 9000).toISOString(),
+    guardian_service_ready: true, owner_binding_proven: true, device_binding_proven: true, authority_effect: false };
+  assert.equal(projectClientWorkReadiness(value).continuous_autonomy_ready, false);
+  value.fleet.agents.push({ ...value.fleet.agents[0], agent_id: 'agent_critic', role: 'CRITIC', tab_id: 'tab_critic', target_id: 'target_critic',
+    transport_proof: { ...value.fleet.agents[0].transport_proof, tab_id: 'tab_critic', target_id: 'target_critic' } });
+  assert.equal(projectClientWorkReadiness(value).continuous_autonomy_ready, true);
+  for (const key of ['sandbox_backend_bound', 'verification_sandbox_execution', 'candidate_capsules_executable']) {
+    const copy = { ...value, development: { ...value.development, [key]: false } };
+    assert.equal(projectClientWorkReadiness(copy).capabilities.coding_execution.ready, false);
+  }
+  value.guardian.expires_at = new Date(now).toISOString();
+  assert.equal(projectClientWorkReadiness(value).continuous_autonomy_ready, false);
+  value.guardian.expires_at = new Date(now + 9000).toISOString();
+  value.guardian.owner_binding_proven = false;
+  assert.equal(projectClientWorkReadiness(value).continuous_autonomy_ready, false);
+});
 
 test('native telemetry receives actual lifecycle, DevOS and accepted-heartbeat data', () => {
   const value = input();

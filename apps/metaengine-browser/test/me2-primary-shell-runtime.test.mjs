@@ -439,7 +439,9 @@ test('R97 persistent chrome avoids duplicate task, mirror and attention telemetr
   assert.doesNotMatch(me2Topbar, /useKpis|kpi\.ready|kpi\.running|kpi\.fail/);
   assert.doesNotMatch(me2Topbar, /data-testid="attention-button"/);
   assert.doesNotMatch(me2Shell, /<StatusBar\s*\/>/);
-  assert.match(me2Statusbar, /connected \? "runtime live" : snap \? "runtime cached" : "runtime offline"/);
+  assert.match(me2Statusbar, /useClientRuntimeStatus/);
+  assert.match(me2Statusbar, /work\?\.proven_agent_count/);
+  assert.doesNotMatch(me2Statusbar, /runtime live|stats\.agentsIdle/);
 });
 
 test('R85 Task Sheet schedules scroll after commit, never during render', () => {

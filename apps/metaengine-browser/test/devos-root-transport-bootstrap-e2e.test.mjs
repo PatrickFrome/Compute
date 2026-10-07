@@ -32,13 +32,14 @@ function proof(stage, url, agentSurfaceSha256 = null) {
   };
 }
 
-test('root worker is bootstrapped under promotion lease before task lease and revalidates canonical proof before mark-running', async () => {
+async function runRootBootstrap({ preflight = null, failType = false } = {}) {
   const calls = [];
   let selected = 'tab_supervisor';
   let captureCount = 0;
   let markRunningObservedCanonicalProof = false;
   let submitCount = 0;
   let typedDraft = '';
+  let barrierCount = 0;
   const state = {
     tabs: [
       { tab_id: 'tab_supervisor', url: 'https://chatgpt.com/c/supervisor-1234', selected: true },
@@ -71,6 +72,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       assert.deepEqual({ agent_id, tab_id, target_id, generation_epoch }, {
         agent_id: AGENT_ID, tab_id: TAB_ID, target_id: TARGET_ID, generation_epoch: 7,
       });
+      barrierCount += 1;
       const agent = state.fleet.agents[0];
       agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
       agent.ambiguous_reason = 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
@@ -172,6 +174,11 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       composer.value_sha256 = typedDraft ? sha256(typedDraft) : null;
       if (typedDraft) out.semantic_targets.push({ role:'button',name:'Send prompt',backend_node_id:99,semantic_ref:{ schema:'metaengine.native-browser.semantic-ref.v1',semantic_ref_id:'semref_' + '9'.repeat(64) } });
     }
+    if (preflight && captureCount >= 2 && submitCount === 0) {
+      if (preflight === 'missing') out.semantic_targets = [];
+      if (preflight === 'dirty' && composer) { composer.value_length = 7; composer.value_sha256 = sha256('my text'); }
+      if (preflight === 'busy') out.semantic_targets.push({ role: 'button', name: 'Stop generating', semantic_ref: semanticRef('3') });
+    }
     return out;
   };
 
@@ -187,6 +194,8 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       return frame({ generating: surfaceState === 'CONVERSATION' && submitCount >= 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(barrierCount, 1, 'the durable fence must exist before any draft effect');
+      if (failType) throw new Error('injected_unknown_type_outcome');
       assert.equal(command.payload.submit_after_type, false);
       assert.equal(command.payload.replace_existing, true);
       typedDraft = command.payload.text;
@@ -263,6 +272,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       authority_effect: false,
     });
     if (path === '/v1/devos/cycle') {
+      if (preflight || failType) return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 0, by_role: {} }, lease: null, running: [], automatic_retry_allowed: false, authority_effect: false });
       assert.equal(state.fleet.agents[0].lifecycle_state, 'ACTIVE', 'scheduler must see only canonical conversation ACTIVE');
       assert.equal(state.fleet.agents[0].transport_proof.transport_stage, undefined);
       assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
@@ -297,6 +307,16 @@ test('root worker is bootstrapped under promotion lease before task lease and re
 
   try {
     const snapshot = await cycle.cycle();
+    if (preflight || failType) {
+      assert.equal(barrierCount, failType ? 1 : 0);
+      assert.equal(snapshot.fleet_transport_promotion.write_ahead_barrier_persisted, failType);
+      assert.equal(state.fleet.agents[0].lifecycle_state, failType ? 'PROVISIONING_AMBIGUOUS' : 'BOUND_UNVERIFIED');
+      assert.equal(calls.filter((row) => row[1] === 'SEMANTIC_TYPE').length, failType ? 1 : 0);
+      assert.equal(calls.filter((row) => row[1] === 'TYPED_CLICK').length, 0);
+      assert.equal(snapshot.fleet_transport_promotion.release_state, 'CONFIRMED');
+      assert.equal(snapshot.fleet_transport_promotion.automatic_retry_allowed, false);
+      return;
+    }
     assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE_AGENT_SESSION');
     assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'CONVERSATION');
     assert.equal(snapshot.fleet_transport_promotion.write_ahead_barrier_persisted, true);
@@ -318,4 +338,10 @@ test('root worker is bootstrapped under promotion lease before task lease and re
   } finally {
     clearFleetRuntime(fleetRuntime);
   }
-});
+}
+
+test('root worker is bootstrapped under promotion lease before task lease and revalidates canonical proof before mark-running', () => runRootBootstrap());
+for (const preflight of ['dirty', 'missing', 'busy']) {
+  test(`root ${preflight} preflight retains BOUND_UNVERIFIED without a draft, Send or ambiguity fence`, () => runRootBootstrap({ preflight }));
+}
+test('a thrown first draft write remains durably ambiguous and is never replayed', () => runRootBootstrap({ failType: true }));

@@ -42,8 +42,9 @@ function fixtureWorkReadiness() {
   return projectClientWorkReadiness({
     connection: { local_runtime_ready: true, admin_ready: true, cloud_control_state: 'CONNECTED' },
     snapshot: {
+      supervisor_mode: 'CONTROL', armed: true,
       last_heartbeat_at: new Date().toISOString(),
-      continuous_service: { runtime_control: { state: paused ? 'CLOSED' : 'OPEN', authoritative: true,
+      continuous_service: { actuation_allowed: !paused, runtime_control: { state: paused ? 'CLOSED' : 'OPEN', authoritative: true,
         generation_floor: 28, refill_enabled: !paused, supervisor_admission_enabled: !paused,
         continuous_service_allowed: !paused, authority_effect: false } },
       lifecycle: { keepalive: { state: runtimeFixtureMode === 'RECOVERY' ? 'ROLLOVER_AMBIGUOUS' : 'WAITING',
@@ -352,7 +353,8 @@ async function metrics(contents) {
       native_work_readiness: document.querySelector('[data-testid="native-work-readiness"]')?.textContent || null,
       work_badge: (() => { const badge = document.querySelector('[data-testid="admin-connection-badge"]');
         return badge ? { text: badge.textContent, admin_ready: badge.getAttribute('data-admin-ready'),
-          state: badge.getAttribute('data-work-state'), reason: badge.getAttribute('data-work-reason') } : null; })(),
+          state: badge.getAttribute('data-work-state'), reason: badge.getAttribute('data-work-reason'),
+          autonomous_ready_color: badge.classList.contains('text-emerald-300') } : null; })(),
       legacy_runtime_panels_present: Boolean(document.querySelector('#sys-mech, #sys-contract, [data-testid="me-matrix"]')),
       horizontal_overflow: document.documentElement.scrollWidth > innerWidth,
       body_background: getComputedStyle(document.body).backgroundColor,
@@ -482,7 +484,8 @@ async function main() {
     runtimeFixtureMode = 'READY';
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'READY'");
     const readyCapture = await capture(shellView, 'ui1-readiness-ready-1440x960');
-    if (readyCapture.metrics.work_badge?.text !== 'Ready for work') throw new Error('ui1_positive_readiness_label_missing');
+    if (readyCapture.metrics.work_badge?.text !== 'Chats ready') throw new Error('ui1_positive_chat_readiness_label_missing');
+    if (readyCapture.metrics.work_badge?.autonomous_ready_color === true) throw new Error('ui1_chat_readiness_masquerades_as_autonomous_coding');
     evidence.captures.push(readyCapture);
     evidence.positive_readiness_verified = true;
 
@@ -584,7 +587,7 @@ async function main() {
     runtimeFixtureMode = 'UNAVAILABLE';
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'UNAVAILABLE' && document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-admin-ready') === 'false' && document.querySelector('[data-testid=native-work-readiness]')?.textContent.includes('Status unavailable')");
     const unavailableCapture = await capture(shellView, 'ui1-settings-runtime-unavailable-1440x960');
-    if (unavailableCapture.metrics.native_work_readiness?.includes('Ready for work') || unavailableCapture.metrics.native_work_readiness?.includes('profile 28') || unavailableCapture.metrics.legacy_runtime_panels_present) throw new Error('ui1_stale_native_readiness_retained');
+    if (unavailableCapture.metrics.native_work_readiness?.includes('Chats ready') || unavailableCapture.metrics.native_work_readiness?.includes('profile 28') || unavailableCapture.metrics.legacy_runtime_panels_present) throw new Error('ui1_stale_native_readiness_retained');
     evidence.captures.push(unavailableCapture);
     evidence.stale_readiness_cleared = true;
     evidence.settings_loading_bounded = true;
