@@ -1,0 +1,460 @@
+{
+  "schema": "metaengine.preinstall-critical-audit-qualification.v1",
+  "observed_at": "2026-10-07T16:38:21.848683Z",
+  "source_head": "627bad932a001bafe0d7510259e7b20865a8b2e6",
+  "source_tree": "858fd1f94287513485ff4208268e1ce3edf91f6d",
+  "package_version": "0.7.0-dev.37628000001.1",
+  "pull_request": "https://github.com/PatrickFrome/Compute/pull/1141",
+  "installer": {
+    "name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.37628000001.1-x64.exe",
+    "sha256": "89715ddc1f0fe3ed130baa59c95300cf72f680f633a7e9deac2b75d10449ede0",
+    "artifact_id": 11483977725,
+    "artifact_url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403557/artifacts/11483977725",
+    "artifact_zip_sha256": "ad8cb02657498cacaa29de3deb55cd72c14955e68d3cc7b4d3d87b94db52f011",
+    "signed": false,
+    "published": false,
+    "promotion_authorized": false
+  },
+  "evidence_archive": {
+    "artifact_id": 11484352803,
+    "sha256": "adfb42dac127be6588a194bc2f6c86d53d345b1bebb1228197044a3fec94345b",
+    "downloaded_archive_hash_verified": true
+  },
+  "ci": [
+    {
+      "name": "METAENGINE Browser Host Resilience Login Start V1",
+      "run_id": 37625403684,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403684"
+    },
+    {
+      "name": "Browser DevOS Root Transport Bootstrap V1",
+      "run_id": 37625403560,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403560"
+    },
+    {
+      "name": "Client V1 LIVE Development Candidate Audit",
+      "run_id": 37625403592,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403592"
+    },
+    {
+      "name": "Browser Typed Workspaces V1",
+      "run_id": 37625403495,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403495"
+    },
+    {
+      "name": "Browser Watchdog Heartbeat Coalescing V2",
+      "run_id": 37625403769,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403769"
+    },
+    {
+      "name": "Browser Meta Orchestrator V1",
+      "run_id": 37625403483,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403483"
+    },
+    {
+      "name": "Client V1 C4 Goal Contracts",
+      "run_id": 37625403653,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403653"
+    },
+    {
+      "name": "R84 Desktop Convergence V1",
+      "run_id": 37625403828,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403828"
+    },
+    {
+      "name": "Browser Workspace Reincarnation V1",
+      "run_id": 37625403542,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403542"
+    },
+    {
+      "name": "METAENGINE Browser Shell V1",
+      "run_id": 37625403623,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403623"
+    },
+    {
+      "name": "Client Live Mechanics Recovery",
+      "run_id": 37625403511,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403511"
+    },
+    {
+      "name": "METAENGINE Browser Critical Audit V1",
+      "run_id": 37625403486,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403486"
+    },
+    {
+      "name": "METAENGINE Browser Final Runtime Activation V1",
+      "run_id": 37625403601,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403601"
+    },
+    {
+      "name": "Browser Windows Installed Chat Qualification",
+      "run_id": 37625403585,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403585"
+    },
+    {
+      "name": "METAENGINE Browser Windows Autonomous Soak V1",
+      "run_id": 37625403514,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403514"
+    },
+    {
+      "name": "Browser Windows Package Smoke",
+      "run_id": 37625403557,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403557"
+    },
+    {
+      "name": "METAENGINE Browser Shell-First Dirty Profile V1",
+      "run_id": 37625403637,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403637"
+    },
+    {
+      "name": "METAENGINE Browser Self Update E2E",
+      "run_id": 37625403618,
+      "conclusion": "success",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/37625403618"
+    }
+  ],
+  "tests": {
+    "windows": {
+      "total": 4351,
+      "passed": 4351,
+      "failed": 0,
+      "skipped": 0
+    },
+    "linux": {
+      "total": 4351,
+      "passed": 4347,
+      "failed": 0,
+      "skipped": 4,
+      "skip_reason": "Windows-only cases"
+    },
+    "advisory_rsi": {
+      "passed": 6,
+      "failed": 0
+    },
+    "postgresql_17_11": {
+      "cognitive": 36,
+      "native_readonly_issuer": 14,
+      "native_bootstrap": 27,
+      "passed": true
+    },
+    "ui_typecheck": true,
+    "modified_ui_boundary_lint": true,
+    "locked_ui_production_build": true
+  },
+  "package_proof": {
+    "installer_sha256": "89715ddc1f0fe3ed130baa59c95300cf72f680f633a7e9deac2b75d10449ede0",
+    "composed_sbom_total_component_count": 292,
+    "me2_ui_bun_lock_sha256": "d97fe60db1a6a1325e13fec8815c0d34c4c2d1db48ba85d09338031445eee422",
+    "second_instance_activation_verified": true,
+    "npm_version": "11.19.0",
+    "installer_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.37628000001.1-x64.exe",
+    "guardian_native_built_by_before_pack": true,
+    "dependency_resolution_sha256": "4c2bc6a3d685a473230c13a5afdb514d350c61e8f2ce45c960165497bb9ea9b7",
+    "normal_ui_boot_verified": true,
+    "me2_ui_bun_lock_verified": true,
+    "package_lock_sha256": "5cc345ebe05bcc459fbdb45890679112131edffb626fd3781516eff11d5a98d2",
+    "signed": false,
+    "version_probe_verified": true,
+    "npm_sbom_semantic_inventory_sha256": "63d6015957083868ebb57a98e6b91cdef453c5ce70f79682af72d851ab19b96b",
+    "package_version": "0.7.0-dev.37628000001.1",
+    "build_identity_sha256": "6fde6a8182647f6dcf995c5cec10a2e3d73fe027bb166e3bbf173ebd66265b67",
+    "blockmap_name": "METAENGINE-Browser-Test-Setup-0.7.0-dev.37628000001.1-x64.exe.blockmap",
+    "runtime_import_observability_verified": true,
+    "composed_sbom_first_party_component_count": 5,
+    "npm_sbom_component_count": 286,
+    "published": false,
+    "npm_sbom_raw_sha256": "16abaf7a0de47e98e0a474d4799ea5d50b3837fba3739c357f1e1d0f166db865",
+    "package_lock_verified": true,
+    "source_head": "627bad932a001bafe0d7510259e7b20865a8b2e6",
+    "bun_version": "1.3.3",
+    "guardian_native_staging_required": true,
+    "promotion_authorized": false,
+    "composed_sbom_raw_sha256": "830c5416a1fb4c7f77b844cf09ff228cc7d706b5bb59f60d221113ea013c38a9",
+    "schema": "metaengine.browser.windows-package-smoke.v3",
+    "authority_effect": false,
+    "composed_sbom_semantic_inventory_sha256": "2bc25e07ebd535da0e4382ee571a7c7116368e7213649a12a7f9cc7a9b96eef8",
+    "composed_sbom_composition_aggregate": "incomplete",
+    "me2_ui_installed_verified": true,
+    "me2_ui_installed_size_bytes": 38795691,
+    "me2_daemon_installed_verified": true,
+    "me2_daemon_version": "0.57.1",
+    "me2_daemon_executable_sha256": "f0f37f20096bc09045d2740f2c2dbbe7bbc43c250a0aaf76228b6eb25b2df339",
+    "guardian_native_manifest_sha256": "2d4429cc6ae62ebfa080b9778fe519a949056b2ba279bbe8fd8e8cb454c1be5d",
+    "guardian_native_staging_verified": true,
+    "user_data_path": "C:\\Users\\runneradmin\\AppData\\Roaming\\@metaengine/browser-shell",
+    "user_data_path_source": "PACKAGED_PROFILE_PROBE",
+    "me2_browser_integration_verified": true,
+    "me2_browser_integration_boot_mode": "primary_me2_shell",
+    "me2_primary_shell_visible_verified": true,
+    "me2_r97_dom_contract_verified": true,
+    "legacy_shell_used_on_normal_startup": false,
+    "startup_grace_survival_seconds": 190,
+    "same_primary_pid_across_startup_grace": true,
+    "same_sentinel_token_across_startup_grace": true,
+    "parent_progress_advanced_across_startup_grace": true,
+    "sentinel_relaunch_attempted": false,
+    "startup_journal_schema": "metaengine.browser.startup-journal.v1",
+    "normal_ui_stable_event_sequence": 15,
+    "second_instance_activation_event_sequence": 16,
+    "second_instance_launch_id": "e08767e0-248e-48b8-8eb1-4f09bf60d25e",
+    "client_c5_installed_restart_continuity_verified": true,
+    "client_c5_installed_restart_stale_binding_rejected": true,
+    "client_c5_installed_restart_live_useful_work_proven": false
+  },
+  "build_identity_proof": {
+    "schema": "metaengine.browser.packaged-build-identity-proof.v2",
+    "source_head": "627bad932a001bafe0d7510259e7b20865a8b2e6",
+    "package_version": "0.7.0-dev.37628000001.1",
+    "build_identity_sha256": "6fde6a8182647f6dcf995c5cec10a2e3d73fe027bb166e3bbf173ebd66265b67",
+    "dependency_resolution_sha256": "4c2bc6a3d685a473230c13a5afdb514d350c61e8f2ce45c960165497bb9ea9b7",
+    "package_lock_sha256": "5cc345ebe05bcc459fbdb45890679112131edffb626fd3781516eff11d5a98d2",
+    "npm_version": "11.19.0",
+    "bun_version": "1.3.3",
+    "me2_ui_bun_lock_sha256": "d97fe60db1a6a1325e13fec8815c0d34c4c2d1db48ba85d09338031445eee422",
+    "builder_config_sha256": "1138d5aca70b76e03a50c87eb1a8659b3fa3d2f5c28d2aaca761ddf8bb89ef5d",
+    "repository": "PatrickFrome/Compute",
+    "repository_id": "1341371143",
+    "workflow": "browser-windows-package-smoke.yml",
+    "run_id": "37625403557",
+    "run_attempt": 1,
+    "platform": "win32",
+    "arch": "x64",
+    "electron_builder_version": "26.15.7",
+    "node_version": "v24.21.0",
+    "authority_effect": false
+  },
+  "visual": {
+    "schema": "metaengine.browser.r97-visual-evidence.v1",
+    "source_head": "627bad932a001bafe0d7510259e7b20865a8b2e6",
+    "ok": true,
+    "capture_count": 11,
+    "all_capture_hashes_verified": true,
+    "manually_reviewed": [
+      "ui1-readiness-ready-1440x960",
+      "ui1-settings-runtime-paused-1440x960",
+      "ui1-agent-picker-900x720"
+    ],
+    "captures": [
+      {
+        "name": "r97-chat-fleet-main-1440x960",
+        "sha256": "af68e804b8aa8a82b6d9caefdb24d5f03d33322b78894699ad4e69bfca449d64",
+        "bytes": 30510,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Recovery required",
+          "admin_ready": "true",
+          "state": "BLOCKED",
+          "reason": "SUPERVISOR_RECOVERY_REQUIRED",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "ui1-readiness-ready-1440x960",
+        "sha256": "67ea50c1f9cf943050eef7e34e4a2b25e707b6f7cb85fa21b7c994d9ff703885",
+        "bytes": 30136,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Chats ready",
+          "admin_ready": "true",
+          "state": "READY",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "r97-client-goal-admitted-1440x960",
+        "sha256": "001d5cfa84817733dec720c1e29533a529dc8a7a68568fbd7ab666ab594f0bcd",
+        "bytes": 31182,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Chats ready",
+          "admin_ready": "true",
+          "state": "READY",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "ui1-task-status-1440x960",
+        "sha256": "93d112aebda456fb63eb2723272536dce62574ca85c46d91ffd957da36a71a14",
+        "bytes": 44844,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Chats ready",
+          "admin_ready": "true",
+          "state": "READY",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "r97-chat-fleet-agent-selected-1440x960",
+        "sha256": "530b3b407199aff8d836d56ac7a53fa368913b6399546a5bf11450a3d95f503f",
+        "bytes": 31531,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Chats ready",
+          "admin_ready": "true",
+          "state": "READY",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "ui1-selection-rejected-1440x960",
+        "sha256": "98a0f7dd9e1670eed69992646d48841b652e2e3ddd1a2065a00175771d3474d1",
+        "bytes": 34255,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Chats ready",
+          "admin_ready": "true",
+          "state": "READY",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "r97-settings-advanced-surface-1440x960",
+        "sha256": "2aa5306f1a8fe3838b524241b403e7714e16e3205a49a1efe9077eb84633804a",
+        "bytes": 32042,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Chats ready",
+          "admin_ready": "true",
+          "state": "READY",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "ui1-settings-runtime-paused-1440x960",
+        "sha256": "824fa5a69a835dc17be22a53d662b1288c3b45530d4d8a8035600b52292d4a1a",
+        "bytes": 55596,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Execution paused",
+          "admin_ready": "true",
+          "state": "PAUSED",
+          "reason": "WORKSPACE_EXECUTION_PAUSED",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "ui1-settings-runtime-unavailable-1440x960",
+        "sha256": "fca07ea1f22410775176dd711ef379306a7e63c72fd1445fcf622977325db8c3",
+        "bytes": 51640,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Status unavailable",
+          "admin_ready": "false",
+          "state": "UNAVAILABLE",
+          "reason": "",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "ui1-agent-picker-900x720",
+        "sha256": "f0be7506ab2a7a9bc11700932d7c2d4ec5828126bfc215b13eef1c0bc26d8e53",
+        "bytes": 28818,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Recovery required",
+          "admin_ready": "true",
+          "state": "BLOCKED",
+          "reason": "SUPERVISOR_RECOVERY_REQUIRED",
+          "autonomous_ready_color": false
+        }
+      },
+      {
+        "name": "r97-command-search-1440x960",
+        "sha256": "e11b7f7f0af416dd02ea0858a352d217166899125259d53712dae2df0703ae3e",
+        "bytes": 51012,
+        "horizontal_overflow": false,
+        "work_badge": {
+          "text": "Recovery required",
+          "admin_ready": "true",
+          "state": "BLOCKED",
+          "reason": "SUPERVISOR_RECOVERY_REQUIRED",
+          "autonomous_ready_color": false
+        }
+      }
+    ]
+  },
+  "restart_proof": {
+    "stale_execution_proof_retained": true,
+    "stale_process_pid": 7212,
+    "automatic_retry_allowed": false,
+    "valid_journal_sha256": "d5e2ce5c726231a2f0871530aaeb265b1f81c398423e84a9cd898f373f379e8c",
+    "journal_probe_read_only": true,
+    "useful_work_evidence_class": "SYNTHETIC",
+    "canonical_c2_promotion_authorized": false,
+    "network_started": false,
+    "submit_effect_attempted": false,
+    "journal_path": "C:\\Users\\runneradmin\\AppData\\Roaming\\@metaengine\\browser-shell\\metaengine-client-goal-journal-v1.json",
+    "first_process_pid": 5148,
+    "package_version": "0.7.0-dev.37628000001.1",
+    "client_c5_useful_work_verified": false,
+    "schema": "metaengine.client-v1.c5-installed-restart-continuity.v1",
+    "useful_work_proof_restored": true,
+    "native_supervisor_started": false,
+    "source_head": "627bad932a001bafe0d7510259e7b20865a8b2e6",
+    "browser_runtime_started": false,
+    "user_data_path": "C:\\Users\\runneradmin\\AppData\\Roaming\\@metaengine/browser-shell",
+    "stale_useful_work_binding_rejected": true,
+    "authority_effect": false,
+    "stale_journal_sha256": "ef3846d735e0980a2f022ddd4cedc3d3f3651179090650102974663bc8e0f8d6",
+    "execution_proof_restored": true,
+    "second_process_pid": 8792,
+    "distinct_restart_processes": true
+  },
+  "live_observation": {
+    "observed_at": "2026-10-07T16:38:21.848683Z",
+    "last_seen_at": "2026-10-07T16:01:12.260471Z",
+    "heartbeat_fresh": false,
+    "last_observed_version": "0.7.0-dev.37493000001.1",
+    "last_observed_source": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+    "active_agents": 0,
+    "ambiguous_agents": 4,
+    "mesh_members": 0,
+    "last_guardian_state": "HOLD",
+    "last_guardian_reason": "GUARDIAN_OWNER_OBSERVATION_FAILED",
+    "last_guardian_observed_at": "2026-10-07T15:58:24.666Z",
+    "last_guardian_observation_expired": true,
+    "sandbox_backend_bound": false,
+    "verification_sandbox_execution": false,
+    "verification_sandbox_prepare_only": true
+  },
+  "remaining_gates": [
+    "Exact user-machine install/readback",
+    "Current Guardian owner/device/service proof",
+    "Positive exact ambiguous-session reconciliation without replay",
+    "Canonical C1 real isolated Linux worker",
+    "Canonical C2 real repository edit/build/tests/verified artifact with independent review",
+    "Live restart/budget/lost-ack/role-drift acceptance",
+    "Matched-baseline held-out improvement evaluation and rollback before activation"
+  ],
+  "user_machine_qualified": false,
+  "canonical_c1_verified": false,
+  "canonical_c2_verified": false,
+  "continuous_autonomy_proven": false,
+  "verified_self_improvement": false,
+  "authority_effect": false,
+  "qualification_record_only": true
+}
