@@ -13,6 +13,12 @@ test('heartbeat perception projection is bounded while retaining exact target an
   }));
   const source = {
     tabs: [{ tab_id: 'tab_a', url: 'https://chat.z.ai/c/a' }],
+    tab_census: { raw: 'c'.repeat(80_000) },
+    downloads: { rows: Array(100).fill({ payload: 'd'.repeat(4000) }) },
+    tab_network: { rows: Array(100).fill({ payload: 'n'.repeat(4000) }) },
+    owner_safety_gates: { raw: 'o'.repeat(80_000) },
+    computer_authority: { raw: 'a'.repeat(80_000) },
+    loopback_rpc: { raw: 'l'.repeat(80_000) },
     perception: {
       schema: 'metaengine.native-browser.perception.v1',
       tab_id: 'tab_a',
@@ -25,6 +31,13 @@ test('heartbeat perception projection is bounded while retaining exact target an
   };
   const projected = nativeSupervisorTransportState(source);
   assert.equal(projected.tabs.length, 1);
+  assert.equal(projected.tab_census, undefined);
+  assert.equal(projected.downloads, undefined);
+  assert.equal(projected.tab_network, undefined);
+  assert.equal(projected.owner_safety_gates, undefined);
+  assert.equal(projected.computer_authority, undefined);
+  assert.equal(projected.loopback_rpc, undefined);
+  assert.equal(projected.heartbeat_local_only_fields_embedded, false);
   assert.equal(projected.perception.semantic_target_count, 200);
   assert.equal(projected.perception.semantic_targets.length, 24);
   assert.equal(projected.perception.semantic_targets_truncated, true);
