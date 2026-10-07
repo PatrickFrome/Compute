@@ -8,6 +8,7 @@ on:
       - 'supabase/migrations/*cognitive*'
       - 'supabase/migrations/*readonly_issuer_parity*'
       - 'supabase/migrations/*claim_class_preservation*'
+      - 'supabase/migrations/*native_device_transport_bootstrap*'
       - '.github/workflows/client-live-mechanics-recovery-v1.yml'
   workflow_dispatch:
 permissions:
@@ -24,7 +25,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
       - name: Prove exact source head
         shell: bash
@@ -105,3 +106,6 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_READONLY_ISSUER_FIXTURE_V1.sql
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007061807_native_supervisor_readonly_issuer_parity_v1.sql
           psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_READONLY_ISSUER_QUALIFICATION_V1.sql
+          psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_DEVICE_BOOTSTRAP_FIXTURE_V1.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007101028_native_device_transport_bootstrap_v1.sql
+          psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_DEVICE_BOOTSTRAP_QUALIFICATION_V1.sql

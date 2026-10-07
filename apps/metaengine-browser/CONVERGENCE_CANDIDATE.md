@@ -1,6 +1,10 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37593000001.1`.
+Reserved package identity is `0.7.0-dev.37597000002.1`.
+
+The bootstrap predecessor `d71307ad6d4340b11d9be16942766166a2f90e5d` consumed `0.7.0-dev.37597000001.1`. Its PostgreSQL 17.11 qualification passed, but Browser recovery jobs failed before tests because depth-2 checkout omitted immutable regression subject `45d73aa24b852d9de93e9af9c62808e65136c33b`. Full history now makes that pinned comparison independent of descendant depth; no old installer identity is rebuilt.
+
+This successor adds a device-bound bootstrap lease for the approved installed client when supervisor mesh is empty. It shares the existing client actuation lane, validates active ADMIN device grants and fresh exact fleet bindings, and never creates a synthetic mesh member. Prior source `8300ff4249546ec254fddc9866157a257ff0ab54` / `0.7.0-dev.37593000001.1` passed its recovery mechanics and Windows package workflows; that identity is consumed. Physical qualification of this successor remains required.
 
 This successor prevents advisory worker captures from starving the scheduler-owned DevOS turn. Advisory capture has one independent in-flight read slot; an admitted DevOS turn excludes a new maintenance pass, while remote command admission and authoritative task fences remain first. Regression CI replays the prior immutable wiring and requires the observed starvation assertion before qualifying this successor.
 

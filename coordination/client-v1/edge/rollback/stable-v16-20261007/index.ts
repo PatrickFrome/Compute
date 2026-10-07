@@ -1,6 +1,5 @@
 import { createGuardianEnrollmentRedemptionForwarder } from 'https://raw.githubusercontent.com/PatrickFrome/Compute/ec20a79e45a686aa840853b7ee404b6816730bd0/coordination/client-v1/edge/guardian-enrollment-redemption-forwarder.mjs';
 import { createClientScopedQualificationForwarder } from './client-scoped-qualification-forwarder.mjs';
-import { createNativeDeviceBootstrapRoutes } from './native-device-bootstrap-routes.mjs';
 import postgres from 'npm:postgres@3.4.7';
 import { createDevosSupervisorRoutes, readDevosRuntimeControl, unavailableDevosRuntimeControl } from 'https://raw.githubusercontent.com/PatrickFrome/Compute/6e859e109fe50e242859af5d2bd715d15afccb92/apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs';
 import { createDbInspectRoutes } from 'https://raw.githubusercontent.com/PatrickFrome/Compute/00d7c814213a97ac17504d5c598818bd99c588cb/apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/db-inspect-routes.mjs';
@@ -271,7 +270,6 @@ async function status(){const {states,commands}=await statusRows();return{schema
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl,metaRoadmapId:'metaengine-client-v1'});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
-const nativeBootstrapRoutes=createNativeDeviceBootstrapRoutes({rpc,workspaceId:WORKSPACE_ID,clientId:'2a60d6a2-c7c2-4dcc-b4c9-99de768443c9',createPromotionRoutes:createDevosPromotionRoutes});
 const metaRoutes=createMetaSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID});
 const cognitiveRoutes=createCognitiveDeltaRoutes({rpc,workspaceId:WORKSPACE_ID,json});
 const dbInspectRoutes=createDbInspectRoutes({sql,json});
@@ -309,7 +307,7 @@ Deno.serve(async(req:Request)=>{
   const path=routedServicePath(url.pathname);
   const guardianRedemptionResponse=await guardianTicketRedemption(req,path);
   if(guardianRedemptionResponse)return guardianRedemptionResponse;
-  const qualifiedResponse=path==='/v1/devos/promotion-lease'?null:await qualifiedInstalledClient(req,path);
+  const qualifiedResponse=await qualifiedInstalledClient(req,path);
   if(qualifiedResponse)return qualifiedResponse;
   if (
     (url.pathname.includes('/health') && path!=='/health')
@@ -327,7 +325,6 @@ Deno.serve(async(req:Request)=>{
     const canonicalPath=`${SERVICE_MARKER}${path}`;
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
-    const bootstrap=await nativeBootstrapRoutes({req,path,body,clientId:identity.id,identity});if(bootstrap)return bootstrap;
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
     const emergency=await emergencyRoutes({req,path,body,clientId:identity.id});if(emergency)return emergency;
     const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
