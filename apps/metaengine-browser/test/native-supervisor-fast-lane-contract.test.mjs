@@ -78,7 +78,7 @@ test('Edge realtime wait is race-free, uses a non-secret URL key, and delivery n
     "wake_reason:'SUBSCRIBED_RECHECK'",
     'const wake=await subscription.wake',
     'transport_delivery_is_authority:false',
-    "row.realtime_process_plane=boundedObject(s.realtime_process_plane,262144)",
+    "row.realtime_process_plane=boundedObject(boundedRealtimeProcessPlane(s.realtime_process_plane),32768)",
     "row.control_latency=boundedObject(s.control_latency,32768)",
     "Deno.env.get('SUPABASE_PUBLISHABLE_KEY')",
     "Deno.env.get('SUPABASE_ANON_KEY')",

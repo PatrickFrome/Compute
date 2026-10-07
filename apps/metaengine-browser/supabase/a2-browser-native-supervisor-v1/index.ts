@@ -178,6 +178,84 @@ function clientId(req:Request){return String(req.headers.get('x-a2-chat-bridge-c
 function modeOf(v:any){const m=String(v||'OFF').toUpperCase();return ['OFF','MONITOR','CONTROL'].includes(m)?m:'OFF'}
 function parseJson(text:string){try{return text?JSON.parse(text):{}}catch{return null}}
 function boundedObject(value:any,maxBytes:number){if(!value||typeof value!=='object'||Array.isArray(value))return null;try{const text=JSON.stringify(value);if(text.length>maxBytes)return null;return JSON.parse(text)}catch{return null}}
+function boundedCount(value:any){const n=Number(value);return Number.isSafeInteger(n)&&n>=0?n:0}
+function boundedText(value:any,max=160){const out=String(value??'').trim();return out?out.slice(0,max):null}
+function boundedRealtimeProcessPlane(value:any){
+  const s=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+  const semantic=s.semantic_plane&&typeof s.semantic_plane==='object'&&!Array.isArray(s.semantic_plane)?s.semantic_plane:{};
+  const brain=s.browser_brain&&typeof s.browser_brain==='object'&&!Array.isArray(s.browser_brain)?s.browser_brain:{};
+  const collaboration=brain.collaboration_fabric&&typeof brain.collaboration_fabric==='object'&&!Array.isArray(brain.collaboration_fabric)?brain.collaboration_fabric:{};
+  const workbench=collaboration.workbench&&typeof collaboration.workbench==='object'&&!Array.isArray(collaboration.workbench)?collaboration.workbench:{};
+  const cognitive=s.cognitive_delta_bus&&typeof s.cognitive_delta_bus==='object'&&!Array.isArray(s.cognitive_delta_bus)?s.cognitive_delta_bus:{};
+  return{
+    schema:boundedText(s.schema,96)||'metaengine.browser.realtime-process-plane.v1',
+    running:s.running===true,
+    sequence:boundedCount(s.sequence),
+    observed_at:boundedText(s.observed_at,64),
+    sample_interval_ms:boundedCount(s.sample_interval_ms),
+    process_count:boundedCount(s.process_count),
+    web_contents_count:boundedCount(s.web_contents_count),
+    exact_tab_bound_web_contents_count:boundedCount(s.exact_tab_bound_web_contents_count),
+    unbound_live_web_contents_count:boundedCount(s.unbound_live_web_contents_count),
+    semantic_root_target_capacity:boundedCount(s.semantic_root_target_capacity),
+    chromium_subtarget_count:boundedCount(s.chromium_subtarget_count),
+    chromium_attached_subtarget_count:boundedCount(s.chromium_attached_subtarget_count),
+    semantic_plane:{
+      schema:boundedText(semantic.schema,96)||'metaengine.browser.realtime-semantic-plane.v1',
+      running:semantic.running===true,
+      state:boundedText(semantic.state,96),
+      sequence:boundedCount(semantic.sequence),
+      observed_at:boundedText(semantic.observed_at,64),
+      target_count:boundedCount(semantic.target_count),
+      ready_count:boundedCount(semantic.ready_count),
+      dirty_count:boundedCount(semantic.dirty_count),
+      target_capacity:boundedCount(semantic.target_capacity),
+      chromium_subtarget_count:boundedCount(semantic.chromium_subtarget_count),
+      chromium_attached_subtarget_count:boundedCount(semantic.chromium_attached_subtarget_count),
+      persistent_cdp_sessions:semantic.persistent_cdp_sessions===true,
+      attach_per_command:semantic.attach_per_command===true,
+      control_authority:false,command_leasing:false,authority_effect:false,
+    },
+    browser_brain:{
+      schema:boundedText(brain.schema,96),
+      edge_count:boundedCount(brain.edge_count),
+      reconcile_count:boundedCount(brain.reconcile_count),
+      continuous_autonomous_work:brain.continuous_autonomous_work===true,
+      durable_collaboration_memory:brain.durable_collaboration_memory===true,
+      episodic_collaboration_memory:brain.episodic_collaboration_memory===true,
+      routing_v2:brain.routing_v2===true,
+      adaptive_sparse_fanout:brain.adaptive_sparse_fanout===true,
+      collaboration_fabric:{
+        schema:boundedText(collaboration.schema,96),
+        task_count:boundedCount(collaboration.task_count),
+        agent_count:boundedCount(collaboration.agent_count),
+        workbench:{
+          schema:boundedText(workbench.schema,96),
+          context_count:boundedCount(workbench.context_count),
+          visible_context_count:boundedCount(workbench.visible_context_count),
+          total_task_count:boundedCount(workbench.total_task_count),
+          visible_task_count:boundedCount(workbench.visible_task_count),
+          contexts_truncated:workbench.contexts_truncated===true,
+          bounded:workbench.bounded===true,
+          projection_is_authority:false,scheduler_authority:false,execution_authority:false,command_leasing:false,authority_effect:false,
+        },
+        authority_effect:false,
+      },
+      scheduler_authority:false,execution_authority:false,authority_effect:false,
+    },
+    cognitive_delta_bus:{
+      schema:boundedText(cognitive.schema,96),
+      state:boundedText(cognitive.state,96),
+      sequence:boundedCount(cognitive.sequence??cognitive.latest_sequence),
+      oldest_sequence:boundedCount(cognitive.oldest_sequence),
+      dropped_events:boundedCount(cognitive.dropped_events),
+      control_authority:false,command_leasing:false,authority_effect:false,
+    },
+    processes_embedded:false,web_contents_embedded:false,events_embedded:false,collaboration_history_embedded:false,
+    full_snapshot_retained_locally:true,full_snapshot_available_by_command:true,transport_projection:true,
+    projection_is_authority:false,control_authority:false,command_leasing:false,authority_effect:false,
+  }
+}
 function boundedMesh(value:any){if(!value||typeof value!=='object'||Array.isArray(value)||String(value.schema||'')!=='metaengine.supervisor-mesh-runtime.v1'||value.authority_effect===true)return null;const mesh=value.mesh;if(!mesh||typeof mesh!=='object'||Array.isArray(mesh)||String(mesh.schema||'')!=='metaengine.supervisor-mesh.state.v1'||!Array.isArray(mesh.supervisors)||mesh.supervisors.length>16)return null;const supervisors=[];for(const row of mesh.supervisors){const supervisor_id=String(row?.supervisor_id||'').toLowerCase();const conversation_url_sha256=String(row?.conversation_url_sha256||'').toLowerCase();const status=String(row?.status||'LOST').toUpperCase();const tab_id=row?.tab_id==null?null:String(row.tab_id).slice(0,160);if(!/^sup_[a-f0-9]{24}$/.test(supervisor_id)||!/^[a-f0-9]{64}$/.test(conversation_url_sha256)||supervisor_id!==`sup_${conversation_url_sha256.slice(0,24)}`||!['ACTIVE','PAUSED','LOST','AMBIGUOUS_INCARNATION'].includes(status)||row?.authority_effect===true)return null;supervisors.push({supervisor_id,conversation_url_sha256,status,tab_id:status==='LOST'||status==='AMBIGUOUS_INCARNATION'?null:tab_id,selected:row?.selected===true,authority_effect:false})}const preferred=mesh.preferred_supervisor_id==null?null:String(mesh.preferred_supervisor_id).toLowerCase();if(preferred!==null&&!/^sup_[a-f0-9]{24}$/.test(preferred))return null;return{schema:'metaengine.supervisor-mesh-runtime.v1',running:value.running===true,last_reconcile_at:value.last_reconcile_at||null,last_error:String(value.last_error||'').slice(0,500)||null,authority_effect:false,mesh:{schema:'metaengine.supervisor-mesh.state.v1',version:String(mesh.version||'').slice(0,32),mesh_epoch:Math.max(1,Number(mesh.mesh_epoch)||1),preferred_supervisor_id:preferred,supervisors,authority_effect:false}}}
 async function verifyEnrollment(req:Request,bodyText:string,body:any){const id=clientId(req);if(!id)return{ok:false,reason:'CLIENT_ID_REQUIRED'};let jwk;try{jwk=canonicalJwk(body?.public_jwk)}catch{return{ok:false,reason:'JWK_INVALID'}};if(String(body?.profile||'')!==PROFILE)return{ok:false,reason:'PROFILE_INVALID'};const fingerprint=await sha256(JSON.stringify(jwk));if(String(body?.key_fingerprint_sha256||'')!==fingerprint)return{ok:false,reason:'FINGERPRINT_MISMATCH'};const timestamp=String(req.headers.get('x-metaengine-enroll-timestamp')||'');const nonce=String(req.headers.get('x-metaengine-enroll-nonce')||'');const signature=String(req.headers.get('x-metaengine-enroll-signature')||'');const parsed=Date.parse(timestamp);if(!Number.isFinite(parsed)||Math.abs(Date.now()-parsed)>120000)return{ok:false,reason:'TIMESTAMP_OUT_OF_WINDOW'};if(!/^[A-Za-z0-9_-]{16,96}$/.test(nonce)||!/^[A-Za-z0-9_-]{80,128}$/.test(signature))return{ok:false,reason:'ENROLL_HEADERS_INVALID'};const material=['METAENGINE_NATIVE_ENROLLMENT_V1',`client_id:${id}`,`profile:${PROFILE}`,`fingerprint:${fingerprint}`,`timestamp:${timestamp}`,`nonce:${nonce}`,`body_sha256:${await sha256(bodyText)}`].join('\n');if(!await verifyP256(jwk,material,signature))return{ok:false,reason:'INVALID_SIGNATURE'};return{ok:true,id,jwk,fingerprint}}
 function enrollmentMetadata(body:any){
@@ -321,7 +399,7 @@ async function redeemGuardianEnrollmentTicket(body:any){
 // scalar fields are always emitted (they are mandatory for every writer), while
 // plane keys are emitted only when the writer actually included them.
 const PLANE_KEYS=['tabs','development_plane','compute','fleet','perception','supervisor_lifecycle','supervisor_mesh','self_update','host_resilience','realtime_process_plane','control_latency'] as const;
-function boundedState(value:any){const s=value&&typeof value==='object'?value:{};const tabs=Array.isArray(s.tabs)?s.tabs.slice(0,64).map((t:any)=>({tab_id:String(t?.tab_id||'').slice(0,80),url:String(t?.url||'').slice(0,1200),title:String(t?.title||'').slice(0,240),kind:String(t?.kind||'').slice(0,40),selected:t?.selected===true})):[];const row:any={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(s.shell_version||'').slice(0,32),supervisor_mode:modeOf(s.supervisor_mode),armed:s.armed===true,operator_mode:String(s.operator_mode||'CONTROL').slice(0,32),active_tab:s.active_tab&&typeof s.active_tab==='object'?s.active_tab:null,realtime_observation_push:s.realtime_observation_push===true,last_error:String(s.last_error||'').slice(0,500)||null,started_at:s.started_at||null,heartbeat_at:new Date().toISOString()};if('tabs'in s)row.tabs=tabs;if('development_plane'in s)row.development_plane=boundedObject(s.development_plane,32768);if('compute'in s)row.compute=boundedObject(s.compute,32768);if('fleet'in s)row.fleet=boundedObject(s.fleet,65536);if('perception'in s)row.perception=boundedObject(s.perception,32768);if('supervisor_lifecycle'in s)row.supervisor_lifecycle=boundedObject(s.supervisor_lifecycle,32768);if('supervisor_mesh'in s)row.supervisor_mesh=boundedMesh(s.supervisor_mesh);if('self_update'in s)row.self_update=boundedObject(s.self_update,32768);if('host_resilience'in s)row.host_resilience=boundedObject(s.host_resilience,32768);if('realtime_process_plane'in s)row.realtime_process_plane=boundedObject(s.realtime_process_plane,262144);if('control_latency'in s)row.control_latency=boundedObject(s.control_latency,32768);if('rsi'in s)row.rsi=boundedObject(s.rsi,16384);if('rsi_outcome_river'in s)row.rsi_outcome_river=boundedObject(s.rsi_outcome_river,16384);if('rsi_operator_steering'in s)row.rsi_operator_steering=boundedObject(s.rsi_operator_steering,16384);return row}
+function boundedState(value:any){const s=value&&typeof value==='object'?value:{};const tabs=Array.isArray(s.tabs)?s.tabs.slice(0,64).map((t:any)=>({tab_id:String(t?.tab_id||'').slice(0,80),url:String(t?.url||'').slice(0,1200),title:String(t?.title||'').slice(0,240),kind:String(t?.kind||'').slice(0,40),selected:t?.selected===true})):[];const row:any={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',shell_version:String(s.shell_version||'').slice(0,32),supervisor_mode:modeOf(s.supervisor_mode),armed:s.armed===true,operator_mode:String(s.operator_mode||'CONTROL').slice(0,32),active_tab:s.active_tab&&typeof s.active_tab==='object'?s.active_tab:null,realtime_observation_push:s.realtime_observation_push===true,last_error:String(s.last_error||'').slice(0,500)||null,started_at:s.started_at||null,heartbeat_at:new Date().toISOString()};if('tabs'in s)row.tabs=tabs;if('development_plane'in s)row.development_plane=boundedObject(s.development_plane,32768);if('compute'in s)row.compute=boundedObject(s.compute,32768);if('fleet'in s)row.fleet=boundedObject(s.fleet,65536);if('perception'in s)row.perception=boundedObject(s.perception,32768);if('supervisor_lifecycle'in s)row.supervisor_lifecycle=boundedObject(s.supervisor_lifecycle,32768);if('supervisor_mesh'in s)row.supervisor_mesh=boundedMesh(s.supervisor_mesh);if('self_update'in s)row.self_update=boundedObject(s.self_update,32768);if('host_resilience'in s)row.host_resilience=boundedObject(s.host_resilience,32768);if('realtime_process_plane'in s)row.realtime_process_plane=boundedObject(boundedRealtimeProcessPlane(s.realtime_process_plane),32768);if('control_latency'in s)row.control_latency=boundedObject(s.control_latency,32768);if('rsi'in s)row.rsi=boundedObject(s.rsi,16384);if('rsi_outcome_river'in s)row.rsi_outcome_river=boundedObject(s.rsi_outcome_river,16384);if('rsi_operator_steering'in s)row.rsi_operator_steering=boundedObject(s.rsi_operator_steering,16384);return row}
 async function upsertState(req:Request,body:any,identity:any){
   const id=clientId(req);
   const s=boundedState(body?.state);

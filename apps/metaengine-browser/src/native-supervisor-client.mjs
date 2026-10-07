@@ -52,6 +52,134 @@ function boundedInt(value, fallback, min, max) {
   return Math.max(min, Math.min(max, parsed));
 }
 
+
+function transportCount(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function transportText(value, max = 160) {
+  const out = String(value ?? '').trim();
+  return out ? out.slice(0, max) : null;
+}
+
+/**
+ * Durable /v1/state is a hot control-plane row, not a process telemetry archive.
+ *
+ * Full BrowserRealtimeProcessPlane snapshots include process/webContents arrays,
+ * semantic event history and the Brain collaboration journal/workbench. Live
+ * readback on 2026-10-07 showed 199-264 KiB signed state writes and a tuple-lock
+ * convoy on the single supervisor-state row. Keep only scalar health/readiness
+ * metadata on the heartbeat. Full process/semantic/Brain state remains local and
+ * is still available through the existing READ_ONLY PROCESS_* / SEMANTIC_*
+ * command surfaces.
+ */
+export function projectRealtimeProcessPlaneForTransport(snapshot = {}) {
+  const source = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : {};
+  const semantic = source.semantic_plane && typeof source.semantic_plane === 'object' && !Array.isArray(source.semantic_plane)
+    ? source.semantic_plane
+    : {};
+  const brain = source.browser_brain && typeof source.browser_brain === 'object' && !Array.isArray(source.browser_brain)
+    ? source.browser_brain
+    : {};
+  const collaboration = brain.collaboration_fabric && typeof brain.collaboration_fabric === 'object' && !Array.isArray(brain.collaboration_fabric)
+    ? brain.collaboration_fabric
+    : {};
+  const workbench = collaboration.workbench && typeof collaboration.workbench === 'object' && !Array.isArray(collaboration.workbench)
+    ? collaboration.workbench
+    : {};
+  const cognitive = source.cognitive_delta_bus && typeof source.cognitive_delta_bus === 'object' && !Array.isArray(source.cognitive_delta_bus)
+    ? source.cognitive_delta_bus
+    : {};
+
+  return Object.freeze({
+    schema: transportText(source.schema, 96) || 'metaengine.browser.realtime-process-plane.v1',
+    running: source.running === true,
+    sequence: transportCount(source.sequence),
+    observed_at: transportText(source.observed_at, 64),
+    sample_interval_ms: transportCount(source.sample_interval_ms),
+    process_count: transportCount(source.process_count),
+    web_contents_count: transportCount(source.web_contents_count),
+    exact_tab_bound_web_contents_count: transportCount(source.exact_tab_bound_web_contents_count),
+    unbound_live_web_contents_count: transportCount(source.unbound_live_web_contents_count),
+    semantic_root_target_capacity: transportCount(source.semantic_root_target_capacity),
+    chromium_subtarget_count: transportCount(source.chromium_subtarget_count),
+    chromium_attached_subtarget_count: transportCount(source.chromium_attached_subtarget_count),
+    semantic_plane: Object.freeze({
+      schema: transportText(semantic.schema, 96) || 'metaengine.browser.realtime-semantic-plane.v1',
+      running: semantic.running === true,
+      state: transportText(semantic.state, 96),
+      sequence: transportCount(semantic.sequence),
+      observed_at: transportText(semantic.observed_at, 64),
+      target_count: transportCount(semantic.target_count),
+      ready_count: transportCount(semantic.ready_count),
+      dirty_count: transportCount(semantic.dirty_count),
+      target_capacity: transportCount(semantic.target_capacity),
+      chromium_subtarget_count: transportCount(semantic.chromium_subtarget_count),
+      chromium_attached_subtarget_count: transportCount(semantic.chromium_attached_subtarget_count),
+      persistent_cdp_sessions: semantic.persistent_cdp_sessions === true,
+      attach_per_command: semantic.attach_per_command === true,
+      control_authority: false,
+      command_leasing: false,
+      authority_effect: false,
+    }),
+    browser_brain: Object.freeze({
+      schema: transportText(brain.schema, 96),
+      edge_count: transportCount(brain.edge_count),
+      reconcile_count: transportCount(brain.reconcile_count),
+      continuous_autonomous_work: brain.continuous_autonomous_work === true,
+      durable_collaboration_memory: brain.durable_collaboration_memory === true,
+      episodic_collaboration_memory: brain.episodic_collaboration_memory === true,
+      routing_v2: brain.routing_v2 === true,
+      adaptive_sparse_fanout: brain.adaptive_sparse_fanout === true,
+      collaboration_fabric: Object.freeze({
+        schema: transportText(collaboration.schema, 96),
+        task_count: transportCount(collaboration.task_count),
+        agent_count: transportCount(collaboration.agent_count),
+        workbench: Object.freeze({
+          schema: transportText(workbench.schema, 96),
+          context_count: transportCount(workbench.context_count),
+          visible_context_count: transportCount(workbench.visible_context_count),
+          total_task_count: transportCount(workbench.total_task_count),
+          visible_task_count: transportCount(workbench.visible_task_count),
+          contexts_truncated: workbench.contexts_truncated === true,
+          bounded: workbench.bounded === true,
+          projection_is_authority: false,
+          scheduler_authority: false,
+          execution_authority: false,
+          command_leasing: false,
+          authority_effect: false,
+        }),
+        authority_effect: false,
+      }),
+      scheduler_authority: false,
+      execution_authority: false,
+      authority_effect: false,
+    }),
+    cognitive_delta_bus: Object.freeze({
+      schema: transportText(cognitive.schema, 96),
+      state: transportText(cognitive.state, 96),
+      sequence: transportCount(cognitive.sequence ?? cognitive.latest_sequence),
+      oldest_sequence: transportCount(cognitive.oldest_sequence),
+      dropped_events: transportCount(cognitive.dropped_events),
+      control_authority: false,
+      command_leasing: false,
+      authority_effect: false,
+    }),
+    processes_embedded: false,
+    web_contents_embedded: false,
+    events_embedded: false,
+    collaboration_history_embedded: false,
+    full_snapshot_retained_locally: true,
+    full_snapshot_available_by_command: true,
+    transport_projection: true,
+    projection_is_authority: false,
+    control_authority: false,
+    command_leasing: false,
+    authority_effect: false,
+  });
+}
+
 export async function sendNativeSupervisorCognitiveBatch({ identity, fetchImpl, batch } = {}) {
   if (!identity || typeof identity.ensure !== 'function' || typeof identity.deviceHeaders !== 'function') {
     throw new Error('native_supervisor_cognitive_identity_required');
@@ -395,7 +523,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           return {
             ...sourceState,
             host_resilience: mergeHostResilienceGuardianObservation(hostResilienceSnapshot(), sourceState),
-            realtime_process_plane: realtimeProcessPlane?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY'),
+            realtime_process_plane: projectRealtimeProcessPlaneForTransport(
+              realtimeProcessPlane?.snapshot({ eventLimit: 0 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY'),
+            ),
             control_latency: controlLatencySnapshot(),
           };
         }
@@ -578,7 +708,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       const devosRuntime = buildDevosRuntimeObservability(base || {});
       const lifecycleStatus = base?.lifecycle ? buildSupervisorLifecycleStatusSnapshot(base.lifecycle) : null;
       const supervisorLifecycle = mergeDevosRuntimeObservability(lifecycleStatus, devosRuntime);
-      const processPlane = this.#processPlaneRef?.()?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
+      const processPlane = projectRealtimeProcessPlaneForTransport(
+        this.#processPlaneRef?.()?.snapshot({ eventLimit: 0 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY'),
+      );
       const payload = {
         state: {
           ...sourceState,

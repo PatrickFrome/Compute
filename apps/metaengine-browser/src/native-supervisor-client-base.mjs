@@ -164,13 +164,60 @@ function perceptionTransportProjection(frame) {
   });
 }
 
+function boundedTransportObject(value, maxBytes) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    const text = JSON.stringify(value);
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function transportTab(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  return Object.freeze({
+    tab_id: clipped(row.tab_id, 80),
+    url: clipped(row.url, 1200),
+    title: clipped(row.title, 240),
+    kind: clipped(row.kind, 40),
+    selected: row.selected === true,
+  });
+}
+
 export function nativeSupervisorTransportState(state = {}) {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return {};
+  const tabs = Array.isArray(state.tabs)
+    ? state.tabs.slice(0, 64).map(transportTab).filter(Boolean)
+    : [];
+  const activeTab = transportTab(state.active_tab);
+
+  // Exact client-side mirror of the Edge durable state contract. Local shell,
+  // download, network, Computer Authority, loopback RPC and other diagnostics
+  // stay available through local snapshot/read-only commands, but are never
+  // signed and resent on every heartbeat only to be discarded by boundedState().
   return {
-    ...state,
+    tabs,
+    active_tab: activeTab,
+    development_plane: boundedTransportObject(state.development_plane, 32 * 1024),
+    compute: boundedTransportObject(state.compute, 32 * 1024),
+    fleet: boundedTransportObject(state.fleet, 64 * 1024),
     perception: perceptionTransportProjection(state.perception),
+    supervisor_lifecycle: boundedTransportObject(state.supervisor_lifecycle, 32 * 1024),
+    supervisor_mesh: boundedTransportObject(state.supervisor_mesh, 32 * 1024),
+    self_update: boundedTransportObject(state.self_update, 32 * 1024),
+    host_resilience: boundedTransportObject(state.host_resilience, 32 * 1024),
+    realtime_process_plane: boundedTransportObject(state.realtime_process_plane, 32 * 1024),
+    control_latency: boundedTransportObject(state.control_latency, 32 * 1024),
+    rsi: boundedTransportObject(state.rsi, 16 * 1024),
+    rsi_outcome_river: boundedTransportObject(state.rsi_outcome_river, 16 * 1024),
+    rsi_operator_steering: boundedTransportObject(state.rsi_operator_steering, 16 * 1024),
+    realtime_observation_push: state.realtime_observation_push === true,
     heartbeat_payload_bounded: true,
     heartbeat_full_perception_embedded: false,
+    heartbeat_local_only_fields_embedded: false,
+    authority_effect: false,
   };
 }
 
