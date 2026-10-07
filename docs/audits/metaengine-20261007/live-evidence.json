@@ -1,0 +1,569 @@
+{
+  "observed_at": "2026-10-07T04:40:33.421Z",
+  "project_ref": "jhriwwsryeqsvvvufkok",
+  "client_id": "2a60d6a2-c7c2-4dcc-b4c9-99de768443c9",
+  "installed": {
+    "version": "0.7.0-dev.37493000001.1",
+    "source_head": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+    "started_at": "2026-10-07T04:15:53.429Z",
+    "device_id": "719bf900-9e50-44ec-b13b-fd998f33ba95",
+    "access_tier": "ADMIN",
+    "admin_epoch": 1,
+    "fleet_counts": {
+      "LOST": 0,
+      "ACTIVE": 0,
+      "RETIRED": 0,
+      "REGISTERED": 0,
+      "PROVISIONING": 0,
+      "BOUND_UNVERIFIED": 4,
+      "PROVISIONING_AMBIGUOUS": 0
+    },
+    "guardian": {
+      "error": "guardian_update_actuator_pipe_error:connect EPERM \\\\.\\pipe\\METAENGINEBrowserGuardianUpdateV1",
+      "ready": false,
+      "stale": true,
+      "state": "HOLD",
+      "reason": "GUARDIAN_OBSERVATION_STALE",
+      "schema": "metaengine.browser-guardian.machine-bootstrap-launcher.v1",
+      "expires_at": "2026-10-07T04:30:23.237Z",
+      "observed_at": "2026-10-07T04:30:13.237Z",
+      "source_head": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+      "package_version": "0.7.0-dev.37493000001.1",
+      "authority_effect": false,
+      "last_confirmed_at": "2026-10-07T04:30:13.237Z",
+      "observation_error": null,
+      "refresh_in_flight": true,
+      "invalidated_reason": null,
+      "arbitrary_shell_used": false,
+      "last_confirmed_state": "HOLD",
+      "observation_revision": 82,
+      "owner_binding_proven": false,
+      "uac_consent_required": false,
+      "device_binding_proven": false,
+      "guardian_service_ready": false,
+      "observation_generation": 0,
+      "automatic_retry_allowed": false,
+      "fixed_packaged_bootstrap": true,
+      "caller_supplied_path_used": false,
+      "explicit_user_action_required": true,
+      "caller_supplied_arguments_used": false,
+      "last_confirmed_owner_binding_proven": false,
+      "last_confirmed_device_binding_proven": false,
+      "last_confirmed_guardian_service_ready": false
+    },
+    "process_incarnation_id": "process_c60a1e29-5a50-4d99-8e50-6a134a75575f",
+    "cognitive_transport": {
+      "state": "UNAVAILABLE",
+      "schema": "metaengine.browser.cognitive-delta-transport.v1",
+      "pending": true,
+      "in_flight": false,
+      "scheduled": false,
+      "stream_id": null,
+      "batch_size": 128,
+      "dedupe_key": "stream_id+sequence",
+      "last_error": "COGNITIVE_ROUTE_HTTP_501",
+      "sent_events": 0,
+      "event_driven": true,
+      "resync_count": 0,
+      "sent_batches": 0,
+      "fallback_edges": 1,
+      "timer_delay_ms": 0,
+      "command_leasing": false,
+      "last_attempt_at": "2026-10-07T04:15:56.596Z",
+      "last_success_at": null,
+      "authority_effect": false,
+      "control_authority": false,
+      "delivery_is_authority": false,
+      "duplicate_safe_retries": 0,
+      "second_command_scheduler": false,
+      "full_state_fallback_required": true,
+      "acknowledged_through_sequence": 0,
+      "automatic_effect_retry_allowed": false
+    }
+  },
+  "commands": [
+    {
+      "observed_at": "2026-10-07 04:34:11.343367+00",
+      "command_id": "6774ae91-c20d-4d94-8af8-108a0e058b3b",
+      "action": "DEV_PLANE_STATUS",
+      "status": "COMPLETED",
+      "issued_at": "2026-10-07 04:33:39.059334+00",
+      "leased_at": "2026-10-07 04:33:39.704827+00",
+      "completed_at": "2026-10-07 04:33:40.149701+00",
+      "receipt": {
+        "lane": "READ_ONLY",
+        "action": "DEV_PLANE_STATUS",
+        "result": {
+          "pid": 24796,
+          "state": "READY",
+          "schema": "metaengine.development-plane.snapshot.v1",
+          "version": "0.4.0",
+          "protocol": "metaengine.development-plane.v1",
+          "started_at": "2026-10-07T04:15:35.809Z",
+          "transcript": [
+            {
+              "at": "2026-10-07T04:15:35.809Z",
+              "seq": 1,
+              "state": "REQUESTED",
+              "summary": null,
+              "capability": "DEVOS_REPO_READ_MODEL",
+              "authority_effect": false
+            },
+            {
+              "at": "2026-10-07T04:15:36.057Z",
+              "seq": 2,
+              "state": "SUCCESS",
+              "summary": "2 source files",
+              "capability": "DEVOS_REPO_READ_MODEL",
+              "authority_effect": false
+            }
+          ],
+          "capabilities": [
+            "HEALTH",
+            "CAPABILITIES",
+            "PROCESS_METRICS",
+            "REPO_HEAD_READ",
+            "DEVOS_REPO_READ_MODEL",
+            "DEVOS_REPO_SEARCH",
+            "CANDIDATE_CAPSULE_CREATE",
+            "CANDIDATE_CAPSULE_VERIFY",
+            "VERIFICATION_SANDBOX_PLAN_CREATE",
+            "VERIFICATION_SANDBOX_PLAN_VERIFY",
+            "ADVISORY_EVIDENCE_VERIFY"
+          ],
+          "last_results": {
+            "DEVOS_REPO_READ_MODEL": {
+              "ok": null,
+              "ref": "refs/pull/1135/merge",
+              "head": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+              "schema": "metaengine.development-plane.retained-result-summary.v1",
+              "capability": "DEVOS_REPO_READ_MODEL",
+              "code_bytes": 162636,
+              "repository": "PatrickFrome/Compute",
+              "evidence_id": null,
+              "source_head": null,
+              "candidate_id": null,
+              "payload_bytes": 53211,
+              "result_schema": "metaengine.development-plane.repo-read-model.v1",
+              "code_file_count": 2,
+              "component_count": 0,
+              "authority_effect": false,
+              "payload_included": false
+            }
+          },
+          "arbitrary_eval": false,
+          "last_exit_code": null,
+          "restart_attempt": 0,
+          "restart_pending": false,
+          "authority_effect": false,
+          "automatic_restart": true,
+          "devos_repo_search": true,
+          "candidate_capsules": true,
+          "cooperative_shutdown": true,
+          "devos_repo_read_model": {
+            "ok": null,
+            "ref": "refs/pull/1135/merge",
+            "head": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+            "schema": "metaengine.development-plane.retained-result-summary.v1",
+            "capability": "DEVOS_REPO_READ_MODEL",
+            "code_bytes": 162636,
+            "repository": "PatrickFrome/Compute",
+            "evidence_id": null,
+            "source_head": null,
+            "candidate_id": null,
+            "payload_bytes": 53211,
+            "result_schema": "metaengine.development-plane.repo-read-model.v1",
+            "code_file_count": 2,
+            "component_count": 0,
+            "authority_effect": false,
+            "payload_included": false
+          },
+          "sandbox_backend_bound": false,
+          "direct_promote_current": false,
+          "page_command_authority": false,
+          "restart_backoff_max_ms": 10000,
+          "transcript_total_count": 2,
+          "external_stop_requested": false,
+          "result_payloads_included": false,
+          "verified_shutdown_required": true,
+          "browser_actuation_authority": false,
+          "candidate_capsules_executable": false,
+          "verification_sandbox_planning": true,
+          "advisory_evidence_verification": true,
+          "verification_sandbox_execution": false,
+          "terminal_requires_external_stop": true,
+          "verification_sandbox_prepare_only": true,
+          "advisory_evidence_network_dispatch": false,
+          "advisory_evidence_browser_authority": false,
+          "candidate_capsule_max_payload_bytes": 262144,
+          "advisory_evidence_promotion_authority": false,
+          "result_payloads_bounded_for_transport": true,
+          "devos_repo_search_arbitrary_path_selection": false
+        },
+        "schema": "metaengine.native-supervisor.command-receipt.v2",
+        "platform": null,
+        "command_id": "6774ae91-c20d-4d94-8af8-108a0e058b3b",
+        "effect_key": null,
+        "recorded_at": "2026-10-07T04:33:39.710Z",
+        "effect_outcome": null,
+        "authority_effect": false
+      },
+      "error": null,
+      "authority_effect": false
+    },
+    {
+      "observed_at": "2026-10-07 04:37:30.931354+00",
+      "command_id": "a055235e-6a52-46f0-8955-961c8335932e",
+      "action": "SELF_UPDATE_STATUS",
+      "status": "COMPLETED",
+      "issued_at": "2026-10-07 04:34:57.952069+00",
+      "leased_at": "2026-10-07 04:34:59.145139+00",
+      "completed_at": "2026-10-07 04:34:59.611515+00",
+      "error": null,
+      "authority_effect": false,
+      "lane": "READ_ONLY",
+      "updater_state": "CURRENT",
+      "updater_error": null,
+      "current_version": "0.7.0-dev.37493000001.1"
+    }
+  ],
+  "source_workflows": {
+    "frozen": [
+      {
+        "id": 37495353067,
+        "name": "METAENGINE Browser Critical Audit V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 2880,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495353067/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495353067/logs",
+        "workflow_id": 351676255
+      },
+      {
+        "id": 37495352955,
+        "name": "Browser Typed Workspaces V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 1088,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352955/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352955/logs",
+        "workflow_id": 348265574
+      },
+      {
+        "id": 37495352565,
+        "name": "R84 Desktop Convergence V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 618,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352565/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352565/logs",
+        "workflow_id": 367591001
+      },
+      {
+        "id": 37495352573,
+        "name": "Browser Meta Orchestrator V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 1745,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352573/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352573/logs",
+        "workflow_id": 346847841
+      },
+      {
+        "id": 37495352562,
+        "name": "Browser Workspace Reincarnation V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 678,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352562/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352562/logs",
+        "workflow_id": 348276669
+      },
+      {
+        "id": 37495352594,
+        "name": "Client V1 C4 Goal Contracts",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 199,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352594/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352594/logs",
+        "workflow_id": 370921024
+      },
+      {
+        "id": 37495352808,
+        "name": "Client V1 LIVE Development Candidate Audit",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 31,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352808/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352808/logs",
+        "workflow_id": 376037183
+      },
+      {
+        "id": 37495352890,
+        "name": "METAENGINE Browser Shell V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 3827,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352890/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352890/logs",
+        "workflow_id": 345209107
+      },
+      {
+        "id": 37495353020,
+        "name": "METAENGINE Browser Host Resilience Login Start V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 626,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495353020/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495353020/logs",
+        "workflow_id": 350778927
+      },
+      {
+        "id": 37495352677,
+        "name": "METAENGINE Browser Shell-First Dirty Profile V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 1156,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352677/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352677/logs",
+        "workflow_id": 350793664
+      },
+      {
+        "id": 37495352920,
+        "name": "Browser Windows Installed Chat Qualification",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 2704,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352920/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352920/logs",
+        "workflow_id": 353128427
+      },
+      {
+        "id": 37495352813,
+        "name": "METAENGINE Browser Final Runtime Activation V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 2282,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352813/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352813/logs",
+        "workflow_id": 355854117
+      },
+      {
+        "id": 37495352735,
+        "name": "Browser Windows Package Smoke",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 3430,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352735/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352735/logs",
+        "workflow_id": 347795280
+      },
+      {
+        "id": 37495352875,
+        "name": "METAENGINE Browser Windows Autonomous Soak V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 2956,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352875/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352875/logs",
+        "workflow_id": 351578853
+      },
+      {
+        "id": 37495352896,
+        "name": "METAENGINE Browser Self Update E2E",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 3875,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352896/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37495352896/logs",
+        "workflow_id": 345450338
+      }
+    ],
+    "repair": [
+      {
+        "id": 37507521366,
+        "name": "METAENGINE Browser Self Update E2E",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_number": 3882,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521366/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521366/logs",
+        "workflow_id": 345450338
+      },
+      {
+        "id": 37507521447,
+        "name": "Browser Typed Workspaces V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 1095,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521447/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521447/logs",
+        "workflow_id": 348265574
+      },
+      {
+        "id": 37507521416,
+        "name": "Browser Live Control Recovery V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 753,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521416/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521416/logs",
+        "workflow_id": 348337422
+      },
+      {
+        "id": 37507521627,
+        "name": "R83 Edge Canary Qualification V1",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_number": 262,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521627/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521627/logs",
+        "workflow_id": 367553791
+      },
+      {
+        "id": 37507521508,
+        "name": "METAENGINE Browser Control Plane Fast Lane V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 783,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521508/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521508/logs",
+        "workflow_id": 350858326
+      },
+      {
+        "id": 37507521383,
+        "name": "Client V1 C4 Goal Contracts",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 204,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521383/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521383/logs",
+        "workflow_id": 370921024
+      },
+      {
+        "id": 37507521432,
+        "name": "Browser Meta Orchestrator V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 1752,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521432/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521432/logs",
+        "workflow_id": 346847841
+      },
+      {
+        "id": 37507521482,
+        "name": "Browser Watchdog Heartbeat Coalescing V2",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 410,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521482/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521482/logs",
+        "workflow_id": 348186165
+      },
+      {
+        "id": 37507521458,
+        "name": "METAENGINE Browser Cognitive Ingest V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 425,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521458/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521458/logs",
+        "workflow_id": 351192400
+      },
+      {
+        "id": 37507521535,
+        "name": "Browser Windows Package Smoke",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_number": 3437,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521535/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521535/logs",
+        "workflow_id": 347795280
+      },
+      {
+        "id": 37507521311,
+        "name": "R84 Desktop Convergence V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 625,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521311/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521311/logs",
+        "workflow_id": 367591001
+      },
+      {
+        "id": 37507521634,
+        "name": "METAENGINE Browser Final Runtime Activation V1",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_number": 2289,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521634/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521634/logs",
+        "workflow_id": 355854117
+      },
+      {
+        "id": 37507521801,
+        "name": "METAENGINE Browser Shell V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 3834,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521801/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521801/logs",
+        "workflow_id": 345209107
+      },
+      {
+        "id": 37507521646,
+        "name": "Browser Windows Installed Chat Qualification",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_number": 2711,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521646/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521646/logs",
+        "workflow_id": 353128427
+      },
+      {
+        "id": 37507521470,
+        "name": "METAENGINE Browser Critical Audit V1",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 2887,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521470/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521470/logs",
+        "workflow_id": 351676255
+      },
+      {
+        "id": 37507521396,
+        "name": "METAENGINE Browser Windows Autonomous Soak V1",
+        "status": "completed",
+        "conclusion": "failure",
+        "run_number": 2963,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521396/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521396/logs",
+        "workflow_id": 351578853
+      },
+      {
+        "id": 37507521403,
+        "name": "Client V1 Supabase Edge Live Probe",
+        "status": "completed",
+        "conclusion": "success",
+        "run_number": 166,
+        "jobs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521403/jobs",
+        "logs_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/37507521403/logs",
+        "workflow_id": 369938491
+      }
+    ]
+  },
+  "actuation_lease_readback": [
+    {
+      "observed_at": "2026-10-07 04:38:46.769198+00",
+      "active_actuation_leases": 0,
+      "potentially_active_leases": 0
+    }
+  ],
+  "missing_cognitive_acceptor": [
+    {
+      "observed_at": "2026-10-07 04:39:28.499075+00",
+      "cognitive_acceptor_count": 0
+    }
+  ]
+}

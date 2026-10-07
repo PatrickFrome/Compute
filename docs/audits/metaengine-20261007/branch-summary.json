@@ -1,0 +1,344 @@
+{
+  "branches": 870,
+  "open_prs": 384,
+  "prefixes": {
+    "analysis": 35,
+    "archive": 1,
+    "browser-dev-channel": 1,
+    "build": 1,
+    "context-vault": 1,
+    "do-not-use-placeholder": 1,
+    "fix": 10,
+    "governance": 1,
+    "integration": 11,
+    "main": 1,
+    "me2": 14,
+    "noop-check": 1,
+    "perf": 3,
+    "physical": 1,
+    "rail-merge": 1,
+    "release": 8,
+    "repair": 31,
+    "sandbox": 2,
+    "scratch": 3,
+    "snapshot-20260929": 1,
+    "tmp-ignore": 1,
+    "tmp-noop": 1,
+    "tmp-noop-should-not-create": 1,
+    "tmp-recovery-do-not-use": 1,
+    "tmp-recovery-safe": 1,
+    "tmp-recovery-safe2": 1,
+    "tmp": 2,
+    "update": 1,
+    "work": 733
+  },
+  "relations": {
+    "frozen": {
+      "DIVERGED": 605,
+      "ANCESTOR": 257,
+      "UNRELATED": 6,
+      "EXACT": 1,
+      "DESCENDANT": 1
+    },
+    "repair": {
+      "DIVERGED": 605,
+      "ANCESTOR": 258,
+      "UNRELATED": 6,
+      "EXACT": 1
+    },
+    "main": {
+      "DIVERGED": 860,
+      "UNRELATED": 6,
+      "ANCESTOR": 3,
+      "EXACT": 1
+    }
+  },
+  "recent_branches": [
+    {
+      "branch": "work/client-v1-state-plane-single-writer-v1",
+      "sha": "6aeea9f68fa91ef38f4d0aea4eddaf1e4d29c0f9",
+      "committed_at": "2026-10-06T20:57:05+03:00",
+      "subject": "test(db): prove scheduler-free amortized nonce cleanup",
+      "open_prs": [
+        1137
+      ],
+      "frozen": "DESCENDANT",
+      "repair": "EXACT",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/chat-development-operating-system-v1",
+      "sha": "ad322e5bf881ce5c2524435547fd478fb8046159",
+      "committed_at": "2026-10-06T20:14:32+03:00",
+      "subject": "docs(chat): link live preflight and frontier architecture",
+      "open_prs": [
+        1136
+      ],
+      "frozen": "DIVERGED",
+      "repair": "DIVERGED",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-chatgpt-ui-convergence-v1",
+      "sha": "be5e84a0524aece3f5ba1a5d84c09f38b05e4d8c",
+      "committed_at": "2026-10-06T19:23:30+03:00",
+      "subject": "fix(client): rebind installed observers after dark workspace retirement",
+      "open_prs": [
+        1135
+      ],
+      "frozen": "EXACT",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-live-development-candidate-v1",
+      "sha": "e2e8f20e5d6abf0f84bf163066ed3ec15b69298a",
+      "committed_at": "2026-10-06T09:44:55+03:00",
+      "subject": "fix(client): seal final LIVE development Windows candidate",
+      "open_prs": [
+        1132
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-supervisor-trust-root-v1",
+      "sha": "20ea57fd2ced1bf7daa01f6d81ebc1740dbd521c",
+      "committed_at": "2026-10-06T06:54:25+03:00",
+      "subject": "ci(client): qualify Supervisor trust-root report head",
+      "open_prs": [
+        1131
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-live-evidence-consumer-v1",
+      "sha": "3eb30fbd8f3d755c3904b3963c6e1f38633197c9",
+      "committed_at": "2026-10-06T05:49:25+03:00",
+      "subject": "ci(client): qualify C5 evidence consumer report head",
+      "open_prs": [
+        1130
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-live-readiness-v1",
+      "sha": "baeff4885f96c8045bdf9bd9a2f1cbf1d36b92b6",
+      "committed_at": "2026-10-06T05:16:47+03:00",
+      "subject": "fix(client): run relocated C5 readiness from repo root",
+      "open_prs": [
+        1129
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-installed-restart-evidence-report-v1",
+      "sha": "99e3be67efe080df745549c24fe43c7b9a51aff4",
+      "committed_at": "2026-10-06T05:01:13+03:00",
+      "subject": "docs(client): record installed restart continuity evidence",
+      "open_prs": [
+        1128
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-installed-restart-continuity-v1",
+      "sha": "eee637fcba41906dc21e8d2dc44d214257fabae5",
+      "committed_at": "2026-10-06T04:34:19+03:00",
+      "subject": "chore(client): reserve exact-head installed restart candidate",
+      "open_prs": [
+        1127
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-installed-restart-continuity-v3",
+      "sha": "eee637fcba41906dc21e8d2dc44d214257fabae5",
+      "committed_at": "2026-10-06T04:34:19+03:00",
+      "subject": "chore(client): reserve exact-head installed restart candidate",
+      "open_prs": [],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-installed-restart-continuity-v2",
+      "sha": "cd5b06a0862288b46c5d300972af0829d5cd0e61",
+      "committed_at": "2026-10-06T04:20:45+03:00",
+      "subject": "chore(client): reserve corrected installed restart candidate",
+      "open_prs": [],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-windows-package-qualification-v1",
+      "sha": "c6ced9cc565594412af07cde7dbbec12d3e0e222",
+      "committed_at": "2026-10-06T04:03:06+03:00",
+      "subject": "chore(client): align lockfile candidate version",
+      "open_prs": [
+        1126
+      ],
+      "frozen": "DIVERGED",
+      "repair": "DIVERGED",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-useful-work-readback-contract-v1",
+      "sha": "e989688a1cccc9fadadd8500ff0ac09c5bc04abc",
+      "committed_at": "2026-10-06T04:01:14+03:00",
+      "subject": "ci(client): qualify useful work readback research checkpoint",
+      "open_prs": [
+        1125
+      ],
+      "frozen": "DIVERGED",
+      "repair": "DIVERGED",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-restart-continuity-v1",
+      "sha": "546ab1a0b0881c9a36d8dd31a803215315dc19ee",
+      "committed_at": "2026-10-06T03:59:19+03:00",
+      "subject": "ci(client): qualify restart continuity checkpoint",
+      "open_prs": [
+        1124
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-useful-work-projection-v1",
+      "sha": "12020209e0cb1d1b8fd50438e1f1acef0aaac6ba",
+      "committed_at": "2026-10-06T03:49:40+03:00",
+      "subject": "ci(client): qualify useful work projection research",
+      "open_prs": [
+        1123
+      ],
+      "frozen": "DIVERGED",
+      "repair": "DIVERGED",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-useful-work-restart-v1",
+      "sha": "034c062979fe6d37c28154964c10f8968c6ec75d",
+      "committed_at": "2026-10-06T03:43:20+03:00",
+      "subject": "ci(client): qualify useful work restart research",
+      "open_prs": [
+        1122
+      ],
+      "frozen": "DIVERGED",
+      "repair": "DIVERGED",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-reference-producer-v1",
+      "sha": "41cab27657ee905cb98294c18315ecf6a7ed7f55",
+      "committed_at": "2026-10-06T03:36:52+03:00",
+      "subject": "ci(client): qualify C5 reference research checkpoint",
+      "open_prs": [
+        1121
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-v1-c5-useful-work-proof-v1",
+      "sha": "b29db530a6c4edf5a4f16e209b2f2f9ba2e58aef",
+      "committed_at": "2026-10-06T03:25:54+03:00",
+      "subject": "ci(client): qualify useful work research checkpoint",
+      "open_prs": [
+        1120
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/client-windows-real-vm-install-e2e-v1",
+      "sha": "f616258602a64107226bc93a2c9ced38ab180ff4",
+      "committed_at": "2026-10-06T03:21:18+03:00",
+      "subject": "docs(client): record Windows real VM qualification checkpoint",
+      "open_prs": [
+        1119
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/r1-step10-source-identity-qualification-v1",
+      "sha": "acbdab774f007fa51095e7331119e700638c8bd0",
+      "committed_at": "2026-10-06T01:23:22+03:00",
+      "subject": "docs(r1): record STEP10 source identity qualification",
+      "open_prs": [
+        1118
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/r1-fresh-project-source-identity-v1",
+      "sha": "4171e6fc0db88aa6215571ce9925f77f1bc70872",
+      "committed_at": "2026-10-06T01:20:58+03:00",
+      "subject": "docs(r1): record fresh project source identity convergence",
+      "open_prs": [
+        1117
+      ],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/r1-step09b-fresh-project-convergence-v1",
+      "sha": "8da8573076f82f9b78e9a04b3edd1f7525297cf3",
+      "committed_at": "2026-10-05T23:00:25+03:00",
+      "subject": "feat(r1): converge STEP09B on fresh project",
+      "open_prs": [],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "work/r1-continuity-fresh-project-convergence-v1",
+      "sha": "c2178e0e52b665e3b379cfab74a02ab87e130ec6",
+      "committed_at": "2026-10-05T22:18:29+03:00",
+      "subject": "feat(r1): converge continuity plane on fresh project",
+      "open_prs": [],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    },
+    {
+      "branch": "physical/build-slsa-provenance-v1",
+      "sha": "eb08a46ad5093bfb0b2e17da6acc6b01fb9996f8",
+      "committed_at": "2026-10-05T21:47:44+03:00",
+      "subject": "chore(browser): stage proof convergence physical qualification",
+      "open_prs": [],
+      "frozen": "ANCESTOR",
+      "repair": "ANCESTOR",
+      "main": "DIVERGED"
+    }
+  ],
+  "open_prs_ancestor_frozen": 95,
+  "open_prs_ancestor_repair": 96,
+  "recent_divergent_count": 67,
+  "recent_scope_counts": {
+    "DOCS_OR_COORDINATION": 32,
+    "SOURCE_OR_MIXED": 33,
+    "UNRELATED_HISTORY": 2
+  }
+}
