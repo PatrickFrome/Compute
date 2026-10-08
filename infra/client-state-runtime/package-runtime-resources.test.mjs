@@ -124,7 +124,7 @@ test('reviewed runtime host source is included only by explicit host selection',
     await writeFile(join(repository, REMOTE_SUPPORT_ENTRY), "export const remoteSupport = true;\n");
     const manifest = await receipt(repository, { includeRuntimeHost: true });
     const hostOptions = { ...options, startupManifest: manifest, expectedSourceDigest: manifest.source_manifest_sha256 };
-    await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch/);
+    await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch|bundle_unexpected_source_record/);
     const bundle = await stageRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true });
     assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY]);
     assert.ok(bundle.files.some(file => file.path === RUNTIME_HOST_ENTRY));

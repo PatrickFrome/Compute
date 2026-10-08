@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37781000002.1`.
+Reserved package identity is `0.7.0-dev.37781000003.1`.
+
+Remote support MCP source regression follow-up: an unselected host source bundle with the new remote support entry is correctly rejected at `bundle_unexpected_source_record`, before the former `reviewed_source_closure_mismatch` guard. Update the exact negative test to accept either fail-closed branch; keep all source-hash and manifest enforcement unchanged. `0.7.0-dev.37781000002.1` was reserved by Windows Package Smoke and is permanently consumed.
 
 Scoped remote support MCP successor: explicitly started stdio tool exposed only via a separately configured private secure tunnel. One on-PC VIEW or CONTROL approval starts a maximum 60-minute session, then **no per-action confirmation popups**. A CONTROL grant also permits observation; after expiry or support_stop all effects fail closed and renewal requires a new locally launched process. Existing computer-authority DB lease, agent, target identity, readback and ambiguity fences are not relaxed. This MCP host neither auto-starts on Electron boot nor listens publicly or executes arbitrary shell. Tested source packaging includes its audited full import closure in the pinned offline runtime bundle. Earlier `0.7.0-dev.37781000001.1` has already been built and consumed; this source requires the fresh package identity.
 
