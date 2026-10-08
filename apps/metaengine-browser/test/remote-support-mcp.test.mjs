@@ -290,9 +290,9 @@ test('read-only discovery scans all supplied fixed drives for real PGDATA marker
   assert.equal(outcome.database_opened,false);
   assert.equal(outcome.truncated,false);
   assert.equal(outcome.candidates.length,2);
-  assert.equal(outcome.candidates[0].directory,'C:\\ProgramData\\PostgreSQL\\17\\data');
-  assert.equal(outcome.candidates[0].postgresql_conf_present,true);
-  assert.equal(outcome.candidates[1].directory,'D:\\Archives\\PostgresBackups');
+  const byPath = new Map(outcome.candidates.map(row=>[row.directory,row]));
+  assert.equal(byPath.get('C:\\ProgramData\\PostgreSQL\\17\\data').postgresql_conf_present,true);
+  assert.equal(byPath.get('D:\\Archives\\PostgresBackups').pg_control_present,true);
   assert.equal(calls.some(c=>c.filename?.includes('SecretJunction')),false);
   assert.equal(calls.some(c=>c.op==='readFile'||c.op==='writeFile'),false);
   assert.equal(JSON.stringify(outcome).includes('secret.key'),false);
