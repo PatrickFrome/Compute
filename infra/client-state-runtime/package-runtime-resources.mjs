@@ -37,8 +37,17 @@ function safeRelativePath(value) {
   return value;
 }
 
+// These three files form the only permitted Windows computer-control import
+// closure. Never broaden this to all browser/src modules: the bundle includes
+// security-sensitive runtime material, and every source is SHA-256 reviewed.
+const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
+  'apps/metaengine-browser/src/remote-support-mcp.mjs',
+  'apps/metaengine-browser/src/windows-local-computer-executor.mjs',
+  'apps/metaengine-browser/src/computer-authority-plane.mjs',
+]);
 function sourcePathAllowed(value) {
-  return /^(?:infra\/client-state-runtime\/[^/]+\.mjs|apps\/metaengine-browser\/src\/meta-(?:objective|orchestrator)-[^/]+\.mjs|apps\/metaengine-browser\/supabase\/a2-browser-native-supervisor-v1\/[^/]+\.(?:mjs|ts))$/.test(value)
+  return (REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
+    || /^(?:infra\/client-state-runtime\/[^/]+\.mjs|apps\/metaengine-browser\/src\/meta-(?:objective|orchestrator)-[^/]+\.mjs|apps\/metaengine-browser\/supabase\/a2-browser-native-supervisor-v1\/[^/]+\.(?:mjs|ts))$/.test(value))
     && !/(?:\.test\.|-fixture\.)/.test(value);
 }
 
