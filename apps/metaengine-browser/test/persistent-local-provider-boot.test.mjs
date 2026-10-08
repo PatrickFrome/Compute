@@ -237,5 +237,9 @@ test('packaged owner admission precedes HostResilience and main imports', async 
   const main = entry.indexOf("browserRuntimePromise = import('./main.mjs')", guard);
   assert.ok(boot >= 0 && guard > boot && resilience > guard && main > guard);
   assert.match(entry, /isPackaged: app\.isPackaged/);
-  assert.match(entry, /bootstrapState: providerBoot\.persistentLocalProviderBootstrap\.state/);
+  assert.match(entry, /let bootstrapState = providerBoot\.persistentLocalProviderBootstrap\.state/);
+  assert.match(entry, /bootstrapState,\s*\}\)/);
+  assert.match(entry, /showInstalledRestoredProviderWizard/);
+  assert.match(entry, /if \(setup\.state === 'CONFIGURED'\)/);
+  assert.match(entry, /bootstrapState = readyProvider\.state/);
 });
