@@ -2,7 +2,7 @@
 
 Дата: 2026-10-08. Ветка: `work/client-github-chat-control-v1`.
 База: PR #1167, `bdab03db1a5092f28a20138a194cb0f90745f2f1`.
-Новая идентичность пакета: `0.7.0-dev.37781000011.1`.
+Новая идентичность пакета: `0.7.0-dev.37781000012.1`.
 
 Клиент получает канал доставки команд через отдельную приватную GitHub Issue. Чат и его агенты могут запрашивать состояние клиента, доступные действия, окна, UI Automation и снимки экрана, отправлять команды браузеру и Windows executor, ставить существующие Client V1 цели и читать результат из PostgreSQL. Первоначальная привязка находится в Settings → Runtime → «Управление из чата»; токен вводится в отдельном локальном окне. После привязки нет подтверждения каждого действия.
 
@@ -55,11 +55,13 @@ ID запроса детерминирован из ID репозитория, I
 
 ## Проверки этого кандидата
 
-- 33 новых теста: приём через существующий issuer, Computer RPC, device signature, повторная доставка, process restart, неполный claim, потеря ответа, неверный пользователь/Issue/relay/client, public repository, edited comment, scope, expiry, revoke, поздняя публикация, экспорт PNG, защищённые файлы, локальная привязка, отсутствие автоматического повторения Issue creation и перепривязка.
-- Вместе с существующими typed bridge и workflow guard тестами: 49 PASS, 0 FAIL, 0 SKIP.
-- Расширенные Browser control regressions (включая новые проверки): 241 PASS, 0 FAIL, 2 Windows-specific SKIP.
+- 35 новых тестов (33 для управления и 2 для Windows-compatible source gate): приём через существующий issuer, Computer RPC, device signature, повторная доставка, process restart, неполный claim, потеря ответа, неверный пользователь/Issue/relay/client, public repository, edited comment, scope, expiry, revoke, поздняя публикация, экспорт PNG, защищённые файлы, локальная привязка, отсутствие автоматического повторения Issue creation и перепривязка.
+- Вместе с существующими typed bridge и workflow guard тестами: 49 PASS, 0 FAIL, 0 SKIP; дополнительно 24 PASS для startup/singleton и короткого source-check runner.
+- Расширенные Browser control regressions (включая новые проверки): 241 PASS, 0 FAIL, 2 Windows-specific SKIP; с дополнительными startup/source-check проверками — 265 PASS.
 - Client State Runtime: 149 PASS, 0 FAIL, 4 Windows-specific SKIP в Linux.
 - Browser syntax check, полный UI TypeScript check и ESLint изменённого System page прошли. UI проверялся после чистой npm установки; frozen Bun install и production UI build остаются отдельными CI-проверками.
 - Полный локальный Browser прогон прерван после ошибок sandbox IPC; его завершение и зелёный результат не заявляются. Эта среда запрещает Unix sockets (`listen EPERM`), поэтому локальные IPC/fixture проверки здесь не могут служить зелёной квалификацией всего Browser. Полный CI и Windows Package Smoke должны проверять точный опубликованный head; результаты предшествующего пакета не переиспользуются.
+
+Первый CI head `7981d3702189a01ec0f91fbf3aa3e3c862500754` обнаружил Windows cmd.exe command length overflow и отсутствие BrowserWindow/ipcMain в унаследованной Electron test fixture. Исправлены проверяющий entrypoint и fixture; production admission gates не изменены. Версия .11 потреблена, исправленный источник использует .12. Отдельный R83 gate сравнивает источник с прежним deployed v14 canary и отвергает drift; этот pin не переписан и квалификация облачного canary не заявляется.
 
 Следующая физическая квалификация: запуск точного нового пакета на Windows с постоянным восстановленным PG17 и оригинальным Vault, привязка отдельного приватного inbox, настоящий запрос из чата, чтение Windows UIA/PNG, подтверждённый эффект на обычном окне, два агента на общем desktop, cold restart и отзыв с ожидающей командой. Наличие исходников или успешных fixture тестов не заменяет эту проверку.

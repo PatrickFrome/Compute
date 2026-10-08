@@ -97,6 +97,8 @@ app.requestSingleInstanceLock = data => {
 };
 globalThis.__singletonTestElectron = {
   app,
+  BrowserWindow: class { constructor() { throw new Error('fixture_browser_window_forbidden'); } },
+  ipcMain: { handle() { throw new Error('fixture_privileged_ipc_forbidden'); } },
   BaseWindow: { getAllWindows: () => [{
     isDestroyed: () => false, isVisible: () => true, isFocused: () => true,
     isMinimized: () => false, show() {}, focus() {},
@@ -107,6 +109,8 @@ const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source
 const electronModule = dataModule([
   'export const app = globalThis.__singletonTestElectron.app;',
   'export const BaseWindow = globalThis.__singletonTestElectron.BaseWindow;',
+  'export const BrowserWindow = globalThis.__singletonTestElectron.BrowserWindow;',
+  'export const ipcMain = globalThis.__singletonTestElectron.ipcMain;',
   'export const dialog = globalThis.__singletonTestElectron.dialog;',
 ].join('\n'));
 const runtimeModule = dataModule([
