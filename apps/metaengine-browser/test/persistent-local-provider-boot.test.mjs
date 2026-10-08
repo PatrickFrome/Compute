@@ -234,7 +234,7 @@ test('packaged owner admission precedes HostResilience and main imports', async 
   const boot = entry.indexOf("const providerBoot = await import('./local-state-provider-bootstrap.mjs')");
   const guard = entry.indexOf('requirePackagedLocalProviderAdmission({', boot);
   const resilience = entry.indexOf("await import('./host-resilience-runtime.mjs')", guard);
-  const main = entry.indexOf("await import('./main.mjs')", guard);
+  const main = entry.indexOf("browserRuntimePromise = import('./main.mjs')", guard);
   assert.ok(boot >= 0 && guard > boot && resilience > guard && main > guard);
   assert.match(entry, /isPackaged: app\.isPackaged/);
   assert.match(entry, /bootstrapState: providerBoot\.persistentLocalProviderBootstrap\.state/);
