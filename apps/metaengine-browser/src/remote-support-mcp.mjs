@@ -50,6 +50,8 @@ export function createRemoteSupportMcp({
   let closed = false;
   let buffer = '';
   let processing = Promise.resolve();
+  let approvalPending = false;
+  let sessionGeneration = 0;
   const send = message => {
     if (closed) return;
     output.write(JSON.stringify(message) + '\n');
@@ -58,29 +60,57 @@ export function createRemoteSupportMcp({
   // mouse/keyboard action. No remote caller may mint or extend a grant.
   // All effects still pass the existing DB-lease + target-identity fences.
   const SESSION_MAX_MS = 60 * 60 * 1000;
+  const grantValid = (grant, scope) =>
+    platform === 'win32' && !revoked && !closed && sessionId !== null
+    && sessionId === grant.sessionId && sessionGeneration === grant.generation
+    && (scope === 'CONTROL' ? controlExpires : viewExpires) > now();
   const requireAuthorized = scope => {
     if (platform !== 'win32') throw new Error('remote_support_windows_required');
     if (revoked || closed) throw new Error('remote_support_session_revoked');
-    if (scope === 'CONTROL' ? controlExpires <= now() : viewExpires <= now())
+    if (!sessionId || (scope === 'CONTROL' ? controlExpires : viewExpires) <= now())
       throw new Error('remote_support_session_not_active');
+    return {sessionId, generation:sessionGeneration};
+  };
+  const recheckGrant = (grant, scope) => {
+    if (!grantValid(grant, scope))
+      throw new Error(revoked || closed || grant.sessionId !== sessionId
+        ? 'remote_support_session_revoked' : 'remote_support_session_not_active');
+  };
+  const revoke = () => {
+    // Generation revocation is synchronous, including when an effect has
+    // already been dispatched or a Windows consent dialog is still open.
+    sessionGeneration++;
+    viewExpires = 0;
+    controlExpires = 0;
+    sessionId = null;
+    revoked = true;
   };
   const startSession = async scope => {
     if (platform !== 'win32') throw new Error('remote_support_windows_required');
     if (revoked || closed) throw new Error('remote_support_session_revoked');
     if (!['VIEW','CONTROL'].includes(scope)) throw new Error('remote_support_scope_invalid');
-    // No silent upgrade or renewal; the owner must terminate and relaunch
-    // the foreground local helper to authorize a new session.
-    if (sessionId) throw new Error('remote_support_session_already_started');
-    const accepted = await approve({scope});
-    if (accepted !== true) deny();
-    const until = now() + SESSION_MAX_MS;
-    sessionId = randomUUID();
-    viewExpires = until;
-    controlExpires = scope === 'CONTROL' ? until : 0;
-    return content({schema:'metaengine.remote-support-session.v1',
-      session_id:sessionId,scope,expires_at:new Date(until).toISOString(),
-      further_action_prompts:false,unattended_persistent_access:false,
-      approved_locally:true,authority_effect:false});
+    // Reserve consent before awaiting Windows; a second remote request must
+    // not queue a competing approval or upgrade an existing pending one.
+    if (sessionId || approvalPending) throw new Error('remote_support_session_already_started');
+    approvalPending = true;
+    const initialGeneration = sessionGeneration;
+    try {
+      const accepted = await approve({scope});
+      if (closed || revoked || sessionGeneration !== initialGeneration)
+        throw new Error('remote_support_session_revoked');
+      if (accepted !== true) deny();
+      const until = now() + SESSION_MAX_MS;
+      sessionGeneration++;
+      sessionId = randomUUID();
+      viewExpires = until;
+      controlExpires = scope === 'CONTROL' ? until : 0;
+      return content({schema:'metaengine.remote-support-session.v1',
+        session_id:sessionId,scope,expires_at:new Date(until).toISOString(),
+        further_action_prompts:false,unattended_persistent_access:false,
+        approved_locally:true,authority_effect:false});
+    } finally {
+      approvalPending = false;
+    }
   };
   async function tool(name, args = {}) {
     if (name === 'support_status') return content({
@@ -96,20 +126,20 @@ export function createRemoteSupportMcp({
       return startSession(args?.scope);
     }
     if (name === 'support_stop') {
-      viewExpires = 0;
-      controlExpires = 0;
-      sessionId = null;
-      revoked = true;
+      revoke();
       return content({state:'SESSION_REVOKED',new_session_requires_local_restart:true,authority_effect:false});
     }
     if (name === 'support_observe') {
       if (!VIEWS.has(args?.action)) throw new Error('remote_support_action_not_allowed');
-      requireAuthorized('VIEW');
+      const grant = requireAuthorized('VIEW');
       const observation = await executor.observe({action:args.action,args:args.args||{},target:args.target});
+      // An in-flight view cannot publish private UI data after stop/expiry.
+      recheckGrant(grant,'VIEW');
       if (['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(args.action)) {
         const capture = observation?.result;
         if (!capture?.png_path || !capture?.png_sha256) throw new Error('remote_support_capture_unverified');
         const image = await imageLoader(capture.png_path,capture.png_sha256);
+        recheckGrant(grant,'VIEW');
         return {content:[
           {type:'text',text:JSON.stringify({action:args.action,sha256:capture.png_sha256,window_target_sha256:observation?.result?.target_identity_sha256||null})},
           {type:'image',data:image.toString('base64'),mimeType:'image/png'},
@@ -124,11 +154,26 @@ export function createRemoteSupportMcp({
       // One visible local CONTROL approval covers this bounded session.
       // NO per-action popups; each act is still independently leased,
       // target-bound, readback-checked and never automatically retried.
-      requireAuthorized('CONTROL');
-      const effect = await executor.act({
-        action:args.action, args:args.args||{},target:args.target,
-        agent_id:args.agent_id, task_id:args.task_id,
-      },args.context||{});
+      const grant = requireAuthorized('CONTROL');
+      // Once executor.act has been invoked, physical dispatch may have
+      // occurred. Revocation cannot retroactively prove NO_EFFECT.
+      const ambiguousAfterRevocation = () => ({
+        ...content({schema:'metaengine.remote-support-effect-outcome.v1',
+          outcome:'AMBIGUOUS',reason:'SESSION_CHANGED_DURING_POSSIBLE_EFFECT',
+          automatic_retry_allowed:false,authority_effect:false}),
+        isError:true,
+      });
+      let effect;
+      try {
+        effect = await executor.act({
+          action:args.action, args:args.args||{},target:args.target,
+          agent_id:args.agent_id, task_id:args.task_id,
+        },args.context||{});
+      } catch (error) {
+        if (!grantValid(grant,'CONTROL')) return ambiguousAfterRevocation();
+        throw error;
+      }
+      if (!grantValid(grant,'CONTROL')) return ambiguousAfterRevocation();
       return content(effect);
     }
     throw new Error('remote_support_unknown_tool');
@@ -176,13 +221,23 @@ export function createRemoteSupportMcp({
     let index;
     while ((index=buffer.indexOf('\n'))>=0) {
       const one=buffer.slice(0,index);buffer=buffer.slice(index+1);
-      if (one.trim()) processing=processing.then(()=>line(one),()=>line(one));
+      if (!one.trim()) continue;
+      // Emergency stop must not wait behind a hung observation, action or
+      // pending approval in the normal serialized stdio request queue.
+      // JSON-RPC replies may be out of order; revocation happens immediately.
+      let interrupt = false;
+      try {
+        const parsed = JSON.parse(one);
+        interrupt = parsed?.method === 'tools/call' && parsed?.params?.name === 'support_stop';
+      } catch {}
+      if (interrupt) void line(one);
+      else processing=processing.then(()=>line(one),()=>line(one));
     }
   }
   input.on('data',onData);
   return Object.freeze({
     request,tools,
-    close:()=>{viewExpires=0;controlExpires=0;sessionId=null;revoked=true;closed=true;input.off('data',onData);},
+    close:()=>{revoke();closed=true;input.off('data',onData);},
   });
 }
 
