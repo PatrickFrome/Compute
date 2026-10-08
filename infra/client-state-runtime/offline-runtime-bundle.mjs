@@ -172,7 +172,8 @@ async function sourceBinding(root, expectedDigest) {
     || manifest.policy?.database_included !== false || manifest.policy?.private_config_included !== false
     || manifest.policy?.credentials_included !== false
     || !manifest.entry_points?.includes('infra/client-state-runtime/runtime-host.mjs')
-    || !manifest.entry_points?.includes('infra/client-state-runtime/fresh-pg17-initdb.mjs')) fail('offline_bundle_source_binding_invalid');
+    || !manifest.entry_points?.includes('infra/client-state-runtime/fresh-pg17-initdb.mjs')
+    || !manifest.entry_points?.includes('apps/metaengine-browser/src/remote-support-mcp.mjs')) fail('offline_bundle_source_binding_invalid');
   if (!Array.isArray(manifest.files) || manifest.files.length > 1000) fail('offline_bundle_source_binding_invalid');
   const names = manifest.files.map(file => safePath(file.path));
   const actualNames = await tree(root);
@@ -321,6 +322,7 @@ export async function verifyOfflineRuntimeBundle({ bundleDirectory, expectedBund
       denoExecutable: join(root, OFFLINE_LAYOUT.executables.deno), postgresBinDirectory: join(root, OFFLINE_LAYOUT.executables.postgres_bin),
       denoDirectory: join(root, OFFLINE_LAYOUT.deno_dir), hostEntry: join(root, OFFLINE_LAYOUT.entry),
       firstRunInitdbEntry: join(root, 'source/infra/client-state-runtime/fresh-pg17-initdb.mjs'),
+      remoteSupportEntry: join(root, 'source/apps/metaengine-browser/src/remote-support-mcp.mjs'),
     },
   };
 }

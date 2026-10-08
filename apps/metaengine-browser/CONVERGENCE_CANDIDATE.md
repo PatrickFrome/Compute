@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37781000001.1`.
+Reserved package identity is `0.7.0-dev.37781000002.1`.
+
+Scoped remote support MCP successor: explicitly started stdio tool exposed only via a separately configured private secure tunnel. One on-PC VIEW or CONTROL approval starts a maximum 60-minute session, then **no per-action confirmation popups**. A CONTROL grant also permits observation; after expiry or support_stop all effects fail closed and renewal requires a new locally launched process. Existing computer-authority DB lease, agent, target identity, readback and ambiguity fences are not relaxed. This MCP host neither auto-starts on Electron boot nor listens publicly or executes arbitrary shell. Tested source packaging includes its audited full import closure in the pinned offline runtime bundle. Earlier `0.7.0-dev.37781000001.1` has already been built and consumed; this source requires the fresh package identity.
 
 Restored PostgreSQL successor: continue from PR #1157 using the owner's previously restored PostgreSQL 17 database and original Vault key. Fresh initdb remains an optional experimental action and is never invoked on existing PGDATA. Align the packaged first-run source closure with runtime startup verification; qualify Windows PostgreSQL using the actual restricted-token postmaster identity rather than the short-lived pg_ctl helper PID. Explicit restored-provider preparation independently checks the existing schema, local health and shutdown before exclusively publishing a credential-free owner profile. Private dumps, PGDATA, passwords and keys are excluded from GitHub and installers. Hosted enrollment/upgrade/soak jobs remain held for this local-only branch; public package CI does not have the private restored database and cannot establish normal client readiness. Source, resource, fresh synthetic durability and package checks remain active.
 
