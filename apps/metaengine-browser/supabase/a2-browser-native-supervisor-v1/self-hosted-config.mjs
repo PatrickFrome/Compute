@@ -7,7 +7,11 @@ function loopbackUrl(value, protocols, code) {
 
 export function resolveSelfHostedSupervisorConfig(get) {
   const mode = String(get('LOCAL_STATE_RUNTIME') || '');
-  if (!mode) return Object.freeze({ local: false, serverOptions: {} });
+  if (!mode) {
+    if (String(get('METAENGINE_LOCAL_ONLY_CLIENT') || '') === '1')
+      throw new Error('client_local_postgres_runtime_required');
+    return Object.freeze({ local: false, serverOptions: {} });
+  }
   if (mode !== 'LOCAL_POSTGRES') throw new Error('local_state_runtime_mode_invalid');
   const database = loopbackUrl(get('LOCAL_STATE_DATABASE_URL'), ['postgres:', 'postgresql:'], 'local_state_database_url_invalid');
   if (!database.username || database.pathname === '/') throw new Error('local_state_database_url_invalid');
