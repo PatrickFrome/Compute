@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000015.1`.
+Reserved package identity is `0.7.0-dev.37780000016.1`.
+
+First-run PG17 and Vault key in same exclusive owner transaction, Windows physical test: correctly validate private 64-digit key plus LF terminator; previous code accidentally double-escaped newline in test regex. Prior 0.7.0-dev.37780000015.1 candidate consumed.
 
 Optional fresh-PG17-plus-Vault transaction: exact explicit action creates a private Vault key only inside the already-exclusive fresh initdb transaction after structural validation, before lock release. Failure retains a review lock and partial PGDATA; full Windows physical test validates key absence from outputs and key file. `0.7.0-dev.37780000014.1` is consumed, cannot qualify this head.
 

@@ -42,7 +42,7 @@ test('physical offline PostgreSQL 17 initdb creates one SCRAM/checksummed fresh 
   const vaultPath = path.join(pgDataDirectory, 'client-vault.key');
   const vaultInfo = await fs.lstat(vaultPath);
   assert.equal(vaultInfo.isFile() && !vaultInfo.isSymbolicLink() && vaultInfo.nlink === 1 && vaultInfo.size === 65, true);
-  assert.match(await fs.readFile(vaultPath, 'utf8'), /^[a-f0-9]{64}\\n$/);
+  assert.match(await fs.readFile(vaultPath, 'utf8'), /^[a-f0-9]{64}\n$/);
   assert.equal(JSON.stringify(receipt).includes(await fs.readFile(vaultPath, 'utf8')), false);
   await assert.rejects(fs.lstat(path.join(stateDirectory, 'client-first-run-initdb.lock')), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(selection.ownerFile), { code: 'ENOENT' });
