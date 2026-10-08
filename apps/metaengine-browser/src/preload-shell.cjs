@@ -259,6 +259,9 @@ const clientWorkReadiness = () => ipcRenderer.invoke('metaengine:client:work-rea
 const resumeClientAdmission = () => ipcRenderer.invoke('metaengine:client:resume-admission');
 const clientGuardianStatus = () => ipcRenderer.invoke('metaengine:client:guardian-status');
 const activateClientGuardian = () => ipcRenderer.invoke('metaengine:client:activate-guardian');
+const clientGithubChatStatus = () => ipcRenderer.invoke('metaengine:client:github-chat-status');
+const connectClientGithubChat = () => ipcRenderer.invoke('metaengine:client:github-chat-connect');
+const disconnectClientGithubChat = () => ipcRenderer.invoke('metaengine:client:github-chat-disconnect');
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
@@ -290,6 +293,9 @@ if (isPrimaryMe2PresentationDocument()) {
     resumeAdmission: resumeClientAdmission,
     guardianStatus: clientGuardianStatus,
     activateGuardian: activateClientGuardian,
+    githubChatStatus: clientGithubChatStatus,
+    connectGithubChat: connectClientGithubChat,
+    disconnectGithubChat: disconnectClientGithubChat,
     typed_positive_api: true,
     generic_command_exposed: false,
     scheduler_authority: false,

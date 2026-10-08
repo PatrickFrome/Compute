@@ -1044,6 +1044,32 @@ export class NativeSupervisorClient {
     });
   }
 
+  // GitHub delivery uses the same device signature and local PostgreSQL issuer
+  // as every other command. Remote input cannot supply execution authority.
+  async chatCommandSubmit(payload) {
+    const response = await this.#signedRequest('/v1/commands/issue-chat', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.accepted !== true) throw new Error('native_supervisor_chat_admission_unconfirmed');
+    return body;
+  }
+
+  async chatCommandLookup(payload) {
+    const response = await this.#signedRequest('/v1/commands/chat-lookup', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error('native_supervisor_chat_lookup_unconfirmed');
+    return body;
+  }
+
+  async chatCommandReceipt({ command_id } = {}) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(command_id || '')) {
+      throw new Error('native_supervisor_chat_command_id_invalid');
+    }
+    const response = await this.#signedRequest(`/v1/commands/${command_id}/receipt`, { method: 'GET' });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error('native_supervisor_chat_receipt_unconfirmed');
+    return body;
+  }
+
   async clientGoalSubmit({ request_id, objective } = {}) {
     const payload = {
       request_id: String(request_id ?? ''),
