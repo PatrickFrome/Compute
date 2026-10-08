@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000018.1`.
+Reserved package identity is `0.7.0-dev.37780000019.1`.
+
+First-run physical durability successor: Windows Package Smoke runs a fresh, pinned offline PG17+Vault initdb followed by a real loopback postmaster write→stop→cold restart→SQL readback and immutable Vault-key check, on a disposable owned CI cluster. Clean cluster intentionally lacks native supervisor SQL baseline, so this proves database durability only, not installed client READY. Earlier `0.7.0-dev.37780000018.1` identity consumed.
 
 Complete Browser SBOM/ASAR fixture for new explicit first-run entry: stage and checkout now contain identical synthetic fresh PG17 initdb source and hash/manifest binding. This retains the production offline source gate rather than weakening it. `0.7.0-dev.37780000017.1` CI had seven test fixture failures and is superseded.
 
