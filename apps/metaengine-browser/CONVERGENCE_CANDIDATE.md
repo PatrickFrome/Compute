@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000007.1`.
+Reserved package identity is `0.7.0-dev.37780000008.1`.
+
+First-run read-only preflight successor: a private-state/layout classifier rejects PGDATA/owner/config collisions and ancestor reparse points, reporting safe bounded state WITHOUT authorizing initdb or storing secrets. Includes Windows/Linux tests in Client State Runtime Contracts. Prior `0.7.0-dev.37780000007.1` candidate source/bytes may not qualify this new version; packaged-first-run activation remains blocked pending trusted provisioning.
 
 Hardening follow-up: even idempotent ALREADY_CONFIGURED owner admission now checks the entire physical directory ancestry before acceptance; a symlink/junction parent cannot masquerade as the existing safe owner. Added an installed-platform portable regression. `0.7.0-dev.37780000006.1` is consumed; prior green CI cannot be reused on this source.
 

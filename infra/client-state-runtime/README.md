@@ -54,3 +54,17 @@ verified exclusion from the selected profile. A local health response or unit
 test alone does not establish complete project-wide replacement or autonomous
 coding readiness. If the client machine is off, GitHub cannot serve its live
 database transactions.
+
+## First-run preflight boundary (successor)
+
+`first-run-preflight.mjs` is a strictly read-only, local-only inventory step for a
+reviewed future first-run provisioner. It checks canonical physical directory
+separation, all existing symlink/junction ancestors, whether an owner profile,
+PGDATA or private runtime config already exists, and unexpected state contents.
+It never creates PGDATA, starts PostgreSQL, generates a Vault key, changes an
+owner file, uses the network, or grants initialization authority.
+A result of `PREPARATION_REVIEW_REQUIRED` is **not** permission to call initdb.
+Existing data yields `HOLD_EXISTING_PRIVATE_STATE` and must follow a
+separate owner-authorized migration/reconciliation path. Packaging must first
+prove the independently pinned offline bundle; this inventory does not verify
+source or publisher integrity.
