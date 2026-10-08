@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000011.1`.
+Reserved package identity is `0.7.0-dev.37780000012.1`.
+
+Restore complete Windows CI physical initdb workflow step (a previous YAML write was truncated), retain exact source-cleanliness gate, and reserve a new source identity. `0.7.0-dev.37780000011.1` is consumed and invalid for this source.
 
 Windows first-run test portability repair: compare realpath identities of verified initdb executable, not short-name spelling; accept Windows PG_VERSION newline normalization. Predecessor `0.7.0-dev.37780000010.1` was reserved and cannot qualify this changed head.
 
