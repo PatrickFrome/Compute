@@ -21,6 +21,7 @@
     "startup_source_sha256": "2f6d9b829ac10838b53945b13f08705359658d1f6c9a4f27920a97496ca7af80",
     "startup_manifest_files": 110,
     "probe_compared_runtime_files": 108,
+    "postgresql_binaries_compared_during_probe": false,
     "source_and_health_stable": true,
     "process_code_attested": false,
     "private_config_included": false,

@@ -18,6 +18,12 @@ The custom archive remains immutable. Preserve its digest, snapshot inventory, v
 
 The local launcher now uses the checked-in lock for exact `npm:postgres@3.4.7` and its registry integrity, frozen lockfile and cached-only startup. Dependency installation is an explicit preparation step, separate from running the local service. The startup receipt hashes both Node and resolved Deno npm package files, the selected relative source closure including side-effect imports, lock files and executable bytes before and after readiness. Loader-injection environment variables and unrelated access tokens are removed from server children. Keys and connection URLs are excluded from manifests.
 
+## Recorded Qualification
+
+At `2026-10-08T01:03:26.091Z`, 18 signed Native Supervisor probes passed for Git HEAD `dfb3d23a9bde7c1119bed628308a326912ebd46c`, runtime instance `f86dc2a9-edc3-473b-86cd-7ebf1a26a346`, and startup source digest `2f6d9b829ac10838b53945b13f08705359658d1f6c9a4f27920a97496ca7af80`. The recorded classification is `STARTUP_MANIFEST_BOUND_SMOKE`, with `process_code_attested:false`. That result is specific to these bindings; later commits do not inherit the signed result automatically.
+
+The Windows CI fixture correction canonicalizes only test-owned temporary roots, which can inherit a short-name TEMP prefix. Production rejects both non-canonical short-name paths and junction/symlink paths as before. The 51-test runtime suite passes locally on Windows; the six affected tests also pass when TEMP/TMP explicitly use a real 8.3 alias. These test-only checks do not restart the running service or rebind its signed qualification to a later Git HEAD.
+
 ## Remaining Gaps
 
 File hashes and a launcher receipt prove which selected bytes were present before and after startup. They do not cryptographically attest loaded process memory, dynamic PostgreSQL libraries, compiled Deno caches or the operating system. The signed verification checks the actual startup UUID, endpoint, manifest digest, current module/package bytes and health, and calls its result `STARTUP_MANIFEST_BOUND_SMOKE` without inferring code identity from the database capability contract.
