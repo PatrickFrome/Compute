@@ -76,3 +76,19 @@ source or publisher integrity.
 ## Physical PG17 qualification (Windows package producer)
 
 After the frozen offline runtime is staged, `browser-windows-package-smoke.yml` now invokes `fresh-pg17-initdb.integration.test.mjs` using that exact bundle and manifest digest. The test verifies every offline resource byte, executes the real bundled PostgreSQL 17 `initdb.exe` against a new random synthetic CI directory with a fresh SCRAM password, verifies `PG_VERSION=17`/`pg_hba.conf`, refuses a second attempt, and confirms that owner/Vault/config was not created. It cleans only a confirmed-success, isolated synthetic cluster. Missing explicit bundle/digest skips the integration test in ordinary unit runs; a failed package-workflow qualification is **not** a success or proof of installed Browser provisioning. The test never uses an existing main cluster, installed profile, external network state backend, or real owner credentials.
+
+## Optional atomic fresh Vault stage
+
+The fresh `initdb` transaction supports an additional *explicit* action,
+`INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT`. Unlike a standalone
+key-initializer on an existing cluster, this mode creates a new Vault key
+only **after newly owned initdb** has passed PostgreSQL 17 structural checks,
+but **before** its exclusive owner lock is released. The key resides at
+`PGDATA/client-vault.key` with the existing Windows owner+SYSTEM/Unix 0600
+protection. Any ACL/key/postcondition uncertainty leaves the owner lock and
+partial cluster for manual reconciliation, never automatic deletion or retry.
+The result reports only `vault_key_created`; no secret or private path is
+returned. The separate physical Windows package gate tests real initdb and
+real Vault key creation on one disposable CI-only cluster. This still does
+NOT apply SQL schema, grant service_role, create the Browser owner profile
+or start the installed API.

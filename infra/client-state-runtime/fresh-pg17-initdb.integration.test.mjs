@@ -29,16 +29,21 @@ test('physical offline PostgreSQL 17 initdb creates one SCRAM/checksummed fresh 
     bundleDirectory: bundle, expectedBundleSha256: sha, stateDirectory, pgDataDirectory,
     runtimeConfigFile: path.join(stateDirectory, 'runtime-private-config.json'),
     ownerFile: path.join(root, 'roaming', 'owner.json'), passwordFile,
-    ownerAction: 'INITIALIZE_FRESH_LOCAL_POSTGRES_17',
+    ownerAction: 'INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT',
   };
   const receipt = await initializeFreshClientPg17(selection);
   assert.equal(receipt.state, 'PG17_INITIALIZED_UNPROVISIONED');
   assert.equal(receipt.runtime_ready, false);
-  assert.equal(receipt.vault_key_created, false);
+  assert.equal(receipt.vault_key_created, true);
   assert.equal(receipt.owner_profile_written, false);
   assert.equal(receipt.authority_effect, false);
   assert.equal((await fs.readFile(path.join(pgDataDirectory, 'PG_VERSION'), 'utf8')).trim(), '17');
   assert.match(await fs.readFile(path.join(pgDataDirectory, 'pg_hba.conf'), 'utf8'), /scram-sha-256/);
+  const vaultPath = path.join(pgDataDirectory, 'client-vault.key');
+  const vaultInfo = await fs.lstat(vaultPath);
+  assert.equal(vaultInfo.isFile() && !vaultInfo.isSymbolicLink() && vaultInfo.nlink === 1 && vaultInfo.size === 65, true);
+  assert.match(await fs.readFile(vaultPath, 'utf8'), /^[a-f0-9]{64}\\n$/);
+  assert.equal(JSON.stringify(receipt).includes(await fs.readFile(vaultPath, 'utf8')), false);
   await assert.rejects(fs.lstat(path.join(stateDirectory, 'client-first-run-initdb.lock')), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(selection.ownerFile), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(selection.runtimeConfigFile), { code: 'ENOENT' });

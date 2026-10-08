@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000014.1`.
+Reserved package identity is `0.7.0-dev.37780000015.1`.
+
+Optional fresh-PG17-plus-Vault transaction: exact explicit action creates a private Vault key only inside the already-exclusive fresh initdb transaction after structural validation, before lock release. Failure retains a review lock and partial PGDATA; full Windows physical test validates key absence from outputs and key file. `0.7.0-dev.37780000014.1` is consumed, cannot qualify this head.
 
 Windows regression: synthetic SCRAM password path, like binary path, must compare physical file identity rather than 8.3/long-name spelling. Prior .13 source/identity is consumed; exact Windows contracts and physical initdb need fresh qualification.
 
