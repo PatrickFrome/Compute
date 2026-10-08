@@ -22,7 +22,7 @@ permissions:
 jobs:
   windows-shell-first-dirty-profile:
     # Chromium proxy isolation does not constrain Node supervisor transport.
-    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1')
+    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1')
     runs-on: windows-2025
     timeout-minutes: 28
     steps:
