@@ -29,6 +29,9 @@ export interface QueryResult {
 }
 
 export async function query(text: string, params?: unknown[]): Promise<QueryResult> {
+  if (String(process.env.METAENGINE_STATE_PROVIDER || "").trim() === "LOCAL_POSTGRES") {
+    throw new Error("legacy_pg_console_unavailable_in_local_profile");
+  }
   const res = await pgPool.query(text, params as never[]);
   return { rows: res.rows as Record<string, unknown>[], rowCount: res.rowCount ?? 0 };
 }

@@ -70,6 +70,8 @@ jobs:
           echo "source_head=$EXPECTED_HEAD" >> "$GITHUB_OUTPUT"
 
   windows-nsis-package-smoke:
+    # Normal installed startup would otherwise contact the historical host.
+    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
     needs: package_identity_preflight
     runs-on: windows-2025
     timeout-minutes: 35

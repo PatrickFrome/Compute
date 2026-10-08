@@ -30,7 +30,7 @@ const RING_LIMIT = 128;
 const SIMULATION_DEFAULT_SECONDS = 300;
 
 export type HealthState = "UNKNOWN" | "HEALTHY" | "DEGRADED" | "DOWN";
-export type SentinelMode = "CLOUD_AUTHORITY" | "LOCAL_FALLBACK";
+export type SentinelMode = "CLOUD_AUTHORITY" | "LOCAL_FALLBACK" | "DISABLED_LOCAL_PROFILE";
 
 export interface TargetState {
   base: string;
@@ -121,6 +121,28 @@ interface SentinelState {
   tickInFlight: Promise<FallbackSnapshot> | null;
 }
 
+const LOCAL_PROFILE_DISABLED_REASON = "LOCAL_PROFILE_LEGACY_CONSOLE_NOT_PORTED";
+const LOCAL_PROFILE_DISABLED_SINCE = Date.now();
+
+function localProfileSelected(): boolean {
+  return String(process.env.METAENGINE_STATE_PROVIDER || "").trim() === "LOCAL_POSTGRES";
+}
+
+function localProfileSnapshot(): FallbackSnapshot {
+  const target = (): TargetState => ({ base: "", state: "UNKNOWN", okStreak: 0, failStreak: 0,
+    notHealthyStreak: 0, latencyMs: null, status: null, lastError: LOCAL_PROFILE_DISABLED_REASON, lastProbeAt: null });
+  return {
+    ok: true, schema: "metaengine.fallback-console.v1", mode: "DISABLED_LOCAL_PROFILE",
+    modeReason: LOCAL_PROFILE_DISABLED_REASON, modeSince: iso(LOCAL_PROFILE_DISABLED_SINCE),
+    gate: { locked: true, lockedReason: LOCAL_PROFILE_DISABLED_REASON, unlockCondition: "NOT_SUPPORTED_IN_LOCAL_PROFILE",
+      lockCondition: "EXPLICIT_LOCAL_PROFILE_SELECTED", reserveUsable: false },
+    failover: { enabled: false, cloudBase: "", localBase: "", degradeStreak: DEGRADE_STREAK,
+      restoreStreak: RESTORE_STREAK, degradedLatencyMs: DEGRADED_LATENCY_MS, minFallbackResidencyMs: MIN_FALLBACK_RESIDENCY_MS },
+    targets: { cloud: target(), local: target() }, probes: [], transitions: [], drills: [],
+    simulation: { active: false, until: null }, counters: { probesTotal: 0, transitionsTotal: 0, drillsTotal: 0 }, authorityEffect: false,
+  };
+}
+
 function iso(ms: number): string {
   try {
     return new Date(ms).toISOString();
@@ -152,6 +174,7 @@ function classify(probe: { ok: boolean; latencyMs: number }, prev: TargetState):
 }
 
 async function probeHttp(base: string, name: "cloud" | "local", simulated: boolean): Promise<ProbeRecord> {
+  if (localProfileSelected()) return { name, ok: false, status: 0, latencyMs: 0, error: LOCAL_PROFILE_DISABLED_REASON, simulated: false, at: iso(Date.now()) };
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
@@ -183,6 +206,7 @@ async function probeHttp(base: string, name: "cloud" | "local", simulated: boole
 }
 
 async function persistTransition(t: TransitionRecord): Promise<void> {
+  if (localProfileSelected()) return;
   try {
     await query(
       `INSERT INTO destruktion_meta.fallback_console_transition_log_h205f22
@@ -196,7 +220,9 @@ async function persistTransition(t: TransitionRecord): Promise<void> {
 }
 
 export async function ensureFallbackTables(): Promise<void> {
+  if (localProfileSelected()) return;
   await query(`CREATE SCHEMA IF NOT EXISTS destruktion_meta`);
+  if (localProfileSelected()) return;
   await query(`
     CREATE TABLE IF NOT EXISTS destruktion_meta.fallback_console_transition_log_h205f22 (
       id bigserial PRIMARY KEY,
@@ -211,6 +237,7 @@ export async function ensureFallbackTables(): Promise<void> {
 }
 
 export async function recentTransitions(limit = 12): Promise<Record<string, unknown>[]> {
+  if (localProfileSelected()) return [];
   try {
     const res = await query(
       `SELECT id, at, from_mode, to_mode, reason, simulated, cloud_state, local_state
@@ -225,11 +252,13 @@ export async function recentTransitions(limit = 12): Promise<Record<string, unkn
 }
 
 async function tick(state: SentinelState): Promise<FallbackSnapshot> {
+  if (localProfileSelected()) return localProfileSnapshot();
   const simulationActive = state.simulateUntil > Date.now();
   const [cloudProbe, localProbe] = await Promise.all([
     probeHttp(CLOUD_SUPERVISOR_BASE, "cloud", simulationActive),
     probeHttp(EDGE_BASE, "local", false),
   ]);
+  if (localProfileSelected()) return localProfileSnapshot();
 
   // QA simulation: a forced outage overrides the real cloud result.
   const effectiveCloud = simulationActive && cloudProbe.ok
@@ -288,6 +317,7 @@ async function tick(state: SentinelState): Promise<FallbackSnapshot> {
 }
 
 function snapshot(state: SentinelState): FallbackSnapshot {
+  if (localProfileSelected()) return localProfileSnapshot();
   const simulationActive = state.simulateUntil > Date.now();
   const locked = state.mode !== "LOCAL_FALLBACK";
   const reserveUsable = state.local.state === "HEALTHY" || state.local.state === "DEGRADED";
@@ -370,7 +400,9 @@ export function getFallbackConsole(): FallbackConsole {
       return snapshot(state);
     },
     async drill() {
+      if (localProfileSelected()) return { ok: false, base: "", latencyMs: 0, status: 0, error: LOCAL_PROFILE_DISABLED_REASON, at: iso(Date.now()) };
       const health = await edgeHealth(2500);
+      if (localProfileSelected()) return { ok: false, base: "", latencyMs: 0, status: 0, error: LOCAL_PROFILE_DISABLED_REASON, at: iso(Date.now()) };
       const record: DrillRecord = {
         ok: health.ok,
         base: EDGE_BASE,
@@ -385,6 +417,7 @@ export function getFallbackConsole(): FallbackConsole {
       return record;
     },
     async setSimulation(enabled, seconds = SIMULATION_DEFAULT_SECONDS) {
+      if (localProfileSelected()) return localProfileSnapshot();
       state.simulateUntil = enabled ? Date.now() + seconds * 1000 : 0;
       return this.forceTick();
     },

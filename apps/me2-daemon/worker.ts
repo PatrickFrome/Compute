@@ -4,8 +4,9 @@
  * Инструменты: sandbox workspace + shell + web_search. JSON-протокол шага.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, join, normalize, dirname } from "node:path";
+import { resolve, join, normalize, dirname, relative, isAbsolute, sep } from "node:path";
 import {
   listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
@@ -66,8 +67,36 @@ function taskDir(taskId: string) {
 }
 function safeJoin(cwd: string, p: string) {
   const full = resolve(cwd, normalize(p || "."));
-  if (!full.startsWith(resolve(cwd))) throw new Error("path_escape_blocked");
+  const pathFromRoot = relative(resolve(cwd), full);
+  if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) throw new Error("path_escape_blocked");
   return full;
+}
+
+type WrittenArtifact = { path: string; sha256: string };
+type ToolCallRecord = { tool: string; sig: string; err: boolean; artifact?: WrittenArtifact };
+const contentDigest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+
+function captureWriteArtifact(taskId: string, args: Record<string, unknown>): WrittenArtifact {
+  const path = safeJoin(taskDir(taskId), String(args.path ?? ""));
+  const sha256 = contentDigest(String(args.content ?? ""));
+  if (contentDigest(readFileSync(path)) !== sha256) throw new Error("artifact_write_readback_mismatch");
+  return { path, sha256 };
+}
+
+function unverifiedWrittenArtifacts(calls: ToolCallRecord[]): string[] {
+  const latest = new Map<string, WrittenArtifact>();
+  const missing: string[] = [];
+  for (const call of calls) {
+    if (call.tool !== "write_file" || call.err) continue;
+    if (!call.artifact) missing.push("artifact_receipt_missing");
+    else latest.set(call.artifact.path, call.artifact);
+  }
+  for (const artifact of latest.values()) {
+    try {
+      if (contentDigest(readFileSync(artifact.path)) !== artifact.sha256) missing.push("artifact_content_changed");
+    } catch { missing.push("artifact_readback_unavailable"); }
+  }
+  return missing;
 }
 
 async function runShell(cwd: string, command: string): Promise<string> {
@@ -168,7 +197,7 @@ function sigStats(calls: { tool: string; sig: string; err: boolean }[]) {
   for (const [sig, n] of counts) if (!top || n > top.n) top = { sig, n };
   return {
     top, total: calls.length, distinct: counts.size,
-    writes: calls.filter((c) => c.tool === "write_file").length,
+    writes: calls.filter((c) => c.tool === "write_file" && !c.err).length,
     toolErrors: calls.filter((c) => c.err).length,
     reads: calls.filter((c) => c.tool === "read_file" || c.tool === "list_dir").length,
   };
@@ -189,7 +218,7 @@ export function buildVerdict(
   task: TaskRow,
   ctx: { steps: number; toolCalls: { tool: string; sig: string; err: boolean }[]; result: string },
 ): Record<string, unknown> | null {
-  const st = sigStats(ctx.toolCalls);
+  const st = sigStats(ctx.toolCalls.filter((c) => c.tool !== "finish"));
   const reasons: string[] = [];
   if (CREATION_SPEC_RE.test(task.spec) && st.writes === 0) {
     reasons.push("no_writes_on_creation_task");
@@ -320,13 +349,14 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
     emit("TASK_LEASED", { retry_memory: true, parent: task.parent_id }, agent.id, task.id);
   }
   // сигналы для tier-1 рефлексии (R12): сигнатуры вызовов инструментов + репарсы
-  const toolCalls: { tool: string; sig: string; err: boolean }[] = [];
+  const toolCalls: ToolCallRecord[] = [];
   let parseFails = 0;
 
   try {
     let result: string | null = null;
     let deadlineBreached = false;
     for (let step = 1; step <= task.max_steps; step++) {
+      if (!leaseAlive(task.id)) break;
       // CP-W1: cycle hard deadline — стенные часы важнее счётчика шагов
       const leaseAgeMs = Date.now() - leaseStartedAt;
       if (leaseAgeMs > TASK_HARD_DEADLINE_MS) {
@@ -337,6 +367,8 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       recordSpan("lease.liveness", { "me2.task_id": task.id, "me2.step": step, "me2.lease_age_ms": leaseAgeMs }, Date.now());
       emit("STEP_START", { step, max_steps: task.max_steps }, agent.id, task.id);
       const reply = await chat(agent.model, messages, { temperature: 0.4, lane: "P1" }); // pool-исполнители — P1 (G11)
+      if (!leaseAlive(task.id)) break;
+      if (Date.now() - leaseStartedAt > TASK_HARD_DEADLINE_MS) { deadlineBreached = true; break; }
       const parsed = extractJson(reply);
       if (!parsed?.action?.tool) {
         parseFails++;
@@ -350,31 +382,45 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       emit("TOOL_CALL", { step, tool, args: JSON.stringify(args).slice(0, 500), thought: parsed.thought ?? "" }, agent.id, task.id);
       // G4: рассуждение исполнителя — в реку флота
       fleetStep(lease, task, agent.id, "thought", { step, preview: parsed.thought ?? "" });
-      const callRec = { tool, sig: `${tool}:${JSON.stringify(args).slice(0, 200)}`, err: false };
+      const callRec: ToolCallRecord = { tool, sig: `${tool}:${JSON.stringify(args).slice(0, 200)}`, err: false };
       toolCalls.push(callRec);
 
       if (tool === "finish") {
         result = String(args.result ?? "(empty result)");
+        const verdict = buildVerdict(task, { steps: step, toolCalls, result });
+        const artifactIssues = unverifiedWrittenArtifacts(toolCalls);
+        const reasons = (verdict?.reasons as string[] | undefined) ?? [];
+        // Broad creation wording is advisory for shell/research work; an
+        // explicit file contract or failed write cannot claim completion.
+        const creationUnverified = reasons.includes("no_writes_on_creation_task")
+          && (/write_file/i.test(task.spec) || toolCalls.some((c) => c.tool === "write_file") || toolCalls.every((c) => c.tool === "finish"));
+        const unverified = creationUnverified || reasons.includes("empty_result") || artifactIssues.length > 0;
         // R28 C2: гон handoff↔completion — если работа ушла в handoff во время lease,
         // финальные записи воркера НЕ затирают честный HANDED_OFF (передача старше lease).
         if (leaseAlive(task.id)) {
-          emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
-          fleetStep(lease, task, agent.id, "reply", { step, preview: result });
-          updateTask(task.id, { status: "COMPLETED", result, steps: step });
-          // R29 C3: антифальшь-ревью результата против спека (zero-authority, async, квотировано);
-          // улики — телеметрия lease (writes/tool_calls/parse_fails)
-          try {
-            reviewTask(task.id, {
-              writes: toolCalls.filter((c) => c.tool === "write_file").length,
-              tool_calls: toolCalls.length,
-              parse_fails: parseFails,
-            });
-          } catch { /* ревью не ломает цикл задачи */ }
+          if (unverified) {
+            updateTask(task.id, { status: "FAILED", result, steps: step, error: "unverified_result",
+              reflection: JSON.stringify({ v: 1, cause: "unverified_result", reasons, artifact_issues: artifactIssues }) });
+            emit("TASK_FAILED", { error: "unverified_result", reasons, artifact_issues: artifactIssues, steps: step }, agent.id, task.id);
+            fleetStep(lease, task, agent.id, "fail", { step, preview: "unverified_result" });
+          } else {
+            emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
+            fleetStep(lease, task, agent.id, "reply", { step, preview: result });
+            updateTask(task.id, { status: "COMPLETED", result, steps: step });
+            // R29 C3: антифальшь-ревью результата против спека (zero-authority, async, квотировано);
+            // улики — телеметрия lease (writes/tool_calls/parse_fails)
+            try {
+              reviewTask(task.id, {
+                writes: toolCalls.filter((c) => c.tool === "write_file" && !c.err).length,
+                tool_calls: toolCalls.length,
+                parse_fails: parseFails,
+              });
+            } catch { /* ревью не ломает цикл задачи */ }
+          }
         } else {
           emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", finish_result: result.slice(0, 200) }, agent.id, task.id);
         }
         // R18: вердикт завершения — ловим finish-без-работы (reward hacking)
-        const verdict = buildVerdict(task, { steps: step, toolCalls, result });
         if (verdict) {
           emit("TASK_REWARD_HACK", verdict, agent.id, task.id);
           try { recordSpan("verdict.reward_hack", { "me2.task_id": task.id, "me2.reasons": (verdict.reasons as string[]).join(",") }, Date.now(), { status: "ERROR", message: (verdict.reasons as string[]).join(",") }); } catch { /* телеметрия не ломает шину */ }
@@ -382,8 +428,14 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         break;
       }
 
-      const observation = await execTool(tool, args, task.id);
+      if (!leaseAlive(task.id)) break;
+      let observation = await execTool(tool, args, task.id);
+      if (!leaseAlive(task.id)) break;
       callRec.err = observation.startsWith("ERROR:");
+      if (tool === "write_file" && !callRec.err) {
+        try { callRec.artifact = captureWriteArtifact(task.id, args); }
+        catch (e) { callRec.err = true; observation = `ERROR: ${e instanceof Error ? e.message : String(e)}`; }
+      }
       emit("TOOL_RESULT", { step, tool, output: observation.slice(0, 1200) }, agent.id, task.id);
       // G4: наблюдение инструмента — в реку флота
       fleetStep(lease, task, agent.id, "tool", { step, tool, preview: observation });

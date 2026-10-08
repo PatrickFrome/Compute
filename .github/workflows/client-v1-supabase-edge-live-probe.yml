@@ -16,6 +16,8 @@ permissions:
 
 jobs:
   public-health:
+    # This local-only candidate must not contact the historical hosted runtime.
+    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

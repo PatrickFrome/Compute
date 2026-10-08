@@ -71,6 +71,8 @@ jobs:
           ! grep -q 'NEON' apps/metaengine-browser/src/self-update-runtime.mjs
 
   windows-published-n-to-one-build-target:
+    # The resident upgrade rehearsal launches a historical hosted-default client.
+    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
     needs: contract
     runs-on: windows-2022
     timeout-minutes: 46

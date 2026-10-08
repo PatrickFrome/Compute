@@ -24,6 +24,8 @@ permissions:
 
 jobs:
   windows-installed-chat-qualification:
+    # Hosted enrollment approval is not part of this local-only candidate PR.
+    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
     runs-on: windows-2025
     timeout-minutes: 75
     steps:

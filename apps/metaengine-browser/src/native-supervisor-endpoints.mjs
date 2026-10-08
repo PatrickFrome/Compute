@@ -1,3 +1,5 @@
+import './local-state-provider-bootstrap.mjs';
+
 // R5 closure (ops audit 2026-09-21): the pinned Supabase endpoint used to be
 // hard-duplicated in native-supervisor-endpoints.mjs AND
 // native-supervisor-client-base.mjs. This file is now the single source of
@@ -20,6 +22,26 @@ const DEFAULT_NATIVE_SUPERVISOR_BASE = 'https://jhriwwsryeqsvvvufkok.supabase.co
 
 export const NATIVE_SUPERVISOR_DEFAULT_BASE = DEFAULT_NATIVE_SUPERVISOR_BASE;
 
+const selectedProvider = String(process.env.METAENGINE_STATE_PROVIDER || '').trim();
+if (selectedProvider && selectedProvider !== 'LOCAL_POSTGRES') throw new Error('native_supervisor_state_provider_invalid');
+export const NATIVE_SUPERVISOR_STATE_PROVIDER = selectedProvider || null;
+
+function requiredLocalProviderBase() {
+  const raw = String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim();
+  const instanceId = String(process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID || '').trim();
+  if (!raw) throw new Error('native_supervisor_local_base_required');
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(instanceId)) throw new Error('native_supervisor_local_instance_required');
+  let parsed;
+  try { parsed = new URL(raw); } catch { throw new Error('native_supervisor_local_base_invalid'); }
+  const port = Number(parsed.port);
+  if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || !Number.isSafeInteger(port) || port < 1024 || port > 65535 || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname.replace(/\/+$/, '') !== '/a2-browser-native-supervisor-v1') {
+    throw new Error('native_supervisor_local_base_invalid');
+  }
+  return `${parsed.origin}/a2-browser-native-supervisor-v1`;
+}
+
+const pinnedLocalProviderBase = selectedProvider === 'LOCAL_POSTGRES' ? requiredLocalProviderBase() : null;
+
 export function resolveNativeSupervisorBase(rawBase = null) {
   const raw = rawBase == null
     ? String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim()
@@ -39,7 +61,7 @@ export function resolveNativeSupervisorBase(rawBase = null) {
   return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
 }
 
-export let NATIVE_SUPERVISOR_BASE = resolveNativeSupervisorBase();
+export let NATIVE_SUPERVISOR_BASE = pinnedLocalProviderBase || resolveNativeSupervisorBase();
 
 // Failover hook (Fallback Console): validate + swap the live supervisor base.
 // Throws on invalid input; refuses empty values so a misconfigured sentinel
@@ -48,6 +70,7 @@ export function setNativeSupervisorBase(rawBase) {
   const raw = String(rawBase ?? '').trim();
   if (!raw) throw new Error('native_supervisor_base_url_required');
   const next = resolveNativeSupervisorBase(raw);
+  if (pinnedLocalProviderBase && next !== pinnedLocalProviderBase) throw new Error('native_supervisor_local_provider_endpoint_pinned');
   NATIVE_SUPERVISOR_BASE = next;
   return NATIVE_SUPERVISOR_BASE;
 }

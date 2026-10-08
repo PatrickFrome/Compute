@@ -215,6 +215,7 @@ export class BrowserRealtimeProcessPlane {
   }
 
   #brainProcessSnapshot(eventLimit = 64) {
+    const limit = boundedInt(eventLimit, 64, 0, 256);
     return Object.freeze({
       schema: BROWSER_REALTIME_PROCESS_PLANE_SCHEMA,
       running: this.#started,
@@ -224,7 +225,7 @@ export class BrowserRealtimeProcessPlane {
       processes: this.#processes,
       web_contents: this.#webContents,
       semantic_plane: this.semanticSnapshot({ includeText: false, eventLimit: 0 }),
-      events: this.#events.slice(-boundedInt(eventLimit, 64, 0, 256)),
+      events: limit === 0 ? [] : this.#events.slice(-limit),
       main_event_loop_pressure: this.#mainLoopPressure.snapshot(),
       authority_effect: false,
     });
@@ -686,9 +687,10 @@ export class BrowserRealtimeProcessPlane {
   }
 
   snapshot({ eventsSince = null, eventLimit = 128 } = {}) {
-    const events = eventsSince == null
-      ? this.#events.slice(-boundedInt(eventLimit, 128, 0, 1024))
-      : this.eventsSince(eventsSince, eventLimit);
+    const limit = boundedInt(eventLimit, 128, 0, 1024);
+    const events = limit === 0 ? [] : eventsSince == null
+      ? this.#events.slice(-limit)
+      : this.eventsSince(eventsSince, limit);
     const byPid = new Map();
     const processKeyByPid = new Map();
     for (const processRow of this.#processes) {

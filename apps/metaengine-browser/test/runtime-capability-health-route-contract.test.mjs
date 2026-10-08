@@ -13,7 +13,7 @@ test('health liveness remains HTTP 200 while readiness comes only from bounded D
   assert.match(source, /HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS\s*=\s*1500/);
   assert.match(source, /async function boundedRpc\(name:string,args:any,ms:number\)[\s\S]*Promise\.race\([\s\S]*rpc\(name,args\)[\s\S]*setTimeout\([\s\S]*rpc_deadline[\s\S]*clearTimeout\(timer\)/);
   assert.match(source, /name==='devos_runtime_capabilities_v1'\?boundedRpc\(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS\)/);
-  assert.match(source, /if\(req\.method==='GET'&&path==='\/health'\)return json\(200,await health\(\)\)/);
+  assert.match(source, /if\(req\.method==='GET'&&path==='\/health'\)return json\(200,\{\.\.\.await health\(\),\.\.\.\(localRuntime\.local\?\{backend_transport:'LOCAL_POSTGRES_RPC',state_provider:'LOCAL_POSTGRES',instance_id:localRuntime\.instanceId,hosted_supabase_required:false\}: \{\}\)\}\)/);
 });
 
 test('health route has no local capability-envelope fallback or scheduler loop', () => {

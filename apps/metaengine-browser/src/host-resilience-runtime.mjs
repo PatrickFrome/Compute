@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserSentinelHost } from './browser-sentinel.mjs';
 import { BrowserParentProgressLease } from './browser-parent-progress-lease.mjs';
+import { localSupervisorProviderProfile } from './explicit-local-supervisor-provider.mjs';
+import { persistentLocalProviderBootstrap } from './local-state-provider-bootstrap.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
@@ -62,6 +64,7 @@ export class HostResilienceRuntime {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
     login_start_required: false, login_start_verified: false, login_start_policy_hold: false,
     login_start_attempts: 0, login_start_repair_attempts: 0,
+    login_start_unavailable_reason: null, login_start_provider_qualified: null, login_start_configuration_hold: false,
     login_start_recheck_ms: LOGIN_START_RECHECK_MS, last_login_start_check_at: null,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
     sentinel_worker_recovery: null, sentinel_worker_failure: null, sentinel_bootstrap: null,
@@ -117,6 +120,24 @@ export class HostResilienceRuntime {
   }
 
   async #verifyLoginStart({ force = false } = {}) {
+    const localProfile = localSupervisorProviderProfile(process.env);
+    const persistentQualified = localProfile != null && persistentLocalProviderBootstrap.persistent === true && persistentLocalProviderBootstrap.state === 'READY' && persistentLocalProviderBootstrap.base_url === localProfile.base_url && persistentLocalProviderBootstrap.instance_id === localProfile.instance_id;
+    if (localProfile && !persistentQualified) {
+      this.#state.login_start_required = false;
+      this.#state.login_start_verified = false;
+      this.#state.login_start_policy_hold = false;
+      this.#state.login_start_configuration_hold = true;
+      this.#state.login_start_provider_qualified = false;
+      this.#state.login_start_unavailable_reason = 'LOCAL_PROVIDER_CONFIGURATION_REQUIRED';
+      this.#state.last_error = 'login_start:LOCAL_PROVIDER_CONFIGURATION_REQUIRED';
+      this.#state.state = 'DEGRADED_LOGIN_START';
+      return false;
+    }
+    if (persistentQualified) {
+      this.#state.login_start_provider_qualified = true;
+      this.#state.login_start_configuration_hold = false;
+      this.#state.login_start_unavailable_reason = null;
+    }
     const required = this.#platform === 'win32' && process.env.METAENGINE_DISABLE_LOGIN_START !== '1';
     this.#state.login_start_required = required;
     if (!required) {

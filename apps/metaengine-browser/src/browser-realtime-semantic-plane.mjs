@@ -436,9 +436,10 @@ export class BrowserRealtimeSemanticPlane {
   }
 
   snapshot({ includeText = false, eventsSince = null, eventLimit = 128 } = {}) {
-    const events = eventsSince == null
-      ? this.#events.slice(-boundedInt(eventLimit, 128, 0, 1024))
-      : this.eventsSince(eventsSince, eventLimit);
+    const limit = boundedInt(eventLimit, 128, 0, 1024);
+    const events = limit === 0 ? [] : eventsSince == null
+      ? this.#events.slice(-limit)
+      : this.eventsSince(eventsSince, limit);
     const targets = [...this.#rows.values()].map((row) => this.#targetProjection(row, includeText === true));
     const persistentCdp = typeof this.#pool.snapshot === 'function' ? this.#pool.snapshot() : null;
     return Object.freeze({

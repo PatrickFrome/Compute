@@ -1,8 +1,85 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 
+import { BrowserCognitiveDeltaBus } from '../src/browser-cognitive-delta-bus.mjs';
 import { projectRealtimeProcessPlaneForTransport } from '../src/native-supervisor-client.mjs';
+
+async function edgeHeartbeatHelpers() {
+  const source = await fs.readFile(
+    new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url),
+    'utf8',
+  );
+  const helpers = source.slice(source.indexOf('function modeOf'), source.indexOf('async function verifyEnrollment'));
+  const stateStart = source.indexOf('function boundedState');
+  const state = source.slice(stateStart, source.indexOf('async function upsertState', stateStart));
+  assert.ok(helpers.startsWith('function modeOf'));
+  assert.ok(state.startsWith('function boundedState'));
+  return runInNewContext(
+    `${stripTypeScriptTypes(`${helpers}\n${state}`)}\n({ boundedObject, boundedRealtimeProcessPlane, boundedState });`,
+    { TextEncoder },
+  );
+}
+
+async function edgeRealtimeProjector() {
+  return (await edgeHeartbeatHelpers()).boundedRealtimeProcessPlane;
+}
+
+test('Edge object budgets measure UTF-8 bytes and accept the exact byte boundary', async () => {
+  const { boundedObject } = await edgeHeartbeatHelpers();
+  const budget = 32768;
+  for (const char of ['x', '\u0416', '\u{1f680}']) {
+    const value = { diagnostic: char.repeat(20000) };
+    const bytes = Buffer.byteLength(JSON.stringify(value), 'utf8');
+    assert.equal(boundedObject(value, bytes)?.diagnostic, value.diagnostic);
+    assert.equal(boundedObject(value, bytes - 1), null);
+    assert.equal(boundedObject(value, budget)?.diagnostic ?? null, bytes <= budget ? value.diagnostic : null);
+  }
+});
+
+test('Edge state projection preserves absent realtime plane and explicit plane clearing', async () => {
+  const { boundedRealtimeProcessPlane, boundedState } = await edgeHeartbeatHelpers();
+  assert.equal(Object.hasOwn(boundedState({}), 'realtime_process_plane'), false);
+  for (const invalid of [null, false, 'invalid', []]) {
+    assert.equal(boundedRealtimeProcessPlane(invalid), null);
+    assert.equal(boundedState({ realtime_process_plane: invalid }).realtime_process_plane, null);
+  }
+  assert.equal(boundedState({ realtime_process_plane: { running: true, sequence: 7 } }).realtime_process_plane.sequence, 7);
+});
+
+test('client and Edge preserve real cognitive ring loss and oldest retained sequence', async () => {
+  const bus = new BrowserCognitiveDeltaBus({ maxEvents: 8 });
+  for (let i = 0; i < 8; i += 1) bus.publish({ type: 'WEB_CONTENTS_DESTROYED' });
+  bus.publish({ type: 'METRICS_SAMPLE' });
+  bus.publish({ type: 'WEB_CONTENTS_CREATED' });
+  const cognitive = bus.snapshot();
+  assert.equal(cognitive.earliest_sequence, 2);
+  assert.equal(cognitive.dropped_total, 2);
+
+  const full = { cognitive_delta_bus: cognitive };
+  const client = projectRealtimeProcessPlaneForTransport(full);
+  const edgeProject = await edgeRealtimeProjector();
+  for (const projected of [client, edgeProject(full), edgeProject(client)]) {
+    assert.equal(projected.cognitive_delta_bus.sequence, 10);
+    assert.equal(projected.cognitive_delta_bus.oldest_sequence, 2);
+    assert.equal(projected.cognitive_delta_bus.dropped_events, 2);
+  }
+});
+
+test('cognitive aliases from older projections retain their values and explicit zero', async () => {
+  const edgeProject = await edgeRealtimeProjector();
+  for (const project of [projectRealtimeProcessPlaneForTransport, edgeProject]) {
+    const legacy = project({ cognitive_delta_bus: { latest_sequence: 20, oldest_sequence: 5, dropped_events: 3 } });
+    assert.equal(legacy.cognitive_delta_bus.sequence, 20);
+    assert.equal(legacy.cognitive_delta_bus.oldest_sequence, 5);
+    assert.equal(legacy.cognitive_delta_bus.dropped_events, 3);
+    const zero = project({ cognitive_delta_bus: { oldest_sequence: 0, earliest_sequence: 5, dropped_events: 0, dropped_total: 3 } });
+    assert.equal(zero.cognitive_delta_bus.oldest_sequence, 0);
+    assert.equal(zero.cognitive_delta_bus.dropped_events, 0);
+  }
+});
 
 test('realtime process heartbeat projection is scalar-bounded even when local telemetry is huge', () => {
   const hugeTask = {

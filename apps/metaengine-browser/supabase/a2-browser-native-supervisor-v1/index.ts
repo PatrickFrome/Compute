@@ -10,10 +10,12 @@ import { projectNativeSupervisorRuntimeCapabilityHealth, runtimeCapabilityHealth
 import { openRealtimeCommandWake } from './realtime-command-wake.mjs';
 import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
 import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
+import { resolveSelfHostedSupervisorConfig } from './self-hosted-config.mjs';
 
-const DB_URL=Deno.env.get('SUPABASE_DB_URL')||'';
-const DB_SESSION_URL=Deno.env.get('SUPABASE_DB_SESSION_URL')||'';
-const SUPABASE_URL=String(Deno.env.get('SUPABASE_URL')||'').replace(/\/+$/,'');
+const localRuntime=resolveSelfHostedSupervisorConfig((name:string)=>Deno.env.get(name));
+const DB_URL=localRuntime.local?localRuntime.databaseUrl:Deno.env.get('SUPABASE_DB_URL')||'';
+const DB_SESSION_URL=localRuntime.local?localRuntime.databaseUrl:Deno.env.get('SUPABASE_DB_SESSION_URL')||'';
+const SUPABASE_URL=localRuntime.local?localRuntime.apiBase:String(Deno.env.get('SUPABASE_URL')||'').replace(/\/+$/,'');
 function serverSecretKey(){
   const modern=String(Deno.env.get('SUPABASE_SECRET_KEYS')||'').trim();
   if(modern){
@@ -25,9 +27,9 @@ function serverSecretKey(){
   }
   return String(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'').trim();
 }
-const SERVICE_ROLE=serverSecretKey();
+const SERVICE_ROLE=localRuntime.local?localRuntime.key:serverSecretKey();
 const REST_BASE=SUPABASE_URL?SUPABASE_URL+'/rest/v1':'';
-const REALTIME_API_KEY=Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
+const REALTIME_API_KEY=localRuntime.local?'':Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
 // Modern Supabase sb_secret_* values are API keys, not JWT access tokens. Realtime
 // private-channel auth therefore stays disabled unless a legacy JWT-shaped token is
 // explicitly present. Durable DB leasing remains the authority; when private Realtime
@@ -72,7 +74,12 @@ if(!REST_BASE||!SERVICE_ROLE)throw new Error('supabase_postgrest_service_identit
 // Direct Postgres is retained only for explicit DB-inspect diagnostics. Normal
 // enrollment/auth/heartbeat/command/RPC traffic below uses PostgREST so an Edge
 // isolate does not consume a query session merely to serve the Native Browser.
-const sql=postgres(DB_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:20});
+const querySql=postgres(DB_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:20});
+const sql=localRuntime.local?{unsafe:(text:string,args:any[]=[])=>querySql.begin('read only',async(tx:any)=>{
+  await tx.unsafe('SET LOCAL ROLE service_role');
+  await tx.unsafe("SET LOCAL statement_timeout = '5s'");
+  return tx.unsafe(text,args);
+})}:querySql;
 // LISTEN holds a dedicated connection. Keep it isolated from the query pool so a
 // held command-wake subscription cannot starve durable lease/heartbeat queries.
 const wakeSql=DB_SESSION_URL?postgres(DB_SESSION_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:null}):null;
@@ -177,11 +184,12 @@ async function verifyP256(jwk:any,material:string,signatureText:string){const si
 function clientId(req:Request){return String(req.headers.get('x-a2-chat-bridge-client')||'').trim().slice(0,160)}
 function modeOf(v:any){const m=String(v||'OFF').toUpperCase();return ['OFF','MONITOR','CONTROL'].includes(m)?m:'OFF'}
 function parseJson(text:string){try{return text?JSON.parse(text):{}}catch{return null}}
-function boundedObject(value:any,maxBytes:number){if(!value||typeof value!=='object'||Array.isArray(value))return null;try{const text=JSON.stringify(value);if(text.length>maxBytes)return null;return JSON.parse(text)}catch{return null}}
+function boundedObject(value:any,maxBytes:number){if(!value||typeof value!=='object'||Array.isArray(value))return null;try{const text=JSON.stringify(value);if(new TextEncoder().encode(text).byteLength>maxBytes)return null;return JSON.parse(text)}catch{return null}}
 function boundedCount(value:any){const n=Number(value);return Number.isSafeInteger(n)&&n>=0?n:0}
 function boundedText(value:any,max=160){const out=String(value??'').trim();return out?out.slice(0,max):null}
 function boundedRealtimeProcessPlane(value:any){
-  const s=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const s=value;
   const semantic=s.semantic_plane&&typeof s.semantic_plane==='object'&&!Array.isArray(s.semantic_plane)?s.semantic_plane:{};
   const brain=s.browser_brain&&typeof s.browser_brain==='object'&&!Array.isArray(s.browser_brain)?s.browser_brain:{};
   const collaboration=brain.collaboration_fabric&&typeof brain.collaboration_fabric==='object'&&!Array.isArray(brain.collaboration_fabric)?brain.collaboration_fabric:{};
@@ -247,8 +255,8 @@ function boundedRealtimeProcessPlane(value:any){
       schema:boundedText(cognitive.schema,96),
       state:boundedText(cognitive.state,96),
       sequence:boundedCount(cognitive.sequence??cognitive.latest_sequence),
-      oldest_sequence:boundedCount(cognitive.oldest_sequence),
-      dropped_events:boundedCount(cognitive.dropped_events),
+      oldest_sequence:boundedCount(cognitive.oldest_sequence??cognitive.earliest_sequence),
+      dropped_events:boundedCount(cognitive.dropped_events??cognitive.dropped_total),
       control_authority:false,command_leasing:false,authority_effect:false,
     },
     processes_embedded:false,web_contents_embedded:false,events_embedded:false,collaboration_history_embedded:false,
@@ -560,7 +568,7 @@ function routedServicePath(pathname:string){
   return raw;
 }
 
-Deno.serve(async(req:Request)=>{
+Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
   const url=new URL(req.url);
   const path=routedServicePath(url.pathname);
@@ -571,7 +579,7 @@ Deno.serve(async(req:Request)=>{
     console.warn('native_supervisor_route_mismatch',JSON.stringify({method:req.method,pathname:url.pathname,routed_path:path}));
   }
   try{
-    if(req.method==='GET'&&path==='/health')return json(200,await health());
+    if(req.method==='GET'&&path==='/health')return json(200,{...await health(),...(localRuntime.local?{backend_transport:'LOCAL_POSTGRES_RPC',state_provider:'LOCAL_POSTGRES',instance_id:localRuntime.instanceId,hosted_supabase_required:false}: {})});
     const bodyText=req.method==='GET'?'':await req.text();
     const body=parseJson(bodyText);
     if(body===null)return json(400,{error:'invalid_json'});
@@ -604,10 +612,10 @@ Deno.serve(async(req:Request)=>{
     if(req.method==='GET'&&receipt)return readCommandReceipt(req,decodeURIComponent(receipt[1]));
     const m=path.match(/^\/v1\/commands\/([^/]+)\/result$/);
     if(req.method==='POST'&&m)return complete(req,decodeURIComponent(m[1]),body);
-    if(req.method==='GET'&&path==='/v1/status')return json(200,await status());
+    if(req.method==='GET'&&path==='/v1/status')return json(200,{...await status(),...(localRuntime.local?{backend_transport:'LOCAL_POSTGRES_RPC',state_provider:'LOCAL_POSTGRES',instance_id:localRuntime.instanceId,hosted_supabase_required:false}: {})});
     return json(404,{error:'not_found'});
   }catch(e){
     console.error('native_supervisor_request_failure',String((e as any)?.message||e));
-    return json(502,{error:'native_supervisor_failure',backend_transport:'POSTGREST_RPC'});
+    return json(502,{error:'native_supervisor_failure',backend_transport:localRuntime.local?'LOCAL_POSTGRES_RPC':'POSTGREST_RPC'});
   }
 });

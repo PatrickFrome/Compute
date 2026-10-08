@@ -54,6 +54,7 @@ import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervis
 import { createSupabaseHealthSentinel } from './supabase-health-sentinel.mjs';
 import { createFallbackConsoleRuntime } from './fallback-console-runtime.mjs';
 import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
+import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
 import {
   normalizeClientAgentId,
   normalizeClientAgentSelectionReadback,
@@ -2032,9 +2033,9 @@ async function initNativeSupervisor() {
   // back only after restore_streak healthy probes AND >= one lease timeout of
   // fallback residency, so in-flight local leases expire before the switch —
   // no dual-authority window. If METAENGINE_SUPERVISOR_BASE_URL pins the base,
-  // swapping is disabled (explicit operator decision wins) but probing/drill
-  // stay active.
-  if (!fallbackConsole) {
+  // swapping is disabled. A canonical local provider also omits the hosted
+  // health sentinel; device-signed control remains on the selected endpoint.
+  if (!fallbackConsole && !explicitLocalSupervisorBase()) {
     const rawLocalBase = String(process.env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL || '').trim();
     const localReserveBase = rawLocalBase ? resolveNativeSupervisorBase(rawLocalBase) : null;
     const reserveSentinel = createSupabaseHealthSentinel({
@@ -2484,12 +2485,15 @@ function readClientConnectionStatus() {
     authority_effect: false,
   });
   const reserve = fallbackConsole?.snapshot?.() || null;
+  const localProvider = explicitLocalSupervisorBase();
   return Object.freeze({
     ...status,
-    fallback_mode: reserve?.gate?.mode || 'CLOUD_AUTHORITY',
+    state_provider: localProvider ? 'LOCAL_POSTGRES' : 'HOSTED',
+    hosted_supabase_required: localProvider == null,
+    fallback_mode: localProvider ? 'LOCAL_PINNED' : (reserve?.gate?.mode || 'CLOUD_AUTHORITY'),
     fallback_ready: reserve?.gate?.reserve_usable === true,
     fallback_enabled: reserve?.failover?.enabled === true,
-    cloud_health: reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN',
+    cloud_health: localProvider ? 'NOT_CONFIGURED' : (reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN'),
     legacy_daemon_feed_is_authority: false,
     authority_effect: false,
   });

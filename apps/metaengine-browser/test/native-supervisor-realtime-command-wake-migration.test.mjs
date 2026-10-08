@@ -53,7 +53,8 @@ test('publisher topic/privacy contract matches wait-batch subscriber and durable
 
 test('serverless DB URL never impersonates a session-capable LISTEN transport', () => {
   assert.match(edge, /REALTIME_ACCESS_TOKEN=SERVICE_ROLE\.split\('\.'\)\.length===3\?SERVICE_ROLE:''/);
-  assert.match(edge, /DB_SESSION_URL=Deno\.env\.get\('SUPABASE_DB_SESSION_URL'\)\|\|''/);
+  assert.match(edge, /DB_SESSION_URL=localRuntime\.local\?localRuntime\.databaseUrl:Deno\.env\.get\('SUPABASE_DB_SESSION_URL'\)\|\|''/);
+  assert.doesNotMatch(edge, /DB_SESSION_URL=.*Deno\.env\.get\('SUPABASE_DB_URL'\)/);
   assert.match(edge, /const wakeSql=DB_SESSION_URL\?postgres\(DB_SESSION_URL,\{max:1,prepare:false,connect_timeout:4,idle_timeout:null\}\):null/,
     'LISTEN must require an explicit session-capable URL and stay isolated from the query pool');
   assert.match(edge, /if\(!wakeSql\)throw new Error\('postgres_session_wake_url_unavailable'\)/);

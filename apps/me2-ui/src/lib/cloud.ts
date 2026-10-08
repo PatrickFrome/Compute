@@ -13,7 +13,13 @@ const A2_ENV_PATH = "/home/z/.a2/supabase-cloud.env";
 
 let cached: { url: string; jwt: string } | null = null;
 
+function localProfileSelected(): boolean {
+  return String(process.env.METAENGINE_STATE_PROVIDER || "").trim() === "LOCAL_POSTGRES";
+}
+
 function loadCloudEnv(): { url: string; jwt: string } {
+  // Legacy console routes have no signed local adapter yet.
+  if (localProfileSelected()) return { url: "", jwt: "" };
   if (cached) return cached;
   let url = process.env.SUPABASE_URL ?? "";
   let jwt = process.env.SUPABASE_SERVICE_ROLE_JWT ?? "";
@@ -60,6 +66,7 @@ function headers(json = false): Record<string, string> {
 }
 
 async function cloudFetch(path: string, init: RequestInit & { json?: boolean }, timeoutMs = 8000): Promise<Response> {
+  if (localProfileSelected()) throw new Error("cloud_console_unavailable_in_local_profile");
   const { url } = loadCloudEnv();
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);

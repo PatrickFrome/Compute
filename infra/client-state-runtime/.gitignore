@@ -1,0 +1,7 @@
+/node_modules/
+/data/
+/private-config.json
+/evidence/
+/database.dump
+/database.sql
+/runtime-*.log

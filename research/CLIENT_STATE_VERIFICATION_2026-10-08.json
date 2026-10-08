@@ -1,0 +1,121 @@
+{
+  "schema": "compute.client-state.public-development-checkpoint.v1",
+  "date": "2026-10-08",
+  "timezone": "Europe/Moscow",
+  "subject_commit": "dfb3d23a9bde7c1119bed628308a326912ebd46c",
+  "pull_request": "https://github.com/PatrickFrome/Compute/pull/1143",
+  "local_checks": {
+    "runtime_contracts": { "passed": 50, "failed": 0 },
+    "focused_provider_recovery_publication": { "passed": 74, "failed": 0 },
+    "browser_full_run": { "passed": 4394, "failed": 1, "total": 4395, "skipped": 0, "failure": "Windows exact-window capture computer_executor_timeout", "coverage_note": "Run began before the final hosted-workflow publication guards were added; those additions passed separately in focused_provider_recovery_publication." },
+    "windows_capture_isolated_rerun": { "passed": 36, "failed": 0, "full_run_failure_erased": false },
+    "browser_syntax": "PASS",
+    "portable_postgresql_restart_persistence": "PASS"
+  },
+  "local_signed_supervisor": {
+    "verified_at": "2026-10-08T01:03:26.091Z",
+    "status": "PASS",
+    "probes_passed": 18,
+    "evidence_level": "STARTUP_MANIFEST_BOUND_SMOKE",
+    "instance_id": "f86dc2a9-edc3-473b-86cd-7ebf1a26a346",
+    "startup_source_sha256": "2f6d9b829ac10838b53945b13f08705359658d1f6c9a4f27920a97496ca7af80",
+    "startup_manifest_files": 110,
+    "probe_compared_runtime_files": 108,
+    "postgresql_binaries_compared_during_probe": false,
+    "source_and_health_stable": true,
+    "process_code_attested": false,
+    "private_config_included": false,
+    "hosted_requests": false,
+    "real_tasks_executed": false,
+    "protected_state_changed": false
+  },
+  "github_ci_observation": {
+    "subject_commit": "dfb3d23a9bde7c1119bed628308a326912ebd46c",
+    "run": "https://github.com/PatrickFrome/Compute/actions/runs/37710988218",
+    "linux": "PASS",
+    "windows": "FAIL: canonical temporary-path fixtures",
+    "ui_typecheck_and_boundary_lint": "PASS: Critical Audit job 113096722640 on the same subject commit",
+    "full_browser": "4404 PASS, 1 FAIL: package reservation source regex did not allow the added job guard",
+    "historical_cloud_canary_promotion": "NOT_QUALIFIED",
+    "subsequent_corrections_require_their_own_ci": true
+  },
+  "subsequent_github_ci_observation": {
+    "subject_commit": "1dd4304aaca88f9f1ea0e840c0dc44821ee3540e",
+    "runtime_contracts_pull_request": {
+      "run": "https://github.com/PatrickFrome/Compute/actions/runs/37711625979",
+      "linux": "PASS",
+      "windows": "PASS"
+    },
+    "runtime_contracts_push": {
+      "run": "https://github.com/PatrickFrome/Compute/actions/runs/37711621674",
+      "linux": "PASS",
+      "windows": "PASS"
+    },
+    "full_browser": {
+      "job": "https://github.com/PatrickFrome/Compute/actions/runs/37711625943/job/113098712933",
+      "passed": 4405,
+      "failed": 0,
+      "skipped": 0
+    },
+    "ui_quality": {
+      "job": "https://github.com/PatrickFrome/Compute/actions/runs/37711625943/job/113098713018",
+      "status": "PASS"
+    },
+    "focused_authority_contracts": {
+      "job": "https://github.com/PatrickFrome/Compute/actions/runs/37711625943/job/113098713045",
+      "status": "PASS"
+    },
+    "historical_cloud_canary": {
+      "job": "https://github.com/PatrickFrome/Compute/actions/runs/37711626022/job/113098615299",
+      "status": "FAIL",
+      "failed_step": "Prove source equivalence to deployed v14 canary pin",
+      "promotion_qualified": false
+    },
+    "inherits_prior_signed_smoke_head": false,
+    "qualifies_future_commits": false
+  },
+  "next_increment_local_observation": {
+    "scope": "PREPUBLICATION_WORKTREE",
+    "base_commit": "1dd4304aaca88f9f1ea0e840c0dc44821ee3540e",
+    "runtime_contracts": { "passed": 83, "failed": 0, "skipped": 0 },
+    "provider_and_ui_guards": { "passed": 20, "failed": 0, "skipped": 0 },
+    "source_bundle": {
+      "fixture_staging_and_import": "PASS",
+      "historical_runtime_receipt_staging": "BLOCKED: package.json digest changed after recorded startup",
+      "portable_binary_runtime_proven": false,
+      "installed_release_proven": false
+    },
+    "signed_goal_fixture": {
+      "verified_at": "2026-10-08T01:30:19.718Z",
+      "status": "PASS",
+      "evidence_level": "ISOLATED_SCHEMA_FIXTURE_SMOKE",
+      "probes": 14,
+      "schema_tables_checked_empty_before_seeding": 81,
+      "source_data_rows_restored": 0,
+      "synthetic_ready_tasks": 2,
+      "claims_or_commands": 0,
+      "journal_reload": "PASS",
+      "response_loss_read_only_reconciliation": "PASS",
+      "owned_fixture_removed": true,
+      "goal_execution_proven": false,
+      "complete_acceptance_proven": false,
+      "universal_submit_replay_idempotency_proven": false
+    },
+    "local_ui_typecheck": "NOT_RUN: UI dependencies absent in checkout",
+    "independent_changed_source_review": "NO_BLOCKING_FINDINGS",
+    "fresh_published_head_ci_required": true,
+    "inherits_prior_signed_runtime_qualification": false
+  },
+  "installed_client_changed": false,
+  "hosted_database_changed": false,
+  "supabase_target_transfer_resumed": false,
+  "private_artifacts_published": false,
+  "authority_effect": false,
+  "production_promotion_authorized": false,
+  "limitations": [
+    "File manifests do not cryptographically attest loaded process memory, PostgreSQL dynamic libraries or Deno compiled caches.",
+    "The persistent client configuration is implemented and fixture-tested, not provisioned into the live user profile.",
+    "Active legacy Auth, Storage/outbox, mirror and bridge consumers still need concrete local adapters or verified exclusion.",
+    "The full private backup, configuration and detailed local database receipts remain outside GitHub."
+  ]
+}

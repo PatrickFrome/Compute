@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
+import { localSupervisorProviderProfile } from './explicit-local-supervisor-provider.mjs';
 
 const require = createRequire(import.meta.url);
 const { durableWriteJson, durableWriteJsonSync } = require('./durable-json-file.cjs');
@@ -71,7 +72,7 @@ function safeState(value) {
   };
 }
 
-function sentinelEnvironment(source, { statePath, token, parentPid }) {
+export function sentinelEnvironment(source, { statePath, token, parentPid }) {
   const env = {};
   const allow = new Set([
     'SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE',
@@ -80,6 +81,12 @@ function sentinelEnvironment(source, { statePath, token, parentPid }) {
   ].map((x) => x.toUpperCase()));
   for (const [key, value] of Object.entries(source || {})) {
     if (allow.has(String(key).toUpperCase()) && value != null) env[key] = String(value);
+  }
+  const provider = localSupervisorProviderProfile(source);
+  if (provider) {
+    env.METAENGINE_STATE_PROVIDER = provider.provider;
+    env.METAENGINE_SUPERVISOR_BASE_URL = provider.base_url;
+    env.METAENGINE_LOCAL_STATE_INSTANCE_ID = provider.instance_id;
   }
   env.ELECTRON_RUN_AS_NODE = '1';
   env.METAENGINE_SENTINEL_STATE_PATH = statePath;
