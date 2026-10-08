@@ -20,12 +20,14 @@ const errorContent = error => ({content:[{type:'text',text:clean(error)}],isErro
 
 export async function confirmRemoteSupportOnWindows({ scope }) {
   if (process.platform !== 'win32') return false;
-  if (!['VIEW','CONTROL'].includes(scope)) return false;
+  if (!['VIEW','CONTROL','FILES'].includes(scope)) return false;
   // The operator must be physically present in the user's interactive
   // Windows session. The remote caller cannot set this decision.
   const text = scope === 'VIEW'
     ? 'Allow ONE METAENGINE support session to VIEW your screen and UI for up to 60 minutes? Private content may be visible. Close the support terminal to stop immediately.'
-    : 'Allow ONE METAENGINE support session to VIEW your screen and CONTROL keyboard/mouse for up to 60 minutes WITHOUT further action-by-action popups? Only trusted authorized agent leases can cause effects. Close the support terminal to stop immediately.';
+    : scope === 'FILES'
+      ? 'Allow ONE METAENGINE support session to SEARCH FILE AND DIRECTORY NAMES across all accessible local fixed drives for an existing PostgreSQL database, for up to 60 minutes? Only matching database directory locations and metadata can be returned. No file contents, passwords or Vault keys are read. Close the support terminal to stop.'
+      : 'Allow ONE METAENGINE support session to VIEW your screen, CONTROL keyboard/mouse and SEARCH local fixed drives for PostgreSQL database locations for up to 60 minutes WITHOUT further per-action popups? File contents, passwords and Vault keys are not read by the discovery tool. Typed effects still require trusted agent leases. Close the support terminal to stop.';
   const escaped = text.replaceAll("'", "''");
   const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('${escaped}','METAENGINE — Remote Support',[System.Windows.Forms.MessageBoxButtons]::YesNo,[System.Windows.Forms.MessageBoxIcon]::Warning).ToString()`;
   try {
@@ -36,15 +38,116 @@ export async function confirmRemoteSupportOnWindows({ scope }) {
   } catch { return false; }
 }
 
+
+const POSTGRES_DISCOVERY_MAX_DIRECTORIES = 16000;
+const POSTGRES_DISCOVERY_MAX_ENTRIES = 220000;
+const POSTGRES_DISCOVERY_MAX_RESULTS = 40;
+const POSTGRES_DISCOVERY_MAX_MS = 75000;
+const ignoredDirectories = new Set(['$recycle.bin','system volume information','.git','node_modules',
+  '.next','cache','caches','code cache','gpu cache','temporary internet files']);
+const driveRoot = value => typeof value === 'string' && /^[A-Z]:\\$/i.test(value);
+
+export async function listReadyFixedWindowsDrives({ platform = process.platform, run = execute } = {}) {
+  if (platform !== 'win32') throw new Error('remote_support_windows_required');
+  // Fixed command, never user-provided PowerShell or shell arguments; network,
+  // mapped and removable volumes are excluded from automatic enumeration.
+  const script = "[IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [IO.DriveType]::Fixed -and $_.IsReady } | ForEach-Object { $_.RootDirectory.FullName }";
+  let stdout;
+  try {
+    ({stdout} = await run('powershell.exe',
+      ['-NoProfile','-NonInteractive','-Command',script],
+      {windowsHide:true,shell:false,timeout:10000,maxBuffer:4096}));
+  } catch { throw new Error('remote_support_drive_enumeration_failed'); }
+  const drives = [...new Set(String(stdout || '').split(/\r?\n/).map(x=>x.trim().toUpperCase()).filter(driveRoot))];
+  if (!drives.length) throw new Error('remote_support_no_fixed_drives');
+  return drives.slice(0,26);
+}
+
+function priority(name) {
+  const value = name.toLowerCase();
+  if (/postgres|pgdata|metaengine|pgsql|database|restore|backup/.test(value)) return 0;
+  if (/^users$|^appdata$|^programdata$|^program files/.test(value)) return 1;
+  return 2;
+}
+
+export async function discoverLocalPostgresFiles({
+  roots, fsImpl = fs, now = Date.now, shouldContinue = () => true,
+  maxDirectories = POSTGRES_DISCOVERY_MAX_DIRECTORIES,
+  maxEntries = POSTGRES_DISCOVERY_MAX_ENTRIES,
+  maxResults = POSTGRES_DISCOVERY_MAX_RESULTS,
+  maxDurationMs = POSTGRES_DISCOVERY_MAX_MS,
+} = {}) {
+  if (!Array.isArray(roots) || roots.length === 0 || roots.length > 26 || !roots.every(driveRoot)
+    || ![maxDirectories,maxEntries,maxResults,maxDurationMs].every(Number.isSafeInteger)
+    || maxDirectories < 1 || maxDirectories > POSTGRES_DISCOVERY_MAX_DIRECTORIES
+    || maxEntries < 1 || maxEntries > POSTGRES_DISCOVERY_MAX_ENTRIES
+    || maxResults < 1 || maxResults > POSTGRES_DISCOVERY_MAX_RESULTS
+    || maxDurationMs < 1 || maxDurationMs > POSTGRES_DISCOVERY_MAX_MS) {
+    throw new Error('remote_support_discovery_arguments_invalid');
+  }
+  const queue = [...new Set(roots.map(x=>x.toUpperCase()))];
+  const start = now();
+  let directories = 0, entries = 0, inaccessible = 0, truncated = false;
+  const candidates = [];
+  while (queue.length && directories < maxDirectories && entries < maxEntries
+    && now() - start < maxDurationMs && candidates.length < maxResults) {
+    if (!shouldContinue()) throw new Error('remote_support_session_not_active');
+    const current = queue.shift();
+    let stat, children;
+    try {
+      stat = await fsImpl.lstat(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
+      children = await fsImpl.readdir(current, {withFileTypes:true});
+    } catch { inaccessible++;continue; }
+    directories++;
+    entries += children.length;
+    const files = new Set(children.filter(x=>x.isFile() && !x.isSymbolicLink()).map(x=>x.name.toLowerCase()));
+    if (files.has('pg_version')) {
+      try {
+        const control = await fsImpl.lstat(path.win32.join(current,'global','pg_control'));
+        if (control.isFile() && !control.isSymbolicLink()) {
+          // Never open the database, configs, password files, or the Vault key.
+          // postmaster.pid is only a hint and NEVER proof of a running server.
+          candidates.push({
+            directory:current, pg_version_present:true, pg_control_present:true,
+            postgresql_conf_present:files.has('postgresql.conf'),
+            postmaster_pid_present:files.has('postmaster.pid'),
+            active_server_verified:false, database_contents_read:false,
+          });
+        }
+      } catch {}
+    }
+    const directoriesHere = children.filter(x=>x.isDirectory() && !x.isSymbolicLink()
+      && !ignoredDirectories.has(x.name.toLowerCase())).sort((a,b)=>priority(a.name)-priority(b.name));
+    for (const child of directoriesHere) {
+      if (queue.length >= maxDirectories * 3) { truncated=true;break; }
+      queue.push(path.win32.join(current,child.name));
+    }
+  }
+  if (!shouldContinue()) throw new Error('remote_support_session_not_active');
+  truncated ||= queue.length > 0;
+  return {
+    schema:'metaengine.remote-support-postgres-discovery.v1',
+    search_scope:'ALL_READY_FIXED_LOCAL_DRIVES',
+    roots_searched:roots, directories_inspected:directories, entries_seen:entries,
+    inaccessible_directories:inaccessible, truncated,
+    candidates, read_only:true, file_contents_read:false,
+    database_opened:false, vault_key_read:false, authority_effect:false,
+  };
+}
+
 export function createRemoteSupportMcp({
   input = process.stdin, output = process.stdout,
   executor = createWindowsLocalComputerExecutor(),
   approve = confirmRemoteSupportOnWindows,
   now = () => Date.now(), platform = process.platform,
   imageLoader = readBoundedCapture,
+  driveEnumerator = listReadyFixedWindowsDrives,
+  postgresDiscoverer = discoverLocalPostgresFiles,
 } = {}) {
   let viewExpires = 0;
   let controlExpires = 0;
+  let filesExpires = 0;
   let sessionId = null;
   let revoked = false;
   let closed = false;
@@ -63,11 +166,11 @@ export function createRemoteSupportMcp({
   const grantValid = (grant, scope) =>
     platform === 'win32' && !revoked && !closed && sessionId !== null
     && sessionId === grant.sessionId && sessionGeneration === grant.generation
-    && (scope === 'CONTROL' ? controlExpires : viewExpires) > now();
+    && (scope === 'CONTROL' ? controlExpires : scope === 'FILES' ? filesExpires : viewExpires) > now();
   const requireAuthorized = scope => {
     if (platform !== 'win32') throw new Error('remote_support_windows_required');
     if (revoked || closed) throw new Error('remote_support_session_revoked');
-    if (!sessionId || (scope === 'CONTROL' ? controlExpires : viewExpires) <= now())
+    if (!sessionId || (scope === 'CONTROL' ? controlExpires : scope === 'FILES' ? filesExpires : viewExpires) <= now())
       throw new Error('remote_support_session_not_active');
     return {sessionId, generation:sessionGeneration};
   };
@@ -82,13 +185,14 @@ export function createRemoteSupportMcp({
     sessionGeneration++;
     viewExpires = 0;
     controlExpires = 0;
+    filesExpires = 0;
     sessionId = null;
     revoked = true;
   };
   const startSession = async scope => {
     if (platform !== 'win32') throw new Error('remote_support_windows_required');
     if (revoked || closed) throw new Error('remote_support_session_revoked');
-    if (!['VIEW','CONTROL'].includes(scope)) throw new Error('remote_support_scope_invalid');
+    if (!['VIEW','CONTROL','FILES'].includes(scope)) throw new Error('remote_support_scope_invalid');
     // Reserve consent before awaiting Windows; a second remote request must
     // not queue a competing approval or upgrade an existing pending one.
     if (sessionId || approvalPending) throw new Error('remote_support_session_already_started');
@@ -104,6 +208,7 @@ export function createRemoteSupportMcp({
       sessionId = randomUUID();
       viewExpires = until;
       controlExpires = scope === 'CONTROL' ? until : 0;
+      filesExpires = scope === 'FILES' || scope === 'CONTROL' ? until : 0;
       return content({schema:'metaengine.remote-support-session.v1',
         session_id:sessionId,scope,expires_at:new Date(until).toISOString(),
         further_action_prompts:false,unattended_persistent_access:false,
@@ -117,9 +222,11 @@ export function createRemoteSupportMcp({
       schema:'metaengine.remote-support.v1', state:'OPT_IN_ONLY',
       local_approval_required:true, active_view_grant:!revoked && viewExpires > now(),
       active_control_grant:!revoked && controlExpires > now(),
+      active_filesystem_grant:!revoked && filesExpires > now(),
       session_id:revoked ? null : sessionId,
       session_revoked:revoked, further_action_prompts:false,
-      arbitrary_shell:false, filesystem_access:false, unattended_access:false,
+      arbitrary_shell:false, filesystem_access:'POSTGRES_METADATA_ONLY', arbitrary_file_contents:false,
+      unattended_access:false,
       installed_browser_runtime_required:false, authority_effect:false,
     });
     if (name === 'support_start_session') {
@@ -128,6 +235,17 @@ export function createRemoteSupportMcp({
     if (name === 'support_stop') {
       revoke();
       return content({state:'SESSION_REVOKED',new_session_requires_local_restart:true,authority_effect:false});
+    }
+    if (name === 'support_discover_postgres') {
+      if (args && Object.keys(args).length) throw new Error('remote_support_discovery_arguments_invalid');
+      const grant = requireAuthorized('FILES');
+      const roots = await driveEnumerator({platform});
+      recheckGrant(grant,'FILES');
+      const discovery = await postgresDiscoverer({
+        roots, now, shouldContinue:()=>grantValid(grant,'FILES'),
+      });
+      recheckGrant(grant,'FILES');
+      return content(discovery);
     }
     if (name === 'support_observe') {
       if (!VIEWS.has(args?.action)) throw new Error('remote_support_action_not_allowed');
@@ -180,9 +298,10 @@ export function createRemoteSupportMcp({
   }
   const tools = [
     {name:'support_status',description:'Read session status without starting control or disclosing private data.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
-    {name:'support_start_session',description:'Request one local on-screen approval for up to 60 minutes of VIEW or VIEW+CONTROL. This is the ONLY interactive approval per session; control actions have no further popups.',inputSchema:{type:'object',properties:{
-      scope:{type:'string',enum:['VIEW','CONTROL']},
+    {name:'support_start_session',description:'Request one local on-screen approval for up to 60 minutes: FILES (Postgres location inventory), VIEW (screen), or CONTROL (screen, typed effects and Postgres location inventory). No per-action popups after consent.',inputSchema:{type:'object',properties:{
+      scope:{type:'string',enum:['VIEW','CONTROL','FILES']},
     },required:['scope'],additionalProperties:false}},
+    {name:'support_discover_postgres',description:'With locally approved FILES or CONTROL scope, search directory/file NAMES on all accessible fixed local Windows drives for existing PostgreSQL PGDATA. Return matching paths and metadata only; never read file contents, passwords, Vault keys, or write to any disk.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
     {name:'support_observe',description:'With on-PC view approval, observe windows, UIA, displays or capture a screenshot. May reveal private screen contents.',inputSchema:{type:'object',properties:{
       action:{type:'string',enum:[...VIEWS]},args:{type:'object'},target:{type:'object'},
     },required:['action'],additionalProperties:false}},
