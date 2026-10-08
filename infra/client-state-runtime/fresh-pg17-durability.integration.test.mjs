@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import postgres from 'postgres';
+import { inspectLocalApiSchemaCatalog } from './db-api-core.mjs';
 import { initializeFreshClientPg17 } from './fresh-pg17-initdb.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 
@@ -153,6 +154,12 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
     { max: 1, prepare: false, connect_timeout: 5, idle_timeout: 5, onnotice: () => {} });
   const [version] = await sql.unsafe('SELECT current_setting(\'server_version_num\')::integer AS major');
   assert(version.major >= 170000 && version.major < 180000);
+  const catalog = await inspectLocalApiSchemaCatalog({ sql });
+  assert.equal(catalog.state, 'BASELINE_SCHEMA_MISSING');
+  assert.equal(catalog.required_rpc_count, 40);
+  assert.equal(catalog.required_table_count, 5);
+  assert.equal(catalog.runtime_ready, false);
+  assert.equal(catalog.initialization_authorized, false);
   // A clean initdb is deliberately NOT a prepared METAENGINE schema.
   const [baseline] = await sql.unsafe("SELECT pg_catalog.to_regclass('public.compute_fabric_a2_browser_device_h205f22') IS NOT NULL AS ready");
   assert.equal(baseline.ready, false);

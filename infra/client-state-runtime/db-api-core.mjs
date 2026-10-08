@@ -214,3 +214,60 @@ export function databaseError(error) {
   const message = status === 503 ? 'database_request_failed' : String(error?.message || code).slice(0, 512);
   return { status, body: { code, message } };
 }
+
+// Read-only catalog inventory for a FUTURE owner-approved schema installer.
+// It does not claim API runtime readiness, RLS/grant correctness or authority.
+export async function inspectLocalApiSchemaCatalog({ sql } = {}) {
+  if (typeof sql?.unsafe !== 'function') throw new Error('local_schema_catalog_connection_required');
+  const tables = Object.keys(TABLE_ALLOWLIST);
+  const read = async (query, values = []) => {
+    try { return await sql.unsafe(query, values); }
+    catch { throw new Error('local_schema_catalog_readback_failed'); }
+  };
+  const [current] = await read(`SELECT r.rolsuper AS "superuser" FROM pg_catalog.pg_roles r WHERE r.rolname = CURRENT_USER`);
+  if (current?.superuser !== true) throw new Error('local_schema_catalog_superuser_required');
+  const [rpcs, columns, roles, extensions] = await Promise.all([
+    read(RPC_CATALOG_QUERY, [JSON.stringify(RPC_ALLOWLIST)]),
+    read(`SELECT c.table_name, c.column_name
+      FROM information_schema.columns c
+      WHERE c.table_schema = 'public' AND c.table_name
+        IN (SELECT pg_catalog.jsonb_array_elements_text($1::jsonb))`, [JSON.stringify(tables)]),
+    read(`SELECT r.rolname FROM pg_catalog.pg_roles r WHERE r.rolname = 'service_role'`),
+    read(`SELECT e.extname FROM pg_catalog.pg_extension e WHERE e.extname = 'pgcrypto'`),
+  ]);
+  if (![rpcs, columns, roles, extensions].every(Array.isArray))
+    throw new Error('local_schema_catalog_readback_invalid');
+  const installed = new Set(rpcs.map(row => row.name));
+  const actualColumns = new Set(columns.map(row => row.table_name + '.' + row.column_name));
+  const missingRpc = RPC_ALLOWLIST.filter(name => !installed.has(name));
+  const missingTable = [];
+  const missingColumn = [];
+  for (const [table, policy] of Object.entries(TABLE_ALLOWLIST)) {
+    const required = new Set([...policy.select, ...policy.filters, ...policy.order, ...(policy.insert || [])]);
+    if (!columns.some(row => row.table_name === table)) missingTable.push(table);
+    for (const column of required) if (!actualColumns.has(table + '.' + column)) missingColumn.push(table + '.' + column);
+  }
+  const serviceRolePresent = roles.some(row => row.rolname === 'service_role');
+  const pgcryptoPresent = extensions.some(row => row.extname === 'pgcrypto');
+  const catalogComplete = missingRpc.length === 0 && missingTable.length === 0 &&
+    missingColumn.length === 0 && serviceRolePresent && pgcryptoPresent;
+  // Presence is NOT RLS, function-body, migration-source or privilege attestation.
+  return Object.freeze({
+    schema: 'compute.local-api-schema-catalog.v1',
+    state: catalogComplete ? 'CATALOG_PRESENT_UNATTESTED' : 'BASELINE_SCHEMA_MISSING',
+    required_rpc_count: RPC_ALLOWLIST.length,
+    required_table_count: tables.length,
+    missing_rpc: Object.freeze(missingRpc),
+    missing_table: Object.freeze(missingTable),
+    missing_column: Object.freeze(missingColumn),
+    service_role_present: serviceRolePresent,
+    pgcrypto_present: pgcryptoPresent,
+    complete_catalog_only: catalogComplete,
+    grants_attested: false,
+    rls_attested: false,
+    migration_sources_attested: false,
+    runtime_ready: false,
+    initialization_authorized: false,
+    authority_effect: false,
+  });
+}
