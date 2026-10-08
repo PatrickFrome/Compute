@@ -74,10 +74,15 @@ test('slow advisory capture cannot starve the scheduler-owned DevOS turn', async
   const f = fixture();
   try {
     await f.client.cycle();
-    await Promise.race([
-      f.taskStarted.promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('devos_task_start_timeout')), 5000)),
-    ]);
+    // Preserve the predecessor negative-proof assertion while bounding startup
+    // observation: a starved legacy scheduler must fail with its causal reason.
+    let timeout;
+    try {
+      await Promise.race([
+        f.taskStarted.promise,
+        new Promise(resolve => { timeout = setTimeout(resolve, 2000); }),
+      ]);
+    } finally { clearTimeout(timeout); }
     await f.settle();
     assert.equal(f.counters.commands, 1);
     assert.equal(f.counters.captures, 1);

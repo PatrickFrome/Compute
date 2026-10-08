@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -55,7 +55,7 @@ test('offline resource bundle binds source, binaries, cache and licenses with no
     inventory: f.inventory, expectedInventoryDigest: f.inventory.inventory_sha256 });
   const verified = await verifyOfflineRuntimeBundle({ bundleDirectory: f.stage, expectedBundleDigest: manifest.bundle_sha256 });
   assert.deepEqual(verified.manifest, manifest);
-  assert.equal(verified.paths.hostEntry, path.join(f.stage, 'source/infra/client-state-runtime/runtime-host.mjs'));
+  assert.equal(verified.paths.hostEntry, path.join(await realpath(f.stage), 'source/infra/client-state-runtime/runtime-host.mjs'));
   assert.equal(manifest.policy.database_included, false);
   assert.equal(manifest.policy.private_config_included, false);
   assert.equal(manifest.policy.installed_client_qualified, false);

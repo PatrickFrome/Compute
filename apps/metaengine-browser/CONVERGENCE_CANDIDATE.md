@@ -1,6 +1,6 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000001.1`.
+Reserved package identity is `0.7.0-dev.37780000003.1`.
 
 Client-owned offline runtime successor (2026-10-08):
 - Continues source `9241f4566ee7bb9ab54a1da5ef98de27cb36c56b` from PR #1143 with whole-stack restart qualification, singleton admission before provider health, and a managed local runtime host.
