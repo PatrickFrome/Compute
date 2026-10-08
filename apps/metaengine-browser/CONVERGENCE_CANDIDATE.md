@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000020.1`.
+Reserved package identity is `0.7.0-dev.37781000001.1`.
+
+Restored PostgreSQL successor: continue from PR #1157 using the owner's previously restored PostgreSQL 17 database and original Vault key. Fresh initdb remains an optional experimental action and is never invoked on existing PGDATA. Align the packaged first-run source closure with runtime startup verification; qualify Windows PostgreSQL using the actual restricted-token postmaster identity rather than the short-lived pg_ctl helper PID. Explicit restored-provider preparation independently checks the existing schema, local health and shutdown before exclusively publishing a credential-free owner profile. Private dumps, PGDATA, passwords and keys are excluded from GitHub and installers. Hosted enrollment/upgrade/soak jobs remain held for this local-only branch; public package CI does not have the private restored database and cannot establish normal client readiness. Source, resource, fresh synthetic durability and package checks remain active.
 
 Read-only PG17 schema readiness inventory: the already-bundled db-api-core now checks catalog rows for 40 RPCs, 5 table shapes, service_role and pgcrypto, never granting initialization or readiness even if catalog entries are present. Windows physical cold-restart requires the new cluster to report BASELINE_SCHEMA_MISSING. Earlier `0.7.0-dev.37780000019.1` reserved source identity consumed; this new head must pass exact CI.
 

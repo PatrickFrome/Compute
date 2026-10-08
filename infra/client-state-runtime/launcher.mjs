@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import net from 'node:net';
@@ -217,6 +218,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   const finished = new Promise(resolve => { finish = resolve; });
   let postgresIdentity;
   let startupManifest;
+  let postgresPreparation;
 
   const stopChild = async child => {
     if (exits.has(child)) return;
@@ -242,7 +244,20 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     clearInterval(monitor);
     config.signal?.removeEventListener('abort', onAbort);
     let cleanupFailure;
+    // pg_ctl exits before its restricted-token postmaster. Settle that
+    // preparation before deciding which exact processes this launcher owns.
+    if (postgresPreparation) {
+      try { await postgresPreparation; }
+      catch (error) { if (error?.code === 'runtime_cleanup_unconfirmed') cleanupFailure = error; }
+    }
     for (const item of [...children].reverse()) {
+      if (item.session) {
+        try {
+          const outcome = await item.session.stop();
+          if (outcome.cleanup_confirmed !== true) throw runtimeError('runtime_cleanup_unconfirmed');
+        } catch { cleanupFailure = runtimeError('runtime_cleanup_unconfirmed'); }
+        continue;
+      }
       if (item.name === 'postgres' && !exits.has(item.child)) {
         // pg_ctl targets the already-qualified data directory, never an arbitrary port.
         try {
@@ -314,7 +329,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     const fixtureEntry = (command, fallback) => command ? command.args.find((arg) => path.isAbsolute(arg) && /\.(mjs|js|ts)$/.test(arg)) || fallback : fallback;
     const captureOptions = {
       repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry),
-        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs')] : [])],
+        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs')] : [])],
       nodePath: config.nodePath, denoPath: config.denoPath, denoLockPath: config.denoLockPath,
       pgBinDir: hooks.inspectPostgres ? undefined : config.pgBinDir, env, fixture, policy: safeRuntimePolicy(config, { fixture }),
     };
@@ -322,12 +337,26 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     if (config.expectedStartupSourceSha256 && before.manifest_sha256 !== config.expectedStartupSourceSha256) throw runtimeError('startup_source_pin_mismatch');
     if (config.expectedStartupFilesSha256 && startupFilesDigest(before.files) !== config.expectedStartupFilesSha256) throw runtimeError('startup_files_pin_mismatch');
     let pgChild;
+    let ownedPostgresPid = null;
     if (config.postgresMode === 'owned') {
       await requireFreePort(config.databasePort);
-      pgChild = start('postgres', path.join(config.pgBinDir, executable('postgres')), ['-D', config.pgDataDir, '-h', '127.0.0.1', '-p', String(config.databasePort)]);
+      if (process.platform === 'win32' && !hooks.inspectPostgres) {
+        postgresPreparation = startOwnedWindowsPostgres({ pgBinDir: config.pgBinDir, pgDataDir: config.pgDataDir,
+          databasePort: config.databasePort, env, startupTimeoutMs: config.startupTimeoutMs, signal: config.signal })
+          .then(session => {
+            children.push({ name: 'postgres', session });
+            report({ event: 'spawned', component: 'postgres', pid: session.pid, instance_id: config.instanceId });
+            return session;
+          });
+        ownedPostgresPid = (await postgresPreparation).pid;
+        if (stopping || config.signal?.aborted) throw runtimeError('runtime_startup_cancelled');
+      } else {
+        pgChild = start('postgres', path.join(config.pgBinDir, executable('postgres')), ['-D', config.pgDataDir, '-h', '127.0.0.1', '-p', String(config.databasePort)]);
+        ownedPostgresPid = pgChild.pid;
+      }
     }
     const inspector = hooks.inspectPostgres || inspectPostgres;
-    postgresIdentity = await waitReady(async () => assertPostgresIdentity(await inspector(config), config, pgChild?.pid ?? null), 'postgres');
+    postgresIdentity = await waitReady(async () => assertPostgresIdentity(await inspector(config), config, ownedPostgresPid), 'postgres');
     const apiCommand = hooks.apiCommand || { command: config.nodePath, args: [config.apiEntry] };
     start('api', apiCommand.command, apiCommand.args);
     await waitReady(() => health('api'), 'api');
@@ -339,7 +368,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     const edgeHealth = await waitReady(() => health('edge'), 'edge');
     const endpoint = `http://127.0.0.1:${config.edgePort}/a2-browser-native-supervisor-v1`;
     startupManifest = bindStartupManifest({ before, after: await captureStartupSource(captureOptions), instanceId: config.instanceId, endpoint,
-      children: children.map(({ name, child }) => ({ name, pid: child.pid })), startedAt, readyAt: new Date().toISOString() });
+      children: children.map(({ name, child, session }) => ({ name, pid: session?.pid ?? child.pid })), startedAt, readyAt: new Date().toISOString() });
     const startupManifestPath = config.startupManifestPath || path.join(config.pgDataDir, `runtime-startup-${config.instanceId}.json`);
     await persistStartupManifest(startupManifestPath, startupManifest, projectRoot);
     let failedProbes = 0;
@@ -350,7 +379,9 @@ export async function launchClientStateRuntime(input, hooks = {}) {
       try {
         await health('api');
         await health('edge');
-        const current = await assertPostgresIdentity(await inspector(config), config, pgChild?.pid ?? null);
+        const session = children.find(item => item.name === 'postgres')?.session;
+        if (session) await session.verify();
+        const current = await assertPostgresIdentity(await inspector(config), config, ownedPostgresPid);
         if (current.pid !== postgresIdentity.pid || current.started_at !== postgresIdentity.started_at) throw runtimeError('postgres_incarnation_mismatch');
         failedProbes = 0;
       } catch (error) {
@@ -361,7 +392,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     report({ event: 'ready', instance_id: config.instanceId, endpoint, postgres_mode: config.postgresMode,
       startup_source_sha256: startupManifest.source_manifest_sha256, startup_manifest_path: startupManifestPath });
     return { endpoint, instanceId: config.instanceId, postgresIdentity, edgeHealth, startupManifest, startupManifestPath, stop, finished,
-      get stopped() { return stopping; }, children: children.map(({ name, child }) => ({ name, pid: child.pid })) };
+      get stopped() { return stopping; }, children: children.map(({ name, child, session }) => ({ name, pid: session?.pid ?? child.pid })) };
   } catch (error) {
     await stop(error.code || 'runtime_start_failed');
     throw error;

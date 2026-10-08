@@ -231,7 +231,7 @@ export async function inspectLocalApiSchemaCatalog({ sql } = {}) {
     read(`SELECT c.table_name, c.column_name
       FROM information_schema.columns c
       WHERE c.table_schema = 'public' AND c.table_name
-        IN (SELECT pg_catalog.jsonb_array_elements_text($1::jsonb))`, [JSON.stringify(tables)]),
+        IN (SELECT pg_catalog.jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(tables)]),
     read(`SELECT r.rolname FROM pg_catalog.pg_roles r WHERE r.rolname = 'service_role'`),
     read(`SELECT e.extname FROM pg_catalog.pg_extension e WHERE e.extname = 'pgcrypto'`),
   ]);

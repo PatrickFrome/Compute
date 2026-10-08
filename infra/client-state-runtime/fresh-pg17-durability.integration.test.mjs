@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, execFile } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -10,9 +8,9 @@ import test from 'node:test';
 import postgres from 'postgres';
 import { inspectLocalApiSchemaCatalog } from './db-api-core.mjs';
 import { initializeFreshClientPg17 } from './fresh-pg17-initdb.mjs';
+import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 
-const exec = promisify(execFile);
 const bundle = process.env.LOCAL_STATE_TEST_FRESH_BUNDLE_DIRECTORY;
 const sha = process.env.LOCAL_STATE_TEST_FRESH_BUNDLE_SHA256;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -52,7 +50,6 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
   assert.equal(process.platform, 'win32', 'physical installed-runtime qualification is Windows-scoped');
   const verified = await verifyOfflineRuntimeBundle({ bundleDirectory: bundle, expectedBundleDigest: sha });
   const bin = verified.paths.postgresBinDirectory;
-  const executable = name => path.join(bin, name + '.exe');
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'compute-physical-pg17-cold-')));
   const marker = randomUUID();
   await fs.writeFile(path.join(root, 'synthetic-test-owner.marker'), marker, { flag: 'wx', mode: 0o600 });
@@ -77,14 +74,11 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
   let active = null;
   let sql = null;
   let completed = false;
-  const run = async (name, args, timeout = 15000) => {
-    try {
-      await exec(executable(name), args, { env, windowsHide: true, shell: false,
-        timeout, maxBuffer: 32768 });
-    } catch { throw new Error('physical_pg17_' + name + '_command_unconfirmed'); }
-  };
   const pidPath = path.join(dataDirectory, 'postmaster.pid');
   const assertOwnedProcess = async session => {
+    const verifiedProcess = await session.owned.verify();
+    assert.equal(verifiedProcess.pid, session.pid, 'verified OS process must be this owned postmaster');
+    assert.equal(verifiedProcess.processCreatedAt, session.processCreatedAt, 'Windows process creation identity must remain pinned');
     const lines = (await fs.readFile(pidPath, 'utf8')).trim().split(/\r?\n/);
     assert.equal(Number(lines[0]), session.pid, 'postgres PID must belong to this test');
     assert.equal(Number(lines[3]), port, 'postgres port must be the isolated test port');
@@ -95,23 +89,13 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
   const start = async () => {
     assert.equal(active, null);
     await portClosed(port);
-    const child = spawn(executable('postgres'), ['-D', dataDirectory, '-p', String(port), '-h', '127.0.0.1'], {
-      env, windowsHide: true, shell: false, stdio: ['ignore', 'ignore', 'ignore'],
-    });
-    let spawnError = false;
-    child.once('error', () => { spawnError = true; });
-    const closed = new Promise(resolve => child.once('close', resolve));
-    active = { pid: child.pid, child, closed };
-    for (let attempt = 0; attempt < 90; attempt++) {
-      if (spawnError || child.exitCode !== null || child.signalCode !== null)
-        throw new Error('physical_pg17_postmaster_terminated_during_start');
-      try {
-        await run('pg_isready', ['--timeout=1'], 3000);
-        active.startIdentity = await assertOwnedProcess(active);
-        return active;
-      } catch { await sleep(200); }
-    }
-    throw new Error('physical_pg17_postmaster_readiness_unconfirmed');
+    const owned = await startOwnedWindowsPostgres({ pgBinDir: bin, pgDataDir: dataDirectory,
+      databasePort: port, env, startupTimeoutMs: 30000 });
+    active = { owned, pid: owned.pid, processCreatedAt: owned.processCreatedAt,
+      startIdentity: owned.postmasterStartIdentity };
+    assert.equal(await assertOwnedProcess(active), active.startIdentity);
+    assert.equal(await owned.isAlive(), true);
+    return active;
   };
   const stop = async () => {
     if (sql) {
@@ -121,8 +105,8 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
     if (!active) return;
     const owned = active;
     assert.equal(await assertOwnedProcess(owned), owned.startIdentity, 'postmaster identity drift during shutdown');
-    await run('pg_ctl', ['-D', dataDirectory, 'stop', '-m', 'fast', '-w', '-t', '15'], 25000);
-    await Promise.race([owned.closed, sleep(8000).then(() => { throw new Error('physical_pg17_process_stop_unconfirmed'); })]);
+    assert.equal((await owned.owned.stop()).cleanup_confirmed, true);
+    assert.equal(await owned.owned.isAlive(), false, 'the original OS postmaster process must be absent');
     await assert.rejects(fs.lstat(pidPath), { code: 'ENOENT' });
     await portClosed(port);
     active = null;
@@ -167,7 +151,20 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
   await sql.unsafe('INSERT INTO public.compute_first_run_durability_probe(id, value) VALUES ($1,$2)', [1, markerValue]);
   assert.equal((await sql.unsafe('SELECT value FROM public.compute_first_run_durability_probe WHERE id=1'))[0].value, markerValue);
   const firstIdentity = first.startIdentity;
+  const originalPidBytes = await fs.readFile(pidPath);
+  try {
+    const changed = originalPidBytes.toString('utf8').replace(/^\d+/, String(first.pid + 1));
+    await fs.writeFile(pidPath, changed);
+    await assert.rejects(first.owned.verify(), { code: 'owned_postgres_process_identity_unconfirmed' });
+    await assert.rejects(first.owned.stop(), { code: 'runtime_cleanup_unconfirmed' });
+    assert.equal(await first.owned.isAlive(), true, 'uncertain PID ownership must not terminate the postmaster');
+  } finally { await fs.writeFile(pidPath, originalPidBytes); }
+  assert.equal(await assertOwnedProcess(first), firstIdentity);
   await stop();
+
+  // postmaster.pid records whole seconds. Crossing that boundary preserves
+  // the original assertion that a cold restart has a fresh start identity.
+  while (Math.floor(Date.now() / 1000) <= Number(firstIdentity)) await sleep(50);
 
   const second = await start();
   assert.notEqual(second.startIdentity, firstIdentity, 'cold restart must create a fresh postmaster start identity');
