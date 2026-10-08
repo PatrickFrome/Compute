@@ -55,6 +55,25 @@ async function requireCanonicalPath(target, kind) {
   return info;
 }
 
+// Logical path checks alone cannot distinguish Windows long names and DOS
+// 8.3 aliases. Compare physical paths after validating every ancestor to
+// ensure private PGDATA/keys never overlap immutable package or source bytes.
+export function validateRuntimeHostPhysicalBoundaries({
+  bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory,
+} = {}) {
+  const values = [bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory];
+  if (values.some(value => typeof value !== 'string' || !path.isAbsolute(value))) throw failure('runtime_host_path_invalid');
+  if (within(bundleDirectory, stateDirectory) || within(stateDirectory, bundleDirectory)
+    || within(repositoryDirectory, stateDirectory) || within(stateDirectory, repositoryDirectory)
+    || !within(stateDirectory, pgDataDirectory) || stateDirectory === pgDataDirectory) {
+    throw failure('runtime_host_private_state_boundary_invalid');
+  }
+  if (within(bundleDirectory, privateConfigFile) || within(repositoryDirectory, privateConfigFile)) {
+    throw failure('runtime_host_private_config_boundary_invalid');
+  }
+  return true;
+}
+
 async function readConfig(configFile) {
   configFile = absoluteLocalPath(configFile);
   const info = await requireCanonicalPath(configFile, 'file');
@@ -69,7 +88,17 @@ async function readConfig(configFile) {
     catch { throw failure('runtime_host_config_json_invalid'); }
   } finally { await handle.close(); }
   const config = validateRuntimeHostConfig(value);
-  if (within(config.bundle_directory, configFile) || within(repositoryRoot, configFile)) throw failure('runtime_host_private_config_boundary_invalid');
+  // Reject ancestor reparse points and then compare resolved physical
+  // directory identities, not user-supplied path spellings.
+  await requireCanonicalPath(config.bundle_directory, 'directory');
+  await requireCanonicalPath(config.state_directory, 'directory');
+  await requireCanonicalPath(config.pg_data_directory, 'directory');
+  const [bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory] = await Promise.all([
+    config.bundle_directory, config.state_directory, config.pg_data_directory, configFile, repositoryRoot,
+  ].map(target => realpath(target)));
+  validateRuntimeHostPhysicalBoundaries({
+    bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory,
+  });
   return config;
 }
 

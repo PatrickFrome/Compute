@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { runtimeProviderDescriptor, stageManagedDenoCache, startManagedRuntimeHost, validateRuntimeHostConfig } from './runtime-host.mjs';
+import { runtimeProviderDescriptor, stageManagedDenoCache, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
 const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version: 1,
@@ -19,6 +19,7 @@ async function fixture(t, overrides = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'compute-host-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const config = { ...configValue(root), ...overrides };
+  await mkdir(config.bundle_directory, { recursive: true });
   await mkdir(config.pg_data_directory, { recursive: true });
   await writeFile(path.join(config.pg_data_directory, 'PG_VERSION'), '17\n');
   await writeFile(path.join(config.pg_data_directory, 'client-vault.key'), 'b'.repeat(64) + '\n');
@@ -46,6 +47,34 @@ test('host rejects private-state overlap, extra config fields and unqualified pr
   assert.throws(() => validateRuntimeHostConfig({ ...good, state_directory: good.bundle_directory }), /private_state_boundary_invalid/);
   assert.throws(() => validateRuntimeHostConfig({ ...good, expected_bundle_sha256: 'bad' }), /bundle_pin_required/);
   assert.throws(() => runtimeProviderDescriptor({ instanceId: randomUUID(), edgeHealth: { runtime_ready: true } }), /provider_unattested/);
+});
+
+test('physical directory identity fences short-name aliases and private PGDATA overlap', () => {
+  // The normalized names stand in for realpath() results of two distinct path
+  // spellings (e.g. RUNNER~1 and runneradmin). Works on Windows and Linux
+  // without relying on 8.3 short-name generation by the test runner.
+  const root = path.resolve(os.tmpdir(), 'physical-boundary-fixture');
+  const bundleDirectory = path.join(root, 'actual', 'bundle');
+  const stateDirectory = path.join(root, 'actual', 'private');
+  const pgDataDirectory = path.join(stateDirectory, 'pgdata');
+  const privateConfigFile = path.join(root, 'private-config.json');
+  const repositoryDirectory = path.join(root, 'checkout');
+  const physical = { bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory };
+  assert.equal(validateRuntimeHostPhysicalBoundaries(physical), true);
+  const aliasedState = path.join(bundleDirectory, 'private');
+  assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+    ...physical, stateDirectory: aliasedState, pgDataDirectory: path.join(aliasedState, 'pgdata'),
+  }), /runtime_host_private_state_boundary_invalid/);
+  assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+    ...physical, privateConfigFile: path.join(bundleDirectory, 'credentials.json'),
+  }), /runtime_host_private_config_boundary_invalid/);
+  assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+    ...physical, stateDirectory: path.join(repositoryDirectory, 'private'),
+    pgDataDirectory: path.join(repositoryDirectory, 'private', 'pgdata'),
+  }), /runtime_host_private_state_boundary_invalid/);
+  assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+    ...physical, pgDataDirectory: path.join(root, 'foreign-pgdata'),
+  }), /runtime_host_private_state_boundary_invalid/);
 });
 
 test('host owns one lock, publishes public status and idempotently stops its runtime', async t => {
