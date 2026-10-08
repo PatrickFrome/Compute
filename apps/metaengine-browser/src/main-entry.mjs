@@ -24,6 +24,12 @@ const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
 const updatedLaunch = process.argv.includes('--updated');
 const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !clientGoalJournalProbe && !instanceHoldProbe;
 const interactiveNormalLaunch = browserRuntimeNeeded && !updatedLaunch;
+if (app.isPackaged && browserRuntimeNeeded && !bypassSingleInstance) {
+  // Fence the entire installed normal/updated runtime to the owned local API
+  // before any dynamically imported supervisor module can select a transport.
+  // Offline probes and installer shutdown remain DB-free.
+  process.env.METAENGINE_LOCAL_ONLY_CLIENT = '1';
+}
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
