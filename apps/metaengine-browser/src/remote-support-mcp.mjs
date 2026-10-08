@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createWindowsLocalComputerExecutor } from './windows-local-computer-executor.mjs';
+import { runRestoredClientProviderCli } from '../../../infra/client-state-runtime/restored-client-provider-cli.mjs';
 
 const execute = promisify(execFile);
 const MAX_MESSAGE = 128 * 1024;
@@ -13,17 +14,47 @@ const MAX_IMAGE = 8 * 1024 * 1024;
 const VIEWS = new Set(['OBSERVE_WINDOWS','OBSERVE_DISPLAYS','FOREGROUND_STATUS','VERIFY_TARGET','UIA_SNAPSHOT','CAPTURE_DESKTOP','CAPTURE_WINDOW']);
 const CONTROLS = new Set(['UIA_FOCUS','UIA_INVOKE','UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','UIA_SCROLL','TYPE_TEXT','KEY_PRESS','POINTER_CLICK']);
 const deny = () => { throw new Error('remote_support_local_approval_required'); };
+const RESTORE_ACTION = 'USE_EXISTING_RESTORED_POSTGRES_17';
+const RESTORE_FIELDS = ['private_config_file','expected_bundle_sha256','restore_receipt_file',
+  'expected_restore_receipt_sha256','appdata_directory','owner_action'];
+const restoreDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+function restoreArguments(args) {
+  if (!args || Array.isArray(args) || typeof args !== 'object'
+    || Object.keys(args).length !== RESTORE_FIELDS.length
+    || RESTORE_FIELDS.some(key=>!Object.hasOwn(args,key))
+    || !restoreDigest(args.expected_bundle_sha256)
+    || !restoreDigest(args.expected_restore_receipt_sha256)
+    || args.owner_action !== RESTORE_ACTION
+    || !['private_config_file','restore_receipt_file','appdata_directory'].every(key =>
+      typeof args[key] === 'string' && args[key].length < 2048
+      && path.win32.isAbsolute(args[key]) && !/^(?:\\\\\\\\|\/\/)/.test(args[key])
+      && !/[\x00-\x1f]/.test(args[key]))) {
+    throw new Error('remote_support_restore_arguments_invalid');
+  }
+  return ['--config',args.private_config_file,'--bundle-sha256',args.expected_bundle_sha256,
+    '--restore-receipt',args.restore_receipt_file,'--restore-receipt-sha256',args.expected_restore_receipt_sha256,
+    '--appdata',args.appdata_directory,'--owner-action',RESTORE_ACTION];
+}
+function ambiguousRestore() {
+  return {...content({schema:'metaengine.remote-support-restored-provider-effect.v1',state:'AMBIGUOUS',
+    reason:'SESSION_CHANGED_DURING_POSSIBLE_PROVIDER_EFFECT',automatic_retry_allowed:false,
+    authority_effect:false}),isError:true};
+}
 const result = id => ({ jsonrpc:'2.0', id });
 const clean = error => /^remote_support_[a-z0-9_]+$/.test(String(error?.message||'')) ? error.message : 'remote_support_operation_failed';
 const content = value => ({ content:[{type:'text',text:JSON.stringify(value)}],isError:false });
 const errorContent = error => ({content:[{type:'text',text:clean(error)}],isError:true});
 
-export async function confirmRemoteSupportOnWindows({ scope }) {
+export async function confirmRemoteSupportOnWindows({ scope, details = null }) {
   if (process.platform !== 'win32') return false;
-  if (!['VIEW','CONTROL','FILES'].includes(scope)) return false;
+  if (!['VIEW','CONTROL','FILES','DB_CONNECT','DB_CONNECT_COMMIT'].includes(scope)) return false;
   // The operator must be physically present in the user's interactive
   // Windows session. The remote caller cannot set this decision.
-  const text = scope === 'VIEW'
+  const text = scope === 'DB_CONNECT'
+    ? 'Allow one 10-minute local PostgreSQL qualification session? The assistant may inspect an owner-selected PostgreSQL 17 and compare Vault keys locally. No database changes occur without a SECOND on-screen approval. Stop the support process to revoke.'
+    : scope === 'DB_CONNECT_COMMIT'
+      ? 'APPROVE ONE restored PostgreSQL 17 provider registration on this Windows PC? Existing private config: ' + String(details?.configFile||'UNSPECIFIED').slice(0,500) + '; Browser profile root: ' + String(details?.appData||'UNSPECIFIED').slice(0,350) + '. This starts and stops your selected DB and may exclusively write a missing owner profile. NEVER replaces PGDATA or Vault. Approve only if these paths are correct.'
+    : scope === 'VIEW'
     ? 'Allow ONE METAENGINE support session to VIEW your screen and UI for up to 60 minutes? Private content may be visible. Close the support terminal to stop immediately.'
     : scope === 'FILES'
       ? 'Allow ONE METAENGINE support session to SEARCH FILE AND DIRECTORY NAMES across all accessible local fixed drives for an existing PostgreSQL database, for up to 60 minutes? Only matching database directory locations and metadata can be returned. No file contents, passwords or Vault keys are read. Close the support terminal to stop.'
@@ -144,10 +175,14 @@ export function createRemoteSupportMcp({
   imageLoader = readBoundedCapture,
   driveEnumerator = listReadyFixedWindowsDrives,
   postgresDiscoverer = discoverLocalPostgresFiles,
+  restoredProviderOperator = runRestoredClientProviderCli,
 } = {}) {
   let viewExpires = 0;
   let controlExpires = 0;
   let filesExpires = 0;
+  let databaseExpires = 0;
+  let restoreAttemptClaimed = false;
+  let restoreApprovalPending = false;
   let sessionId = null;
   let revoked = false;
   let closed = false;
@@ -166,11 +201,11 @@ export function createRemoteSupportMcp({
   const grantValid = (grant, scope) =>
     platform === 'win32' && !revoked && !closed && sessionId !== null
     && sessionId === grant.sessionId && sessionGeneration === grant.generation
-    && (scope === 'CONTROL' ? controlExpires : scope === 'FILES' ? filesExpires : viewExpires) > now();
+    && (scope === 'CONTROL' ? controlExpires : scope === 'FILES' ? filesExpires : scope === 'DB_CONNECT' ? databaseExpires : viewExpires) > now();
   const requireAuthorized = scope => {
     if (platform !== 'win32') throw new Error('remote_support_windows_required');
     if (revoked || closed) throw new Error('remote_support_session_revoked');
-    if (!sessionId || (scope === 'CONTROL' ? controlExpires : scope === 'FILES' ? filesExpires : viewExpires) <= now())
+    if (!sessionId || (scope === 'CONTROL' ? controlExpires : scope === 'FILES' ? filesExpires : scope === 'DB_CONNECT' ? databaseExpires : viewExpires) <= now())
       throw new Error('remote_support_session_not_active');
     return {sessionId, generation:sessionGeneration};
   };
@@ -186,13 +221,14 @@ export function createRemoteSupportMcp({
     viewExpires = 0;
     controlExpires = 0;
     filesExpires = 0;
+    databaseExpires = 0;
     sessionId = null;
     revoked = true;
   };
   const startSession = async scope => {
     if (platform !== 'win32') throw new Error('remote_support_windows_required');
     if (revoked || closed) throw new Error('remote_support_session_revoked');
-    if (!['VIEW','CONTROL','FILES'].includes(scope)) throw new Error('remote_support_scope_invalid');
+    if (!['VIEW','CONTROL','FILES','DB_CONNECT'].includes(scope)) throw new Error('remote_support_scope_invalid');
     // Reserve consent before awaiting Windows; a second remote request must
     // not queue a competing approval or upgrade an existing pending one.
     if (sessionId || approvalPending) throw new Error('remote_support_session_already_started');
@@ -203,12 +239,13 @@ export function createRemoteSupportMcp({
       if (closed || revoked || sessionGeneration !== initialGeneration)
         throw new Error('remote_support_session_revoked');
       if (accepted !== true) deny();
-      const until = now() + SESSION_MAX_MS;
+      const until = now() + (scope === 'DB_CONNECT' ? 10 * 60 * 1000 : SESSION_MAX_MS);
       sessionGeneration++;
       sessionId = randomUUID();
       viewExpires = until;
       controlExpires = scope === 'CONTROL' ? until : 0;
       filesExpires = scope === 'FILES' || scope === 'CONTROL' ? until : 0;
+      databaseExpires = scope === 'DB_CONNECT' ? until : 0;
       return content({schema:'metaengine.remote-support-session.v1',
         session_id:sessionId,scope,expires_at:new Date(until).toISOString(),
         further_action_prompts:false,unattended_persistent_access:false,
@@ -223,10 +260,13 @@ export function createRemoteSupportMcp({
       local_approval_required:true, active_view_grant:!revoked && viewExpires > now(),
       active_control_grant:!revoked && controlExpires > now(),
       active_filesystem_grant:!revoked && filesExpires > now(),
+      active_database_connect_grant:!revoked && databaseExpires > now(),
+      restored_provider_attempt_claimed:restoreAttemptClaimed,
       session_id:revoked ? null : sessionId,
       session_revoked:revoked, further_action_prompts:false,
       arbitrary_shell:false, filesystem_access:'POSTGRES_METADATA_ONLY', arbitrary_file_contents:false,
       unattended_access:false,
+      restored_database_connection_requires_second_local_approval:true,
       installed_browser_runtime_required:false, authority_effect:false,
     });
     if (name === 'support_start_session') {
@@ -246,6 +286,41 @@ export function createRemoteSupportMcp({
       });
       recheckGrant(grant,'FILES');
       return content(discovery);
+    }
+    if (name === 'support_connect_restored_postgres') {
+      const grant = requireAuthorized('DB_CONNECT');
+      const cliArgs = restoreArguments(args);
+      if (restoreAttemptClaimed || restoreApprovalPending) throw new Error('remote_support_restore_attempt_already_claimed');
+      restoreApprovalPending = true;
+      let approved = false;
+      try {
+        approved = await approve({scope:'DB_CONNECT_COMMIT',details:{
+          configFile:args.private_config_file,appData:args.appdata_directory,
+        }});
+      } finally { restoreApprovalPending = false; }
+      recheckGrant(grant,'DB_CONNECT');
+      if (approved !== true) deny();
+      // One attempt per local support process, even if the operator rejects or cleanup becomes ambiguous.
+      restoreAttemptClaimed = true;
+      let receipt;
+      try { receipt = await restoredProviderOperator(cliArgs); }
+      catch {
+        if (!grantValid(grant,'DB_CONNECT')) return ambiguousRestore();
+        throw new Error('remote_support_restore_operator_failed');
+      }
+      if (!grantValid(grant,'DB_CONNECT')) return ambiguousRestore();
+      // Never forward arbitrary operator-provided objects or private paths.
+      if (receipt?.schema !== 'compute.restored-client-provider-provisioning.v1'
+          || receipt.state !== 'CONFIGURED' || receipt.provider !== 'LOCAL_POSTGRES'
+          || receipt.cleanup_confirmed !== true || receipt.private_vault_key_preserved !== true
+          || receipt.owner_profile_written !== true || receipt.runtime_ready !== false
+          || receipt.authority_effect !== false)
+        throw new Error('remote_support_restore_receipt_unverified');
+      return content({schema:'metaengine.remote-support-restored-provider-effect.v1',
+        state:'CONFIGURED',provider:'LOCAL_POSTGRES',owner_profile_written:true,
+        private_vault_key_preserved:true,cleanup_confirmed:true,
+        runtime_ready:false,installed_normal_boot_verified:false,
+        automatic_retry_allowed:false,authority_effect:false});
     }
     if (name === 'support_observe') {
       if (!VIEWS.has(args?.action)) throw new Error('remote_support_action_not_allowed');
@@ -298,10 +373,15 @@ export function createRemoteSupportMcp({
   }
   const tools = [
     {name:'support_status',description:'Read session status without starting control or disclosing private data.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
-    {name:'support_start_session',description:'Request one local on-screen approval for up to 60 minutes: FILES (Postgres location inventory), VIEW (screen), or CONTROL (screen, typed effects and Postgres location inventory). No per-action popups after consent.',inputSchema:{type:'object',properties:{
-      scope:{type:'string',enum:['VIEW','CONTROL','FILES']},
+    {name:'support_start_session',description:'Request local approval: FILES (metadata), VIEW (screen), CONTROL (leased UI effects), or DB_CONNECT (10-minute restored PostgreSQL session requiring a SECOND approval for registration).',inputSchema:{type:'object',properties:{
+      scope:{type:'string',enum:['VIEW','CONTROL','FILES','DB_CONNECT']},
     },required:['scope'],additionalProperties:false}},
     {name:'support_discover_postgres',description:'With locally approved FILES or CONTROL scope, search directory/file NAMES on all accessible fixed local Windows drives for existing PostgreSQL PGDATA. Return matching paths and metadata only; never read file contents, passwords, Vault keys, or write to any disk.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+    {name:'support_connect_restored_postgres',description:'One-shot, locally double-approved connection of an EXISTING restored PostgreSQL 17 via the reviewed private operator. Requires an existing private runtime-host config, independent bundle/restore receipt SHA pins, and an absent owner profile. Never initdb, overwrite PGDATA/Vault or fall back to hosted DB. No automatic retry; installed boot remains separately unqualified.',inputSchema:{type:'object',properties:{
+      private_config_file:{type:'string'},expected_bundle_sha256:{type:'string'},
+      restore_receipt_file:{type:'string'},expected_restore_receipt_sha256:{type:'string'},
+      appdata_directory:{type:'string'},owner_action:{type:'string',enum:[RESTORE_ACTION]},
+    },required:RESTORE_FIELDS,additionalProperties:false}},
     {name:'support_observe',description:'With on-PC view approval, observe windows, UIA, displays or capture a screenshot. May reveal private screen contents.',inputSchema:{type:'object',properties:{
       action:{type:'string',enum:[...VIEWS]},args:{type:'object'},target:{type:'object'},
     },required:['action'],additionalProperties:false}},
