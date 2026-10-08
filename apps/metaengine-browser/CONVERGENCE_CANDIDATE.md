@@ -1,6 +1,10 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000016.1`.
+Reserved package identity is `0.7.0-dev.37780000018.1`.
+
+Complete Browser SBOM/ASAR fixture for new explicit first-run entry: stage and checkout now contain identical synthetic fresh PG17 initdb source and hash/manifest binding. This retains the production offline source gate rather than weakening it. `0.7.0-dev.37780000017.1` CI had seven test fixture failures and is superseded.
+
+Reviewed runtime source manifest now binds fresh-PG17-plus-Vault initializer and static closure. Offline bundle rejects source missing entry. This only stages trusted source; normal Browser boot does not invoke initdb, SQL schema and local owner onboarding remain blockers. Prior .16 identity consumed.
 
 First-run PG17 and Vault key in same exclusive owner transaction, Windows physical test: correctly validate private 64-digit key plus LF terminator; previous code accidentally double-escaped newline in test regex. Prior 0.7.0-dev.37780000015.1 candidate consumed.
 

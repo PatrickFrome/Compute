@@ -12,7 +12,8 @@ export const BUNDLE_ENTRY_POINTS = Object.freeze([
   'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts',
 ]);
 export const RUNTIME_HOST_ENTRY = 'infra/client-state-runtime/runtime-host.mjs';
-const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY] : [...BUNDLE_ENTRY_POINTS];
+export const FIRST_RUN_INITDB_ENTRY = 'infra/client-state-runtime/fresh-pg17-initdb.mjs';
+const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY] : [...BUNDLE_ENTRY_POINTS];
 
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';

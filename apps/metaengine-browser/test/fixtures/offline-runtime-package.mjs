@@ -20,14 +20,20 @@ export async function offlineRuntimePackageFixture(t) {
     return target;
   };
   const host = 'export const host = true;\n';
+  const firstRun = 'export const firstRun = true;\n';
   const sourceBody = { schema: 'compute.runtime-source-bundle.v1', reviewed_startup_source_sha256: 'd'.repeat(64),
-    reviewed_startup_files_sha256: 'e'.repeat(64), entry_points: ['infra/client-state-runtime/runtime-host.mjs'],
-    files: [{ path: 'infra/client-state-runtime/runtime-host.mjs', kind: 'source', bytes: Buffer.byteLength(host), sha256: digest(host) }],
+    reviewed_startup_files_sha256: 'e'.repeat(64), entry_points: ['infra/client-state-runtime/runtime-host.mjs', 'infra/client-state-runtime/fresh-pg17-initdb.mjs'],
+    files: [
+      { path: 'infra/client-state-runtime/runtime-host.mjs', kind: 'source', bytes: Buffer.byteLength(host), sha256: digest(host) },
+      { path: 'infra/client-state-runtime/fresh-pg17-initdb.mjs', kind: 'source', bytes: Buffer.byteLength(firstRun), sha256: digest(firstRun) },
+    ],
     policy: { database_included: false, private_config_included: false, credentials_included: false } };
   const sourceManifest = { ...sourceBody, bundle_sha256: digest(JSON.stringify(sourceBody)) };
   await put('source/infra/client-state-runtime/runtime-host.mjs', host);
+  await put('source/infra/client-state-runtime/fresh-pg17-initdb.mjs', firstRun);
   await put('source/runtime-source-bundle.json', JSON.stringify(sourceManifest));
   await put('checkout/infra/client-state-runtime/runtime-host.mjs', host);
+  await put('checkout/infra/client-state-runtime/fresh-pg17-initdb.mjs', firstRun);
   const verifierBytes = await readFile(fileURLToPath(new URL('../../../../' + verifierRelativePath, import.meta.url)));
   await put('checkout/' + verifierRelativePath, verifierBytes);
   await put('node/node.exe', 'synthetic-node-binary');
