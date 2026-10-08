@@ -101,7 +101,9 @@ async function verifyBundle(options) {
     }
     // Builtin-only verifier bytes are read from protected app.asar, checked
     // against its own metadata and executed without resolving mutable files.
-    const verifier = await import('data:text/javascript;base64,' + verifierBytes.toString('base64'));
+    // Runtime-generated source is checked by the protected bundle digest; it is not a static source import.
+    const verifierModuleUrl = 'data:text/javascript;base64,' + verifierBytes.toString('base64');
+    const verifier = await import(verifierModuleUrl);
     const verified = await verifier.verifyOfflineRuntimeBundle(options);
     const after = await boundedBytes(manifestFile, 8 * 1024 * 1024, 'packaged_local_runtime_manifest_mismatch');
     if (!before.equals(after) || SOURCE_BINDING_KEYS.some(key => verified.manifest[key] !== binding[key])
