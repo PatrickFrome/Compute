@@ -8,6 +8,17 @@ export const INSTALLER_SHUTDOWN_ARG = '--metaengine-installer-shutdown';
 export const INSTALLER_PRIMARY_EXIT_FALLBACK_MS = 5_000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const primaryShutdownBarriers = new WeakMap();
+const installerShutdownAttempts = new WeakSet();
+
+// Registered synchronously by an admitted primary before its first awaited
+// provider import. The guard itself stays provider-free for control/secondary
+// launches, including an installer signal delivered during primary startup.
+export function registerPrimaryInstallerShutdownBarrier(app, barrier) {
+  if (!app || typeof app !== 'object' || typeof barrier !== 'function'
+    || primaryShutdownBarriers.has(app)) throw new Error('installer_shutdown_barrier_invalid');
+  primaryShutdownBarriers.set(app, barrier);
+}
 
 export function validSingleInstanceLaunchData(value) {
   return value
@@ -25,32 +36,39 @@ export function isInstallerShutdownArgv(argv) {
 }
 
 async function stopPrimaryForInstaller(app, { schedule = setTimeout } = {}) {
-  if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
+  if (installerShutdownAttempts.has(app)) return;
+  installerShutdownAttempts.add(app);
   globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ = true;
 
   try {
-    globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__?.cancel?.();
-  } catch {}
-
-  try {
+    const watchdog = globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__;
+    watchdog?.cancel?.();
+    await primaryShutdownBarriers.get(app)?.();
+    // Preparation may have created its watchdog after the installer signal.
+    const preparedWatchdog = globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__;
+    if (preparedWatchdog !== watchdog) preparedWatchdog?.cancel?.();
     await globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__?.stop?.();
-  } catch (error) {
+  } catch {
     console.error(JSON.stringify({
       schema: 'metaengine.browser.installer-shutdown.v1',
-      state: 'HOST_RESILIENCE_STOP_FAILED',
-      error: String(error?.message || error).slice(0, 240),
+      state: 'PRIMARY_SHUTDOWN_BLOCKED',
+      reason: 'OWNED_RUNTIME_OR_RESILIENCE_CLEANUP_UNCONFIRMED',
+      primary_kept_alive: true,
       forced_by_installer: false,
       authority_effect: false,
     }));
-  } finally {
-    // main.mjs already treats Electron's before-quit event as the canonical
-    // planned-shutdown fence: it disables close-to-background and runtime retry.
-    // Calling quit only after HostResilience.stop() prevents the Sentinel worker
-    // from interpreting an installer upgrade as an unexpected parent death.
-    const fallback = schedule(() => app.exit(0), INSTALLER_PRIMARY_EXIT_FALLBACK_MS);
-    if (fallback && typeof fallback.unref === 'function') fallback.unref();
-    app.quit();
+    // Keep startup/retry fenced while the primary remains alive. A later
+    // explicit installer signal may retry cleanup without resuming startup.
+    installerShutdownAttempts.delete(app);
+    return;
   }
+  // main.mjs already treats Electron's before-quit event as the canonical
+  // planned-shutdown fence: it disables close-to-background and runtime retry.
+  // Calling quit only after confirmed owned cleanup and HostResilience.stop()
+  // prevents an upgrade from leaving a detached database/API stack behind.
+  const fallback = schedule(() => app.exit(0), INSTALLER_PRIMARY_EXIT_FALLBACK_MS);
+  if (fallback && typeof fallback.unref === 'function') fallback.unref();
+  app.quit();
 }
 
 function installPrimaryInstallerShutdownHandler(app, schedule) {

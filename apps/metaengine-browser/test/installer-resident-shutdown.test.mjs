@@ -6,6 +6,7 @@ import {
   INSTALLER_PRIMARY_EXIT_FALLBACK_MS,
   INSTALLER_SHUTDOWN_ARG,
   isInstallerShutdownArgv,
+  registerPrimaryInstallerShutdownBarrier,
 } from '../src/single-instance-guard.mjs';
 
 const FIXED_LAUNCH_ID = '123e4567-e89b-42d3-a456-426614174000';
@@ -126,6 +127,62 @@ test('ordinary second-instance does not request installer shutdown or arm forced
   } finally {
     delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
     delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
+  }
+});
+
+test('primary waits for its registered cleanup barrier before resilience stop, quit or forced fallback', async () => {
+  delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
+  const app = fakePrimaryApp();
+  let release;
+  const cleanup = new Promise(resolve => { release = resolve; });
+  let schedules = 0;
+  globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ = { stop: async () => app.events.push('resilience-stop') };
+  try {
+    acquirePrimaryInstance(app, { launch_id: FIXED_LAUNCH_ID, schedule: () => {
+      schedules++; app.events.push('fallback'); return { unref() {} };
+    } });
+    registerPrimaryInstallerShutdownBarrier(app, async () => {
+      app.events.push('owned-cleanup-start'); await cleanup; app.events.push('owned-cleanup-confirmed');
+    });
+    app.listeners.get('second-instance')(null, ['browser.exe', INSTALLER_SHUTDOWN_ARG]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(app.events, ['owned-cleanup-start']);
+    assert.equal(schedules, 0);
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(app.events, ['owned-cleanup-start', 'owned-cleanup-confirmed', 'resilience-stop', 'fallback', 'quit']);
+  } finally {
+    delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
+    delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
+  }
+});
+
+test('failed owned cleanup keeps the primary alive without quit or a forced-exit timer', async () => {
+  delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
+  const app = fakePrimaryApp();
+  let schedules = 0;
+  const errors = [];
+  let attempts = 0;
+  const originalError = console.error;
+  console.error = row => errors.push(JSON.parse(row));
+  try {
+    acquirePrimaryInstance(app, { launch_id: FIXED_LAUNCH_ID, schedule: () => { schedules++; } });
+    registerPrimaryInstallerShutdownBarrier(app, async () => { attempts++; throw new Error('private-fixture-config'); });
+    app.listeners.get('second-instance')(null, ['browser.exe', INSTALLER_SHUTDOWN_ARG]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(app.events, []);
+    assert.equal(schedules, 0);
+    assert.equal(globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__, true);
+    assert.equal(errors[0].state, 'PRIMARY_SHUTDOWN_BLOCKED');
+    assert.equal(errors[0].primary_kept_alive, true);
+    assert.doesNotMatch(JSON.stringify(errors), /private-fixture-config/);
+    app.listeners.get('second-instance')(null, ['browser.exe', INSTALLER_SHUTDOWN_ARG]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(attempts, 2, 'a later explicit signal may retry cleanup while startup stays fenced');
+    assert.equal(schedules, 0);
+  } finally {
+    console.error = originalError;
+    delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
   }
 });
 

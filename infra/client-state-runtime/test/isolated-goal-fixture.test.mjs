@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, realpath, mkdir, rm, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
-import { assertOwnedFixtureDirectory, goalFixtureConfig, schemaOnlyRestorePlan } from './isolated-goal-fixture.mjs';
+import { assertFixturePortsClosed, assertOwnedFixtureDirectory, createFixtureLifecycle, goalFixtureConfig, schemaOnlyRestorePlan } from './isolated-goal-fixture.mjs';
 
 const config = () => ({
   LOCAL_STATE_TEST_GOAL_BACKUP_DIRECTORY: path.resolve(os.tmpdir(), 'private-archive'),
@@ -61,4 +62,98 @@ test('fixture cleanup requires canonical temporary root and exact owned marker',
     await symlink(path.join(directory, 'actual'), path.join(directory, 'compute-goal-fixture-alias'), process.platform === 'win32' ? 'junction' : 'dir');
     await assert.rejects(assertOwnedFixtureDirectory({ directory: path.join(directory, 'compute-goal-fixture-alias'), temporaryRoot: directory, markerId }), /cleanup_alias_forbidden/);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('whole-runtime restart requires all three qualified loopback ports closed', async () => {
+  const servers = [];
+  const ports = [];
+  try {
+    for (let count = 0; count < 3; count += 1) {
+      const server = net.createServer(socket => socket.destroy());
+      servers.push(server);
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      ports.push(server.address().port);
+    }
+    await assert.rejects(assertFixturePortsClosed(ports), /restart_port_still_open/);
+    for (const server of servers) await new Promise(resolve => server.close(resolve));
+    await assertFixturePortsClosed(ports);
+    await assert.rejects(assertFixturePortsClosed([ports[0], ports[0], ports[2]]), /restart_ports_invalid/);
+    await assert.rejects(assertFixturePortsClosed([0, -1, 80]), /restart_ports_invalid/);
+  } finally {
+    for (const server of servers) if (server.listening) await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('fixture lifecycle rejects concurrent restarts and shares cleanup after a pending restart', async () => {
+  let finishRestart;
+  let stopCount = 0;
+  const lifecycle = createFixtureLifecycle({ restart: () => new Promise(resolve => { finishRestart = resolve; }),
+    stop: async () => { stopCount += 1; } });
+  const restarting = lifecycle.restart();
+  await Promise.resolve();
+  await assert.rejects(lifecycle.restart(), /restart_state_invalid/);
+  const stopping = lifecycle.stop();
+  assert.equal(lifecycle.stop(), stopping);
+  assert.equal(stopCount, 0);
+  await assert.rejects(lifecycle.restart(), /restart_state_invalid/);
+  finishRestart('restarted');
+  assert.equal(await restarting, 'restarted');
+  await stopping;
+  await lifecycle.stop();
+  assert.equal(stopCount, 1);
+});
+
+test('failed restart releases its guard; failed cleanup is retried without admitting restart', async () => {
+  let restartCount = 0;
+  let stopCount = 0;
+  const lifecycle = createFixtureLifecycle({ restart: async () => {
+    restartCount += 1;
+    if (restartCount === 1) throw new Error('vault_hash_failed');
+    return 'restarted';
+  }, stop: async () => { stopCount += 1; if (stopCount === 1) throw new Error('cleanup_unconfirmed'); } });
+  await assert.rejects(lifecycle.restart(), /vault_hash_failed/);
+  assert.equal(await lifecycle.restart(), 'restarted');
+  await assert.rejects(lifecycle.stop(), /cleanup_unconfirmed/);
+  await assert.rejects(lifecycle.restart(), /restart_state_invalid/);
+  await lifecycle.stop();
+  assert.equal(stopCount, 2);
+});
+
+test('a synchronous preflight exception releases restart ownership before a retry', async () => {
+  let attempts = 0;
+  const lifecycle = createFixtureLifecycle({ restart: () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('vault_hash_failed');
+    return 'restarted';
+  }, stop: () => {} });
+  const failed = lifecycle.restart();
+  await assert.rejects(lifecycle.restart(), /restart_state_invalid/);
+  await assert.rejects(failed, /vault_hash_failed/);
+  assert.equal(await lifecycle.restart(), 'restarted');
+  assert.equal(attempts, 2);
+  await lifecycle.stop();
+});
+
+test('cleanup waits for rejected restart preflight and can retry a synchronous stop failure', async () => {
+  let rejectPreflight;
+  let stopCount = 0;
+  const lifecycle = createFixtureLifecycle({ restart: () => new Promise((resolve, reject) => { rejectPreflight = reject; }),
+    stop: () => {
+      stopCount += 1;
+      if (stopCount === 1) throw new Error('cleanup_unconfirmed');
+    } });
+  const restarting = lifecycle.restart();
+  await Promise.resolve();
+  const stopping = lifecycle.stop();
+  const restartFailure = assert.rejects(restarting, /vault_hash_failed/);
+  const stopFailure = assert.rejects(stopping, /cleanup_unconfirmed/);
+  assert.equal(lifecycle.stop(), stopping);
+  await Promise.resolve();
+  assert.equal(stopCount, 0, 'cleanup must not overlap restart preflight');
+  rejectPreflight(new Error('vault_hash_failed'));
+  await restartFailure;
+  await stopFailure;
+  await assert.rejects(lifecycle.restart(), /restart_state_invalid/);
+  await lifecycle.stop();
+  assert.equal(stopCount, 2);
 });

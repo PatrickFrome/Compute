@@ -28,7 +28,7 @@ permissions:
 jobs:
   windows-final-runtime-activation:
     # Local runtime qualification requires its own explicitly selected profile.
-    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
+    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1')
     runs-on: windows-2025
     timeout-minutes: 80
     steps:

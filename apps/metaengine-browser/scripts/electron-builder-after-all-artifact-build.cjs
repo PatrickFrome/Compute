@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
+const { VERIFIER_FILE, assertPackagedOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
 const {
   BUILD_IDENTITY_SCHEMA_V3,
   loadDependencyResolutionProof,
@@ -214,6 +215,10 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
   const expectedHead = exactGitHead(repoRoot);
   const fingerprint = assertPackagedTrustRoot(packageJson.metaengineEmergencyTrustRoot, expectedHead);
   const packageVersion = String(packageJson.version || '');
+  const offlineRuntime = await assertPackagedOfflineRuntimeBinding(packageJson.metaengineClientStateRuntime, {
+    expectedHead, packageVersion, resourcesDir,
+    verifierBytes: asar.extractFile(asarPath, VERIFIER_FILE.split('/').join(path.sep)),
+  });
   const bootstrap = assertPackagedGuardianBootstrapBinding(packageJson.metaengineGuardianBootstrapBinding, {
     expectedHead,
     packageVersion,
@@ -234,6 +239,9 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
   const asarOnlyIndex = fuses.FuseV1Options.OnlyLoadAppFromAsar;
   if (wire[integrityIndex] !== 49) throw new Error('packaged_asar_integrity_fuse_not_enabled');
   if (wire[asarOnlyIndex] !== 49) throw new Error('packaged_asar_only_fuse_not_enabled');
+  const runnerTemp = String(process.env.RUNNER_TEMP || '').trim();
+  if (runnerTemp) fs.writeFileSync(path.join(runnerTemp, 'packaged-client-state-runtime-proof.json'),
+    `${JSON.stringify(offlineRuntime, null, 2)}\n`, 'utf8');
 
   console.log(JSON.stringify({
     schema: 'metaengine.browser.packaged-emergency-trust-root-proof.v1',
@@ -248,6 +256,13 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     guardian_bootstrap_name: bootstrap.name,
     guardian_bootstrap_sha256: bootstrap.digest,
     guardian_bootstrap_size: bootstrap.size,
+    client_state_runtime_protected_binding_present: true,
+    client_state_runtime_bundle_sha256: offlineRuntime.bundle_sha256,
+    client_state_runtime_manifest_sha256: offlineRuntime.bundle_manifest_sha256,
+    client_state_runtime_resource_file_count: offlineRuntime.resource_file_count,
+    client_state_runtime_resource_size_bytes: offlineRuntime.resource_size_bytes,
+    client_state_runtime_verifier_sha256: offlineRuntime.runtime_verifier_sha256,
+    client_state_runtime_packaged_resources_verified: true,
     build_identity_required: requireBuildIdentity,
     build_identity_sha256: buildIdentity?.build_identity_sha256 || null,
     dependency_resolution_sha256: buildIdentity?.dependency_resolution_sha256 || null,
@@ -268,3 +283,4 @@ module.exports.assertPackagedGuardianBootstrapBinding = assertPackagedGuardianBo
 module.exports.assertPackagedBuildIdentity = assertPackagedBuildIdentity;
 module.exports.buildIdentityRequired = buildIdentityRequired;
 module.exports.buildIdentityVersion = buildIdentityVersion;
+module.exports.assertPackagedOfflineRuntimeBinding = assertPackagedOfflineRuntimeBinding;

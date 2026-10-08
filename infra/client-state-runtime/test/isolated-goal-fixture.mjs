@@ -15,7 +15,6 @@ import { applyLocalRuntimeMigrations } from '../local-runtime-migrations.mjs';
 
 const PREFIX = 'compute-goal-fixture-';
 const MARKER = 'owned-goal-fixture.json';
-const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const runtimeRoot = fileURLToPath(new URL('..', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
@@ -34,11 +33,13 @@ export function goalFixtureConfig(env = process.env) {
     if (!path.isAbsolute(env[name])) fail('absolute_paths_required');
   }
   if (!/^[a-f0-9]{64}$/.test(env.LOCAL_STATE_TEST_GOAL_DUMP_SHA256)) fail('dump_digest_invalid');
+  if (env.LOCAL_STATE_TEST_DENO_DIR && !path.isAbsolute(env.LOCAL_STATE_TEST_DENO_DIR)) fail('absolute_paths_required');
   return {
     backupDirectory: path.resolve(env.LOCAL_STATE_TEST_GOAL_BACKUP_DIRECTORY),
     expectedDumpSha256: env.LOCAL_STATE_TEST_GOAL_DUMP_SHA256,
     pgBinDir: path.resolve(env.LOCAL_STATE_TEST_PG_BIN_DIR),
     denoPath: path.resolve(env.LOCAL_STATE_TEST_DENO_PATH),
+    denoDirectory: env.LOCAL_STATE_TEST_DENO_DIR ? path.resolve(env.LOCAL_STATE_TEST_DENO_DIR) : undefined,
   };
 }
 
@@ -79,6 +80,53 @@ async function freePort() {
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
   return port;
+}
+
+export async function assertFixturePortsClosed(ports) {
+  if (!Array.isArray(ports) || ports.length !== 3 || new Set(ports).size !== 3
+    || ports.some(port => !Number.isSafeInteger(port) || port < 1024 || port > 65535)) fail('restart_ports_invalid');
+  for (const port of ports) {
+    await new Promise((resolve, reject) => {
+      const socket = net.createConnection({ host: '127.0.0.1', port });
+      const timer = setTimeout(() => { socket.destroy(); reject(new Error('goal_fixture_restart_port_probe_timeout')); }, 2000);
+      socket.once('connect', () => { clearTimeout(timer); socket.destroy(); reject(new Error('goal_fixture_restart_port_still_open')); });
+      socket.once('error', error => {
+        clearTimeout(timer);
+        socket.destroy();
+        error.code === 'ECONNREFUSED' ? resolve() : reject(new Error('goal_fixture_restart_port_probe_failed'));
+      });
+    });
+  }
+}
+
+export function createFixtureLifecycle({ restart, stop, prepareHost }) {
+  let activeRestart = null;
+  let activeStop = null;
+  let closing = false;
+  let stopped = false;
+  const runExclusive = operation => {
+      if (closing || stopped || activeRestart) return Promise.reject(new Error('goal_fixture_restart_state_invalid'));
+      // Own the whole operation, including vault/source preflight. A rejected
+      // preflight must release the guard and cleanup must wait for it to settle.
+      activeRestart = Promise.resolve().then(operation).finally(() => { activeRestart = null; });
+      return activeRestart;
+  };
+  return {
+    restart: () => runExclusive(restart),
+    prepareHost: options => runExclusive(() => prepareHost(options)),
+    stop() {
+      if (stopped) return Promise.resolve();
+      if (activeStop) return activeStop;
+      closing = true;
+      const pendingRestart = activeRestart;
+      activeStop = Promise.resolve().then(async () => {
+        await pendingRestart?.catch(() => {});
+        await stop();
+        stopped = true;
+      }).finally(() => { activeStop = null; });
+      return activeStop;
+    },
+  };
 }
 
 async function runTool(command, args, env, stage, timeoutMs = 30000) {
@@ -145,31 +193,40 @@ export async function createIsolatedGoalFixture(config) {
   let pg;
   let sql;
   let runtime;
+  let apiKey;
+  let apiPort;
+  let edgePort;
   let stopped = false;
   let closePromise;
-  const stop = async () => {
-    if (stopped) return;
-    await runtime?.stop();
-    if (sql) await sql.end({ timeout: 5 });
+  const postmasterPids = [];
+  const stopPostgres = async () => {
+    let connectionFailure;
+    if (sql) {
+      try { await sql.end({ timeout: 5 }); sql = null; }
+      catch { connectionFailure = new Error('goal_fixture_admin_connection_cleanup_failed'); }
+    }
     if (pg && pg.exitCode === null && pg.signalCode === null) {
       const pidFile = (await readFile(path.join(dataDirectory, 'postmaster.pid'), 'utf8')).trim().split(/\r?\n/);
       if (Number(pidFile[0]) !== pg.pid || Number(pidFile[3]) !== port
         || canonical(await realpath(pidFile[1])) !== canonical(await realpath(dataDirectory))) fail('owned_postmaster_identity_changed');
       await runTool(executable('pg_ctl'), ['-D', dataDirectory, 'stop', '-m', 'fast', '-w', '-t', '10'], env, 'stop', 15000);
-      await Promise.race([closePromise, sleep(5000).then(() => fail('postmaster_close_timeout'))]);
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('goal_fixture_postmaster_close_timeout')), 5000);
+        closePromise.then(() => { clearTimeout(timer); resolve(); }, reject);
+      });
     }
     if (pg && pg.exitCode === null && pg.signalCode === null) fail('postmaster_still_running');
-    await assertOwnedFixtureDirectory({ directory, temporaryRoot, markerId });
-    if (await fileHash(dump) !== config.expectedDumpSha256) fail('archive_changed_after_restore');
-    await rm(directory, { recursive: true, force: false });
-    stopped = true;
+    if (pg) {
+      try { await lstat(path.join(dataDirectory, 'postmaster.pid')); fail('postmaster_pid_file_remains'); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (connectionFailure) throw connectionFailure;
   };
-  try {
-    await runTool(executable('initdb'), ['-D', dataDirectory, '--username=' + owner, '--auth=scram-sha-256', '--pwfile=' + passwordFile,
-      '--encoding=UTF8', '--no-locale'], env, 'initdb');
+  const startPostgres = async () => {
     pg = spawn(executable('postgres'), ['-D', dataDirectory, '-p', String(port), '-h', '127.0.0.1'], {
       env, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
     });
+    postmasterPids.push(pg.pid);
     let spawnFailed = false;
     pg.once('error', () => { spawnFailed = true; });
     closePromise = new Promise(resolve => pg.once('close', resolve));
@@ -181,6 +238,78 @@ export async function createIsolatedGoalFixture(config) {
     }
     if (!ready) fail('postmaster_readiness_timeout');
     sql = postgres(adminUrl, { max: 1, prepare: false, onnotice: () => {}, connection: { timezone: 'UTC' } });
+  };
+  const startRuntime = async () => {
+    apiKey = randomBytes(32).toString('hex');
+    runtime = await launchClientStateRuntime({ mode: 'local', postgresMode: 'attached', databaseUrl: apiUrl, inspectDatabaseUrl: adminUrl,
+      pgBinDir: config.pgBinDir, pgDataDir: dataDirectory, denoPath: config.denoPath, denoDir: config.denoDirectory, apiPort, edgePort, apiKey, startupTimeoutMs: 60000 });
+  };
+  const stopStack = async () => {
+    if (stopped) return;
+    let cleanupFailure;
+    try { await runtime?.stop(); runtime = null; }
+    catch { cleanupFailure = new Error('goal_fixture_runtime_cleanup_unconfirmed'); }
+    try { await stopPostgres(); }
+    catch (error) { cleanupFailure ||= error; }
+    if (cleanupFailure) throw cleanupFailure;
+    if (apiPort && edgePort) await assertFixturePortsClosed([port, apiPort, edgePort]);
+    await assertOwnedFixtureDirectory({ directory, temporaryRoot, markerId });
+    if (await fileHash(dump) !== config.expectedDumpSha256) fail('archive_changed_after_restore');
+    await rm(directory, { recursive: true, force: false });
+    stopped = true;
+  };
+  const restartStack = async () => {
+    if (stopped || !runtime || !sql) fail('restart_state_invalid');
+    const previous = { instanceId: runtime.instanceId, postgres: runtime.postgresIdentity, key: apiKey,
+      manifestPath: runtime.startupManifestPath, sourceDigest: runtime.startupManifest.source_manifest_sha256 };
+    const vaultKeyDigest = await fileHash(path.join(dataDirectory, 'client-vault.key'));
+    await runtime.stop();
+    runtime = null;
+    await stopPostgres();
+    await assertFixturePortsClosed([port, apiPort, edgePort]);
+    await assertOwnedFixtureDirectory({ directory, temporaryRoot, markerId });
+    await startPostgres();
+    await startRuntime();
+    if (runtime.instanceId === previous.instanceId || apiKey === previous.key
+      || runtime.postgresIdentity.pid === previous.postgres.pid || runtime.postgresIdentity.started_at === previous.postgres.started_at
+      || runtime.startupManifestPath === previous.manifestPath) fail('restart_identity_not_fresh');
+    if (runtime.startupManifest.source_manifest_sha256 !== previous.sourceDigest) fail('restart_source_bytes_changed');
+    if (await fileHash(path.join(dataDirectory, 'client-vault.key')) !== vaultKeyDigest) fail('restart_vault_key_changed');
+    return { complete_stop_observed: true, ports_closed_before_restart: true, postgres_restarted: true,
+      instance_id_changed: true, api_key_rotated: true, startup_receipt_changed: true, selected_source_bytes_unchanged: true,
+      private_vault_key_preserved: true, before_instance_id: previous.instanceId, after_instance_id: runtime.instanceId,
+      before_postmaster_pid: previous.postgres.pid, after_postmaster_pid: runtime.postgresIdentity.pid,
+      production_qualification: false, process_code_attested: false };
+  };
+  const prepareHostStack = async ({ bundleDirectory, expectedBundleDigest } = {}) => {
+    if (!path.isAbsolute(bundleDirectory || '') || !/^[a-f0-9]{64}$/.test(expectedBundleDigest || '')) fail('managed_host_bundle_binding_invalid');
+    if (stopped || !runtime || !sql) fail('restart_state_invalid');
+    await runtime.stop();
+    runtime = null;
+    await stopPostgres();
+    await assertFixturePortsClosed([port, apiPort, edgePort]);
+    await assertOwnedFixtureDirectory({ directory, temporaryRoot, markerId });
+    const configFile = path.join(directory, 'managed-runtime-host-config.json');
+    await writeFile(configFile, JSON.stringify({ schema: 'compute.runtime-host-config.v1', version: 1,
+      bundle_directory: path.resolve(bundleDirectory), expected_bundle_sha256: expectedBundleDigest,
+      state_directory: directory, pg_data_directory: dataDirectory, database_url: apiUrl, inspect_database_url: adminUrl,
+      api_port: apiPort, edge_port: edgePort, startup_timeout_ms: 60000 }), { flag: 'wx', mode: 0o600 });
+    return { configFile, statusFile: path.join(directory, 'runtime-instance.json'),
+      endpoint: `http://127.0.0.1:${edgePort}/a2-browser-native-supervisor-v1`, ports: [port, apiPort, edgePort] };
+  };
+  const lifecycle = createFixtureLifecycle({ restart: restartStack, stop: stopStack, prepareHost: prepareHostStack });
+  const stop = () => lifecycle.stop();
+  const restart = () => lifecycle.restart();
+  // Captured probes retain a private test credential without returning it to callers or receipts.
+  const captureApiHealthProbe = () => {
+    if (!runtime || !apiKey || stopped) fail('api_probe_state_invalid');
+    const key = apiKey;
+    return () => fetch(`http://127.0.0.1:${apiPort}/health`, { headers: { apikey: key }, signal: AbortSignal.timeout(5000) });
+  };
+  try {
+    await runTool(executable('initdb'), ['-D', dataDirectory, '--username=' + owner, '--auth=scram-sha-256', '--pwfile=' + passwordFile,
+      '--encoding=UTF8', '--no-locale'], env, 'initdb', 120000);
+    await startPostgres();
     for (const role of ROLE_NAMES) await sql.unsafe(`CREATE ROLE ${quoteIdentifier(role)} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION ${role === 'service_role' ? 'BYPASSRLS' : 'NOBYPASSRLS'}`);
     await sql.unsafe('CREATE SCHEMA extensions; CREATE SCHEMA vault; CREATE EXTENSION pgcrypto WITH SCHEMA extensions');
     await initializeLocalVaultKey({ dataDirectory });
@@ -203,14 +332,14 @@ export async function createIsolatedGoalFixture(config) {
     await sql.unsafe(`INSERT INTO destruktion_meta.metaengine_devos_roadmap_authority_h205f22
       (authority_key,roadmap_id,active_milestone_key,integration_line,baseline_sha,alignment_epoch)
       VALUES($1,$2,$3,$4,$5,1)`, ['CLIENT_V1_SYNTHETIC_TEST', 'metaengine-client-v1', 'SYNTHETIC_GOAL_FIXTURE', 'synthetic/goal-fixture', 'a'.repeat(40)]);
-    const apiPort = await freePort();
-    let edgePort;
+    do { apiPort = await freePort(); } while (apiPort === port);
     do { edgePort = await freePort(); } while (edgePort === apiPort || edgePort === port);
-    runtime = await launchClientStateRuntime({ mode: 'local', postgresMode: 'attached', databaseUrl: apiUrl, inspectDatabaseUrl: adminUrl,
-      pgBinDir: config.pgBinDir, pgDataDir: dataDirectory, denoPath: config.denoPath, apiPort, edgePort, startupTimeoutMs: 60000 });
+    await startRuntime();
     const journalDirectory = path.join(directory, 'synthetic-client-profile');
     await mkdir(journalDirectory);
-    return { sql, runtime, stop, journalDirectory, fixture: { isolated: true, generated_postmaster_pid: pg.pid,
+    return { get sql() { return sql; }, get runtime() { return runtime; }, stop, restart,
+      prepareManagedRuntimeHost: options => lifecycle.prepareHost(options), captureApiHealthProbe, journalDirectory,
+      fixture: { isolated: true, generated_postmaster_pid: pg.pid, generated_postmaster_pids: postmasterPids,
       schema_only: true, source_dump_sha256: config.expectedDumpSha256, source_data_rows_restored: 0,
       empty_tables_verified: tables.length, compatibility: plan.compatibility, local_migrations: migrations.migrations,
       production_qualification: false, useful_coding_proven: false } };

@@ -15,6 +15,7 @@ export async function provisionPersistentClientProvider({
   runtimeIdentityFile,
   ownerChoice,
   appDataDirectory,
+  runtimeHost,
   replaceExisting = false,
 } = {}) {
   if (ownerChoice !== 'LOCAL_POSTGRES') throw new Error('persistent_client_owner_choice_required');
@@ -26,6 +27,7 @@ export async function provisionPersistentClientProvider({
     schema: LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, version: 1,
     profile: LOCAL_STATE_PROVIDER_PROFILE, provider: 'LOCAL_POSTGRES',
     base_url: baseUrl, runtime_identity_file: runtimeIdentityFile, authority_effect: false,
+    ...(runtimeHost === undefined ? {} : { runtime_host: runtimeHost }),
   });
   let existingOwnerFile = false;
   try {

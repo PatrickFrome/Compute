@@ -39,7 +39,9 @@ test('deprecated metaengine-dark-workspace-v2 bundle and route are absent', asyn
   assert.doesNotMatch(main, /metaengine-dark-workspace-v2/);
 
   const builder = JSON.parse(await readFile(browserPath('electron-builder.test.json'), 'utf8'));
-  assert.deepEqual(builder.files, ['src/**/*', 'package.json']);
+  assert.deepEqual(builder.files, ['src/**/*', 'package.json', {
+    from: '../../infra/client-state-runtime', to: 'infra/client-state-runtime', filter: ['offline-runtime-bundle.mjs'],
+  }]);
   assert.equal(
     builder.extraResources.some((entry) => String(entry?.from || '') === 'ui' || String(entry?.to || '') === 'ui'),
     false,

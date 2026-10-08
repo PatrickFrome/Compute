@@ -1,6 +1,12 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37628000001.1`.
+Reserved package identity is `0.7.0-dev.37780000001.1`.
+
+Client-owned offline runtime successor (2026-10-08):
+- Continues source `9241f4566ee7bb9ab54a1da5ef98de27cb36c56b` from PR #1143 with whole-stack restart qualification, singleton admission before provider health, and a managed local runtime host.
+- Bundles reviewed source, pinned Node 24.21.0, Deno 2.9.7, PostgreSQL 17.11 and the locked postgres dependency cache. Private DB data, credentials and owner configuration are excluded from package resources.
+- Package metadata binds the runtime resource manifest and the trusted verifier inside app.asar. Normal primary boot can start the explicitly provisioned local host; secondary launches and installer control avoid starting another host.
+- The previous installer `0.7.0-dev.37628000001.1` is a consumed identity. This new version requires its own source qualification and physical Package Smoke build. No installed upgrade, canonical C1/C2 result or release publication is asserted by the reservation.
 
 Pre-install critical audit successor (2026-10-07):
 - Runtime source `83aaafaf485e2bca50cadaaf058f87837e8d002f` passed source qualification run `37623582505`: 4351/4351 Browser tests on Windows, six isolated Bun RSI lifecycle tests, locked UI TypeScript and boundary lint.

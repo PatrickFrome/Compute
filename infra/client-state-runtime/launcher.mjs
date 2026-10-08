@@ -4,7 +4,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bindStartupManifest, captureStartupSource, persistStartupManifest, safeRuntimePolicy } from './startup-source-manifest.mjs';
+import { bindStartupManifest, captureStartupSource, persistStartupManifest, safeRuntimePolicy, startupFilesDigest } from './startup-source-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '../..');
@@ -48,6 +48,11 @@ export function normalizeLauncherConfig(input) {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300000) throw runtimeError('startup_timeout_invalid');
   const apiKey = input.apiKey || randomBytes(32).toString('hex');
   if (!/^[a-f0-9]{64}$/i.test(apiKey)) throw runtimeError('local_api_key_invalid');
+  if (input.denoDir !== undefined && (typeof input.denoDir !== 'string' || !path.isAbsolute(input.denoDir))) throw runtimeError('deno_cache_absolute_path_required');
+  if (input.expectedStartupSourceSha256 !== undefined && !/^[a-f0-9]{64}$/.test(input.expectedStartupSourceSha256)) throw runtimeError('expected_startup_source_sha256_invalid');
+  if (input.expectedStartupFilesSha256 !== undefined && !/^[a-f0-9]{64}$/.test(input.expectedStartupFilesSha256)) throw runtimeError('expected_startup_files_sha256_invalid');
+  if (input.includeRuntimeHost !== undefined && typeof input.includeRuntimeHost !== 'boolean') throw runtimeError('runtime_host_source_choice_invalid');
+  if (input.instanceId !== undefined && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.instanceId)) throw runtimeError('runtime_instance_id_invalid');
   return {
     ...input,
     databaseUrl: database.href,
@@ -61,6 +66,7 @@ export function normalizeLauncherConfig(input) {
     pgBinDir: path.resolve(input.pgBinDir),
     pgDataDir: path.resolve(input.pgDataDir),
     denoPath: path.resolve(input.denoPath),
+    denoDir: input.denoDir === undefined ? undefined : path.resolve(input.denoDir),
     nodePath: input.nodePath || process.execPath,
     apiEntry: input.apiEntry || path.join(here, 'db-api.mjs'),
     edgeEntry: input.edgeEntry || path.join(projectRoot, 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'),
@@ -68,7 +74,7 @@ export function normalizeLauncherConfig(input) {
     startupManifestPath: input.startupManifestPath ? path.resolve(input.startupManifestPath) : null,
     startupTimeoutMs: timeoutMs,
     healthIntervalMs: Math.max(100, Number(input.healthIntervalMs) || 2000),
-    instanceId: randomUUID(),
+    instanceId: input.instanceId || randomUUID(),
   };
 }
 
@@ -81,6 +87,10 @@ export function configFromEnvironment(env = process.env) {
     pgBinDir: env.LOCAL_STATE_PG_BIN_DIR,
     pgDataDir: env.LOCAL_STATE_PG_DATA_DIR,
     denoPath: env.LOCAL_STATE_DENO_PATH,
+    denoDir: env.LOCAL_STATE_DENO_DIR,
+    expectedStartupSourceSha256: env.LOCAL_STATE_EXPECTED_STARTUP_SOURCE_SHA256,
+    expectedStartupFilesSha256: env.LOCAL_STATE_EXPECTED_STARTUP_FILES_SHA256,
+    includeRuntimeHost: env.LOCAL_STATE_INCLUDE_RUNTIME_HOST === undefined ? undefined : env.LOCAL_STATE_INCLUDE_RUNTIME_HOST === 'true',
     nodePath: env.LOCAL_STATE_NODE_PATH,
     apiPort: env.LOCAL_STATE_API_PORT,
     edgePort: env.LOCAL_STATE_EDGE_PORT,
@@ -159,10 +169,11 @@ export async function assertPostgresIdentity(record, config, ownedPid = null) {
 
 export function runtimeEnvironment(config) {
   const env = { ...process.env };
-  for (const name of Object.keys(env)) if (/^SUPABASE_/i.test(name) || /^LOCAL_STATE_/i.test(name) || /^PG/i.test(name)
+  for (const name of Object.keys(env)) if (/^SUPABASE_/i.test(name) || /^LOCAL_STATE_/i.test(name) || /^PG/i.test(name) || /^DENO_/i.test(name)
     || /^(NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|ELECTRON_RUN_AS_NODE|GH_TOKEN|GITHUB_TOKEN|GITHUB_PAT|NPM_TOKEN|NODE_AUTH_TOKEN|DENO_V8_FLAGS|DENO_UNSTABLE_INTERNALS)$/i.test(name)) delete env[name];
   return {
     ...env,
+    ...(config.denoDir ? { DENO_DIR: config.denoDir } : {}),
     LOCAL_STATE_MODE: 'local',
     LOCAL_STATE_RUNTIME: 'LOCAL_POSTGRES',
     LOCAL_STATE_INSTANCE_ID: config.instanceId,
@@ -222,12 +233,15 @@ export async function launchClientStateRuntime(input, hooks = {}) {
       child.kill('SIGKILL');
       await killed;
     }
+    if (!exits.has(child)) throw runtimeError('runtime_child_stop_unconfirmed');
   };
 
   const stop = async (reason = 'requested') => {
     if (stopping) return finished;
     stopping = true;
     clearInterval(monitor);
+    config.signal?.removeEventListener('abort', onAbort);
+    let cleanupFailure;
     for (const item of [...children].reverse()) {
       if (item.name === 'postgres' && !exits.has(item.child)) {
         // pg_ctl targets the already-qualified data directory, never an arbitrary port.
@@ -238,23 +252,29 @@ export async function launchClientStateRuntime(input, hooks = {}) {
           }
         } catch { /* Only the child handle below may be terminated on a failed qualification. */ }
       }
-      await stopChild(item.child);
+      try { await stopChild(item.child); }
+      catch { cleanupFailure = runtimeError('runtime_cleanup_unconfirmed'); }
     }
     report({ event: 'stopped', instance_id: config.instanceId, reason });
-    finish({ reason });
+    finish({ reason: cleanupFailure ? cleanupFailure.code : reason, children_stopped: !cleanupFailure });
+    if (cleanupFailure) throw cleanupFailure;
     return finished;
   };
 
+  const onAbort = () => { void stop('startup_cancelled').catch(() => {}); };
+  config.signal?.addEventListener('abort', onAbort, { once: true });
+
   function start(name, command, args) {
+    if (stopping || config.signal?.aborted) throw runtimeError('runtime_startup_cancelled');
     const child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
     children.push({ name, child });
     child.once('error', () => {
       exits.set(child, { code: null });
-      if (!stopping) void stop(`${name}_spawn_failed`);
+      if (!stopping) void stop(`${name}_spawn_failed`).catch(() => {});
     });
     child.once('exit', (code, signal) => {
       exits.set(child, { code, signal });
-      if (!stopping) void stop(`${name}_exited`);
+      if (!stopping) void stop(`${name}_exited`).catch(() => {});
     });
     report({ event: 'spawned', component: name, pid: child.pid, instance_id: config.instanceId });
     return child;
@@ -286,17 +306,21 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   }
 
   try {
+    if (config.signal?.aborted) throw runtimeError('runtime_startup_cancelled');
     await requireFreePort(config.apiPort);
     await requireFreePort(config.edgePort);
     const startedAt = new Date().toISOString();
     const fixture = Boolean(hooks.apiCommand || hooks.edgeCommand);
     const fixtureEntry = (command, fallback) => command ? command.args.find((arg) => path.isAbsolute(arg) && /\.(mjs|js|ts)$/.test(arg)) || fallback : fallback;
     const captureOptions = {
-      repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry)],
+      repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry),
+        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs')] : [])],
       nodePath: config.nodePath, denoPath: config.denoPath, denoLockPath: config.denoLockPath,
       pgBinDir: hooks.inspectPostgres ? undefined : config.pgBinDir, env, fixture, policy: safeRuntimePolicy(config, { fixture }),
     };
     const before = await captureStartupSource(captureOptions);
+    if (config.expectedStartupSourceSha256 && before.manifest_sha256 !== config.expectedStartupSourceSha256) throw runtimeError('startup_source_pin_mismatch');
+    if (config.expectedStartupFilesSha256 && startupFilesDigest(before.files) !== config.expectedStartupFilesSha256) throw runtimeError('startup_files_pin_mismatch');
     let pgChild;
     if (config.postgresMode === 'owned') {
       await requireFreePort(config.databasePort);
@@ -331,12 +355,13 @@ export async function launchClientStateRuntime(input, hooks = {}) {
         failedProbes = 0;
       } catch (error) {
         failedProbes += 1;
-        if (String(error.code || '').includes('mismatch') || failedProbes >= 3) void stop('runtime_health_failed');
+        if (String(error.code || '').includes('mismatch') || failedProbes >= 3) void stop('runtime_health_failed').catch(() => {});
       } finally { probing = false; }
     }, config.healthIntervalMs);
     report({ event: 'ready', instance_id: config.instanceId, endpoint, postgres_mode: config.postgresMode,
       startup_source_sha256: startupManifest.source_manifest_sha256, startup_manifest_path: startupManifestPath });
-    return { endpoint, instanceId: config.instanceId, postgresIdentity, edgeHealth, startupManifest, startupManifestPath, stop, finished, children: children.map(({ name, child }) => ({ name, pid: child.pid })) };
+    return { endpoint, instanceId: config.instanceId, postgresIdentity, edgeHealth, startupManifest, startupManifestPath, stop, finished,
+      get stopped() { return stopping; }, children: children.map(({ name, child }) => ({ name, pid: child.pid })) };
   } catch (error) {
     await stop(error.code || 'runtime_start_failed');
     throw error;

@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
+export const startupFilesDigest = files => digest(JSON.stringify(files));
 const slash = (value) => value.replaceAll('\\', '/');
 const within = (root, target) => {
   const value = relative(root, target);

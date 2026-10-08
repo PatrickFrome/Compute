@@ -6,6 +6,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { createComposedSbom } from '../scripts/composed-sbom-evidence.mjs';
+import bindingTools from '../scripts/offline-runtime-package-binding.cjs';
+import { offlineRuntimePackageFixture } from './fixtures/offline-runtime-package.mjs';
 
 const HEAD = 'a'.repeat(40);
 const VERSION = '0.7.0-dev.36991000001.1';
@@ -130,7 +132,7 @@ function fixture() {
   return { root, paths, npmRoot };
 }
 
-function compose(f) {
+function compose(f, extra = {}) {
   return createComposedSbom({
     npmSbomPath: f.paths.npmSbom,
     npmEvidencePath: f.paths.npmEvidence,
@@ -141,6 +143,7 @@ function compose(f) {
     installerProvenancePath: f.paths.provenance,
     sourceHead: HEAD,
     packageVersion: VERSION,
+    ...extra,
   });
 }
 
@@ -172,6 +175,84 @@ test('composed Browser SBOM inventories npm and verified first-party payloads wi
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+async function offlineFixture(t) {
+  const f = fixture();
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const offline = await offlineRuntimePackageFixture(t);
+  const binding = await bindingTools.buildOfflineRuntimeBinding({ ...offline, sourceHead: HEAD, packageVersion: VERSION });
+  const proof = await bindingTools.assertPackagedOfflineRuntimeBinding(binding, {
+    expectedHead: HEAD, packageVersion: VERSION, resourcesDir: offline.resourcesDir, verifierBytes: offline.verifierBytes,
+  });
+  return { f, offline, proof, paths: {
+    offlineRuntimeManifestPath: path.join(offline.bundleDirectory, 'offline-runtime-bundle.json'),
+    offlineRuntimeProofPath: write(f.root, 'offline-proof.json', proof),
+  } };
+}
+
+test('composed SBOM includes the byte-verified offline runtime, source and cached dependency', async t => {
+  const { f, offline, paths } = await offlineFixture(t);
+  const { sbom, evidence } = compose(f, paths);
+  assert.equal(evidence.first_party_component_count, 11);
+  assert.equal(evidence.offline_runtime_component_count, 6);
+  assert.equal(evidence.total_component_count, 13);
+  assert.equal(evidence.offline_runtime_resource_file_count, offline.manifest.files.length);
+  assert.equal(evidence.offline_runtime_resource_size_bytes, offline.manifest.files.reduce((sum, file) => sum + file.bytes, 0));
+  assert.equal(evidence.offline_runtime_bundle_sha256, offline.manifest.bundle_sha256);
+  assert.equal(evidence.offline_runtime_resource_inventory_sha256, offline.manifest.resource_inventory_sha256);
+  assert.equal(evidence.offline_runtime_packaged_resources_verified, true);
+  assert.equal(evidence.composition_aggregate, 'incomplete');
+  for (const name of ['METAENGINE Client State Offline Runtime', 'METAENGINE Client State Reviewed Source', 'Node.js', 'Deno', 'PostgreSQL', 'postgres']) {
+    assert.ok(sbom.components.some(component => component.name === name));
+  }
+  const node = sbom.components.find(component => component.name === 'Node.js');
+  assert.equal(node.version, offline.manifest.component_origins.node.version);
+  assert.equal(node.hashes[0].content, offline.manifest.files.find(row => row.path === 'runtime/node/node.exe').sha256);
+  assert.ok(node.properties.some(row => row.name === 'metaengine:license_sha256' && /^[a-f0-9]{64}$/.test(row.value)));
+  assert.equal(JSON.stringify(sbom).includes(offline.root), false);
+});
+
+test('optional offline runtime SBOM inputs must be supplied as one pair', () => {
+  const f = fixture();
+  try {
+    assert.throws(() => compose(f, { offlineRuntimeManifestPath: 'unused' }), /offline_inputs_pair_required/);
+    assert.throws(() => compose(f, { offlineRuntimeProofPath: 'unused' }), /offline_inputs_pair_required/);
+    const { evidence } = compose(f);
+    assert.equal(evidence.offline_runtime_component_count, 0);
+    assert.equal(evidence.offline_runtime_bundle_sha256, null);
+    assert.equal(evidence.offline_runtime_packaged_resources_verified, false);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('offline SBOM rejects proof source, byte digest, resource count and authority drift', async t => {
+  const { f, paths, proof } = await offlineFixture(t);
+  for (const [change, pattern] of [
+    [{ source_head: 'b'.repeat(40) }, /source_version_mismatch/],
+    [{ package_version: '0.7.0-dev.1.1' }, /source_version_mismatch/],
+    [{ bundle_manifest_sha256: I('f') }, /manifest_bytes_mismatch/],
+    [{ resource_file_count: proof.resource_file_count + 1 }, /resource_count_mismatch/],
+    [{ resource_size_bytes: proof.resource_size_bytes + 1 }, /resource_count_mismatch/],
+    [{ resource_inventory_sha256: I('f') }, /proof_binding_mismatch/],
+    [{ protected_asar_binding_present: false }, /proof_invalid/],
+    [{ publisher_provenance_verified: true }, /proof_invalid/],
+    [{ installed_client_qualified: true }, /proof_invalid/],
+    [{ authority_effect: true }, /proof_invalid/],
+  ]) {
+    write(f.root, 'offline-proof.json', { ...proof, ...change });
+    assert.throws(() => compose(f, paths), pattern);
+  }
+});
+
+test('offline SBOM refuses semantically altered or reformatted manifests', async t => {
+  const { f, paths } = await offlineFixture(t);
+  const bytes = fs.readFileSync(paths.offlineRuntimeManifestPath, 'utf8');
+  fs.writeFileSync(paths.offlineRuntimeManifestPath, bytes + '\n');
+  assert.throws(() => compose(f, paths), /manifest_bytes_mismatch/);
+  const document = JSON.parse(bytes);
+  document.files[0].sha256 = I('f');
+  fs.writeFileSync(paths.offlineRuntimeManifestPath, JSON.stringify(document));
+  assert.throws(() => compose(f, paths), /manifest_digest_mismatch/);
 });
 
 test('composed semantic inventory is stable under npm document metadata volatility', () => {

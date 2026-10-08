@@ -69,10 +69,15 @@ tests use disposable directories and an import-only child process with no
 runtime credentials. Importing the staged launcher/API proves path resolution
 outside the checkout, **not** database readiness or a cold installed launch.
 
-## Before A Packaged Cold Start
+## Source Bundle Scope
 
-No production Electron builder configuration changes are made here. A later
-reviewed release step must place runtime resources outside ASAR and resolve
+The source-only stage above remains deliberately narrower than the complete
+offline resource package. The implemented runtime host, binary/cache resource
+stage and bundled subprocess verification are documented in
+[README-offline-runtime.md](README-offline-runtime.md). The remaining notes
+describe requirements beyond the source-only stage.
+
+The Electron builder must place runtime resources outside ASAR and resolve
 them from `process.resourcesPath`, not the current working directory. Electron
 does not support an ASAR directory as a subprocess working directory, and
 binary spawning within ASAR has restrictions. Source layout preservation
@@ -82,9 +87,9 @@ PostgreSQL needs more than `postgres` and `psql`: build-dependent `bindir`,
 `sharedir`, `pkglibdir`, `libdir`, extensions and dynamic libraries, potentially
 including ICU, zlib and OpenSSL, require complete provenance and platform
 qualification. Node, Deno, its frozen offline npm cache, license material,
-database restore/init, protected local configuration and reboot ownership
-remain separate work. No automatic download, install, profile write, machine
-startup registration or fallback to Supabase is introduced.
+database restore/init, protected local configuration and ownership must have
+explicit contracts. The host requires prepared private state and does not
+register machine startup or fall back to Supabase.
 
 Official references:
 

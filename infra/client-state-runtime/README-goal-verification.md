@@ -7,6 +7,17 @@ durable ClientGoalJournal reload, and response-loss reconciliation without
 automatically resubmitting an effect. The first goal remains readable after
 the next synthetic goal supersedes its semantic plan.
 
+The same fixture then cleanly stops PostgreSQL, the API and the supervisor,
+checks all three ports are closed, and cold-starts those processes against the
+same private PGDATA. Runtime UUID, postmaster incarnation, startup receipt and
+API key must change; selected source bytes and the protected Vault key must
+remain unchanged. Exact goal, task, plan, device and nonce rows and journal bytes
+are compared across the restart. The old API key is rejected, the fresh key is
+accepted, a previously admitted signed nonce is still rejected as replay, and
+new signatures recover both existing goals without resubmission or dispatch.
+The replay probe signs the persisted nonce again with a current timestamp so
+it tests durable nonce admission independently of the timestamp window.
+
 The fixture owns a fresh temporary PostgreSQL 17 cluster, generated SCRAM
 credentials, unused loopback ports, service processes and a private synthetic
 client journal. It never accepts a caller-supplied database or supervisor URL,
@@ -48,9 +59,15 @@ retain zero lease generation and no agent/tab/target binding. Claims, supervisor
 commands/state and runtime-control tables remain empty. An owned marker,
 canonical temporary path and exact postmaster PID/data directory are checked
 before cleanup. An unconfirmed stop prevents deletion of the cluster.
+Concurrent restarts are rejected. Cleanup requested during restart waits for
+that operation, shares one cleanup attempt with other callers, and remains
+retryable after a cleanup failure while forbidding new restarts.
 
 Successful evidence is `ISOLATED_SCHEMA_FIXTURE_SMOKE`. It proves this bounded
 workflow on a declared fresh schema fixture, not the installed application,
 production runtime, useful coding, model output, result acceptance, autonomous
 execution, or completeness of a Supabase replacement. Archive and fixture data,
 keys and connection URLs must never be committed or uploaded as CI artifacts.
+The cold restart uses already cached, frozen dependencies and the loopback-only
+service contract; it is not an operating-system network-disconnection test or
+qualification of a packaged binary/cache distribution.

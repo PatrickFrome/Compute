@@ -18,11 +18,21 @@
   },
   "files": [
     "src/**/*",
-    "package.json"
+    "package.json",
+    {
+      "from": "../../infra/client-state-runtime",
+      "to": "infra/client-state-runtime",
+      "filter": ["offline-runtime-bundle.mjs"]
+    }
   ],
   "beforePack": "./scripts/electron-builder-before-pack.cjs",
   "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
   "extraResources": [
+    {
+      "from": "client-state-runtime-dist",
+      "to": "client-state-runtime",
+      "filter": ["**/*"]
+    },
     {
       "from": "native-dist/guardian",
       "to": "guardian-native",

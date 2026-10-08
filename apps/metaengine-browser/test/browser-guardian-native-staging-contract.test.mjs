@@ -31,6 +31,10 @@ function parsePowerShellFile(file) {
 test('electron-builder owns the single Guardian native staging build boundary', () => {
   assert.equal(builder.beforePack, './scripts/electron-builder-before-pack.cjs');
   assert.deepEqual(builder.extraResources, [{
+    from: 'client-state-runtime-dist',
+    to: 'client-state-runtime',
+    filter: ['**/*'],
+  }, {
     from: 'native-dist/guardian',
     to: 'guardian-native',
     filter: ['**/*'],
