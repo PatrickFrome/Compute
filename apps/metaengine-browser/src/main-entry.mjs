@@ -1,4 +1,4 @@
-import { app, BaseWindow, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BaseWindow, dialog } from 'electron';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
@@ -127,6 +127,7 @@ if (guard.installer_shutdown_control) {
       // cannot import Browser/main/HostResilience until a previously restored
       // PostgreSQL 17 is independently qualified and owner-bound.
       const { showInstalledRestoredProviderWizard } = await import('./local-restored-pg17-setup.mjs');
+      const { BrowserWindow, ipcMain } = await import('electron');
       const setup = await showInstalledRestoredProviderWizard({ app, BrowserWindow, dialog, ipcMain });
       if (setup.state === 'CONFIGURED') {
         const readyProvider = await providerBoot.bootstrapPersistentLocalProvider();
