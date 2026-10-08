@@ -76,3 +76,18 @@ export function localStateProviderHealthAttested(value, instanceId) {
     && value.capability_health?.state === 'ATTESTED'
     && value.capability_health?.authority_effect === false;
 }
+
+
+// This is a first-run admission fence for the installed local-only client,
+// not a profile provisioner. Fail before native supervisor imports/requests;
+// never turn absence of an owner into permission to select the cloud default.
+export function requirePackagedLocalProviderAdmission({
+  isPackaged = false,
+  browserRuntimeNeeded = false,
+  bypassSingleInstance = false,
+  bootstrapState = null,
+} = {}) {
+  if (isPackaged !== true || browserRuntimeNeeded !== true || bypassSingleInstance === true) return true;
+  if (bootstrapState === 'READY') return true;
+  throw new Error('local_state_packaged_owner_not_ready');
+}
