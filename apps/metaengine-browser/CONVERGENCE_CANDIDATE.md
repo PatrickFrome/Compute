@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000012.1`.
+Reserved package identity is `0.7.0-dev.37780000013.1`.
+
+Physical initdb Windows CI job restored to a unique step in proven valid workflow. Earlier workflow YAML was duplicated and was rejected before GitHub could schedule it.
 
 Restore complete Windows CI physical initdb workflow step (a previous YAML write was truncated), retain exact source-cleanliness gate, and reserve a new source identity. `0.7.0-dev.37780000011.1` is consumed and invalid for this source.
 
