@@ -51,7 +51,7 @@ export async function confirmRemoteSupportOnWindows({ scope, details = null }) {
   // The operator must be physically present in the user's interactive
   // Windows session. The remote caller cannot set this decision.
   const text = scope === 'DB_CONNECT'
-    ? 'Allow one 10-minute local PostgreSQL qualification session? The assistant may inspect an owner-selected PostgreSQL 17 and compare Vault keys locally. No database changes occur without a SECOND on-screen approval. Stop the support process to revoke.'
+    ? 'Allow a 10-minute restored PostgreSQL registration session? The assistant will need an EXISTING private runtime-host config and independent bundle/restore report SHA pins. No database is started and no owner profile is written unless you approve a SECOND local dialog. The operation never creates or overwrites PGDATA or Vault. Stop the support process to revoke.'
     : scope === 'DB_CONNECT_COMMIT'
       ? 'APPROVE ONE restored PostgreSQL 17 provider registration on this Windows PC? Existing private config: ' + String(details?.configFile||'UNSPECIFIED').slice(0,500) + '; Browser profile root: ' + String(details?.appData||'UNSPECIFIED').slice(0,350) + '. This starts and stops your selected DB and may exclusively write a missing owner profile. NEVER replaces PGDATA or Vault. Approve only if these paths are correct.'
     : scope === 'VIEW'
@@ -242,7 +242,7 @@ export function createRemoteSupportMcp({
       const until = now() + (scope === 'DB_CONNECT' ? 10 * 60 * 1000 : SESSION_MAX_MS);
       sessionGeneration++;
       sessionId = randomUUID();
-      viewExpires = until;
+      viewExpires = scope === 'VIEW' || scope === 'CONTROL' ? until : 0;
       controlExpires = scope === 'CONTROL' ? until : 0;
       filesExpires = scope === 'FILES' || scope === 'CONTROL' ? until : 0;
       databaseExpires = scope === 'DB_CONNECT' ? until : 0;
@@ -264,7 +264,7 @@ export function createRemoteSupportMcp({
       restored_provider_attempt_claimed:restoreAttemptClaimed,
       session_id:revoked ? null : sessionId,
       session_revoked:revoked, further_action_prompts:false,
-      arbitrary_shell:false, filesystem_access:'POSTGRES_METADATA_ONLY', arbitrary_file_contents:false,
+      arbitrary_shell:false, filesystem_access:'POSTGRES_METADATA_OR_DOUBLE_APPROVED_PROVIDER_REGISTRATION', arbitrary_file_contents:false,
       unattended_access:false,
       restored_database_connection_requires_second_local_approval:true,
       installed_browser_runtime_required:false, authority_effect:false,
