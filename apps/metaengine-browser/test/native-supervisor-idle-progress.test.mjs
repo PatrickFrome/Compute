@@ -23,6 +23,7 @@ function fixture({ maintenance = false, admitted = true, holdTask = false } = {}
   const originalSnapshot = BaseNativeSupervisorClient.prototype.snapshot;
   const capture = deferred();
   const task = deferred();
+  const taskStarted = deferred();
   const counters = { commands: 0, captures: 0, taskRequests: 0, reconciles: 0 };
   const identityState = { client_id: deviceId, device_id: deviceId, enrolled: true };
   const supervisor = {
@@ -50,12 +51,13 @@ function fixture({ maintenance = false, admitted = true, holdTask = false } = {}
     fetchImpl: async (url) => {
       if (!String(url).endsWith('/v1/devos/cycle')) throw new Error('unexpected_route:' + url);
       counters.taskRequests += 1;
+      taskStarted.resolve();
       if (holdTask) await task.promise;
       return response();
     },
   });
   return {
-    client, counters, capture, task, supervisor,
+    client, counters, capture, task, taskStarted, supervisor,
     async settle() { await nextTurn(); await nextTurn(); },
     async close() {
       capture.resolve({ tab_id: tabId, target_id: 'webcontents:42', controls: [] });
@@ -71,7 +73,12 @@ function fixture({ maintenance = false, admitted = true, holdTask = false } = {}
 test('slow advisory capture cannot starve the scheduler-owned DevOS turn', async () => {
   const f = fixture();
   try {
-    await f.client.cycle(); await f.settle();
+    await f.client.cycle();
+    await Promise.race([
+      f.taskStarted.promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('devos_task_start_timeout')), 5000)),
+    ]);
+    await f.settle();
     assert.equal(f.counters.commands, 1);
     assert.equal(f.counters.captures, 1);
     assert.equal(f.counters.taskRequests, 1, 'DevOS must progress before an advisory CAPTURE settles');

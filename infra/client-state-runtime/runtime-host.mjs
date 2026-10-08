@@ -37,9 +37,21 @@ export function validateRuntimeHostConfig(value) {
 }
 
 async function requireCanonicalPath(target, kind) {
-  const info = await lstat(target);
-  if (info.isSymbolicLink() || (kind === 'file' ? !info.isFile() || info.nlink !== 1 : !info.isDirectory())
-    || canonical(await realpath(target)) !== canonical(path.resolve(target))) throw failure('runtime_host_path_invalid');
+  const absolute = path.resolve(target);
+  const info = await lstat(absolute);
+  if (info.isSymbolicLink() || (kind === 'file' ? !info.isFile() || info.nlink !== 1 : !info.isDirectory())) {
+    throw failure('runtime_host_path_invalid');
+  }
+  const real = await realpath(absolute);
+  if (process.platform === 'win32') {
+    // Windows realpath expands valid DOS short names. Walk all path components
+    // to reject symlinks/junctions without treating RUNNER~1 as a redirect.
+    let current = path.parse(absolute).root;
+    for (const segment of path.relative(current, absolute).split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      if ((await lstat(current)).isSymbolicLink()) throw failure('runtime_host_path_invalid');
+    }
+  } else if (canonical(real) !== canonical(absolute)) throw failure('runtime_host_path_invalid');
   return info;
 }
 

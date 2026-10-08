@@ -276,7 +276,7 @@ test('ESM primary arms Electron ready continuation instead of awaiting app.whenR
 
   const importSettled = source.indexOf('await browserRuntimePromise;');
   const continuation = source.indexOf('const continueStartupAfterReady = async () =>');
-  const hostStart = source.indexOf('await hostResilience.start()', continuation);
+  const hostStart = source.indexOf('resilienceStartup = hostResilience.start()', continuation);
   const barrierRelease = source.indexOf('resolveBrowserBootstrap?.(hostSnapshot)', hostStart);
   const listener = source.indexOf("app.once('ready', runReadyContinuation)", continuation);
   assert.ok(importSettled >= 0 && continuation > importSettled);
