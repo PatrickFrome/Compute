@@ -1,0 +1,53 @@
+{
+  "schema": "compute.client-state.public-development-checkpoint.v1",
+  "date": "2026-10-08",
+  "timezone": "Europe/Moscow",
+  "subject_commit": "dfb3d23a9bde7c1119bed628308a326912ebd46c",
+  "pull_request": "https://github.com/PatrickFrome/Compute/pull/1143",
+  "local_checks": {
+    "runtime_contracts": { "passed": 50, "failed": 0 },
+    "focused_provider_recovery_publication": { "passed": 74, "failed": 0 },
+    "browser_full_run": { "passed": 4394, "failed": 1, "total": 4395, "skipped": 0, "failure": "Windows exact-window capture computer_executor_timeout" },
+    "windows_capture_isolated_rerun": { "passed": 36, "failed": 0, "full_run_failure_erased": false },
+    "browser_syntax": "PASS",
+    "portable_postgresql_restart_persistence": "PASS"
+  },
+  "local_signed_supervisor": {
+    "verified_at": "2026-10-08T01:03:26.091Z",
+    "status": "PASS",
+    "probes_passed": 18,
+    "evidence_level": "STARTUP_MANIFEST_BOUND_SMOKE",
+    "instance_id": "f86dc2a9-edc3-473b-86cd-7ebf1a26a346",
+    "startup_source_sha256": "2f6d9b829ac10838b53945b13f08705359658d1f6c9a4f27920a97496ca7af80",
+    "startup_manifest_files": 110,
+    "probe_compared_runtime_files": 108,
+    "source_and_health_stable": true,
+    "process_code_attested": false,
+    "private_config_included": false,
+    "hosted_requests": false,
+    "real_tasks_executed": false,
+    "protected_state_changed": false
+  },
+  "github_ci_observation": {
+    "subject_commit": "dfb3d23a9bde7c1119bed628308a326912ebd46c",
+    "run": "https://github.com/PatrickFrome/Compute/actions/runs/37710988218",
+    "linux": "PASS",
+    "windows": "FAIL: canonical temporary-path fixtures",
+    "ui_typecheck_and_boundary_lint": "PASS: Critical Audit job 113096722640 on the same subject commit",
+    "full_browser": "4404 PASS, 1 FAIL: package reservation source regex did not allow the added job guard",
+    "historical_cloud_canary_promotion": "NOT_QUALIFIED",
+    "subsequent_corrections_require_their_own_ci": true
+  },
+  "installed_client_changed": false,
+  "hosted_database_changed": false,
+  "supabase_target_transfer_resumed": false,
+  "private_artifacts_published": false,
+  "authority_effect": false,
+  "production_promotion_authorized": false,
+  "limitations": [
+    "File manifests do not cryptographically attest loaded process memory, PostgreSQL dynamic libraries or Deno compiled caches.",
+    "The persistent client configuration is implemented and fixture-tested, not provisioned into the live user profile.",
+    "Active legacy Auth, Storage/outbox, mirror and bridge consumers still need concrete local adapters or verified exclusion.",
+    "The full private backup, configuration and detailed local database receipts remain outside GitHub."
+  ]
+}

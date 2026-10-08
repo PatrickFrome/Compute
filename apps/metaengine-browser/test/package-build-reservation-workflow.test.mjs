@@ -15,7 +15,7 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /package_identity_preflight:/);
   assert.match(workflow, /GITHUB_RUN_ATTEMPT" != "1"/);
   assert.match(workflow, /package_identity_rerun_requires_new_source_and_version/);
-  assert.match(workflow, /windows-nsis-package-smoke:\s*\n\s*needs: package_identity_preflight/);
+  assert.match(workflow, /windows-nsis-package-smoke:\s*\n(?:\s*#[^\n]*\n|\s*if:[^\n]*\n)*\s*needs: package_identity_preflight/);
   assert.match(
     workflow,
     /group: browser-windows-package-version-\$\{\{ needs\.package_identity_preflight\.outputs\.package_version \}\}/,

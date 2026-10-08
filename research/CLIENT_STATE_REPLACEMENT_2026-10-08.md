@@ -141,6 +141,27 @@ lineage differs substantially; no implicit merge or restoration of unrelated
 project history is performed. GitHub CI results must refer to the published
 head and remain distinct from local test observations.
 
+Published head `dfb3d23a9bde7c1119bed628308a326912ebd46c` has a passing Linux
+Client State Runtime Contracts job. Windows identified three temporary-fixture
+path failures caused by the runner's short-name TEMP prefix; production alias
+rejection remains intentionally strict. Corrections canonicalize owned test
+roots, not production permissions. The public development receipt records this
+initial failed run rather than rewriting its result.
+
+That head's GitHub full Browser job passed 4,404 tests and failed one static
+package-reservation assertion that assumed the `needs` line immediately follows
+the job name. The local-only job guard changed the line layout, not the
+dependency. The assertion now permits intervening job conditions/comments while
+still requiring the same preflight dependency; guard tests separately enforce
+the exact local-only condition. Test corrections passed 51 runtime contracts
+locally and need fresh GitHub results for their own published head.
+
+The existing Critical Audit job also passed exact UI typechecking and modified
+UI-boundary lint for that head on GitHub, extending the earlier offline TS
+guard checks. The historical R83 cloud canary-equivalence check fails because
+this source differs from its deployed pin; that gate remains intact. No
+production promotion or hosted deployment is inferred from other green jobs.
+
 ## Remaining Dependencies and Order
 
 1. Complete client installation/startup qualification. Preserve existing device
