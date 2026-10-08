@@ -138,3 +138,13 @@ restart, installed normal UI/provider boot, update-safe private config digest
 reconciliation, and independently proven useful goal/agent/effect continuity.
 Fresh SQL baseline P0 #1155 and signing/public release are separate. A built
 unsigned development installer grants none of those claims by itself.
+
+## Remote computer support successor (2026-10-08)
+
+New stacked candidate `0.7.0-dev.37781000002.1` adds `apps/metaengine-browser/src/remote-support-mcp.mjs` (explicit standalone MCP stdio host) and the existing `windows-local-computer-executor.mjs` closure to the immutable client-state runtime source bundle. There is no automatic background listener, service or web server. The operator starts a separate **trusted, private tunnel/MCP host** and verifies its identity; the bridge between ChatGPT and Windows is NOT supplied or considered connected merely by packaging this source.
+
+To reduce interruption, the operator makes **one visible local VIEW or CONTROL decision per session**. The maximum is 60 minutes, with no per-action approval prompts. CONTROL also enables view; view-only cannot upgrade. A caller may not extend the session; `support_stop`, expiry, or closing the local terminal ends effects. Every mutating request still needs an existing independently qualified DB computer-effect lease, exact agent/target binding, typed action and readback. No free-form PowerShell, silent installation, startup persistence, private key/database read or cloud fallback. If the main Browser UI fails to load, this separate helper can still run because the reviewed Node binary and module are in the installed offline package.
+
+**Important operational limit:** the public GitHub connector attached to a chat cannot see a user's Windows desktop. Only after a secure remote MCP connector/tunnel is deliberately configured and connected to this conversation, and the owner has explicitly enabled a local session, can this chat request screen or computer actions. New candidate CI source tests are necessary but do not prove end-to-end ChatGPT connectivity or restored PGDATA readiness.
+
+Remote-support `.02` Windows/Ubuntu State Runtime Contracts failed one stale source-bundle negative test assertion. The reviewer correctly rejects a host-only manifest with `bundle_unexpected_source_record`; `.03` updates this test's error expectation without changing production admission checks. `.02` is consumed and not eligible for relabel/rebuild.

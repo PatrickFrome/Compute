@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { sourceClosure } from './startup-source-manifest.mjs';
 import {
-  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY,
+  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY,
   reviewedBundlePlan, stageRuntimeSourceBundle, verifyRuntimeSourceBundle,
 } from './package-runtime-resources.mjs';
 
@@ -39,7 +39,7 @@ function refreshDigest(manifest) {
 }
 
 async function receipt(root, { includeRuntimeHost = false } = {}) {
-  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY] : BUNDLE_ENTRY_POINTS;
+  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY] : BUNDLE_ENTRY_POINTS;
   const closure = await sourceClosure(entries.map(name => join(root, name)), root);
   const records = [];
   const add = async (path, id, kind) => {
@@ -121,13 +121,15 @@ test('reviewed runtime host source is included only by explicit host selection',
   await fixture(async ({ repository, stage, options }) => {
     await writeFile(join(repository, RUNTIME_HOST_ENTRY), "import './launcher.mjs'; export const host = true;\n");
     await writeFile(join(repository, FIRST_RUN_INITDB_ENTRY), "export const firstRun = true;\n");
+    await writeFile(join(repository, REMOTE_SUPPORT_ENTRY), "export const remoteSupport = true;\n");
     const manifest = await receipt(repository, { includeRuntimeHost: true });
     const hostOptions = { ...options, startupManifest: manifest, expectedSourceDigest: manifest.source_manifest_sha256 };
-    await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch/);
+    await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch|bundle_unexpected_source_record/);
     const bundle = await stageRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true });
-    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY]);
+    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY]);
     assert.ok(bundle.files.some(file => file.path === RUNTIME_HOST_ENTRY));
     assert.ok(bundle.files.some(file => file.path === FIRST_RUN_INITDB_ENTRY));
+    assert.ok(bundle.files.some(file => file.path === REMOTE_SUPPORT_ENTRY));
     assert.deepEqual(await verifyRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true, expectedBundleDigest: bundle.bundle_sha256 }), bundle);
     await assert.rejects(verifyRuntimeSourceBundle({ ...hostOptions, expectedBundleDigest: bundle.bundle_sha256 }), /expected_digest_mismatch/);
   });
@@ -279,8 +281,8 @@ test('verification rejects drift, injected files, edited manifests and absent pi
 });
 
 test('selected runtime bundle includes the full real first-run source closure', async () => {
-  const closure = await sourceClosure([...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY].map(name => join(repositoryRoot, name)), repositoryRoot);
+  const closure = await sourceClosure([...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY].map(name => join(repositoryRoot, name)), repositoryRoot);
   const names = new Set(closure.files.map(file => slash(relative(repositoryRoot, file))));
-  for (const file of [FIRST_RUN_INITDB_ENTRY, 'infra/client-state-runtime/first-run-preflight.mjs', 'infra/client-state-runtime/local-vault-key.mjs', 'infra/client-state-runtime/offline-runtime-bundle.mjs']) assert.ok(names.has(file), 'missing first-run dependency: ' + file);
+  for (const file of [FIRST_RUN_INITDB_ENTRY, 'infra/client-state-runtime/first-run-preflight.mjs', 'infra/client-state-runtime/local-vault-key.mjs', 'infra/client-state-runtime/offline-runtime-bundle.mjs', REMOTE_SUPPORT_ENTRY, 'apps/metaengine-browser/src/windows-local-computer-executor.mjs', 'apps/metaengine-browser/src/computer-authority-plane.mjs']) assert.ok(names.has(file), 'missing first-run dependency: ' + file);
   assert.ok(closure.npm.includes('npm:postgres@3.4.7'));
 });

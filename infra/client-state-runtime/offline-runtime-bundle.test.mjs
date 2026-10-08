@@ -24,16 +24,19 @@ async function fixture(t) {
   };
   const host = 'export const host = true;\n';
   const firstRun = 'export const firstRun = true;\n';
+  const support = 'export const support = true;\n';
   const sourceBody = { schema: 'compute.runtime-source-bundle.v1', reviewed_startup_source_sha256: 'd'.repeat(64),
-    reviewed_startup_files_sha256: 'e'.repeat(64), entry_points: ['infra/client-state-runtime/runtime-host.mjs', 'infra/client-state-runtime/fresh-pg17-initdb.mjs'],
+    reviewed_startup_files_sha256: 'e'.repeat(64), entry_points: ['infra/client-state-runtime/runtime-host.mjs', 'infra/client-state-runtime/fresh-pg17-initdb.mjs', 'apps/metaengine-browser/src/remote-support-mcp.mjs'],
     files: [
       { path: 'infra/client-state-runtime/runtime-host.mjs', kind: 'source', bytes: Buffer.byteLength(host), sha256: digest(host) },
       { path: 'infra/client-state-runtime/fresh-pg17-initdb.mjs', kind: 'source', bytes: Buffer.byteLength(firstRun), sha256: digest(firstRun) },
+      { path: 'apps/metaengine-browser/src/remote-support-mcp.mjs', kind: 'source', bytes: Buffer.byteLength(support), sha256: digest(support) },
     ],
     policy: { database_included: false, private_config_included: false, credentials_included: false } };
   const sourceManifest = { ...sourceBody, bundle_sha256: digest(JSON.stringify(sourceBody)) };
   await put('source/infra/client-state-runtime/runtime-host.mjs', host);
   await put('source/infra/client-state-runtime/fresh-pg17-initdb.mjs', firstRun);
+  await put('source/apps/metaengine-browser/src/remote-support-mcp.mjs', support);
   await put('source/runtime-source-bundle.json', JSON.stringify(sourceManifest));
   await put('node/node.exe', 'synthetic-node-binary');
   await put('node/LICENSE', 'Copyright Node.js\n'.repeat(40));
@@ -62,6 +65,7 @@ test('offline resource bundle binds source, binaries, cache and licenses with no
   assert.deepEqual(verified.manifest, manifest);
   assert.equal(verified.paths.hostEntry, path.join(await realpath(f.stage), 'source/infra/client-state-runtime/runtime-host.mjs'));
   assert.equal(verified.paths.firstRunInitdbEntry, path.join(await realpath(f.stage), 'source/infra/client-state-runtime/fresh-pg17-initdb.mjs'));
+  assert.equal(verified.paths.remoteSupportEntry, path.join(await realpath(f.stage), 'source/apps/metaengine-browser/src/remote-support-mcp.mjs'));
   assert.equal(manifest.policy.database_included, false);
   assert.equal(manifest.policy.private_config_included, false);
   assert.equal(manifest.policy.installed_client_qualified, false);
