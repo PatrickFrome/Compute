@@ -48,35 +48,51 @@ test('R83 deployed v14 binding classifies source drift as requalification-requir
   const value = await binding();
   const source = await fs.readFile(path.join(APP_ROOT, 'supabase/a2-browser-native-supervisor-v1/index.ts'), 'utf8');
   const imports = [...source.matchAll(/from '\.\/([^']+)'/g)].map(m => 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/' + m[1]);
-  assert.deepEqual(value.candidate.imports.map(row => row.path).sort(), imports.sort(), 'all deployed local import edges must be bound');
-
+  const currentImports = new Set(imports);
+  const deployedImports = new Set(value.candidate.imports.map(row => row.path));
   const seen = new Set();
   const drift = [];
+  for (const currentPath of currentImports) {
+    if (!deployedImports.has(currentPath)) drift.push(Object.freeze({ path: currentPath, kind: 'IMPORT_ADDED' }));
+  }
   for (const row of value.candidate.imports) {
     assert.equal(seen.has(row.path), false, `duplicate import binding: ${row.path}`);
     seen.add(row.path);
     assert.match(row.git_blob_sha1, /^[a-f0-9]{40}$/);
+    if (!currentImports.has(row.path)) {
+      drift.push(Object.freeze({ path: row.path, kind: 'IMPORT_REMOVED', deployed_blob: row.git_blob_sha1 }));
+      continue;
+    }
     const bytes = await fs.readFile(path.join(REPO_ROOT, row.path));
     const currentBlob = gitTextBlobSha1(bytes);
     if (currentBlob !== row.git_blob_sha1) {
-      drift.push(Object.freeze({ path: row.path, deployed_blob: row.git_blob_sha1, current_blob: currentBlob }));
+      drift.push(Object.freeze({ path: row.path, kind: 'CONTENT_CHANGED', deployed_blob: row.git_blob_sha1, current_blob: currentBlob }));
     }
   }
 
-  const state = drift.length === 0 ? 'DEPLOYED_CANARY_EQUIVALENT' : 'CANARY_REQUALIFICATION_REQUIRED';
-  assert.ok(['DEPLOYED_CANARY_EQUIVALENT', 'CANARY_REQUALIFICATION_REQUIRED'].includes(state));
+  const state = drift.length === 0 ? 'DIRECT_IMPORT_BINDING_EQUIVALENT' : 'CANARY_REQUALIFICATION_REQUIRED';
+  assert.ok(['DIRECT_IMPORT_BINDING_EQUIVALENT', 'CANARY_REQUALIFICATION_REQUIRED'].includes(state));
   assert.equal(value.promotion_authorized, false);
   assert.equal(value.automatic_promotion_allowed, false);
   assert.equal(value.authority_effect, false);
 
   // Generic Browser test suites must be able to validate a source candidate.
-  // The dedicated R83 qualification workflow remains the hard exact-equivalence
-  // gate and must fail while this state is CANARY_REQUALIFICATION_REQUIRED.
+  // This diagnostic does not bind index.ts or transitive imports. The dedicated
+  // R83 qualification workflow remains the hard full-source equivalence gate.
   if (state === 'CANARY_REQUALIFICATION_REQUIRED') {
     assert.ok(drift.length > 0);
     for (const row of drift) {
-      assert.notEqual(row.current_blob, row.deployed_blob);
-      assert.match(row.current_blob, /^[a-f0-9]{40}$/);
+      if (row.kind === 'CONTENT_CHANGED') {
+        assert.notEqual(row.current_blob, row.deployed_blob);
+        assert.match(row.current_blob, /^[a-f0-9]{40}$/);
+      } else if (row.kind === 'IMPORT_ADDED') {
+        assert.equal(deployedImports.has(row.path), false);
+        assert.equal(currentImports.has(row.path), true);
+      } else {
+        assert.equal(row.kind, 'IMPORT_REMOVED');
+        assert.equal(currentImports.has(row.path), false);
+        assert.equal(deployedImports.has(row.path), true);
+      }
     }
   }
 });

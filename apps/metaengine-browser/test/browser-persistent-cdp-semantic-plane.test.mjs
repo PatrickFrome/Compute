@@ -161,3 +161,32 @@ test('network/runtime telemetry is live but does not expose headers, bodies or r
   assert.equal(plane.snapshot().raw_cdp_passthrough, false);
   plane.stop();
 });
+
+test('semantic snapshots honor zero, default and capped event limits with retained history', async (t) => {
+  const pool = new PersistentBrowserCdpSessionPool();
+  const contents = new FakeContents(32, 3200);
+  const tabId = 'tab_00000000-0000-4000-8000-000000000032';
+  const plane = new BrowserRealtimeSemanticPlane({
+    pool,
+    getTargets: () => [{ tab_id: tabId, webContents: contents }],
+    eventLimit: 4096,
+  });
+  t.after(() => plane.stop());
+  const started = await plane.start();
+  assert.equal(started.events.length, 0);
+  assert.ok(started.sequence > 0);
+  for (let i = 0; i < 1100; i += 1) contents.debugger.push('Network.responseReceived', { requestId: `r${i}` });
+  const capped = plane.snapshot({ eventLimit: 4096 });
+  assert.equal(capped.events.length, 1024);
+  assert.ok(capped.sequence > 1024);
+
+  for (const eventsSince of [null, 0]) {
+    const zero = plane.snapshot({ eventsSince, eventLimit: 0 });
+    assert.equal(zero.events.length, 0);
+    assert.equal(zero.sequence, capped.sequence);
+    assert.equal(plane.snapshot({ eventsSince, eventLimit: -1 }).events.length, 0);
+    assert.deepEqual(plane.snapshot({ eventsSince, eventLimit: 3 }).events, capped.events.slice(-3));
+    assert.deepEqual(plane.snapshot({ eventsSince }).events, capped.events.slice(-128));
+    assert.deepEqual(plane.snapshot({ eventsSince, eventLimit: 'invalid' }).events, capped.events.slice(-128));
+  }
+});

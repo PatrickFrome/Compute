@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { recordAcceptedSignedSupervisorHeartbeat } from './self-update-successor-qualification.mjs';
+import { explicitLocalSupervisorBase, localSupervisorHealthAttested } from './explicit-local-supervisor-provider.mjs';
 
 export const NATIVE_SUPERVISOR_HOST = 'jhriwwsryeqsvvvufkok.supabase.co';
 export const NATIVE_SUPERVISOR_STATE_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/state';
@@ -42,11 +43,11 @@ export function inspectSignedNativeSupervisorStateRequest(input, init = {}) {
   let url;
   try { url = new URL(requestUrl(input)); }
   catch { return Object.freeze({ valid: false, reason: 'url_invalid' }); }
-  if (
-    url.protocol !== 'https:'
-    || url.hostname.toLowerCase() !== NATIVE_SUPERVISOR_HOST
-    || !SIGNED_HEARTBEAT_ELIGIBLE_PATHS.has(url.pathname)
-  ) {
+  const localBase = explicitLocalSupervisorBase();
+  const endpointMatches = localBase
+    ? [`${localBase}/v1/state`, `${localBase}/v1/heartbeat`].includes(`${url.origin}${url.pathname}`)
+    : url.protocol === 'https:' && url.hostname.toLowerCase() === NATIVE_SUPERVISOR_HOST && (!url.port || url.port === '443') && SIGNED_HEARTBEAT_ELIGIBLE_PATHS.has(url.pathname);
+  if (!endpointMatches || url.username || url.password || url.search || url.hash) {
     return Object.freeze({ valid: false, reason: 'endpoint_mismatch' });
   }
 
@@ -77,6 +78,7 @@ export function inspectSignedNativeSupervisorStateRequest(input, init = {}) {
     device_id: deviceId,
     client_id: clientId,
     body_sha256: declaredHash,
+    provider_base: localBase,
   });
 }
 
@@ -85,10 +87,29 @@ export function installSignedSupervisorHeartbeatQualificationHook({ app, fetchIm
   if (typeof fetchImpl !== 'function') throw new Error('self_update_signed_heartbeat_fetch_invalid');
   if (fetchImpl.__metaengineSignedHeartbeatQualificationHook === true) return fetchImpl;
 
+  let localHealth = null;
+  let localHealthProbe = null;
+  async function localProviderQualified(base) {
+    const instanceId = String(process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID || '').trim();
+    if (localHealth?.base === base && localHealth?.instance_id === instanceId && Date.now() - localHealth.checked_at < 5000) return true;
+    if (localHealthProbe) return localHealthProbe.base === base && localHealthProbe.instance_id === instanceId ? localHealthProbe.promise : false;
+    const promise = (async () => {
+      try {
+        const response = await fetchImpl(`${base}/health`, { method: 'GET', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(2500) });
+        if (!response?.ok || !localSupervisorHealthAttested(await response.json(), instanceId)) return false;
+        localHealth = { base, instance_id: instanceId, checked_at: Date.now() };
+        return true;
+      } catch { return false; }
+      finally { localHealthProbe = null; }
+    })();
+    localHealthProbe = { base, instance_id: instanceId, promise };
+    return promise;
+  }
+
   const wrapped = async (input, init = {}) => {
     const signed = inspectSignedNativeSupervisorStateRequest(input, init);
     const response = await fetchImpl(input, init);
-    if (signed.valid && response?.status === 202) {
+    if (signed.valid && response?.status === 202 && (!signed.provider_base || await localProviderQualified(signed.provider_base))) {
       await recordAcceptedSignedSupervisorHeartbeat({
         app,
         state: signed.payload?.state,

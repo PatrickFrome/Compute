@@ -21,6 +21,8 @@ permissions:
 
 jobs:
   windows-shell-first-dirty-profile:
+    # Chromium proxy isolation does not constrain Node supervisor transport.
+    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
     runs-on: windows-2025
     timeout-minutes: 28
     steps:

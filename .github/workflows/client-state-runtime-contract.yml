@@ -1,0 +1,68 @@
+name: Client State Runtime Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/**'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/test/**'
+      - 'apps/me2-ui/src/lib/cloud.ts'
+      - 'apps/me2-ui/src/lib/fallback-console.ts'
+      - '.github/workflows/client-state-runtime-contract.yml'
+  push:
+    paths:
+      - 'infra/client-state-runtime/**'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/test/**'
+      - 'apps/me2-ui/src/lib/cloud.ts'
+      - 'apps/me2-ui/src/lib/fallback-console.ts'
+      - '.github/workflows/client-state-runtime-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-state-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install runtime dependencies
+        working-directory: infra/client-state-runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify API, owned processes and private archive
+        working-directory: infra/client-state-runtime
+        run: npm test
+
+      - name: Verify selected client provider and supervisor compatibility
+        working-directory: apps/metaengine-browser
+        run: node --test test/explicit-local-supervisor-provider.test.mjs test/native-supervisor-local-provider-pin.test.mjs test/local-provider-recovery-environment.test.mjs test/persistent-local-provider-boot.test.mjs test/browser-sentinel.test.mjs test/host-resilience-runtime.test.mjs test/agent-access-capsule.test.mjs test/self-hosted-supervisor-config.test.mjs test/runtime-capability-health-route-contract.test.mjs test/native-supervisor-realtime-command-wake-migration.test.mjs test/r83-edge-v14-canary-source-binding.test.mjs test/me2-ui-local-profile-outbound-guard.test.mjs test/client-owned-state-hosted-workflow-guard.test.mjs

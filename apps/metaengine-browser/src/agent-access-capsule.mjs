@@ -19,6 +19,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { NATIVE_SUPERVISOR_BASE } from './native-supervisor-endpoints.mjs';
+import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
 
 export const AGENT_ACCESS_CAPSULE_SCHEMA = 'metaengine.agent-access-capsule.v1';
 export const AGENT_ACCESS_CAPSULE_FILE = 'agent-access-capsule.json';
@@ -78,13 +80,14 @@ export function normalizeAgentAccessCapsule(value) {
   });
 }
 
-export function defaultAgentAccessCapsule() {
+export function defaultAgentAccessCapsule({ env = process.env, activeBase = NATIVE_SUPERVISOR_BASE } = {}) {
+  const localBase = explicitLocalSupervisorBase({ env, activeBase });
   return normalizeAgentAccessCapsule({
     infrastructure: [
       {
-        name: 'cloud supervisor edge (authority)',
-        location: 'remote',
-        url: 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1',
+        name: localBase ? 'client supervisor (authority)' : 'cloud supervisor edge (authority)',
+        location: localBase ? 'loopback' : 'remote',
+        url: localBase || activeBase,
         note: 'workspace 2de9f84b-7c0a-4091-911c-894ff1d6eaf4; device-signed routes only',
       },
       {
@@ -93,17 +96,17 @@ export function defaultAgentAccessCapsule() {
         url: 'release/self-update-ambiguity-live-v2',
         note: 'trusted dev releases; verified-self-update-manifest.json in assets',
       },
-      {
+      ...(!localBase ? [{
         name: 'reserve plane (when reachable)',
         location: 'loopback',
         url: 'http://127.0.0.1:3031/a2-browser-native-supervisor-v1 + postgresql://127.0.0.1:55432/postgres',
         note: 'local edge + Pigsty PG 17; used by the fallback console while cloud is degraded',
-      },
+      }] : []),
     ],
     databases: [
       {
         name: 'command plane',
-        scope: 'public (cloud Postgres via signed edge RPC only)',
+        scope: localBase ? 'public (client Postgres via signed supervisor only)' : 'public (cloud Postgres via signed edge RPC only)',
         tables: [
           'compute_fabric_a2_browser_supervisor_command_h205f22',
           'compute_fabric_a2_browser_supervisor_state_h205f22',
@@ -123,7 +126,7 @@ export function defaultAgentAccessCapsule() {
         name: 'cognition',
         scope: 'public',
         tables: ['compute_fabric_a2_browser_cognitive_cursor_h205f22'],
-        note: 'cursor table only — deltas are not persisted; acceptor h205f22_a2_browser_cognitive_accept_v1',
+        note: 'durable last_batch and cursor; acceptor h205f22_a2_browser_cognitive_accept_v1; optional wake is not delivery proof',
       },
       {
         name: 'devos fleet',
@@ -138,8 +141,13 @@ export function defaultAgentAccessCapsule() {
     ],
     credentials_policy: 'Auth is A2_DEVICE_HTTP_SIGNATURE_V1 (ECDSA P-256, IEEE-P1363) device signatures; private keys live in Electron safeStorage and never leave the host. Agents hold ZERO direct database credentials by design: reach data through the browser command plane or request elevated actions with TOOL_REQUEST_V1. Never paste anon/service JWTs, passwords or private keys into prompts, code or webpages.',
     context_sources: [
-      { name: 'operator worklog capsule', pointer: 'a2-capsule/00_START_HERE_CAPSULE.md + 01_CREDENTIALS_AND_ENDPOINTS.md', note: 'mission state, endpoints, live-test campaign' },
-      { name: 'schema reconstructions', pointer: 'infra/pigsty/bootstrap/01..10', note: 'canonical SQL for every fabric table + wake triggers' },
+      ...(localBase ? [
+        { name: 'client state runtime', pointer: 'infra/client-state-runtime', note: 'loopback PostgreSQL API, supervisor launcher and private archive; GitHub stores code and tests only' },
+        { name: 'schema provenance', pointer: 'backup manifest + local migration receipts; supabase/migrations', note: 'restored snapshot and separately recorded local migrations, not historical Pigsty bootstrap' },
+      ] : [
+        { name: 'operator worklog capsule', pointer: 'a2-capsule/00_START_HERE_CAPSULE.md + 01_CREDENTIALS_AND_ENDPOINTS.md', note: 'mission state, endpoints, live-test campaign' },
+        { name: 'schema reconstructions', pointer: 'infra/pigsty/bootstrap/01..10', note: 'historical schema reconstruction; current migrations and measured DB remain authoritative' },
+      ]),
       { name: 'self-update evidence', pointer: 'verified-self-update-manifest.json (release assets)', note: 'exact installed-executable + installer sha256 bindings' },
     ],
     rules: [
@@ -151,7 +159,10 @@ export function defaultAgentAccessCapsule() {
   });
 }
 
-export function loadAgentAccessCapsule({ storage_dir = null, read_file = fs.readFileSync, exists = fs.existsSync } = {}) {
+export function loadAgentAccessCapsule({ storage_dir = null, read_file = fs.readFileSync, exists = fs.existsSync, env = process.env, activeBase = NATIVE_SUPERVISOR_BASE } = {}) {
+  // A historical cloud briefing cannot override the explicitly selected local plane.
+  // Keep the operator's file untouched for its original profile.
+  if (explicitLocalSupervisorBase({ env, activeBase })) return defaultAgentAccessCapsule({ env, activeBase });
   const dir = String(storage_dir || '').trim();
   if (!dir || typeof read_file !== 'function') return null;
   const filePath = path.join(dir, AGENT_ACCESS_CAPSULE_FILE);
@@ -166,14 +177,15 @@ export function loadAgentAccessCapsule({ storage_dir = null, read_file = fs.read
 
 // Writes the shipped default capsule into the storage directory ONCE (first
 // boot). The operator can then edit the file; it is never overwritten again.
-export function ensureAgentAccessCapsuleFile(storage_dir = null, { write_file = fs.writeFileSync, exists = fs.existsSync, mkdir = fs.mkdirSync } = {}) {
+export function ensureAgentAccessCapsuleFile(storage_dir = null, { write_file = fs.writeFileSync, exists = fs.existsSync, mkdir = fs.mkdirSync, env = process.env, activeBase = NATIVE_SUPERVISOR_BASE } = {}) {
+  if (explicitLocalSupervisorBase({ env, activeBase })) return null;
   const dir = String(storage_dir || '').trim();
   if (!dir) return null;
   const filePath = path.join(dir, AGENT_ACCESS_CAPSULE_FILE);
   try {
     if (typeof exists === 'function' && exists(filePath)) return filePath;
     if (typeof mkdir === 'function') mkdir(dir, { recursive: true });
-    const capsule = defaultAgentAccessCapsule();
+    const capsule = defaultAgentAccessCapsule({ env, activeBase });
     if (!capsule) return null;
     write_file(filePath, `${JSON.stringify(capsule, null, 2)}\n`, { mode: 0o600 });
     return filePath;

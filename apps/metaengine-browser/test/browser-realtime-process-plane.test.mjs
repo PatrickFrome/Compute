@@ -196,6 +196,34 @@ test('event history is bounded and reports dropped deltas rather than growing wi
   plane.stop();
 });
 
+test('process snapshots honor zero, default and capped event limits with retained history', (t) => {
+  const app = new FakeApp(metrics());
+  const remote = new FakeContents({ id: 28, pid: 200 });
+  const plane = new BrowserRealtimeProcessPlane({
+    app,
+    getWebContents: () => [remote],
+    eventLimit: 4096,
+    sampleMs: 5000,
+    brainCoordinator: { observeEdge: () => null, snapshot: () => ({}), pressureBudget: () => ({}) },
+  });
+  t.after(() => plane.stop());
+  plane.start();
+  for (let i = 0; i < 1100; i += 1) remote.emit(i % 2 ? 'focus' : 'blur');
+  const capped = plane.snapshot({ eventLimit: 4096 });
+  assert.equal(capped.events.length, 1024);
+  assert.ok(capped.sequence > 1024);
+
+  for (const eventsSince of [null, 0]) {
+    const zero = plane.snapshot({ eventsSince, eventLimit: 0 });
+    assert.equal(zero.events.length, 0);
+    assert.equal(zero.sequence, capped.sequence);
+    assert.equal(plane.snapshot({ eventsSince, eventLimit: -1 }).events.length, 0);
+    assert.deepEqual(plane.snapshot({ eventsSince, eventLimit: 3 }).events, capped.events.slice(-3));
+    assert.deepEqual(plane.snapshot({ eventsSince }).events, capped.events.slice(-128));
+    assert.deepEqual(plane.snapshot({ eventsSince, eventLimit: 'invalid' }).events, capped.events.slice(-128));
+  }
+});
+
 test('stop removes app/webContents listeners and has no hidden command scheduler', () => {
   const app = new FakeApp(metrics());
   const remote = new FakeContents({ id: 37, pid: 200 });

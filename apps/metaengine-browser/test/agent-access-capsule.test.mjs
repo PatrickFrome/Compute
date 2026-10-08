@@ -71,6 +71,35 @@ test('render is deterministic and bounded (prompt-hash stability)', () => {
   assert.equal(renderAgentAccessCapsuleBlock('junk'), '');
 });
 
+test('local capsule binds the active supervisor without cloud, reserve or database credentials', () => {
+  const base = 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
+  const env = { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: '11111111-2222-4333-8444-555555555555', METAENGINE_SUPERVISOR_BASE_URL: base, SUPABASE_SERVICE_ROLE_KEY: 'private-test-key' };
+  const capsule = defaultAgentAccessCapsule({ env, activeBase: base });
+  assert.equal(capsule.infrastructure[0].url, base);
+  assert.equal(capsule.infrastructure[0].location, 'loopback');
+  assert.equal(capsule.infrastructure.some((row) => /reserve/.test(row.name)), false);
+  const wire = renderAgentAccessCapsuleBlock(capsule);
+  assert.doesNotMatch(wire, /supabase\.co|private-test-key|postgresql:\/\//);
+  assert.match(wire, /client Postgres via signed supervisor only/);
+  assert.match(capsule.databases[2].note, /durable last_batch and cursor/);
+  assert.equal(capsule.context_sources[0].pointer, 'infra/client-state-runtime');
+  assert.equal(capsule.context_sources.some(row => row.pointer.includes('infra/pigsty')), false);
+});
+
+test('local profile never reads or rewrites the historical operator capsule', () => {
+  const base = 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
+  const opts = { env: { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: '11111111-2222-4333-8444-555555555555', METAENGINE_SUPERVISOR_BASE_URL: base }, activeBase: base };
+  const unexpected = () => { throw new Error('historical capsule must remain untouched'); };
+  const loaded = loadAgentAccessCapsule({ ...opts, storage_dir: '/unused', read_file: unexpected, exists: unexpected });
+  assert.equal(loaded.infrastructure[0].url, base);
+  assert.equal(ensureAgentAccessCapsuleFile('/unused', { ...opts, exists: unexpected, mkdir: unexpected, write_file: unexpected }), null);
+});
+
+test('hosted default briefing uses the selected endpoint rather than a stale project', () => {
+  const base = 'https://selected.example/functions/v1/a2-browser-native-supervisor-v1';
+  assert.equal(defaultAgentAccessCapsule({ env: {}, activeBase: base }).infrastructure[0].url, base);
+});
+
 test('loader prefers the operator override file; malformed override degrades to null', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2-capsule-'));
   try {

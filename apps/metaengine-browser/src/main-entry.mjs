@@ -1,3 +1,4 @@
+import './local-state-provider-bootstrap.mjs';
 import { app, BaseWindow, dialog } from 'electron';
 import {
   acquirePrimaryInstance,

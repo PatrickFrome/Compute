@@ -1,3 +1,4 @@
+import './local-state-provider-bootstrap.mjs';
 import { registerHooks } from 'node:module';
 import { app, BaseWindow } from 'electron';
 import { requestPrimaryWindowResurrection } from './primary-window-resurrection.mjs';
