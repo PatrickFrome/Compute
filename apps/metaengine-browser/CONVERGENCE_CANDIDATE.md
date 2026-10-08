@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000013.1`.
+Reserved package identity is `0.7.0-dev.37780000014.1`.
+
+Windows regression: synthetic SCRAM password path, like binary path, must compare physical file identity rather than 8.3/long-name spelling. Prior .13 source/identity is consumed; exact Windows contracts and physical initdb need fresh qualification.
 
 Physical initdb Windows CI job restored to a unique step in proven valid workflow. Earlier workflow YAML was duplicated and was rejected before GitHub could schedule it.
 

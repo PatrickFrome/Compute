@@ -30,7 +30,7 @@ async function fixture(t) {
   }), initdb: async ({ executable, dataDirectory, passwordFile: privateFile, stateDirectory }) => {
     calls += 1;
     assert.equal(await fs.realpath(executable), await fs.realpath(binary), 'physical exe identity must survive Windows 8.3 aliases');
-    assert.equal(privateFile, passwordFile);
+    assert.equal(await fs.realpath(privateFile), await fs.realpath(passwordFile), 'physical private credential identity must survive Windows path aliases');
     assert.equal(stateDirectory, input.stateDirectory);
     await fs.writeFile(path.join(dataDirectory, 'PG_VERSION'), '17\n');
     await fs.writeFile(path.join(dataDirectory, 'postgresql.conf'), 'shared_buffers=128MB\n');
