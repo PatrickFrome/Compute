@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile, readdir } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
-import { authenticated, ApiError, RPC_ALLOWLIST, compileTableRequest, compileRpcRequest, databaseError } from './db-api-core.mjs';
+import { authenticated, ApiError, RPC_ALLOWLIST, TABLE_ALLOWLIST, RPC_CATALOG_QUERY, inspectLocalApiSchemaCatalog, compileTableRequest, compileRpcRequest, databaseError } from './db-api-core.mjs';
 import { startDbApi } from './db-api.mjs';
 
 const enrollment = 'compute_fabric_a2_browser_device_enrollment_request_h205f22';
@@ -200,4 +200,62 @@ test('loopback configuration and error privacy are enforced', async () => {
   assert.deepEqual(databaseError({ code: '08006', message: 'password sensitive connection' }), { status: 503, body: { code: '08006', message: 'database_request_failed' } });
   assert.equal(databaseError({ code: '57014' }).status, 504);
   assert.equal(databaseError({ code: '42501' }).status, 403);
+});
+
+test('fresh PostgreSQL catalog is explicitly missing all API functions/tables/roles without becoming READY', async () => {
+  const calls = [];
+  const sql = { unsafe: async (query, params = []) => {
+    calls.push({ query: query.trim(), params });
+    if (query.includes('AS "superuser"')) return [{ superuser: true }];
+    return [];
+  } };
+  const observed = await inspectLocalApiSchemaCatalog({ sql });
+  assert.equal(observed.state, 'BASELINE_SCHEMA_MISSING');
+  assert.deepEqual(observed.missing_rpc, RPC_ALLOWLIST);
+  assert.deepEqual(observed.missing_table, Object.keys(TABLE_ALLOWLIST));
+  assert.equal(observed.required_rpc_count, 40);
+  assert.equal(observed.required_table_count, 5);
+  assert.equal(observed.service_role_present, false);
+  assert.equal(observed.pgcrypto_present, false);
+  assert.equal(observed.runtime_ready, false);
+  assert.equal(observed.initialization_authorized, false);
+  assert.equal(observed.authority_effect, false);
+  assert.equal(calls.length, 5);
+  assert(calls.every(({ query }) => query.startsWith('SELECT')), 'catalog inspection must be read-only');
+});
+
+test('catalog-complete cannot impersonate grants, RLS, runtime or owner authority', async () => {
+  const tables = Object.entries(TABLE_ALLOWLIST).flatMap(([table_name, p]) =>
+    [...new Set([...p.select, ...p.filters, ...p.order, ...(p.insert || [])])]
+      .map(column_name => ({ table_name, column_name })));
+  const sql = { unsafe: async (query) => {
+    if (query.includes('AS "superuser"')) return [{ superuser: true }];
+    if (query === RPC_CATALOG_QUERY) return RPC_ALLOWLIST.map(name => ({ name }));
+    if (query.includes('information_schema.columns')) return tables;
+    if (query.includes("rolname = 'service_role'")) return [{ rolname: 'service_role' }];
+    if (query.includes("extname = 'pgcrypto'")) return [{ extname: 'pgcrypto' }];
+    throw new Error('unrecognized SQL');
+  } };
+  const observed = await inspectLocalApiSchemaCatalog({ sql });
+  assert.equal(observed.state, 'CATALOG_PRESENT_UNATTESTED');
+  assert.equal(observed.complete_catalog_only, true);
+  assert.deepEqual(observed.missing_rpc, []);
+  assert.deepEqual(observed.missing_table, []);
+  assert.deepEqual(observed.missing_column, []);
+  assert.equal(observed.grants_attested, false);
+  assert.equal(observed.rls_attested, false);
+  assert.equal(observed.runtime_ready, false);
+  assert.equal(observed.initialization_authorized, false);
+});
+
+test('partial catalog, denied admin and SQL errors fail closed without leaking SQL error text', async () => {
+  const denied = { unsafe: async () => [{ superuser: false }] };
+  await assert.rejects(inspectLocalApiSchemaCatalog({ sql: denied }), /superuser_required/);
+  const error = { unsafe: async () => { throw new Error('private_password_in_error'); } };
+  await assert.rejects(inspectLocalApiSchemaCatalog({ sql: error }), error => {
+    assert.equal(error.message, 'local_schema_catalog_readback_failed');
+    return true;
+  });
+  const noConnection = () => inspectLocalApiSchemaCatalog({});
+  await assert.rejects(noConnection(), /connection_required/);
 });

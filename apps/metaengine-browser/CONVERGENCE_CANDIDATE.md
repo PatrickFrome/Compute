@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000019.1`.
+Reserved package identity is `0.7.0-dev.37780000020.1`.
+
+Read-only PG17 schema readiness inventory: the already-bundled db-api-core now checks catalog rows for 40 RPCs, 5 table shapes, service_role and pgcrypto, never granting initialization or readiness even if catalog entries are present. Windows physical cold-restart requires the new cluster to report BASELINE_SCHEMA_MISSING. Earlier `0.7.0-dev.37780000019.1` reserved source identity consumed; this new head must pass exact CI.
 
 First-run physical durability successor: Windows Package Smoke runs a fresh, pinned offline PG17+Vault initdb followed by a real loopback postmaster write→stop→cold restart→SQL readback and immutable Vault-key check, on a disposable owned CI cluster. Clean cluster intentionally lacks native supervisor SQL baseline, so this proves database durability only, not installed client READY. Earlier `0.7.0-dev.37780000018.1` identity consumed.
 
