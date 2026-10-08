@@ -87,7 +87,7 @@ export async function showInstalledRestoredProviderWizard({
   win.setMenu(null);
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',event=>event.preventDefault());
-  let configFile=null,restoreReceiptFile=null,claimed=false,busy=false,closed=false;
+  let configFile=null,restoreReceiptFile=null,claimed=false,busy=false,closed=false,verifiedClose=false;
   let resolveResult;
   const completed = new Promise(resolve=>{resolveResult=resolve;});
   const prefix='metaengine:local-postgres-setup:';
@@ -127,6 +127,7 @@ export async function showInstalledRestoredProviderWizard({
       catch { return {state:'BLOCKED',reason:'operator_not_confirmed_no_automatic_retry'}; }
       if(receipt?.state!=='CONFIGURED' || receipt?.owner_profile_written!==true)
         return {state:'BLOCKED',reason:'receipt_unverified'};
+      verifiedClose=true;
       resolveResult(receipt);
       if(!win.isDestroyed()) win.close();
       return {state:'CONFIGURED'};
@@ -134,7 +135,7 @@ export async function showInstalledRestoredProviderWizard({
   });
   // Once the operator might have run, closing the dialog must never create
   // an invented NO_EFFECT receipt or invite an automatic replay.
-  win.on('close',event=>{if(busy && claimed)event.preventDefault();});
+  win.on('close',event=>{if(busy && claimed && !verifiedClose)event.preventDefault();});
   win.on('closed',()=>{
     closed=true;
     ipcMain.removeHandler(prefix+'choose');ipcMain.removeHandler(prefix+'connect');
