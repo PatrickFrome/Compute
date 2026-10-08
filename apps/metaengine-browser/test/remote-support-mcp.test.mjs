@@ -214,13 +214,13 @@ test('stop during an in-flight mutation yields AMBIGUOUS and forbids retry', asy
 
 test('stdio stop preempts an unresolved control request without waiting for its response', async () => {
   const input = new PassThrough(), output = new PassThrough();
-  const replies = [];output.on('data',value=>replies.push(...String(value).trim().split('\\n').filter(Boolean).map(JSON.parse)));
+  const replies = [];output.on('data',value=>replies.push(...String(value).trim().split('\n').filter(Boolean).map(JSON.parse)));
   const waiting = deferred();
   const service = createRemoteSupportMcp({input,output,platform:'win32',approve:async()=>true,executor:{
     observe:async()=>({result:{}}),
     act:async()=>waiting.promise,
   }});
-  const wire=(id,name,args={})=>input.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params:{name,arguments:args}})+'\\n');
+  const wire=(id,name,args={})=>input.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params:{name,arguments:args}})+'\n');
   wire(1,'support_start_session',{scope:'CONTROL'});
   await new Promise(resolve=>setImmediate(resolve));
   wire(2,'support_control',act);
