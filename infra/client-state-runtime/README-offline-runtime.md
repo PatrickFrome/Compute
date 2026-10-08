@@ -51,3 +51,7 @@ released ownership and unchanged resource bytes after restart. This evidence
 qualifies a disposable schema fixture, not an installed Electron profile,
 production database, complete user-goal execution or operating-system network
 disconnection.
+
+## Physical first-run cold-restart evidence
+
+The opt-in Windows NSIS package producer now tests **the real bundled PostgreSQL 17 postmaster** after independently verified fresh initdb and local Vault setup. The isolated CI test pins the offline bundle SHA256, generates its own SCRAM credentials, binds only loopback, writes one synthetic row into its own newly initialized database, stops its exact postmaster via PID+PGDATA+port identity, checks the port is closed, cold-restarts it, and checks exact persisted row bytes and unchanged private Vault key. It expressly verifies the clean cluster has **no Browser schema** (no device table) and refuses a second initdb. A failed/unknown shutdown prevents synthetic PGDATA deletion. This test does NOT provision service_role, the 40 RPC functions, Browser owner, API or agent execution; no installed user database or external Supabase is involved.
