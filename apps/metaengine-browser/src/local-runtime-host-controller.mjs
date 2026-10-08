@@ -117,6 +117,12 @@ async function verifyBundle(options) {
   return module.verifyOfflineRuntimeBundle(options);
 }
 
+// Installer onboarding uses the exact same protected-ASAR and immutable bundle
+// verification as a normal provider boot. This publishes no credentials or effects.
+export async function verifyInstalledClientStateResources({ bundleDirectory, expectedBundleDigest }) {
+  return verifyBundle({ bundleDirectory, expectedBundleDigest });
+}
+
 function validProviderDescriptor(value, config) {
   const keys = ['schema', 'provider', 'endpoint', 'instance_id', 'status_file', 'runtime_ready',
     'automatic_cloud_fallback', 'hosted_supabase_required', 'authority_effect'];

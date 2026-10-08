@@ -1,4 +1,4 @@
-import { app, BaseWindow, dialog } from 'electron';
+import { app, BaseWindow, BrowserWindow, dialog, ipcMain } from 'electron';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
@@ -120,11 +120,24 @@ if (guard.installer_shutdown_control) {
     // This runs only after primary instance admission but strictly before
     // HostResilience/main (whose static imports can resolve a cloud endpoint).
     // Packaged Browser never silently selects the legacy hosted default.
+    let bootstrapState = providerBoot.persistentLocalProviderBootstrap.state;
+    if (app.isPackaged && browserRuntimeNeeded && interactiveNormalLaunch
+      && !bypassSingleInstance && bootstrapState === 'NO_OWNER_CONFIG') {
+      // First-run setup is an offline, consented LOCAL_POSTGRES surface. It
+      // cannot import Browser/main/HostResilience until a previously restored
+      // PostgreSQL 17 is independently qualified and owner-bound.
+      const { showInstalledRestoredProviderWizard } = await import('./local-restored-pg17-setup.mjs');
+      const setup = await showInstalledRestoredProviderWizard({ app, BrowserWindow, dialog, ipcMain });
+      if (setup.state === 'CONFIGURED') {
+        const readyProvider = await providerBoot.bootstrapPersistentLocalProvider();
+        bootstrapState = readyProvider.state;
+      }
+    }
     requirePackagedLocalProviderAdmission({
       isPackaged: app.isPackaged,
       browserRuntimeNeeded,
       bypassSingleInstance,
-      bootstrapState: providerBoot.persistentLocalProviderBootstrap.state,
+      bootstrapState,
     });
   } catch (error) {
     if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
