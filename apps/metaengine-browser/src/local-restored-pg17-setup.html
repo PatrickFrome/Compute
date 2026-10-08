@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta http-equiv="Content-Security-Policy"
+ content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'">
+<title>METAENGINE — Existing PostgreSQL 17</title>
+<style>body{background:#10151e;color:#e9edf5;font:15px system-ui,sans-serif;max-width:620px;margin:28px auto;padding:0 24px}
+h1{font-size:22px}p{line-height:1.5;color:#c6cdd8}button,input{font:inherit;border-radius:8px;padding:10px;margin:7px 0}
+button{background:#2875d4;color:white;border:0;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
+input{display:block;background:#1c2737;color:white;border:1px solid #748099;width:96%}
+section{padding:12px 0;border-bottom:1px solid #354153}.small{font-size:12px}#status{min-height:20px}</style></head><body>
+<h1>Connect your existing PostgreSQL 17</h1>
+<p>PostgreSQL, Node and Supervisor are bundled with this Browser. Your database and Vault key stay outside the installer. No database is initialized or restored over an existing PGDATA.</p>
+<section><button id="config">Select private runtime-host JSON</button><div id="configName" class="small">Not selected</div></section>
+<section><button id="receipt">Select independently reviewed restore report JSON</button><div id="receiptName" class="small">Not selected</div></section>
+<section><label for="digest">Independent SHA-256 of that exact restore report</label>
+<input id="digest" spellcheck="false" autocomplete="off" placeholder="64 lowercase hexadecimal characters" maxlength="64">
+<p class="small">Use the digest from your previous trusted restore qualification. Do not paste database passwords, URLs or Vault keys. A hash computed only from the selected file is not independent evidence.</p></section>
+<p>The Browser verifies its sealed offline runtime, starts and stops your selected existing PostgreSQL for qualification, then registers a new owner profile only if no profile exists. You must explicitly confirm before any effect.</p>
+<button id="connect">Verify and connect locally</button>
+<div id="status" role="status" aria-live="polite"></div>
+<script>
+const $=id=>document.getElementById(id);
+async function choose(kind) {
+ try {const result=await window.metaengineRestore.choose(kind);
+   if(result?.selected) $(kind+'Name').textContent=result.name;
+ } catch { $('status').textContent='File selection failed.'; }
+}
+$('config').onclick=()=>choose('config');
+$('receipt').onclick=()=>choose('receipt');
+$('connect').onclick=async()=>{
+ const digest=$('digest').value.trim();
+ if(!/^[a-f0-9]{64}$/.test(digest)){$('status').textContent='Enter the independently recorded lowercase SHA-256.';return;}
+ $('connect').disabled=true;$('status').textContent='Waiting for confirmation and local verification…';
+ try{const r=await window.metaengineRestore.connect(digest);
+   $('status').textContent=r?.state==='CONFIGURED' ? 'Provider registered. Starting Browser…'
+     : 'Connection blocked: '+(r?.reason || 'unverified state')+'. Relaunch after reviewing evidence.';
+ }catch{$('status').textContent='Connection could not be verified.';}
+};
+</script></body></html>
