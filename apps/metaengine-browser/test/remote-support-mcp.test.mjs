@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { createRemoteSupportMcp, readBoundedCapture } from '../src/remote-support-mcp.mjs';
+import { createRemoteSupportMcp, readBoundedCapture, discoverLocalPostgresFiles, listReadyFixedWindowsDrives } from '../src/remote-support-mcp.mjs';
 
 const rpc = (service,name,args={}) => service.request({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}});
 const denied = x => x.result.isError && x.result.content[0].text.startsWith('remote_support_');
@@ -23,7 +23,7 @@ test('MCP discovery, status and session closure do not start Browser or remote c
   const init=await s.request({jsonrpc:'2.0',id:1,method:'initialize'});
   assert.equal(init.result.serverInfo.name,'metaengine-remote-support');
   const list=await s.request({jsonrpc:'2.0',id:2,method:'tools/list'});
-  assert.deepEqual(list.result.tools.map(x=>x.name),['support_status','support_start_session','support_observe','support_control','support_stop']);
+  assert.deepEqual(list.result.tools.map(x=>x.name),['support_status','support_start_session','support_discover_postgres','support_observe','support_control','support_stop']);
   const row=JSON.parse((await rpc(s,'support_status')).result.content[0].text);
   assert.equal(row.unattended_access,false);
   assert.equal(row.active_view_grant,false);
@@ -234,4 +234,161 @@ test('stdio stop preempts an unresolved control request without waiting for its 
   const done = replies.find(x=>x.id===2);
   assert.equal(JSON.parse(done.result.content[0].text).outcome,'AMBIGUOUS');
   service.close();input.destroy();output.destroy();
+});
+
+
+const diskDir = (name, type='directory') => ({
+  name, isDirectory:()=>type==='directory', isFile:()=>type==='file',
+  isSymbolicLink:()=>type==='link',
+});
+function fakeWindowsDisk() {
+  const dirs = new Map([
+    ['C:\\', [diskDir('ProgramData'),diskDir('Users'),diskDir('SecretJunction','link')]],
+    ['C:\\ProgramData',[diskDir('PostgreSQL')]],
+    ['C:\\ProgramData\\PostgreSQL',[diskDir('17')]],
+    ['C:\\ProgramData\\PostgreSQL\\17',[diskDir('data')]],
+    ['C:\\ProgramData\\PostgreSQL\\17\\data',[
+      diskDir('PG_VERSION','file'),diskDir('postgresql.conf','file'),
+      diskDir('postmaster.pid','file'),diskDir('global'),
+      diskDir('secret.key','file'),
+    ]],
+    ['C:\\ProgramData\\PostgreSQL\\17\\data\\global',[diskDir('pg_control','file')]],
+    ['C:\\Users',[diskDir('PrivatePhotos')]],
+    ['C:\\Users\\PrivatePhotos',[diskDir('vacation.jpg','file')]],
+    ['D:\\',[diskDir('Archives')]],
+    ['D:\\Archives',[diskDir('PostgresBackups')]],
+    ['D:\\Archives\\PostgresBackups',[diskDir('PG_VERSION','file'),diskDir('global')]],
+    ['D:\\Archives\\PostgresBackups\\global',[diskDir('pg_control','file')]],
+  ]);
+  const fileSet = new Set([...dirs].flatMap(([dir,children])=>
+    children.filter(row=>row.isFile()).map(row=>path.win32.join(dir,row.name))));
+  const calls = [];
+  const fsImpl = {
+    async lstat(filename) {
+      calls.push({op:'lstat',filename});
+      if (dirs.has(filename)) return {isDirectory:()=>true,isFile:()=>false,isSymbolicLink:()=>false};
+      if (fileSet.has(filename)) return {isDirectory:()=>false,isFile:()=>true,isSymbolicLink:()=>false};
+      throw Object.assign(new Error('not found'),{code:'ENOENT'});
+    },
+    async readdir(filename) {
+      calls.push({op:'readdir',filename});
+      if (!dirs.has(filename)) throw Object.assign(new Error('not found'),{code:'ENOENT'});
+      return dirs.get(filename);
+    },
+    async readFile() { throw Error('filesystem_contents_must_not_be_read'); },
+    async writeFile() { throw Error('filesystem_mutation_must_not_be_attempted'); },
+  };
+  return {fsImpl,calls};
+}
+
+test('read-only discovery scans all supplied fixed drives for real PGDATA markers, never contents',async()=>{
+  const {fsImpl,calls}=fakeWindowsDisk();
+  const outcome=await discoverLocalPostgresFiles({roots:['C:\\','D:\\'],fsImpl});
+  assert.equal(outcome.search_scope,'ALL_READY_FIXED_LOCAL_DRIVES');
+  assert.equal(outcome.file_contents_read,false);
+  assert.equal(outcome.vault_key_read,false);
+  assert.equal(outcome.database_opened,false);
+  assert.equal(outcome.truncated,false);
+  assert.equal(outcome.candidates.length,2);
+  assert.equal(outcome.candidates[0].directory,'C:\\ProgramData\\PostgreSQL\\17\\data');
+  assert.equal(outcome.candidates[0].postgresql_conf_present,true);
+  assert.equal(outcome.candidates[1].directory,'D:\\Archives\\PostgresBackups');
+  assert.equal(calls.some(c=>c.filename?.includes('SecretJunction')),false);
+  assert.equal(calls.some(c=>c.op==='readFile'||c.op==='writeFile'),false);
+  assert.equal(JSON.stringify(outcome).includes('secret.key'),false);
+  assert.equal(JSON.stringify(outcome).includes('vacation.jpg'),false);
+});
+
+test('fixed Windows drive enumeration uses a constant PowerShell command and excludes invalid roots',async()=>{
+  const calls=[];
+  const roots=await listReadyFixedWindowsDrives({platform:'win32',run:async (...args)=>{
+    calls.push(args);
+    return {stdout:'C:\\\r\nD:\\\r\nC:\\\r\n\\\\server\\share\r\n'};
+  }});
+  assert.deepEqual(roots,['C:\\','D:\\']);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0][0],'powershell.exe');
+  assert.equal(calls[0][2].shell,false);
+  assert.match(calls[0][1].at(-1),/DriveType/);
+  await assert.rejects(listReadyFixedWindowsDrives({platform:'linux'}),/remote_support_windows_required/);
+  await assert.rejects(discoverLocalPostgresFiles({roots:['\\\\server\\share']}),/remote_support_discovery_arguments_invalid/);
+});
+
+test('FILES approval permits disk metadata only; VIEW cannot search and FILES cannot control',async()=>{
+  const scopes=[], ex=mock();
+  const disk=fakeWindowsDisk();
+  const discovery=options=>discoverLocalPostgresFiles({...options,fsImpl:disk.fsImpl});
+  const deps={platform:'win32',executor:ex,approve:async({scope})=>{scopes.push(scope);return true;},
+    driveEnumerator:async()=>['C:\\','D:\\'],postgresDiscoverer:discovery};
+  const view=createRemoteSupportMcp(deps);
+  assert(denied(await rpc(view,'support_discover_postgres')));
+  await rpc(view,'support_start_session',{scope:'VIEW'});
+  assert(denied(await rpc(view,'support_discover_postgres')));
+  view.close();
+  const files=createRemoteSupportMcp(deps);
+  assert(denied(await rpc(files,'support_discover_postgres')));
+  assert(denied(await rpc(files,'support_start_session',{scope:'ADMIN'})));
+  const accepted=await rpc(files,'support_start_session',{scope:'FILES'});
+  assert.equal(JSON.parse(accepted.result.content[0].text).scope,'FILES');
+  assert(denied(await rpc(files,'support_observe',{action:'OBSERVE_WINDOWS'})));
+  assert(denied(await rpc(files,'support_control',act)));
+  assert(denied(await rpc(files,'support_discover_postgres',{path:'C:\\Users',recursive:true})));
+  const found=await rpc(files,'support_discover_postgres');
+  assert.equal(found.result.isError,false);
+  assert.equal(JSON.parse(found.result.content[0].text).candidates.length,2);
+  assert.equal(JSON.parse((await rpc(files,'support_status')).result.content[0].text).active_filesystem_grant,true);
+  assert.deepEqual(ex.calls,[]);
+  assert.deepEqual(scopes,['VIEW','FILES']);
+  files.close();
+});
+
+test('CONTROL scope includes PostgreSQL metadata search with one local approval',async()=>{
+  const approvals=[],disk=fakeWindowsDisk();
+  const service=createRemoteSupportMcp({platform:'win32',executor:mock(),
+    approve:async({scope})=>{approvals.push(scope);return true;},
+    driveEnumerator:async()=>['C:\\'],
+    postgresDiscoverer:options=>discoverLocalPostgresFiles({...options,fsImpl:disk.fsImpl})});
+  await rpc(service,'support_start_session',{scope:'CONTROL'});
+  assert.equal((await rpc(service,'support_discover_postgres')).result.isError,false);
+  assert.equal((await rpc(service,'support_observe',{action:'OBSERVE_WINDOWS'})).result.isError,false);
+  assert.deepEqual(approvals,['CONTROL']);
+  service.close();
+});
+
+test('stop or expiry fences in-flight local-drive enumeration and database paths',async()=>{
+  const pendingDrives=deferred(),pendingScan=deferred();
+  const make=({driveEnumerator,postgresDiscoverer})=>createRemoteSupportMcp({
+    platform:'win32',approve:async()=>true,executor:mock(),driveEnumerator,postgresDiscoverer,
+  });
+  const s=make({driveEnumerator:()=>pendingDrives.promise,
+    postgresDiscoverer:()=>{throw Error('must_not_scan_after_stop');}});
+  await rpc(s,'support_start_session',{scope:'FILES'});
+  const result=rpc(s,'support_discover_postgres');
+  await rpc(s,'support_stop');
+  pendingDrives.resolve(['C:\\']);
+  const refused=await result;
+  assert(denied(refused));
+  assert.equal(JSON.stringify(refused).includes('C:\\'),false);
+  s.close();
+
+  const second=make({driveEnumerator:async()=>['C:\\'],postgresDiscoverer:()=>pendingScan.promise});
+  await rpc(second,'support_start_session',{scope:'FILES'});
+  const searched=rpc(second,'support_discover_postgres');
+  await new Promise(resolve=>setImmediate(resolve));
+  await rpc(second,'support_stop');
+  pendingScan.resolve({candidates:[{directory:'C:\\private\\pgdata'}]});
+  const stopped=await searched;
+  assert(denied(stopped));
+  assert.equal(JSON.stringify(stopped).includes('private'),false);
+  second.close();
+});
+
+test('discovery is bounded, fail-closed and stops when the active session is revoked',async()=>{
+  const {fsImpl}=fakeWindowsDisk();
+  const outcome=await discoverLocalPostgresFiles({roots:['C:\\'],fsImpl,maxDirectories:1});
+  assert.equal(outcome.truncated,true);
+  assert.equal(outcome.directories_inspected,1);
+  let checks=0;
+  await assert.rejects(discoverLocalPostgresFiles({roots:['C:\\'],fsImpl,
+    shouldContinue:()=>++checks<3}),/remote_support_session_not_active/);
 });
