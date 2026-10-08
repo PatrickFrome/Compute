@@ -23,7 +23,7 @@ test('MCP discovery, status and session closure do not start Browser or remote c
   const init=await s.request({jsonrpc:'2.0',id:1,method:'initialize'});
   assert.equal(init.result.serverInfo.name,'metaengine-remote-support');
   const list=await s.request({jsonrpc:'2.0',id:2,method:'tools/list'});
-  assert.deepEqual(list.result.tools.map(x=>x.name),['support_status','support_start_session','support_discover_postgres','support_observe','support_control','support_stop']);
+  assert.deepEqual(list.result.tools.map(x=>x.name),['support_status','support_start_session','support_discover_postgres','support_connect_restored_postgres','support_observe','support_control','support_stop']);
   const row=JSON.parse((await rpc(s,'support_status')).result.content[0].text);
   assert.equal(row.unattended_access,false);
   assert.equal(row.active_view_grant,false);
@@ -391,4 +391,145 @@ test('discovery is bounded, fail-closed and stops when the active session is rev
   let checks=0;
   await assert.rejects(discoverLocalPostgresFiles({roots:['C:\\'],fsImpl,
     shouldContinue:()=>++checks<3}),/remote_support_session_not_active/);
+});
+
+
+const validRestoreInput = Object.freeze({
+  private_config_file:'C:\\METAENGINE\\private\\runtime-host.json',
+  expected_bundle_sha256:'a'.repeat(64),
+  restore_receipt_file:'C:\\METAENGINE\\private\\restore-report.json',
+  expected_restore_receipt_sha256:'b'.repeat(64),
+  appdata_directory:'C:\\Users\\Owner\\AppData\\Roaming',
+  owner_action:'USE_EXISTING_RESTORED_POSTGRES_17',
+});
+const configuredReceipt = Object.freeze({
+  schema:'compute.restored-client-provider-provisioning.v1',state:'CONFIGURED',
+  provider:'LOCAL_POSTGRES',owner_profile_written:true,
+  private_vault_key_preserved:true,cleanup_confirmed:true,runtime_ready:false,authority_effect:false,
+  secret:'NEVER_LEAK',private_path:'C:\\hidden\\data',
+});
+
+test('DB_CONNECT is isolated and requires local approval twice before operator starts',async()=>{
+  const scopes=[],effects=[];
+  const s=createRemoteSupportMcp({platform:'win32',executor:mock(),
+    approve:async ({scope,details})=>{scopes.push({scope,details});return true;},
+    restoredProviderOperator:async argv=>{effects.push(argv);return configuredReceipt;}});
+  assert(denied(await rpc(s,'support_connect_restored_postgres',validRestoreInput)));
+  await rpc(s,'support_start_session',{scope:'FILES'});
+  assert(denied(await rpc(s,'support_connect_restored_postgres',validRestoreInput)));
+  s.close();
+  const db=createRemoteSupportMcp({platform:'win32',executor:mock(),
+    approve:async ({scope,details})=>{scopes.push({scope,details});return true;},
+    restoredProviderOperator:async argv=>{effects.push(argv);return configuredReceipt;}});
+  const connected=await rpc(db,'support_start_session',{scope:'DB_CONNECT'});
+  assert.equal(connected.result.isError,false);
+  assert.equal(JSON.parse(connected.result.content[0].text).scope,'DB_CONNECT');
+  assert.equal(JSON.parse((await rpc(db,'support_status')).result.content[0].text).active_database_connect_grant,true);
+  assert(denied(await rpc(db,'support_discover_postgres')));
+  assert(denied(await rpc(db,'support_observe',{action:'OBSERVE_WINDOWS'})));
+  assert(denied(await rpc(db,'support_control',act)));
+  const result=await rpc(db,'support_connect_restored_postgres',validRestoreInput);
+  assert.equal(result.result.isError,false);
+  const receipt=JSON.parse(result.result.content[0].text);
+  assert.equal(receipt.state,'CONFIGURED');
+  assert.equal(receipt.installed_normal_boot_verified,false);
+  assert.equal(JSON.stringify(receipt).includes('NEVER_LEAK'),false);
+  assert.equal(JSON.stringify(receipt).includes('hidden'),false);
+  assert.equal(effects.length,1);
+  assert.deepEqual(effects[0],[
+    '--config',validRestoreInput.private_config_file,'--bundle-sha256',validRestoreInput.expected_bundle_sha256,
+    '--restore-receipt',validRestoreInput.restore_receipt_file,
+    '--restore-receipt-sha256',validRestoreInput.expected_restore_receipt_sha256,
+    '--appdata',validRestoreInput.appdata_directory,'--owner-action',validRestoreInput.owner_action,
+  ]);
+  assert.equal(scopes[1].scope,'DB_CONNECT');
+  assert.equal(scopes[2].scope,'DB_CONNECT_COMMIT');
+  assert.deepEqual(scopes[2].details,{configFile:validRestoreInput.private_config_file,appData:validRestoreInput.appdata_directory});
+  assert(denied(await rpc(db,'support_connect_restored_postgres',validRestoreInput)));
+  assert.equal(effects.length,1);
+  db.close();
+});
+
+test('DB_CONNECT denies dangerous arguments and failed second consent never dispatches',async()=>{
+  let invoked=0,commits=0;
+  const db=createRemoteSupportMcp({platform:'win32',executor:mock(),
+    approve:async ({scope})=>{if(scope==='DB_CONNECT_COMMIT') {commits++;return false;}return true;},
+    restoredProviderOperator:async()=>{invoked++;return configuredReceipt;}});
+  assert.equal((await rpc(db,'support_start_session',{scope:'DB_CONNECT'})).result.isError,false);
+  for(const invalid of [
+    {...validRestoreInput,owner_action:'CREATE_NEW_DATABASE'},
+    {...validRestoreInput,extra:'cmd'},
+    {...validRestoreInput,expected_bundle_sha256:'invalid'},
+    {...validRestoreInput,private_config_file:'\\\\host\\share\\evil.json'},
+    {...validRestoreInput,private_config_file:'relative\\evil.json'},
+  ])assert(denied(await rpc(db,'support_connect_restored_postgres',invalid)));
+  assert.equal(commits,0);
+  assert(denied(await rpc(db,'support_connect_restored_postgres',validRestoreInput)));
+  assert.equal(commits,1);
+  assert.equal(invoked,0);
+  db.close();
+});
+
+test('DB_CONNECT attempt is single-flight, failure claims attempt and keeps all errors redacted',async()=>{
+  let complete,started=0;
+  const pending=new Promise(resolve=>{complete=resolve;});
+  const db=createRemoteSupportMcp({platform:'win32',executor:mock(),approve:async()=>true,
+    restoredProviderOperator:async()=>{started++;await pending;throw new Error('private_password_do_not_leak');}});
+  await rpc(db,'support_start_session',{scope:'DB_CONNECT'});
+  const first=rpc(db,'support_connect_restored_postgres',validRestoreInput);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert(denied(await rpc(db,'support_connect_restored_postgres',validRestoreInput)));
+  complete();
+  const result=await first;
+  assert.equal(result.result.isError,true);
+  assert.equal(result.result.content[0].text,'remote_support_restore_operator_failed');
+  assert.equal(started,1);
+  assert(denied(await rpc(db,'support_connect_restored_postgres',validRestoreInput)));
+  db.close();
+});
+
+test('DB_CONNECT remote stop before second approval cannot dispatch, or disambiguate an in-flight effect',async()=>{
+  let authorize,started=0;
+  const waiting=new Promise(resolve=>{authorize=resolve;});
+  const one=createRemoteSupportMcp({platform:'win32',executor:mock(),
+    approve:async({scope})=>scope==='DB_CONNECT_COMMIT'?waiting:true,
+    restoredProviderOperator:async()=>{started++;return configuredReceipt;}});
+  await rpc(one,'support_start_session',{scope:'DB_CONNECT'});
+  const pending=rpc(one,'support_connect_restored_postgres',validRestoreInput);
+  await rpc(one,'support_stop');
+  authorize(true);
+  assert(denied(await pending));
+  assert.equal(started,0);
+  one.close();
+  let finish;
+  const effect=new Promise(resolve=>{finish=resolve;});
+  const two=createRemoteSupportMcp({platform:'win32',executor:mock(),approve:async()=>true,
+    restoredProviderOperator:async()=>{started++;await effect;return configuredReceipt;}});
+  await rpc(two,'support_start_session',{scope:'DB_CONNECT'});
+  const result=rpc(two,'support_connect_restored_postgres',validRestoreInput);
+  await new Promise(resolve=>setImmediate(resolve));
+  await rpc(two,'support_stop');
+  finish();
+  const report=await result;
+  assert.equal(report.result.isError,true);
+  assert.equal(JSON.parse(report.result.content[0].text).state,'AMBIGUOUS');
+  assert.equal(started,1);
+  two.close();
+});
+
+test('DB_CONNECT expires and is denied on other platforms',async()=>{
+  let clock=0, count=0;
+  const db=createRemoteSupportMcp({platform:'win32',executor:mock(),now:()=>clock,
+    approve:async()=>true,restoredProviderOperator:async()=>{count++;return configuredReceipt;}});
+  await rpc(db,'support_start_session',{scope:'DB_CONNECT'});
+  clock+=10*60*1000;
+  assert(denied(await rpc(db,'support_connect_restored_postgres',validRestoreInput)));
+  assert.equal(count,0);
+  db.close();
+  const linux=createRemoteSupportMcp({platform:'linux',executor:mock(),approve:async()=>true,
+    restoredProviderOperator:async()=>{count++;return configuredReceipt;}});
+  assert(denied(await rpc(linux,'support_start_session',{scope:'DB_CONNECT'})));
+  assert(denied(await rpc(linux,'support_connect_restored_postgres',validRestoreInput)));
+  assert.equal(count,0);
+  linux.close();
 });
