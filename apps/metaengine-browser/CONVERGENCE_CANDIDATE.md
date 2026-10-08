@@ -1,9 +1,12 @@
 # METAENGINE Browser convergence candidate
 
+2026-10-08 follow-up of PR #1161 / issue #1162: source-only remote support MCP consent and revocation race hardening. New generation/epoch fence prevents a late Windows approval, private observation or image from surviving stop/expiry; a dispatched possible mutation that races with stop is classified AMBIGUOUS with automatic retry denied. The stdio stop tool bypasses an unrelated in-flight request queue to revoke immediately, but cannot cancel an already-running OS effect. Added deterministic deferred-promise and stdio-preemption regressions. Previous `0.7.0-dev.37781000004.1` Windows Package Smoke producer was started and is consumed; this change requires fresh `0.7.0-dev.37781000005.1` exact-source physical qualification. No remote tunnel, private restored PGDATA/Vault change, production rollout or user-machine installation is claimed.
+
+
 2026-10-08 successor of PR #1160: exact reviewed Windows MCP source closure fix. Runtime source bundling previously rejected the three approved browser/src support modules with `bundle_unexpected_source_record`; both Windows/Linux contract jobs and the NSIS producer failed before package creation. This candidate permits *only* the named support entry, Windows executor, and computer authority module, retaining digest pinning, import-closure matching and unexpected-source rejection. Added positive/negative closure tests. Previous 0.7.0-dev.37781000003.1 package reservation and failed CI are consumed, not release evidence. Hosted CI cannot prove real ChatGPT-to-PC connectivity or restored private-PGDATA UI readiness.
 
 
-Reserved package identity is `0.7.0-dev.37781000004.1`.
+Reserved package identity is `0.7.0-dev.37781000005.1`.
 
 Remote support MCP source regression follow-up: an unselected host source bundle with the new remote support entry is correctly rejected at `bundle_unexpected_source_record`, before the former `reviewed_source_closure_mismatch` guard. Update the exact negative test to accept either fail-closed branch; keep all source-hash and manifest enforcement unchanged. `0.7.0-dev.37781000002.1` was reserved by Windows Package Smoke and is permanently consumed.
 
