@@ -138,3 +138,100 @@ test('stdio JSON-RPC framing sends no unsolicited private data',async()=>{
   assert.equal(JSON.parse(seen[1]).error.code,-32700);
   support.close();input.destroy();output.destroy();
 });
+
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+};
+
+test('stop during a pending local approval irrevocably fences that approval', async () => {
+  const consent = deferred();
+  let requests = 0;
+  const service = createRemoteSupportMcp({platform:'win32',executor:mock(),
+    approve:async()=>{requests++;return consent.promise;}});
+  const pending = rpc(service,'support_start_session',{scope:'CONTROL'});
+  assert(denied(await rpc(service,'support_start_session',{scope:'VIEW'})));
+  assert.equal(requests,1);
+  await rpc(service,'support_stop');
+  consent.resolve(true);
+  assert(denied(await pending));
+  const status = JSON.parse((await rpc(service,'support_status')).result.content[0].text);
+  assert.equal(status.session_revoked,true);
+  assert.equal(status.active_control_grant,false);
+  assert(denied(await rpc(service,'support_start_session',{scope:'CONTROL'})));
+  service.close();
+});
+
+test('revoked or expired grants cannot return in-flight private observations', async () => {
+  const waiting = deferred();
+  let clock = 10000;
+  const executor = {...mock(),observe:async()=>waiting.promise};
+  const service = createRemoteSupportMcp({platform:'win32',executor,approve:async()=>true,now:()=>clock});
+  await rpc(service,'support_start_session',{scope:'VIEW'});
+  const pending = rpc(service,'support_observe',{action:'UIA_SNAPSHOT'});
+  await rpc(service,'support_stop');
+  waiting.resolve({result:{private_control_value:'secret'}});
+  const response = await pending;
+  assert(denied(response));
+  assert.equal(JSON.stringify(response).includes('secret'),false);
+  service.close();
+
+  const image = deferred();
+  const second = createRemoteSupportMcp({platform:'win32',executor:{
+    observe:async()=>({result:{png_path:'synthetic',png_sha256:'f'.repeat(64)}}),
+  },approve:async()=>true,now:()=>clock,imageLoader:async()=>image.promise});
+  await rpc(second,'support_start_session',{scope:'VIEW'});
+  const capture = rpc(second,'support_observe',{action:'CAPTURE_DESKTOP'});
+  await new Promise(resolve=>setImmediate(resolve));
+  clock += 3600000;
+  image.resolve(Buffer.from('private-pixels'));
+  const blocked = await capture;
+  assert(denied(blocked));
+  assert.equal(JSON.stringify(blocked).includes('private-pixels'),false);
+  second.close();
+});
+
+test('stop during an in-flight mutation yields AMBIGUOUS and forbids retry', async () => {
+  const waiting = deferred(), calls = [];
+  const service = createRemoteSupportMcp({platform:'win32',approve:async()=>true,executor:{
+    observe:async()=>({result:{}}),
+    act:async(input)=>{calls.push(input);return waiting.promise;},
+  }});
+  await rpc(service,'support_start_session',{scope:'CONTROL'});
+  const pending = rpc(service,'support_control',act);
+  await rpc(service,'support_stop');
+  waiting.resolve({outcome:'NO_EFFECT_PROVEN',authority_effect:false});
+  const reply = await pending;
+  assert.equal(reply.result.isError,true);
+  const result = JSON.parse(reply.result.content[0].text);
+  assert.equal(result.outcome,'AMBIGUOUS');
+  assert.equal(result.automatic_retry_allowed,false);
+  assert.equal(calls.length,1);
+  assert(denied(await rpc(service,'support_control',act)));
+  service.close();
+});
+
+test('stdio stop preempts an unresolved control request without waiting for its response', async () => {
+  const input = new PassThrough(), output = new PassThrough();
+  const replies = [];output.on('data',value=>replies.push(...String(value).trim().split('\\n').filter(Boolean).map(JSON.parse)));
+  const waiting = deferred();
+  const service = createRemoteSupportMcp({input,output,platform:'win32',approve:async()=>true,executor:{
+    observe:async()=>({result:{}}),
+    act:async()=>waiting.promise,
+  }});
+  const wire=(id,name,args={})=>input.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params:{name,arguments:args}})+'\\n');
+  wire(1,'support_start_session',{scope:'CONTROL'});
+  await new Promise(resolve=>setImmediate(resolve));
+  wire(2,'support_control',act);
+  await new Promise(resolve=>setImmediate(resolve));
+  wire(3,'support_stop');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(replies.some(x=>x.id===3 && x.result.content[0].text.includes('SESSION_REVOKED')),true);
+  assert.equal(replies.some(x=>x.id===2),false);
+  waiting.resolve({outcome:'NO_EFFECT_PROVEN'});
+  await new Promise(resolve=>setImmediate(resolve));
+  const done = replies.find(x=>x.id===2);
+  assert.equal(JSON.parse(done.result.content[0].text).outcome,'AMBIGUOUS');
+  service.close();input.destroy();output.destroy();
+});
