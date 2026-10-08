@@ -41,6 +41,41 @@ test('external-only owner configurations remain compatible and managed host repl
   assert.equal(Object.hasOwn(result.config, 'runtime_host'), false);
   await assert.rejects(provisionPersistentClientProvider(input), /owner_file_exists/);
   assert.equal(Object.hasOwn(JSON.parse(await fs.readFile(input.ownerFile, 'utf8')), 'runtime_host'), false);
-  const replaced = await provisionPersistentClientProvider({ ...input, replaceExisting: true });
-  assert.deepEqual(replaced.config.runtime_host, runtimeHost);
+  await assert.rejects(provisionPersistentClientProvider({ ...input, replaceExisting: true }),
+    /owner_replacement_requires_verified_cas/);
+  assert.equal(Object.hasOwn(JSON.parse(await fs.readFile(input.ownerFile, 'utf8')), 'runtime_host'), false);
+});
+
+test('malformed owner remains untouched even when a replacement was explicitly requested', async t => {
+  const input = await options(t);
+  await fs.mkdir(path.dirname(input.ownerFile), { recursive: true });
+  const original = '{malformed owner bytes';
+  await fs.writeFile(input.ownerFile, original);
+  await assert.rejects(provisionPersistentClientProvider({ ...input, replaceExisting: true }), /existing_file_invalid/);
+  assert.equal(await fs.readFile(input.ownerFile, 'utf8'), original);
+});
+
+test('hardlinked existing owner and symlinked ancestor are rejected without modifying target', async t => {
+  const input = await options(t);
+  await provisionPersistentClientProvider(input);
+  const linked = path.join(path.dirname(input.appDataDirectory), 'shared-owner-link.json');
+  await fs.link(input.ownerFile, linked);
+  await assert.rejects(provisionPersistentClientProvider(input), /existing_file_invalid/);
+  await fs.rm(linked);
+  const symlinkInput = await options(t);
+  const other = path.join(path.dirname(symlinkInput.appDataDirectory), 'actual-appdata');
+  await fs.mkdir(other);
+  await fs.symlink(other, symlinkInput.appDataDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(provisionPersistentClientProvider(symlinkInput), /owner_directory_invalid/);
+  await assert.rejects(fs.stat(symlinkInput.ownerFile), { code: 'ENOENT' });
+});
+
+test('parallel initial publication never overwrites or leaves a temporary owner file', async t => {
+  const input = await options(t);
+  const results = await Promise.allSettled(Array.from({ length: 4 }, () => provisionPersistentClientProvider(input)));
+  assert(results.some(result => result.status === 'fulfilled' && result.value.state === 'CONFIGURED'));
+  assert(results.every(result => result.status === 'fulfilled' || result.reason?.code === 'EEXIST'));
+  assert.deepEqual(validateLocalStateProviderConfig(JSON.parse(await fs.readFile(input.ownerFile, 'utf8'))).runtime_host, input.runtimeHost);
+  const files = await fs.readdir(path.dirname(input.ownerFile));
+  assert.deepEqual(files, [path.basename(input.ownerFile)]);
 });

@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000005.1`.
+Reserved package identity is `0.7.0-dev.37780000006.1`.
+
+Owner-file non-overwrite successor: invalid or conflicting local provider configuration can no longer be replaced via a weak `replaceExisting` path; a reviewed migration CAS is required. Adds same-owner idempotence, symlink/hardlink/corrupt file negative tests and concurrent exclusive publication. No database/owner profile is migrated by this code. `0.7.0-dev.37780000005.1` is consumed and cannot be reused.
 
 Local-only packaged successor: the admitted normal/updated packaged primary must have an attested persisted LOCAL_POSTGRES owner before it imports HostResilience or main; absent config fails to a local diagnostic rather than choosing hosted fallback. Existing developer, diagnostic and smoke modes retain their compatibility behavior. This is a source-only first-run fence, **not** an automatic PostgreSQL initializer or proof of usable installed onboarding. The prior `0.7.0-dev.37780000004.1` identity is consumed; new source requires independent exact Windows, local-host and physical evidence.
 
