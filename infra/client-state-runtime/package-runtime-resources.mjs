@@ -44,6 +44,8 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/remote-support-mcp.mjs',
   'apps/metaengine-browser/src/windows-local-computer-executor.mjs',
   'apps/metaengine-browser/src/computer-authority-plane.mjs',
+  'apps/metaengine-browser/src/local-state-provider-policy.mjs',
+  'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
 ]);
 function sourcePathAllowed(value) {
   return (REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
