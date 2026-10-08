@@ -29,7 +29,7 @@ async function fixture(t) {
     manifest: { bundle_sha256: sha }, paths: { postgresBinDirectory: pgBin },
   }), initdb: async ({ executable, dataDirectory, passwordFile: privateFile, stateDirectory }) => {
     calls += 1;
-    assert.equal(executable, binary);
+    assert.equal(await fs.realpath(executable), await fs.realpath(binary), 'physical exe identity must survive Windows 8.3 aliases');
     assert.equal(privateFile, passwordFile);
     assert.equal(stateDirectory, input.stateDirectory);
     await fs.writeFile(path.join(dataDirectory, 'PG_VERSION'), '17\n');

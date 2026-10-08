@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000010.1`.
+Reserved package identity is `0.7.0-dev.37780000011.1`.
+
+Windows first-run test portability repair: compare realpath identities of verified initdb executable, not short-name spelling; accept Windows PG_VERSION newline normalization. Predecessor `0.7.0-dev.37780000010.1` was reserved and cannot qualify this changed head.
 
 Physical first-run PostgreSQL 17 qualification: the Windows Package Smoke producer now runs real bundled initdb.exe from the independently pinned staged offline resource tree on a disposable synthetic cluster before building the installer. It checks SCRAM settings, exclusive no-overwrite/retry semantics and no owner/profile writes. `0.7.0-dev.37780000009.1` is consumed; synthetic tests on that earlier head do not qualify the new exact source.
 

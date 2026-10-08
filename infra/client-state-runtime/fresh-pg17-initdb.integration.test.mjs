@@ -37,7 +37,7 @@ test('physical offline PostgreSQL 17 initdb creates one SCRAM/checksummed fresh 
   assert.equal(receipt.vault_key_created, false);
   assert.equal(receipt.owner_profile_written, false);
   assert.equal(receipt.authority_effect, false);
-  assert.equal(await fs.readFile(path.join(pgDataDirectory, 'PG_VERSION'), 'utf8'), '17\n');
+  assert.equal((await fs.readFile(path.join(pgDataDirectory, 'PG_VERSION'), 'utf8')).trim(), '17');
   assert.match(await fs.readFile(path.join(pgDataDirectory, 'pg_hba.conf'), 'utf8'), /scram-sha-256/);
   await assert.rejects(fs.lstat(path.join(stateDirectory, 'client-first-run-initdb.lock')), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(selection.ownerFile), { code: 'ENOENT' });
