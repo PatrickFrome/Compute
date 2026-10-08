@@ -870,7 +870,7 @@ jobs:
 
       - name: Prove normal packaged UI boot and second-instance activation
         # The owned provider requires an explicit private fixture, absent on this runner.
-        if: github.event_name != 'pull_request' || github.head_ref != 'work/client-runtime-restart-singleton-v1'
+        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1')
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |

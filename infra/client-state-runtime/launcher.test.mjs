@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, runtimeEnvironment } from './launcher.mjs';
+import { captureStartupSource, safeRuntimePolicy, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
+import { BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, 'launcher-fixture.mjs');
@@ -162,6 +164,72 @@ test('a startup source pin mismatch refuses every child before launch', async t 
   await assert.rejects(launchClientStateRuntime(input, hooks), /startup_source_pin_mismatch/);
   assert.equal(events.some(event => event.event === 'spawned'), false);
   assert(alive(process.pid));
+});
+
+test('packaged host launch pins the complete current first-run source closure before children', async t => {
+  const { input, hooks, events } = await setup(t);
+  const sourceRoot = await realpath(path.resolve(here, '../..'));
+  const stage = await realpath(await mkdtemp(path.join(os.tmpdir(), 'compute-launcher-source-pin-')));
+  t.after(() => rm(stage, { recursive: true, force: true }));
+  // Use the packaging entry contract and actual source bytes, rather than a
+  // miniature host stub that cannot expose a missing first-run dependency.
+  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY];
+  const packagedClosure = await sourceClosure(entries.map(name => path.join(sourceRoot, name)), sourceRoot);
+  for (const source of packagedClosure.files) {
+    const destination = path.join(stage, path.relative(sourceRoot, source));
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+  }
+  const stagedRuntime = path.join(stage, 'infra/client-state-runtime');
+  for (const name of ['package.json', 'package-lock.json', 'deno.lock']) {
+    await copyFile(path.join(here, name), path.join(stagedRuntime, name));
+  }
+  await cp(path.join(here, 'node_modules/postgres'), path.join(stagedRuntime, 'node_modules/postgres'), { recursive: true });
+  const stagedLauncher = await import(pathToFileURL(path.join(stagedRuntime, 'launcher.mjs')).href);
+  input.includeRuntimeHost = true;
+  input.apiEntry = path.join(stage, BUNDLE_ENTRY_POINTS[1]);
+  input.edgeEntry = path.join(stage, BUNDLE_ENTRY_POINTS[2]);
+  // Commands remain explicit fixtures. Their eval argument does not replace
+  // the measured packaged API/supervisor entry with the fixture source.
+  const command = role => ({
+    command: process.execPath,
+    args: ['--input-type=module', '--eval',
+      `process.argv[2] = ${JSON.stringify(role)}; await import(${JSON.stringify(pathToFileURL(fixture).href)});`],
+  });
+  hooks.apiCommand = command('api');
+  hooks.edgeCommand = command('edge');
+  const expected = await captureStartupSource({
+    repositoryRoot: stage, entries: entries.map(name => path.join(stage, name)),
+    nodePath: process.execPath, denoPath: process.execPath, fixture: true,
+    policy: safeRuntimePolicy(normalizeLauncherConfig(input), { fixture: true }),
+  });
+  const firstRunClosure = await sourceClosure([path.join(stage, FIRST_RUN_INITDB_ENTRY)], stage);
+  for (const source of firstRunClosure.files) {
+    const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
+    assert.ok(expected.files.some(file => file.id === id), id);
+  }
+  input.expectedStartupFilesSha256 = startupFilesDigest(expected.files);
+  let runtime;
+  try {
+    runtime = await stagedLauncher.launchClientStateRuntime(input, hooks);
+    assert.deepEqual(runtime.startupManifest.source.files, expected.files);
+    assert.equal(runtime.startupManifest.source_manifest_sha256, expected.manifest_sha256);
+    assert.equal(runtime.startupManifest.source.policy.dependency_policy, 'FIXTURE_COMMANDS');
+    assert.equal(runtime.children.length, 2);
+    assert.ok(runtime.children.every(child => alive(child.pid)));
+    await runtime.stop();
+    assert.ok(runtime.children.every(child => !alive(child.pid)));
+    // Tampering with an unused first-run entry still invalidates the reviewed
+    // pin before any runtime child is created; no initdb action is invoked.
+    const firstRunFile = path.join(stage, FIRST_RUN_INITDB_ENTRY);
+    await writeFile(firstRunFile, (await readFile(firstRunFile, 'utf8')) + '\n// changed after review\n');
+    events.length = 0;
+    await assert.rejects(stagedLauncher.launchClientStateRuntime(input, hooks), /startup_files_pin_mismatch/);
+    assert.equal(events.some(event => event.event === 'spawned'), false);
+    assert.ok(alive(process.pid));
+  } finally {
+    await runtime?.stop();
+  }
 });
 
 test('starts real owned API/edge children and stops only those children', async t => {
