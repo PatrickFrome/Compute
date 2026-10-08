@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { launchClientStateRuntime, normalizeLauncherConfig, runtimeEnvironment } from './launcher.mjs';
+import { configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, runtimeEnvironment } from './launcher.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, 'launcher-fixture.mjs');
@@ -72,11 +74,12 @@ test('requires local mode, explicit PostgreSQL ownership, loopback URL and disti
     { inspectDatabaseUrl: 'postgresql://test:secret@remote:15434/postgres' },
     { inspectDatabaseUrl: 'postgresql://test:secret@127.0.0.1:15435/postgres' },
     { apiPort: 15434 }, { edgePort: 15432 }, { apiKey: 'insecure' },
+    { denoDir: 'relative-cache' }, { expectedStartupSourceSha256: 'bad' },
   ]) assert.throws(() => normalizeLauncherConfig({ ...good, ...mutation }));
 });
 
 test('owned server environment removes loader injection and unrelated access tokens', () => {
-  const names = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'ELECTRON_RUN_AS_NODE', 'GH_TOKEN', 'GITHUB_TOKEN', 'NPM_TOKEN', 'NODE_AUTH_TOKEN', 'DENO_V8_FLAGS'];
+  const names = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'ELECTRON_RUN_AS_NODE', 'GH_TOKEN', 'GITHUB_TOKEN', 'NPM_TOKEN', 'NODE_AUTH_TOKEN', 'DENO_V8_FLAGS', 'DENO_DIR', 'DENO_AUTH_TOKENS'];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
     for (const name of names) process.env[name] = 'must-not-reach-server';
@@ -84,9 +87,81 @@ test('owned server environment removes loader injection and unrelated access tok
     for (const name of names) assert.equal(Object.hasOwn(env, name), false, name);
     assert.equal(env.LOCAL_STATE_API_KEY, 'local-key');
     assert.equal(env.LOCAL_STATE_RUNTIME, 'LOCAL_POSTGRES');
+    const selected = runtimeEnvironment({ instanceId: 'test', denoDir: here });
+    assert.equal(selected.DENO_DIR, here);
+    assert.equal(Object.hasOwn(selected, 'DENO_AUTH_TOKENS'), false);
   } finally {
     for (const name of names) if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name];
   }
+});
+
+test('environment configuration remains valid when launch normalizes it again', () => {
+  const configured = configFromEnvironment({ LOCAL_STATE_MODE: 'local', LOCAL_STATE_POSTGRES_MODE: 'owned',
+    LOCAL_STATE_DATABASE_URL: 'postgresql://test:synthetic@127.0.0.1:15434/test', LOCAL_STATE_PG_BIN_DIR: here,
+    LOCAL_STATE_PG_DATA_DIR: here, LOCAL_STATE_DENO_PATH: process.execPath });
+  const normalized = normalizeLauncherConfig(configured);
+  assert.deepEqual(normalized, configured, 'normalizing an already normalized configuration must preserve identity and secrets');
+  assert.throws(() => normalizeLauncherConfig({ ...configured, instanceId: 'not-a-uuid' }), /runtime_instance_id_invalid/);
+});
+
+test('automatic child-exit cleanup reports an unconfirmed stop without an unhandled rejection', async t => {
+  const { input, hooks } = await setup(t);
+  const originalSpawn = childProcess.spawn;
+  let apiChild;
+  let terminateApi;
+  let runtime;
+  const rejections = [];
+  const onUnhandled = error => rejections.push(error);
+  const restoreSpawn = () => { childProcess.spawn = originalSpawn; syncBuiltinESMExports(); };
+  try {
+    // Start real fixture children, then model an OS refusal to terminate the
+    // API through its owned handle. The original handle remains available for
+    // test-only cleanup after the launcher reports the failure.
+    childProcess.spawn = (...argumentsList) => {
+      const child = originalSpawn(...argumentsList);
+      if (argumentsList[1]?.includes(fixture) && argumentsList[1]?.includes('api')) {
+        apiChild = child;
+        terminateApi = child.kill.bind(child);
+        child.kill = () => false;
+      }
+      return child;
+    };
+    syncBuiltinESMExports();
+    process.on('unhandledRejection', onUnhandled);
+    runtime = await launchClientStateRuntime(input, hooks);
+    restoreSpawn();
+    assert.ok(apiChild);
+    process.kill(runtime.children.find(child => child.name === 'edge').pid, 'SIGTERM');
+    assert.deepEqual(await runtime.finished, { reason: 'runtime_cleanup_unconfirmed', children_stopped: false });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(rejections, []);
+    assert.equal(alive(apiChild.pid), true, 'failure reports the still-running owned child');
+  } finally {
+    restoreSpawn();
+    process.removeListener('unhandledRejection', onUnhandled);
+    if (apiChild && apiChild.exitCode === null && apiChild.signalCode === null) {
+      const ended = new Promise(resolve => apiChild.once('exit', resolve));
+      terminateApi('SIGTERM');
+      await ended;
+    }
+    await runtime?.stop();
+  }
+});
+
+test('an already cancelled startup refuses all children', async t => {
+  const { input, hooks, events } = await setup(t);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(launchClientStateRuntime({ ...input, signal: controller.signal }, hooks), /runtime_startup_cancelled/);
+  assert.equal(events.some(event => event.event === 'spawned'), false);
+});
+
+test('a startup source pin mismatch refuses every child before launch', async t => {
+  const { input, hooks, events } = await setup(t);
+  input.expectedStartupSourceSha256 = '0'.repeat(64);
+  await assert.rejects(launchClientStateRuntime(input, hooks), /startup_source_pin_mismatch/);
+  assert.equal(events.some(event => event.event === 'spawned'), false);
+  assert(alive(process.pid));
 });
 
 test('starts real owned API/edge children and stops only those children', async t => {

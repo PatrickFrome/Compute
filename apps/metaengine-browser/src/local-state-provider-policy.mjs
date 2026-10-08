@@ -23,6 +23,7 @@ export function localStateProviderOwnerFile({ env = process.env, platform = proc
 
 export function validateLocalStateProviderConfig(value) {
   const keys = ['schema', 'version', 'profile', 'provider', 'base_url', 'runtime_identity_file', 'authority_effect'];
+  if (value && Object.hasOwn(value, 'runtime_host')) keys.push('runtime_host');
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length || keys.some(key => !(key in value))) {
     throw new Error('local_state_provider_config_shape_invalid');
   }
@@ -36,7 +37,25 @@ export function validateLocalStateProviderConfig(value) {
     profile: LOCAL_STATE_PROVIDER_PROFILE, provider: 'LOCAL_POSTGRES',
     base_url: canonicalLocalStateSupervisorBase(value.base_url),
     runtime_identity_file: path.normalize(runtimeFile), authority_effect: false,
+    ...(Object.hasOwn(value, 'runtime_host') ? { runtime_host: validateLocalRuntimeHostConfig(value.runtime_host) } : {}),
   });
+}
+
+export function validateLocalRuntimeHostConfig(value) {
+  const keys = ['bundle_directory', 'expected_bundle_sha256', 'config_file'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) {
+    throw new Error('local_state_runtime_host_shape_invalid');
+  }
+  const paths = {};
+  for (const key of ['bundle_directory', 'config_file']) {
+    const file = value[key];
+    if (typeof file !== 'string' || !path.isAbsolute(file) || /^(?:\\\\|\/\/)/.test(file)
+      || file.length > 2048 || /[\x00-\x1f]/.test(file)) throw new Error('local_state_runtime_host_path_invalid');
+    paths[key] = path.normalize(file);
+  }
+  if (typeof value.expected_bundle_sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(value.expected_bundle_sha256)) throw new Error('local_state_runtime_host_digest_invalid');
+  return Object.freeze({ ...paths, expected_bundle_sha256: value.expected_bundle_sha256.toLowerCase() });
 }
 
 export function validateLocalStateRuntimeIdentity(value, baseUrl) {

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const workflow = readFileSync(new URL('../../../.github/workflows/client-v1-supabase-edge-live-probe.yml', import.meta.url), 'utf8');
-const guard = "github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'";
+const producerGuard = "github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'";
+const guard = "github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1')";
 const guardedJobs = [
   ['client-v1-supabase-edge-live-probe.yml', 'public-health'],
   ['browser-windows-installed-chat-qualification.yml', 'windows-installed-chat-qualification'],
@@ -17,7 +18,7 @@ const guardedJobs = [
 for (const [file, job] of guardedJobs) {
   test(`local-only PR holds hosted/default-cloud physical job ${file}:${job}`, () => {
     const source = readFileSync(new URL(`../../../.github/workflows/${file}`, import.meta.url), 'utf8');
-    const escaped = guard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = (file === 'browser-windows-package-smoke.yml' ? producerGuard : guard).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(source, new RegExp(`^  ${job}:\\r?\\n(?:    #[^\\n]*\\r?\\n)?    if: ${escaped}\\r?\\n`, 'm'));
     assert.match(source, /^on:\r?\n/m);
     assert.match(source, /^  pull_request:\r?\n/m);
@@ -34,6 +35,7 @@ test('client-owned state PR skips every historical hosted live-probe step at the
 test('guard preserves other PRs, historical push and explicit dispatch without adding write permissions', () => {
   const permits = new Function('github', `return ${guard};`);
   assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/client-owned-state-runtime-v1' }), false);
+  assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/client-runtime-restart-singleton-v1' }), false);
   assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/another-candidate' }), true);
   assert.equal(permits({ event_name: 'push', head_ref: '' }), true);
   assert.equal(permits({ event_name: 'workflow_dispatch', head_ref: 'work/client-owned-state-runtime-v1' }), true);
@@ -42,6 +44,16 @@ test('guard preserves other PRs, historical push and explicit dispatch without a
   assert.match(workflow, /  workflow_dispatch:/);
   assert.match(workflow, /permissions:\r?\n  contents: read\r?\n\r?\njobs:/);
   assert.doesNotMatch(workflow, /^\s+[\w-]+:\s*write\s*$/m);
+});
+
+test('offline successor builds a physical package without qualifying historical hosted normal boot', () => {
+  const source = readFileSync(new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url), 'utf8');
+  const produces = new Function('github', `return ${producerGuard};`);
+  assert.equal(produces({ event_name: 'pull_request', head_ref: 'work/client-runtime-restart-singleton-v1' }), true);
+  assert.match(source, /- name: Prove exact packaged profile with an offline diagnostic/);
+  assert.match(source, /- name: Prove normal packaged UI boot and second-instance activation\r?\n(?:\s*#[^\n]*\r?\n)?\s*if: github.event_name != 'pull_request' \|\| github.head_ref != 'work\/client-runtime-restart-singleton-v1'/);
+  assert.match(source, /normal_ui_boot_verified=\$false/);
+  assert.match(source, /client_state_runtime_packaged_resources_verified=\$true/);
 });
 
 test('offline contract and source jobs are not held by the branch-specific physical guard', () => {

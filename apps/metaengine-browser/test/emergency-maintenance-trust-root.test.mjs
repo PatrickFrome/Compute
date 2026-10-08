@@ -58,7 +58,9 @@ test('packaging enables ASAR plus integrity and ASAR-only fuses while excluding 
   assert.equal(config.asar, true);
   assert.equal(config.electronFuses?.enableEmbeddedAsarIntegrityValidation, true);
   assert.equal(config.electronFuses?.onlyLoadAppFromAsar, true);
-  assert.deepEqual(config.files, ['src/**/*', 'package.json']);
+  assert.deepEqual(config.files, ['src/**/*', 'package.json', {
+    from: '../../infra/client-state-runtime', to: 'infra/client-state-runtime', filter: ['offline-runtime-bundle.mjs'],
+  }]);
   assert.equal(config.files.includes('ui/**/*'), false);
 
   const publicKeyPem = fs.readFileSync(new URL('../build/emergency-maintenance-public-key.pem', import.meta.url), 'utf8');

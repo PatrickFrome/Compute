@@ -1,7 +1,7 @@
-import './local-state-provider-bootstrap.mjs';
 import { registerHooks } from 'node:module';
 import { app, BaseWindow } from 'electron';
 import { requestPrimaryWindowResurrection } from './primary-window-resurrection.mjs';
+import { isInstallerShutdownArgv } from './single-instance-guard.mjs';
 
 const mainUrl = new URL('./main.mjs', import.meta.url).href;
 const developmentPlaneUrl = new URL('./development-plane.mjs', import.meta.url).href;
@@ -27,6 +27,7 @@ const primaryUiRecoveryEnabled = !process.argv.some((arg) => [
   '--metaengine-self-update-smoke',
   '--metaengine-smoke',
   '--metaengine-devplane-smoke',
+  '--metaengine-installer-shutdown',
 ].includes(String(arg || '')));
 
 // This listener is deliberately installed before main-entry acquires the
@@ -37,7 +38,8 @@ const primaryUiRecoveryEnabled = !process.argv.some((arg) => [
 // or mutates self-update authority.
 let primaryUiRecoveryInFlight = null;
 if (primaryUiRecoveryEnabled) {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    if (isInstallerShutdownArgv(argv) || globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
     if (primaryUiRecoveryInFlight) return;
     primaryUiRecoveryInFlight = requestPrimaryWindowResurrection({ app, BaseWindow })
       .then((result) => {
@@ -122,7 +124,7 @@ await import('./main-entry.mjs');
 // main.mjs still fences actual window creation.
 const primaryInstance = typeof app.hasSingleInstanceLock !== 'function'
   || app.hasSingleInstanceLock() === true;
-if (primaryUiRecoveryEnabled && primaryInstance) {
+if (primaryUiRecoveryEnabled && primaryInstance && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
   const requestInitialPrimaryUi = () => {
     void requestPrimaryWindowResurrection({
       app,
@@ -170,7 +172,8 @@ if (primaryUiRecoveryEnabled && primaryInstance) {
 // ME2-рунтайма на хосте или любых ошибках — браузер работает ровно как раньше.
 // Не касается self-update authority, single-instance, second-scheduler, окон.
 // Карта слияния: docs/me2-smart-merge-r40.md
-if (primaryInstance && !probeStdoutReserved && primaryUiRecoveryEnabled && process.env.ME2_INTEGRATION !== '0') {
+if (primaryInstance && !probeStdoutReserved && primaryUiRecoveryEnabled && process.env.ME2_INTEGRATION !== '0'
+  && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
   import('./me2/me2-integration-entry.mjs')
     .then((me2) => {
       const r = me2.startMe2Integration({ app });

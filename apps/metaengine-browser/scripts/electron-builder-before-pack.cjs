@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { execFileSync, spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
+const { buildOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
 const {
   createBuildIdentity,
   createBuildIdentityV3,
@@ -206,11 +207,17 @@ async function metaengineGuardianNativeBeforePack(context) {
   const appRoot = path.resolve(__dirname, '..');
   const repoRoot = path.resolve(appRoot, '../..');
   const trustRoot = buildEmergencyTrustRootMetadata({ appRoot, repoRoot });
+  const packageVersion = String(require(path.join(appRoot, 'package.json')).version || '');
+  const offlineRuntimeBinding = await buildOfflineRuntimeBinding({
+    bundleDirectory: path.join(appRoot, 'client-state-runtime-dist'),
+    repoRoot, sourceHead: trustRoot.build_sha, packageVersion,
+  });
   const priorMetadata = context.packager?.config?.extraMetadata;
   if (!context.packager?.config) throw new Error('emergency_trust_root_packager_config_unavailable');
   context.packager.config.extraMetadata = {
     ...(priorMetadata && typeof priorMetadata === 'object' ? priorMetadata : {}),
     metaengineEmergencyTrustRoot: trustRoot,
+    metaengineClientStateRuntime: offlineRuntimeBinding,
   };
 
   await buildDevOSSourceSnapshot({
@@ -246,7 +253,6 @@ async function metaengineGuardianNativeBeforePack(context) {
   if (bootstrapResult.error) throw bootstrapResult.error;
   if (bootstrapResult.status !== 0) throw new Error(`guardian_machine_bootstrap_build_failed:${bootstrapResult.status}`);
 
-  const packageVersion = String(require(path.join(appRoot, 'package.json')).version || '');
   const bootstrapBindingPath = path.join(appRoot, 'native-dist', 'guardian-bootstrap', 'guardian-machine-bootstrap-binding.json');
   let bootstrapBinding;
   try {
@@ -283,3 +289,4 @@ module.exports.validateGuardianBootstrapBinding = validateGuardianBootstrapBindi
 module.exports.buildPackageIdentityMetadata = buildPackageIdentityMetadata;
 module.exports.buildIdentityRequired = buildIdentityRequired;
 module.exports.buildIdentityVersion = buildIdentityVersion;
+module.exports.buildOfflineRuntimeBinding = buildOfflineRuntimeBinding;

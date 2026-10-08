@@ -207,6 +207,95 @@ function validateProvenance(provenance, sourceHead, packageVersion) {
   return { installerSha, buildIdentitySha, lockSha, dependencySha };
 }
 
+function normalizeOfflineRuntime(manifest, proof, manifestBytes, sourceHead, packageVersion) {
+  if (manifest.schema !== 'compute.runtime-offline-bundle.v1'
+    || proof.schema !== 'metaengine.browser.packaged-client-state-runtime-proof.v1') fail('composed_sbom_offline_schema_invalid');
+  if (proof.source_head !== sourceHead || proof.package_version !== packageVersion) fail('composed_sbom_offline_source_version_mismatch');
+  if (manifest.platform !== 'win32' || manifest.arch !== 'x64'
+    || manifest.source_root !== 'source' || manifest.entry !== 'source/infra/client-state-runtime/runtime-host.mjs'
+    || manifest.deno_dir !== 'runtime/deno-cache'
+    || JSON.stringify(manifest.executables) !== JSON.stringify({ node: 'runtime/node/node.exe', deno: 'runtime/deno/deno.exe', postgres_bin: 'runtime/postgresql/bin' })
+    || proof.runtime_verifier_relative_path !== 'infra/client-state-runtime/offline-runtime-bundle.mjs'
+    || !SHA256.test(proof.runtime_verifier_sha256 || '')) fail('composed_sbom_offline_layout_invalid');
+  if (proof.protected_asar_binding_present !== true || proof.packaged_resources_verified !== true
+    || proof.publisher_provenance_verified !== false || proof.installed_client_qualified !== false
+    || proof.authority_effect !== false || manifest.policy?.authority_effect !== false
+    || manifest.policy.database_included !== false || manifest.policy.private_config_included !== false
+    || manifest.policy.credentials_included !== false || manifest.policy.publisher_provenance_verified !== false
+    || manifest.policy.installed_client_qualified !== false) fail('composed_sbom_offline_proof_invalid');
+  const { bundle_sha256: bundleDigest, schema, resource_inventory_sha256: inventoryDigest, ...rest } = manifest;
+  if (sha256Bytes(Buffer.from(JSON.stringify({ schema, resource_inventory_sha256: inventoryDigest, ...rest }))) !== bundleDigest
+    || sha256Bytes(Buffer.from(JSON.stringify({ schema: 'compute.runtime-offline-resource-inventory.v1', ...rest }))) !== inventoryDigest) fail('composed_sbom_offline_manifest_digest_mismatch');
+  const manifestDigest = sha256Bytes(manifestBytes);
+  if (proof.bundle_manifest_sha256 !== manifestDigest) fail('composed_sbom_offline_manifest_bytes_mismatch');
+  for (const key of ['bundle_sha256', 'source_bundle_sha256', 'reviewed_startup_source_sha256', 'reviewed_startup_files_sha256', 'resource_inventory_sha256']) {
+    if (sha(manifest[key], 'composed_sbom_offline_digest_invalid') !== proof[key]) fail('composed_sbom_offline_proof_binding_mismatch');
+  }
+  if (!Array.isArray(manifest.files) || manifest.files.length < 1 || manifest.files.length > 10000) fail('composed_sbom_offline_inventory_invalid');
+  const groups = new Map(['source', 'node', 'deno', 'postgresql', 'deno_cache'].map(name => [name, []]));
+  const names = new Set();
+  let size = 0;
+  for (const row of manifest.files) {
+    if (!row || typeof row.path !== 'string' || row.path.includes('\\')
+      || !row.path.split('/').every(part => /^[A-Za-z0-9_@+.-]+$/.test(part) && part !== '.' && part !== '..' && !part.startsWith('.'))
+      || names.has(row.path.toLowerCase()) || !groups.has(row.component) || !SHA256.test(row.sha256 || '')
+      || !Number.isSafeInteger(row.bytes) || row.bytes < 0 || row.bytes > 256 * 1024 * 1024) fail('composed_sbom_offline_inventory_invalid');
+    names.add(row.path.toLowerCase());
+    groups.get(row.component).push(row);
+    size += row.bytes;
+  }
+  if (size > 2 ** 31 || proof.resource_file_count !== manifest.files.length || proof.resource_size_bytes !== size
+    || [...groups.values()].some(rows => rows.length === 0)) fail('composed_sbom_offline_resource_count_mismatch');
+  for (const [component, executable] of [['node', 'runtime/node/node.exe'], ['deno', 'runtime/deno/deno.exe'], ['postgresql', 'runtime/postgresql/bin/postgres.exe']]) {
+    if (!groups.get(component).some(row => row.path === executable)
+      || !groups.get(component).some(row => row.path === `licenses/${component}.txt`)) fail('composed_sbom_offline_required_resource_missing');
+  }
+  if (!groups.get('source').some(row => row.path === 'source/runtime-source-bundle.json')
+    || !groups.get('source').some(row => row.path === manifest.entry)
+    || !groups.get('deno_cache').some(row => row.path === 'runtime/deno-cache/npm/registry.npmjs.org/postgres/3.4.7/package.json')) fail('composed_sbom_offline_required_resource_missing');
+  const make = (name, componentVersion, digest, type, properties = [], licenses = []) => {
+    const ref = componentRef(name, componentVersion, digest);
+    return { ref, component: { type, 'bom-ref': ref, name, version: componentVersion,
+      hashes: [{ alg: 'SHA-256', content: digest }], ...(licenses.length ? { licenses } : {}),
+      properties: [property('metaengine:source_head', sourceHead), property('metaengine:authority_effect', false), ...properties] } };
+  };
+  const output = [make('METAENGINE Client State Offline Runtime', packageVersion, bundleDigest, 'application', [
+    property('metaengine:manifest_sha256', manifestDigest), property('metaengine:resource_inventory_sha256', inventoryDigest),
+    property('metaengine:resource_file_count', manifest.files.length), property('metaengine:size_bytes', size),
+    property('metaengine:publisher_provenance_verified', false), property('metaengine:installed_client_qualified', false),
+  ]), make('METAENGINE Client State Reviewed Source', packageVersion, manifest.source_bundle_sha256, 'file', [
+    property('metaengine:reviewed_startup_source_sha256', manifest.reviewed_startup_source_sha256),
+    property('metaengine:reviewed_startup_files_sha256', manifest.reviewed_startup_files_sha256),
+  ])];
+  for (const [name, component, executable] of [
+    ['Node.js', 'node', 'runtime/node/node.exe'],
+    ['Deno', 'deno', 'runtime/deno/deno.exe'],
+    ['PostgreSQL', 'postgresql', 'runtime/postgresql/bin/postgres.exe'],
+  ]) {
+    const origin = manifest.component_origins?.[component];
+    if (!origin || !/^\d+\.\d+\.\d+$/.test(origin.version || '') || !SHA256.test(origin.archive_sha256 || '')
+      || origin.verification !== 'RECORDED_ORIGIN_NOT_PUBLISHER_ATTESTATION') fail('composed_sbom_offline_origin_invalid');
+    let url;
+    try { url = new URL(origin.url); } catch { fail('composed_sbom_offline_origin_invalid'); }
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) fail('composed_sbom_offline_origin_invalid');
+    const rows = groups.get(component);
+    const binary = rows.find(row => row.path === executable);
+    const licenseFile = rows.find(row => row.path === `licenses/${component}.txt`);
+    output.push(make(name, origin.version, binary.sha256, 'application', [
+      property('metaengine:resource_inventory_sha256', sha256Bytes(Buffer.from(canonicalJson(rows)))),
+      property('metaengine:resource_file_count', rows.length), property('metaengine:recorded_origin_url', url.href),
+      property('metaengine:recorded_origin_archive_sha256', origin.archive_sha256),
+      property('metaengine:origin_verification', origin.verification),
+      property('metaengine:license_file', licenseFile.path), property('metaengine:license_sha256', licenseFile.sha256),
+    ], [{ license: { name: `Bundled ${name} license resource` } }]));
+  }
+  const cacheRows = groups.get('deno_cache');
+  output.push(make('postgres', '3.4.7', sha256Bytes(Buffer.from(canonicalJson(cacheRows))), 'library', [
+    property('metaengine:offline_deno_cache', true), property('metaengine:resource_file_count', cacheRows.length),
+  ]));
+  return { components: output, manifestDigest, bundleDigest, inventoryDigest, fileCount: manifest.files.length, size };
+}
+
 export function createComposedSbom({
   npmSbomPath,
   npmEvidencePath,
@@ -215,6 +304,8 @@ export function createComposedSbom({
   guardianManifestPath,
   bootstrapBindingPath,
   installerProvenancePath,
+  offlineRuntimeManifestPath,
+  offlineRuntimeProofPath,
   sourceHead,
   packageVersion,
 } = {}) {
@@ -239,10 +330,16 @@ export function createComposedSbom({
   const daemon = normalizeDaemon(readJson(daemonManifestPath, 'composed_sbom_daemon_unreadable'), head);
   const guardian = normalizeGuardian(readJson(guardianManifestPath, 'composed_sbom_guardian_unreadable'), head, version);
   const bootstrap = normalizeBootstrap(readJson(bootstrapBindingPath, 'composed_sbom_bootstrap_unreadable'), head, version, guardian);
+  if (Boolean(offlineRuntimeManifestPath) !== Boolean(offlineRuntimeProofPath)) fail('composed_sbom_offline_inputs_pair_required');
+  const offlineRuntime = offlineRuntimeManifestPath ? normalizeOfflineRuntime(
+    readJson(offlineRuntimeManifestPath, 'composed_sbom_offline_manifest_unreadable'),
+    readJson(offlineRuntimeProofPath, 'composed_sbom_offline_proof_unreadable'),
+    fs.readFileSync(offlineRuntimeManifestPath), head, version,
+  ) : null;
 
   const rootRef = `metaengine:browser:${version}`;
   const npmRootRef = required(npm.root['bom-ref'], 'composed_sbom_npm_root_ref_missing');
-  const firstParty = [ui, daemon, ...guardian, bootstrap];
+  const firstParty = [ui, daemon, ...guardian, bootstrap, ...(offlineRuntime?.components || [])];
   const assemblyRefs = [npmRootRef, ...firstParty.map((x) => x.ref)];
 
   const composed = {
@@ -309,6 +406,13 @@ export function createComposedSbom({
     composed_semantic_inventory_sha256: semanticSha,
     npm_component_count: npm.components.length,
     first_party_component_count: firstParty.length,
+    offline_runtime_component_count: offlineRuntime?.components.length || 0,
+    offline_runtime_resource_file_count: offlineRuntime?.fileCount ?? null,
+    offline_runtime_resource_size_bytes: offlineRuntime?.size ?? null,
+    offline_runtime_bundle_sha256: offlineRuntime?.bundleDigest ?? null,
+    offline_runtime_manifest_sha256: offlineRuntime?.manifestDigest ?? null,
+    offline_runtime_resource_inventory_sha256: offlineRuntime?.inventoryDigest ?? null,
+    offline_runtime_packaged_resources_verified: Boolean(offlineRuntime),
     total_component_count: composed.components.length,
     composition_aggregate: 'incomplete',
     authority_effect: false,
@@ -340,6 +444,8 @@ async function main() {
     guardianManifestPath: a['guardian-manifest'],
     bootstrapBindingPath: a['bootstrap-binding'],
     installerProvenancePath: a.provenance,
+    offlineRuntimeManifestPath: a['offline-runtime-manifest'],
+    offlineRuntimeProofPath: a['offline-runtime-proof'],
     sourceHead: a['source-head'],
     packageVersion: a['package-version'],
   });

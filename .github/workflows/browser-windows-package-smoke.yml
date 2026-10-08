@@ -8,6 +8,7 @@ on:
       - 'physical/build-slsa-provenance-v1'
   pull_request:
     paths:
+      - 'infra/client-state-runtime/**'
       - 'apps/metaengine-browser/**'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/native/**'
@@ -422,6 +423,27 @@ jobs:
           }
           Write-Host ($evidence | ConvertTo-Json -Compress -Depth 10)
 
+      - name: Install frozen client state runtime dependency
+        working-directory: infra/client-state-runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Stage pinned offline client state runtime resources
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/stage-client-state-runtime.mjs --work-dir "$env:RUNNER_TEMP\client-state-runtime-build" --out "$env:GITHUB_WORKSPACE\apps\metaengine-browser\client-state-runtime-dist"
+          if ($LASTEXITCODE -ne 0) { throw 'client_state_runtime_stage_failed' }
+
+      - name: Verify tracked source is unchanged before physical packaging
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code HEAD -- .
+
       - name: Build exact-head unsigned NSIS package through native staging hook
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -519,6 +541,8 @@ jobs:
             --daemon-manifest $daemonManifestPath `
             --guardian-manifest $stagedManifest `
             --bootstrap-binding $bootstrapBindingPath `
+            --offline-runtime-manifest "$env:GITHUB_WORKSPACE\apps\metaengine-browser\client-state-runtime-dist\offline-runtime-bundle.json" `
+            --offline-runtime-proof "$env:RUNNER_TEMP\packaged-client-state-runtime-proof.json" `
             --provenance "$env:RUNNER_TEMP\installer-provenance.json" `
             --source-head $sourceHead `
             --package-version $version `
@@ -535,7 +559,14 @@ jobs:
               -or [string]$composed.composed_semantic_inventory_sha256 -notmatch '^[a-f0-9]{64}$' `
               -or $composedRawSha -notmatch '^[a-f0-9]{64}$' `
               -or [string]$composed.composition_aggregate -ne 'incomplete' `
-              -or [int]$composed.first_party_component_count -ne 5 `
+              -or [int]$composed.first_party_component_count -ne 11 `
+              -or [int]$composed.offline_runtime_component_count -ne 6 `
+              -or [int]$composed.offline_runtime_resource_file_count -lt 1 `
+              -or [int64]$composed.offline_runtime_resource_size_bytes -lt 1 `
+              -or [string]$composed.offline_runtime_bundle_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or [string]$composed.offline_runtime_manifest_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or [string]$composed.offline_runtime_resource_inventory_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or $composed.offline_runtime_packaged_resources_verified -ne $true `
               -or [int]$composed.total_component_count -le [int]$composed.npm_component_count `
               -or $composed.authority_effect -ne $false) {
             throw 'browser_composed_sbom_contract_invalid'
@@ -543,6 +574,7 @@ jobs:
           Copy-Item $uiManifestPath "$env:RUNNER_TEMP\me2-ui-manifest.json" -Force
           Copy-Item $daemonManifestPath "$env:RUNNER_TEMP\me2-daemon-manifest.json" -Force
           Copy-Item $stagedManifest "$env:RUNNER_TEMP\guardian-native-manifest.json" -Force
+          Copy-Item "client-state-runtime-dist\offline-runtime-bundle.json" "$env:RUNNER_TEMP\offline-runtime-bundle.json" -Force
           @{
             schema='metaengine.browser.windows-package-smoke.v3'
             source_head=$sourceHead
@@ -561,6 +593,12 @@ jobs:
             composed_sbom_total_component_count=[int]$composed.total_component_count
             composed_sbom_first_party_component_count=[int]$composed.first_party_component_count
             composed_sbom_composition_aggregate=[string]$composed.composition_aggregate
+            client_state_runtime_bundle_sha256=[string]$composed.offline_runtime_bundle_sha256
+            client_state_runtime_manifest_sha256=[string]$composed.offline_runtime_manifest_sha256
+            client_state_runtime_resource_inventory_sha256=[string]$composed.offline_runtime_resource_inventory_sha256
+            client_state_runtime_resource_file_count=[int]$composed.offline_runtime_resource_file_count
+            client_state_runtime_resource_size_bytes=[int64]$composed.offline_runtime_resource_size_bytes
+            client_state_runtime_packaged_resources_verified=$true
             npm_version=[string]$buildIdentity.npm_version
             bun_version=[string]$buildIdentity.bun_version
             me2_ui_bun_lock_sha256=[string]$buildIdentity.me2_ui_bun_lock_sha256
@@ -649,6 +687,15 @@ jobs:
             authority_effect=$false
           } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $dir 'installer-slsa-provenance-receipt.json') -Encoding utf8
 
+      - name: Verify tracked source is unchanged before candidate publication
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code HEAD -- .
+
       - name: Publish immutable candidate for parallel downstream qualification
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -666,6 +713,8 @@ jobs:
             ${{ runner.temp }}/me2-ui-manifest.json
             ${{ runner.temp }}/me2-daemon-manifest.json
             ${{ runner.temp }}/guardian-native-manifest.json
+            ${{ runner.temp }}/packaged-client-state-runtime-proof.json
+            ${{ runner.temp }}/offline-runtime-bundle.json
             ${{ runner.temp }}/package-lock-material.json
             ${{ runner.temp }}/package.json
             ${{ runner.temp }}/package-lock.json
@@ -750,19 +799,16 @@ jobs:
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
 
-      - name: Prove normal packaged UI boot and second-instance activation
+      - name: Prove exact packaged profile with an offline diagnostic
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
-          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
-          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
-          if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
-
+          if (-not (Test-Path $app -PathType Leaf)) { throw 'packaged_profile_browser_missing' }
           # Never guess Electron's packaged userData directory from productName.
           # Ask the exact installed binary for app.getPath('userData') through
           # the existing read-only profile probe, then bind every journal read
@@ -805,6 +851,24 @@ jobs:
           $proof | Add-Member -NotePropertyName user_data_path_source -NotePropertyValue 'PACKAGED_PROFILE_PROBE' -Force
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
 
+
+      - name: Prove normal packaged UI boot and second-instance activation
+        # The owned provider requires an explicit private fixture, absent on this runner.
+        if: github.event_name != 'pull_request' || github.head_ref != 'work/client-runtime-restart-singleton-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
+
+          $userData = [string]$proof.user_data_path
+          $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
           $normalOut = "$env:RUNNER_TEMP\package-normal-ui.out"
           $normalErr = "$env:RUNNER_TEMP\package-normal-ui.err"
           $secondOut = "$env:RUNNER_TEMP\package-second-instance.out"
@@ -1188,7 +1252,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
+          test -z "$(git diff --name-only HEAD -- infra/client-state-runtime apps/metaengine-browser/src apps/metaengine-browser/native apps/metaengine-browser/build apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
 
       - name: Upload exact-head Windows qualification evidence
         if: always()
@@ -1198,6 +1262,8 @@ jobs:
           path: |
             ${{ runner.temp }}/windows-package-proof.json
             ${{ runner.temp }}/packaged-build-identity-proof.json
+            ${{ runner.temp }}/packaged-client-state-runtime-proof.json
+            ${{ github.workspace }}/apps/metaengine-browser/client-state-runtime-dist/offline-runtime-bundle.json
             ${{ runner.temp }}/expected-build-identity.json
             ${{ runner.temp }}/build-identity.json
             ${{ runner.temp }}/dependency-resolution.json

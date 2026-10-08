@@ -72,7 +72,7 @@ jobs:
 
   windows-published-n-to-one-build-target:
     # The resident upgrade rehearsal launches a historical hosted-default client.
-    if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
+    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1')
     needs: contract
     runs-on: windows-2022
     timeout-minutes: 46

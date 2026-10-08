@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { sourceClosure } from './startup-source-manifest.mjs';
+import { captureStartupSource, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
 
 export const BUNDLE_SCHEMA = 'compute.runtime-source-bundle.v1';
 export const BUNDLE_MANIFEST_FILE = 'runtime-source-bundle.json';
@@ -11,6 +11,8 @@ export const BUNDLE_ENTRY_POINTS = Object.freeze([
   'infra/client-state-runtime/db-api.mjs',
   'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts',
 ]);
+export const RUNTIME_HOST_ENTRY = 'infra/client-state-runtime/runtime-host.mjs';
+const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY] : [...BUNDLE_ENTRY_POINTS];
 
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';
@@ -60,11 +62,31 @@ function classifyRecord(record) {
   fail('bundle_unexpected_source_record');
 }
 
-export function reviewedBundlePlan(startupManifest, expectedSourceDigest) {
+export async function captureRuntimeBuildInventory({ repositoryRoot, nodePath = process.execPath, denoPath, pgBinDir,
+  denoLockPath, denoDirectory, includeRuntimeHost = false } = {}) {
+  if (typeof includeRuntimeHost !== 'boolean') fail('bundle_host_choice_invalid');
+  const root = await canonicalDirectory(repositoryRoot);
+  const policy = { mode: 'LOCAL_POSTGRES', address: '127.0.0.1', dependency_policy: 'FROZEN_LOCKFILE_AND_CACHED_ONLY',
+    automatic_cloud_fallback: false, credentials_included: false, private_config_included: false,
+    artifact_kind: 'BUILD_RESOURCE_INVENTORY', runtime_liveness_proven: false };
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) if (/^DENO_/i.test(name) || /^(NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS)$/i.test(name)) delete env[name];
+  if (denoDirectory !== undefined) env.DENO_DIR = await canonicalDirectory(denoDirectory);
+  const source = await captureStartupSource({ repositoryRoot: root, entries: selectedEntries(includeRuntimeHost).map(name => join(root, name)),
+    nodePath, denoPath, pgBinDir, denoLockPath: denoLockPath || join(root, runtimeRoot, 'deno.lock'), env, policy });
+  return { schema: 'compute.runtime-build-resource-inventory.v1', artifact_kind: 'BUILD_RESOURCE_INVENTORY',
+    runtime_liveness_proven: false, private_material_included: false, source_manifest_sha256: source.manifest_sha256, source };
+}
+
+export function reviewedBundlePlan(startupManifest, expectedSourceDigest, { includeRuntimeHost = false } = {}) {
+  if (typeof includeRuntimeHost !== 'boolean') fail('bundle_host_choice_invalid');
   if (!digestPattern.test(expectedSourceDigest || '')) fail('bundle_explicit_review_digest_required');
   const source = startupManifest?.source;
-  if (startupManifest?.schema !== 'compute.runtime-startup-manifest.v1'
-    || startupManifest.stable_during_startup !== true || startupManifest.private_material_included !== false
+  const startupReceipt = startupManifest?.schema === 'compute.runtime-startup-manifest.v1' && startupManifest.stable_during_startup === true;
+  const buildReceipt = startupManifest?.schema === 'compute.runtime-build-resource-inventory.v1'
+    && startupManifest.artifact_kind === 'BUILD_RESOURCE_INVENTORY' && startupManifest.runtime_liveness_proven === false
+    && source?.policy?.artifact_kind === 'BUILD_RESOURCE_INVENTORY' && source.policy.runtime_liveness_proven === false;
+  if ((!startupReceipt && !buildReceipt) || startupManifest.private_material_included !== false
     || source?.schema !== 'compute.runtime-source-snapshot.v1' || !Array.isArray(source.files)
     || source.files.length < 1 || source.files.length > 1000) fail('bundle_reviewed_startup_receipt_required');
   if (startupManifest.source_manifest_sha256 !== expectedSourceDigest || source.manifest_sha256 !== expectedSourceDigest
@@ -80,7 +102,7 @@ export function reviewedBundlePlan(startupManifest, expectedSourceDigest) {
     const selected = classifyRecord(record);
     if (selected) records.push(selected);
   }
-  for (const name of [...BUNDLE_ENTRY_POINTS, ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
+  for (const name of [...selectedEntries(includeRuntimeHost), ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
     if (!records.some(record => record.path === name)) fail('bundle_required_resource_missing');
   }
   const paths = records.map(record => record.path);
@@ -149,11 +171,12 @@ function verifyLocks(contents) {
     || !/^sha512-[A-Za-z0-9+/=]+$/.test(deno.npm?.['postgres@3.4.7']?.integrity || '')) fail('bundle_frozen_dependency_contract_invalid');
 }
 
-function bundleManifest(records, reviewedDigest) {
+function bundleManifest(records, reviewedDigest, includeRuntimeHost, reviewedFilesDigest) {
   const body = {
     schema: BUNDLE_SCHEMA,
     reviewed_startup_source_sha256: reviewedDigest,
-    entry_points: [...BUNDLE_ENTRY_POINTS],
+    reviewed_startup_files_sha256: reviewedFilesDigest,
+    entry_points: selectedEntries(includeRuntimeHost),
     files: records.map(({ path, kind, bytes, sha256: fileDigest }) => ({ path, kind, bytes, sha256: fileDigest })),
     policy: {
       artifact_kind: 'SOURCE_AND_NODE_DEPENDENCY_BUNDLE',
@@ -164,7 +187,7 @@ function bundleManifest(records, reviewedDigest) {
       private_config_included: false,
       binary_runtime_included: false,
       deno_dependency_cache_included: false,
-      provider_bootstrap_included: false,
+      provider_bootstrap_included: includeRuntimeHost,
       installed_client_qualified: false,
       process_code_attested: false,
       publisher_release_authority: false,
@@ -174,13 +197,15 @@ function bundleManifest(records, reviewedDigest) {
   return { ...body, bundle_sha256: sha256(JSON.stringify(body)) };
 }
 
-export async function stageRuntimeSourceBundle({ repositoryRoot, stagingDirectory, startupManifest, expectedSourceDigest }) {
+export async function stageRuntimeSourceBundle({ repositoryRoot, stagingDirectory, startupManifest, buildInventory, expectedSourceDigest, includeRuntimeHost = false }) {
+  if (startupManifest && buildInventory) fail('bundle_ambiguous_review_receipt');
+  startupManifest ||= buildInventory;
   const root = await canonicalDirectory(repositoryRoot);
   const stage = await canonicalDirectory(stagingDirectory);
   if (within(root, stage) || within(stage, root)) fail('bundle_external_stage_required');
   if ((await readdir(stage)).length !== 0) fail('bundle_empty_stage_required');
-  const records = reviewedBundlePlan(startupManifest, expectedSourceDigest);
-  const closure = await sourceClosure(BUNDLE_ENTRY_POINTS.map(name => join(root, name)), root);
+  const records = reviewedBundlePlan(startupManifest, expectedSourceDigest, { includeRuntimeHost });
+  const closure = await sourceClosure(selectedEntries(includeRuntimeHost).map(name => join(root, name)), root);
   const reviewedSources = records.filter(record => record.kind === 'source').map(record => record.path).sort();
   if (JSON.stringify(closure.files.map(file => slash(relative(root, file))).sort()) !== JSON.stringify(reviewedSources)
     || JSON.stringify(closure.npm) !== JSON.stringify(['npm:postgres@3.4.7'])) fail('bundle_reviewed_source_closure_mismatch');
@@ -203,17 +228,19 @@ export async function stageRuntimeSourceBundle({ repositoryRoot, stagingDirector
     await canonicalDirectory(resolve(target, '..'));
     await writeFile(target, contents.get(record.path), { flag: constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, mode: 0o644 });
   }
-  const manifest = bundleManifest(records, expectedSourceDigest);
+  const manifest = bundleManifest(records, expectedSourceDigest, includeRuntimeHost, startupFilesDigest(startupManifest.source.files));
   await writeFile(join(stage, BUNDLE_MANIFEST_FILE), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
-  await verifyRuntimeSourceBundle({ stagingDirectory: stage, startupManifest, expectedSourceDigest, expectedBundleDigest: manifest.bundle_sha256 });
+  await verifyRuntimeSourceBundle({ stagingDirectory: stage, startupManifest, expectedSourceDigest, expectedBundleDigest: manifest.bundle_sha256, includeRuntimeHost });
   return manifest;
 }
 
-export async function verifyRuntimeSourceBundle({ stagingDirectory, startupManifest, expectedSourceDigest, expectedBundleDigest }) {
+export async function verifyRuntimeSourceBundle({ stagingDirectory, startupManifest, buildInventory, expectedSourceDigest, expectedBundleDigest, includeRuntimeHost = false }) {
+  if (startupManifest && buildInventory) fail('bundle_ambiguous_review_receipt');
+  startupManifest ||= buildInventory;
   if (!digestPattern.test(expectedBundleDigest || '')) fail('bundle_explicit_bundle_digest_required');
   const stage = await canonicalDirectory(stagingDirectory);
-  const records = reviewedBundlePlan(startupManifest, expectedSourceDigest);
-  const expected = bundleManifest(records, expectedSourceDigest);
+  const records = reviewedBundlePlan(startupManifest, expectedSourceDigest, { includeRuntimeHost });
+  const expected = bundleManifest(records, expectedSourceDigest, includeRuntimeHost, startupFilesDigest(startupManifest.source.files));
   if (expected.bundle_sha256 !== expectedBundleDigest) fail('bundle_expected_digest_mismatch');
   const manifest = json(await fileBytes(stage, BUNDLE_MANIFEST_FILE));
   if (JSON.stringify(manifest) !== JSON.stringify(expected)) fail('bundle_manifest_mismatch');

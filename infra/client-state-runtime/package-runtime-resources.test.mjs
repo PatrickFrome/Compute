@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { sourceClosure } from './startup-source-manifest.mjs';
 import {
-  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA,
+  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY,
   reviewedBundlePlan, stageRuntimeSourceBundle, verifyRuntimeSourceBundle,
 } from './package-runtime-resources.mjs';
 
@@ -38,8 +38,9 @@ function refreshDigest(manifest) {
   return digest;
 }
 
-async function receipt(root) {
-  const closure = await sourceClosure(BUNDLE_ENTRY_POINTS.map(name => join(root, name)), root);
+async function receipt(root, { includeRuntimeHost = false } = {}) {
+  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY] : BUNDLE_ENTRY_POINTS;
+  const closure = await sourceClosure(entries.map(name => join(root, name)), root);
   const records = [];
   const add = async (path, id, kind) => {
     const bytes = await readFile(join(root, path));
@@ -113,6 +114,20 @@ test('reviewed source bundle is deterministic, complete and omits runtime/privat
     assert.equal(text.includes('binary/node'), false);
     assert.equal((await files(stage)).some(name => name.includes('dump')), false);
     assert.deepEqual(await verifyRuntimeSourceBundle({ ...options, expectedBundleDigest: first.bundle_sha256 }), first);
+  });
+});
+
+test('reviewed runtime host source is included only by explicit host selection', async () => {
+  await fixture(async ({ repository, stage, options }) => {
+    await writeFile(join(repository, RUNTIME_HOST_ENTRY), "import './launcher.mjs'; export const host = true;\n");
+    const manifest = await receipt(repository, { includeRuntimeHost: true });
+    const hostOptions = { ...options, startupManifest: manifest, expectedSourceDigest: manifest.source_manifest_sha256 };
+    await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch/);
+    const bundle = await stageRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true });
+    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY]);
+    assert.ok(bundle.files.some(file => file.path === RUNTIME_HOST_ENTRY));
+    assert.deepEqual(await verifyRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true, expectedBundleDigest: bundle.bundle_sha256 }), bundle);
+    await assert.rejects(verifyRuntimeSourceBundle({ ...hostOptions, expectedBundleDigest: bundle.bundle_sha256 }), /expected_digest_mismatch/);
   });
 });
 

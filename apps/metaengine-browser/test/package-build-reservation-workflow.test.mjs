@@ -63,3 +63,22 @@ test('Package Smoke has only one physical build and one candidate upload after r
   assert.equal((workflow.match(/Publish immutable candidate for parallel downstream qualification/g) || []).length, 1);
   assert.equal((workflow.match(/Upload exact-head Windows qualification evidence/g) || []).length, 1);
 });
+
+test('offline resource evidence travels with the candidate after clean-source gates', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const stage = workflow.indexOf('- name: Stage pinned offline client state runtime resources');
+  const beforeBuild = workflow.indexOf('- name: Verify tracked source is unchanged before physical packaging');
+  const build = workflow.indexOf('- name: Build exact-head unsigned NSIS package');
+  const beforePublish = workflow.indexOf('- name: Verify tracked source is unchanged before candidate publication');
+  const publish = workflow.indexOf('- name: Publish immutable candidate for parallel downstream qualification');
+  const install = workflow.indexOf('- name: Install exact-head package and prove Browser');
+  assert.ok(stage >= 0 && beforeBuild > stage && build > beforeBuild);
+  assert.ok(beforePublish > build && publish > beforePublish && install > publish);
+  for (const begin of [beforeBuild, beforePublish]) {
+    assert.match(workflow.slice(begin, workflow.indexOf('\n      - name:', begin + 1)), /git diff --exit-code HEAD -- \./);
+  }
+  const candidate = workflow.slice(publish, install);
+  assert.match(candidate, /packaged-client-state-runtime-proof\.json/);
+  assert.match(candidate, /offline-runtime-bundle\.json/);
+  assert.match(workflow, /offline_runtime_packaged_resources_verified -ne \$true/);
+});

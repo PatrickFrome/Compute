@@ -1,11 +1,11 @@
-import './local-state-provider-bootstrap.mjs';
 import { app, BaseWindow, dialog } from 'electron';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
+  registerPrimaryInstallerShutdownBarrier,
+  isInstallerShutdownArgv,
   validSingleInstanceLaunchData,
 } from './single-instance-guard.mjs';
-import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
 import {
   activateExistingPrimaryWindow,
   beginBrowserStartupJournal,
@@ -13,15 +13,6 @@ import {
   waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
 } from './browser-startup-observability.mjs';
-import {
-  inspectSelfUpdateStartup,
-  persistUpdatedSuccessorReceipt,
-  SUCCESSOR_STARTUP_PROBE_ONLY,
-} from './self-update-handoff.mjs';
-import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
-import { qualifyUpdatedSuccessorWhenHealthy, startSuccessorQualificationReprobeLoop } from './self-update-successor-qualification.mjs';
-import { shouldResumeSuccessorQualification } from './self-update-successor-recovery.mjs';
-import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -36,7 +27,11 @@ const interactiveNormalLaunch = browserRuntimeNeeded && !updatedLaunch;
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
-if (!guard.primary) {
+if (guard.installer_shutdown_control) {
+  // The guard owns this control process's bounded signal/re-notify and exit.
+  // It must reach an existing primary even with a stopped or invalid provider,
+  // and must never load a Browser runtime when no primary exists.
+} else if (!guard.primary) {
   // The old guard called app.quit() immediately. That made a hidden/stale old
   // primary indistinguishable from a successful "focus the existing window"
   // handoff. A normal user launch now waits only for a durable ACK tied to its
@@ -98,6 +93,61 @@ if (!guard.primary) {
     app.exit(0);
   }
 } else {
+  let preparationFinished;
+  const primaryPreparation = new Promise(resolve => { preparationFinished = resolve; });
+  let runtimeController;
+  let resilienceStartup = null;
+  registerPrimaryInstallerShutdownBarrier(app, async () => {
+    await primaryPreparation;
+    const controller = await runtimeController;
+    // An already-started ready continuation must settle before the guard stops
+    // HostResilience. A later ready event is fenced by the installer marker.
+    if (resilienceStartup) await resilienceStartup;
+    const cleanup = await controller.stopOwnedLocalRuntimeHost();
+    if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
+  });
+  try {
+  runtimeController = import('./local-runtime-host-controller.mjs');
+  const { installLocalRuntimeHostShutdown } = await runtimeController;
+  installLocalRuntimeHostShutdown(app);
+  // Singleton signaling and the secondary's local activation ACK never need a
+  // database. Only an admitted primary may validate/probe its runtime provider.
+  // Await this before importing HostResilience or self-update modules: their
+  // static dependencies resolve and pin the supervisor endpoint at evaluation.
+  try {
+    await import('./local-state-provider-bootstrap.mjs');
+  } catch (error) {
+    if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
+    const reason = String(error?.message || error).slice(0, 240);
+    console.error(JSON.stringify({
+      schema: 'metaengine.browser.provider-startup.v1',
+      state: 'LOCAL_PROVIDER_STARTUP_BLOCKED',
+      reason,
+      browser_runtime_started: false,
+      automatic_cloud_fallback: false,
+      authority_effect: false,
+    }));
+    try {
+      dialog.showErrorBox(
+        'METAENGINE Browser — local runtime unavailable',
+        `The selected local state runtime could not be verified.\nStart or repair that runtime and open the Browser again.\n\nDiagnostic: ${reason}`,
+      );
+    } catch {}
+    throw error;
+    }
+  }
+  if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
+  const { HostResilienceRuntime } = await import('./host-resilience-runtime.mjs');
+  const {
+    inspectSelfUpdateStartup,
+    persistUpdatedSuccessorReceipt,
+    SUCCESSOR_STARTUP_PROBE_ONLY,
+  } = await import('./self-update-handoff.mjs');
+  const { installSignedSupervisorHeartbeatQualificationHook } = await import('./self-update-signed-heartbeat.mjs');
+  const { qualifyUpdatedSuccessorWhenHealthy, startSuccessorQualificationReprobeLoop } = await import('./self-update-successor-qualification.mjs');
+  const { shouldResumeSuccessorQualification } = await import('./self-update-successor-recovery.mjs');
+  const { createClientGoalJournalFileStore } = await import('./client-goal-journal-file-store.mjs');
+
   if (process.platform === 'win32' && typeof app.setAppUserModelId === 'function') {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
@@ -152,6 +202,7 @@ if (!guard.primary) {
     // additionalData carries a launch nonce, and only a visible activation event
     // with that exact nonce can acknowledge the losing secondary.
     app.on('second-instance', (_event, _argv, _workingDirectory, additionalData) => {
+      if (isInstallerShutdownArgv(_argv) || globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
       void (async () => {
         const launchData = validSingleInstanceLaunchData(additionalData) ? additionalData : null;
         void recordStartup(
@@ -184,7 +235,7 @@ if (!guard.primary) {
     });
   }
 
-  // Load the Browser runtime before any slow startup awaits so it can register
+  // After provider preflight, load the Browser before slow update-inspection awaits so it can register
   // privileged protocol metadata and its ready handler in time. The handler is
   // fenced on this promise and cannot create the Browser window until host
   // resilience has completed its first bootstrap attempt.
@@ -448,9 +499,10 @@ if (!guard.primary) {
     // until this same one-shot host bootstrap settles.
     let readyContinuationStarted = false;
     const continueStartupAfterReady = async () => {
+      if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
       void recordStartup('APP_READY', 'ELECTRON_APP_READY');
       void recordStartup('HOST_RESILIENCE_BOOTSTRAP_STARTED', 'HOST_BOOTSTRAP_ATTEMPT_BEGIN');
-      const hostSnapshot = await hostResilience.start()
+      resilienceStartup = hostResilience.start()
         .catch((error) => ({
           schema: 'metaengine.host-resilience-runtime.v7',
           state: 'ERROR',
@@ -458,6 +510,8 @@ if (!guard.primary) {
           terminal: false,
           authority_effect: false,
         }));
+      const hostSnapshot = await resilienceStartup;
+      if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
       void recordStartup(
         'HOST_RESILIENCE_BOOTSTRAP_SETTLED',
         'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
@@ -657,4 +711,6 @@ if (!guard.primary) {
       app.once('ready', runReadyContinuation);
     }
   }
+  }
+  } finally { preparationFinished(); }
 }

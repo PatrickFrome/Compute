@@ -56,6 +56,7 @@ test('convergence product head contains no temporary patch authority and package
 
   const builder = JSON.parse(await source('electron-builder.test.json'));
   assert.deepEqual(builder.extraResources, [
+    { from: 'client-state-runtime-dist', to: 'client-state-runtime', filter: ['**/*'] },
     { from: 'native-dist/guardian', to: 'guardian-native', filter: ['**/*'] },
     { from: 'native-dist/guardian-bootstrap', to: 'guardian-bootstrap', filter: ['**/*'] },
     { from: 'devos-source-snapshot', to: 'devos-source-snapshot', filter: ['**/*'] },

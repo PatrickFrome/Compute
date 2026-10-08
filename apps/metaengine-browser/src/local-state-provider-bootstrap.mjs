@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import { canonicalLocalStateSupervisorBase, LOCAL_STATE_INSTANCE_UUID, localStateProviderHealthAttested, localStateProviderOwnerFile, validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity } from './local-state-provider-policy.mjs';
+import { startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost } from './local-runtime-host-controller.mjs';
 
 const CONFIG_MAX_BYTES = 16384;
 const RUNTIME_MAX_BYTES = 65536;
@@ -50,7 +51,11 @@ export async function bootstrapPersistentLocalProvider({
     }
     env.METAENGINE_SUPERVISOR_BASE_URL = config.base_url;
     delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
+    // An explicitly provisioned descriptor starts only its pinned offline host
+    // and existing database. The Browser never reads private server config.
+    const runtimeHost = await startConfiguredLocalRuntimeHost({ config, env });
     const identity = validateLocalStateRuntimeIdentity(await readBoundedJson(config.runtime_identity_file, RUNTIME_MAX_BYTES), config.base_url);
+    if (runtimeHost && identity.instance_id !== runtimeHost.instance_id) throw new Error('local_state_provider_host_identity_mismatch');
     // Runtime restarts issue a new UUID. The durable owner file binds the base
     // and identity-file location; fresh health confirms that file's current UUID.
     env.METAENGINE_LOCAL_STATE_INSTANCE_ID = identity.instance_id;
@@ -63,10 +68,17 @@ export async function bootstrapPersistentLocalProvider({
       state: 'READY', persistent: true, schema: config.schema, profile: config.profile,
       provider: 'LOCAL_POSTGRES', base_url: config.base_url, instance_id: identity.instance_id,
       owner_file: ownerFile, authority_effect: false,
+      ...(runtimeHost ? { runtime_host: runtimeHost } : {}),
     });
   } catch (error) {
-    failClosed(env, String(error?.message || 'LOCAL_PROVIDER_BOOT_FAILED').slice(0, 120));
-    throw error;
+    const cleanup = await stopOwnedLocalRuntimeHost().catch(() => ({ cleanup_confirmed: false }));
+    // Filesystem/network errors may include private paths or configuration.
+    // Only bounded fixed categories reach Browser logs and the local dialog.
+    const rawReason = String(error?.message || '');
+    const reason = cleanup.cleanup_confirmed !== true ? 'local_runtime_host_cleanup_unconfirmed'
+      : /^[a-z][a-z0-9_]{0,119}$/.test(rawReason) ? rawReason : 'local_state_provider_boot_failed';
+    failClosed(env, reason);
+    throw new Error(reason);
   }
 }
 
@@ -76,6 +88,7 @@ const nonRuntimeProbeArguments = new Set([
   '--metaengine-client-goal-journal-probe',
   '--metaengine-single-instance-probe',
   '--metaengine-self-update-smoke',
+  '--metaengine-installer-shutdown',
 ]);
 
 export function localProviderRuntimeBootRequired(argv = process.argv) {

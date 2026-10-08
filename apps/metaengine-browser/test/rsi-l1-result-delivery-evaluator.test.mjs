@@ -62,6 +62,30 @@ async function withModule(source, fn) {
   }
 }
 
+async function withControlledClock(t, fn) {
+  // Windows rounds small timers and a parallel suite adds scheduling latency.
+  // Exercise the unchanged 20/140 ms deadline ordering independently of that
+  // wall-clock noise; the production evaluator still measures real elapsed time.
+  let now = 0;
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(performance, 'now', () => now);
+  let settled = false;
+  const result = Promise.resolve().then(fn);
+  result.then(() => { settled = true; }, () => { settled = true; });
+  const started = Date.now();
+  try {
+    while (!settled) {
+      if (Date.now() - started > 30000) throw new Error('controlled_evaluator_clock_did_not_settle');
+      // Each tick gives promise continuations and filesystem IO a turn before
+      // advancing to the next deadline; runAll would race inner and outer timers.
+      await new Promise(resolve => setImmediate(resolve));
+      now += 1;
+      t.mock.timers.tick(1);
+    }
+    return await result;
+  } finally { t.mock.restoreAll(); t.mock.timers.reset(); }
+}
+
 test('candidate source contract rejects project/process/network/effect authority surfaces', () => {
   assert.equal(verifyCandidateSourceContract(COMPLIANT).ok, true);
   for (const forbidden of [
@@ -74,9 +98,9 @@ test('candidate source contract rejects project/process/network/effect authority
   }
 });
 
-test('compliant helper passes five repeated timeout/readback/healthy-control episodes with zero effect authority', async () => {
+test('compliant helper passes five repeated timeout/readback/healthy-control episodes with a controlled clock', async t => {
   await withModule(COMPLIANT, async (modulePath) => {
-    const result = await evaluateResultDeliveryCandidate({ modulePath, repetitions: 5, deadlineMs: 20, attempts: 3, outerMs: 140 });
+    const result = await withControlledClock(t, () => evaluateResultDeliveryCandidate({ modulePath, repetitions: 5, deadlineMs: 20, attempts: 3, outerMs: 140 }));
     assert.equal(result.schema, RSI_L1_RESULT_DELIVERY_EVALUATION_SCHEMA);
     assert.equal(result.passed, true);
     assert.equal(result.summary.result_delivery_wall_clock_bounded, true);
@@ -98,9 +122,9 @@ test('compliant helper passes five repeated timeout/readback/healthy-control epi
   });
 });
 
-test('legacy unbounded result delivery is falsified instead of hanging the evaluator', async () => {
+test('legacy unbounded result delivery is falsified at the controlled outer deadline', async t => {
   await withModule(LEGACY_UNBOUNDED, async (modulePath) => {
-    const result = await evaluateResultDeliveryCandidate({ modulePath, repetitions: 5, deadlineMs: 20, attempts: 2, outerMs: 70 });
+    const result = await withControlledClock(t, () => evaluateResultDeliveryCandidate({ modulePath, repetitions: 5, deadlineMs: 20, attempts: 2, outerMs: 70 }));
     assert.equal(result.passed, false);
     assert.equal(result.summary.result_delivery_wall_clock_bounded, false);
     assert.ok(result.runs.some((run) => /outer_timeout/.test(String(run.lost.error || ''))));
