@@ -35,9 +35,19 @@ async function canonicalExisting(file, kind) {
   let real;
   try { stat = await fs.lstat(resolved); real = await fs.realpath(resolved); }
   catch { throw new Error('local_runtime_host_path_unavailable'); }
-  if (stat.isSymbolicLink() || (kind === 'directory' ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)
-    || !samePath(real, resolved)) throw new Error('local_runtime_host_path_not_canonical');
-  return resolved;
+  if (stat.isSymbolicLink() || (kind === 'directory' ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)) {
+    throw new Error('local_runtime_host_path_not_canonical');
+  }
+  if (process.platform === 'win32') {
+    // realpath may expand valid 8.3 profile names; reject reparse-point
+    // ancestors instead and return the physical spelling for identity checks.
+    let current = path.parse(resolved).root;
+    for (const segment of path.relative(current, resolved).split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      if ((await fs.lstat(current)).isSymbolicLink()) throw new Error('local_runtime_host_path_not_canonical');
+    }
+  } else if (!samePath(real, resolved)) throw new Error('local_runtime_host_path_not_canonical');
+  return real;
 }
 
 export function validatePackagedLocalRuntimeBinding(pkg, { bundleDirectory, expectedBundleDigest, resourcesPath }) {

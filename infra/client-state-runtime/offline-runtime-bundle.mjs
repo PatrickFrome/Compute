@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 export const OFFLINE_INVENTORY_SCHEMA = 'compute.runtime-offline-resource-inventory.v1';
 export const OFFLINE_BUNDLE_SCHEMA = 'compute.runtime-offline-bundle.v1';
@@ -32,13 +32,28 @@ function safePath(path) {
   return path;
 }
 
+// On Windows os.tmpdir() and administrator profiles can contain legitimate 8.3
+// components (RUNNER~1), which realpath() expands. Reject reparse redirects
+// at every existing ancestor, rather than rejecting harmless short-name aliases.
+// Return the resolved physical spelling for all subsequent within()/stage checks.
+async function checkedRealPath(absolute) {
+  const real = await realpath(absolute);
+  if (process.platform === 'win32') {
+    let current = parse(absolute).root;
+    for (const segment of relative(current, absolute).split(sep).filter(Boolean)) {
+      current = join(current, segment);
+      if ((await lstat(current)).isSymbolicLink()) fail('offline_bundle_alias_forbidden');
+    }
+  } else if (!same(real, absolute)) fail('offline_bundle_alias_forbidden');
+  return real;
+}
+
 async function directory(path) {
   if (!isAbsolute(path || '')) fail('offline_bundle_absolute_path_required');
   const absolute = resolve(path);
   const info = await lstat(absolute);
   if (!info.isDirectory() || info.isSymbolicLink()) fail('offline_bundle_directory_invalid');
-  if (!same(await realpath(absolute), absolute)) fail('offline_bundle_alias_forbidden');
-  return absolute;
+  return checkedRealPath(absolute);
 }
 
 async function regular(path) {
@@ -46,7 +61,7 @@ async function regular(path) {
   const absolute = resolve(path);
   const info = await lstat(absolute);
   if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) fail('offline_bundle_regular_file_required');
-  if (!same(await realpath(absolute), absolute)) fail('offline_bundle_alias_forbidden');
+  await checkedRealPath(absolute);
   if (info.size > maxFileBytes) fail('offline_bundle_file_size_limit');
   return info;
 }
@@ -174,7 +189,7 @@ async function gather(sources) {
     postgresql: await directory(sources.postgresDirectory), deno_cache: await directory(sources.denoNpmDirectory),
     licenses: await directory(sources.licenseDirectory),
   };
-  const deno = resolve(sources.denoExecutable || '');
+  const deno = await checkedRealPath(resolve(sources.denoExecutable || ''));
   await regular(deno);
   const paths = [];
   const add = (path, absolute) => paths.push({ path, absolute, ...selectedFile(path) });
