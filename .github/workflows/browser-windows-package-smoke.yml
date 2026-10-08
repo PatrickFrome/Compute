@@ -435,6 +435,22 @@ jobs:
           node scripts/stage-client-state-runtime.mjs --work-dir "$env:RUNNER_TEMP\client-state-runtime-build" --out "$env:GITHUB_WORKSPACE\apps\metaengine-browser\client-state-runtime-dist"
           if ($LASTEXITCODE -ne 0) { throw 'client_state_runtime_stage_failed' }
 
+      - name: Qualify fresh local PostgreSQL 17 using exact staged offline runtime
+        working-directory: infra/client-state-runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:GITHUB_WORKSPACE 'apps/metaengine-browser/client-state-runtime-dist'
+          $manifestPath = Join-Path $bundle 'offline-runtime-bundle.json'
+          if (-not (Test-Path $manifestPath -PathType Leaf)) { throw 'physical_initdb_bundle_manifest_missing' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $digest = [string]$manifest.bundle_sha256
+          if ($digest -notmatch '^[a-f0-9]{64}$') { throw 'physical_initdb_bundle_digest_invalid' }
+          $env:LOCAL_STATE_TEST_FRESH_BUNDLE_DIRECTORY = $bundle
+          $env:LOCAL_STATE_TEST_FRESH_BUNDLE_SHA256 = $digest
+          node --test fresh-pg17-initdb.integration.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'physical_initdb_fresh_cluster_failed' }
+
       - name: Verify tracked source is unchanged before physical packaging
         shell: bash
         env:

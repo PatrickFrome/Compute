@@ -1,6 +1,16 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000009.1`.
+Reserved package identity is `0.7.0-dev.37780000014.1`.
+
+Windows regression: synthetic SCRAM password path, like binary path, must compare physical file identity rather than 8.3/long-name spelling. Prior .13 source/identity is consumed; exact Windows contracts and physical initdb need fresh qualification.
+
+Physical initdb Windows CI job restored to a unique step in proven valid workflow. Earlier workflow YAML was duplicated and was rejected before GitHub could schedule it.
+
+Restore complete Windows CI physical initdb workflow step (a previous YAML write was truncated), retain exact source-cleanliness gate, and reserve a new source identity. `0.7.0-dev.37780000011.1` is consumed and invalid for this source.
+
+Windows first-run test portability repair: compare realpath identities of verified initdb executable, not short-name spelling; accept Windows PG_VERSION newline normalization. Predecessor `0.7.0-dev.37780000010.1` was reserved and cannot qualify this changed head.
+
+Physical first-run PostgreSQL 17 qualification: the Windows Package Smoke producer now runs real bundled initdb.exe from the independently pinned staged offline resource tree on a disposable synthetic cluster before building the installer. It checks SCRAM settings, exclusive no-overwrite/retry semantics and no owner/profile writes. `0.7.0-dev.37780000009.1` is consumed; synthetic tests on that earlier head do not qualify the new exact source.
 
 Explicit fresh-PG17 initdb successor: separate owner-reviewed command can exclusively create a new SCRAM/UTF8/checksummed PostgreSQL 17 data directory after pinned offline-resource verification and repeated clean layout checks; never adopts an existing cluster or cleans partial data. The result is UNPROVISIONED, not Browser-ready, and source has no normal-startup caller. `0.7.0-dev.37780000008.1` package identity is consumed and cannot qualify these bytes.
 

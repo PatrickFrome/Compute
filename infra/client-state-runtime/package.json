@@ -7,7 +7,7 @@
     "start": "node launcher.mjs",
     "start:api": "node db-api.mjs",
     "test": "node --test first-run-preflight.test.mjs fresh-pg17-initdb.test.mjs db-api.test.mjs launcher.test.mjs client-local-provider.test.mjs persistent-client-provider.test.mjs local-vault-key.test.mjs startup-source-manifest.test.mjs runtime-verification-bindings.test.mjs package-runtime-resources.test.mjs offline-runtime-bundle.test.mjs runtime-host.test.mjs test/evidence-archive.test.mjs test/backup-verifier.test.mjs test/isolated-goal-fixture.test.mjs",
-    "test:integration": "node --test db-api.integration.test.mjs local-vault.integration.test.mjs native-supervisor.integration.test.mjs client-goal.integration.test.mjs bundled-host.integration.test.mjs"
+    "test:integration": "node --test fresh-pg17-initdb.integration.test.mjs db-api.integration.test.mjs local-vault.integration.test.mjs native-supervisor.integration.test.mjs client-goal.integration.test.mjs bundled-host.integration.test.mjs"
   },
   "dependencies": {
     "postgres": "3.4.7"
