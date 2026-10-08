@@ -117,3 +117,20 @@ Run `node --test infra/client-state-runtime/client-local-provider.test.mjs` to
 verify exact endpoint selection, secret separation, readiness checks and launch
 arguments. Live provider acceptance and a signed device readback are separate
 post-launch checks.
+
+
+## First-run owner file safety (October 8 successor)
+
+The first-run provider API publishes an owner file only by exclusive link of a
+fresh temporary file. Existing malformed, unreadable, hardlinked, or conflicting
+configurations are never overwritten by `replaceExisting`, including after a
+failed JSON/contract check. Requested replacement of a *different valid owner*
+now fails with `persistent_client_owner_replacement_requires_verified_cas`
+until a separately reviewed old-owner/new-owner CAS migration protocol exists.
+An unchanged valid owner still returns `ALREADY_CONFIGURED`. Existing directory
+ancestors are checked for junctions/symlinks both before and after creation;
+private profiles must not live inside the repository.
+
+This is source-level hardening, not PostgreSQL provisioning. It does not
+initialize PGDATA, create a Vault key, migrate an installed user's database,
+grant agent authority, or prove a working installed first-run flow.
