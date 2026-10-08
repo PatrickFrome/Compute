@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { inspectClientFirstRun } from './first-run-preflight.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
+import { initializeLocalVaultKey } from './local-vault-key.mjs';
 
 const runFile = promisify(execFile);
 const digest = /^[0-9a-f]{64}$/;
@@ -56,8 +57,10 @@ export async function runClientInitdb({
 export async function initializeFreshClientPg17({
   bundleDirectory, expectedBundleSha256, stateDirectory, pgDataDirectory,
   runtimeConfigFile, ownerFile, passwordFile, ownerAction,
-}, { verifyBundle = verifyOfflineRuntimeBundle, initdb = runClientInitdb } = {}) {
-  if (ownerAction !== 'INITIALIZE_FRESH_LOCAL_POSTGRES_17') fail('client_initdb_owner_approval_required');
+}, { verifyBundle = verifyOfflineRuntimeBundle, initdb = runClientInitdb,
+  initializeVaultKey = initializeLocalVaultKey } = {}) {
+  const stageVault = ownerAction === 'INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT';
+  if (!stageVault && ownerAction !== 'INITIALIZE_FRESH_LOCAL_POSTGRES_17') fail('client_initdb_owner_approval_required');
   if (!digest.test(expectedBundleSha256 || '')) fail('client_initdb_reviewed_bundle_digest_required');
   const selected = { bundleDirectory, stateDirectory, pgDataDirectory, runtimeConfigFile, ownerFile };
   const preflight = await inspectClientFirstRun(selected);
@@ -113,13 +116,33 @@ export async function initializeFreshClientPg17({
     if (version.trim() !== '17' || !config.isFile() || !base.isDirectory()) {
       fail('client_initdb_postcondition_unproven');
     }
+    // A Vault key may be created ONLY as part of the same explicitly
+    // owner-approved first-run initdb transaction. No separate existing-DB
+    // key-generation path is admitted by this API.
+    let vaultCreated = false;
+    if (stageVault) {
+      const expectedKey = path.join(pgDataDirectory, 'client-vault.key');
+      try { await fs.lstat(expectedKey); fail('client_initdb_unexpected_vault_key'); }
+      catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      const canonicalPgData = await fs.realpath(pgDataDirectory);
+      const receipt = await initializeVaultKey({ dataDirectory: canonicalPgData });
+      if (receipt?.created !== true || receipt?.plaintext_key_logged !== false
+        || path.resolve(receipt.key_file || '') !== path.resolve(path.join(canonicalPgData, 'client-vault.key'))) {
+        fail('client_initdb_vault_key_postcondition_unproven');
+      }
+      const info = await fs.lstat(expectedKey);
+      if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size !== 65) {
+        fail('client_initdb_vault_key_postcondition_unproven');
+      }
+      vaultCreated = true;
+    }
     const lockInfo = await fs.lstat(lockFile);
     if (!lockInfo.isFile() || lockInfo.isSymbolicLink() || lockInfo.nlink !== 1
       || (await fs.readFile(lockFile, 'utf8')) !== lockBytes) fail('client_initdb_owner_lock_changed');
     await fs.unlink(lockFile);
     return Object.freeze({ schema: 'compute.client-initdb-receipt.v1',
       state: 'PG17_INITIALIZED_UNPROVISIONED', database_initialized: true,
-      credentials_exported: false, vault_key_created: false, schema_provisioned: false,
+      credentials_exported: false, vault_key_created: vaultCreated, schema_provisioned: false,
       runtime_ready: false, owner_profile_written: false, automatic_cloud_fallback: false,
       authority_effect: false });
   } catch (error) {
