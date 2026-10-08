@@ -115,7 +115,17 @@ if (guard.installer_shutdown_control) {
   // Await this before importing HostResilience or self-update modules: their
   // static dependencies resolve and pin the supervisor endpoint at evaluation.
   try {
-    await import('./local-state-provider-bootstrap.mjs');
+    const providerBoot = await import('./local-state-provider-bootstrap.mjs');
+    const { requirePackagedLocalProviderAdmission } = await import('./local-state-provider-policy.mjs');
+    // This runs only after primary instance admission but strictly before
+    // HostResilience/main (whose static imports can resolve a cloud endpoint).
+    // Packaged Browser never silently selects the legacy hosted default.
+    requirePackagedLocalProviderAdmission({
+      isPackaged: app.isPackaged,
+      browserRuntimeNeeded,
+      bypassSingleInstance,
+      bootstrapState: providerBoot.persistentLocalProviderBootstrap.state,
+    });
   } catch (error) {
     if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
     const reason = String(error?.message || error).slice(0, 240);

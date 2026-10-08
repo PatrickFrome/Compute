@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
 import { provisionPersistentClientProvider } from '../../../infra/client-state-runtime/persistent-client-provider.mjs';
-import { LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, LOCAL_STATE_PROVIDER_PROFILE, localStateProviderOwnerFile } from '../src/local-state-provider-policy.mjs';
+import { LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, LOCAL_STATE_PROVIDER_PROFILE, localStateProviderOwnerFile, requirePackagedLocalProviderAdmission } from '../src/local-state-provider-policy.mjs';
 
 const execute = promisify(execFile);
 const endpointsUrl = new URL('../src/native-supervisor-endpoints.mjs', import.meta.url).href;
@@ -211,4 +211,31 @@ test('operator provisioning writes only an explicit external profile choice and 
   assert.deepEqual(JSON.parse(await fs.readFile(f.ownerFile, 'utf8')), f.config);
   assert.equal((await provisionPersistentClientProvider({ ...options, ownerChoice: 'LOCAL_POSTGRES' })).state, 'ALREADY_CONFIGURED');
   await assert.rejects(provisionPersistentClientProvider({ ...options, ownerChoice: 'LOCAL_POSTGRES', baseUrl: f.base.replace('/a2-browser', '/other/a2-browser') }));
+});
+
+
+// The package's local-only policy applies to real normal/updated primary
+// launches, not test-only smoke / diagnostic processes. This tests the pure
+// guard separately from the older compatibility tests, which retain their
+// historical non-packaged cloud-default assertions.
+test('packaged local-only primary rejects missing owner before supervisor imports', () => {
+  const normal = { isPackaged: true, browserRuntimeNeeded: true, bypassSingleInstance: false };
+  assert.equal(requirePackagedLocalProviderAdmission({ ...normal, bootstrapState: 'READY' }), true);
+  for (const state of ['NO_OWNER_CONFIG', 'OFFLINE_DIAGNOSTIC', 'BLOCKED', null, '']) {
+    assert.throws(() => requirePackagedLocalProviderAdmission({ ...normal, bootstrapState: state }), /local_state_packaged_owner_not_ready/);
+  }
+  assert.equal(requirePackagedLocalProviderAdmission({ ...normal, isPackaged: false, bootstrapState: 'NO_OWNER_CONFIG' }), true);
+  assert.equal(requirePackagedLocalProviderAdmission({ ...normal, browserRuntimeNeeded: false, bootstrapState: 'NO_OWNER_CONFIG' }), true);
+  assert.equal(requirePackagedLocalProviderAdmission({ ...normal, bypassSingleInstance: true, bootstrapState: 'NO_OWNER_CONFIG' }), true);
+});
+
+test('packaged owner admission precedes HostResilience and main imports', async () => {
+  const entry = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  const boot = entry.indexOf("const providerBoot = await import('./local-state-provider-bootstrap.mjs')");
+  const guard = entry.indexOf('requirePackagedLocalProviderAdmission({', boot);
+  const resilience = entry.indexOf("await import('./host-resilience-runtime.mjs')", guard);
+  const main = entry.indexOf("await import('./main.mjs')", guard);
+  assert.ok(boot >= 0 && guard > boot && resilience > guard && main > guard);
+  assert.match(entry, /isPackaged: app\.isPackaged/);
+  assert.match(entry, /bootstrapState: providerBoot\.persistentLocalProviderBootstrap\.state/);
 });
