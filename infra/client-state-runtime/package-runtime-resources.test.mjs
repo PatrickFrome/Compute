@@ -121,7 +121,9 @@ test('reviewed runtime host source is included only by explicit host selection',
   await fixture(async ({ repository, stage, options }) => {
     await writeFile(join(repository, RUNTIME_HOST_ENTRY), "import './launcher.mjs'; export const host = true;\n");
     await writeFile(join(repository, FIRST_RUN_INITDB_ENTRY), "export const firstRun = true;\n");
-    await writeFile(join(repository, REMOTE_SUPPORT_ENTRY), "export const remoteSupport = true;\n");
+    await writeFile(join(repository, REMOTE_SUPPORT_ENTRY), "import './windows-local-computer-executor.mjs'; export const remoteSupport = true;\n");
+    await writeFile(join(repository, 'apps/metaengine-browser/src/windows-local-computer-executor.mjs'), "import './computer-authority-plane.mjs'; export const executor = true;\n");
+    await writeFile(join(repository, 'apps/metaengine-browser/src/computer-authority-plane.mjs'), "export const authority = true;\n");
     const manifest = await receipt(repository, { includeRuntimeHost: true });
     const hostOptions = { ...options, startupManifest: manifest, expectedSourceDigest: manifest.source_manifest_sha256 };
     await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch|bundle_unexpected_source_record/);
@@ -130,6 +132,15 @@ test('reviewed runtime host source is included only by explicit host selection',
     assert.ok(bundle.files.some(file => file.path === RUNTIME_HOST_ENTRY));
     assert.ok(bundle.files.some(file => file.path === FIRST_RUN_INITDB_ENTRY));
     assert.ok(bundle.files.some(file => file.path === REMOTE_SUPPORT_ENTRY));
+    assert.ok(bundle.files.some(file => file.path === 'apps/metaengine-browser/src/windows-local-computer-executor.mjs'));
+    assert.ok(bundle.files.some(file => file.path === 'apps/metaengine-browser/src/computer-authority-plane.mjs'));
+    const unreviewed = structuredClone(manifest);
+    unreviewed.source.files.push({
+      id: 'repository/apps/metaengine-browser/src/unreviewed-control.mjs',
+      kind: 'source', bytes: 0, sha256: hash(''),
+    });
+    assert.throws(() => reviewedBundlePlan(unreviewed, refreshDigest(unreviewed), { includeRuntimeHost: true }),
+      /bundle_unexpected_source_record/);
     assert.deepEqual(await verifyRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true, expectedBundleDigest: bundle.bundle_sha256 }), bundle);
     await assert.rejects(verifyRuntimeSourceBundle({ ...hostOptions, expectedBundleDigest: bundle.bundle_sha256 }), /expected_digest_mismatch/);
   });
