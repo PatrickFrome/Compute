@@ -1,4 +1,5 @@
 import './local-state-provider-bootstrap.mjs';
+import { requireLocalOnlySupervisorBase } from './client-control-plane-topology.mjs';
 
 // R5 closure (ops audit 2026-09-21): the pinned Supabase endpoint used to be
 // hard-duplicated in native-supervisor-endpoints.mjs AND
@@ -22,8 +23,11 @@ const DEFAULT_NATIVE_SUPERVISOR_BASE = 'https://jhriwwsryeqsvvvufkok.supabase.co
 
 export const NATIVE_SUPERVISOR_DEFAULT_BASE = DEFAULT_NATIVE_SUPERVISOR_BASE;
 
+const localOnlyClient = process.env.METAENGINE_LOCAL_ONLY_CLIENT === '1';
 const selectedProvider = String(process.env.METAENGINE_STATE_PROVIDER || '').trim();
 if (selectedProvider && selectedProvider !== 'LOCAL_POSTGRES') throw new Error('native_supervisor_state_provider_invalid');
+if (localOnlyClient && selectedProvider !== 'LOCAL_POSTGRES')
+  throw new Error('native_supervisor_local_provider_required');
 export const NATIVE_SUPERVISOR_STATE_PROVIDER = selectedProvider || null;
 
 function requiredLocalProviderBase() {
@@ -46,6 +50,9 @@ export function resolveNativeSupervisorBase(rawBase = null) {
   const raw = rawBase == null
     ? String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim()
     : String(rawBase).trim();
+  // Installed local-only clients may not silently fall back to the historical
+  // hosted Supabase URL, including through fallback-console endpoint swaps.
+  if (localOnlyClient) return requireLocalOnlySupervisorBase(raw);
   if (!raw) return DEFAULT_NATIVE_SUPERVISOR_BASE;
   let parsed;
   try {
@@ -70,6 +77,8 @@ export function setNativeSupervisorBase(rawBase) {
   const raw = String(rawBase ?? '').trim();
   if (!raw) throw new Error('native_supervisor_base_url_required');
   const next = resolveNativeSupervisorBase(raw);
+  if (localOnlyClient && next !== pinnedLocalProviderBase)
+    throw new Error('native_supervisor_local_provider_endpoint_pinned');
   if (pinnedLocalProviderBase && next !== pinnedLocalProviderBase) throw new Error('native_supervisor_local_provider_endpoint_pinned');
   NATIVE_SUPERVISOR_BASE = next;
   return NATIVE_SUPERVISOR_BASE;
