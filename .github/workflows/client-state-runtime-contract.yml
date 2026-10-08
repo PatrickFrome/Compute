@@ -9,6 +9,7 @@ on:
       - 'apps/metaengine-browser/test/**'
       - 'apps/me2-ui/src/lib/cloud.ts'
       - 'apps/me2-ui/src/lib/fallback-console.ts'
+      - 'apps/me2-ui/src/lib/pg.ts'
       - '.github/workflows/client-state-runtime-contract.yml'
   push:
     paths:
@@ -18,6 +19,7 @@ on:
       - 'apps/metaengine-browser/test/**'
       - 'apps/me2-ui/src/lib/cloud.ts'
       - 'apps/me2-ui/src/lib/fallback-console.ts'
+      - 'apps/me2-ui/src/lib/pg.ts'
       - '.github/workflows/client-state-runtime-contract.yml'
   workflow_dispatch:
 

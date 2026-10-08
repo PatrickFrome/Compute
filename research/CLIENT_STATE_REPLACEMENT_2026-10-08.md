@@ -132,7 +132,9 @@ Verification of this increment: 50 runtime contracts and 74 focused
 provider/recovery/publication checks passed. The latest full Browser run passed
 4,394 of 4,395 tests; the real Windows capture test timed out under concurrent
 machine load. Its isolated rerun passed 36/36 and is recorded separately, not
-presented as an all-green full run. Browser syntax passed. Earlier 4,379/4,379 remains evidence
+presented as an all-green full run. That broad run began before the final
+publication-guard tests were added; the separate focused run covers those late
+additions. Browser syntax passed. Earlier 4,379/4,379 remains evidence
 for the earlier checkpoint, not automatic proof of this increment.
 
 The source candidate is published on `work/client-owned-state-runtime-v1`,
@@ -161,6 +163,76 @@ UI-boundary lint for that head on GitHub, extending the earlier offline TS
 guard checks. The historical R83 cloud canary-equivalence check fails because
 this source differs from its deployed pin; that gate remains intact. No
 production promotion or hosted deployment is inferred from other green jobs.
+
+The subsequent head `1dd4304aaca88f9f1ea0e840c0dc44821ee3540e` passed
+[runtime contracts on both Windows and Linux](https://github.com/PatrickFrome/Compute/actions/runs/37711625979)
+for the PR, with a separate
+[successful push run](https://github.com/PatrickFrome/Compute/actions/runs/37711621674).
+Its [full Browser job](https://github.com/PatrickFrome/Compute/actions/runs/37711625943/job/113098712933)
+passed 4,405 tests, zero failures and zero skips. The same run's
+[UI quality](https://github.com/PatrickFrome/Compute/actions/runs/37711625943/job/113098713018)
+and [focused authority contracts](https://github.com/PatrickFrome/Compute/actions/runs/37711625943/job/113098713045)
+jobs passed. The
+[historical cloud canary-equivalence job](https://github.com/PatrickFrome/Compute/actions/runs/37711626022/job/113098615299)
+still fails its deployed-v14 source-equivalence step and remains unchanged.
+These results qualify their exact source head, do not inherit the earlier
+signed local smoke's head binding, and do not qualify later packaging changes.
+
+## Next Increment: Source Packaging and Goal Protocol
+
+The next prepublication worktree increment adds a bounded
+[source/dependency staging tool](../infra/client-state-runtime/README-packaging.md).
+It requires an independently pinned startup-source digest, preserves the exact
+reviewed entrypoint closure and frozen Node PostgreSQL dependency, and rejects
+private artifacts, unexpected files, aliases and changed bytes. Its fixture
+imports the staged launcher/API outside the checkout without starting them.
+The historical running instance's receipt correctly rejects the subsequently
+changed `package.json`; no fresh physical bundle is attributed to that receipt.
+This is not a portable binary runtime or a reviewed installed release.
+
+Official Electron documentation distinguishes its resources directory from the
+ASAR virtual archive [9][10]. Runtime working directories and executable
+children require real filesystem resources. PostgreSQL's `pg_config` exposes
+separate executable, library, extension and shared-resource directories [11],
+with dependencies determined by build options [12]. Their binary closure and
+the Deno dependency cache still require independent packaging qualification.
+
+A new [opt-in goal fixture](../infra/client-state-runtime/README-goal-verification.md)
+creates its own PostgreSQL cluster, verifies the pinned private dump, restores
+schema only and confirms all 81 resulting tables are empty before synthetic
+seeding. It never accepts an external database/supervisor URL or copies source
+rows, role passwords or the installed profile. Real local API/Edge processes
+then exercise signed goal submit, progress and negative execution-proof
+readback, durable journal reload, lost-response reconciliation, scope/ID fences
+and intent-collision rejection. Two synthetic tasks remain READY at lease
+generation zero; no execution, claims, commands or runtime-control rows are
+produced. The temporary owned processes and marked data directory are removed.
+Four tests including this real fixture passed, recording 14 probes. This is
+`ISOLATED_SCHEMA_FIXTURE_SMOKE`, not deployed-client qualification or useful
+coding. Recovery reads the original request ID and never resubmits; universal
+HTTP submission replay idempotency is not inferred.
+
+The persistent-provider bootstrap now excludes exactly the five existing
+non-runtime entrypoint modes (version, profile, goal-journal, singleton and
+self-update smoke). They do not read the owner/runtime files, change provider
+environment or probe health. Normal, updated and runtime-smoke starts remain
+fail-closed, including lookalike diagnostic flags. The shared legacy UI SQL
+query helper also rejects an explicit local provider before contacting the
+unrelated Pigsty pool. No current UI consumer of `fleet-plane.ts` was found;
+this is a dormant-library safeguard, not a claim of previously live unsigned
+enqueue traffic. A signed local console adapter remains unfinished.
+
+Local verification for this increment: 83/83 runtime contracts and 20/20
+provider/UI guard checks passed. The latter production-body checks include
+eight UI tests and 12 persistent-provider tests. The real fixture's three
+configuration/cleanup guards also occur in the runtime total and are not
+counted as separate independent coverage. Independent review found no blocking
+issue in the changed guards or source staging. Full local UI typechecking was
+unavailable because this checkout has no installed UI dependencies; current
+GitHub UI quality results above apply only to their recorded earlier head.
+Fresh published-head CI is required. Neither hosted database nor the installed
+client/profile was changed. The pre-singleton normal boot health check, binary
+release integration and automatic local stack startup remain open gates.
 
 ## Remaining Dependencies and Order
 
@@ -229,3 +301,7 @@ All URLs below were fetched read-only on 2026-10-08.
 6. PostgreSQL 17 transaction isolation: https://www.postgresql.org/docs/17/transaction-iso.html
 7. Supabase database backup scope: https://supabase.com/docs/guides/platform/backups
 8. PostgreSQL 17 backup and restore: https://www.postgresql.org/docs/17/backup.html
+9. Electron resources path: https://www.electronjs.org/docs/latest/api/process#processresourcespath-readonly
+10. Electron ASAR limitations: https://www.electronjs.org/docs/latest/tutorial/asar-archives
+11. PostgreSQL 17 installation directories: https://www.postgresql.org/docs/17/app-pgconfig.html
+12. PostgreSQL 17 build requirements: https://www.postgresql.org/docs/17/install-requirements.html

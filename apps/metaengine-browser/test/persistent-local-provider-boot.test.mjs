@@ -85,6 +85,40 @@ test('self-update module import and successor/crash argv use the same persisted 
   }
 });
 
+test('exact non-runtime diagnostic modes neither read stopped or malformed owner state nor start network', async t => {
+  const f = await fixture(t);
+  await fs.rm(f.identityFile);
+  for (const ownerContents of [JSON.stringify(f.config), 'malformed owner JSON']) {
+    await fs.writeFile(f.ownerFile, ownerContents);
+    for (const flag of [
+      '--metaengine-version-probe', '--metaengine-profile-probe',
+      '--metaengine-client-goal-journal-probe', '--metaengine-single-instance-probe',
+      '--metaengine-self-update-smoke',
+    ]) {
+      const result = await probe(f, { firstImport: heartbeatUrl, argv: [flag] });
+      assert.equal(result.ok, true, flag);
+      assert.equal(result.boot.state, 'OFFLINE_DIAGNOSTIC');
+      assert.equal(result.boot.network_started, false);
+      assert.equal(result.provider, null);
+      assert.equal(result.instance, undefined);
+    }
+  }
+  assert.equal(f.requests.length, 0);
+});
+
+test('normal, recovery and lookalike diagnostic flags cannot bypass persistent provider validation', async t => {
+  const f = await fixture(t);
+  await fs.rm(f.identityFile);
+  for (const argv of [[], ['--updated'], ['--metaengine-smoke'], ['--metaengine-devplane-smoke'],
+    ['--metaengine-version-probe=true'], ['--metaengine-client-goal-journal-probe-extra']]) {
+    const result = await probe(f, { firstImport: heartbeatUrl, argv });
+    assert.equal(result.ok, false);
+    assert.equal(result.provider, 'LOCAL_POSTGRES');
+    assert.equal(result.boot_state, 'BLOCKED');
+  }
+  assert.equal(f.requests.length, 0);
+});
+
 test('runtime restart refreshes inherited old UUID from identity file only when current health attests the new instance', async t => {
   const f = await fixture(t);
   f.changeRuntime(secondId);

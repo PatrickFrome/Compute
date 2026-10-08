@@ -70,4 +70,20 @@ export async function bootstrapPersistentLocalProvider({
   }
 }
 
-export const persistentLocalProviderBootstrap = await bootstrapPersistentLocalProvider();
+const nonRuntimeProbeArguments = new Set([
+  '--metaengine-version-probe',
+  '--metaengine-profile-probe',
+  '--metaengine-client-goal-journal-probe',
+  '--metaengine-single-instance-probe',
+  '--metaengine-self-update-smoke',
+]);
+
+export function localProviderRuntimeBootRequired(argv = process.argv) {
+  return !argv.some(argument => nonRuntimeProbeArguments.has(String(argument)));
+}
+
+// These exact entrypoint modes do not load the Browser runtime. They must
+// remain offline even when the owner selected a stopped local server.
+export const persistentLocalProviderBootstrap = localProviderRuntimeBootRequired()
+  ? await bootstrapPersistentLocalProvider()
+  : Object.freeze({ state: 'OFFLINE_DIAGNOSTIC', persistent: false, network_started: false, authority_effect: false });

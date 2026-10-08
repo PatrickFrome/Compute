@@ -14,6 +14,16 @@ function productionSource(file, imports) {
 
 const cloudSource = productionSource('cloud.ts', ['import fs from "node:fs";']);
 const fallbackSource = productionSource('fallback-console.ts', ['import { EDGE_BASE, edgeHealth } from "@/lib/edge";', 'import { query } from "@/lib/pg";']);
+const pgSource = productionSource('pg.ts', ['import { Pool } from "pg";']);
+
+function pgFixture(env = {}) {
+  const calls = [];
+  class Pool {
+    async query(...args) { calls.push(args); return { rows: [{ fixture: true }], rowCount: 1 }; }
+  }
+  const module = new Function('Pool', 'process', 'globalThis', `${pgSource}\nreturn {query};`)(Pool, { env }, {});
+  return { module, calls, env };
+}
 
 function cloudFixture(env = {}) {
   const calls = { files: [], fetch: [] };
@@ -52,6 +62,24 @@ test('local console refuses every hosted read/RPC before credentials, files or n
     ]) await assert.rejects(operation(), /cloud_console_unavailable_in_local_profile/);
     assert.deepEqual(calls, { files: [], fetch: [] });
   }
+});
+
+test('explicit local profile cannot fall through to the legacy unsigned Pigsty query path', async () => {
+  for (const env of [{ METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES' }, { METAENGINE_STATE_PROVIDER: ' LOCAL_POSTGRES ' }]) {
+    const { module, calls } = pgFixture(env);
+    for (const statement of ['select public.devos_fleet_snapshot_v1($1::uuid)', 'select public.devos_fleet_enqueue_v1($1::uuid)']) {
+      await assert.rejects(module.query(statement, ['fixture-workspace']), /legacy_pg_console_unavailable_in_local_profile/);
+    }
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('an existing legacy SQL pool cannot bypass later local profile selection', async () => {
+  const { module, calls, env } = pgFixture();
+  assert.deepEqual(await module.query('select 1', []), { rows: [{ fixture: true }], rowCount: 1 });
+  env.METAENGINE_STATE_PROVIDER = 'LOCAL_POSTGRES';
+  await assert.rejects(module.query('select 2'), /legacy_pg_console_unavailable_in_local_profile/);
+  assert.deepEqual(calls, [['select 1', []]]);
 });
 
 test('a cached historic service identity cannot bypass a later explicit local profile', async () => {
