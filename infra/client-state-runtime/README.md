@@ -68,3 +68,7 @@ Existing data yields `HOLD_EXISTING_PRIVATE_STATE` and must follow a
 separate owner-authorized migration/reconciliation path. Packaging must first
 prove the independently pinned offline bundle; this inventory does not verify
 source or publisher integrity.
+
+## Experimental explicit fresh-PG17 initdb transaction
+
+`fresh-pg17-initdb.mjs` is an **opt-in, separate development-stage action**, never called by normal Browser startup. It requires explicit owner action, an independently pinned fully verified offline runtime bundle, a private existing SCRAM password file, read-only first-run inventory, and an exclusive PGDATA creation lock. It invokes only the verified `initdb` with fixed SHA-256 data checksums, SCRAM and UTF8/no-locale parameters and a restricted environment. Errors retain the review lock and partial cluster; there is no destructive auto-retry or deletion. After success it proves `PG_VERSION=17`, `postgresql.conf` and `base/` and reports `PG17_INITIALIZED_UNPROVISIONED`, not runtime readiness. It does **not** grant SQL roles, apply source schema, create/recover a Vault key, publish an owner profile or launch the Browser. Synthetic unit fixtures do not count as physical PostgreSQL integration; independent real-initdb and installed-first-run qualification remain required.
