@@ -79,3 +79,14 @@ test('parallel initial publication never overwrites or leaves a temporary owner 
   const files = await fs.readdir(path.dirname(input.ownerFile));
   assert.deepEqual(files, [path.basename(input.ownerFile)]);
 });
+
+test('identical existing profile through a reparse-point ancestor is never accepted', async t => {
+  const input = await options(t);
+  await provisionPersistentClientProvider(input);
+  const aliasRoot = path.join(path.dirname(input.appDataDirectory), 'alias-appdata');
+  await fs.symlink(input.appDataDirectory, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  const alias = { ...input, appDataDirectory: aliasRoot,
+    ownerFile: localStateProviderOwnerFile({ env: { APPDATA: aliasRoot }, platform: 'win32' }) };
+  await assert.rejects(provisionPersistentClientProvider(alias), /owner_directory_invalid/);
+  assert.equal((await provisionPersistentClientProvider(input)).state, 'ALREADY_CONFIGURED');
+});

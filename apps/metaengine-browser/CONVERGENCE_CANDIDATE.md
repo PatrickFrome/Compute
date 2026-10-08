@@ -1,6 +1,8 @@
 # METAENGINE Browser convergence candidate
 
-Reserved package identity is `0.7.0-dev.37780000006.1`.
+Reserved package identity is `0.7.0-dev.37780000007.1`.
+
+Hardening follow-up: even idempotent ALREADY_CONFIGURED owner admission now checks the entire physical directory ancestry before acceptance; a symlink/junction parent cannot masquerade as the existing safe owner. Added an installed-platform portable regression. `0.7.0-dev.37780000006.1` is consumed; prior green CI cannot be reused on this source.
 
 Owner-file non-overwrite successor: invalid or conflicting local provider configuration can no longer be replaced via a weak `replaceExisting` path; a reviewed migration CAS is required. Adds same-owner idempotence, symlink/hardlink/corrupt file negative tests and concurrent exclusive publication. No database/owner profile is migrated by this code. `0.7.0-dev.37780000005.1` is consumed and cannot be reused.
 

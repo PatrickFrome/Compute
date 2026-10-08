@@ -54,6 +54,10 @@ export async function provisionPersistentClientProvider({
     base_url: baseUrl, runtime_identity_file: runtimeIdentityFile, authority_effect: false,
     ...(runtimeHost === undefined ? {} : { runtime_host: runtimeHost }),
   });
+  const directory = path.dirname(ownerFile);
+  // Check ancestors even for an unchanged existing owner: idempotent admission
+  // must not trust a matching config reached through a reparse-point parent.
+  await assertPrivateOwnerDirectory(directory, { allowMissing: true });
   // Never replace a live owner file by rename: there is no durable
   // expected-version CAS here. A malformed/unreadable prior file MUST NOT be
   // treated as permission to overwrite it even with replaceExisting=true.
@@ -67,13 +71,12 @@ export async function provisionPersistentClientProvider({
     try { prior = validateLocalStateProviderConfig(JSON.parse(await fs.readFile(ownerFile, 'utf8'))); }
     catch { throw new Error('persistent_client_existing_file_invalid'); }
     if (JSON.stringify(prior) === JSON.stringify(config)) {
+      await assertPrivateOwnerDirectory(directory);
       return Object.freeze({ state: 'ALREADY_CONFIGURED', owner_file: ownerFile, config, authority_effect: false });
     }
     if (replaceExisting) throw new Error('persistent_client_owner_replacement_requires_verified_cas');
     throw new Error('persistent_client_owner_file_exists');
   }
-  const directory = path.dirname(ownerFile);
-  await assertPrivateOwnerDirectory(directory, { allowMissing: true });
   await fs.mkdir(directory, { recursive: true });
   await assertPrivateOwnerDirectory(directory);
   const temporary = `${ownerFile}.${randomUUID()}.tmp`;
