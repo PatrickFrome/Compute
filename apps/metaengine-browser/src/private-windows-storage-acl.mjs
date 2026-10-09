@@ -5,6 +5,10 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const done = 'METAENGINE_OWNER_DACL_VERIFIED';
+// Cold WinPS/.NET startup on Windows CI can exceed 15 seconds before the
+// first phase marker. Keep one bounded attempt; expiry still denies private
+// storage use, and the phase markers identify where that attempt stopped.
+const aclTimeoutMs = 120000;
 const fail = code => { throw new Error('private_windows_storage_'+code); };
 const absolute = value => typeof value === 'string' && path.isAbsolute(value)
   && value.length < 2048 && !/^(?:\\\\|\/\/)/.test(value) && !/[\x00-\x1f]/.test(value);
@@ -45,11 +49,11 @@ export async function verifyOwnerOnlyWindowsStorage(target,{
   try{
     ({stdout}=await run(exe,['-NoLogo','-NoProfile','-NonInteractive',
       '-EncodedCommand',Buffer.from(aclScript,'utf16le').toString('base64')],{
-      env:vars,shell:false,windowsHide:true,timeout:15000,maxBuffer:8192}));
+      env:vars,shell:false,windowsHide:true,timeout:aclTimeoutMs,maxBuffer:8192}));
   }catch(error){
     // Only predetermined phase IDs can reach error metadata. Raw stderr and
     // stdout may contain user profile paths, credentials or private PGDATA.
-    if(error?.killed||error?.code==='ETIMEDOUT')
+    if(error?.code==='ETIMEDOUT'||(error?.killed&&!error?.code))
       fail('powershell_timeout_'+safePhase(error?.stdout));
     if(error?.code==='ENOENT')fail('powershell_missing');
     fail('acl_not_confirmed_'+safePhase(error?.stdout));
