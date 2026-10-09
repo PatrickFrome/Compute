@@ -1,4 +1,4 @@
-import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
+import { app, BaseWindow, BrowserWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_MODEL, AGENT_PLATFORM_PROVIDER, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -19,6 +19,9 @@ import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { createWindowsLocalComputerExecutor } from './windows-local-computer-executor.mjs';
+import { startInstalledGithubChatRelay,revokeInstalledGithubChatPairing } from './github-chat-relay-bootstrap.mjs';
+import { showInstalledGithubChatSetup } from './github-chat-setup.mjs';
+import { CHAT_COMMAND_ACTIONS } from './chat-command-policy.mjs';
 import { assertLegacyProviderCommandAllowed } from './legacy-provider-quarantine.mjs';
 import { assertActiveInferenceCommandPolicy } from './active-inference-command-policy.mjs';
 import { AgentObservationPlane } from './agent-observation-plane.mjs';
@@ -216,6 +219,9 @@ let runtimeGenesisState = null;
 let computeHealthCache = { value: null, observed_ms: 0, promise: null };
 let lastComputeHealthState = null;
 let supervisorLoopbackRpc = null;
+let githubChatRelay = null;
+let githubChatSetup = null;
+let githubChatRelayError = null;
 const degradedStartupSubsystems = new Map();
 
 function failClosedRecoveryDocument(reason = 'ME2_PRIMARY_UNAVAILABLE') {
@@ -1677,6 +1683,7 @@ async function nativeSupervisorState() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     computer_authority: computerExecutor.snapshot(),
     loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
+    github_chat: githubChatState(),
     compute,
     guardian,
     host_resilience: {
@@ -1726,6 +1733,10 @@ async function executeNativeSupervisorCommand(command) {
 }
 
 async function executeNativeSupervisorCommandFenced(command) {
+  if (String(command?.issued_by || '').startsWith('github-chat:')) {
+    if (!githubChatRelay) throw new Error('github_chat_command_grant_revoked');
+    await githubChatRelay.assertCommandGrant(command);
+  }
   assertActiveInferenceCommandPolicy(command);
   const action = String(command?.action || '');
   const payload = command?.payload || {};
@@ -1938,6 +1949,63 @@ function ensureGuardianStatusObserver() {
   return guardianStatusObserver;
 }
 
+async function initGithubChatRelay() {
+  if (!githubChatRelay) {
+    try {
+      githubChatRelay = await startInstalledGithubChatRelay({
+        userDataPath: app.getPath('userData'),clientId: ensureSupervisorIdentity().snapshot()?.client_id,
+        localProvider: Boolean(explicitLocalSupervisorBase()),safeStorage,
+        control: {
+          status: () => nativeSupervisorState(),
+          capabilities: async () => ({schema:'metaengine.chat-control-capabilities.v1',
+            actions:[...CHAT_COMMAND_ACTIONS],computer:computerExecutor.snapshot(),
+            command_execution:'LOCAL_POSTGRES_LEASE',shared_desktop_arbitration:true,
+            authority_effect:false}),
+          commandSubmit: payload => nativeSupervisor.chatCommandSubmit(payload),
+          commandLookup: payload => nativeSupervisor.chatCommandLookup(payload),
+          commandReceipt: payload => nativeSupervisor.chatCommandReceipt(payload),
+          goalSubmit: payload => nativeSupervisor.clientGoalSubmit(payload),
+          goalProgress: payload => nativeSupervisor.clientGoalProgress(payload),
+          goalProof: payload => nativeSupervisor.clientGoalExecutionProof(payload),
+        },
+      });
+      githubChatRelayError = null;
+    } catch (error) {
+      githubChatRelayError = 'PAIRING_OR_TRANSPORT_UNCONFIRMED';
+      recordStartupSubsystemDegraded('GITHUB_CHAT_RELAY', error);
+    }
+  }
+  return githubChatState();
+}
+
+function githubChatState() {
+  return githubChatRelay?.snapshot() || {schema:'metaengine.github-chat-relay.v1',
+    state:githubChatRelayError ? 'BLOCKED' : 'NOT_PAIRED',reason:githubChatRelayError,authority_effect:false};
+}
+
+async function connectGithubChat() {
+  if (githubChatSetup) return githubChatSetup;
+  if (githubChatRelay?.snapshot().state === 'ACTIVE') return githubChatRelay.snapshot();
+  if (!explicitLocalSupervisorBase()) throw new Error('github_chat_local_postgres_required');
+  githubChatSetup = (async () => {
+    // A local reconnect action retires an inactive pairing even if transport or
+    // startup failed. No GitHub response is needed to persist this revocation.
+    if (githubChatRelay) await githubChatRelay.revoke();
+    else await revokeInstalledGithubChatPairing({userDataPath:app.getPath('userData'),
+      clientId:ensureSupervisorIdentity().snapshot()?.client_id});
+    const receipt = await showInstalledGithubChatSetup({BrowserWindow,ipcMain,
+      userDataPath:app.getPath('userData'),clientId:ensureSupervisorIdentity().snapshot()?.client_id,
+      localProvider:true,safeStorage});
+    if (receipt?.state === 'PAIRED') {
+      githubChatRelay?.stop();
+      githubChatRelay = null;
+      await initGithubChatRelay();
+    }
+    return receipt || {state:'CANCELED',authority_effect:false};
+  })().finally(() => {githubChatSetup = null;});
+  return githubChatSetup;
+}
+
 async function initNativeSupervisor() {
   if (!nativeSupervisor) {
     const identity = ensureSupervisorIdentity();
@@ -2067,12 +2135,15 @@ async function initNativeSupervisor() {
     supervisorLoopbackRpc = null;
     recordStartupSubsystemDegraded('SUPERVISOR_LOOPBACK_RPC', error);
   }
+  await initGithubChatRelay();
   if (!shellBrainPortConsumerId) attachShellBrainPort();
   await publishSnapshot().catch(() => {});
   return nativeSupervisor.snapshot();
 }
 
 function destroyWindowContents() {
+  githubChatRelay?.stop();
+  githubChatRelay = null;
   detachShellBrainPort();
   supervisorLoopbackRpc?.stop().catch(() => {});
   supervisorLoopbackRpc = null;
@@ -2708,6 +2779,25 @@ ipcMain.handle('metaengine:client:resume-admission', async (event) => {
   return resumeClientAdmissionOnce();
 });
 
+ipcMain.handle('metaengine:client:github-chat-status', async (event) => {
+  assertShellSender(event);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error('github_chat_sender_frame_untrusted');
+  return githubChatState();
+});
+ipcMain.handle('metaengine:client:github-chat-connect', async (event) => {
+  assertShellSender(event);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error('github_chat_sender_frame_untrusted');
+  return connectGithubChat();
+});
+ipcMain.handle('metaengine:client:github-chat-disconnect', async (event) => {
+  assertShellSender(event);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error('github_chat_sender_frame_untrusted');
+  if (githubChatRelay) return githubChatRelay.revoke();
+  const receipt = await revokeInstalledGithubChatPairing({userDataPath:app.getPath('userData'),
+    clientId:ensureSupervisorIdentity().snapshot()?.client_id});
+  githubChatRelayError = null;
+  return receipt;
+});
 ipcMain.handle('metaengine:client:guardian-status', async (event) => {
   assertShellSender(event);
   return ensureGuardianStatusObserver().observe({ force: true });
@@ -2868,6 +2958,7 @@ async function startBrowserRuntime() {
 }
 
 app.on('before-quit', () => {
+  githubChatRelay?.stop();
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;

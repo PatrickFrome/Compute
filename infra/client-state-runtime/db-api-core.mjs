@@ -65,7 +65,7 @@ export const TABLE_ALLOWLIST = Object.freeze({
   }),
   compute_fabric_a2_browser_supervisor_command_h205f22: Object.freeze({
     select: columns('command_id,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error'),
-    filters: columns('workspace_id,command_id,leased_by'), order: columns('issued_at'),
+    filters: columns('workspace_id,command_id,leased_by,target_client_id,idempotency_key'), order: columns('issued_at'),
   }),
 });
 

@@ -11,6 +11,7 @@ import { openRealtimeCommandWake } from './realtime-command-wake.mjs';
 import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
 import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
 import { resolveSelfHostedSupervisorConfig } from './self-hosted-config.mjs';
+import { createChatCommandRoutes } from './chat-command-routes.mjs';
 
 const localRuntime=resolveSelfHostedSupervisorConfig((name:string)=>Deno.env.get(name));
 const DB_URL=localRuntime.local?localRuntime.databaseUrl:Deno.env.get('SUPABASE_DB_URL')||'';
@@ -115,6 +116,12 @@ async function rpc(name:string,args:any={}){
   if(!/^[a-z0-9_]+$/i.test(name))throw new Error('rpc_name_invalid');
   return rest('/rpc/'+encodeURIComponent(name),{method:'POST',body:args});
 }
+const chatCommandRoutes=createChatCommandRoutes({local:localRuntime.local,rpc,json,
+  lookup:async({clientId,idempotencyKey}:any)=>{
+    const rows=await rest(`/${COMMAND_TABLE}?workspace_id=eq.${encodeURIComponent(WORKSPACE_ID)}&target_client_id=eq.${encodeURIComponent(clientId)}&idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=command_id,status&limit=1`);
+    return rows?.[0]||null;
+  },
+});
 async function boundedRpc(name:string,args:any,ms:number){
   let timer:any;
   try{return await Promise.race([
@@ -593,6 +600,7 @@ Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
     if(req.method==='GET'&&path==='/v1/admin/status')return json(200,await adminStatus(identity));
+    const chatCommand=await chatCommandRoutes({req,path,body,identity});if(chatCommand)return chatCommand;
     if(req.method==='POST'&&path==='/v1/device/guardian-enrollment/ticket')return issueGuardianEnrollmentTicket(identity);
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
     const emergency=await emergencyRoutes({req,path,body,clientId:identity.id});if(emergency)return emergency;

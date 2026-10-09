@@ -54,6 +54,20 @@ type GuardianStatusT = {
   automatic_retry_allowed: false;
   authority_effect: false;
 };
+type GithubChatStatusT = {
+  schema?: "metaengine.github-chat-relay.v1";
+  state: "ACTIVE" | "REVOKED" | "STOPPED" | "NOT_PAIRED" | "BLOCKED" | "PAIRED" | "CANCELED";
+  repository?: string;
+  issue_number?: number;
+  reason?: string;
+  last_error?: string | null;
+};
+type GithubChatBridge = {
+  githubChatStatus?: () => Promise<GithubChatStatusT>;
+  connectGithubChat?: () => Promise<GithubChatStatusT>;
+  disconnectGithubChat?: () => Promise<GithubChatStatusT>;
+};
+const githubChatBridge = () => (window as Window & { metaengineClient?: GithubChatBridge }).metaengineClient;
 const suState = (v: string): SysState =>
   v === "UP_TO_DATE" ? "Completed" : v === "DIVERGED" ? "Failed" : "Degraded";
 const SHORT7 = (h: string | null) => (h ? h.slice(0, 7) : "—");
@@ -97,6 +111,8 @@ export function SystemPage() {
   const [suBusy, setSuBusy] = useState(false);
   const [guardian, setGuardian] = useState<GuardianStatusT | null>(null);
   const [guardianBusy, setGuardianBusy] = useState(false);
+  const [githubChat, setGithubChat] = useState<GithubChatStatusT | null>(null);
+  const [githubChatBusy, setGithubChatBusy] = useState(false);
 
   // ── загрузчики ──
   const loadTokens = useCallback(async () => {
@@ -122,6 +138,27 @@ export function SystemPage() {
       return false;
     }
   }, []);
+  const loadGithubChat = useCallback(async () => {
+    const bridge = githubChatBridge();
+    if (!bridge?.githubChatStatus) { setGithubChat(null); return false; }
+    try {
+      const next = await bridge.githubChatStatus();
+      setGithubChat(next);
+      return next?.schema === "metaengine.github-chat-relay.v1";
+    } catch { setGithubChat(null); return false; }
+  }, []);
+  const changeGithubChat = useCallback(async (action: "connect" | "disconnect") => {
+    const bridge = githubChatBridge();
+    const change = action === "connect" ? bridge?.connectGithubChat : bridge?.disconnectGithubChat;
+    if (!change || githubChatBusy) return;
+    setGithubChatBusy(true);
+    try {
+      await change();
+      await loadGithubChat();
+    } catch {
+      toast({ title: "Управление из чата недоступно", description: "Проверьте подключение локального PostgreSQL и настройки GitHub.", variant: "destructive" });
+    } finally { setGithubChatBusy(false); }
+  }, [githubChatBusy, loadGithubChat, toast]);
   // Hidden areas neither mount their controls nor poll their resources.
   const loadCurrent = useCallback(async () => {
     if (readsInFlight.current.has(area)) return;
@@ -129,13 +166,13 @@ export function SystemPage() {
     setLoadState("LOADING");
     try {
       const loaders = area === "access" ? [loadTokens] : area === "policy" ? [loadPolicy]
-        : area === "recovery" ? [loadSu] : area === "runtime" ? [loadGuardian] : [];
+        : area === "recovery" ? [loadSu] : area === "runtime" ? [loadGuardian, loadGithubChat] : [];
       const results = await Promise.all(loaders.map((load) => load()));
       if (activeArea.current === area) setLoadState(results.every(Boolean) ? "LIVE" : "UNAVAILABLE");
     } catch {
       if (activeArea.current === area) setLoadState("UNAVAILABLE");
     } finally { readsInFlight.current.delete(area); }
-  }, [area, loadGuardian, loadPolicy, loadSu, loadTokens]);
+  }, [area, loadGuardian, loadGithubChat, loadPolicy, loadSu, loadTokens]);
   useEffect(() => {
     let current = true;
     const load = () => { if (current && document.visibilityState === "visible") void loadCurrent(); };
@@ -451,6 +488,37 @@ export function SystemPage() {
 
         {/* ── КОЛОНКА 2 ── */}
         <div className="flex min-w-0 flex-col gap-2">
+          {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="github-chat-control" aria-labelledby="github-chat-control-title">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="github-chat-control-title" className="text-[13px] font-medium text-zinc-200">Управление из чата</h2>
+              <button type="button" onClick={() => void loadGithubChat()} disabled={githubChatBusy}
+                className="h-7 border border-zinc-700 px-2 text-[12px] text-zinc-300 disabled:opacity-40">Обновить</button>
+            </div>
+            <p className="mt-2 text-[12px] text-zinc-400">Чат и его агенты получают обзор клиента, окон и экрана, управление приложениями и постановку задач. Подключение действует до отзыва доступа.</p>
+            <p className="mt-1 text-[12px] text-zinc-500">Отзыв отключает канал управления. Ранее принятые автономные задачи продолжают свой обычный цикл.</p>
+            <p role="status" className={`mt-3 text-[13px] ${githubChat?.state === "ACTIVE" ? "text-emerald-300" : "text-amber-200"}`}>
+              {githubChat?.state === "ACTIVE" ? "Подключено"
+                : githubChat?.state === "REVOKED" ? "Доступ отозван"
+                : githubChat?.state === "NOT_PAIRED" ? "Не подключено"
+                : githubChat?.state === "BLOCKED" ? "Подключение не подтверждено" : "Состояние недоступно"}
+            </p>
+            {githubChat?.repository ? <p className="mt-1 break-all text-[12px] text-zinc-400">
+              {githubChat.repository} · #{githubChat.issue_number}
+            </p> : null}
+            {githubChat?.last_error ? <p className="mt-1 text-[12px] text-amber-200">Доставка временно недоступна. Обновите состояние перед действием.</p> : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" data-testid="github-chat-connect"
+                disabled={githubChatBusy || !githubChat || githubChat.state === "ACTIVE"}
+                onClick={() => void changeGithubChat("connect")}
+                className="min-h-8 border border-cyan-700 bg-cyan-950/30 px-3 text-[12px] text-cyan-200 disabled:opacity-40">
+                {githubChatBusy ? "Ожидание…" : "Подключить GitHub"}
+              </button>
+              <button type="button" data-testid="github-chat-disconnect"
+                disabled={githubChatBusy || !githubChat || githubChat.state === "NOT_PAIRED"}
+                onClick={() => void changeGithubChat("disconnect")}
+                className="min-h-8 border border-zinc-700 px-3 text-[12px] text-zinc-300 disabled:opacity-40">Отозвать доступ</button>
+            </div>
+          </section> : null}
           {/* ME-МАТРИЦА */}
           {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="native-work-readiness" aria-labelledby="native-work-readiness-title">
             <div className="flex items-center justify-between gap-3">
