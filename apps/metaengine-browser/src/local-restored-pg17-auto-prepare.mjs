@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
-import { createReadStream, constants } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
@@ -131,6 +133,7 @@ export async function prepareDurableRestoredPg17({
   restoreReceiptFile, restoreReceiptSha256,
   postgresBinDirectory, tempDirectory=os.tmpdir(), platform=process.platform,
   run=exec, sourceOverride=null,
+  protectStorage=protectOwnerOnlyWindowsDirectory, verifyStorage=verifyOwnerOnlyWindowsStorage,
 }={}){
   if(platform!=='win32'||![oldConfigFile,localAppData,bundleDirectory,
     postgresBinDirectory,tempDirectory,restoreReceiptFile].every(local)
@@ -220,6 +223,11 @@ export async function prepareDurableRestoredPg17({
   await physical(parent,'directory');
   await absent(state);
   await fs.mkdir(state,{mode:0o700});
+  // mode=0700 is not a Windows DACL. Verify a restricted, inheritance-enabled
+  // owner/SYSTEM/Administrators security descriptor before any copied private
+  // PGDATA or database credentials can be created under this directory.
+  const protection=await protectStorage(state);
+  if(protection?.owner_dacl_verified!==true)fail('private_storage_acl_unverified');
   const staging=path.join(state,'.data-copy-pending');
   await fs.mkdir(staging,{mode:0o700});
   const digests=[];
@@ -233,7 +241,11 @@ export async function prepareDurableRestoredPg17({
     if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
       ||before.size!==item.size||before.mtimeMs!==item.mtimeMs)fail('source_changed');
     const original=await hashFile(sourceFile);
-    await fs.copyFile(sourceFile,target,constants.COPYFILE_EXCL);
+    // Node's Win32 CopyFile may preserve the TEMP source's permissive DACL.
+    // An exclusive NEW file stream inherits the protected target directory's
+    // ACL instead; verify file hashes after the copy and rehash the source.
+    await pipeline(createReadStream(sourceFile),
+      createWriteStream(target,{flags:'wx',mode:0o600}));
     const dest=await fs.lstat(target);
     if(dest.size!==item.size || (await hashFile(target))!==original
       || (await hashFile(sourceFile))!==original)fail('copy_verification_failed');
@@ -264,6 +276,12 @@ export async function prepareDurableRestoredPg17({
   // Never rewrite or publish source config. This is PRIVATE host state, not a
   // resource inside app.asar, GitHub or CI artifacts.
   await fs.writeFile(configFile,configBytes,{flag:'wx',mode:0o600});
+  const privatePaths=[configFile,path.join(destination,'client-vault.key'),
+    path.join(destination,'global','pg_control')];
+  for(const entry of privatePaths){
+    const checked=await verifyStorage(entry);
+    if(checked?.owner_dacl_verified!==true)fail('private_file_acl_unverified');
+  }
   const proof=path.join(state,'pg17-copy-proof.json');
   const manifestHash=createHash('sha256').update(JSON.stringify(digests)).digest('hex');
   await fs.writeFile(proof,JSON.stringify({
@@ -274,6 +292,8 @@ export async function prepareDurableRestoredPg17({
     vault_key_matched_original:true,external_tablespaces_accepted:false,
     original_source_modified:false,automatic_retry_allowed:false,
   },null,2)+'\n',{flag:'wx',mode:0o600});
+  if((await verifyStorage(proof))?.owner_dacl_verified!==true)
+    fail('private_file_acl_unverified');
   return Object.freeze({configFile,stateDirectory:state,pgDataDirectory:destination,
     fileCount:digests.length,copyVerified:true,vaultPreserved:true,automaticRetryAllowed:false});
 }
