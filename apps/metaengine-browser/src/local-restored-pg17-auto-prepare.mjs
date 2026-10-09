@@ -203,6 +203,11 @@ export async function prepareDurableRestoredPg17({
   await inspectStopped(path.join(postgresBinDirectory,'pg_controldata.exe'),staging,run);
   if(JSON.stringify((await filesIn(source)).map(x=>[x.rel,x.size,x.mtimeMs])) !==
       JSON.stringify(files.map(x=>[x.rel,x.size,x.mtimeMs])))fail('source_changed');
+  for(let index=0;index<files.length;index++){
+    const filename=path.join(source,files[index].rel);
+    if((await hashFile(filename))!==digests[index].sha256)
+      fail('source_digest_changed_after_copy');
+  }
   const targetDirs=[];
   if((await filesIn(staging,{directories:targetDirs})).length!==files.length
     ||JSON.stringify(targetDirs.sort())!==JSON.stringify(directories.sort()))fail('copy_file_count_mismatch');
