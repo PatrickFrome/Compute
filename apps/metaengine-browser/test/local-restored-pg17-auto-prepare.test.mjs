@@ -46,8 +46,8 @@ async function fixture(t){
   const args={platform:'win32',oldConfigFile,localAppData,bundleDirectory:bundle,bundleDigest:NEW,
     restoreReceiptFile,restoreReceiptSha256,
     postgresBinDirectory:path.join(bundle,'runtime','postgresql','bin'),
-    tempDirectory:temp,run:async(bin,argv)=>{
-      calls.push({bin,argv});return {stdout:validState};
+    tempDirectory:temp,run:async(bin,argv,options)=>{
+      calls.push({bin,argv,options});return {stdout:validState};
     }};
   return {home,source,temp,original,oldConfigFile,previous,bundle,localAppData,calls,args};
 }
@@ -178,6 +178,9 @@ test('PostgreSQL system identity is inspected using a locale-stable, no-shell ch
   for(const call of f.calls){
     assert.equal(call.argv[0],'-D');
     assert.equal(call.bin.endsWith('pg_controldata.exe'),true);
+    assert.equal(call.options.shell,false);
+    assert.equal(call.options.env.LC_ALL,'C');
+    assert.equal(call.options.env.LANG,'C');
   }
 });
 
