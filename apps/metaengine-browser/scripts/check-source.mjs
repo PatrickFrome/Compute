@@ -161,6 +161,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/remote-support-mcp.mjs",
   "src/chat-command-policy.mjs",
   "src/github-chat-relay.mjs",
+  "src/github-chat-egress-policy.mjs",
   "src/github-chat-relay-journal.mjs",
   "src/github-chat-relay-bootstrap.mjs",
   "src/github-chat-capture.mjs",
