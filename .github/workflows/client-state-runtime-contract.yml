@@ -31,6 +31,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  checkpoint-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17.11@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+        env:
+          POSTGRES_PASSWORD: checkpoint-fixture-only
+          POSTGRES_DB: checkpoint_fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d checkpoint_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      LOCAL_STATE_TEST_ADMIN_DATABASE_URL: postgres://postgres:checkpoint-fixture-only@127.0.0.1:5432/checkpoint_fixture
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install runtime dependencies
+        working-directory: infra/client-state-runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify real checkpoint JSONB binding and append-only replay
+        working-directory: infra/client-state-runtime
+        run: node --test development-checkpoint.integration.test.mjs
+
   contracts:
     strategy:
       fail-fast: false

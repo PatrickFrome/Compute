@@ -99,9 +99,11 @@ function validateCheckpoint(value) {
   return expected;
 }
 
+// Bind canonical JSON as text so postgres.js does not serialize the string
+// again as a JSON scalar before PostgreSQL converts it to a JSONB object.
 const INSERT = `INSERT INTO destruktion_meta.metaengine_audit_checkpoint_v1
   (checkpoint_id, project_ref, source_parent_sha, evidence_state, scope, canonical_checkpoint, authority_effect, payload)
-  VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::boolean, $7::boolean, $8::jsonb)
+  VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::boolean, $7::boolean, $8::text::jsonb)
   ON CONFLICT (checkpoint_id) DO NOTHING RETURNING checkpoint_id`;
 const READBACK = `SELECT checkpoint_id, project_ref, source_parent_sha, evidence_state, scope,
   canonical_checkpoint, authority_effect, payload, payload::text AS payload_json, payload_sha256
