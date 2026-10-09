@@ -7,7 +7,8 @@ import test from 'node:test';
 import { prepareDurableRestoredPg17 } from '../src/local-restored-pg17-auto-prepare.mjs';
 
 const OLD='a'.repeat(64),NEW='b'.repeat(64);
-const validState='Database cluster state:               shut down\n';
+const identifier='7512345678901234567';
+const validState='Database system identifier: '+identifier+'\nDatabase cluster state: shut down\n';
 async function fixture(t){
   const home=await fs.mkdtemp(path.join(os.tmpdir(),'pg17-auto-prepare-test-'));
   t.after(()=>fs.rm(home,{recursive:true,force:true}));
@@ -17,6 +18,10 @@ async function fixture(t){
   for(const dir of [temp,localAppData,path.dirname(original),bundle,
     path.join(source,'global'),path.join(source,'pg_wal'),path.join(source,'pg_tblspc'),
     path.join(source,'base','16384')])await fs.mkdir(dir,{recursive:true});
+  await fs.mkdir(path.join(original,'global'),{recursive:true});
+  await fs.writeFile(path.join(original,'PG_VERSION'),'17\n');
+  await fs.writeFile(path.join(original,'global','pg_control'),Buffer.from('original_control_read_only'));
+  await fs.writeFile(path.join(original,'client-vault.key'),'f'.repeat(64)+'\n');
   const file=async(name,body)=>fs.writeFile(path.join(source,name),body);
   await file('PG_VERSION','17\n');
   await file('client-vault.key','f'.repeat(64)+'\n');
@@ -73,13 +78,13 @@ test('auto prepare copies clean stopped PG17, preserves all files and empty dirs
   assert.equal(proof.file_count,4);
   assert.equal(proof.vault_key_preserved,true);
   assert.equal(proof.original_source_modified,false);
-  assert.equal(f.calls.length,3,'source control state checked twice, copied clone once');
+  assert.equal(f.calls.length,4,'original read only, source twice, copied clone once');
   await assert.rejects(prepareDurableRestoredPg17(f.args),/existing_destination_requires_review/);
 });
 
 test('auto prepare refuses original in-production state, missing copy and stale postmaster pid',async t=>{
   const f=await fixture(t);
-  await assert.rejects(prepareDurableRestoredPg17({...f.args,run:async()=>({stdout:'Database cluster state: in production'})}),
+  await assert.rejects(prepareDurableRestoredPg17({...f.args,run:async()=>({stdout:'Database system identifier: '+identifier+'\nDatabase cluster state: in production'})}),
     /pg_control_not_cleanly_shut_down/);
   await fs.writeFile(path.join(f.source,'postmaster.pid'),'99999\n');
   await assert.rejects(prepareDurableRestoredPg17(f.args),/existing_destination_requires_review/);
@@ -99,6 +104,19 @@ test('auto prepare refuses an unverified restore report before reading or copyin
   await assert.rejects(prepareDurableRestoredPg17({...f.args,
     restoreReceiptSha256:createHash('sha256').update(changed).digest('hex')}),
     /restore_report_unverified/);
+  await assert.rejects(fs.lstat(path.join(f.localAppData,'METAENGINE','restored-postgres-17')),
+    e=>e.code==='ENOENT');
+});
+
+test('auto prepare rejects wrong original Vault or system identifier before any persistent copy',async t=>{
+  const f=await fixture(t);
+  await fs.writeFile(path.join(f.original,'client-vault.key'),'e'.repeat(64)+'\n');
+  await assert.rejects(prepareDurableRestoredPg17(f.args),/vault_identity_mismatch/);
+  await fs.writeFile(path.join(f.original,'client-vault.key'),'f'.repeat(64)+'\n');
+  await assert.rejects(prepareDurableRestoredPg17({...f.args,
+    run:async(exe,argv)=>({stdout:argv[1]===f.original
+      ?'Database system identifier: 8000000000000000000\nDatabase cluster state: in production\n'
+      :validState})}),/postgres_system_identity_mismatch/);
   await assert.rejects(fs.lstat(path.join(f.localAppData,'METAENGINE','restored-postgres-17')),
     e=>e.code==='ENOENT');
 });
