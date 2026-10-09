@@ -870,7 +870,7 @@ jobs:
 
       - name: Prove normal packaged UI boot and second-instance activation
         # The owned provider requires an explicit private fixture, absent on this runner.
-        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1')
+        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1')
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
