@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const workflow = readFileSync(new URL('../../../.github/workflows/client-v1-supabase-edge-live-probe.yml', import.meta.url), 'utf8');
 const producerGuard = "github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'";
-const guard = "github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1')";
+const guard = "github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1')";
 const guardedJobs = [
   ['client-v1-supabase-edge-live-probe.yml', 'public-health'],
   ['browser-windows-installed-chat-qualification.yml', 'windows-installed-chat-qualification'],
@@ -47,6 +47,7 @@ test('guard preserves other PRs, historical push and explicit dispatch without a
   assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/client-pg17-private-windows-acl-v1' }), false);
   assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/client-pg17-private-windows-acl-r2-v1' }), false);
   assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/client-pg17-private-windows-acl-r3-v1' }), false);
+  assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/client-pg17-private-windows-acl-r4-v1' }), false);
   assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/another-candidate' }), true);
   assert.equal(permits({ event_name: 'push', head_ref: '' }), true);
   assert.equal(permits({ event_name: 'workflow_dispatch', head_ref: 'work/client-owned-state-runtime-v1' }), true);
@@ -66,7 +67,7 @@ test('offline successor builds a physical package without qualifying historical 
   const condition = normalStep.match(/\n\s*if: ([^\r\n]+)/)?.[1];
   assert.ok(condition, 'normal boot has a separate admission condition');
   const qualifiesNormalBoot = new Function('github', `return ${condition};`);
-  for (const branch of ['work/client-runtime-restart-singleton-v1', 'work/client-restored-pg17-runtime-repair-v1', 'work/client-mcp-offline-installer-qualification-v1', 'work/client-mcp-db-connect-operator-v1', 'work/client-installed-pg17-setup-wizard-v1', 'work/client-github-chat-control-v1', 'work/client-github-chat-egress-redaction-v1', 'work/client-pg17-auto-prepare-durable-v1', 'work/client-github-chat-result-egress-v1', 'work/client-pg17-private-windows-acl-v1', 'work/client-pg17-private-windows-acl-r2-v1', 'work/client-pg17-private-windows-acl-r3-v1']) {
+  for (const branch of ['work/client-runtime-restart-singleton-v1', 'work/client-restored-pg17-runtime-repair-v1', 'work/client-mcp-offline-installer-qualification-v1', 'work/client-mcp-db-connect-operator-v1', 'work/client-installed-pg17-setup-wizard-v1', 'work/client-github-chat-control-v1', 'work/client-github-chat-egress-redaction-v1', 'work/client-pg17-auto-prepare-durable-v1', 'work/client-github-chat-result-egress-v1', 'work/client-pg17-private-windows-acl-v1', 'work/client-pg17-private-windows-acl-r2-v1', 'work/client-pg17-private-windows-acl-r3-v1', 'work/client-pg17-private-windows-acl-r4-v1']) {
     assert.equal(produces({ event_name: 'pull_request', head_ref: branch }), true);
     assert.equal(qualifiesNormalBoot({ event_name: 'pull_request', head_ref: branch }), false);
   }
