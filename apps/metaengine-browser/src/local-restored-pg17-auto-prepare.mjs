@@ -230,6 +230,8 @@ export async function prepareDurableRestoredPg17({
   if(protection?.owner_dacl_verified!==true)fail('private_storage_acl_unverified');
   const staging=path.join(state,'.data-copy-pending');
   await fs.mkdir(staging,{mode:0o700});
+  if((await verifyStorage(staging,{operation:'VERIFY_DIRECTORY'}))?.owner_dacl_verified!==true)
+    fail('private_storage_acl_unverified');
   const digests=[];
   for(const dir of directories.sort((a,b)=>a.split('/').length-b.split('/').length))
     await fs.mkdir(path.join(staging,dir),{recursive:true,mode:0o700});
@@ -269,6 +271,8 @@ export async function prepareDurableRestoredPg17({
   if((await filesIn(staging,{directories:targetDirs})).length!==files.length
     ||JSON.stringify(targetDirs.sort())!==JSON.stringify(directories.sort()))fail('copy_file_count_mismatch');
   await fs.rename(staging,destination);
+  if((await verifyStorage(destination,{operation:'VERIFY_DIRECTORY'}))?.owner_dacl_verified!==true)
+    fail('private_storage_acl_unverified');
   const updated={...prior,bundle_directory:bundleDirectory,expected_bundle_sha256:bundleDigest,
     state_directory:state,pg_data_directory:destination};
   const configFile=path.join(state,'runtime-host-config.json');
