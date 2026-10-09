@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { controlActionDescriptor } from './control-actions-manifest.mjs';
 import { CHAT_COMMAND_ACTIONS } from './chat-command-policy.mjs';
+import { projectGithubChatReplyResult } from './github-chat-egress-policy.mjs';
 
 export const GITHUB_CHAT_PAIRING_SCHEMA='metaengine.github-chat-pairing.v1';
 export const GITHUB_CHAT_REQUEST_MARKER='<!-- metaengine-chat-request:v1 -->';
@@ -173,9 +174,10 @@ export class GithubChatRelay {
   }
   async #reply(request,result){
     await this.#repository();
-    let projected=structuredClone(result);
-    if(Buffer.byteLength(JSON.stringify(projected))>48_000)projected={state:'RESULT_TOO_LARGE',
-      result_sha256:digest(JSON.stringify(projected)),use_bounded_observation:true,authority_effect:false};
+    // No arbitrary Supervisor/Host Agent result is eligible for private
+    // GitHub publication until it passes the bounded secret/path projector.
+    // The original receipt stays in the owner's local PostgreSQL journal.
+    const projected=projectGithubChatReplyResult(result);
     const value={schema:'metaengine.github-chat-reply.v1',relay_id:this.#pairing.relay_id,client_id:this.#pairing.client_id,
       request_comment_id:request.comment_id,request_id:request.request_id,body_sha256:request.body_sha256,
       result:projected,transport_delivery_is_authority:false,automatic_retry_allowed:false,authority_effect:false};
