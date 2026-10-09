@@ -65,6 +65,8 @@ Learning/artifact callbacks уже подключены к realtime plane в `na
 
 Другие незакрытые границы:
 
+- **Проект на ПК и общая лента действий (P1 для пользовательского контракта).** `workspace-manager.mjs` умеет только построить in-memory reservation и Git worktree plan/readback; production поиск не нашёл вызова `createWorkspaceReservation`/`planWorkspaceMaterialization` вне тестов. `meta-orchestrator-workspace-admission.mjs` требует заранее созданный READY binding и не выбирает, не создаёт и не исполняет workspace. Tasks UI остаётся read-only, Code UI только читает `/worktrees`. Общая видимость ограничена глобальным bounded WS буфером (300) и запросами `/events?task=...`; durable workspace-scoped feed отсутствует. Следующий срез: idempotent Native Supervisor create/open-project effect, локальный Git executor и readback, DB binding, Task Sheet command и project/task/agent-linked event feed.
+
 - Production MCP CONTROL требует серверного PostgreSQL lease resolver с доказанным происхождением и fencing. Исправленный host contract предоставляет точку подключения, но сам её не реализует.
 - Реальный установленный клиент, восстановленная приватная БД, полезная задача и crash/resume в одной цепочке пока не проверены. Синтетический goal submission/restart test прямо ограничен сценарием без dispatch.
 - Масштабирование должно отделять общее число агентов от ограниченной активной параллельности: durable queue, lease/epoch, capacity, backpressure, архив/ротация истории. Физически неограниченная одновременная работа на одном ПК невозможна.
