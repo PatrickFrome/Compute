@@ -46,7 +46,7 @@ async function fixture(t){
   const args={platform:'win32',oldConfigFile,localAppData,bundleDirectory:bundle,bundleDigest:NEW,
     protectStorage:async target=>{aclCalls.push({operation:'PROTECT_DIRECTORY',target});
       return {owner_dacl_verified:true};},
-    verifyStorage:async target=>{aclCalls.push({operation:'VERIFY_FILE',target});
+    verifyStorage:async (target,{operation='VERIFY_FILE'}={})=>{aclCalls.push({operation,target});
       return {owner_dacl_verified:true};},
     restoreReceiptFile,restoreReceiptSha256,
     postgresBinDirectory:path.join(bundle,'runtime','postgresql','bin'),
@@ -115,7 +115,9 @@ test('DACL failure blocks creating private data or new config, never falls back 
 test('failed readback of config/Vault ACL never returns configured success',async t=>{
   const f=await fixture(t);
   await assert.rejects(prepareDurableRestoredPg17({...f.args,
-    verifyStorage:async()=>({owner_dacl_verified:false})}),/private_file_acl_unverified/);
+    verifyStorage:async (_target,{operation='VERIFY_FILE'}={})=>({
+      owner_dacl_verified:operation!=='VERIFY_FILE',
+    })}),/private_file_acl_unverified/);
   assert.equal(f.aclCalls[0].operation,'PROTECT_DIRECTORY');
 });
 
