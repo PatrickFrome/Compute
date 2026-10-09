@@ -34,6 +34,8 @@ test('computer actions use the computer RPC and cannot fabricate a lease or exec
   }})]});await h.relay.start({poll:false});
   assert.equal(h.state.admissions[0].name,'h205f22_a2_browser_supervisor_issue_computer_v1');
   assert.equal(replies(h.state)[0].result.execution_authority,false);
+  assert.equal(replies(h.state)[0].result.command_leasing,false);
+  assert.equal(replies(h.state)[0].result.replayed,false);
   for(const key of ['effect_binding','lease','context','command_id']){
     const denied=await harness(t,{comments:[request('COMMAND_SUBMIT',{action:'COMPUTER_ACTION',payload:{
       agent_id:'agent_test-fixture',[key]:{fake:true},
@@ -148,6 +150,7 @@ test('GitHub STATUS reply publishes redacted projection, not raw Host Agent cred
       schema:'metaengine.status.v1',state:'READY',agent_count:6,
       database_url:'postgres://service:secret@127.0.0.1:5432/metaengine',
       private_config_file:privateHost,headers:{authorization:'Bearer abcdefghijklmnop'},
+      ['ghp_abcdefghijabcdefghij']:true,[privateHost]:123,
       message:'Connected to PostgreSQL 17',
     })},
   });
@@ -158,7 +161,7 @@ test('GitHub STATUS reply publishes redacted projection, not raw Host Agent cred
   assert.equal(published.database_url,'[REDACTED]');
   assert.equal(published.private_config_file,'[REDACTED]');
   assert.equal(published.headers,'[REDACTED]');
-  for(const secret of ['postgres://service:secret','Bearer abcdefghijklmnop',privateHost])
+  for(const secret of ['postgres://service:secret','Bearer abcdefghijklmnop',privateHost,'ghp_abcdefghijabcdefghij'])
     assert(!h.state.comments.at(-1).body.includes(secret));
 });
 
