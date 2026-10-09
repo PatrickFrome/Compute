@@ -84,7 +84,7 @@ test('auto prepare copies clean stopped PG17, preserves all files and empty dirs
   assert.equal(proof.original_source_modified,false);
   assert.equal(f.aclCalls[0].operation,'PROTECT_DIRECTORY');
   assert.equal(f.aclCalls[0].target,outcome.stateDirectory);
-  assert.equal(f.aclCalls.filter(x=>x.operation==='VERIFY_FILE').length,4);
+  assert.equal(f.aclCalls.filter(x=>x.operation==='VERIFY_FILE').length,6);
   assert(f.aclCalls.some(x=>x.target===outcome.configFile));
   assert(f.aclCalls.some(x=>x.target===path.join(outcome.pgDataDirectory,'client-vault.key')));
   assert.equal(f.calls.length,4,'original read only, source twice, copied clone once');
@@ -115,7 +115,7 @@ test('DACL failure blocks creating private data or new config, never falls back 
 test('failed readback of config/Vault ACL never returns configured success',async t=>{
   const f=await fixture(t);
   await assert.rejects(prepareDurableRestoredPg17({...f.args,
-    verifyStorage:async()=>({owner_dacl_verified:false})}),/private_file_acl_unverified/);
+    verifyStorage:async()=>({owner_dacl_verified:false})}),/private_storage_acl_unverified/);
   assert.equal(f.aclCalls[0].operation,'PROTECT_DIRECTORY');
 });
 
