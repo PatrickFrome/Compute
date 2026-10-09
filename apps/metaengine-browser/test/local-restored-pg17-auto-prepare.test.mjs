@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -30,8 +31,15 @@ async function fixture(t){
     api_port:15431,edge_port:15433,startup_timeout_ms:30000,
   };
   await fs.writeFile(oldConfigFile,JSON.stringify(previous));
+  const restoreReceiptFile=path.join(home,'restore-report.json');
+  const report=JSON.stringify({schema:'metaengine.database-restore-report.v1',
+    data_verified:true,schema_verified:true,errors:[],ddl_adaptations:[],
+    source_dump_sha256:'f'.repeat(64)});
+  await fs.writeFile(restoreReceiptFile,report);
+  const restoreReceiptSha256=createHash('sha256').update(report).digest('hex');
   const calls=[];
   const args={platform:'win32',oldConfigFile,localAppData,bundleDirectory:bundle,bundleDigest:NEW,
+    restoreReceiptFile,restoreReceiptSha256,
     postgresBinDirectory:path.join(bundle,'runtime','postgresql','bin'),
     tempDirectory:temp,run:async(bin,argv)=>{
       calls.push({bin,argv});return {stdout:validState};
@@ -65,7 +73,7 @@ test('auto prepare copies clean stopped PG17, preserves all files and empty dirs
   assert.equal(proof.file_count,4);
   assert.equal(proof.vault_key_preserved,true);
   assert.equal(proof.original_source_modified,false);
-  assert.equal(f.calls.length,2,'control state confirmed before and after copy');
+  assert.equal(f.calls.length,3,'source control state checked twice, copied clone once');
   await assert.rejects(prepareDurableRestoredPg17(f.args),/existing_destination_requires_review/);
 });
 
@@ -78,6 +86,21 @@ test('auto prepare refuses original in-production state, missing copy and stale 
   await fs.unlink(path.join(f.source,'postmaster.pid'));
   await fs.rm(f.source,{recursive:true,force:true});
   await assert.rejects(prepareDurableRestoredPg17(f.args),/stopped_copy_not_found/);
+});
+
+test('auto prepare refuses an unverified restore report before reading or copying PGDATA',async t=>{
+  const f=await fixture(t);
+  await assert.rejects(prepareDurableRestoredPg17({...f.args,restoreReceiptSha256:'c'.repeat(64)}),
+    /restore_report_pin_unverified/);
+  await fs.writeFile(f.args.restoreReceiptFile,JSON.stringify({schema:'metaengine.database-restore-report.v1',
+    data_verified:false,schema_verified:true,errors:[],ddl_adaptations:[],
+    source_dump_sha256:'f'.repeat(64)}));
+  const changed=await fs.readFile(f.args.restoreReceiptFile);
+  await assert.rejects(prepareDurableRestoredPg17({...f.args,
+    restoreReceiptSha256:createHash('sha256').update(changed).digest('hex')}),
+    /restore_report_unverified/);
+  await assert.rejects(fs.lstat(path.join(f.localAppData,'METAENGINE','restored-postgres-17')),
+    e=>e.code==='ENOENT');
 });
 
 test('auto prepare refuses two TEMP clones without making a choice or creating a permanent target',async t=>{
