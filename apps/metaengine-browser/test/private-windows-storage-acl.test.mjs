@@ -8,7 +8,9 @@ import {protectOwnerOnlyWindowsDirectory,verifyOwnerOnlyWindowsStorage} from '..
 test('DACL operator is a fixed PowerShell program, never a private path assembled into script or argv',async t=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-dacl-contract-'));
   t.after(()=>fs.rm(directory,{recursive:true,force:true}));
-  const fakeWindowsEnv={SystemRoot:'C:\\Windows'};
+  const fakeWindowsEnv={SystemRoot:'C:\\Windows',
+    PSModulePath:'C:\\untrusted-modules',PATH:'C:\\untrusted-binaries',
+    LOCALAPPDATA:'C:\\Users\\Example\\AppData\\Local',APPDATA:'C:\\Users\\Example\\AppData\\Roaming'};
   const calls=[];
   const run=async(executable,argv,opts)=>{
     calls.push({executable,argv,opts});
@@ -30,6 +32,8 @@ test('DACL operator is a fixed PowerShell program, never a private path assemble
   assert.equal(Buffer.from(call.argv.at(-1),'base64').toString('utf16le').includes(directory),false);
   assert.equal(call.opts.env.DATABASE_URL,undefined);
   assert.equal(call.opts.env.PGPASSWORD,undefined);
+  assert.equal(call.opts.env.LOCALAPPDATA,'C:\\Users\\Example\\AppData\\Local');
+  assert.notEqual(call.opts.env.PSModulePath,fakeWindowsEnv.PSModulePath);
 });
 
 test('Win32 DACL operator rejects unreadable receipt, unsupported platform and unknown operation',async t=>{
@@ -51,6 +55,10 @@ test('Win32 DACL operator rejects unreadable receipt, unsupported platform and u
   await assert.rejects(verifyOwnerOnlyWindowsStorage(file,{
     ...args,run:async()=>{throw Object.assign(new Error('contains-private-path'),{killed:true});},
   }),/private_windows_storage_powershell_timeout/);
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(file,{
+    ...args,run:async()=>{throw Object.assign(new Error('C:\\private\\path'),
+      {killed:true,stdout:'ACL_PHASE_SCRIPT_STARTED\\nACL_PHASE_GET_ACL\\nC:\\secret'});},
+  }),/private_windows_storage_powershell_timeout_get_acl/);
   await assert.rejects(verifyOwnerOnlyWindowsStorage(file,{...args,platform:'linux'}),
     /private_windows_storage_arguments_invalid/);
 });
