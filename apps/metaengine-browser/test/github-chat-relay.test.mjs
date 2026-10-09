@@ -140,6 +140,28 @@ test('concurrent ticks share one delivery pass',async t=>{
   await Promise.all([h.relay.tick(),h.relay.tick(),h.relay.tick()]);assert.equal(h.state.admissions.length,1);
 });
 
+test('GitHub STATUS reply publishes redacted projection, not raw Host Agent credentials',async t=>{
+  const privateHost='C:\\Users\\Owner\\AppData\\Local\\METAENGINE\\private.json';
+  const h=await harness(t,{
+    comments:[request('STATUS',{}, {id:112})],
+    control:{status:async()=>({
+      schema:'metaengine.status.v1',state:'READY',agent_count:6,
+      database_url:'postgres://service:secret@127.0.0.1:5432/metaengine',
+      private_config_file:privateHost,headers:{authorization:'Bearer abcdefghijklmnop'},
+      message:'Connected to PostgreSQL 17',
+    })},
+  });
+  await h.relay.start({poll:false});
+  const published=replies(h.state)[0].result;
+  assert.equal(published.state,'READY');
+  assert.equal(published.agent_count,6);
+  assert.equal(published.database_url,'[REDACTED]');
+  assert.equal(published.private_config_file,'[REDACTED]');
+  assert.equal(published.headers,'[REDACTED]');
+  for(const secret of ['postgres://service:secret','Bearer abcdefghijklmnop',privateHost])
+    assert(!h.state.comments.at(-1).body.includes(secret));
+});
+
 test('capture receipt publishes verified image bytes into the pinned private repository and omits local path',async t=>{
   const bytes=Buffer.from('89504e470d0a1a0a0102030405060708090a0b0c','hex'),hash=createHash('sha256').update(bytes).digest('hex');
   const capture={schema:'metaengine.windows-computer-executor.capture.v1',png_path:'private fixture path',png_sha256:hash};
