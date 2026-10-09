@@ -19,6 +19,12 @@ export type Command = {
   run_after: number | null; created_at: string; error: string | null; result: string | null;
 };
 export type Event = { seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string };
+export type TaskEventCursor = {
+  mode: "latest" | "after"; after_seq: number | null; returned_through_seq: number;
+  latest_seq: number; log_latest_seq: number; has_more: boolean; has_earlier: boolean;
+  resync_required: boolean; resync_reason: string | null;
+};
+export type TaskEventPage = { ok: boolean; events: Event[]; scope?: { kind: string; task_id: string | null }; cursor?: TaskEventCursor; exact_task_history_available?: boolean };
 export type ActionMeta = { action: string; lane: string; cost: number; desc: string; group: string; args?: string };
 export type Mirror = { mode: string; pending: number; method: string | null; last_error: string | null; last_sent_seq: number; storage?: { ok: boolean; bucket: string; objects: number }; ddl?: { last_result: string | null; retry_every_min: number; next_retry_at: string | null; attempts_total: number } };
 export type Snapshot = {

@@ -8,10 +8,11 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import {
   getSocket, setBusHandlers, startHeartbeat, me2Fetch, toastBus,
-  type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
+  type Snapshot, type Event, type ActionMeta, type Mirror, type Task, type TaskEventCursor, type TaskEventPage,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
 import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
+import { taskEventRowsConflict, validateTaskEventPage } from "@/lib/project-action-feed.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -97,6 +98,7 @@ interface Me2State {
   inspectedTaskId: string | null;
   stream: Event[];
   streamTaskId: string | null;
+  streamCursor: TaskEventCursor | null;
   streamState: "UNBOUND" | "LOADING" | "EXACT" | "DEGRADED";
   // R96 temporary Peek is ephemeral presentation state only: no persistence/data authority.
   peekTarget: PeekTarget | null;
@@ -134,7 +136,7 @@ interface Me2State {
   syncContextDrawer: (preferred?: boolean, height?: number, width?: number, dock?: ContextDrawerDock) => void;
   setCommandRailPreference: (open: boolean) => void;
   resetWorkspaceLayout: () => void;
-  openTask: (id: string) => void;
+  openTask: (id: string, readMode?: "latest" | "after") => void;
   closeTask: () => void;
   setChatId: (id: string | null) => void;
   setBusy: (b: boolean) => void;
@@ -277,6 +279,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   inspectedTaskId: null,
   stream: [],
   streamTaskId: null,
+  streamCursor: null,
   streamState: "UNBOUND",
   peekTarget: null,
   contextDrawerPreferredOpen: false,
@@ -536,7 +539,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
 
     // WS-шина
     setBusHandlers({
-      onConnect: () => set({ connected: true }),
+      onConnect: () => {
+        set({ connected: true });
+        const st = get();
+        // One bounded page repairs a reconnect; further pages remain explicit.
+        if (st.detail && st.streamCursor && !st.streamCursor.resync_required) get().openTask(st.detail.id, "after");
+      },
       onDisconnect: () => set({ connected: false }),
       onSnapshot: (s) => {
         set((st) => {
@@ -565,7 +573,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
             && !st.stream.some((x) => x.seq === e.seq)
             ? [...st.stream, e].slice(-200)
             : st.stream;
-          return { events, stream };
+          const conflict = e.task_id === st.streamTaskId && taskEventRowsConflict(st.stream, [e]);
+          return { events, stream, ...(conflict ? { streamState: "DEGRADED" as const } : {}) };
         });
       },
     });
@@ -717,23 +726,28 @@ export const useMe2 = create<Me2State>((set, get) => ({
   setPalette: (open) => set({ paletteOpen: open }),
   setDialog: (d) => set({ dialog: d }),
 
-  openTask: (id) => {
+  openTask: (id, readMode = "latest") => {
     const requestSeq = ++taskStreamRequestSeq;
     const st = get();
+    const sameTask = st.streamTaskId === id;
+    const afterSeq = readMode === "after" && sameTask && st.streamCursor && !st.streamCursor.resync_required
+      ? st.streamCursor.returned_through_seq : null;
+    const previousEvents = new Set(sameTask ? st.stream : []);
     const task = st.snap?.tasks.find((t) => t.id === id) ?? (st.snap?.archived ?? []).find((t) => t.id === id) ?? null;
     set((state) => ({
       detail: task,
       inspectedTaskId: task?.id ?? id,
-      stream: [],
+      stream: sameTask ? state.stream : [],
       streamTaskId: id,
+      streamCursor: sameTask ? state.streamCursor : null,
       streamState: "LOADING",
       contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
     }));
     if (get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
       writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
     }
-    void me2Fetch<{ events: Event[] }>(
-      `/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`,
+    void me2Fetch<TaskEventPage>(
+      `/events?task=${encodeURIComponent(id)}&limit=200${afterSeq === null ? "" : `&since=${afterSeq}`}&XTransformPort=3041`,
       { signal: AbortSignal.timeout(8_000) },
     ).then((d) => {
       set((state) => {
@@ -741,19 +755,25 @@ export const useMe2 = create<Me2State>((set, get) => ({
           { seq: requestSeq, taskId: id },
           { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
         )) return {};
+        const page = validateTaskEventPage(d, { taskId: id, afterSeq });
+        if (!page.valid || page.resyncRequired) return {
+          streamState: "DEGRADED",
+          ...(page.resyncRequired ? { streamCursor: page.cursor as TaskEventCursor } : {}),
+        };
+        if (afterSeq !== null && taskEventRowsConflict(state.stream, d?.events ?? [])) return { streamState: "DEGRADED" };
         const resolved = resolveExactTaskStreamResponse({
           request: { seq: requestSeq, taskId: id },
           current: {
             seq: taskStreamRequestSeq,
             taskId: state.inspectedTaskId,
             streamTaskId: state.streamTaskId,
-            stream: state.stream,
+            stream: afterSeq === null ? state.stream.filter((event) => !previousEvents.has(event)) : state.stream,
           },
           responseEvents: d?.events ?? null,
           limit: 200,
         });
         if (!resolved.applied || !resolved.patch) return {};
-        return resolved.patch as Pick<Me2State, "stream" | "streamState">;
+        return { ...resolved.patch, streamCursor: page.cursor } as Pick<Me2State, "stream" | "streamState" | "streamCursor">;
       });
     });
   },

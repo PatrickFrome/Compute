@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useToast } from "@/hooks/use-toast";
 import { useMe2 } from "@/components/me2/store";
 import { eventsSearch, environmentReset, age, hhmmss, EVENT_STYLE, type Event } from "@/lib/me2-bus";
+import { projectActionFeed, projectFeedBinding } from "@/lib/project-action-feed.mjs";
 import {
   Search, Gauge, Trash2, CheckCircle2,
   AlertTriangle, Activity, Globe2,
@@ -228,9 +229,23 @@ function ResetDialog() {
 function TaskSheet() {
   const detail = useMe2((s) => s.detail);
   const stream = useMe2((s) => s.stream);
+  const streamTaskId = useMe2((s) => s.streamTaskId);
+  const streamState = useMe2((s) => s.streamState);
+  const streamCursor = useMe2((s) => s.streamCursor);
+  const connected = useMe2((s) => s.connected);
   const closeTask = useMe2((s) => s.closeTask);
   const openTask = useMe2((s) => s.openTask);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
+  const actionFeed = projectActionFeed({
+    taskId: detail?.id ?? null,
+    events: streamTaskId === detail?.id ? stream : [],
+    // DEGRADED keeps the last verified rows visible; UNBOUND means no history
+    // has ever been bound to this task.
+    available: streamState !== "UNBOUND",
+    resyncRequired: streamCursor?.resync_required === true,
+    limit: 200,
+  });
+  const projectBinding = projectFeedBinding();
   useEffect(() => {
     if (!detail) return;
     const frame = window.requestAnimationFrame(() => {
@@ -279,15 +294,31 @@ function TaskSheet() {
               )}
               <div>
                 <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold tracking-widest text-cyan-500">
-                  <Activity className="h-3 w-3" /> ХРОНИКА ШАГОВ ({stream.length})
+                  <Activity className="h-3 w-3" /> ДЕЙСТВИЯ АГЕНТОВ ({actionFeed.events.length})
                 </p>
-                <div className="mc-scroll max-h-56 space-y-0.5 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-900/40 p-2 font-mono text-[10px]">
-                  {stream.length === 0 && <p className="p-2 text-center text-zinc-500">хроника пуста</p>}
-                  {stream.map((e) => (
-                    <div key={e.seq} className="flex gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/50">
-                      <span className="shrink-0 text-zinc-600">{hhmmss(e.ts)}</span>
-                      <span className={`w-28 shrink-0 font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`}>{e.type}</span>
-                      <span className="min-w-0 flex-1 truncate text-zinc-500">{e.data}</span>
+                <div className="mb-2 space-y-1 font-mono text-[9px] text-zinc-500" data-testid="task-project-feed-status" aria-live="polite">
+                  <p>{projectBinding.label} · {connected ? "live" : "offline"} · последнее событие #{actionFeed.cursor?.latest_seq ?? "—"}</p>
+                  <p>Окно до 200 действий{streamCursor ? ` · прочитано из БД до #${streamCursor.returned_through_seq}` : " · курсор БД недоступен"}</p>
+                  <p className="text-zinc-600">Действия этой задачи. Общий журнал проекта пока недоступен: задача не содержит привязки к project/workspace.</p>
+                  {streamState === "LOADING" ? <p className="text-cyan-400">Загрузка истории…</p> : null}
+                  {streamCursor?.resync_required ? <p className="text-amber-400">Журнал изменился: прежний курсор недействителен. Загрузите последнее окно.</p> : streamState === "DEGRADED" ? <p className="text-amber-400">Синхронизация недоступна. Сохранены ранее прочитанные действия.</p> : null}
+                  {streamCursor?.has_more ? <p className="text-cyan-400">В БД есть следующие действия. Загрузите следующую страницу.</p> : null}
+                  {streamCursor?.has_earlier ? <p className="text-zinc-500">Более ранние действия находятся за пределами этого окна.</p> : null}
+                  {!connected && streamState === "EXACT" ? <p className="text-amber-400">Показана последняя загруженная история; для новых действий нужна синхронизация.</p> : null}
+                </div>
+                <div className="mc-scroll max-h-64 space-y-1 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-900/40 p-2 font-mono text-[10px]" data-testid="task-project-action-feed">
+                  {actionFeed.events.length === 0 && streamState === "EXACT" && <p className="p-2 text-center text-zinc-500">Действий этой задачи пока нет</p>}
+                  {actionFeed.events.map((e) => (
+                    <div key={e.seq} className="rounded border-b border-zinc-800/60 px-1 py-1 hover:bg-zinc-800/50">
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                        <span className="shrink-0 text-zinc-600">#{e.seq} · {hhmmss(e.ts)}</span>
+                        <span className={`font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`}>{e.type}</span>
+                        {e.agent_id ? <span className="break-all text-violet-400">{e.agent_id}</span> : null}
+                      </div>
+                      <details className="mt-0.5 min-w-0 text-zinc-500">
+                        <summary className="cursor-pointer truncate" title="Развернуть данные действия">{e.data || "данные отсутствуют"}</summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-all text-[9px] text-zinc-400">{e.data}</pre>
+                      </details>
                     </div>
                   ))}
                   <div ref={streamEndRef} />
@@ -295,9 +326,12 @@ function TaskSheet() {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2 border-t border-zinc-800 p-3">
-              <Button variant="ghost" size="sm" className="border-zinc-800 text-zinc-400" onClick={() => openTask(detail.id)} title="обновить хронику">
-                обновить
+              <Button variant="ghost" size="sm" className="border-zinc-800 text-zinc-400" onClick={() => openTask(detail.id)} disabled={streamState === "LOADING"} title="Заново загрузить последние 200 действий этой задачи">
+                последнее окно
               </Button>
+              {streamCursor && !streamCursor.resync_required ? <Button variant="ghost" size="sm" className="border-zinc-800 text-cyan-400" onClick={() => openTask(detail.id, "after")} disabled={streamState === "LOADING"} title="Прочитать до 200 действий после подтверждённого курсора БД">
+                {streamCursor.has_more ? "следующая страница" : "получить новые действия"}
+              </Button> : null}
             </div>
           </>
         )}
