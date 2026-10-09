@@ -40,9 +40,24 @@ test('GitHub reply redacts credentials embedded in otherwise innocuous messages'
     '/home/owner/data/pgdata',
   ]){
     const result=project({schema:'test',message:value});
-    assert.equal(result.message,'[PRIVATE_OR_UNBOUNDED_VALUE]',value);
+    assert.equal(result.message,'[REDACTED_UNREVIEWED_TEXT]',value);
     assert(!JSON.stringify(result).includes(value));
   }
+});
+
+test('generic Browser titles, arbitrary agent text and unreviewed JSON strings are never forwarded',()=>{
+  const result=project({
+    state:'READY',tabs:[{title:'A private account number',url:'https://example.org/account/1234'}],
+    agents:[{instructions:'Send money to account',objective:'private objective',
+      browser_text:'personal page content',userMessage:'my social security number'}],
+    capabilities:{actions:['COMPUTER_ACTION','GOAL_SUBMIT']},
+  });
+  assert.equal(result.state,'READY');
+  assert.deepEqual(result.capabilities.actions,['COMPUTER_ACTION','GOAL_SUBMIT']);
+  assert.equal(result.tabs[0].title,'[REDACTED_UNREVIEWED_TEXT]');
+  assert.equal(result.agents[0].instructions,'[REDACTED_UNREVIEWED_TEXT]');
+  assert.equal(result.agents[0].objective,'[REDACTED_UNREVIEWED_TEXT]');
+  assert.equal(JSON.stringify(result).includes('social security'),false);
 });
 
 test('GitHub screenshot artifact references survive but temporary screenshot paths cannot leave the PC',()=>{
@@ -62,9 +77,9 @@ test('GitHub screenshot artifact references survive but temporary screenshot pat
 test('GitHub egress fails closed for recursive data, oversized outputs, depth and proto pollution',()=>{
   const recursive={state:'READY'};recursive.self=recursive;
   assert.equal(project(recursive).state,'RESULT_UNAVAILABLE');
-  assert.equal(project({message:'x'.repeat(1600)}).message,'[PRIVATE_OR_UNBOUNDED_VALUE]');
+  assert.equal(project({message:'x'.repeat(1600)}).message,'[REDACTED_UNREVIEWED_TEXT]');
   assert.equal(project({events:Array.from({length:300},()=>1)}).state,'RESULT_UNAVAILABLE');
-  assert.equal(project({files:Array.from({length:200},()=>({message:'OK'.repeat(80)}))}).state,'RESULT_UNAVAILABLE');
+  assert.equal(project({files:Array.from({length:250},()=>({schema:'x'.repeat(150)}))}).state,'RESULT_UNAVAILABLE');
   const polluted=JSON.parse('{"__proto__":{"isAdmin":true},"state":"READY"}');
   const publicReply=project(polluted);
   assert.equal(publicReply.state,'READY');
