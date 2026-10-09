@@ -153,6 +153,34 @@ test('auto prepare rejects external tablespaces and linked database entries',asy
   }
 });
 
+test('old private host config must preserve SQL role separation, safe ports and state boundaries',async t=>{
+  for(const mutation of [
+    config=>({...config,api_port:15432}),
+    config=>({...config,edge_port:15431}),
+    config=>({...config,startup_timeout_ms:0}),
+    config=>({...config,startup_timeout_ms:300001}),
+    config=>({...config,inspect_database_url:config.database_url}),
+    config=>({...config,pg_data_directory:config.state_directory}),
+    config=>({...config,state_directory:config.bundle_directory}),
+  ]){
+    const f=await fixture(t);
+    await fs.writeFile(f.oldConfigFile,JSON.stringify(mutation(f.previous)));
+    await assert.rejects(prepareDurableRestoredPg17(f.args),/old_private_config_unverified/);
+    await assert.rejects(fs.lstat(path.join(f.localAppData,'METAENGINE','restored-postgres-17')),
+      error=>error.code==='ENOENT');
+  }
+});
+
+test('PostgreSQL system identity is inspected using a locale-stable, no-shell child process',async t=>{
+  const f=await fixture(t);
+  await prepareDurableRestoredPg17(f.args);
+  assert.equal(f.calls.length,4);
+  for(const call of f.calls){
+    assert.equal(call.argv[0],'-D');
+    assert.equal(call.bin.endsWith('pg_controldata.exe'),true);
+  }
+});
+
 test('auto prepare never silently reuses invalid credentials, an existing target or different OS',async t=>{
   const f=await fixture(t);
   await assert.rejects(prepareDurableRestoredPg17({...f.args,platform:'linux'}),/arguments_invalid/);
