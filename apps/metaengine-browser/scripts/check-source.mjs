@@ -157,6 +157,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/local-runtime-host-controller.mjs",
   "src/local-restored-pg17-setup.mjs",
   "src/local-restored-pg17-auto-prepare.mjs",
+  "src/private-windows-storage-acl.mjs",
   "src/local-restored-pg17-setup-preload.cjs",
   "src/remote-support-mcp.mjs",
   "src/chat-command-policy.mjs",

@@ -42,14 +42,18 @@ async function fixture(t){
     source_dump_sha256:'f'.repeat(64)});
   await fs.writeFile(restoreReceiptFile,report);
   const restoreReceiptSha256=createHash('sha256').update(report).digest('hex');
-  const calls=[];
+  const calls=[],aclCalls=[];
   const args={platform:'win32',oldConfigFile,localAppData,bundleDirectory:bundle,bundleDigest:NEW,
+    protectStorage:async target=>{aclCalls.push({operation:'PROTECT_DIRECTORY',target});
+      return {owner_dacl_verified:true};},
+    verifyStorage:async target=>{aclCalls.push({operation:'VERIFY_FILE',target});
+      return {owner_dacl_verified:true};},
     restoreReceiptFile,restoreReceiptSha256,
     postgresBinDirectory:path.join(bundle,'runtime','postgresql','bin'),
     tempDirectory:temp,run:async(bin,argv,options)=>{
       calls.push({bin,argv,options});return {stdout:validState};
     }};
-  return {home,source,temp,original,oldConfigFile,previous,bundle,localAppData,calls,args};
+  return {home,source,temp,original,oldConfigFile,previous,bundle,localAppData,calls,aclCalls,args};
 }
 
 test('auto prepare copies clean stopped PG17, preserves all files and empty dirs, and rebinds NEW private config',async t=>{
@@ -78,6 +82,11 @@ test('auto prepare copies clean stopped PG17, preserves all files and empty dirs
   assert.equal(proof.file_count,4);
   assert.equal(proof.vault_key_preserved,true);
   assert.equal(proof.original_source_modified,false);
+  assert.equal(f.aclCalls[0].operation,'PROTECT_DIRECTORY');
+  assert.equal(f.aclCalls[0].target,outcome.stateDirectory);
+  assert.equal(f.aclCalls.filter(x=>x.operation==='VERIFY_FILE').length,4);
+  assert(f.aclCalls.some(x=>x.target===outcome.configFile));
+  assert(f.aclCalls.some(x=>x.target===path.join(outcome.pgDataDirectory,'client-vault.key')));
   assert.equal(f.calls.length,4,'original read only, source twice, copied clone once');
   await assert.rejects(prepareDurableRestoredPg17(f.args),/existing_destination_requires_review/);
 });
@@ -91,6 +100,23 @@ test('auto prepare refuses original in-production state, missing copy and stale 
   await fs.unlink(path.join(f.source,'postmaster.pid'));
   await fs.rm(f.source,{recursive:true,force:true});
   await assert.rejects(prepareDurableRestoredPg17(f.args),/stopped_copy_not_found/);
+});
+
+test('DACL failure blocks creating private data or new config, never falls back to chmod',async t=>{
+  const f=await fixture(t);
+  await assert.rejects(prepareDurableRestoredPg17({...f.args,protectStorage:async()=>({
+    owner_dacl_verified:false,
+  })}),/private_storage_acl_unverified/);
+  const state=path.join(f.localAppData,'METAENGINE','restored-postgres-17');
+  assert.deepEqual(await fs.readdir(state),[]);
+  assert.equal(f.aclCalls.length,0);
+});
+
+test('failed readback of config/Vault ACL never returns configured success',async t=>{
+  const f=await fixture(t);
+  await assert.rejects(prepareDurableRestoredPg17({...f.args,
+    verifyStorage:async()=>({owner_dacl_verified:false})}),/private_file_acl_unverified/);
+  assert.equal(f.aclCalls[0].operation,'PROTECT_DIRECTORY');
 });
 
 test('auto prepare refuses an unverified restore report before reading or copying PGDATA',async t=>{
