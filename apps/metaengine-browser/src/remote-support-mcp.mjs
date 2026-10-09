@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createWindowsLocalComputerExecutor } from './windows-local-computer-executor.mjs';
 import { runRestoredClientProviderCli } from '../../../infra/client-state-runtime/restored-client-provider-cli.mjs';
@@ -46,6 +46,23 @@ const result = id => ({ jsonrpc:'2.0', id });
 const clean = error => /^remote_support_[a-z0-9_]+$/.test(String(error?.message||'')) ? error.message : 'remote_support_operation_failed';
 const content = value => ({ content:[{type:'text',text:JSON.stringify(value)}],isError:false });
 const errorContent = error => ({content:[{type:'text',text:clean(error)}],isError:true});
+const CONTROL_LEASE_SCHEMA = 'metaengine.remote-support-control-lease.v1';
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+function frozenJsonSnapshot(value) {
+  // Snapshot before an async resolver so a programmatic caller cannot swap
+  // action arguments or targets while a lease is being checked.
+  const encoded = JSON.stringify(value);
+  if (!encoded || Buffer.byteLength(encoded,'utf8') > MAX_MESSAGE)
+    throw new Error('remote_support_control_arguments_invalid');
+  const freeze = object => {
+    if (object !== null && typeof object === 'object') {
+      for (const child of Object.values(object)) freeze(child);
+      Object.freeze(object);
+    }
+    return object;
+  };
+  return freeze(JSON.parse(encoded));
+}
 
 export async function confirmRemoteSupportOnWindows({ scope, details = null }) {
   if (process.platform !== 'win32') return false;
@@ -178,6 +195,14 @@ export function createRemoteSupportMcp({
   driveEnumerator = listReadyFixedWindowsDrives,
   postgresDiscoverer = discoverLocalPostgresFiles,
   restoredProviderOperator = runRestoredClientProviderCli,
+  // Computer mutations must be authorized by an embedding application that
+  // can resolve the DB-backed lease.  The JSON-RPC caller is untrusted and
+  // cannot supply this resolver or mint its result through `context`.
+  // The resolver performs no UI effects and must check current server-owned
+  // lease state, owner/task/action/target/payload binding and freshness. It
+  // returns {schema:CONTROL_LEASE_SCHEMA, verified:true, request_binding,
+  // context}; request_binding must equal the exact request snapshot supplied.
+  resolveControlLease = null,
 } = {}) {
   // Programmatic requests do not own the host process's stdio. The CLI below
   // explicitly attaches it; tests and embedding callers can supply a transport.
@@ -195,7 +220,12 @@ export function createRemoteSupportMcp({
   let sessionId = null;
   let revoked = false;
   let closed = false;
-  let buffer = '';
+  // Frame bytes before decoding: a pipe can split any UTF-8 character. The
+  // bound applies to each message, not an arbitrary coalesced transport chunk.
+  const utf8 = new TextDecoder('utf-8', { fatal: true });
+  let frame = [];
+  let frameBytes = 0;
+  let discardFrame = false;
   let processing = Promise.resolve();
   let approvalPending = false;
   let sessionGeneration = 0;
@@ -277,6 +307,9 @@ export function createRemoteSupportMcp({
       unattended_access:false,
       restored_database_connection_requires_second_local_approval:true,
       installed_browser_runtime_required:false, authority_effect:false,
+      control_lease_resolver_configured:typeof resolveControlLease === 'function',
+      control_lease_resolution:typeof resolveControlLease === 'function'
+        ? 'TRUSTED_HOST_RESOLVER_REQUIRED_PER_ACTION' : 'UNAVAILABLE_NO_TRUSTED_DB_ADAPTER',
     });
     if (name === 'support_start_session') {
       return startSession(args?.scope);
@@ -365,12 +398,40 @@ export function createRemoteSupportMcp({
           automatic_retry_allowed:false,authority_effect:false}),
         isError:true,
       });
+      if (typeof resolveControlLease !== 'function')
+        throw new Error('remote_support_trusted_control_lease_resolver_required');
+      const controlRequest = frozenJsonSnapshot({
+        action:args.action,args:args.args || {},target:args.target,
+        agent_id:args.agent_id,task_id:args.task_id,
+      });
+      // The resolver is injected by the trusted embedding process.  Every
+      // field below is caller-controlled input; only the resolver's returned
+      // context and binding may reach the computer executor.
+      let resolvedLease;
+      try {
+        resolvedLease = await resolveControlLease({
+          request:controlRequest,
+          untrusted_context:frozenJsonSnapshot(args.context || {}),
+          session_id:grant.sessionId,
+          session_generation:grant.generation,
+        });
+      } catch {
+        // No executor was invoked: revocation is a pre-effect denial, not
+        // an ambiguous computer operation. Never expose DB error details.
+        recheckGrant(grant,'CONTROL');
+        throw new Error('remote_support_control_lease_resolution_failed');
+      }
+      recheckGrant(grant,'CONTROL');
+      if (!record(resolvedLease) || resolvedLease.schema !== CONTROL_LEASE_SCHEMA
+          || resolvedLease.verified !== true || !record(resolvedLease.context)
+          || !record(resolvedLease.request_binding)
+          || !isDeepStrictEqual(resolvedLease.request_binding,controlRequest))
+        throw new Error('remote_support_control_lease_unverified');
+      const trustedContext = frozenJsonSnapshot(resolvedLease.context);
+      recheckGrant(grant,'CONTROL');
       let effect;
       try {
-        effect = await executor.act({
-          action:args.action, args:args.args||{},target:args.target,
-          agent_id:args.agent_id, task_id:args.task_id,
-        },args.context||{});
+        effect = await executor.act(controlRequest,trustedContext);
       } catch (error) {
         if (!grantValid(grant,'CONTROL')) return ambiguousAfterRevocation();
         throw error;
@@ -394,7 +455,7 @@ export function createRemoteSupportMcp({
     {name:'support_observe',description:'With on-PC view approval, observe windows, UIA, displays or capture a screenshot. May reveal private screen contents.',inputSchema:{type:'object',properties:{
       action:{type:'string',enum:[...VIEWS]},args:{type:'object'},target:{type:'object'},
     },required:['action'],additionalProperties:false}},
-    {name:'support_control',description:'During an ACTIVE locally approved CONTROL session and a valid existing computer-authority DB task lease, perform one typed Windows action without a popup. No arbitrary shell.',inputSchema:{type:'object',properties:{
+    {name:'support_control',description:'During an ACTIVE locally approved CONTROL session and a valid existing computer-authority DB task lease resolved by the trusted host integration, perform one typed Windows action without a popup. Caller context is untrusted; default CLI without an injected DB lease resolver always denies control. No arbitrary shell.',inputSchema:{type:'object',properties:{
       action:{type:'string',enum:[...CONTROLS]},args:{type:'object'},target:{type:'object'},
       agent_id:{type:'string'},task_id:{type:'string'},context:{type:'object'},
     },required:['action','target','agent_id','task_id','context'],additionalProperties:false}},
@@ -424,12 +485,29 @@ export function createRemoteSupportMcp({
     catch { send({jsonrpc:'2.0',id:m?.id??null,error:{code:-32600,message:'Invalid request'}}); }
   }
   function onData(chunk) {
-    buffer+=String(chunk);
-    if (buffer.length>MAX_MESSAGE) {buffer='';send({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Message too large'}});return;}
-    let index;
-    while ((index=buffer.indexOf('\n'))>=0) {
-      const one=buffer.slice(0,index);buffer=buffer.slice(index+1);
-      if (!one.trim()) continue;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const newline = bytes.indexOf(10, offset);
+      const end = newline < 0 ? bytes.length : newline;
+      if (!discardFrame) {
+        const size = end - offset;
+        if (frameBytes + size > MAX_MESSAGE) {
+          frame = []; frameBytes = 0; discardFrame = true;
+          send({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Message too large'}});
+        } else if (size) {
+          frame.push(Buffer.from(bytes.subarray(offset, end)));
+          frameBytes += size;
+        }
+      }
+      offset = end + 1;
+      if (newline < 0) break;
+      if (discardFrame) { discardFrame = false; continue; }
+      let one;
+      try { one = utf8.decode(Buffer.concat(frame, frameBytes)); }
+      catch { send({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}}); }
+      frame = []; frameBytes = 0;
+      if (!one?.trim()) continue;
       // Emergency stop must not wait behind a hung observation, action or
       // pending approval in the normal serialized stdio request queue.
       // JSON-RPC replies may be out of order; revocation happens immediately.
@@ -446,7 +524,7 @@ export function createRemoteSupportMcp({
     if (closed) return;
     revoke();
     closed = true;
-    buffer = '';
+    frame = []; frameBytes = 0;
     if (input) {
       input.off('data',onData);
       input.off('end',close);

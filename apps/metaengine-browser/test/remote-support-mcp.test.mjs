@@ -7,7 +7,23 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createRemoteSupportMcp, readBoundedCapture, discoverLocalPostgresFiles, listReadyFixedWindowsDrives } from '../src/remote-support-mcp.mjs';
+import { createRemoteSupportMcp as createRawRemoteSupportMcp, readBoundedCapture, discoverLocalPostgresFiles, listReadyFixedWindowsDrives } from '../src/remote-support-mcp.mjs';
+
+// Existing behavioral tests model the trusted host integration explicitly.
+// The production default remains fail-closed; the resolver below is only a
+// deterministic test double and never reads a database.
+const trustedTestContext = {command_id:'11111111-1111-4111-8111-111111111111',effect_binding:{trusted_test_fixture:true}};
+const trustedResolver = async ({ request }) => ({
+  schema:'metaengine.remote-support-control-lease.v1',verified:true,
+  context:trustedTestContext,
+  request_binding:request,
+});
+const createRemoteSupportMcp = options => {
+  // Keep transport validation tests on the raw constructor.
+  if ((options?.input && !options?.output) || (!options?.input && options?.output))
+    return createRawRemoteSupportMcp(options);
+  return createRawRemoteSupportMcp({resolveControlLease:trustedResolver,...options});
+};
 
 const rpc = (service,name,args={}) => service.request({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}});
 const denied = x => x.result.isError && x.result.content[0].text.startsWith('remote_support_');
@@ -63,7 +79,7 @@ test('one explicit CONTROL grant allows many actions without repeated local perm
   }
   assert.deepEqual(scopes,['CONTROL']);
   assert.equal(ex.calls.length,50);
-  assert.deepEqual(ex.calls[1].context,act.context);
+  assert.deepEqual(ex.calls[1].context,trustedTestContext);
   assert(denied(await rpc(s,'support_start_session',{scope:'CONTROL'})), 'remote caller may not silently extend session');
   assert.deepEqual(scopes,['CONTROL']);
   clock+=3600000;
@@ -276,6 +292,7 @@ test('stop during an in-flight mutation yields AMBIGUOUS and forbids retry', asy
   }});
   await rpc(service,'support_start_session',{scope:'CONTROL'});
   const pending = rpc(service,'support_control',act);
+  await new Promise(resolve=>setImmediate(resolve));
   await rpc(service,'support_stop');
   waiting.resolve({outcome:'NO_EFFECT_PROVEN',authority_effect:false});
   const reply = await pending;
