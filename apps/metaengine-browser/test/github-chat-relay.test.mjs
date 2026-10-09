@@ -74,6 +74,17 @@ test('VIEW-only pairing cannot submit a mutation or autonomous goal',async t=>{
   assert.equal(h.state.admissions.length,0);assert.equal(h.state.reads,1);
 });
 
+test('paired observation-only operator can revoke immediately and fence unread observations',async t=>{
+  const comments=[request('STATUS',{}, {id:101}),request('REVOKE',{}, {id:102})];
+  const h=await harness(t,{pairing:{permissions:['OBSERVE']},comments});
+  await h.relay.start({poll:false});
+  assert.equal(h.state.reads,0);
+  assert.equal(h.state.admissions.length,0);
+  assert.equal(h.relay.snapshot().state,'REVOKED');
+  const next=await harness(t,{directory:h.directory,pairing:{permissions:['OBSERVE']},comments:[]});
+  await assert.rejects(next.relay.start({poll:false}),/pairing_revoked/);
+});
+
 test('revocation in the inbox preempts older commands and survives a process restart',async t=>{
   const comments=[request('COMMAND_SUBMIT',{action:'NEW_TAB',payload:{}}),request('REVOKE',{}, {id:102})];
   const h=await harness(t,{comments});await h.relay.start({poll:false});assert.equal(h.state.admissions.length,0);
