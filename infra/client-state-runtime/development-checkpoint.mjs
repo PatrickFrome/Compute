@@ -19,7 +19,7 @@ const MAX_BYTES = 262144;
 const HASH = /^[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
 const immutableKeys = ['checkpoint_id', 'project_ref', 'source_parent_sha', 'evidence_state',
-  'scope', 'canonical_checkpoint', 'authority_effect', 'payload', 'payload_sha256'];
+  'scope', 'canonical_checkpoint', 'authority_effect', 'payload', 'canonical_payload_sha256'];
 const hash = value => createHash('sha256').update(value, 'utf8').digest('hex');
 class CheckpointError extends Error {}
 function fail(code) { throw new CheckpointError(`development_checkpoint_${code}`); }
@@ -82,7 +82,7 @@ export function buildDevelopmentCheckpoint(input) {
     source_parent_sha: exactHash(input.source_parent_sha, SHA),
     evidence_state: member(input.evidence_state, STATES),
     scope: 'OPERATIONAL_AUDIT_ONLY', canonical_checkpoint: false, authority_effect: false,
-    payload, payload_sha256: hash(serialized),
+    payload, canonical_payload_sha256: hash(serialized),
   };
   const checkpoint_id = Object.hasOwn(input, 'checkpoint_id') ? exactHash(input.checkpoint_id, HASH) : hash(canonical(core));
   return deepFreeze({ checkpoint_id, ...core });
@@ -100,11 +100,11 @@ function validateCheckpoint(value) {
 }
 
 const INSERT = `INSERT INTO destruktion_meta.metaengine_audit_checkpoint_v1
-  (checkpoint_id, project_ref, source_parent_sha, evidence_state, scope, canonical_checkpoint, authority_effect, payload, payload_sha256)
-  VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::boolean, $7::boolean, $8::jsonb, $9::text)
+  (checkpoint_id, project_ref, source_parent_sha, evidence_state, scope, canonical_checkpoint, authority_effect, payload)
+  VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::boolean, $7::boolean, $8::jsonb)
   ON CONFLICT (checkpoint_id) DO NOTHING RETURNING checkpoint_id`;
 const READBACK = `SELECT checkpoint_id, project_ref, source_parent_sha, evidence_state, scope,
-  canonical_checkpoint, authority_effect, payload, payload_sha256
+  canonical_checkpoint, authority_effect, payload, payload::text AS payload_json, payload_sha256
   FROM destruktion_meta.metaengine_audit_checkpoint_v1 WHERE checkpoint_id = $1::text`;
 
 /** One append-only transaction; even idempotent replays require exact readback. */
@@ -116,16 +116,25 @@ export async function writeDevelopmentCheckpoint({ sql, checkpoint } = {}) {
       await tx.unsafe("SET LOCAL statement_timeout = '10s'");
       await tx.unsafe("SET LOCAL lock_timeout = '5s'");
       const inserted = await tx.unsafe(INSERT, [expected.checkpoint_id, expected.project_ref, expected.source_parent_sha,
-        expected.evidence_state, expected.scope, false, false, canonical(expected.payload), expected.payload_sha256]);
+        expected.evidence_state, expected.scope, false, false, canonical(expected.payload)]);
       if (!Array.isArray(inserted) || inserted.length > 1
         || (inserted.length === 1 && inserted[0].checkpoint_id !== expected.checkpoint_id)) fail('insert_readback_invalid');
       const rows = await tx.unsafe(READBACK, [expected.checkpoint_id]);
       if (!Array.isArray(rows) || rows.length !== 1) fail('readback_missing');
+      shape(rows[0], [...immutableKeys.filter(key => key !== 'canonical_payload_sha256'), 'payload_json', 'payload_sha256']);
+      const { payload_json: pgJson, payload_sha256: pgHash, ...stored } = rows[0];
+      const { canonical_payload_sha256: canonicalHash, ...expectedStored } = expected;
       // Compare every immutable column, including the actual JSONB bytes after
       // canonicalization. A copied old hash never validates a changed payload.
-      if (canonical(rows[0]) !== canonical(expected)) fail(inserted.length ? 'readback_mismatch' : 'id_conflict');
-      if (hash(canonical(rows[0].payload)) !== rows[0].payload_sha256) fail('readback_digest_mismatch');
-      return Object.freeze({ checkpoint_id: expected.checkpoint_id, payload_sha256: expected.payload_sha256,
+      if (canonical(stored) !== canonical(expectedStored)) fail(inserted.length ? 'readback_mismatch' : 'id_conflict');
+      // payload_sha256 is GENERATED ALWAYS from PostgreSQL JSONB text. Its
+      // spacing/key order differ from the application canonical JSON digest.
+      if (typeof pgJson !== 'string' || Buffer.byteLength(pgJson, 'utf8') > MAX_BYTES
+        || hash(pgJson) !== pgHash) fail('readback_digest_mismatch');
+      let parsed;
+      try { parsed = JSON.parse(pgJson); } catch { fail('readback_json_invalid'); }
+      if (canonical(parsed) !== canonical(expected.payload)) fail('readback_json_mismatch');
+      return Object.freeze({ checkpoint_id: expected.checkpoint_id, payload_sha256: pgHash, canonical_payload_sha256: canonicalHash,
         state: inserted.length ? 'INSERTED' : 'ALREADY_PRESENT', evidence_state: expected.evidence_state,
         scope: expected.scope, canonical_checkpoint: false, authority_effect: false });
     });
