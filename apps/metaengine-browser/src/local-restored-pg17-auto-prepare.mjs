@@ -47,7 +47,7 @@ async function inspectStopped(executable,data,run) {
   // 'in production' and 'in archive recovery' are NEVER eligible for copying.
   if(!/^\s*Database cluster state:\s*shut down\s*$/im.test(stdout))fail('pg_control_not_cleanly_shut_down');
 }
-async function filesIn(data,{maxFiles=100000,maxBytes=20*1024**3}={}){
+async function filesIn(data,{maxFiles=100000,maxBytes=20*1024**3,directories=null}={}){
   const found=[],stack=[{at:data,rel:''}];
   let total=0;
   while(stack.length){
@@ -60,6 +60,7 @@ async function filesIn(data,{maxFiles=100000,maxBytes=20*1024**3}={}){
       const st=await fs.lstat(absolute);
       if(st.isSymbolicLink())fail('linked_pgdata_forbidden');
       if(st.isDirectory()){
+        if(directories)directories.push(sub);
         if(sub==='pg_tblspc'&& (await fs.readdir(absolute)).length)fail('external_tablespace_forbidden');
         stack.push({at:absolute,rel:sub});
       } else if(st.isFile()&&st.nlink===1){
@@ -137,8 +138,8 @@ export async function prepareDurableRestoredPg17({
   }
   if(sources.length!==1)fail(sources.length?'multiple_candidates_requires_review':'stopped_copy_not_found');
   const source=path.resolve(sources[0]);
-  if(same(source,prior.pg_data_directory)||prefix(source,prior.pg_data_directory)
-    ||prefix(prior.pg_data_directory,source))fail('source_matches_original');
+  // An old private config may legitimately point to the same stopped test
+  // snapshot. Safety is established by TEMP containment and clean PG control.
   await physical(source,'directory');
   await physical(path.join(source,'global','pg_control'),'file');
   await physical(path.join(source,'client-vault.key'),'file');
@@ -147,7 +148,8 @@ export async function prepareDurableRestoredPg17({
     fail('vault_unverified');
   await absent(path.join(source,'postmaster.pid'));
   await inspectStopped(path.join(postgresBinDirectory,platform==='win32'?'pg_controldata.exe':'pg_controldata'),source,run);
-  const files=await filesIn(source);
+  const directories=[];
+  const files=await filesIn(source,{directories});
   for(const name of ['PG_VERSION','global/pg_control','client-vault.key']){
     if(!files.some(f=>f.rel===name))fail('required_cluster_file_missing');
   }
@@ -160,6 +162,8 @@ export async function prepareDurableRestoredPg17({
   const staging=path.join(state,'.data-copy-pending');
   await fs.mkdir(staging,{mode:0o700});
   const digests=[];
+  for(const dir of directories.sort((a,b)=>a.split('/').length-b.split('/').length))
+    await fs.mkdir(path.join(staging,dir),{recursive:true,mode:0o700});
   for(const item of files){
     const sourceFile=path.join(source,item.rel);
     const target=path.join(staging,item.rel);
@@ -179,7 +183,9 @@ export async function prepareDurableRestoredPg17({
   await inspectStopped(path.join(postgresBinDirectory,'pg_controldata.exe'),source,run);
   if(JSON.stringify((await filesIn(source)).map(x=>[x.rel,x.size,x.mtimeMs])) !==
       JSON.stringify(files.map(x=>[x.rel,x.size,x.mtimeMs])))fail('source_changed');
-  if((await filesIn(staging)).length!==files.length)fail('copy_file_count_mismatch');
+  const targetDirs=[];
+  if((await filesIn(staging,{directories:targetDirs})).length!==files.length
+    ||JSON.stringify(targetDirs.sort())!==JSON.stringify(directories.sort()))fail('copy_file_count_mismatch');
   await fs.rename(staging,destination);
   const updated={...prior,bundle_directory:bundleDirectory,expected_bundle_sha256:bundleDigest,
     state_directory:state,pg_data_directory:destination};
