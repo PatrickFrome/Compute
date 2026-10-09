@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, constants } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
@@ -11,7 +11,7 @@ const SHA=/^[0-9a-f]{64}$/;
 const CONFIG_KEYS=['schema','version','bundle_directory','expected_bundle_sha256','state_directory',
   'pg_data_directory','database_url','inspect_database_url','api_port','edge_port','startup_timeout_ms'];
 const local=p=>typeof p==='string'&&p.length<2048&&path.isAbsolute(p)
-  && !/^(?:\\\\|\/\/)/.test(p)&&!/[\\x00-\\x1f]/.test(p);
+  && !/^(?:\\\\|\/\/)/.test(p)&&!/[\x00-\x1f]/.test(p);
 const fail=x=>{throw new Error('pg17_auto_prepare_'+x);};
 const same=(a,b)=>process.platform==='win32'?
   path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase():path.resolve(a)===path.resolve(b);
@@ -54,7 +54,7 @@ async function filesIn(data,{maxFiles=100000,maxBytes=20*1024**3,directories=nul
     const {at,rel}=stack.pop();
     const rows=(await fs.readdir(at,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name,'en'));
     for(const item of rows){
-      if(!item.name||item.name==='.'||item.name==='..')fail('path_invalid');
+      if(!item.name||item.name==='.'||item.name==='..'||item.name.includes(':'))fail('path_invalid');
       const sub=rel?rel+'/'+item.name:item.name;
       const absolute=path.join(at,item.name);
       const st=await fs.lstat(absolute);
@@ -172,7 +172,7 @@ export async function prepareDurableRestoredPg17({
     if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
       ||before.size!==item.size||before.mtimeMs!==item.mtimeMs)fail('source_changed');
     const original=await hashFile(sourceFile);
-    await fs.copyFile(sourceFile,target,fs.constants.COPYFILE_EXCL);
+    await fs.copyFile(sourceFile,target,constants.COPYFILE_EXCL);
     const dest=await fs.lstat(target);
     if(dest.size!==item.size || (await hashFile(target))!==original
       || (await hashFile(sourceFile))!==original)fail('copy_verification_failed');
