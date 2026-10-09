@@ -146,9 +146,11 @@ export class GithubChatRelay {
   }
   #permission(request){
     let scope='OBSERVE';
-    if(request.method==='REVOKE')scope='CONTROL';
+    // Revocation is always available to an authenticated, paired operator.
+    // A read-only grant must be able to withdraw itself without CONTROL.
     if(request.method==='GOAL_SUBMIT')scope='GOALS';
     if(request.method==='COMMAND_SUBMIT'&&controlActionDescriptor(request.params.action)?.effect==='MUTATING')scope='CONTROL';
+    if(request.method==='REVOKE')return;
     if(!this.#pairing.permissions.includes(scope))fail('scope_denied');
   }
   async #invoke(request){
