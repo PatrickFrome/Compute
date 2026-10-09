@@ -4,6 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import net from 'node:net';
+import postgres from 'postgres';
+import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { initializeFreshClientPg17 } from './fresh-pg17-initdb.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { prepareDurableRestoredPg17 } from '../../apps/metaengine-browser/src/local-restored-pg17-auto-prepare.mjs';
@@ -26,11 +29,16 @@ test('real stopped PG17 snapshot is copied and rebound automatically using seale
   const passwordFile=path.join(root,'generated-init-password');
   const oldConfigFile=path.join(root,'original-private-config.json');
   const reportPath=path.join(root,'reviewed-restore-report.json');
-  let passed=false;
-  t.after(async()=>{if(passed) await fs.rm(root,{recursive:true,force:false});});
+  let passed=false,active=null,sql=null;
+  t.after(async()=>{
+    if(sql){await sql.end({timeout:5});sql=null;}
+    if(active){const stop=await active.stop();assert.equal(stop.cleanup_confirmed,true);active=null;}
+    if(passed)await fs.rm(root,{recursive:true,force:false});
+  });
   await fs.mkdir(temp,{recursive:true});
   await fs.mkdir(localAppData,{recursive:true});
-  await fs.writeFile(passwordFile,randomBytes(32).toString('hex')+'\n',{flag:'wx'});
+  const password=randomBytes(32).toString('hex');
+  await fs.writeFile(passwordFile,password+'\n',{flag:'wx'});
   const result=await initializeFreshClientPg17({
     bundleDirectory:bundle,expectedBundleSha256:sha,
     stateDirectory:path.join(root,'original'),pgDataDirectory:source,
@@ -79,6 +87,36 @@ test('real stopped PG17 snapshot is copied and rebound automatically using seale
   assert.equal(bound.pg_data_directory,proof.pgDataDirectory);
   assert.equal(bound.state_directory,proof.stateDirectory);
   assert.equal(bound.database_url,originalConfig.database_url);
+  // The durable copy must actually start as PostgreSQL 17, answer SQL,
+  // preserve its physical Vault, and stop without stale postmaster.pid.
+  // This does NOT qualify METAENGINE application roles or an owner profile.
+  const listener=net.createServer();
+  await new Promise((resolve,reject)=>{
+    listener.once('error',reject);
+    listener.listen(0,'127.0.0.1',resolve);
+  });
+  const pgPort=listener.address().port;
+  await new Promise((resolve,reject)=>listener.close(error=>error?reject(error):resolve()));
+  const env={...process.env,PGHOST:'127.0.0.1',PGPORT:String(pgPort),
+    PGUSER:'postgres',PGPASSWORD:password,PGDATABASE:'postgres',
+    PGSSLMODE:'disable',PGCONNECT_TIMEOUT:'3'};
+  active=await startOwnedWindowsPostgres({
+    pgBinDir:verified.paths.postgresBinDirectory,
+    pgDataDir:proof.pgDataDirectory,databasePort:pgPort,
+    env,startupTimeoutMs:30000,
+  });
+  sql=postgres('postgres://postgres:'+password+'@127.0.0.1:'+pgPort+'/postgres',
+    {max:1,prepare:false,connect_timeout:5,idle_timeout:5,onnotice:()=>{}});
+  const [version]=await sql.unsafe("SELECT current_setting('server_version_num')::integer AS major");
+  assert(version.major>=170000&&version.major<180000);
+  const [identity]=await sql.unsafe('SELECT system_identifier FROM pg_control_system()');
+  assert.equal(String(identity.system_identifier).length>=10,true);
+  assert.deepEqual(await fs.readFile(path.join(proof.pgDataDirectory,'client-vault.key')),originalVault);
+  await sql.end({timeout:5});sql=null;
+  const stoppedReadback=await active.stop();
+  assert.equal(stoppedReadback.cleanup_confirmed,true);
+  active=null;
+  await assert.rejects(fs.lstat(path.join(proof.pgDataDirectory,'postmaster.pid')),{code:'ENOENT'});
   await assert.rejects(prepareDurableRestoredPg17({
     oldConfigFile,localAppData,bundleDirectory:bundle,bundleDigest:sha,
     restoreReceiptFile:reportPath,restoreReceiptSha256:digest(Buffer.from(report)),
