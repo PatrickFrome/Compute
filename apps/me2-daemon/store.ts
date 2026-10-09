@@ -262,6 +262,48 @@ export function eventsByTask(taskId: string, limit = 300): EventRow[] {
   return db.query(`SELECT * FROM events WHERE task_id=? ORDER BY seq ASC LIMIT ?`).all(taskId, limit) as EventRow[];
 }
 
+/** Durable event pagination. Task sequence gaps are other tasks, not lost rows. */
+export function readEventPage({ since, limit = 200, taskId = null }: { since?: number; limit?: number; taskId?: string | null } = {}) {
+  const after = since ?? 0;
+  const latestWindow = taskId !== null && since === undefined;
+  if (!Number.isSafeInteger(after) || after < 0) throw new Error("event_cursor_invalid");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error("event_limit_invalid");
+  if (taskId !== null && (typeof taskId !== "string" || taskId.length < 1 || taskId.length > 192 || /[\u0000-\u001f]/.test(taskId))) {
+    throw new Error("event_task_id_invalid");
+  }
+  // Bounds and rows share one read snapshot, even if another process appends.
+  return db.transaction(() => {
+    const logLatest = (db.query(`SELECT COALESCE(MAX(seq),0) AS value FROM events`).get() as { value: number }).value;
+    const scopedLatest = taskId === null ? logLatest :
+      (db.query(`SELECT COALESCE(MAX(seq),0) AS value FROM events WHERE task_id=?`).get(taskId) as { value: number }).value;
+    const resync = after > logLatest;
+    const found = resync ? [] : (taskId === null
+      ? db.query(`SELECT * FROM events WHERE seq>? ORDER BY seq ASC LIMIT ?`).all(after, limit + 1)
+      : latestWindow
+        ? db.query(`SELECT * FROM events WHERE task_id=? ORDER BY seq DESC LIMIT ?`).all(taskId, limit + 1)
+        : db.query(`SELECT * FROM events WHERE task_id=? AND seq>? ORDER BY seq ASC LIMIT ?`).all(taskId, after, limit + 1)) as EventRow[];
+    const events = found.slice(0, limit);
+    if (latestWindow) events.reverse();
+    return {
+      events,
+      scope: { kind: taskId === null ? "global" : "task", task_id: taskId },
+      cursor: {
+        mode: latestWindow ? "latest" : "after",
+        after_seq: latestWindow ? null : after,
+        returned_through_seq: events.at(-1)?.seq ?? after,
+        latest_seq: scopedLatest,
+        log_latest_seq: logLatest,
+        has_more: !latestWindow && found.length > limit,
+        has_earlier: latestWindow && found.length > limit,
+        resync_required: resync,
+        resync_reason: resync ? "CURSOR_AHEAD_OF_LOG" : null,
+      },
+      project_history_available: false,
+      authority_effect: false,
+    };
+  })();
+}
+
 // ── agents ────────────────────────────────────────────────────────
 export function createAgent(role: string, model: string): AgentRow {
   if (!/^openai:gpt-[a-z0-9._-]+$/i.test(model)) throw new Error("inference_provider_not_allowed");
