@@ -121,6 +121,17 @@ test('auto prepare rejects wrong original Vault or system identifier before any 
     e=>e.code==='ENOENT');
 });
 
+test('source PGDATA must be distinct from the old-config original for meaningful Vault and system identity comparison',async t=>{
+  const f=await fixture(t);
+  const prior={...f.previous,pg_data_directory:f.source,
+    state_directory:path.dirname(f.source)};
+  await fs.writeFile(f.oldConfigFile,JSON.stringify(prior));
+  await assert.rejects(prepareDurableRestoredPg17(f.args),
+    /pg17_auto_prepare_independent_original_required/);
+  await assert.rejects(fs.lstat(path.join(f.localAppData,'METAENGINE','restored-postgres-17')),
+    e=>e.code==='ENOENT');
+});
+
 test('auto prepare refuses two TEMP clones without making a choice or creating a permanent target',async t=>{
   const f=await fixture(t);
   const clone=path.join(f.temp,'compute-restored-provider-Dup123','data');
