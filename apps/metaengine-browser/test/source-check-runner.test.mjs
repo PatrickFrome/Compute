@@ -9,6 +9,7 @@ test('npm source check fits Windows cmd limits and checks the full catalog witho
   assert.ok(pkg.scripts.check.length<100);
   assert.equal(new Set(SOURCE_CHECK_FILES).size,SOURCE_CHECK_FILES.length);
   for(const file of ['src/main.mjs','src/preload-shell.cjs','src/github-chat-relay.mjs',
+    'src/local-restored-pg17-auto-prepare.mjs',
     'src/github-chat-setup.mjs','src/github-chat-setup-renderer.js',
     'supabase/a2-browser-native-supervisor-v1/chat-command-routes.mjs'])assert.ok(SOURCE_CHECK_FILES.includes(file));
   const calls=[];
