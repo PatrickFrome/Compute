@@ -1,6 +1,6 @@
 # Аудит и продолжение разработки METAENGINE — 9 октября 2026
 
-Работа ведётся в [PR #1176](https://github.com/PatrickFrome/Compute/pull/1176), ветка `work/client-autonomous-continuity-v1`, поверх PR #1175 / `f64006dab3285c1152159e4d36fc0feed5dc09e0`. Кандидат пакета: `0.7.0-dev.37781000025.1`. Это продолжение локального Windows/PostgreSQL клиента. Установленный клиент с непрерывным полезным исполнением пока не квалифицирован.
+Работа ведётся в [PR #1176](https://github.com/PatrickFrome/Compute/pull/1176), ветка `work/client-autonomous-continuity-v1`, поверх PR #1175 / `f64006dab3285c1152159e4d36fc0feed5dc09e0`. Текущий кандидат пакета: `0.7.0-dev.37781000027.1`. Это продолжение локального Windows/PostgreSQL клиента. Установленный клиент с непрерывным полезным исполнением пока не квалифицирован.
 
 ## Источники и происхождение
 
@@ -77,3 +77,11 @@ Learning/artifact callbacks уже подключены к realtime plane в `na
 Сопоставлены официальные документы Temporal, LangGraph и OpenHands: [источники и разбор механизмов](../../research-autonomous-client-2026-10-09.md). Заимствуемые принципы: durable execution и идемпотентные внешние действия; отдельные checkpoint и shared knowledge store; ограниченная история с продолжением в новом run; отдельный execution service и наблюдающий интерфейс. Рейтинг «лучшего продукта 2026» без benchmark не заявляется.
 
 Проверяемый следующий рубеж: одна настоящая coding-задача → работа нескольких агентов → build/tests в связанном verifier backend → независимый результат → durable checkpoint → принудительный сбой → продолжение без повторного внешнего эффекта. Текущий PR устраняет конкретные дефекты транспорта, полномочий, наблюдаемости и сохранения доказательств, необходимые для этого рубежа.
+
+## Продолжение: проект задачи и лента действий
+
+Реализован локальный исполнитель проекта задачи: locked Git worktree из точного SHA/branch, write-ahead RESERVED запись, идемпотентность, проверка физического inventory и lock reason, восстановление после прерывания между Git-эффектом и terminal записью. Исполнитель допускает только фиксированные shell-free планы `worktree add --lock` и `worktree list --porcelain -z`. Адаптер для существующего `supervisor.command` требует доверенный актуальный MUTATING claim и точный workspace binding; caller не может подставить claim, пути или Git argv. Отдельный DB bridge вызывает существующие register/readback RPC: RESERVED до эффекта, READY/FROZEN после readback. Тест с настоящим loopback сервером подтверждает 401 без токена и PROVEN при разрешённом запросе.
+
+Production mount намеренно остаётся закрытым: host ещё не предоставляет authoritative claim resolver и durable journal; in-memory journal пригоден только для теста и не защищает перезапуск. Поэтому UI не показывает кнопку создания проекта, а project runtime не объявляется работающим для пользователей. Следующий этап должен подключить эти зависимости к `main.mjs`, доказать crash/restart на реальной БД и только затем открыть команду в UI.
+
+Для существующего ME2 daemon исправлен `/events?task=...`: latest окно, bounded `since`-пагинация и server cursor metadata. Task Sheet сохраняет последнюю проверенную историю, показывает новые действия после reconnect и явно сообщает, что проектная привязка и общий project-wide журнал пока недоступны. Проверены 8 условий SQLite regression в изолированном Bun child, 11 тестов feed projection, 41 browser/workspace тест и TypeScript check UI; это локальные результаты данного source tree, не квалификация установленного приложения.
