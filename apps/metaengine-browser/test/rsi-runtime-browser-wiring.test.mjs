@@ -91,7 +91,9 @@ test('RSI operator steering wheel exposes status/pause/resume/nominate/approve w
 
 test('generic Browser command attribution cannot manufacture candidate or skill credit', () => {
   const start = main.indexOf('function rsiOutcomeAttributionForCommand(command)');
-  const end = main.indexOf('async function initNativeSupervisor()', start);
+  // Bound the check to this top-level function, not whichever unrelated
+  // startup helpers happen to precede initNativeSupervisor.
+  const end = main.indexOf('\n}', start) + 2;
   assert.ok(start >= 0 && end > start, 'Browser outcome attribution boundary missing');
   const binding = main.slice(start, end);
   assert.match(binding, /task_signature_digest:\s*taskSignature/);

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { createRemoteSupportMcp, readBoundedCapture, discoverLocalPostgresFiles, listReadyFixedWindowsDrives } from '../src/remote-support-mcp.mjs';
 
 const rpc = (service,name,args={}) => service.request({jsonrpc:'2.0',id:3,method:'tools/call',params:{name,arguments:args}});
@@ -137,6 +139,80 @@ test('stdio JSON-RPC framing sends no unsolicited private data',async()=>{
   assert.equal(JSON.parse(seen[0]).id,5);
   assert.equal(JSON.parse(seen[1]).error.code,-32700);
   support.close();input.destroy();output.destroy();
+});
+
+test('programmatic MCP requests never attach to host stdio',async()=>{
+  const listeners=process.stdin.listenerCount('data');
+  const flowing=process.stdin.readableFlowing;
+  const service=createRemoteSupportMcp({platform:'win32',executor:mock(),approve:async()=>false});
+  try {
+    assert.equal((await rpc(service,'support_status')).result.isError,false);
+    assert.equal(process.stdin.listenerCount('data'),listeners);
+    assert.equal(process.stdin.readableFlowing,flowing);
+    assert.throws(()=>createRemoteSupportMcp({input:new PassThrough()}),/transport_invalid/);
+    assert.throws(()=>createRemoteSupportMcp({output:new PassThrough()}),/transport_invalid/);
+  } finally { service.close(); }
+});
+
+test('explicit MCP CLI answers over stdio and exits when the transport ends',{timeout:10000},async t=>{
+  const child=spawn(process.execPath,[fileURLToPath(new URL('../src/remote-support-mcp.mjs',import.meta.url))],
+    {cwd:new URL('..',import.meta.url),stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});
+  t.after(()=>{if(child.exitCode===null) child.kill();});
+  let stdout='',stderr='';
+  child.stdout.on('data',chunk=>{stdout+=chunk;if(stdout.includes('\n')) child.stdin.end();});
+  child.stderr.on('data',chunk=>{stderr+=chunk;});
+  const closed=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(code,signal)=>resolve({code,signal}));});
+  child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:42,method:'ping'})+'\n');
+  assert.deepEqual(await closed,{code:0,signal:null});
+  assert.equal(stderr,'');
+  assert.deepEqual(JSON.parse(stdout),{jsonrpc:'2.0',id:42,result:{}});
+});
+
+test('closing MCP releases its transport without pausing another reader',async t=>{
+  const input=new PassThrough(),output=new PassThrough();
+  const service=createRemoteSupportMcp({input,output,executor:mock()});
+  t.after(()=>{service.close();input.destroy();output.destroy();});
+  await new Promise(resolve=>setImmediate(resolve));
+  service.close();service.close();
+  assert.equal(input.isPaused(),true);
+  for(const event of ['data','end','close','error']) assert.equal(input.listenerCount(event),0);
+  await assert.rejects(rpc(service,'support_status'),/session_closed/);
+
+  const shared=new PassThrough();
+  const reader=()=>{};
+  shared.on('data',reader);
+  const second=createRemoteSupportMcp({input:shared,output,executor:mock()});
+  t.after(()=>{second.close();shared.destroy();});
+  await new Promise(resolve=>setImmediate(resolve));
+  second.close();
+  assert.equal(shared.listenerCount('data'),1);
+  assert.equal(shared.isPaused(),false);
+});
+
+test('transport disconnect revokes grants and drops queued effects and late observations',async t=>{
+  for(const ending of ['end','close','error']) {
+    const input=new PassThrough(),output=new PassThrough();
+    let finish,observations=0,effects=0;
+    const pending=new Promise(resolve=>{finish=resolve;});
+    const replies=[];output.on('data',value=>replies.push(String(value)));
+    const service=createRemoteSupportMcp({input,output,platform:'win32',approve:async()=>true,
+      executor:{observe:async()=>{observations++;return pending;},act:async()=>{effects++;return {};}}});
+    t.after(()=>{finish({result:{}});service.close();input.destroy();output.destroy();});
+    await rpc(service,'support_start_session',{scope:'CONTROL'});
+    const wire=(id,name,args)=>input.write(JSON.stringify({jsonrpc:'2.0',id,method:'tools/call',params:{name,arguments:args}})+'\n');
+    wire(1,'support_observe',{action:'OBSERVE_WINDOWS'});
+    wire(2,'support_control',act);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(observations,1);
+    if(ending==='end') input.end();
+    else input.destroy(ending==='error'?new Error('transport_lost'):undefined);
+    await new Promise(resolve=>setImmediate(resolve));
+    await assert.rejects(rpc(service,'support_status'),/session_closed/);
+    finish({result:{private_content:'must_not_publish'}});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(effects,0);
+    assert.deepEqual(replies,[]);
+  }
 });
 
 const deferred = () => {
@@ -450,11 +526,12 @@ test('DB_CONNECT is isolated and requires local approval twice before operator s
   db.close();
 });
 
-test('DB_CONNECT denies dangerous arguments and failed second consent never dispatches',async()=>{
+test('DB_CONNECT denies dangerous arguments and failed second consent never dispatches',async t=>{
   let invoked=0,commits=0;
   const db=createRemoteSupportMcp({platform:'win32',executor:mock(),
     approve:async ({scope})=>{if(scope==='DB_CONNECT_COMMIT') {commits++;return false;}return true;},
     restoredProviderOperator:async()=>{invoked++;return configuredReceipt;}});
+  t.after(()=>db.close());
   assert.equal((await rpc(db,'support_start_session',{scope:'DB_CONNECT'})).result.isError,false);
   for(const invalid of [
     {...validRestoreInput,owner_action:'CREATE_NEW_DATABASE'},
@@ -463,6 +540,14 @@ test('DB_CONNECT denies dangerous arguments and failed second consent never disp
     {...validRestoreInput,private_config_file:'\\\\host\\share\\evil.json'},
     {...validRestoreInput,private_config_file:'relative\\evil.json'},
   ])assert(denied(await rpc(db,'support_connect_restored_postgres',invalid)));
+  for(const field of ['private_config_file','restore_receipt_file','appdata_directory']) {
+    for(const invalid of [
+      '\\\\host\\share\\private.json','//host/share/private.json',
+      '\\\\?\\C:\\private.json','\\\\.\\C:\\private.json',
+      '\\private.json','/private.json','C:private.json',
+      'C:\\private.json:stream','C:/private.json:stream','C:\\private\n.json',
+    ]) assert(denied(await rpc(db,'support_connect_restored_postgres',{...validRestoreInput,[field]:invalid})),field);
+  }
   assert.equal(commits,0);
   assert(denied(await rpc(db,'support_connect_restored_postgres',validRestoreInput)));
   assert.equal(commits,1);

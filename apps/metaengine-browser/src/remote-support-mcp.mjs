@@ -27,8 +27,10 @@ function restoreArguments(args) {
     || args.owner_action !== RESTORE_ACTION
     || !['private_config_file','restore_receipt_file','appdata_directory'].every(key =>
       typeof args[key] === 'string' && args[key].length < 2048
-      && path.win32.isAbsolute(args[key]) && !/^(?:\\\\\\\\|\/\/)/.test(args[key])
-      && !/[\x00-\x1f]/.test(args[key]))) {
+      // Require an explicit drive root. isAbsolute alone also accepts UNC,
+      // device namespaces and paths rooted on the current drive.
+      && /^[a-z]:[\\/]/i.test(args[key])
+      && !/[\x00-\x1f:]/.test(args[key].slice(2)))) {
     throw new Error('remote_support_restore_arguments_invalid');
   }
   return ['--config',args.private_config_file,'--bundle-sha256',args.expected_bundle_sha256,
@@ -168,7 +170,7 @@ export async function discoverLocalPostgresFiles({
 }
 
 export function createRemoteSupportMcp({
-  input = process.stdin, output = process.stdout,
+  input = null, output = null,
   executor = createWindowsLocalComputerExecutor(),
   approve = confirmRemoteSupportOnWindows,
   now = () => Date.now(), platform = process.platform,
@@ -177,6 +179,13 @@ export function createRemoteSupportMcp({
   postgresDiscoverer = discoverLocalPostgresFiles,
   restoredProviderOperator = runRestoredClientProviderCli,
 } = {}) {
+  // Programmatic requests do not own the host process's stdio. The CLI below
+  // explicitly attaches it; tests and embedding callers can supply a transport.
+  if ((input !== null || output !== null)
+      && (typeof input?.on !== 'function' || typeof input?.once !== 'function' || typeof input?.off !== 'function'
+        || typeof input?.pause !== 'function' || typeof input?.listenerCount !== 'function'
+        || typeof output?.write !== 'function'))
+    throw new Error('remote_support_transport_invalid');
   let viewExpires = 0;
   let controlExpires = 0;
   let filesExpires = 0;
@@ -191,7 +200,7 @@ export function createRemoteSupportMcp({
   let approvalPending = false;
   let sessionGeneration = 0;
   const send = message => {
-    if (closed) return;
+    if (closed || !output) return;
     output.write(JSON.stringify(message) + '\n');
   };
   // A locally approved, bounded session replaces modal prompts on EVERY
@@ -433,10 +442,30 @@ export function createRemoteSupportMcp({
       else processing=processing.then(()=>line(one),()=>line(one));
     }
   }
-  input.on('data',onData);
+  function close() {
+    if (closed) return;
+    revoke();
+    closed = true;
+    buffer = '';
+    if (input) {
+      input.off('data',onData);
+      input.off('end',close);
+      input.off('close',close);
+      input.off('error',close);
+      // Removing the data listener alone leaves a pipe in flowing mode and
+      // can keep the host alive after all requests have finished.
+      if (input.listenerCount('data') === 0 && input.listenerCount('readable') === 0)
+        input.pause();
+    }
+  }
+  if (input) {
+    input.on('data',onData);
+    input.once('end',close);
+    input.once('close',close);
+    input.once('error',close);
+  }
   return Object.freeze({
-    request,tools,
-    close:()=>{revoke();closed=true;input.off('data',onData);},
+    request,tools,close,
   });
 }
 
@@ -459,5 +488,5 @@ export async function readBoundedCapture(filename,sha256) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // Explicitly launched by the owner-run tunnel-client; no Browser startup
   // registration, no network listener, no persistent unattended service.
-  createRemoteSupportMcp();
+  createRemoteSupportMcp({input:process.stdin,output:process.stdout});
 }
