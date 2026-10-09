@@ -40,12 +40,17 @@ async function hashFile(filename) {
   for await(const chunk of createReadStream(filename))h.update(chunk);
   return h.digest('hex');
 }
-async function inspectStopped(executable,data,run) {
+async function inspectCluster(executable,data,run,{stopped=false}={}) {
   let stdout;
   try{({stdout}=await run(executable,['-D',data],{windowsHide:true,shell:false,timeout:15000,maxBuffer:128*1024}));}
   catch{fail('pg_control_state_unverified');}
-  // 'in production' and 'in archive recovery' are NEVER eligible for copying.
-  if(!/^\s*Database cluster state:\s*shut down\s*$/im.test(stdout))fail('pg_control_not_cleanly_shut_down');
+  const identifier=/^\s*Database system identifier:\s*(\d{10,25})\s*$/im.exec(stdout)?.[1];
+  if(!identifier)fail('pg_system_identity_unverified');
+  // Original PGDATA may still say 'in production' due to its historic stale
+  // postmaster state. It is read-only identity evidence, never a copy source.
+  if(stopped && !/^\s*Database cluster state:\s*shut down\s*$/im.test(stdout))
+    fail('pg_control_not_cleanly_shut_down');
+  return identifier;
 }
 async function filesIn(data,{maxFiles=100000,maxBytes=20*1024**3,directories=null}={}){
   const found=[],stack=[{at:data,rel:''}];
@@ -160,13 +165,26 @@ export async function prepareDurableRestoredPg17({
   // An old private config may legitimately point to the same stopped test
   // snapshot. Safety is established by TEMP containment and clean PG control.
   await physical(source,'directory');
+  const reference=prior.pg_data_directory;
+  await physical(reference,'directory');
+  await physical(path.join(reference,'global','pg_control'),'file');
+  await physical(path.join(reference,'client-vault.key'),'file');
+  if((await fs.readFile(path.join(reference,'PG_VERSION'),'utf8')).trim()!=='17')
+    fail('original_major_mismatch');
+  const vaultReference=await fs.readFile(path.join(reference,'client-vault.key'));
+  if(!/^[a-f0-9]{64}\n$/.test(vaultReference.toString()))
+    fail('original_vault_unverified');
+  const controlExe=path.join(postgresBinDirectory,'pg_controldata.exe');
+  const referenceIdentity=await inspectCluster(controlExe,reference,run);
   await physical(path.join(source,'global','pg_control'),'file');
   await physical(path.join(source,'client-vault.key'),'file');
   if((await fs.readFile(path.join(source,'PG_VERSION'),'utf8')).trim()!=='17')fail('postgres_major_mismatch');
-  if(!/^[a-f0-9]{64}\n$/.test(await fs.readFile(path.join(source,'client-vault.key'),'utf8')))
-    fail('vault_unverified');
+  const sourceVault=await fs.readFile(path.join(source,'client-vault.key'));
+  if(!/^[a-f0-9]{64}\n$/.test(sourceVault.toString())||!sourceVault.equals(vaultReference))
+    fail('vault_identity_mismatch');
   await absent(path.join(source,'postmaster.pid'));
-  await inspectStopped(path.join(postgresBinDirectory,platform==='win32'?'pg_controldata.exe':'pg_controldata'),source,run);
+  if((await inspectCluster(controlExe,source,run,{stopped:true}))!==referenceIdentity)
+    fail('postgres_system_identity_mismatch');
   const directories=[];
   const files=await filesIn(source,{directories});
   for(const name of ['PG_VERSION','global/pg_control','client-vault.key']){
@@ -199,8 +217,11 @@ export async function prepareDurableRestoredPg17({
   }
   // Source remains cleanly shut down even after a potentially lengthy copy.
   await absent(path.join(source,'postmaster.pid'));
-  await inspectStopped(path.join(postgresBinDirectory,'pg_controldata.exe'),source,run);
-  await inspectStopped(path.join(postgresBinDirectory,'pg_controldata.exe'),staging,run);
+  if((await inspectCluster(controlExe,source,run,{stopped:true}))!==referenceIdentity
+    ||(await inspectCluster(controlExe,staging,run,{stopped:true}))!==referenceIdentity)
+    fail('postgres_system_identity_mismatch');
+  if(!(await fs.readFile(path.join(reference,'client-vault.key'))).equals(vaultReference))
+    fail('original_vault_changed');
   if(JSON.stringify((await filesIn(source)).map(x=>[x.rel,x.size,x.mtimeMs])) !==
       JSON.stringify(files.map(x=>[x.rel,x.size,x.mtimeMs])))fail('source_changed');
   for(let index=0;index<files.length;index++){
@@ -225,7 +246,8 @@ export async function prepareDurableRestoredPg17({
     schema:'metaengine.pg17-copy-proof.v1',state:'COPIED_AND_VERIFIED',
     file_count:digests.length,bytes:digests.reduce((n,r)=>n+r.size,0),
     file_digest_manifest_sha256:manifestHash,vault_key_preserved:true,
-    pg_control_stopped_verified:true,external_tablespaces_accepted:false,
+    pg_control_stopped_verified:true,source_system_identity_matched_original:true,
+    vault_key_matched_original:true,external_tablespaces_accepted:false,
     original_source_modified:false,automatic_retry_allowed:false,
   },null,2)+'\n',{flag:'wx',mode:0o600});
   return Object.freeze({configFile,stateDirectory:state,pgDataDirectory:destination,
