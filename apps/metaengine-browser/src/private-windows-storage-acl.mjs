@@ -21,14 +21,28 @@ export async function verifyOwnerOnlyWindowsStorage(target,{
   const root=String(env.SystemRoot || env.SYSTEMROOT || '');
   if(!/^[A-Za-z]:\\Windows$/i.test(root))fail('windows_root_unverified');
   const exe=path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe');
+  // Windows PowerShell auto-loads Get-Acl/Set-Acl from the trusted OS
+  // Security module. Stripping PSModulePath/TEMP can stall module discovery
+  // indefinitely on a clean CI image. Pin modules to SystemRoot, not the
+  // caller's PATH or arbitrary per-user modules.
   const vars={SystemRoot:root,SYSTEMROOT:root,WINDIR:root,
+    PSModulePath:path.win32.join(root,'System32','WindowsPowerShell','v1.0','Modules'),
+    TEMP:typeof env.TEMP==='string'?env.TEMP:path.win32.join(root,'Temp'),
+    TMP:typeof env.TMP==='string'?env.TMP:path.win32.join(root,'Temp'),
+    USERPROFILE:typeof env.USERPROFILE==='string'?env.USERPROFILE:root,
     METAENGINE_PRIVATE_ACL_TARGET:target,METAENGINE_PRIVATE_ACL_ACTION:operation};
   let stdout;
   try{
     ({stdout}=await run(exe,['-NoLogo','-NoProfile','-NonInteractive',
       '-EncodedCommand',Buffer.from(aclScript,'utf16le').toString('base64')],{
-      env:vars,shell:false,windowsHide:true,timeout:30000,maxBuffer:8192}));
-  }catch{fail('acl_not_confirmed');}
+      env:vars,shell:false,windowsHide:true,timeout:15000,maxBuffer:8192}));
+  }catch(error){
+    // Never expose PowerShell stderr: it can contain private usernames,
+    // PGDATA paths, tokens or Windows profile data.
+    if(error?.killed||error?.code==='ETIMEDOUT')fail('powershell_timeout');
+    if(error?.code==='ENOENT')fail('powershell_missing');
+    fail('acl_not_confirmed');
+  }
   if(String(stdout||'').trim()!==done)fail('acl_not_confirmed');
   const st=await fs.lstat(target).catch(()=>null);
   if(!st||st.isSymbolicLink()||(operation==='VERIFY_FILE'?!st.isFile():!st.isDirectory()))

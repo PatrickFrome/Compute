@@ -23,6 +23,9 @@ test('DACL operator is a fixed PowerShell program, never a private path assemble
   assert.equal(call.opts.shell,false);
   assert.equal(call.opts.env.METAENGINE_PRIVATE_ACL_TARGET,directory);
   assert.equal(call.opts.env.METAENGINE_PRIVATE_ACL_ACTION,'PROTECT_DIRECTORY');
+  assert.equal(call.opts.env.PSModulePath,
+    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules');
+  assert.equal(call.opts.env.DATABASE_URL,undefined);
   assert.equal(JSON.stringify(call.argv).includes(directory),false);
   assert.equal(Buffer.from(call.argv.at(-1),'base64').toString('utf16le').includes(directory),false);
   assert.equal(call.opts.env.DATABASE_URL,undefined);
@@ -45,6 +48,9 @@ test('Win32 DACL operator rejects unreadable receipt, unsupported platform and u
     /private_windows_storage_arguments_invalid/);
   await assert.rejects(verifyOwnerOnlyWindowsStorage(file,{...args,env:{SystemRoot:'\\\\remote\\Windows'}}),
     /private_windows_storage_windows_root_unverified/);
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(file,{
+    ...args,run:async()=>{throw Object.assign(new Error('contains-private-path'),{killed:true});},
+  }),/private_windows_storage_powershell_timeout/);
   await assert.rejects(verifyOwnerOnlyWindowsStorage(file,{...args,platform:'linux'}),
     /private_windows_storage_arguments_invalid/);
 });
