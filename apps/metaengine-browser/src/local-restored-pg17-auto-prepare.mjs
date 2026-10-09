@@ -162,8 +162,13 @@ export async function prepareDurableRestoredPg17({
   }
   if(sources.length!==1)fail(sources.length?'multiple_candidates_requires_review':'stopped_copy_not_found');
   const source=path.resolve(sources[0]);
-  // An old private config may legitimately point to the same stopped test
-  // snapshot. Safety is established by TEMP containment and clean PG control.
+  // The old config must identify an independent original cluster, not the
+  // chosen temporary clone itself. Comparing a clone to itself would make
+  // the PostgreSQL/Vault origin attestation meaningless.
+  if(same(source,prior.pg_data_directory)
+    ||prefix(source,prior.pg_data_directory)
+    ||prefix(prior.pg_data_directory,source))
+    fail('independent_original_required');
   await physical(source,'directory');
   const reference=prior.pg_data_directory;
   await physical(reference,'directory');
