@@ -52,7 +52,7 @@ export function projectGithubChatReplyResult(result){
     if(Array.isArray(value)){
       if(seen.has(value)||value.length>MAX_ARRAY)throw new Error('egress_array_unsafe');
       seen.add(value);
-      return value.map(item=>visit(item,key,depth+1,parent));
+      return value.map(item=>visit(item,key,depth+1,key));
     }
     if(!isPlain(value)||seen.has(value))throw new Error('egress_object_unsafe');
     seen.add(value);
