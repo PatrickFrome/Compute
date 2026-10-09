@@ -50,6 +50,7 @@ export async function connectInstalledRestoredPostgres({
     try {
       prepared=await prepare({oldConfigFile:configFile,localAppData:localAppDataDirectory,
         bundleDirectory,bundleDigest:expectedBundleDigest,
+        restoreReceiptFile,restoreReceiptSha256,
         postgresBinDirectory:verified.paths.postgresBinDirectory,platform});
     }catch{fail('durable_copy_or_rebinding_unconfirmed');}
     if(!local(prepared?.configFile)||prepared.copyVerified!==true
