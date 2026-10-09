@@ -5,6 +5,10 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const done = 'METAENGINE_OWNER_DACL_VERIFIED';
+// The physical Windows CI failure was a killed child at 30,053 ms, before
+// the first ACL receipt. Bound cold WinPS startup/readback independently of
+// the ACL policy; a timeout still blocks every subsequent private copy.
+const aclTimeoutMs = 120000;
 const fail = code => { throw new Error('private_windows_storage_'+code); };
 const absolute = value => typeof value === 'string' && path.isAbsolute(value)
   && value.length < 2048 && !/^(?:\\\\|\/\/)/.test(value) && !/[\x00-\x1f]/.test(value);
@@ -22,13 +26,30 @@ export async function verifyOwnerOnlyWindowsStorage(target,{
   if(!/^[A-Za-z]:\\Windows$/i.test(root))fail('windows_root_unverified');
   const exe=path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe');
   const vars={SystemRoot:root,SYSTEMROOT:root,WINDIR:root,
+    // Never resolve modules from an inherited, user-controlled PSModulePath.
+    PSModulePath:path.win32.join(root,'System32','WindowsPowerShell','v1.0','Modules'),
     METAENGINE_PRIVATE_ACL_TARGET:target,METAENGINE_PRIVATE_ACL_ACTION:operation};
+  // WinPS/.NET startup may need the owner's profile and writable TEMP on a
+  // cold Windows runner. Pass only these filesystem locations; credentials,
+  // tokens, loader options, arbitrary modules and PATH are not inherited.
+  for(const key of ['USERPROFILE','TEMP','TMP','HOMEPATH']){
+    const value=env[key];
+    if(typeof value==='string' && value.length<2048 && !/[\x00-\x1f]/.test(value)
+      && !/^(?:\\\\|\/\/)/.test(value)
+      && (key==='HOMEPATH'?/^\\[^\\]/.test(value):path.win32.isAbsolute(value)))vars[key]=value;
+  }
+  if(typeof env.HOMEDRIVE==='string' && /^[A-Za-z]:$/.test(env.HOMEDRIVE))vars.HOMEDRIVE=env.HOMEDRIVE;
   let stdout;
   try{
     ({stdout}=await run(exe,['-NoLogo','-NoProfile','-NonInteractive',
       '-EncodedCommand',Buffer.from(aclScript,'utf16le').toString('base64')],{
-      env:vars,shell:false,windowsHide:true,timeout:30000,maxBuffer:8192}));
-  }catch{fail('acl_not_confirmed');}
+      env:vars,shell:false,windowsHide:true,timeout:aclTimeoutMs,maxBuffer:8192}));
+  }catch(error){
+    // execFile reports its timeout as a killed SIGTERM child with no exit
+    // code. Keep script/transport failures separate without exposing stderr.
+    fail(error?.killed===true && error.signal==='SIGTERM' && error.code===null
+      ? 'acl_timeout' : 'acl_script_failed');
+  }
   if(String(stdout||'').trim()!==done)fail('acl_not_confirmed');
   const st=await fs.lstat(target).catch(()=>null);
   if(!st||st.isSymbolicLink()||(operation==='VERIFY_FILE'?!st.isFile():!st.isDirectory()))
