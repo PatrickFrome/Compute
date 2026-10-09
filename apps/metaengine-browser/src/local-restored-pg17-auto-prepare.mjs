@@ -104,11 +104,30 @@ async function readOldConfig(filename){
  */
 export async function prepareDurableRestoredPg17({
   oldConfigFile, localAppData, bundleDirectory, bundleDigest,
+  restoreReceiptFile, restoreReceiptSha256,
   postgresBinDirectory, tempDirectory=os.tmpdir(), platform=process.platform,
   run=exec, sourceOverride=null,
 }={}){
-  if(platform!=='win32'||![oldConfigFile,localAppData,bundleDirectory,postgresBinDirectory,tempDirectory].every(local)
-    ||!SHA.test(bundleDigest||''))fail('arguments_invalid');
+  if(platform!=='win32'||![oldConfigFile,localAppData,bundleDirectory,
+    postgresBinDirectory,tempDirectory,restoreReceiptFile].every(local)
+    ||![bundleDigest,restoreReceiptSha256].every(x=>SHA.test(x||'')))fail('arguments_invalid');
+  // Independent existing restore report and its caller-supplied pin are
+  // prerequisites for any persistent copy, not post-copy diagnostics.
+  await physical(restoreReceiptFile,'file');
+  const reportStat=await fs.lstat(restoreReceiptFile);
+  if(reportStat.size<1||reportStat.size>4*1024*1024)fail('restore_report_invalid');
+  const reportBytes=await fs.readFile(restoreReceiptFile);
+  if(createHash('sha256').update(reportBytes).digest('hex')!==restoreReceiptSha256
+    ||(await fs.lstat(restoreReceiptFile)).mtimeMs!==reportStat.mtimeMs)
+    fail('restore_report_pin_unverified');
+  let report;
+  try{report=JSON.parse(reportBytes.toString('utf8'));}
+  catch{fail('restore_report_invalid');}
+  if(report?.schema!=='metaengine.database-restore-report.v1'
+    ||report.data_verified!==true||report.schema_verified!==true
+    ||!Array.isArray(report.errors)||report.errors.length!==0
+    ||!Array.isArray(report.ddl_adaptations)||!SHA.test(report.source_dump_sha256||''))
+    fail('restore_report_unverified');
   const prior=await readOldConfig(oldConfigFile);
   await physical(tempDirectory,'directory');
   await physical(localAppData,'directory');
@@ -181,6 +200,7 @@ export async function prepareDurableRestoredPg17({
   // Source remains cleanly shut down even after a potentially lengthy copy.
   await absent(path.join(source,'postmaster.pid'));
   await inspectStopped(path.join(postgresBinDirectory,'pg_controldata.exe'),source,run);
+  await inspectStopped(path.join(postgresBinDirectory,'pg_controldata.exe'),staging,run);
   if(JSON.stringify((await filesIn(source)).map(x=>[x.rel,x.size,x.mtimeMs])) !==
       JSON.stringify(files.map(x=>[x.rel,x.size,x.mtimeMs])))fail('source_changed');
   const targetDirs=[];
