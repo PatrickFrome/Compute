@@ -48,7 +48,7 @@ Earlier .18 source head a65f87d3… was correctly blocked by Windows Package Smo
 2026-10-08 successor of PR #1160: exact reviewed Windows MCP source closure fix. Runtime source bundling previously rejected the three approved browser/src support modules with `bundle_unexpected_source_record`; both Windows/Linux contract jobs and the NSIS producer failed before package creation. This candidate permits *only* the named support entry, Windows executor, and computer authority module, retaining digest pinning, import-closure matching and unexpected-source rejection. Added positive/negative closure tests. Previous 0.7.0-dev.37781000003.1 package reservation and failed CI are consumed, not release evidence. Hosted CI cannot prove real ChatGPT-to-PC connectivity or restored private-PGDATA UI readiness.
 
 
-Reserved package identity is `0.7.0-dev.37781000026.1`.
+Reserved package identity is `0.7.0-dev.37781000027.1`.
 
 Remote support MCP source regression follow-up: an unselected host source bundle with the new remote support entry is correctly rejected at `bundle_unexpected_source_record`, before the former `reviewed_source_closure_mismatch` guard. Update the exact negative test to accept either fail-closed branch; keep all source-hash and manifest enforcement unchanged. `0.7.0-dev.37781000002.1` was reserved by Windows Package Smoke and is permanently consumed.
 
