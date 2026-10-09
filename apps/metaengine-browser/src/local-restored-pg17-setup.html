@@ -14,7 +14,7 @@ section{padding:12px 0;border-bottom:1px solid #354153}.small{font-size:12px}#st
 <section><label for="digest">Independent SHA-256 of that exact restore report</label>
 <input id="digest" spellcheck="false" autocomplete="off" placeholder="64 lowercase hexadecimal characters" maxlength="64">
 <p class="small">Use the digest from your previous trusted restore qualification. Do not paste database passwords, URLs or Vault keys. A hash computed only from the selected file is not independent evidence.</p></section>
-<p>The Browser verifies its sealed offline runtime, starts and stops your selected existing PostgreSQL for qualification, then registers a new owner profile only if no profile exists. You must explicitly confirm before any effect.</p>
+<p>After confirmation, the Browser automatically finds exactly one cleanly stopped TEMP PostgreSQL 17 test copy, verifies its cluster control state, copies and hashes every file into permanent LOCALAPPDATA/METAENGINE storage, then creates a new private runtime configuration pinned to this installed build. It verifies the sealed offline runtime and starts/stops the prepared database before owner registration. Your original database and private config are never overwritten. Multiple candidates or missing evidence stop without retry.</p>
 <button id="connect">Verify and connect locally</button>
 <div id="status" role="status" aria-live="polite"></div>
 <script>

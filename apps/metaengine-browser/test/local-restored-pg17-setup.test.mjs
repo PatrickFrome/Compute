@@ -30,7 +30,8 @@ async function fixture(t) {
   };
   return opts;
 }
-const verified = dir => ({paths:{nodeExecutable:path.join(dir,'runtime','node','node.exe')},
+const verified = dir => ({paths:{nodeExecutable:path.join(dir,'runtime','node','node.exe'),
+  postgresBinDirectory:path.join(dir,'runtime','postgresql','bin')},
   manifest:{files:[{path:cliPath}]}});
 const run = options => connectInstalledRestoredPostgres({
   ...options,verify:async({bundleDirectory,expectedBundleDigest})=>{
@@ -112,4 +113,45 @@ test('installed setup rejects invalid protected package identity before executio
     launch:async()=>{ran=true;},
   }),/installed_restored_setup_package_binding_invalid/);
   assert.equal(ran,false);
+});
+
+
+test('installed first run automatically prepares PG17 before invoking reviewed operator, with independent restore digest',async t=>{
+  const f=await fixture(t);
+  const appData=path.join(f.resourcesPath,'LocalAppData');
+  const preparedConfig=path.join(appData,'METAENGINE','restored-postgres-17','runtime-host-config.json');
+  const actions=[];
+  const result=await connectInstalledRestoredPostgres({
+    ...f,autoPrepareSource:true,localAppDataDirectory:appData,
+    verify:async()=>verified(path.join(f.resourcesPath,'client-state-runtime')),
+    prepare:async options=>{
+      actions.push({kind:'prepare',args:options});
+      return {configFile:preparedConfig,copyVerified:true,vaultPreserved:true};
+    },
+    launch:async (_exe,argv)=>{
+      actions.push({kind:'launch',args:argv});
+      return {stdout:JSON.stringify(receipt)};
+    },
+  });
+  assert.equal(result.state,'CONFIGURED');
+  assert.deepEqual(actions.map(x=>x.kind),['prepare','launch']);
+  assert.equal(actions[0].args.oldConfigFile,f.configFile);
+  assert.equal(actions[0].args.restoreReceiptFile,f.restoreReceiptFile);
+  assert.equal(actions[0].args.restoreReceiptSha256,restoreSha);
+  assert.equal(actions[0].args.bundleDigest,sha);
+  assert.equal(actions[0].args.platform,'win32');
+  assert.equal(actions[1].args[actions[1].args.indexOf('--config')+1],preparedConfig);
+  assert.equal(actions[1].args[actions[1].args.indexOf('--restore-receipt-sha256')+1],restoreSha);
+});
+
+test('auto prepare failure denies existing-provider operator, without falling back to original config',async t=>{
+  const f=await fixture(t);
+  let executions=0;
+  await assert.rejects(connectInstalledRestoredPostgres({
+    ...f,autoPrepareSource:true,localAppDataDirectory:path.join(f.resourcesPath,'LocalAppData'),
+    verify:async()=>verified(f.resourcesPath),
+    prepare:async()=>{throw Error('sensitive windows private data');},
+    launch:async()=>{executions++;throw Error('operator must not start');},
+  }),/installed_restored_setup_durable_copy_or_rebinding_unconfirmed/);
+  assert.equal(executions,0);
 });

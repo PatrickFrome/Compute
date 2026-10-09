@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { verifyInstalledClientStateResources } from './local-runtime-host-controller.mjs';
+import { prepareDurableRestoredPg17 } from './local-restored-pg17-auto-prepare.mjs';
 
 const exec = promisify(execFile);
 const SHA = /^[a-f0-9]{64}$/;
@@ -17,6 +18,8 @@ const fail = name => { throw new Error('installed_restored_setup_' + name); };
 // alone qualifies the existing private local PG17 and publishes an absent owner.
 export async function connectInstalledRestoredPostgres({
   configFile, restoreReceiptFile, restoreReceiptSha256, appDataDirectory,
+  autoPrepareSource = false, localAppDataDirectory = process.env.LOCALAPPDATA,
+  prepare = prepareDurableRestoredPg17,
   resourcesPath = process.resourcesPath, packageFile = new URL('../package.json', import.meta.url),
   verify = verifyInstalledClientStateResources, launch = exec, platform = process.platform,
 } = {}) {
@@ -37,7 +40,24 @@ export async function connectInstalledRestoredPostgres({
   if (!local(verified?.paths?.nodeExecutable)
     || !verified?.manifest?.files?.some(x => x.path === 'source/infra/client-state-runtime/restored-client-provider-cli.mjs'))
     fail('operator_not_in_verified_bundle');
-  const argv = [entry,'--config',configFile,'--bundle-sha256',expectedBundleDigest,
+  // Only the installed first-run wizard requests this step. Legacy direct
+  // CLI callers still use their explicitly verified prepared configs.
+  // No new DB is created, and all inputs stay on the owner's Windows host.
+  let attachedConfigFile=configFile;
+  if(autoPrepareSource===true){
+    if(!local(localAppDataDirectory))fail('local_appdata_required');
+    let prepared;
+    try {
+      prepared=await prepare({oldConfigFile:configFile,localAppData:localAppDataDirectory,
+        bundleDirectory,bundleDigest:expectedBundleDigest,
+        restoreReceiptFile,restoreReceiptSha256,
+        postgresBinDirectory:verified.paths.postgresBinDirectory,platform});
+    }catch{fail('durable_copy_or_rebinding_unconfirmed');}
+    if(!local(prepared?.configFile)||prepared.copyVerified!==true
+      ||prepared.vaultPreserved!==true)fail('durable_copy_unverified');
+    attachedConfigFile=prepared.configFile;
+  }
+  const argv = [entry,'--config',attachedConfigFile,'--bundle-sha256',expectedBundleDigest,
     '--restore-receipt',restoreReceiptFile,'--restore-receipt-sha256',restoreReceiptSha256,
     '--appdata',appDataDirectory,'--owner-action',ACTION];
   let output;
@@ -75,7 +95,8 @@ export async function showInstalledRestoredProviderWizard({
   app, BrowserWindow, dialog, ipcMain, resourcesPath = process.resourcesPath,
   operator = connectInstalledRestoredPostgres, env = process.env,
 } = {}) {
-  if (!app?.isPackaged || process.platform !== 'win32' || !local(env.APPDATA) || !local(resourcesPath))
+  if (!app?.isPackaged || process.platform !== 'win32' || !local(env.APPDATA)
+    || !local(env.LOCALAPPDATA) || !local(resourcesPath))
     fail('installed_windows_required');
   await app.whenReady();
   const win = new BrowserWindow({
@@ -116,13 +137,14 @@ export async function showInstalledRestoredProviderWizard({
         message:'Connect only the selected existing PostgreSQL 17',
         detail:'Configuration: '+configFile+'\nRestore report: '+restoreReceiptFile+
           '\nExpected report SHA-256: '+pin+
-          '\n\nThis starts and stops the selected database, preserves its Vault, and registers a previously absent owner profile. Any existing PGDATA and owner profile must not be overwritten.',
+          '\n\nThis verifies one stopped TEMP PostgreSQL 17 copy, copies it to permanent LOCALAPPDATA/METAENGINE state with full file hash comparison, writes a NEW private config pinned to this installed package, and checks the database before registering the previously absent owner. The original PGDATA, private configuration and Vault are never overwritten. If anything is ambiguous the wizard stops without retry.',
         noLink:true,
       });
       if(!authorized(event) || approval.response!==1) return {state:'BLOCKED',reason:'local_approval_required'};
       claimed=true;
       let receipt;
       try { receipt=await operator({configFile,restoreReceiptFile,restoreReceiptSha256:pin,
+        autoPrepareSource:true,localAppDataDirectory:env.LOCALAPPDATA,
         appDataDirectory:env.APPDATA,resourcesPath}); }
       catch { return {state:'BLOCKED',reason:'operator_not_confirmed_no_automatic_retry'}; }
       if(receipt?.state!=='CONFIGURED' || receipt?.owner_profile_written!==true)
