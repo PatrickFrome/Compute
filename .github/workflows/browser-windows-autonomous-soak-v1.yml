@@ -177,7 +177,7 @@ jobs:
 
   package-session-soak:
     # Do not boot a hosted-default installed client from this local-only PR.
-    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1')
+    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1')
     name: installed-ui-72-activation-race-soak
     needs: [continuous-brain, brain-endurance, seeded-fleet-chaos, fleet-scale]
     runs-on: windows-2025
