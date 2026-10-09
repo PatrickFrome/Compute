@@ -141,7 +141,7 @@ test('backlog capacity grows only on the existing heartbeat cycle and is burst b
   assert.deepEqual({ active: p.active, target_agents: p.target_agents, spawn_burst_limit: p.spawn_burst_limit }, { active: true, target_agents: 6, spawn_burst_limit: 4 });
 });
 
-test('cycle dispatches tab-scoped without foreground grab, types then fresh-readbacks and clicks one Send, proves generation and never touches selection (D-C2)', async () => {
+test('cycle dispatch stays tab-scoped and excludes old unverified DevOS episodes from the actual prompt', async () => {
   const calls = [];
   let selected = supervisorTab;
   let captureCount = 0;
@@ -168,7 +168,13 @@ test('cycle dispatches tab-scoped without foreground grab, types then fresh-read
     if (command.action === 'TYPED_CLICK') return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, automatic_retry_allowed: false, authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
-  const cycle = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
+  const cycle = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest,
+    retrieveMemory: async () => ({ results: [
+      { episode: { context_id: 'devos-fleet-task-results', outcome: 'COMPLETED',
+        objective: 'LEGACY_UNVERIFIED_SUCCESS_MUST_NOT_REACH_PROMPT', verified_facts: ['fabricated learned improvement'] } },
+      { episode: { context_id: 'team-history', outcome: 'COMPLETED', objective: 'ADVISORY_HISTORY_REMAINS_AVAILABLE' } },
+    ] }),
+  });
   const first = await cycle.cycle();
   assert.equal(first.dispatch.state, 'RUNNING');
   assert.equal(first.dispatch.proof.effect_state, 'PROVEN_COMPOSER_CLEARED');
@@ -183,6 +189,9 @@ test('cycle dispatches tab-scoped without foreground grab, types then fresh-read
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 1);
   const type = calls.find((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE');
   assert.equal(type[2].submit_after_type, false);
+  assert.match(type[2].text, /ADVISORY_HISTORY_REMAINS_AVAILABLE/);
+  assert.match(type[2].text, /independent verification required before reuse/);
+  assert.doesNotMatch(type[2].text, /LEGACY_UNVERIFIED_SUCCESS|fabricated learned improvement|recent verified episodes/);
   const second = await cycle.cycle();
   assert.equal(second.dispatch.state, 'NO_REDISPATCH');
   assert.equal(first.second_scheduler_loop, false);

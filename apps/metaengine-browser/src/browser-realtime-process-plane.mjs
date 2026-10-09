@@ -299,14 +299,9 @@ export class BrowserRealtimeProcessPlane {
     }
   }
 
-  // Closed-loop audit fix (memory): every terminal DevOS task outcome now also
-  // ADVANCES the collaboration task through the fabric so terminal episodes
-  // materialize in episodic memory (recordTaskOutcomeArtifact only ensured the
-  // task existed in READY — episodes need a terminal advanceTask). Never
-  // throws — memory must never gate task completion. Idempotent per
-  // (task, lease_generation): a terminal task is immutable, so a repeated
-  // advance for the same revision is classified as a duplicate, and any
-  // regression/immutable rejection degrades silently to a skip.
+  // This callback carries an observed result, not independent acceptance
+  // evidence. Keep proposals recoverable: a claimed success must not produce
+  // an immutable success episode while DB completion or review is pending.
   advanceTaskOutcome(outcome) {
     try {
       if (typeof this.#brain?.advanceCollaborationTask !== 'function') {
@@ -315,14 +310,16 @@ export class BrowserRealtimeProcessPlane {
       const taskId = String(outcome?.task_id || '').trim().toLowerCase();
       const contextId = String(outcome?.context_id || 'devos-fleet-task-results').trim().toLowerCase();
       if (!taskId) return { advanced: false, reason: 'TASK_ID_REQUIRED' };
-      const leaseGeneration = Math.max(1, Number(outcome?.lease_generation) || 1);
+      const leaseGeneration = Number(outcome?.lease_generation);
+      if (!Number.isSafeInteger(leaseGeneration) || leaseGeneration < 1
+        || leaseGeneration > Math.floor((Number.MAX_SAFE_INTEGER - 1) / 2)) {
+        return { advanced: false, reason: 'LEASE_GENERATION_INVALID' };
+      }
       const rawState = String(outcome?.state || '').toUpperCase();
-      // DevOS outcome -> collaboration task status. RESULT_READY means the
-      // agent produced verified work on the proven conversation — that IS the
-      // completed collaboration step; transport ambiguity and blocks are
-      // BLOCKED (recoverable), failures are FAILED.
-      const status = ['RESULT_READY','COMPLETED'].includes(rawState) ? 'COMPLETED'
-        : (rawState === 'FAILED' ? 'FAILED' : 'BLOCKED');
+      const verificationPending = ['RESULT_READY', 'COMPLETED'].includes(rawState);
+      // Even COMPLETED is a bare caller state here. This adapter has no
+      // generation-bound independent verifier receipt and cannot mint one.
+      const status = rawState === 'FAILED' ? 'FAILED' : 'BLOCKED';
       if (outcome?.task_objective != null && typeof this.#brain.recordCollaborationTask === 'function') {
         try {
           this.#brain.recordCollaborationTask({
@@ -340,16 +337,17 @@ export class BrowserRealtimeProcessPlane {
         const advanced = this.#brain.advanceCollaborationTask({
           context_id: contextId,
           task_id: taskId,
-          // Fabric tasks materialize at progress_revision 1 (recordTask), so
-          // the advance must be strictly greater: lease generation N advances
-          // at revision N+1. A re-dispatch of a terminal task is rejected as
-          // immutable above (duplicate), never a regression.
-          progress_revision: leaseGeneration + 1,
+          // Each lease has a pending and a rejection/failure revision. A
+          // same-generation rejection can supersede its pending proposal;
+          // duplicate or late proposals cannot erase the rejection.
+          progress_revision: leaseGeneration * 2 + (verificationPending ? 0 : 1),
           status,
           owner_agent_id: outcome?.owner_agent_id || undefined,
-          blocker: status === 'BLOCKED' ? String(outcome?.blocker || rawState || 'DEVOS_OUTCOME_BLOCKED').slice(0, 512) : null,
+          blocker: verificationPending ? 'INDEPENDENT_COMPLETION_EVIDENCE_REQUIRED'
+            : String(outcome?.blocker || rawState || 'DEVOS_OUTCOME_BLOCKED').slice(0, 512),
         });
-        return { advanced: true, status: advanced?.status || status, episode_materialized: ['COMPLETED','CANCELLED'].includes(String(advanced?.status || status)) };
+        return { advanced: true, status: advanced?.status || status, episode_materialized: false,
+          verification_pending: verificationPending };
       } catch (error) {
         const message = String(error?.message || error);
         if (message.includes('terminal_task_immutable') || message.includes('progress_revision_regression')) {
@@ -364,15 +362,20 @@ export class BrowserRealtimeProcessPlane {
   }
 
   // Closed-loop audit fix (memory): bounded read-only retrieval over the
-  // episodic memory (hybrid lexical/vector/graph rerank, token-budgeted) so
-  // the DevOS task cycle can embed recent verified team experience into agent
-  // prompts. Never throws — absence of memory must never block dispatch.
+  // episodic memory (hybrid lexical/vector/graph rerank, token-budgeted).
+  // Older DevOS episodes were materialized from RESULT_READY without verifier
+  // evidence. Retain their history but never return them as reusable knowledge.
   retrieveCollaborationMemory(query) {
     try {
       if (typeof this.#brain?.retrieveCollaborationMemory !== 'function') {
         return null;
       }
-      return this.#brain.retrieveCollaborationMemory(query);
+      const retrieval = this.#brain.retrieveCollaborationMemory(query);
+      if (!retrieval || !Array.isArray(retrieval.results)) return null;
+      const results = retrieval.results.filter(item => item?.episode?.context_id !== 'devos-fleet-task-results');
+      return Object.freeze({ ...retrieval, results: Object.freeze(results),
+        estimated_tokens_used: results.reduce((total, item) => total + (Number(item.estimated_tokens) || 0), 0),
+        excluded_unverified_episode_count: retrieval.results.length - results.length });
     } catch (error) {
       this.#brainLastError = `MEMORY_RETRIEVE:${text(error?.message || error, 240)}`;
       return null;

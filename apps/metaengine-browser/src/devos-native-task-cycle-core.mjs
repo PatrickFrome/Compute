@@ -169,8 +169,8 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   }
   const toolResultsBlock = clip(renderAgentToolResults(tool_results), 2400).trim();
   if (toolResultsBlock) lines.push('', toolResultsBlock);
-  // Closed-loop audit fix (memory): bounded block of the team's recent VERIFIED
-  // experience (episodic memory retrieval, token-budgeted by the memory
+  // Bounded block of the team's advisory historical experience
+  // (episodic memory retrieval, token-budgeted by the memory
   // itself). Clipped hard so the task body stays dominant; absent when the
   // fleet has no relevant history yet (fresh installs).
   const teamMemoryBlock = clip(String(team_memory || ''), 1400).trim();
@@ -1273,9 +1273,9 @@ export class DevOsNativeTaskCycle {
     // Recorded before the completion write so an artifact exists even when the
     // write goes ambiguous; never throws.
     this.#recordTaskOutcomeArtifact(lease, state, summary);
-    // Closed-loop audit fix (memory): the SAME terminal outcome advances the
-    // collaboration task so an episodic-memory episode materializes (the
-    // learning write path). Never throws, idempotent per lease generation.
+    // Preserve the observation before the ambiguous write boundary. The plane
+    // keeps result proposals pending: this callback has no independent
+    // acceptance receipt and must never promote verified success memory.
     this.#advanceTaskOutcomeFor(lease, state, summary);
     try {
       const response = await this.#signedRequest('/v1/devos/complete', {
@@ -1344,11 +1344,9 @@ export class DevOsNativeTaskCycle {
     }
   }
 
-  // Closed-loop audit fix (memory): the learning write path. One bounded,
-  // never-throwing advance per terminal outcome — the realtime process plane
-  // maps the DevOS state onto the collaboration task lifecycle so terminal
-  // episodes materialize in episodic memory. Degradations surface in the
-  // cycle snapshot only (same contract as the artifact recorder).
+  // One bounded observation advance per result. The plane keeps success claims
+  // pending until an independent acceptance evidence path exists. Degradations
+  // surface in the cycle snapshot only (same contract as the artifact recorder).
   #advanceTaskOutcomeFor(lease, state, summary) {
     try {
       if (typeof this.#advanceTaskOutcome !== 'function') return;
@@ -1374,7 +1372,7 @@ export class DevOsNativeTaskCycle {
   // Closed-loop audit fix (memory): the learning read path. One bounded
   // retrieval per (task, lease_generation) — cached so the prompt and its
   // effect-journal hash stay deterministic within a lease (identical contract
-  // to the telemetry digest). Renders the team's recent VERIFIED episodes
+  // to the telemetry digest). Renders the team's advisory historical episodes
   // (objective + outcome + next actions) as a compact block; returns null
   // when there is no retriever or no relevant history.
   async #memoryBlockFor(lease) {
@@ -1386,16 +1384,20 @@ export class DevOsNativeTaskCycle {
         const objective = clip(lease?.task_spec?.objective ?? lease?.task_spec?.goal, 400);
         const query = [objective, `role:${String(lease.role || '').toUpperCase()}`].filter(Boolean).join(' ');
         const retrieval = await this.#retrieveMemory({ query, max_results: 5, token_budget: 900 });
-        const results = Array.isArray(retrieval?.results) ? retrieval.results.slice(0, 5) : [];
+        // Also enforce the boundary for injected retrievers and previously
+        // persisted DevOS episodes: their context never carried independent
+        // acceptance proof, regardless of the stored COMPLETED label.
+        const results = Array.isArray(retrieval?.results) ? retrieval.results
+          .filter(item => item?.episode?.context_id !== 'devos-fleet-task-results').slice(0, 5) : [];
         if (results.length > 0) {
-          const lines = ['TEAM MEMORY — recent verified episodes from this fleet (advisory context; verify before reuse):'];
+          const lines = ['TEAM MEMORY — advisory historical episodes (independent verification required before reuse):'];
           for (const item of results) {
             const episode = item?.episode || {};
             const objectiveText = clip(episode.objective, 160);
             if (!objectiveText) continue;
             const facts = Array.isArray(episode.verified_facts) ? episode.verified_facts.slice(0, 2).map((v) => clip(v, 100)) : [];
             const actions = Array.isArray(episode.next_actions) ? episode.next_actions.slice(0, 2).map((v) => clip(v, 100)) : [];
-            lines.push(`- [${String(episode.outcome || 'COMPLETED')}] ${objectiveText}${facts.length ? ` | facts: ${facts.join('; ')}` : ''}${actions.length ? ` | next: ${actions.join('; ')}` : ''}`);
+            lines.push(`- [${String(episode.outcome || 'UNKNOWN')}] ${objectiveText}${facts.length ? ` | reported facts: ${facts.join('; ')}` : ''}${actions.length ? ` | next: ${actions.join('; ')}` : ''}`);
           }
           if (lines.length > 1) block = lines.join('\n').slice(0, 1400);
         }
