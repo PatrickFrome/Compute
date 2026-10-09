@@ -170,9 +170,15 @@ export function createManagedTaskProjectRuntime({ executePlan, journal, validate
     if (existing) {
       if (existing.binding_digest !== bindingDigest(reservation)) throw new Error('managed_project_idempotency_binding_conflict');
       if (existing.state === 'PROVEN') {
-        if (!await inventory(reservation)) throw new Error('managed_project_replay_readback_missing');
-        if (finalizeBinding) await finalizeBinding(clone(existing));
-        return Object.freeze({ ...clone(existing), replayed: true });
+        const proof = await inventory(reservation);
+        if (!proof) throw new Error('managed_project_replay_readback_missing');
+        // Lease renewal does not change the materialized binding identity.
+        // Keep the durable receipt intact, but use the caller's current lease
+        // for this readback and the mandatory validation before opening.
+        const ready = recordWorkspaceMaterializationReadback(reservation, { effect_state: 'PROVEN', initial_head_sha: proof.head_sha, worktree_realpath: proof.worktree_path });
+        const replay = { ...clone(existing), reservation: ready, proof };
+        if (finalizeBinding) await finalizeBinding(clone(replay));
+        return Object.freeze({ ...replay, replayed: true });
       }
       if (existing.state === 'RESERVED') {
         const proof = await inventory(reservation);

@@ -143,3 +143,48 @@ test('proven read-only replay allows expired lease but open revalidates it', asy
   assert.equal((await runtime.create(request)).replayed, true);
   await assert.rejects(runtime.open(request), /lease_expired/); assert.equal(opens, 0);
 });
+
+test('proven replay opens with a renewed lease without another add or rewriting the journal', async (t) => {
+  const request = await fixture(t); const journal = createManagedTaskProjectMemoryJournal(); const git = createShellFreeGitExecutor();
+  let clock = Date.now(); let creates = 0; let opens = 0; let activeExpiry = request.claim.lease_expires_at;
+  const finalizations = []; const validations = [];
+  const runtime = createManagedTaskProjectRuntime({ journal, now: () => clock,
+    validateClaim: async (reservation, { phase }) => { validations.push({ phase, expiry: reservation.lease_expires_at }); return reservation.lease_expires_at === activeExpiry; },
+    executePlan: async plan => { if (plan.effect === 'WORKTREE_CREATE_LOCKED') creates++; return git.execute(plan); },
+    finalizeBinding: async entry => { finalizations.push(entry); },
+    openProject: async ({ reservation }) => { assert.equal(reservation.lease_expires_at, activeExpiry); opens++; },
+  });
+  const first = await runtime.create(request); const history = journal.snapshot();
+  clock = Date.parse(request.claim.lease_expires_at) + 1;
+  activeExpiry = new Date(clock + 600000).toISOString();
+  const renewed = { ...request, claim: { ...request.claim, lease_expires_at: activeExpiry } };
+  const replay = await runtime.open(renewed);
+  assert.equal(replay.replayed, true); assert.equal(replay.opened, true);
+  assert.equal(replay.reservation.state, 'READY'); assert.equal(replay.reservation.lease_expires_at, activeExpiry);
+  assert.equal(replay.binding_digest, first.binding_digest);
+  assert.equal(replay.reservation.lease_generation, first.reservation.lease_generation);
+  assert.equal(replay.reservation.workspace_id, first.reservation.workspace_id);
+  assert.equal(replay.reservation.worktree_id, first.reservation.worktree_id);
+  assert.equal(creates, 1); assert.equal(opens, 1);
+  assert.equal(finalizations.at(-1).reservation.lease_expires_at, activeExpiry);
+  assert.deepEqual(validations.at(-1), { phase: 'BEFORE_OPEN', expiry: activeExpiry });
+  assert.deepEqual(journal.snapshot(), history);
+});
+
+test('renewed replay still refuses revoked and expired claims before opening', async (t) => {
+  const request = await fixture(t); const journal = createManagedTaskProjectMemoryJournal(); const git = createShellFreeGitExecutor();
+  let clock = Date.now(); let current = true; let creates = 0; let opens = 0;
+  const runtime = createManagedTaskProjectRuntime({ journal, now: () => clock, validateClaim: async () => current,
+    executePlan: async plan => { if (plan.effect === 'WORKTREE_CREATE_LOCKED') creates++; return git.execute(plan); },
+    openProject: async () => { opens++; },
+  });
+  await runtime.create(request);
+  clock = Date.parse(request.claim.lease_expires_at) + 1;
+  const renewed = { ...request, claim: { ...request.claim, lease_expires_at: new Date(clock + 600000).toISOString() } };
+  current = false;
+  await assert.rejects(runtime.open(renewed), /managed_project_claim_not_current/);
+  current = true; clock = Date.parse(renewed.claim.lease_expires_at) + 1;
+  await assert.rejects(runtime.open(renewed), /managed_project_lease_expired/);
+  assert.equal(creates, 1); assert.equal(opens, 0);
+  assert.deepEqual(journal.snapshot().map(row => row.state), ['RESERVED', 'PROVEN']);
+});

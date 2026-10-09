@@ -10,6 +10,8 @@ import { runRestoredClientProviderCli } from '../../../infra/client-state-runtim
 
 const execute = promisify(execFile);
 const MAX_MESSAGE = 128 * 1024;
+const MAX_PENDING_MESSAGES = 64;
+const MAX_PENDING_BYTES = 1024 * 1024;
 const MAX_IMAGE = 8 * 1024 * 1024;
 const VIEWS = new Set(['OBSERVE_WINDOWS','OBSERVE_DISPLAYS','FOREGROUND_STATUS','VERIFY_TARGET','UIA_SNAPSHOT','CAPTURE_DESKTOP','CAPTURE_WINDOW']);
 const CONTROLS = new Set(['UIA_FOCUS','UIA_INVOKE','UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','UIA_SCROLL','TYPE_TEXT','KEY_PRESS','POINTER_CLICK']);
@@ -227,6 +229,12 @@ export function createRemoteSupportMcp({
   let frameBytes = 0;
   let discardFrame = false;
   let processing = Promise.resolve();
+  // A bounded frame does not bound the serialized request backlog when a
+  // local approval, lease resolver or executor is waiting. Count the running
+  // request too, and reserve one separate bounded slot for emergency stop.
+  let pendingMessages = 0;
+  let pendingBytes = 0;
+  let stopPending = false;
   let approvalPending = false;
   let sessionGeneration = 0;
   const send = message => {
@@ -485,9 +493,10 @@ export function createRemoteSupportMcp({
     catch { send({jsonrpc:'2.0',id:m?.id??null,error:{code:-32600,message:'Invalid request'}}); }
   }
   function onData(chunk) {
+    if (closed) return;
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     let offset = 0;
-    while (offset < bytes.length) {
+    while (offset < bytes.length && !closed) {
       const newline = bytes.indexOf(10, offset);
       const end = newline < 0 ? bytes.length : newline;
       if (!discardFrame) {
@@ -504,6 +513,7 @@ export function createRemoteSupportMcp({
       if (newline < 0) break;
       if (discardFrame) { discardFrame = false; continue; }
       let one;
+      const messageBytes = frameBytes;
       try { one = utf8.decode(Buffer.concat(frame, frameBytes)); }
       catch { send({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}}); }
       frame = []; frameBytes = 0;
@@ -516,8 +526,27 @@ export function createRemoteSupportMcp({
         const parsed = JSON.parse(one);
         interrupt = parsed?.method === 'tools/call' && parsed?.params?.name === 'support_stop';
       } catch {}
-      if (interrupt) void line(one);
-      else processing=processing.then(()=>line(one),()=>line(one));
+      if ((interrupt && stopPending) || (!interrupt &&
+          (pendingMessages >= MAX_PENDING_MESSAGES || pendingBytes + messageBytes > MAX_PENDING_BYTES))) {
+        send({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Pending request limit exceeded'}});
+        // Revoke before any queued action can run. Keep the existing close
+        // ownership rules for shared transports and late/in-flight effects.
+        close();
+        return;
+      }
+      if (interrupt) {
+        stopPending = true;
+        const settled = () => { stopPending = false; };
+        void line(one).then(settled,settled);
+      } else {
+        pendingMessages++;
+        pendingBytes += messageBytes;
+        const run = async () => {
+          try { await line(one); }
+          finally { pendingMessages--; pendingBytes -= messageBytes; }
+        };
+        processing=processing.then(run,run);
+      }
     }
   }
   function close() {

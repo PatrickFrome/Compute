@@ -85,11 +85,12 @@ export function projectActionFeed({
 export function validateTaskEventPage(response, { taskId, afterSeq = null }) {
   const rejected = { valid: false, cursor: null, resyncRequired: false };
   if (!response || response.ok === false || response.exact_task_history_available === false || !Array.isArray(response.events) || response.events.length > MAX_LIMIT) return rejected;
-  if (response.events.some((e) => String(e?.task_id ?? '') !== taskId || safeSeq(e?.seq) === null)) return rejected;
+  if (response.events.some((e) => String(e?.task_id ?? '') !== taskId || !Number.isSafeInteger(e?.seq) || e.seq < 0)) return rejected;
   const c = response.cursor;
   if (!c) return afterSeq === null ? { valid: true, cursor: null, resyncRequired: false } : rejected;
   if (response.scope?.kind !== 'task' || response.scope?.task_id !== taskId) return rejected;
   if (c.mode !== (afterSeq === null ? 'latest' : 'after') || c.after_seq !== afterSeq) return rejected;
+  if ([c.returned_through_seq, c.latest_seq, c.log_latest_seq].some(seq => !Number.isSafeInteger(seq) || seq < 0)) return rejected;
   const through = safeSeq(c.returned_through_seq), latest = safeSeq(c.latest_seq), logLatest = safeSeq(c.log_latest_seq);
   if (through === null || latest === null || logLatest === null || latest > logLatest || typeof c.has_more !== 'boolean' || typeof c.has_earlier !== 'boolean' || typeof c.resync_required !== 'boolean') return rejected;
   if (c.resync_required) {

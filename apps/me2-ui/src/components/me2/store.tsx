@@ -100,6 +100,8 @@ interface Me2State {
   streamTaskId: string | null;
   streamCursor: TaskEventCursor | null;
   streamState: "UNBOUND" | "LOADING" | "EXACT" | "DEGRADED";
+  streamConflictSeq: number;
+  streamHasConflict: boolean;
   // R96 temporary Peek is ephemeral presentation state only: no persistence/data authority.
   peekTarget: PeekTarget | null;
   // contextual drawer (read-only presentation plane)
@@ -281,6 +283,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
   streamTaskId: null,
   streamCursor: null,
   streamState: "UNBOUND",
+  streamConflictSeq: 0,
+  streamHasConflict: false,
   peekTarget: null,
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
@@ -574,7 +578,11 @@ export const useMe2 = create<Me2State>((set, get) => ({
             ? [...st.stream, e].slice(-200)
             : st.stream;
           const conflict = e.task_id === st.streamTaskId && taskEventRowsConflict(st.stream, [e]);
-          return { events, stream, ...(conflict ? { streamState: "DEGRADED" as const } : {}) };
+          return { events, stream, ...(conflict ? {
+            streamState: "DEGRADED" as const,
+            streamConflictSeq: st.streamConflictSeq + 1,
+            streamHasConflict: true,
+          } : {}) };
         });
       },
     });
@@ -730,6 +738,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     const requestSeq = ++taskStreamRequestSeq;
     const st = get();
     const sameTask = st.streamTaskId === id;
+    const conflictSeq = st.streamConflictSeq;
     const afterSeq = readMode === "after" && sameTask && st.streamCursor && !st.streamCursor.resync_required
       ? st.streamCursor.returned_through_seq : null;
     const previousEvents = new Set(sameTask ? st.stream : []);
@@ -739,6 +748,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       inspectedTaskId: task?.id ?? id,
       stream: sameTask ? state.stream : [],
       streamTaskId: id,
+      streamHasConflict: sameTask ? state.streamHasConflict : false,
       streamCursor: sameTask ? state.streamCursor : null,
       streamState: "LOADING",
       contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
@@ -760,7 +770,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
           streamState: "DEGRADED",
           ...(page.resyncRequired ? { streamCursor: page.cursor as TaskEventCursor } : {}),
         };
-        if (afterSeq !== null && taskEventRowsConflict(state.stream, d?.events ?? [])) return { streamState: "DEGRADED" };
+        if (afterSeq !== null && taskEventRowsConflict(state.stream, d?.events ?? [])) return { streamState: "DEGRADED", streamHasConflict: true };
         const resolved = resolveExactTaskStreamResponse({
           request: { seq: requestSeq, taskId: id },
           current: {
@@ -768,12 +778,17 @@ export const useMe2 = create<Me2State>((set, get) => ({
             taskId: state.inspectedTaskId,
             streamTaskId: state.streamTaskId,
             stream: afterSeq === null ? state.stream.filter((event) => !previousEvents.has(event)) : state.stream,
+            conflicted: state.streamConflictSeq !== conflictSeq || (afterSeq !== null && state.streamHasConflict),
           },
           responseEvents: d?.events ?? null,
           limit: 200,
         });
         if (!resolved.applied || !resolved.patch) return {};
-        return { ...resolved.patch, streamCursor: page.cursor } as Pick<Me2State, "stream" | "streamState" | "streamCursor">;
+        if (resolved.patch.streamState === "DEGRADED") return {
+          ...resolved.patch,
+          streamHasConflict: state.streamHasConflict || ("conflict" in resolved && resolved.conflict === true),
+        };
+        return { ...resolved.patch, streamCursor: page.cursor, streamHasConflict: false } as Pick<Me2State, "stream" | "streamState" | "streamCursor" | "streamHasConflict">;
       });
     });
   },

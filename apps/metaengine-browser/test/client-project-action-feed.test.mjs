@@ -85,6 +85,21 @@ test('validated server cursor advances through the returned page, not newest liv
   assert.equal(result.cursor.has_more, true);
 });
 
+test('wire sequences and cursor watermarks must be numeric safe integers', () => {
+  for (const mutate of [
+    p => { p.events[0].seq = '9'; },
+    p => { p.events[0].seq = null; },
+    p => { p.cursor.returned_through_seq = '40'; },
+    p => { p.cursor.latest_seq = '60'; },
+    p => { p.cursor.log_latest_seq = '99'; },
+    p => { p.cursor.latest_seq = Number.MAX_SAFE_INTEGER + 1; },
+  ]) {
+    const response = afterPage(); mutate(response);
+    assert.equal(validateTaskEventPage(response, { taskId: 'task-a', afterSeq: 5 }).valid, false);
+  }
+  assert.equal(validateTaskEventPage({ ok: true, events: [{seq:'9',task_id:'task-a'}] }, {taskId:'task-a'}).valid, false);
+});
+
 test('rejects wrong task, regressing cursor and repeated continuation page', () => {
   for (const mutate of [
     (p) => { p.scope.task_id = 'task-b'; },
