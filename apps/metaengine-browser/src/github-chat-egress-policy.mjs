@@ -8,6 +8,11 @@ const SENSITIVE_FIELD=/(?:^|[_-])(?:password|passwd|pwd|token|secret|credential|
 const PATH_FIELD=/^(?:path|filepath|filename|directory|cwd|workdir|command_line|args|arguments|env_vars|variables)$/i;
 const PRIVATE_TEXT=/(?:\b(?:Bearer|Basic)\s+[A-Za-z0-9._+\/=-]{6,}|github_pat_[a-zA-Z0-9_]{10,}|\bgh[pousr]_[a-zA-Z0-9]{10,}|(?:postgres(?:ql)?|file):\/\/\S+|https?:\/\/[^\s/@:]+:[^\s/@]+@|https?:\/\/[^\s]+[?&](?:token|api_key|access_token|secret|signature|sig|auth)=\S+|(?:[a-zA-Z]:\\|\\\\[^\s\\]+\\|\/(?:home|Users|root|var\/lib\/postgresql)\/)\S+|-----BEGIN (?:OPENSSH|RSA|EC|PRIVATE) KEY-----|\b(?:password|api[_ -]?key|client[_ -]?secret|access[_ -]?token)\s*[:=]\s*\S+)/i;
 const MAX_BYTES=36_000, MAX_NODES=2500, MAX_DEPTH=14, MAX_FIELDS=100, MAX_ARRAY=256, MAX_STRING=1500;
+// A safe reply is status and receipt *metadata*, not arbitrary text from
+// a browser tab, filesystem, agent prompt, screenshot OCR or process output.
+const SAFE_TEXT_FIELDS=/^(?:schema|state|status|provider|profile|source|action|effect|reason|code|error_code|command_id|request_id|goal_id|task_id|client_id|relay_id|instance_id|device_id|point_id|source_head|package_version|version|build_id|sha256|png_sha256|bundle_sha256|digest|repository|mime_type|reconcile_with)$/i;
+const SAFE_ARRAY_TEXT_FIELDS=/^(?:actions|capabilities|scopes|permissions)$/i;
+const SAFE_TEXT_SHAPE=/^[A-Za-z0-9_:.\/ -]{1,180}$/;
 const fixedBlocked=reason=>Object.freeze({schema:'metaengine.github-chat-safe-egress.v1',
   state:'RESULT_UNAVAILABLE',reason,automatic_retry_allowed:false,authority_effect:false});
 const isPlain=value=>{
@@ -37,6 +42,11 @@ export function projectGithubChatReplyResult(result){
       if(PATH_FIELD.test(key))
         return parent==='artifact'&&/^metaengine-chat-artifacts\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f]{64}\.png$/.test(value)
           ?value:'[PRIVATE_PATH]';
+      if(!SAFE_TEXT_FIELDS.test(key)&&!(SAFE_ARRAY_TEXT_FIELDS.test(key)&&parent===key))
+        return '[REDACTED_UNREVIEWED_TEXT]';
+      // Even explicitly allowlisted metadata cannot smuggle URL query
+      // credentials, arbitrary paths or control characters into a reply.
+      if(!SAFE_TEXT_SHAPE.test(value))return '[REDACTED_UNREVIEWED_TEXT]';
       return safeText(value,key);
     }
     if(Array.isArray(value)){
