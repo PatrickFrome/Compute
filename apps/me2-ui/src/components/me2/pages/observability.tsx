@@ -110,31 +110,27 @@ function EventLogPanel() {
   const connected = useMe2((s) => s.connected);
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState("");
-  const [laneFilter, setLaneFilter] = useState("ALL");
-  const [viewPreset, setViewPreset] = useState<EventViewPresetKey>("attention");
+  // The advanced panel mounts after client navigation; restore preferences once
+  // at that mount instead of rendering defaults and resetting state in effects.
+  const [viewPreset, setViewPreset] = useState<EventViewPresetKey>(() => {
+    try {
+      const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
+      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) return saved;
+    } catch { /* private mode */ }
+    return "attention";
+  });
+  const [laneFilter, setLaneFilter] = useState(() => EVENT_VIEW_PRESETS.find((item) => item.key === viewPreset)?.lane ?? "ALL");
   const logRef = useRef<HTMLDivElement | null>(null);
   const [pausedEvents, setPausedEvents] = useState<readonly Event[] | null>(null);
   const { events: display, paused, newerBufferedCount } = eventLogWindow(events, pausedEvents);
   const liveTail = !paused;
-  const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
-
-  useEffect(() => {
+  const [viewMode, setViewMode] = useState<"compact" | "full">(() => {
     try {
       const saved = localStorage.getItem("me2.obs.events.view.v1");
-      if (saved === "compact" || saved === "full") setViewMode(saved);
+      if (saved === "compact" || saved === "full") return saved;
     } catch { /* private mode */ }
-  }, []);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
-      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) {
-        setViewPreset(saved);
-        const preset = EVENT_VIEW_PRESETS.find((item) => item.key === saved);
-        if (preset) setLaneFilter(preset.lane);
-      }
-    } catch { /* private mode */ }
-  }, []);
+    return "compact";
+  });
 
   const applyViewPreset = useCallback((key: Exclude<EventViewPresetKey, "custom">) => {
     const preset = EVENT_VIEW_PRESETS.find((item) => item.key === key);
