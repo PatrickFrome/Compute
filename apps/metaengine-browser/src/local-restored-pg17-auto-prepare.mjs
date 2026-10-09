@@ -42,7 +42,12 @@ async function hashFile(filename) {
 }
 async function inspectCluster(executable,data,run,{stopped=false}={}) {
   let stdout;
-  try{({stdout}=await run(executable,['-D',data],{windowsHide:true,shell:false,timeout:15000,maxBuffer:128*1024}));}
+  try{({stdout}=await run(executable,['-D',data],{
+    windowsHide:true,shell:false,timeout:15000,maxBuffer:128*1024,
+    // Windows owners may have Russian or another locale. PostgreSQL
+    // control state is a machine-read protocol: force stable C messages.
+    env:{...process.env,LANG:'C',LC_ALL:'C',LC_MESSAGES:'C'},
+  }));}
   catch{fail('pg_control_state_unverified');}
   const identifier=/^\s*Database system identifier:\s*(\d{10,25})\s*$/im.exec(stdout)?.[1];
   if(!identifier)fail('pg_system_identity_unverified');
@@ -85,7 +90,21 @@ function validatePreviousConfig(config) {
     || !['database_url','inspect_database_url'].every(k=>{
       try{const url=new URL(config[k]);return ['postgresql:','postgres:'].includes(url.protocol)&&url.hostname==='127.0.0.1';}
       catch{return false;}
-    }))fail('old_private_config_unverified');
+    })
+    || ![config.api_port,config.edge_port].every(x=>Number.isSafeInteger(x)&&x>=1024&&x<=65535)
+    || !Number.isSafeInteger(config.startup_timeout_ms)
+    || config.startup_timeout_ms<1000||config.startup_timeout_ms>300000
+    || !prefix(config.state_directory,config.pg_data_directory)
+    || same(config.state_directory,config.pg_data_directory)
+    || prefix(config.bundle_directory,config.state_directory)
+    || prefix(config.state_directory,config.bundle_directory)
+    || new Set([config.api_port,config.edge_port,
+      Number(new URL(config.database_url).port)]).size!==3
+    || !['database_url','inspect_database_url'].every(k=>Number(new URL(config[k]).port)>0)
+    || new URL(config.database_url).port!==new URL(config.inspect_database_url).port
+    || new URL(config.database_url).pathname!==new URL(config.inspect_database_url).pathname
+    || new URL(config.database_url).username===new URL(config.inspect_database_url).username)
+    fail('old_private_config_unverified');
   return config;
 }
 async function readOldConfig(filename){
