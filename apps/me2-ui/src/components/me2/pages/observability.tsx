@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { mergeExactTaskEvidenceEvents } from "@/lib/r95e-evidence-contracts.mjs";
+import { captureEventLogWindow, eventLogWindow } from "@/lib/event-log-window";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type Probe = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
@@ -107,13 +108,14 @@ function SecLabel({ icon: Icon, text, tone, title, children }: {
 function EventLogPanel() {
   const events = useMe2((s) => s.events);
   const connected = useMe2((s) => s.connected);
-  const [liveTail, setLiveTail] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState("");
   const [laneFilter, setLaneFilter] = useState("ALL");
   const [viewPreset, setViewPreset] = useState<EventViewPresetKey>("attention");
   const logRef = useRef<HTMLDivElement | null>(null);
-  const [frozenSeq, setFrozenSeq] = useState<number | null>(null);
+  const [pausedEvents, setPausedEvents] = useState<readonly Event[] | null>(null);
+  const { events: display, paused, newerBufferedCount } = eventLogWindow(events, pausedEvents);
+  const liveTail = !paused;
   const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
 
   useEffect(() => {
@@ -153,21 +155,15 @@ function EventLogPanel() {
     try { localStorage.setItem("me2.obs.events.view.v1", mode); } catch { /* ignore */ }
   }, []);
 
-  // пауза хвоста: фиксируем водяной знак seq в обработчике (список честно заморожен, WS не рвём)
+  // Keep the inspection window stable even as the live transport rotates its buffer.
   const toggleTail = useCallback((on: boolean) => {
-    setLiveTail(on);
-    setFrozenSeq(on ? null : (events[0]?.seq ?? null));
+    setPausedEvents(on ? null : captureEventLogWindow(events));
   }, [events]);
 
   // автоскролл как legacy: лента prepend'ит сверху — scrollTop=0
   useEffect(() => {
-    if (autoScroll && logRef.current) logRef.current.scrollTop = 0;
-  }, [events, autoScroll]);
-
-  const display = useMemo(
-    () => (liveTail || frozenSeq == null ? events : events.filter((e) => e.seq >= frozenSeq)),
-    [events, liveTail, frozenSeq],
-  );
+    if (liveTail && autoScroll && logRef.current) logRef.current.scrollTop = 0;
+  }, [events, autoScroll, liveTail]);
 
   const filtered = useMemo(() => {
     let list = display;
@@ -208,7 +204,7 @@ function EventLogPanel() {
   return (
     <Sec
       id="obs-event-log" title="EVENT LOG" icon={ScrollText}
-      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {grouped.length}/{filtered.length}</span>}
+      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse={liveTail} /> {paused ? "paused" : connected ? "live" : "offline"} · {grouped.length}/{filtered.length}</span>}
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 pb-2">
@@ -268,6 +264,13 @@ function EventLogPanel() {
             {liveTail ? "live" : "пауза"}
             <Switch checked={liveTail} onCheckedChange={toggleTail} aria-label="Живой хвост событий" className="scale-75" />
           </label>
+          {paused ? (
+            <button type="button" onClick={() => toggleTail(true)} data-testid="event-log-resume"
+              className="border border-amber-900/60 px-1.5 py-0.5 font-mono text-[10px] text-amber-200"
+              title="Вернуться к текущему буферу событий; счётчик включает только события, сохранённые в буфере">
+              Вернуться к live · {newerBufferedCount} новых в буфере
+            </button>
+          ) : null}
           <label className="flex shrink-0 items-center gap-1 text-[10px] text-zinc-500">
             автоскролл
             <Switch checked={autoScroll} onCheckedChange={setAutoScroll} aria-label="Автоскролл лога" className="scale-75" />
@@ -278,7 +281,7 @@ function EventLogPanel() {
           className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-0.5 font-mono text-[10.5px] leading-relaxed [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent"
         >
           {grouped.length === 0 && (
-            <p className="p-4 text-center text-zinc-500">{events.length ? "ничего не найдено по фильтру" : "ожидание событий…"}</p>
+            <p className="p-4 text-center text-zinc-500">{display.length ? "ничего не найдено по фильтру" : paused ? "пауза на пустом журнале" : "ожидание событий…"}</p>
           )}
           {grouped.map(({ event: e, count }) => (
             <div key={e.seq} className="flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
