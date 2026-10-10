@@ -9,9 +9,15 @@ Set-StrictMode -Version Latest
 if ($ExpectedSha256 -notmatch '^[a-f0-9]{64}$') { throw 'package_installer_digest_invalid' }
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'package_installer_missing' }
-if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedSha256) {
-  throw 'package_installer_digest_mismatch'
-}
+# Hash through the built-in cryptography API: isolated PowerShell hosts may
+# have no module autoloading and therefore no Get-FileHash command.
+$stream = [System.IO.File]::OpenRead($installer)
+try {
+  $hasher = [System.Security.Cryptography.SHA256]::Create()
+  try { $actualSha256 = [System.BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+  finally { $hasher.Dispose() }
+} finally { $stream.Dispose() }
+if ($actualSha256 -ne $ExpectedSha256) { throw 'package_installer_digest_mismatch' }
 
 # Start suspended, attach to our private kill-on-close job, and then resume.
 # Unlike Start-Process -Wait, this has an explicit parent deadline. The job owns

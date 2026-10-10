@@ -15,7 +15,9 @@ const crashChild = fileURLToPath(new URL('./fixtures/development-verification-cr
 const git = (root, args) => execFileSync('git', ['-C', root, ...args], { windowsHide: true, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 
 async function fixture(t, { changed = 'export const value = 2;\n', expect = 2, output = '' } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'development-verification-'));
+  // Canonicalize the fixture root before passing paths to the production
+  // reparse fence: Windows CI temp locations can resolve through aliases.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'development-verification-')));
   const repo = path.join(root, 'repo');
   const snapshots = path.join(root, 'snapshots');
   const working = path.join(root, 'working');

@@ -41,7 +41,7 @@ test('disposable PostgreSQL project lineage, history cursors, budget waits and i
       await exec(path.join(bin, 'pg_ctl' + suffix), ['-D', data, 'stop', '-m', 'fast', '-w'], { windowsHide: true });
       await closed;
     }
-    const relative = path.relative(os.tmpdir(), await fs.realpath(root));
+    const relative = path.relative(await fs.realpath(os.tmpdir()), await fs.realpath(root));
     assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
     await fs.rm(root, { recursive: true, force: true });
   });

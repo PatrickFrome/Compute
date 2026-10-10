@@ -64,7 +64,7 @@ test('physical disposable PostgreSQL enforces project fences through loopback CL
       await exec(path.join(bin, 'pg_ctl' + suffix), ['-D', data, 'stop', '-m', 'fast', '-w'], { windowsHide: true });
       await closed;
     }
-    const relative = path.relative(os.tmpdir(), await fs.realpath(root));
+    const relative = path.relative(await fs.realpath(os.tmpdir()), await fs.realpath(root));
     assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
     await fs.rm(root, { recursive: true, force: true });
   });
