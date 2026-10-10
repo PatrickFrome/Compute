@@ -31,6 +31,9 @@ permissions:
 
 jobs:
   static-canary-equivalence:
+    # The deployed v14 pin is a release-line claim, never a claim about a
+    # successor client PR that legitimately changes Edge/SQL sources.
+    if: ${{ github.event_name == 'push' || github.base_ref == 'work/r81-browser-release-convergence-v1' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -151,3 +154,54 @@ jobs:
           set -euo pipefail
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+  successor-edge-contracts:
+    # A successor PR may change Edge/SQL sources. Run source contracts without
+    # falsely declaring equivalence to the historical deployed v14 artifact.
+    if: ${{ github.event_name == 'pull_request' && github.base_ref != 'work/r81-browser-release-convergence-v1' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact successor PR head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Prove exact successor source head and fail-closed R83 manifest
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const m = JSON.parse(fs.readFileSync('coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json', 'utf8'));
+          if (m.schema !== 'metaengine.r83.edge-canary-qualification.v1') throw new Error('r83_schema_invalid');
+          if (!/^[0-9a-f]{40}$/.test(m.candidate?.source_pin)) throw new Error('r83_pin_missing');
+          if (m.live_qualification?.completed !== false || m.live_evidence?.completed !== false ||
+              m.promotion_authorized !== false || m.authority_effect !== false) {
+            throw new Error('r83_successor_must_not_claim_canary_promotion');
+          }
+          NODE
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Run exact successor Edge convergence contracts
+        working-directory: apps/metaengine-browser
+        run: |
+          set -euo pipefail
+          node --test \
+            test/postgres-command-wake.test.mjs \
+            test/native-supervisor-realtime-command-wake-migration.test.mjs \
+            test/rsi-result-delivery-integration.test.mjs \
+            test/rsi-result-delivery-runtime-wiring.test.mjs \
+            test/emergency-routes.test.mjs \
+            test/cognitive-delta-edge-route.test.mjs
+      - name: Prove contract run did not mutate the successor source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
