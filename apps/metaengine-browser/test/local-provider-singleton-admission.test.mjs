@@ -132,7 +132,7 @@ function noProviderOrRuntime(result) {
 }
 
 for (const entry of entries) {
-  test(entry + ': first-run wizard releases ESM before ready and keeps runtime planes behind provider admission',async t=>{
+  test(entry + ': automatic attached Keeper admission precedes runtime imports',async t=>{
     const f=await fixture(t);
     const ownerJson=await fs.readFile(f.ownerFile,'utf8');
     await fs.rm(f.ownerFile);
@@ -140,9 +140,8 @@ for (const entry of entries) {
       extraEnv:{ME2_INTEGRATION:'1'}});
     assert.equal(result.code,0,result.stderr);
     assert.ok(eventIndex(result,'entry-complete')<eventIndex(result,'ready-emitted'));
-    assert.ok(eventIndex(result,'wizard-await-ready')<eventIndex(result,'ready-emitted'));
-    assert.ok(eventIndex(result,'ready-emitted')<eventIndex(result,'wizard-shown'));
-    assert.ok(eventIndex(result,'wizard-completed')<eventIndex(result,'fetch'));
+    assert.ok(eventIndex(result,'autoconnect-start')>=0);
+    assert.ok(eventIndex(result,'autoconnect-completed')<eventIndex(result,'fetch'));
     assert.ok(eventIndex(result,'fetch-returned')<eventIndex(result,'runtime-import'));
     assert.equal(event(result,'runtime-import')?.[1],'READY');
     if(entry==='final-runtime-entry.mjs')assert.ok(eventIndex(result,'runtime-import')<eventIndex(result,'me2-start'));
@@ -150,7 +149,7 @@ for (const entry of entries) {
     assert.equal(f.requests.length,1);
   });
 
-  test(entry + ': cancelled first-run setup cannot import the runtime or ME2',async t=>{
+  test(entry + ': missing attached descriptor cannot import the runtime or ME2',async t=>{
     const f=await fixture(t);
     await fs.rm(f.ownerFile);
     const result=await launch(f,{entry,firstRunWizard:{outcome:'CANCELLED'},extraEnv:{ME2_INTEGRATION:'1'}});
@@ -158,7 +157,7 @@ for (const entry of entries) {
     assert.equal(event(result,'me2-import'),undefined);
     assert.equal(event(result,'fetch'),undefined);
     assert.equal(f.requests.length,0);
-    assert.equal(event(result,'quit-requested')?.[0],'quit-requested');
+    assert.equal(result.code,1);
   });
 
   test(entry + ': installer shutdown waits for managed IPC stop before a forced fallback, including a startup race', async t => {

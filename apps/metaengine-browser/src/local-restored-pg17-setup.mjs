@@ -14,6 +14,79 @@ const local = value => typeof value === 'string' && value.length < 2048 && path.
   && !/^(?:\\\\|\/\/)/.test(value) && !/[\x00-\x1f]/.test(value);
 const fail = name => { throw new Error('installed_restored_setup_' + name); };
 
+// A normal packaged launch consumes this path-only descriptor to attach the
+// already configured Keeper. It contains no password, Vault material, or
+// database URL, and replaces the interactive first-run database wizard.
+export const LOCAL_ATTACHED_AUTOCONNECT_SCHEMA = 'metaengine.browser.local-attached-autoconnect.v1';
+export const LOCAL_ATTACHED_AUTOCONNECT_FILE = 'attached-provider-autoconnect.json';
+export const LOCAL_ATTACHED_AUTOCONNECT_DIRECTORY = 'client-state-attached-50';
+const AUTOCONNECT_MAX_BYTES = 16 * 1024;
+
+export function localAttachedProviderAutoConnectFile({ env = process.env, platform = process.platform } = {}) {
+  const root = String(platform === 'win32' ? env.LOCALAPPDATA || '' : '').trim();
+  if (!root || !path.isAbsolute(root) || /^(?:\\\\|\/\/)/.test(root)) return null;
+  // Keep the descriptor beside the already protected attached runtime config.
+  // The METAENGINE parent is intentionally not used: its broad user profile
+  // ACL is unsuitable for an onboarding input that can select a database.
+  return path.join(root, 'METAENGINE', LOCAL_ATTACHED_AUTOCONNECT_DIRECTORY, LOCAL_ATTACHED_AUTOCONNECT_FILE);
+}
+
+async function readAutoConnectDescriptor(file) {
+  let stat;
+  try { stat = await fs.lstat(file); } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    fail('autoconnect_descriptor_unreadable');
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size < 1 || stat.size > AUTOCONNECT_MAX_BYTES) {
+    fail('autoconnect_descriptor_invalid');
+  }
+  const bytes = await fs.readFile(file);
+  if (bytes.length !== stat.size) fail('autoconnect_descriptor_unreadable');
+  let value;
+  try { value = JSON.parse(bytes.toString('utf8')); } catch { fail('autoconnect_descriptor_invalid'); }
+  const keys = ['schema', 'version', 'postgres_mode', 'config_file', 'restore_receipt_file',
+    'restore_receipt_sha256', 'authority_effect'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))
+    || value.schema !== LOCAL_ATTACHED_AUTOCONNECT_SCHEMA || value.version !== 1
+    || value.postgres_mode !== 'attached' || value.authority_effect !== false
+    || !local(value.config_file) || !local(value.restore_receipt_file)
+    || !SHA.test(String(value.restore_receipt_sha256 || ''))) {
+    fail('autoconnect_descriptor_invalid');
+  }
+  return Object.freeze({ schema: LOCAL_ATTACHED_AUTOCONNECT_SCHEMA, version: 1,
+    postgres_mode: 'attached', config_file: path.normalize(value.config_file),
+    restore_receipt_file: path.normalize(value.restore_receipt_file),
+    restore_receipt_sha256: String(value.restore_receipt_sha256).toLowerCase(), authority_effect: false });
+}
+
+/** Attach the existing local Keeper during packaged startup. */
+export async function autoConnectInstalledAttachedProvider({
+  env = process.env, platform = process.platform, resourcesPath = process.resourcesPath,
+  appDataDirectory = env.APPDATA, operator = connectInstalledRestoredPostgres,
+} = {}) {
+  if (platform !== 'win32') return Object.freeze({ state: 'NOT_APPLICABLE', authority_effect: false });
+  const descriptorFile = localAttachedProviderAutoConnectFile({ env, platform });
+  if (!descriptorFile) return Object.freeze({ state: 'NO_DESCRIPTOR', authority_effect: false });
+  const descriptor = await readAutoConnectDescriptor(descriptorFile);
+  if (!descriptor) return Object.freeze({ state: 'NO_DESCRIPTOR', authority_effect: false });
+  if (!local(appDataDirectory) || !local(resourcesPath)) fail('autoconnect_arguments_invalid');
+  let result;
+  try {
+    result = await operator({ configFile: descriptor.config_file,
+      restoreReceiptFile: descriptor.restore_receipt_file,
+      restoreReceiptSha256: descriptor.restore_receipt_sha256, appDataDirectory, resourcesPath,
+      autoPrepareSource: true, expectedPostgresMode: 'attached',
+      localAppDataDirectory: env.LOCALAPPDATA, platform });
+  } catch { fail('autoconnect_operator_not_confirmed'); }
+  if (result?.state !== 'CONFIGURED' || result.owner_profile_written !== true
+    || result.postgres_mode !== 'attached' || result.automatic_cloud_fallback !== false
+    || result.authority_effect !== false) fail('autoconnect_receipt_unverified');
+  return Object.freeze({ state: 'CONFIGURED', provider: 'LOCAL_POSTGRES', postgres_mode: 'attached',
+    descriptor_file: descriptorFile, owner_profile_written: true, automatic_cloud_fallback: false,
+    authority_effect: false });
+}
+
 // No PGDATA, Vault, credential or cloud connection is packaged here. The
 // sealed installed runtime contains the reviewed provisioning operator, which
 // alone qualifies the existing private local PG17 and publishes an absent owner.

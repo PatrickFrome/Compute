@@ -154,10 +154,12 @@ if(options.firstRunWizard){
     return {state:options.firstRunWizard.outcome,authority_effect:false};
   };
   mocks.set(new URL('local-restored-pg17-setup.mjs',src).href,dataModule([
-    'export async function showInstalledRestoredProviderWizard({app}) {',
-    ' globalThis.__traceEntrypoint("wizard-await-ready"); await app.whenReady();',
-    ' globalThis.__traceEntrypoint("wizard-shown"); await new Promise(resolve=>setTimeout(resolve,30));',
-    ' globalThis.__traceEntrypoint("wizard-completed"); return globalThis.__completeFirstRunWizard();',
+    'export async function autoConnectInstalledAttachedProvider() {',
+    ' globalThis.__traceEntrypoint("autoconnect-start");',
+    ' const result=globalThis.__completeFirstRunWizard();',
+    ' if(result.state!=="CONFIGURED") return {state:"NO_DESCRIPTOR",authority_effect:false};',
+    ' globalThis.__traceEntrypoint("autoconnect-completed");',
+    ' return {state:"CONFIGURED",owner_profile_written:true,postgres_mode:"attached",automatic_cloud_fallback:false,authority_effect:false};',
     '}',
   ].join('\n')));
   mocks.set(new URL('me2/me2-integration-entry.mjs',src).href,dataModule(
