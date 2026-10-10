@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Server } from "socket.io";
 import {
-  listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
+  listAgents, listTasks, getTask, tailEvents, readEventPage, db, emit, snapshot,
   enqueueCommand, budgetWindow, listCommands, listWorkers, upsertWorker,
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
   createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
@@ -1009,10 +1009,17 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       });
     }
     if (path === "/events" && req.method === "GET") {
-      const since = Number(url.searchParams.get("since") ?? 0);
-      const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
-      const task = url.searchParams.get("task");
-      return json(res, 200, { ok: true, events: task ? eventsByTask(task, limit) : tailEvents(since, limit) });
+      const sinceText = url.searchParams.get("since");
+      const limitText = url.searchParams.get("limit") ?? "200";
+      if ((sinceText !== null && !/^\d+$/.test(sinceText)) || !/^\d+$/.test(limitText)) {
+        return json(res, 400, { ok: false, error: "event_query_invalid" });
+      }
+      try {
+        const page = readEventPage({ since: sinceText === null ? undefined : Number(sinceText), limit: Math.min(Number(limitText), 500), taskId: url.searchParams.get("task") });
+        return json(res, 200, { ok: true, ...page });
+      } catch (error) {
+        return json(res, 400, { ok: false, error: error instanceof Error && /^event_(?:cursor|limit|task_id)_invalid$/.test(error.message) ? error.message : "event_query_failed" });
+      }
     }
     if (path === "/reset" && req.method === "POST") {
       const r = enqueueCommand({ action: "ENVIRONMENT_RESET", lane: "EMERGENCY", payload: { by: "operator" } });

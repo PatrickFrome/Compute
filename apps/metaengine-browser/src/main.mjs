@@ -49,6 +49,12 @@ import { normalizeDevelopmentPlaneProjection, projectWorkspaceWorkbench } from '
 import { projectDevOSDevelopmentSources } from './metaengine-devos-development-sources.mjs';
 import { projectMissionControl } from './metaengine-mission-control-projection.mjs';
 import { SupervisorLoopbackRpcServer } from './supervisor-loopback-rpc-server.mjs';
+import { createManagedTaskProjectHost } from './managed-task-project-host.mjs';
+import { MANAGED_PROJECT_COMMAND_ACTIONS } from './managed-task-project-command-adapter.mjs';
+import { createManagedTaskProjectAuthorityResolver, createManagedTaskProjectBindingTransport, createManagedTaskProjectRepositoryProvisioner } from './managed-task-project-authority-resolver.mjs';
+import { prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile } from './managed-task-project-storage.mjs';
+import { createManagedTaskProjectClientControl } from './managed-task-project-client-control.mjs';
+import { createAutonomousProjectHost } from './autonomous-project-host.mjs';
 import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervisorCommand } from './browser-cognitive-system-deltas.mjs';
 // Fallback Console (operator directive 2026-09-21): embedded reserve control
 // plane. Probes the pinned cloud edge + the local reserve edge, re-points the
@@ -68,6 +74,7 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
+import { ensureClientGoalProject } from './client-goal-project-link.mjs';
 import { ClientAdmissionRecoveryJournal } from './client-admission-recovery-journal.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
@@ -100,12 +107,22 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+let managedTaskProjectHost = null;
+let autonomousProjectRuntime = null;
+let managedTaskProjectHostClosing = Promise.resolve();
+let managedTaskProjectHostDrainPending = false;
+let managedTaskProjectQuitReady = false;
 let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
 let clientGoalJournal = null;
 let clientAdmissionRecoveryJournal = null;
 let clientAdmissionRecoveryJournalLoadError = null;
+const managedTaskProjectClientControl = createManagedTaskProjectClientControl({
+  getObservation: () => nativeSupervisor?.snapshot()?.workspace_bindings || null,
+  getHostSnapshot: () => managedTaskProjectHost?.snapshot() || null,
+  executeCommand: executeNativeSupervisorCommand,
+});
 
 function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
@@ -646,6 +663,7 @@ async function reconcileClientGoal(rawRequestId, expectedReceipt = null) {
   const raw = await nativeSupervisor.clientGoalProgress({ request_id: requestId });
   const progress = normalizeClientGoalProgressReadback(raw, requestId, expectedReceipt);
   await journal.recordProgress(progress);
+  await ensureClientGoalProject({ journal, supervisor: nativeSupervisor, request_id: requestId });
 
   // C4.4 proof is a read-only augmentation. Progress remains durable even if
   // the proof route is temporarily unavailable; no task/Browser effect is
@@ -678,6 +696,7 @@ async function submitClientGoal(rawInput) {
     const raw = await nativeSupervisor.clientGoalSubmit({ request_id: requestId, objective: intent.goal });
     const receipt = normalizeClientGoalSubmissionReadback(raw, intent.goal, requestId);
     await journal.recordSubmission(receipt);
+    await ensureClientGoalProject({ journal, supervisor: nativeSupervisor, request_id: requestId });
     await publishSnapshot().catch(() => {});
     return receipt;
   } catch (error) {
@@ -702,6 +721,12 @@ async function latestClientGoal() {
       await reconcileClientGoal(latest.request_id, latest.receipt || null);
       latest = journal.latest();
     } catch {}
+  }
+  // A crash after admission or registration can leave only the goal receipt.
+  // Recover project metadata even for terminal tasks, using the same ID.
+  if (!latest?.project) {
+    await ensureClientGoalProject({ journal, supervisor: nativeSupervisor, request_id: latest.request_id });
+    latest = journal.latest();
   }
   return latest ? structuredClone(latest) : null;
 }
@@ -1683,6 +1708,7 @@ async function nativeSupervisorState() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     computer_authority: computerExecutor.snapshot(),
     loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
+    managed_task_projects: managedTaskProjectHost?.snapshot() || { schema: 'metaengine.devos.managed-task-project-host.v1', state: 'UNAVAILABLE', authority_effect: false },
     github_chat: githubChatState(),
     compute,
     guardian,
@@ -1709,7 +1735,15 @@ async function executeNativeSupervisorCommand(command) {
   // delta on the cognitive bus — Mission Control live effects.
   const startedAt = Date.now();
   try {
-    const result = await executeNativeSupervisorCommandFenced(command);
+    if (String(command?.issued_by || '').startsWith('github-chat:')) {
+      if (!githubChatRelay) throw new Error('github_chat_command_grant_revoked');
+      await githubChatRelay.assertCommandGrant(command);
+    }
+    assertActiveInferenceCommandPolicy(command);
+    if (MANAGED_PROJECT_COMMAND_ACTIONS.includes(command?.action) && !managedTaskProjectHost) throw new Error('managed_project_host_unavailable');
+    const result = managedTaskProjectHost
+      ? await managedTaskProjectHost.executeCommand(command)
+      : await executeNativeSupervisorCommandFenced(command);
     try {
       publishSupervisorCommand(systemDeltaPublisher(), null, {
         command_id: command?.command_id,
@@ -1733,11 +1767,6 @@ async function executeNativeSupervisorCommand(command) {
 }
 
 async function executeNativeSupervisorCommandFenced(command) {
-  if (String(command?.issued_by || '').startsWith('github-chat:')) {
-    if (!githubChatRelay) throw new Error('github_chat_command_grant_revoked');
-    await githubChatRelay.assertCommandGrant(command);
-  }
-  assertActiveInferenceCommandPolicy(command);
   const action = String(command?.action || '');
   const payload = command?.payload || {};
   // ChatGPT-only execution fence. Historical GLM/Z.ai tabs may still be read,
@@ -2006,6 +2035,22 @@ async function connectGithubChat() {
   return githubChatSetup;
 }
 
+function closeManagedTaskProjectHost() {
+  const host = managedTaskProjectHost;
+  const projectRuntime = autonomousProjectRuntime;
+  managedTaskProjectHost = null;
+  autonomousProjectRuntime = null;
+  nativeSupervisor?.bindDevosProjectRuntime(null);
+  if (host || projectRuntime) {
+    managedTaskProjectHostDrainPending = true;
+    managedTaskProjectHostClosing = (async () => {
+      try { await projectRuntime?.close(); }
+      finally { await host?.close(); }
+    })().finally(() => { managedTaskProjectHostDrainPending = false; });
+  }
+  return managedTaskProjectHostClosing;
+}
+
 async function initNativeSupervisor() {
   if (!nativeSupervisor) {
     const identity = ensureSupervisorIdentity();
@@ -2091,6 +2136,31 @@ async function initNativeSupervisor() {
       },
     });
   }
+  // Both remote leased commands and authenticated loopback commands enter the
+  // same host adapter. Its dependencies use this client's existing device
+  // signature rail; no DB credentials or configurable paths enter a renderer.
+  if (!managedTaskProjectHost) {
+    try {
+      await managedTaskProjectHostClosing;
+      const request = input => nativeSupervisor.managedTaskProjectRequest(input);
+      const bindings = createManagedTaskProjectBindingTransport({ request });
+      managedTaskProjectHost = await createManagedTaskProjectHost({
+        userDataPath: app.getPath('userData'), executeCommand: executeNativeSupervisorCommandFenced,
+        resolveProjectBinding: createManagedTaskProjectAuthorityResolver({ request }),
+        ...bindings, provisionRepository: createManagedTaskProjectRepositoryProvisioner({ request }),
+        openProject: async ({ path: projectPath }) => {
+          if (await shell.openPath(projectPath)) throw new Error('managed_project_open_failed');
+        },
+      });
+    } catch (error) { recordStartupSubsystemDegraded('MANAGED_TASK_PROJECTS', error); }
+  }
+  if (!autonomousProjectRuntime && managedTaskProjectHost) {
+    try {
+      autonomousProjectRuntime = await createAutonomousProjectHost({ userDataPath: app.getPath('userData'),
+        supervisor: nativeSupervisor, getManagedHost: () => managedTaskProjectHost });
+      nativeSupervisor.bindDevosProjectRuntime(autonomousProjectRuntime);
+    } catch (error) { recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error); }
+  }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
   // Fallback Console (operator directive 2026-09-21): reserve control plane
   // embedded in the browser. The console stays LOCKED while the pinned cloud
@@ -2124,14 +2194,22 @@ async function initNativeSupervisor() {
   // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
   // path stays as the remote fallback (native-supervisor-runtime-transport).
   try {
+    const directory = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
+    const manifestPath = path.join(directory, 'supervisor-rpc.json');
+    const existingManifest = await fs.lstat(manifestPath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (existingManifest) await verifyManagedProjectPrivateFile(manifestPath);
     supervisorLoopbackRpc = new SupervisorLoopbackRpcServer({
       executeCommand: executeNativeSupervisorCommand,
+      manifestPath,
       snapshotProvider: () => nativeSupervisorState(),
       clientConnectionStatusProvider: () => readClientConnectionStatus(),
       clientWorkReadinessProvider: () => readClientWorkReadiness(),
     });
     await supervisorLoopbackRpc.start();
+    if (supervisorLoopbackRpc.snapshot().last_error) throw new Error('supervisor_loopback_private_manifest_write_failed');
+    await verifyManagedProjectPrivateFile(manifestPath);
   } catch (error) {
+    await supervisorLoopbackRpc?.stop().catch(() => {});
     supervisorLoopbackRpc = null;
     recordStartupSubsystemDegraded('SUPERVISOR_LOOPBACK_RPC', error);
   }
@@ -2147,6 +2225,7 @@ function destroyWindowContents() {
   detachShellBrainPort();
   supervisorLoopbackRpc?.stop().catch(() => {});
   supervisorLoopbackRpc = null;
+  void closeManagedTaskProjectHost().catch(() => {});
   nativeSupervisor?.stop();
   fallbackConsole?.stop();
   fallbackConsole = null;
@@ -2530,6 +2609,41 @@ ipcMain.handle('metaengine:client:latest-goal', async (event) => {
 ipcMain.handle('metaengine:client:goal-status', async (event, rawRequestId) => {
   assertShellSender(event);
   return refreshClientGoal(rawRequestId);
+});
+ipcMain.handle('metaengine:client:project-status', async (event, ...args) => {
+  assertShellSender(event);
+  if (args.length) throw new Error('managed_project_client_status_params_forbidden');
+  return managedTaskProjectClientControl.status();
+});
+ipcMain.handle('metaengine:client:project-create', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('managed_project_client_params_forbidden');
+  return managedTaskProjectClientControl.create(request);
+});
+ipcMain.handle('metaengine:client:project-open', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('managed_project_client_params_forbidden');
+  return managedTaskProjectClientControl.open(request);
+});
+ipcMain.handle('metaengine:client:project-snapshot', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('client_project_snapshot_params_forbidden');
+  if (!nativeSupervisor?.projectSnapshot) throw new Error('client_project_unavailable');
+  return nativeSupervisor.projectSnapshot(request);
+});
+ipcMain.handle('metaengine:client:project-history', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('client_project_history_params_forbidden');
+  if (!nativeSupervisor?.projectHistory) throw new Error('client_project_unavailable');
+  return nativeSupervisor.projectHistory(request);
+});
+ipcMain.handle('metaengine:client:project-overview', async (event, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('client_project_overview_params_forbidden');
+  const latest = await latestClientGoal();
+  if (!latest?.project?.project_id) return null;
+  if (!nativeSupervisor?.projectSnapshot) throw new Error('client_project_unavailable');
+  return nativeSupervisor.projectSnapshot({ project_id: latest.project.project_id, task_after_seq: 0, limit: 128 });
 });
 function readClientConnectionStatus() {
   const status = nativeSupervisor?.connectionStatus?.() || Object.freeze({
@@ -2957,11 +3071,21 @@ async function startBrowserRuntime() {
   }
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   githubChatRelay?.stop();
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;
+  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || managedTaskProjectHostDrainPending)) {
+    event.preventDefault();
+    nativeSupervisor?.stop();
+    const rpc = supervisorLoopbackRpc;
+    supervisorLoopbackRpc = null;
+    void Promise.allSettled([rpc?.stop(), closeManagedTaskProjectHost()]).then(() => {
+      managedTaskProjectQuitReady = true;
+      app.quit();
+    });
+  }
 });
 app.on('activate', () => {
   if (!app.isReady()) return;

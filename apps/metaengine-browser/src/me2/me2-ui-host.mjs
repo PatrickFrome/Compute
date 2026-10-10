@@ -8,7 +8,7 @@
  *
  * Разрешение каталога UI (кандидаты): ME2_UI_DIR env → resources/me2-ui (упакованный) →
  * cwd/me2-ui → cwd/../me2-ui. Спавн: ME2_UI_BIN (bun) `run start` (production-сборка Next);
- * при ME2_UI_DEV=1 — `run dev` (только для разработки). Если ME2_UI_BIN не задан и bun
+ * при ME2_UI_DEV=1 — локальный Next CLI с явным loopback (только для разработки). Если ME2_UI_BIN не задан и bun
  * недоступен на машине (R77: установщик обязан работать без внешних зависимостей) —
  * честный фолбэк: Electron-бинарник в роли node (ELECTRON_RUN_AS_NODE=1) запускает
  * standalone server.js напрямую — Next standalone не требует bun. Отсутствие каталога
@@ -115,15 +115,18 @@ export function resolveMe2UiLaunch({
       bin: execPath,
       args: ['server.js'],
       launch_mode: 'EMBEDDED_NODE_STANDALONE',
-      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' }),
+      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', HOSTNAME: '127.0.0.1' }),
     });
   }
   return Object.freeze({
     ...selected,
     bin: env.ME2_UI_BIN || 'bun',
-    args: dev ? ['run', 'dev'] : ['run', 'start'],
+    // Next dev reads --hostname rather than HOSTNAME. Invoke the local CLI
+    // directly; arguments appended to the historical "... | tee dev.log"
+    // package script would be passed to tee instead of Next.
+    args: dev ? [join(selected.dir, 'node_modules/next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', String(UI_PORT)] : ['run', 'start'],
     launch_mode: dev ? 'SOURCE_DEV' : 'PACKAGE_SCRIPT',
-    env_patch: Object.freeze({}),
+    env_patch: Object.freeze({ HOSTNAME: '127.0.0.1' }),
   });
 }
 
@@ -132,6 +135,7 @@ function spawnUi(launch) {
   const env = {
     ...process.env,
     ...launch.env_patch,
+    HOSTNAME: '127.0.0.1',
     PORT: String(UI_PORT),
     ME2_HOSTED_BY_BROWSER: '1',
     ME2_WATCHDOG: 'off',
@@ -141,6 +145,7 @@ function spawnUi(launch) {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
+    windowsHide: true,
   });
   const fwd = (stream, toErr) => {
     let buf = '';

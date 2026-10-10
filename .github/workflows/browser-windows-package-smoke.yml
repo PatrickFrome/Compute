@@ -9,6 +9,8 @@ on:
   pull_request:
     paths:
       - 'infra/client-state-runtime/**'
+      - 'supabase/migrations/20261009194157_managed_project_admission_v1.sql'
+      - 'supabase/migrations/20261010100000_project_continuity_history_v1.sql'
       - 'apps/metaengine-browser/**'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/native/**'
@@ -75,7 +77,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'
     needs: package_identity_preflight
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read
@@ -450,6 +452,34 @@ jobs:
           $env:LOCAL_STATE_TEST_FRESH_BUNDLE_SHA256 = $digest
           node --test --test-concurrency=1 fresh-pg17-initdb.integration.test.mjs fresh-pg17-durability.integration.test.mjs restored-pg17-auto-prepare.integration.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'physical_initdb_fresh_cluster_failed' }
+          $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
+          npm run test:managed-project-authority
+          if ($LASTEXITCODE -ne 0) { throw 'physical_managed_project_authority_failed' }
+          npm run test:project-continuity
+          if ($LASTEXITCODE -ne 0) { throw 'physical_project_continuity_failed' }
+
+      - name: Qualify attached onboarding and restricted API grants on disposable SCRAM PostgreSQL
+        working-directory: infra/client-state-runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:GITHUB_WORKSPACE 'apps/metaengine-browser/client-state-runtime-dist'
+          $manifest = Get-Content (Join-Path $bundle 'offline-runtime-bundle.json') -Raw | ConvertFrom-Json
+          $digest = [string]$manifest.bundle_sha256
+          if ($digest -notmatch '^[a-f0-9]{64}$') { throw 'physical_attached_bundle_digest_invalid' }
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $digest
+          $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
+          npm run test:attached-onboarding
+          if ($LASTEXITCODE -ne 0) { throw 'physical_attached_onboarding_failed' }
+
+      - name: Verify ordinary UI host child socket ownership and loopback binding
+        working-directory: apps/metaengine-browser
+        run: node --test --test-concurrency=1 test/me2-ui-loopback-host.test.mjs test/verify-windows-tcp-listener.test.mjs
+
+      - name: Verify installed launch evidence admission contracts
+        working-directory: apps/metaengine-browser
+        run: node --test test/installed-client-launch-qualification.test.mjs
 
       - name: Verify tracked source is unchanged before physical packaging
         shell: bash
@@ -461,6 +491,7 @@ jobs:
           git diff --exit-code HEAD -- .
 
       - name: Build exact-head unsigned NSIS package through native staging hook
+        timeout-minutes: 20
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
@@ -745,6 +776,7 @@ jobs:
           compression-level: 0
 
       - name: Install exact-head package and prove Browser plus inert Guardian payload
+        timeout-minutes: 12
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
@@ -752,8 +784,15 @@ jobs:
           $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
           if (Get-Service -Name 'METAENGINEBrowserGuardian' -ErrorAction SilentlyContinue) { throw 'guardian_service_preexists_before_package_install' }
-          $install = Start-Process -FilePath "$env:RUNNER_TEMP\candidate-setup.exe" -ArgumentList '/S' -PassThru -Wait
-          if ($install.ExitCode -ne 0) { throw "package_installer_exit_$($install.ExitCode)" }
+          $installLine = & ./scripts/install-package-bounded.ps1 `
+            -InstallerPath "$env:RUNNER_TEMP\candidate-setup.exe" `
+            -ExpectedSha256 ([string]$proof.installer_sha256) -TimeoutSeconds 600
+          $installProof = $installLine | ConvertFrom-Json
+          if ($installProof.schema -ne 'metaengine.browser.bounded-package-install.v1' `
+              -or $installProof.installer_exit_code -ne 0 `
+              -or $installProof.process_tree_scoped_job -ne $true `
+              -or $installProof.descendant_cleanup_on_job_close -ne $true `
+              -or [string]$installProof.installer_sha256 -ne [string]$proof.installer_sha256) { throw 'package_installer_process_proof_invalid' }
 
           $guardianLine = (& ./scripts/verify-installed-guardian-native-staging.ps1 `
             -ExpectedSourceHead ([string]$proof.source_head) `
@@ -774,7 +813,9 @@ jobs:
             --runtime $app --smoke --evidence $uiEvidence
           if ($LASTEXITCODE -ne 0) { throw 'package_smoke_installed_me2_ui_invalid' }
           $uiProof = Get-Content $uiEvidence -Raw | ConvertFrom-Json
-          if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) { throw 'package_smoke_me2_ui_proof_invalid' }
+          if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes `
+              -or $uiProof.os_listener_verified -ne $true -or $uiProof.os_listener_verification -ne 'PASS' `
+              -or $uiProof.os_listener.loopback_only -ne $true -or $uiProof.os_listener.expected_process_only -ne $true) { throw 'package_smoke_me2_ui_proof_invalid' }
           $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
           $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
 
@@ -814,6 +855,43 @@ jobs:
           $proof | Add-Member -NotePropertyName guardian_native_staging_verified -NotePropertyValue $true -Force
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Qualify normal installed first-run and exact installed UI host in isolated profiles
+        timeout-minutes: 8
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $evidence = Join-Path $env:RUNNER_TEMP 'installed-launch-qualification'
+          New-Item -ItemType Directory -Path $evidence -ErrorAction Stop | Out-Null
+          node scripts/qualify-installed-client-launch.mjs `
+            --install-root (Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test') `
+            --source-root "$env:GITHUB_WORKSPACE" `
+            --expected-head ([string]$proof.source_head) `
+            --expected-version ([string]$proof.package_version) `
+            --evidence-dir $evidence
+          if ($LASTEXITCODE -ne 0) { throw 'isolated_installed_launch_qualification_failed' }
+          $installed = Get-Content (Join-Path $evidence 'installed-launch-qualification.json') -Raw | ConvertFrom-Json
+          if ($installed.schema -ne 'metaengine.browser.installed-launch-qualification.v1' `
+              -or $installed.source_head -ne [string]$proof.source_head `
+              -or $installed.package_version -ne [string]$proof.package_version `
+              -or $installed.installed_source_bytes_verified -ne $true `
+              -or $installed.protected_offline_runtime_verified -ne $true `
+              -or $installed.first_run_qualified -ne $true `
+              -or $installed.installed_ui_host_qualified -ne $true `
+              -or $installed.os_ui_listener_verified -ne $true `
+              -or $installed.owner_boot_qualified -ne $false `
+              -or $installed.production_ready -ne $false `
+              -or $installed.authority_effect -ne $false) { throw 'isolated_installed_launch_contract_invalid' }
+          $proof | Add-Member -NotePropertyName installed_first_run_qualified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName installed_source_bytes_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName installed_owned_ui_host_qualified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName installed_os_ui_listener_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName installed_owner_qualification_state -NotePropertyValue 'REQUIRES_ISOLATED_SCHEMA_FIXTURE' -Force
+          $proof | Add-Member -NotePropertyName production_ready -NotePropertyValue $false -Force
+          $proof | ConvertTo-Json -Depth 7 | Set-Content $proofPath -Encoding utf8
 
       - name: Prove exact packaged profile with an offline diagnostic
         working-directory: apps/metaengine-browser
@@ -870,7 +948,7 @@ jobs:
 
       - name: Prove normal packaged UI boot and second-instance activation
         # The owned provider requires an explicit private fixture, absent on this runner.
-        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1')
+        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
@@ -1270,6 +1348,26 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test -z "$(git diff --name-only HEAD -- infra/client-state-runtime apps/metaengine-browser/src apps/metaengine-browser/native apps/metaengine-browser/build apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/legacy-shell-bundle-retirement.test.mjs apps/metaengine-browser/test/me2-r85-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/package-lock.json apps/metaengine-browser/electron-builder.test.json apps/me2-ui/bun.lock apps/me2-daemon)"
 
+      - name: Seal installed candidate qualification without conflating Owner readiness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          if ($proof.installed_first_run_qualified -ne $true `
+              -or $proof.installed_source_bytes_verified -ne $true `
+              -or $proof.installed_owned_ui_host_qualified -ne $true `
+              -or $proof.installed_os_ui_listener_verified -ne $true `
+              -or $proof.production_ready -ne $false) { throw 'installed_candidate_qualification_incomplete' }
+          $proof | Add-Member -NotePropertyName installed_candidate_qualification -NotePropertyValue 'PASSED_ISOLATED_FIRST_RUN_AND_UI_HOST' -Force
+          $proof | ConvertTo-Json -Depth 7 | Set-Content $proofPath -Encoding utf8
+          @(
+            'Installed candidate: first-run, protected source identity, installed UI host and OS loopback listener verified.',
+            "Normal Owner boot verified: $($proof.normal_ui_boot_verified).",
+            "Owner qualification state: $($proof.installed_owner_qualification_state).",
+            'Production readiness: false. A real isolated schema fixture must qualify Owner boot separately.'
+          ) | Add-Content $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
       - name: Upload exact-head Windows qualification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -1301,6 +1399,8 @@ jobs:
             ${{ runner.temp }}/guardian-bootstrap-physical/*.err
             ${{ runner.temp }}/guardian-machine-bootstrap-binding.json
             ${{ runner.temp }}/installed-me2-daemon-proof.json
+            ${{ runner.temp }}/installed-me2-ui-proof.json
+            ${{ runner.temp }}/installed-launch-qualification/**
             ${{ runner.temp }}/browser-startup-journal-v1.json
             ${{ runner.temp }}/browser-sentinel-v1.json
             ${{ runner.temp }}/browser-parent-progress-v1.json

@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import postgres from 'postgres';
 import { RPC_ALLOWLIST, TABLE_ALLOWLIST } from './db-api-core.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
 import { provisionPersistentClientProvider } from './persistent-client-provider.mjs';
+import { inspectAttachedApiAdmission } from './attached-postgres-onboarding.mjs';
 import { localStateProviderOwnerFile, validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity,
   localStateProviderHealthAttested } from '../../apps/metaengine-browser/src/local-state-provider-policy.mjs';
 import { startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost } from '../../apps/metaengine-browser/src/local-runtime-host-controller.mjs';
@@ -80,8 +82,15 @@ const admissionQuery = `SELECT json_build_object(
   'insert_columns_granted', (${insertColumns.map(column => `has_column_privilege('service_role','public.compute_fabric_a2_browser_device_enrollment_request_h205f22','${column}','INSERT')`).join(' AND ')})
 )::text FROM pg_catalog.pg_roles r WHERE r.rolname=current_user`;
 
-export async function inspectRestoredApiAdmission({ databaseUrl, postgresBinDirectory }) {
+export async function inspectRestoredApiAdmission({ databaseUrl, postgresBinDirectory, roleMode = 'service_role' }) {
   const url = localDatabase(databaseUrl);
+  if (roleMode === 'direct') {
+    const sql = postgres(url.href, { max: 1, prepare: false, connect_timeout: 3, debug: false, onnotice: () => {} });
+    try { return await inspectAttachedApiAdmission({ sql, apiLogin: decodeURIComponent(url.username) }); }
+    catch { fail('api_admission_unattested'); }
+    finally { await sql.end({ timeout: 5 }); }
+  }
+  if (roleMode !== 'service_role') fail('api_admission_unattested');
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^PG/i.test(key)) delete env[key];
   Object.assign(env, { PGHOST: '127.0.0.1', PGPORT: url.port, PGUSER: decodeURIComponent(url.username),
@@ -118,16 +127,18 @@ export async function provisionRestoredClientProvider(options = {}, hooks = {}) 
       privatePath(options.privateConfigFile, 'file'), privatePath(options.bundleDirectory, 'directory'),
       privatePath(options.restoreReceiptFile, 'file'), fs.realpath(repository),
     ]);
+    const configBytes = await bytes(configFile);
+    const config = validateRuntimeHostConfig(json(configBytes));
+    const postgresMode = config.postgres_mode || 'owned';
+    if (postgresMode === 'attached' && config.api_role_mode !== 'direct') fail('attached_direct_api_required');
     validateRuntimeHostPhysicalBoundaries({ bundleDirectory: bundle, stateDirectory: state, pgDataDirectory: data,
-      privateConfigFile: configFile, repositoryDirectory: physicalRepository });
+      privateConfigFile: configFile, repositoryDirectory: physicalRepository, postgresMode });
     if (!within(state, configFile) || within(data, configFile) || within(bundle, restoreFile) || within(physicalRepository, restoreFile)) fail('private_file_boundary_invalid');
     const ownerExpected = localStateProviderOwnerFile({ env: { APPDATA: options.appDataDirectory }, platform: 'win32' });
     if (!ownerExpected || !equalPath(path.resolve(options.ownerFile || ''), path.resolve(ownerExpected))) fail('owner_file_invalid');
     const ownerDirectory = await privatePath(path.dirname(options.ownerFile), 'directory', true);
     if (within(bundle, ownerDirectory) || within(physicalRepository, ownerDirectory) || within(data, ownerDirectory)) fail('owner_file_invalid');
     try { await fs.lstat(options.ownerFile); fail('owner_file_exists'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const configBytes = await bytes(configFile);
-    const config = validateRuntimeHostConfig(json(configBytes));
     if (!equalPath(await fs.realpath(config.state_directory), state) || !equalPath(await fs.realpath(config.pg_data_directory), data)
       || !equalPath(await fs.realpath(config.bundle_directory), bundle) || config.expected_bundle_sha256 !== options.expectedBundleDigest) fail('private_config_binding_mismatch');
     const api = localDatabase(config.database_url); const inspect = localDatabase(config.inspect_database_url);
@@ -138,7 +149,9 @@ export async function provisionRestoredClientProvider(options = {}, hooks = {}) 
     await privatePath(path.join(data,'global','pg_control'),'file');
     const vaultFile = path.join(data,'client-vault.key'); const vaultBytes = await bytes(vaultFile,128);
     if (!/^[a-f0-9]{64}\n$/.test(vaultBytes.toString())) fail('existing_vault_key_required');
-    try { await fs.lstat(path.join(data,'postmaster.pid')); fail('existing_postmaster_state_requires_review'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    let attachedPidBytes;
+    if (postgresMode === 'attached') attachedPidBytes = await bytes(path.join(data,'postmaster.pid'));
+    else { try { await fs.lstat(path.join(data,'postmaster.pid')); fail('existing_postmaster_state_requires_review'); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
     const restoreBytes = await bytes(restoreFile,4*1024*1024);
     if (digest(restoreBytes) !== options.expectedRestoreReceiptSha256) fail('restore_receipt_pin_mismatch');
     const receipt = json(restoreBytes);
@@ -156,7 +169,8 @@ export async function provisionRestoredClientProvider(options = {}, hooks = {}) 
     const status = validateLocalStateRuntimeIdentity(json(await bytes(publicConfig.runtime_identity_file,65536)),publicConfig.base_url);
     if (runtime?.state !== 'READY' || runtime.runtime_owned !== true || runtime.authority_effect !== false || runtime.instance_id !== status.instance_id
       || runtime.endpoint !== publicConfig.base_url || !equalPath(path.resolve(runtime.status_file || ''), publicConfig.runtime_identity_file)) fail('host_identity_unattested');
-    await (hooks.inspectApiAdmission || inspectRestoredApiAdmission)({ databaseUrl:config.database_url,postgresBinDirectory:verified.paths.postgresBinDirectory });
+    await (hooks.inspectApiAdmission || inspectRestoredApiAdmission)({ databaseUrl:config.database_url,postgresBinDirectory:verified.paths.postgresBinDirectory,
+      roleMode: config.api_role_mode || 'service_role' });
     const response = await (hooks.fetchImpl || globalThis.fetch)(`${publicConfig.base_url}/health`, { method:'GET',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(3000) });
     if (!response?.ok || !localStateProviderHealthAttested(await response.json(),status.instance_id)) fail('health_unattested');
     const cleanup = await stop();
@@ -164,6 +178,7 @@ export async function provisionRestoredClientProvider(options = {}, hooks = {}) 
     cleaned = true;
     if (!(await bytes(configFile)).equals(configBytes) || !(await bytes(vaultFile,128)).equals(vaultBytes)
       || !(await bytes(restoreFile,4*1024*1024)).equals(restoreBytes)) fail('private_input_changed');
+    if (attachedPidBytes && !(await bytes(path.join(data,'postmaster.pid'))).equals(attachedPidBytes)) fail('private_input_changed');
     // Reverify resources after the subprocess cycle, then exclusively publish
     // the durable descriptor. A concurrent owner is preserved by the existing
     // provisioner's hard-link publication; no replacement path is available.
@@ -172,6 +187,8 @@ export async function provisionRestoredClientProvider(options = {}, hooks = {}) 
       baseUrl:publicConfig.base_url,runtimeIdentityFile:publicConfig.runtime_identity_file,runtimeHost:publicConfig.runtime_host });
     return Object.freeze({schema:'compute.restored-client-provider-provisioning.v1',state:'CONFIGURED',provider:'LOCAL_POSTGRES',
       existing_restored_database_selected:true,source_restore_receipt_verified:true,database_initialized:false,owner_profile_written:true,runtime_ready:false,cleanup_confirmed:true,
+      postgres_mode:postgresMode, api_role_mode:config.api_role_mode || 'service_role',
+      postgres_lifecycle_owned:postgresMode === 'owned', attached_postmaster_preserved:postgresMode === 'attached',
       attested_instance_id:status.instance_id,source_dump_sha256:receipt.source_dump_sha256,source_restore_receipt_sha256:options.expectedRestoreReceiptSha256,
       bundle_sha256:options.expectedBundleDigest,private_vault_key_preserved:true,source_schema_exact:receipt.ddl_adaptations.length===0,authority_effect:false});
   } catch (error) {

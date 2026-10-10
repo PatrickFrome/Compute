@@ -12,6 +12,13 @@ import { LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, LOCAL_STATE_PROVIDER_PROFILE, valid
 
 const instance = 'bbc91d2a-44a7-4674-b4b4-5e265ebd2770';
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+// Full-suite Windows runs compete for process startup and exit-event delivery.
+// These are inert fixture budgets, separate from the production host deadlines.
+const FIXTURE_START_TIMEOUT_MS = 30000;
+async function waitForFixtureExitObservation(env) {
+  const deadline = Date.now() + 10000;
+  while (env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE !== 'BLOCKED' && Date.now() < deadline) await delay(20);
+}
 const childSource = [
   'import fs from "node:fs";',
   'const config = JSON.parse(fs.readFileSync(process.env.COMPUTE_RUNTIME_HOST_CONFIG, "utf8"));',
@@ -124,7 +131,7 @@ test('protected packaged binding pins version, verifier, manifest and each revie
 
 test('one verified external host starts from a private file, binds ready IPC and stops through real child IPC', async t => {
   const f = await fixture(t);
-  const options = { ...f, startupTimeoutMs: 3000, stopTimeoutMs: 2000 };
+  const options = { ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 };
   const [first, second] = await Promise.all([startConfiguredLocalRuntimeHost(options), startConfiguredLocalRuntimeHost(options)]);
   assert.deepEqual(first, second);
   assert.equal(first.state, 'READY');
@@ -142,7 +149,7 @@ test('one verified external host starts from a private file, binds ready IPC and
 
 test('shutdown delays Electron quit until the owned host has acknowledged exit', async t => {
   const f = await fixture(t);
-  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: 3000, stopTimeoutMs: 2000 });
+  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
   const app = new EventEmitter();
   let prevented = false;
   let quit;
@@ -161,7 +168,7 @@ test('mismatched endpoint, instance, status path or private IPC fields stop the 
     { status_file: path.resolve(os.tmpdir(), 'other-owner-instance.json') }, { password: 'forbidden' },
     { automatic_cloud_fallback: true }, { hosted_supabase_required: true }]) {
     const f = await fixture(t, { descriptorPatch });
-    await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: 3000, stopTimeoutMs: 2000 }), /descriptor_invalid/);
+    await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 }), /descriptor_invalid/);
     assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 })).state, 'NO_OWNED_HOST');
   }
 });
@@ -169,7 +176,7 @@ test('mismatched endpoint, instance, status path or private IPC fields stop the 
 test('verification rejects changed bundles before any host spawn or private config read', async t => {
   const f = await fixture(t);
   let spawns = 0;
-  await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: 3000, stopTimeoutMs: 2000,
+  await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000,
     verifyBundleImpl: async () => { throw new Error('offline_runtime_bundle_digest_mismatch'); },
     spawnImpl: () => { spawns++; throw new Error('unreachable'); },
   }), /bundle_digest_mismatch/);
@@ -181,7 +188,7 @@ test('server failure and bounded readiness timeout do not expose private stderr 
   for (const mode of ['failure', 'timeout']) {
     const f = await fixture(t, { mode });
     await assert.rejects(startConfiguredLocalRuntimeHost({ ...f,
-      startupTimeoutMs: mode === 'timeout' ? 100 : 3000, stopTimeoutMs: 2000,
+      startupTimeoutMs: mode === 'timeout' ? 100 : FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000,
     }), error => /local_runtime_host_(start_failed|start_timeout)/.test(error.message)
       && !error.message.includes('PRIVATE_FIXTURE_DATABASE_SECRET'));
     assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 })).state, 'NO_OWNED_HOST');
@@ -190,7 +197,7 @@ test('server failure and bounded readiness timeout do not expose private stderr 
 
 test('a nonexistent executable fails promptly without retaining an owned PID or leaking its path', async t => {
   const f = await fixture(t);
-  await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: 3000, stopTimeoutMs: 100,
+  await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 100,
     verifyBundleImpl: async () => ({ paths: { nodeExecutable: path.join(path.dirname(f.evidenceFile), 'nonexistent-private-node.exe'),
       sourceRoot: f.config.runtime_host.bundle_directory, hostEntry: 'fixture.mjs' } }),
   }), error => error.message === 'local_runtime_host_spawn_failed');
@@ -199,7 +206,7 @@ test('a nonexistent executable fails promptly without retaining an owned PID or 
 
 test('bounded owner cleanup reports unconfirmed before parent disconnect finishes the inert child', async t => {
   const f = await fixture(t, { mode: 'ignore-stop' });
-  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: 3000, stopTimeoutMs: 100 });
+  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 100 });
   const result = await stopOwnedLocalRuntimeHost({ timeoutMs: 100 });
   assert.equal(result.state, 'CLEANUP_UNCONFIRMED');
   assert.equal(result.cleanup_confirmed, false);
@@ -209,10 +216,65 @@ test('bounded owner cleanup reports unconfirmed before parent disconnect finishe
 
 test('unexpected host death blocks local readiness without a cloud fallback or replacement writer', async t => {
   const f = await fixture(t, { mode: 'crash' });
-  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: 3000, stopTimeoutMs: 2000 });
-  await delay(250);
+  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
+  await waitForFixtureExitObservation(f.env);
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'OWNED_RUNTIME_HOST_EXITED');
+  assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
+  assert.equal(f.verifications(), 1);
+});
+
+test('a ready IPC followed by exit before the startup continuation cannot publish a dead owned host', async t => {
+  const f = await fixture(t);
+  const child = new EventEmitter();
+  child.pid = 12345;
+  child.connected = false;
+  child.stderr = new EventEmitter();
+  await assert.rejects(startConfiguredLocalRuntimeHost({ ...f,
+    startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 100,
+    spawnImpl: () => {
+      queueMicrotask(() => {
+        child.emit('message', { schema: 'compute.runtime-host-provider.v1', provider: 'LOCAL_POSTGRES',
+          endpoint: f.config.base_url, instance_id: instance, status_file: f.config.runtime_identity_file,
+          runtime_ready: true, automatic_cloud_fallback: false, hosted_supabase_required: false, authority_effect: false });
+        child.emit('exit', 2);
+      });
+      return child;
+    },
+  }), /local_runtime_host_exited_before_ready/);
+  assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 100 })).state, 'NO_OWNED_HOST');
+});
+
+test('host shutdown during bootstrap health cannot overwrite BLOCKED with stale READY', async t => {
+  const f = await fixture(t);
+  const previousArgv = process.argv;
+  let bootstrapPersistentLocalProvider;
+  try {
+    // Import the callable bootstrap without running this test process's real
+    // profile; diagnostic mode is already a production entrypoint boundary.
+    process.argv = [...previousArgv, '--metaengine-version-probe'];
+    ({ bootstrapPersistentLocalProvider } = await import('../src/local-state-provider-bootstrap.mjs'));
+  } finally { process.argv = previousArgv; }
+  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
+  const ownerFile = path.join(path.dirname(f.evidenceFile), 'owner.json');
+  await fs.writeFile(ownerFile, JSON.stringify(f.config));
+  const health = { ok: true, instance_id: instance, state_provider: 'LOCAL_POSTGRES', runtime_ready: true,
+    hosted_supabase_required: false, capability_health: { state: 'ATTESTED', authority_effect: false } };
+  await fs.writeFile(f.config.runtime_identity_file, JSON.stringify({ ...health,
+    schema: 'metaengine.client-state.runtime-status.v1', state: 'READY', endpoint: f.config.base_url,
+    automatic_cloud_fallback: false, authority_effect: false }));
+  let requests = 0;
+  await assert.rejects(bootstrapPersistentLocalProvider({ env: f.env, ownerFile,
+    fetchImpl: async () => ({ ok: true, json: async () => {
+      requests++;
+      const stopped = await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 });
+      assert.equal(stopped.cleanup_confirmed, true);
+      return health;
+    } }),
+  }), /local_state_provider_owned_host_not_ready/);
+  assert.equal(requests, 1);
+  assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
+  assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'local_state_provider_owned_host_not_ready');
   assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
   assert.equal(f.verifications(), 1);
 });

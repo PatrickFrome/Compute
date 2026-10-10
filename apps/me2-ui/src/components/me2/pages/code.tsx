@@ -12,6 +12,8 @@ import { Boxes, GitBranch, Lock, Network, RefreshCw, ShieldCheck, Terminal } fro
 import { me2Fetch } from "@/lib/me2-bus";
 import { Chip, PageHeader, Sec } from "@/components/me2/ui/primitives";
 import { useToast } from "@/hooks/use-toast";
+import { ManagedProjects } from "@/components/me2/managed-projects";
+import { ManagedProjectHistory } from "@/components/me2/managed-project-history";
 
 // ── типы (зеркало daemon, перенос из legacy 1:1) ────────────────────────────────
 type CGData = { ok: boolean; tier: string; generatedAt: string; scanMs: number; files: number; symbols: number; edges: number; externalImports: number; orphans: string[]; topFanIn: { path: string; inbound: number }[]; topFanOut: { path: string; outbound: number }[]; externalTop: { pkg: string; n: number }[]; truncated: boolean };
@@ -290,6 +292,8 @@ export function CodePage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-2">
         {/* кол.1: граф кода · exec/edit · review */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
+          <ManagedProjects />
+          <ManagedProjectHistory />
           <Sec id="code-codegraph" title="ГРАФ КОДА" icon={Network} tone="teal"
             right={<>
               {cg && <span className="font-mono text-[10px] text-zinc-500" title={`regex-tier v1 · детерминированный скан src/ + me2-daemon · сгенерирован ${new Date(cg.generatedAt).toLocaleTimeString("ru-RU", { hour12: false })}`}>{cg.symbols} эксп · {cg.edges} рёбер</span>}

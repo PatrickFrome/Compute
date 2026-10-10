@@ -10,6 +10,8 @@ const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
 const schema = 'compute.runtime-host-config.v1';
 const configKeys = ['schema', 'version', 'bundle_directory', 'expected_bundle_sha256', 'state_directory', 'pg_data_directory',
   'database_url', 'inspect_database_url', 'api_port', 'edge_port', 'startup_timeout_ms'];
+const postgresModes = new Set(['owned', 'attached']);
+const apiRoleModes = new Set(['service_role', 'direct']);
 const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
 const within = (root, target) => {
   const relative = path.relative(root, target);
@@ -25,15 +27,33 @@ function absoluteLocalPath(value) {
 }
 
 export function validateRuntimeHostConfig(value) {
-  if (!value || Array.isArray(value) || Object.keys(value).length !== configKeys.length || configKeys.some(key => !(key in value))
+  const hasPostgresMode = value && !Array.isArray(value) && Object.hasOwn(value, 'postgres_mode');
+  const hasApiRoleMode = value && !Array.isArray(value) && Object.hasOwn(value, 'api_role_mode');
+  const hasClusterPin = value && !Array.isArray(value) && Object.hasOwn(value, 'expected_cluster_system_identifier');
+  if (!value || Array.isArray(value) || Object.keys(value).length !== configKeys.length + (hasPostgresMode ? 1 : 0) + (hasApiRoleMode ? 1 : 0) + (hasClusterPin ? 1 : 0) || configKeys.some(key => !(key in value))
     || value.schema !== schema || value.version !== 1) throw failure('runtime_host_config_contract_invalid');
+  const postgresMode = hasPostgresMode ? value.postgres_mode : 'owned';
+  if (!postgresModes.has(postgresMode)) throw failure('runtime_host_postgres_mode_invalid');
+  if (hasApiRoleMode && !apiRoleModes.has(value.api_role_mode)) throw failure('runtime_host_api_role_mode_invalid');
+  if (postgresMode === 'attached' && value.api_role_mode !== 'direct') throw failure('runtime_host_attached_direct_api_required');
+  if ((postgresMode === 'attached' || hasClusterPin) && !/^[1-9][0-9]{0,19}$/.test(value.expected_cluster_system_identifier || '')) {
+    throw failure('runtime_host_cluster_identity_pin_required');
+  }
   if (!/^[a-f0-9]{64}$/.test(value.expected_bundle_sha256 || '')) throw failure('runtime_host_bundle_pin_required');
   const bundle = absoluteLocalPath(value.bundle_directory);
   const state = absoluteLocalPath(value.state_directory);
   const data = absoluteLocalPath(value.pg_data_directory);
+  const dataInsideState = within(state, data) && !within(data, state);
+  const stateDataOverlap = within(state, data) || within(data, state) || state === data;
+  const invalidOwnedBoundary = postgresMode === 'owned' && !dataInsideState;
+  const invalidAttachedBoundary = postgresMode === 'attached' && stateDataOverlap;
   if (within(bundle, state) || within(state, bundle) || within(repositoryRoot, state) || within(state, repositoryRoot)
-    || !within(state, data) || state === data) throw failure('runtime_host_private_state_boundary_invalid');
-  return Object.freeze({ ...value, bundle_directory: bundle, state_directory: state, pg_data_directory: data });
+    || invalidOwnedBoundary || invalidAttachedBoundary || within(bundle, data) || within(data, bundle)
+    || within(repositoryRoot, data) || within(data, repositoryRoot)) {
+    throw failure('runtime_host_private_state_boundary_invalid');
+  }
+  return Object.freeze({ ...value, ...(hasPostgresMode ? { postgres_mode: postgresMode } : {}),
+    bundle_directory: bundle, state_directory: state, pg_data_directory: data });
 }
 
 async function requireCanonicalPath(target, kind) {
@@ -60,12 +80,22 @@ async function requireCanonicalPath(target, kind) {
 // ensure private PGDATA/keys never overlap immutable package or source bytes.
 export function validateRuntimeHostPhysicalBoundaries({
   bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory,
+  postgresMode = 'owned',
 } = {}) {
   const values = [bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory];
   if (values.some(value => typeof value !== 'string' || !path.isAbsolute(value))) throw failure('runtime_host_path_invalid');
+  const mode = postgresMode;
+  if (!postgresModes.has(mode)) throw failure('runtime_host_postgres_mode_invalid');
+  const dataInsideState = within(stateDirectory, pgDataDirectory) && !within(pgDataDirectory, stateDirectory);
+  const stateDataOverlap = within(stateDirectory, pgDataDirectory) || within(pgDataDirectory, stateDirectory)
+    || stateDirectory === pgDataDirectory;
+  const invalidOwnedBoundary = mode === 'owned' && !dataInsideState;
+  const invalidAttachedBoundary = mode === 'attached' && stateDataOverlap;
   if (within(bundleDirectory, stateDirectory) || within(stateDirectory, bundleDirectory)
     || within(repositoryDirectory, stateDirectory) || within(stateDirectory, repositoryDirectory)
-    || !within(stateDirectory, pgDataDirectory) || stateDirectory === pgDataDirectory) {
+    || invalidOwnedBoundary || invalidAttachedBoundary || within(bundleDirectory, pgDataDirectory)
+    || within(pgDataDirectory, bundleDirectory) || within(repositoryDirectory, pgDataDirectory)
+    || within(pgDataDirectory, repositoryDirectory)) {
     throw failure('runtime_host_private_state_boundary_invalid');
   }
   if (within(bundleDirectory, privateConfigFile) || within(repositoryDirectory, privateConfigFile)) {
@@ -98,6 +128,7 @@ async function readConfig(configFile) {
   ].map(target => realpath(target)));
   validateRuntimeHostPhysicalBoundaries({
     bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory,
+    postgresMode: config.postgres_mode || 'owned',
   });
   return config;
 }
@@ -190,7 +221,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     || canonical(await realpath(hooks.executablePath || process.execPath)) !== canonical(verified.paths.nodeExecutable)) {
     throw failure('runtime_host_execution_resource_mismatch');
   }
-  const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode: 'owned',
+  const postgresMode = config.postgres_mode || 'owned';
+  const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode,
+    apiRoleMode: config.api_role_mode || 'service_role',
+    expectedClusterSystemIdentifier: config.expected_cluster_system_identifier,
     databaseUrl: config.database_url, inspectDatabaseUrl: config.inspect_database_url,
     apiPort: config.api_port, edgePort: config.edge_port, startupTimeoutMs: config.startup_timeout_ms,
     pgDataDir: config.pg_data_directory, pgBinDir: verified.paths.postgresBinDirectory,
@@ -240,7 +274,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     await persist({ ...baseStatus, state: 'READY', runtime_ready: true, checked_at: new Date().toISOString(),
       instance_id: descriptor.instance_id, endpoint: descriptor.endpoint, capability_health: runtime.edgeHealth.capability_health,
-      postgres_mode: 'owned', children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
+      postgres_mode: postgresMode, api_role_mode: launcherConfig.apiRoleMode, children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
     const finished = runtime.finished.then(finalize, () => finalize({ reason: 'runtime_host_child_failed', children_stopped: false }));
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished };

@@ -73,6 +73,25 @@ test('explicit owner action and source pins are required before any filesystem/s
   assert.deepEqual(f.events,[]); await assert.rejects(fs.stat(f.options.ownerFile),{code:'ENOENT'});
 });
 
+test('attached provider preserves running PostgreSQL and admits direct API before owner publication', async t => {
+  const f = await fixture(t);
+  const pgDataDirectory = path.join(f.root, 'keeper-data');
+  await fs.rename(f.options.pgDataDirectory, pgDataDirectory);
+  const config = { ...f.config, pg_data_directory: pgDataDirectory, postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100' };
+  await fs.writeFile(f.options.privateConfigFile, JSON.stringify(config));
+  const pidFile = path.join(pgDataDirectory, 'postmaster.pid');
+  const pidBytes = '1234\n' + pgDataDirectory + '\n1790000000\n35432\n';
+  await fs.writeFile(pidFile, pidBytes);
+  const hooks = { ...f.hooks, inspectApiAdmission: async input => {
+    assert.equal(input.roleMode, 'direct'); f.events.push('direct-role-grants');
+  } };
+  const result = await provisionRestoredClientProvider({ ...f.options, pgDataDirectory }, hooks);
+  assert.equal(result.postgres_mode, 'attached'); assert.equal(result.api_role_mode, 'direct');
+  assert.equal(await fs.readFile(pidFile, 'utf8'), pidBytes);
+  assert.equal(await fs.readFile(path.join(pgDataDirectory, 'client-vault.key'), 'utf8'), f.vault);
+  assert.deepEqual(f.events, ['verify', 'start', 'direct-role-grants', 'health', 'stop', 'verify']);
+});
+
 test('missing existing vault key or postmaster state cannot initialize, repair or start the database',async t=>{
   const f = await fixture(t); await fs.unlink(f.vaultFile);
   await assert.rejects(provisionRestoredClientProvider(f.options,f.hooks),/private_path_unavailable/);

@@ -7,9 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, runtimeEnvironment } from './launcher.mjs';
+import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, runtimeEnvironment } from './launcher.mjs';
 import { captureStartupSource, safeRuntimePolicy, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
-import { BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
+import { ATTACHED_ONBOARDING_ENTRY, BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, 'launcher-fixture.mjs');
@@ -78,6 +78,15 @@ test('requires local mode, explicit PostgreSQL ownership, loopback URL and disti
     { apiPort: 15434 }, { edgePort: 15432 }, { apiKey: 'insecure' },
     { denoDir: 'relative-cache' }, { expectedStartupSourceSha256: 'bad' },
   ]) assert.throws(() => normalizeLauncherConfig({ ...good, ...mutation }));
+});
+
+test('attached cluster identity pin rejects replacement PG17 at the same path', async t => {
+  const { input, identity } = await setup(t);
+  const config = normalizeLauncherConfig({ ...input, expectedClusterSystemIdentifier: '7654321098765432100' });
+  await assert.rejects(assertPostgresIdentity({ ...identity, system_identifier: '7654321098765432199' }, config), /cluster_identity_mismatch/);
+  await assert.rejects(assertPostgresIdentity(identity, config), /cluster_identity_mismatch/);
+  const inspected = await assertPostgresIdentity({ ...identity, system_identifier: config.expectedClusterSystemIdentifier }, config);
+  assert.equal(inspected.system_identifier, config.expectedClusterSystemIdentifier);
 });
 
 test('owned server environment removes loader injection and unrelated access tokens', () => {
@@ -166,14 +175,14 @@ test('a startup source pin mismatch refuses every child before launch', async t 
   assert(alive(process.pid));
 });
 
-test('packaged host launch pins the complete current first-run source closure before children', async t => {
+test('packaged host launch pins the complete current onboarding and computer-control source closure before children', async t => {
   const { input, hooks, events } = await setup(t);
   const sourceRoot = await realpath(path.resolve(here, '../..'));
   const stage = await realpath(await mkdtemp(path.join(os.tmpdir(), 'compute-launcher-source-pin-')));
   t.after(() => rm(stage, { recursive: true, force: true }));
   // Use the packaging entry contract and actual source bytes, rather than a
   // miniature host stub that cannot expose a missing first-run dependency.
-  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY];
+  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY];
   const packagedClosure = await sourceClosure(entries.map(name => path.join(sourceRoot, name)), sourceRoot);
   for (const source of packagedClosure.files) {
     const destination = path.join(stage, path.relative(sourceRoot, source));
@@ -205,6 +214,11 @@ test('packaged host launch pins the complete current first-run source closure be
   });
   const firstRunClosure = await sourceClosure([path.join(stage, FIRST_RUN_INITDB_ENTRY)], stage);
   for (const source of firstRunClosure.files) {
+    const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
+    assert.ok(expected.files.some(file => file.id === id), id);
+  }
+  const computerClosure = await sourceClosure([path.join(stage, REMOTE_SUPPORT_ENTRY)], stage);
+  for (const source of computerClosure.files) {
     const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
     assert.ok(expected.files.some(file => file.id === id), id);
   }

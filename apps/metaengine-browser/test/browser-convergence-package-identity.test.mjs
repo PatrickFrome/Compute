@@ -5,19 +5,19 @@ import pkg from '../package.json' with { type: 'json' };
 import { parseMetaengineDevVersion } from '../src/trusted-dev-release-resolver.mjs';
 
 const candidateDoc = await readFile(new URL('../CONVERGENCE_CANDIDATE.md', import.meta.url), 'utf8');
-const reserved = candidateDoc.match(/Reserved package identity is \`([^\`]+)\`\./)?.[1] ?? null;
+const candidate = candidateDoc.match(/^Candidate package identity is \`([^\`]+)\`; the physical build reservation remains pending for this head\./m)?.[1] ?? null;
 const priorInstalledVersion = candidateDoc.match(/Previous installed package identity is \`([^\`]+)\`\./)?.[1] ?? null;
 const priorQualifiedVersion = candidateDoc.match(/Previous qualified package identity is \`([^\`]+)\`/)?.[1] ?? null;
 const priorEphemeralVersions = [...candidateDoc.matchAll(/(?:physically built \(but did not publish\/upload\)|reached physical NSIS build with) \`([^\`]+)\`/g)].map((match) => match[1]);
 
-test('convergence candidate package identity matches the reserved exact source candidate', () => {
-  assert.ok(reserved, 'reserved package identity must be declared in CONVERGENCE_CANDIDATE.md');
-  assert.equal(pkg.version, reserved);
+test('convergence candidate package identity matches the current source candidate', () => {
+  assert.ok(candidate, 'current package identity must be declared in CONVERGENCE_CANDIDATE.md');
+  assert.equal(pkg.version, candidate);
 
   const parsed = parseMetaengineDevVersion(pkg.version);
-  assert.ok(parsed, "reserved package identity must be accepted by the trusted updater");
+  assert.ok(parsed, "candidate package identity must be accepted by the trusted updater");
   assert.deepEqual(parsed, {
-    version: reserved,
+    version: candidate,
     core: '0.7.0',
     build: parsed.build,
   });

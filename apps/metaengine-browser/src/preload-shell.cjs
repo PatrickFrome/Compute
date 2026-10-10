@@ -256,6 +256,40 @@ const clientGoalStatus = (requestId) => ipcRenderer.invoke(
 );
 const clientConnectionStatus = () => ipcRenderer.invoke('metaengine:client:connection-status');
 const clientWorkReadiness = () => ipcRenderer.invoke('metaengine:client:work-readiness');
+const clientProjectStatus = () => ipcRenderer.invoke('metaengine:client:project-status');
+function clientProjectRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)
+    || Object.keys(request).length !== 1 || !Object.hasOwn(request, 'workspace_id')
+    || typeof request.workspace_id !== 'string' || !request.workspace_id
+    || request.workspace_id.length > 192 || /[\u0000-\u001f]/.test(request.workspace_id)) {
+    throw new Error('managed_project_client_request_invalid');
+  }
+  return { workspace_id: request.workspace_id };
+}
+const createClientProject = (request) => ipcRenderer.invoke('metaengine:client:project-create', clientProjectRequest(request));
+const openClientProject = (request) => ipcRenderer.invoke('metaengine:client:project-open', clientProjectRequest(request));
+function clientProjectReadRequest(request, kind) {
+  const historyFields = ['project_id', 'after_seq', 'through_seq', 'limit', 'task_id', 'attempt', 'event_type'];
+  const fields = kind === 'history' ? historyFields : ['project_id', 'task_id', 'task_after_seq', 'limit'];
+  if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).some(key => !fields.includes(key))) {
+    throw new Error('client_project_read_request_invalid');
+  }
+  const id = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  if (!count(request.limit ?? 128) || (request.limit ?? 128) < 1 || (request.limit ?? 128) > 128) throw new Error('client_project_read_request_invalid');
+  if (kind === 'history') {
+    if (!id(request.project_id) || !count(request.after_seq ?? 0)
+      || (request.through_seq != null && (!count(request.through_seq) || request.through_seq < (request.after_seq ?? 0)))
+      || (request.task_id != null && !id(request.task_id)) || (request.attempt != null && !count(request.attempt))
+      || (request.event_type != null && (typeof request.event_type !== 'string' || !/^[A-Z][A-Z0-9_]{0,95}$/.test(request.event_type)))) throw new Error('client_project_read_request_invalid');
+  } else if (Boolean(request.project_id) === Boolean(request.task_id) || !id(request.project_id || request.task_id) || !count(request.task_after_seq ?? 0)) {
+    throw new Error('client_project_read_request_invalid');
+  }
+  return Object.fromEntries(Object.entries(request).map(([key, value]) => [key, value]));
+}
+const clientProjectOverview = () => ipcRenderer.invoke('metaengine:client:project-overview');
+const clientProjectSnapshot = request => ipcRenderer.invoke('metaengine:client:project-snapshot', clientProjectReadRequest(request, 'snapshot'));
+const clientProjectHistory = request => ipcRenderer.invoke('metaengine:client:project-history', clientProjectReadRequest(request, 'history'));
 const resumeClientAdmission = () => ipcRenderer.invoke('metaengine:client:resume-admission');
 const clientGuardianStatus = () => ipcRenderer.invoke('metaengine:client:guardian-status');
 const activateClientGuardian = () => ipcRenderer.invoke('metaengine:client:activate-guardian');
@@ -290,6 +324,12 @@ if (isPrimaryMe2PresentationDocument()) {
     goalStatus: clientGoalStatus,
     connectionStatus: clientConnectionStatus,
     workReadiness: clientWorkReadiness,
+    projectStatus: clientProjectStatus,
+    createProject: createClientProject,
+    openProject: openClientProject,
+    projectOverview: clientProjectOverview,
+    projectSnapshot: clientProjectSnapshot,
+    projectHistory: clientProjectHistory,
     resumeAdmission: resumeClientAdmission,
     guardianStatus: clientGuardianStatus,
     activateGuardian: activateClientGuardian,
@@ -298,6 +338,8 @@ if (isPrimaryMe2PresentationDocument()) {
     disconnectGithubChat: disconnectClientGithubChat,
     typed_positive_api: true,
     generic_command_exposed: false,
+    project_operations_accept_caller_claim: false,
+    project_operations_accept_caller_path: false,
     scheduler_authority: false,
     browser_actuation_authority: false,
     admission_resume_requires_explicit_user_action: true,

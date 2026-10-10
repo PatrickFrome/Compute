@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { prepareDurableRestoredPg17 } from '../src/local-restored-pg17-auto-prepare.mjs';
+import { inspectRestoredRuntimePreparationMode, prepareDurableRestoredPg17, prepareInstalledAttachedPg17 } from '../src/local-restored-pg17-auto-prepare.mjs';
 
 const OLD='a'.repeat(64),NEW='b'.repeat(64);
 const identifier='7512345678901234567';
@@ -55,6 +55,66 @@ async function fixture(t){
     }};
   return {home,source,temp,original,oldConfigFile,previous,bundle,localAppData,calls,aclCalls,args};
 }
+
+async function attachedFixture(t) {
+  const f=await fixture(t);
+  const state=path.join(f.localAppData,'METAENGINE','attached-client');
+  await fs.mkdir(state,{recursive:true});
+  const configFile=path.join(state,'onboarded-runtime.json');
+  const config={...f.previous,state_directory:state,postgres_mode:'attached',api_role_mode:'direct',
+    expected_cluster_system_identifier:identifier,database_url:'postgres://api_login:independent-api-password@127.0.0.1:15432/metaengine',
+    inspect_database_url:'postgres://inspector:separate-admin-password@127.0.0.1:15432/metaengine'};
+  await fs.writeFile(configFile,JSON.stringify(config));
+  const pidFile=path.join(f.original,'postmaster.pid');
+  await fs.writeFile(pidFile,'keeper-process-lifecycle-marker');
+  return {...f,state,configFile,config,pidFile,args:{...f.args,oldConfigFile:configFile}};
+}
+
+test('attached preparation preserves running Keeper and only writes a new protected client config',async t=>{
+  const f=await attachedFixture(t);
+  const prior=await fs.readFile(f.configFile);
+  const vault=await fs.readFile(path.join(f.original,'client-vault.key'));
+  const pid=await fs.readFile(f.pidFile);
+  const selected=await inspectRestoredRuntimePreparationMode(f.configFile,{verifyStorage:f.args.verifyStorage});
+  assert.deepEqual(selected,{postgresMode:'attached'});
+  const result=await prepareInstalledAttachedPg17(f.args);
+  assert.equal(result.copyVerified,false);
+  assert.equal(result.clusterPinPreserved,true);
+  assert.equal(result.postgresLifecycleOwned,false);
+  assert.notEqual(result.configFile,f.configFile);
+  assert.deepEqual(await fs.readFile(f.configFile),prior);
+  assert.deepEqual(await fs.readFile(f.pidFile),pid);
+  assert.deepEqual(await fs.readFile(path.join(f.original,'client-vault.key')),vault);
+  assert.equal(f.calls.length,0,'attached preparation must never execute PG tools');
+  const updated=JSON.parse(await fs.readFile(result.configFile));
+  assert.equal(updated.expected_cluster_system_identifier,identifier);
+  assert.equal(updated.pg_data_directory,f.original);
+  assert.equal(updated.bundle_directory,await fs.realpath(f.bundle));
+  assert.equal(updated.expected_bundle_sha256,NEW);
+  assert.ok(f.aclCalls.some(row=>row.target===f.state&&row.operation==='PROTECT_DIRECTORY'));
+  assert.ok(f.aclCalls.some(row=>row.target===result.configFile&&row.operation==='VERIFY_FILE'));
+  assert.ok(f.aclCalls.every(row=>!row.target.startsWith(f.original)),'Keeper DACL must never be changed');
+});
+
+test('attached mode, role, pin, boundaries and private ACL failures deny publication',async t=>{
+  for(const patch of [{api_role_mode:'service_role'},{expected_cluster_system_identifier:undefined},
+    {expected_cluster_system_identifier:identifier+'x'},{postgres_mode:'owned'},
+    {state_directory:'same-data'},{database_url:'postgres://inspector:same@127.0.0.1:15432/metaengine'}]) {
+    const f=await attachedFixture(t);
+    const config={...f.config,...patch};
+    if(config.state_directory==='same-data')config.state_directory=f.original;
+    await fs.writeFile(f.configFile,JSON.stringify(config));
+    await assert.rejects(prepareInstalledAttachedPg17(f.args),/pg17_auto_prepare_/);
+    assert.deepEqual(await fs.readdir(f.state),['onboarded-runtime.json']);
+    assert.equal(f.calls.length,0);
+  }
+  const f=await attachedFixture(t);
+  await fs.writeFile(path.join(f.state,'runtime-host-lock.json'),'existing-live-client');
+  await assert.rejects(prepareInstalledAttachedPg17(f.args),/existing_destination_requires_review/);
+  await fs.rm(path.join(f.state,'runtime-host-lock.json'));
+  await assert.rejects(prepareInstalledAttachedPg17({...f.args,verifyStorage:async()=>({owner_dacl_verified:false})}),/private_file_acl_unverified/);
+  assert.deepEqual(await fs.readdir(f.state),['onboarded-runtime.json']);
+});
 
 test('auto prepare copies clean stopped PG17, preserves all files and empty dirs, and rebinds NEW private config',async t=>{
   const f=await fixture(t);

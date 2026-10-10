@@ -133,7 +133,7 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase, fleet_snapshot
   return readiness;
 }
 
-export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null, team_memory = null, access_capsule = null } = {}) {
+export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null, team_memory = null, access_capsule = null, project_continuity_enabled = false } = {}) {
   const taskSpec = jsonObject(lease.task_spec, 'task_spec');
   const objective = clip(taskSpec.objective ?? taskSpec.goal, 12000).trim();
   if (!objective) throw new Error('devos_task_objective_missing');
@@ -158,7 +158,9 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   // ride the task prompt — both clipped hard so the task body stays dominant.
   const toolProtocolBlock = clip(String(tool_protocol || ''), 1200).trim();
   if (toolProtocolBlock) lines.push('', toolProtocolBlock);
-  if (taskSpec.meta_orchestrator && typeof taskSpec.meta_orchestrator === 'object' && !Array.isArray(taskSpec.meta_orchestrator)) {
+  if ((taskSpec.meta_orchestrator && typeof taskSpec.meta_orchestrator === 'object' && !Array.isArray(taskSpec.meta_orchestrator))
+      || (taskSpec.project_continuity && typeof taskSpec.project_continuity === 'object' && !Array.isArray(taskSpec.project_continuity))
+      || project_continuity_enabled === true) {
     const resultProtocolBlock = renderAgentResultProtocol({
       task_id: lease.task_id,
       lease_generation: lease.lease_generation,
@@ -169,8 +171,8 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   }
   const toolResultsBlock = clip(renderAgentToolResults(tool_results), 2400).trim();
   if (toolResultsBlock) lines.push('', toolResultsBlock);
-  // Closed-loop audit fix (memory): bounded block of the team's recent VERIFIED
-  // experience (episodic memory retrieval, token-budgeted by the memory
+  // Bounded block of the team's advisory historical experience
+  // (episodic memory retrieval, token-budgeted by the memory
   // itself). Clipped hard so the task body stays dominant; absent when the
   // fleet has no relevant history yet (fresh installs).
   const teamMemoryBlock = clip(String(team_memory || ''), 1400).trim();
@@ -359,6 +361,10 @@ export class DevOsNativeTaskCycle {
   // of the most recent cycle (fleet-scaled) — surfaced numerically in the
   // cycle snapshot so operators and tests can audit the scaling.
   #lastObservationBudget = RUNNING_OBSERVATION_BUDGET_FLOOR;
+  #projectRuntime = null;
+  #projectCoordination = { state: 'NOT_BOUND', reason: null, coordination_sweep_available: false, authority_effect: false };
+  #projectDeliveredTools = new Map();
+  #projectTranscriptFloor = new Map();
 
   constructor(rawOptions = {}) {
     const { getState, executeCommand, signedRequest, effectJournal = null, identity = null, recordArtifact = null, advanceTaskOutcome = null, retrieveMemory = null } = rawOptions;
@@ -418,6 +424,39 @@ export class DevOsNativeTaskCycle {
     this.#retrieveMemory = fn;
   }
 
+  bindProjectRuntime(runtime) {
+    if (runtime != null && !['prepareLease', 'contextForLease', 'continueConversation', 'waitForChildren'].every(key => typeof runtime[key] === 'function')) throw new Error('devos_project_runtime_invalid');
+    this.#projectRuntime = runtime;
+    this.#projectCoordination = { state: runtime ? 'NOT_PROBED' : 'NOT_BOUND', reason: null, coordination_sweep_available: false, authority_effect: false };
+    this.#toolbelt.bindProjectRuntime(runtime);
+  }
+
+  #projectRuntimeForLease(lease) {
+    if (this.#projectCoordination.state !== 'UNAVAILABLE') return this.#projectRuntime;
+    // A legacy task can continue without the optional project addon. A task
+    // already bound to a project must not lose its child/completion fences.
+    if (lease?.task_spec?.project_continuity || this.#projectRuntime?.contextForLease(lease)) {
+      throw new Error(`devos_project_coordination_unavailable:${this.#projectCoordination.reason}`);
+    }
+    return null;
+  }
+
+  async #sweepProjects() {
+    if (typeof this.#projectRuntime?.tick !== 'function') return;
+    try {
+      await this.#projectRuntime.tick();
+      this.#projectCoordination = { state: 'AVAILABLE', reason: null, coordination_sweep_available: true, authority_effect: false };
+      this.#toolbelt.bindProjectRuntime(this.#projectRuntime);
+    } catch (error) {
+      // Only an explicit, rejected missing-route response fences this addon.
+      // Unknown outcomes and DB/effect failures retain their normal error path.
+      if (error?.message !== 'PROJECT_CONTINUITY_HTTP_404' || error.effect_outcome !== 'REJECTED') throw error;
+      this.#projectCoordination = { state: 'UNAVAILABLE', reason: 'PROJECT_CONTINUITY_ROUTE_UNAVAILABLE',
+        coordination_sweep_available: false, automatic_retry_allowed: false, authority_effect: false };
+      this.#toolbelt.bindProjectRuntime(null);
+    }
+  }
+
   async #ensureJournal() {
     if (!this.#effectJournal) return null;
     if (this.#journalInitialized) return this.#effectJournal;
@@ -435,7 +474,7 @@ export class DevOsNativeTaskCycle {
     if (this.#effectJournal && this.#journalInitialized && typeof this.#effectJournal.snapshot === 'function') {
       journal = this.#effectJournal.snapshot();
     }
-    return structuredClone({ ...this.#last, effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot(), dispatch_effect: { last: this.#lastDispatchEffect, counters: { ...this.#dispatchEffectCounters } } });
+    return structuredClone({ ...this.#last, project_continuity: this.#projectCoordination, effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot(), dispatch_effect: { last: this.#lastDispatchEffect, counters: { ...this.#dispatchEffectCounters } } });
   }
 
   async cycle() {
@@ -443,6 +482,9 @@ export class DevOsNativeTaskCycle {
     const state = await this.#getState();
     const fleetSnapshot = state?.fleet;
     if (!fleetSnapshot?.agents) return this.#record({ state: 'NO_FLEET' });
+    // RESULT_READY tasks leave plan.running. Independent verifier admission
+    // must still advance on the same Supervisor heartbeat when no worker runs.
+    await this.#sweepProjects();
 
     // Recovery is one bounded superstep of the same Browser heartbeat. It never clicks,
     // types, creates a lease, or starts another timer. At most one durable tail is inspected.
@@ -842,10 +884,12 @@ export class DevOsNativeTaskCycle {
     try {
       let harvest = this.#toolHarvest.get(key) || null;
       if (!harvest) {
-        const head = await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: 0, max_chars: 20000 } });
+        const floor = this.#projectTranscriptFloor.get(key) || 0;
+        const head = await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: floor, max_chars: 20000 } });
         const total = Number(head?.total_chars || 0);
-        const tailOffset = Math.max(0, total - 20000);
-        const tail = tailOffset > 0 && head?.census_truncated !== true
+        if (total < floor) return { pending: 0, results: [], result_claim: { state: 'TRANSCRIPT_CONTINUATION_BOUNDARY_LOST', claim: null, invalid: [] } };
+        const tailOffset = Math.max(floor, total - 20000);
+        const tail = tailOffset > floor && head?.census_truncated !== true
           ? await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: tailOffset, max_chars: 20000 } })
           : head;
         // A capped census cannot establish that this is the latest answer.
@@ -982,6 +1026,8 @@ export class DevOsNativeTaskCycle {
 
   async #dispatchLease(rawLease, fleetSnapshot) {
     const lease = assertLiveLeaseBinding(rawLease, fleetSnapshot);
+    const projectRuntime = this.#projectRuntimeForLease(lease);
+    if (projectRuntime) await projectRuntime.prepareLease(lease);
     const agent = (fleetSnapshot?.agents || []).find((row) => String(row?.agent_id || '').toLowerCase() === lease.agent_id) || null;
     // R98: one read-only capture opens task dispatch. Session creation was
     // already completed by the promotion-lease path; the scheduler has no
@@ -989,7 +1035,7 @@ export class DevOsNativeTaskCycle {
     const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
     this.#assertCanonicalAgentConversation(lease, agent, pre);
     const telemetryDigest = await this.#telemetryDigest(lease);
-    const contextBriefing = await this.#contextBriefingFor(lease, fleetSnapshot);
+    const contextBriefing = [await this.#contextBriefingFor(lease, fleetSnapshot), projectRuntime?.contextForLease(lease) || ''].filter(Boolean).join('\n');
     // Agent Toolbelt: the protocol rides every dispatch (isolated sessions
     // must relearn the grammar per task); the agent's previous confirmed tool
     // outcomes ride the next task message. Both are deterministic within a
@@ -998,7 +1044,8 @@ export class DevOsNativeTaskCycle {
     const toolProtocol = renderAgentToolProtocol({ tab_id: lease.tab_id });
     const toolResults = this.#toolbelt.resultsForAgent(lease.agent_id);
     const teamMemory = await this.#memoryBlockFor(lease);
-    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol, team_memory: teamMemory, access_capsule: this.#accessCapsuleBlock });
+    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol, team_memory: teamMemory, access_capsule: this.#accessCapsuleBlock,
+      project_continuity_enabled: Boolean(projectRuntime?.contextForLease(lease)) });
     const promptHash = sha256(prompt);
     const effectBinding = journalBinding(lease, promptHash);
     const journal = await this.#ensureJournal();
@@ -1190,6 +1237,7 @@ export class DevOsNativeTaskCycle {
 
   async #observeRunning(raw, fleetSnapshot) {
     const lease = assertLiveLeaseBinding({ ...raw, automatic_retry_allowed: false }, fleetSnapshot);
+    const projectRuntime = this.#projectRuntimeForLease(lease);
     const expectedUrlHash = String(raw.conversation_url_sha256 || '').toLowerCase();
     if (!HASH_RE.test(expectedUrlHash)) return { state: 'WAITING_FOR_TRANSPORT_PROOF', authority_effect: false };
     const frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
@@ -1209,12 +1257,65 @@ export class DevOsNativeTaskCycle {
     // command plane, and keep the task RUNNING while tool commands are in
     // flight. Results land in the completion summary (durable task record)
     // and in the agent's next task message.
+    if (typeof projectRuntime?.refreshContext === 'function') await projectRuntime.refreshContext(lease);
+    const projectLeaseKey = `${lease.task_id}:${lease.lease_generation}`;
+    if (typeof projectRuntime?.latestTurnForLease === 'function') {
+      const turn = await projectRuntime.latestTurnForLease(lease);
+      if (turn?.state === 'AMBIGUOUS') return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
+      if (turn?.state === 'CONFIRMED') {
+        if (!Number.isSafeInteger(turn.transcript_floor) || turn.transcript_floor < 0) return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_BOUNDARY_INVALID');
+        if (this.#projectTranscriptFloor.get(projectLeaseKey) !== turn.transcript_floor) this.#toolHarvest.delete(projectLeaseKey);
+        this.#projectTranscriptFloor.set(projectLeaseKey, turn.transcript_floor);
+      }
+    }
     const toolState = await this.#serveAgentTools(lease);
     if (toolState.pending > 0) {
       return { state: 'TOOL_EXECUTION_PENDING', task_id: lease.task_id, pending_tool_commands: toolState.pending, authority_effect: false };
     }
 
-    const metaTask = lease?.task_spec?.meta_orchestrator && typeof lease.task_spec.meta_orchestrator === 'object' && !Array.isArray(lease.task_spec.meta_orchestrator);
+    if (projectRuntime) {
+      const childState = await projectRuntime.waitForChildren(lease);
+      const delivered = this.#projectDeliveredTools.get(`${lease.task_id}:${lease.lease_generation}`) || new Set();
+      const projectResults = this.#toolbelt.resultsForLease(lease, { limit: 32 }).filter(row => !delivered.has(row.request_id));
+      const continuationResults = childState?.children?.length || childState?.queued_proposals
+        ? [...projectResults, { request_id: 'project:children:status', status: 'COMPLETED', summary: JSON.stringify(childState) }]
+        : projectResults;
+      if (continuationResults.length) {
+        const continuation = await projectRuntime.continueConversation(lease, continuationResults, async text => {
+          const latest = await this.#getState(); assertLiveLeaseBinding(lease, latest?.fleet);
+          const agent = latest.fleet.agents.find(row => row.agent_id === lease.agent_id);
+          const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
+          this.#assertCanonicalAgentConversation(lease, agent, pre);
+          return submitFencedChatGptPrompt({ executeCommand: this.#executeCommand, tab_id: lease.tab_id, frame: pre, text,
+            validateTypedFrame: async typed => { const current = await this.#getState(); assertLiveLeaseBinding(lease, current.fleet); this.#assertCanonicalAgentConversation(lease, agent, typed); },
+          });
+        }, { observeTranscriptFloor: async () => {
+          const boundary = await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: 0, max_chars: 1 } });
+          if (boundary?.census_truncated === true || !Number.isSafeInteger(boundary?.total_chars)
+              || boundary.total_chars < (this.#projectTranscriptFloor.get(projectLeaseKey) || 0)) throw new Error('devos_project_continuation_boundary_invalid');
+          return boundary.total_chars;
+        } });
+        if (continuation?.state === 'DELIVERED') {
+          if (Number.isSafeInteger(continuation.transcript_floor)) this.#projectTranscriptFloor.set(projectLeaseKey, continuation.transcript_floor);
+          for (const result of projectResults) delivered.add(result.request_id);
+          this.#projectDeliveredTools.set(`${lease.task_id}:${lease.lease_generation}`, delivered);
+          while (this.#projectDeliveredTools.size > 128) this.#projectDeliveredTools.delete(this.#projectDeliveredTools.keys().next().value);
+          this.#toolHarvest.delete(`${lease.task_id}:${lease.lease_generation}`);
+          return { state: 'PROJECT_CONTINUING', task_id: lease.task_id, authority_effect: false };
+        }
+        if (continuation?.state === 'ALREADY_DELIVERED') {
+          for (const result of projectResults) delivered.add(result.request_id);
+          this.#projectDeliveredTools.set(`${lease.task_id}:${lease.lease_generation}`, delivered);
+        }
+        if (continuation?.state === 'AMBIGUOUS') return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
+      }
+      if (childState?.waiting) return { state: 'WAIT_CHILDREN', task_id: lease.task_id, authority_effect: false };
+      if (childState?.failed) return this.#postCompletionWithReadback(lease, 'BLOCKED', { child_results_failed: true, page_data_authority: false }, 'CHILD_RESULT_FAILED');
+    }
+
+    const metaTask = (lease?.task_spec?.meta_orchestrator && typeof lease.task_spec.meta_orchestrator === 'object' && !Array.isArray(lease.task_spec.meta_orchestrator))
+      || (lease?.task_spec?.project_continuity && typeof lease.task_spec.project_continuity === 'object' && !Array.isArray(lease.task_spec.project_continuity))
+      || Boolean(projectRuntime?.contextForLease(lease));
     let completionState = 'RESULT_READY';
     let resultClaimSummary = {};
     if (metaTask) {
@@ -1267,15 +1368,24 @@ export class DevOsNativeTaskCycle {
   }
 
   async #postCompletionWithReadback(lease, state, summary, error = null) {
+    // Project history is advisory until the independently fenced completion
+    // write. Preserve the claim/observation, never mark it verified ourselves.
+    const projectRuntime = this.#projectRuntimeForLease(lease);
+    if (projectRuntime) {
+      await projectRuntime.recordActivity(lease, {
+        request_id: `result:${lease.lease_generation}:${state.toLowerCase()}:${sha256(JSON.stringify(summary)).slice(0, 20)}`,
+        event_type: 'TASK_RESULT_OBSERVED', content: { state, summary, verified: false },
+      }).catch(() => {});
+    }
     // Tier 2 break repair #4 (results→artifacts): EVERY terminal task outcome
     // records one immutable artifact reference in the collaboration fabric
     // (digest-only, refs to the durable task record + proven conversation).
     // Recorded before the completion write so an artifact exists even when the
     // write goes ambiguous; never throws.
     this.#recordTaskOutcomeArtifact(lease, state, summary);
-    // Closed-loop audit fix (memory): the SAME terminal outcome advances the
-    // collaboration task so an episodic-memory episode materializes (the
-    // learning write path). Never throws, idempotent per lease generation.
+    // Preserve the observation before the ambiguous write boundary. The plane
+    // keeps result proposals pending: this callback has no independent
+    // acceptance receipt and must never promote verified success memory.
     this.#advanceTaskOutcomeFor(lease, state, summary);
     try {
       const response = await this.#signedRequest('/v1/devos/complete', {
@@ -1344,11 +1454,9 @@ export class DevOsNativeTaskCycle {
     }
   }
 
-  // Closed-loop audit fix (memory): the learning write path. One bounded,
-  // never-throwing advance per terminal outcome — the realtime process plane
-  // maps the DevOS state onto the collaboration task lifecycle so terminal
-  // episodes materialize in episodic memory. Degradations surface in the
-  // cycle snapshot only (same contract as the artifact recorder).
+  // One bounded observation advance per result. The plane keeps success claims
+  // pending until an independent acceptance evidence path exists. Degradations
+  // surface in the cycle snapshot only (same contract as the artifact recorder).
   #advanceTaskOutcomeFor(lease, state, summary) {
     try {
       if (typeof this.#advanceTaskOutcome !== 'function') return;
@@ -1374,7 +1482,7 @@ export class DevOsNativeTaskCycle {
   // Closed-loop audit fix (memory): the learning read path. One bounded
   // retrieval per (task, lease_generation) — cached so the prompt and its
   // effect-journal hash stay deterministic within a lease (identical contract
-  // to the telemetry digest). Renders the team's recent VERIFIED episodes
+  // to the telemetry digest). Renders the team's advisory historical episodes
   // (objective + outcome + next actions) as a compact block; returns null
   // when there is no retriever or no relevant history.
   async #memoryBlockFor(lease) {
@@ -1386,16 +1494,20 @@ export class DevOsNativeTaskCycle {
         const objective = clip(lease?.task_spec?.objective ?? lease?.task_spec?.goal, 400);
         const query = [objective, `role:${String(lease.role || '').toUpperCase()}`].filter(Boolean).join(' ');
         const retrieval = await this.#retrieveMemory({ query, max_results: 5, token_budget: 900 });
-        const results = Array.isArray(retrieval?.results) ? retrieval.results.slice(0, 5) : [];
+        // Also enforce the boundary for injected retrievers and previously
+        // persisted DevOS episodes: their context never carried independent
+        // acceptance proof, regardless of the stored COMPLETED label.
+        const results = Array.isArray(retrieval?.results) ? retrieval.results
+          .filter(item => item?.episode?.context_id !== 'devos-fleet-task-results').slice(0, 5) : [];
         if (results.length > 0) {
-          const lines = ['TEAM MEMORY — recent verified episodes from this fleet (advisory context; verify before reuse):'];
+          const lines = ['TEAM MEMORY — advisory historical episodes (independent verification required before reuse):'];
           for (const item of results) {
             const episode = item?.episode || {};
             const objectiveText = clip(episode.objective, 160);
             if (!objectiveText) continue;
             const facts = Array.isArray(episode.verified_facts) ? episode.verified_facts.slice(0, 2).map((v) => clip(v, 100)) : [];
             const actions = Array.isArray(episode.next_actions) ? episode.next_actions.slice(0, 2).map((v) => clip(v, 100)) : [];
-            lines.push(`- [${String(episode.outcome || 'COMPLETED')}] ${objectiveText}${facts.length ? ` | facts: ${facts.join('; ')}` : ''}${actions.length ? ` | next: ${actions.join('; ')}` : ''}`);
+            lines.push(`- [${String(episode.outcome || 'UNKNOWN')}] ${objectiveText}${facts.length ? ` | reported facts: ${facts.join('; ')}` : ''}${actions.length ? ` | next: ${actions.join('; ')}` : ''}`);
           }
           if (lines.length > 1) block = lines.join('\n').slice(0, 1400);
         }

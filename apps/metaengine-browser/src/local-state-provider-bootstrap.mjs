@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { canonicalLocalStateSupervisorBase, LOCAL_STATE_INSTANCE_UUID, localStateProviderHealthAttested, localStateProviderOwnerFile, validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity } from './local-state-provider-policy.mjs';
-import { startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost } from './local-runtime-host-controller.mjs';
+import { ownedLocalRuntimeHostReady, startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost } from './local-runtime-host-controller.mjs';
 
 const CONFIG_MAX_BYTES = 16384;
 const RUNTIME_MAX_BYTES = 65536;
@@ -62,6 +62,7 @@ export async function bootstrapPersistentLocalProvider({
     if (typeof fetchImpl !== 'function') throw new Error('local_state_provider_health_unavailable');
     const response = await fetchImpl(`${config.base_url}/health`, { method: 'GET', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
     if (!response?.ok || !localStateProviderHealthAttested(await response.json(), identity.instance_id)) throw new Error('local_state_provider_health_unattested');
+    if (runtimeHost && !ownedLocalRuntimeHostReady(runtimeHost)) throw new Error('local_state_provider_owned_host_not_ready');
     env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'READY';
     env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNER_CONFIG_AND_RUNTIME_ATTESTED';
     return Object.freeze({
