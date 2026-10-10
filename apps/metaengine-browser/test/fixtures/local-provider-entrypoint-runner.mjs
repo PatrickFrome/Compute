@@ -153,14 +153,14 @@ const mocks = new Map([
   )],
 ]);
 if (options.packaged) {
-  // An inert first-run wizard reproduces Electron readiness semantics without
-  // a real window, file picker, PostgreSQL provisioner or owner write.
-  mocks.set(new URL('local-restored-pg17-setup.mjs', src).href, dataModule([
-    'export async function showInstalledRestoredProviderWizard({ app }) {',
-    '  globalThis.__traceEntrypoint("first-run-wizard-entered", app.isReady());',
+  // A missing owner shows only a zero-authority status boundary after Ready.
+  // It never shows the retired file/receipt picker or creates a provider.
+  mocks.set(new URL('local-provider-unavailable-boundary.mjs', src).href, dataModule([
+    'export async function showUnprovisionedLocalStateBoundary({ app }) {',
+    '  globalThis.__traceEntrypoint("missing-owner-boundary-entered", app.isReady());',
     '  await app.whenReady();',
-    '  globalThis.__traceEntrypoint("first-run-wizard-ready", app.isReady());',
-    '  return { state:"CANCELLED", authority_effect:false };',
+    '  globalThis.__traceEntrypoint("missing-owner-boundary-ready", app.isReady());',
+    '  return { state:"FRESH_LOCAL_DATABASE_NOT_PROVISIONED", authority_effect:false };',
     '}',
   ].join('\n')));
 }

@@ -285,16 +285,16 @@ test('ESM primary arms Electron ready continuation instead of awaiting app.whenR
   assert.ok(listener > continuation, 'ready listener must be armed after continuation definition');
 });
 
-test('Windows installed smoke qualifies missing-owner wizard separately from configured main UI', async () => {
+test('Windows installed smoke qualifies missing-owner status boundary separately from configured main UI', async () => {
   const workflow = await fs.readFile(new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url), 'utf8');
   assert.match(workflow, /id: installed_owner_mode/);
   assert.match(workflow, /steps\.installed_owner_mode\.outputs\.mode == 'FIRST_RUN'/);
   assert.match(workflow, /steps\.installed_owner_mode\.outputs\.mode == 'CONFIGURED'/);
-  assert.match(workflow, /first_run_wizard_visible_readback_timeout/);
-  assert.match(workflow, /first_run_wizard_fabricated_owner/);
-  assert.match(workflow, /first_run_restored_pg17_wizard_visible=PASS/);
-  assert.match(workflow, /first-run-wizard-proof\.json/);
-  assert.match(workflow, /first-run-wizard\.stdout/);
-  assert.match(workflow, /first-run-wizard\.stderr/);
+  assert.match(workflow, /local_state_boundary_visible_readback_timeout/);
+  assert.match(workflow, /local_state_boundary_fabricated_owner/);
+  assert.match(workflow, /local_state_missing_owner_boundary_visible=PASS/);
+  assert.match(workflow, /local-state-boundary-proof\.json/);
+  assert.match(workflow, /local-state-boundary\.stdout/);
+  assert.match(workflow, /local-state-boundary\.stderr/);
   assert.match(workflow, /normal_ui_second_instance_ack_contract_invalid/);
 });

@@ -297,20 +297,20 @@ for (const entry of entries) {
     assert.equal(f.requests.length, 0);
   });
 
-  test(entry + ': packaged first run defers the setup wizard until after ESM entry completes and Electron ready is emitted', async t => {
+  test(entry + ': packaged missing-owner boot defers inert local-state boundary until after ESM ready', async t => {
     const f = await fixture(t);
     await fs.rm(f.ownerFile);
     const result = await launch(f, { entry, packaged: true });
     assert.equal(result.code, 0, result.stderr);
     assert.ok(eventIndex(result, 'entry-complete') >= 0, 'ESM must finish before ready');
     assert.ok(eventIndex(result, 'entry-complete') < eventIndex(result, 'ready-emitted'));
-    assert.ok(eventIndex(result, 'ready-emitted') < eventIndex(result, 'first-run-wizard-ready'));
-    assert.deepEqual(event(result, 'first-run-wizard-ready'), ['first-run-wizard-ready', true]);
+    assert.ok(eventIndex(result, 'ready-emitted') < eventIndex(result, 'missing-owner-boundary-ready'));
+    assert.deepEqual(event(result, 'missing-owner-boundary-ready'), ['missing-owner-boundary-ready', true]);
     assert.equal(event(result, 'runtime-import'), undefined);
     assert.equal(event(result, 'host-import'), undefined);
     assert.equal(event(result, 'fetch'), undefined);
     assert.equal(await fs.stat(f.ownerFile).then(() => true, () => false), false,
-      'cancelled wizard must not fabricate provider owner authority');
+      'missing-owner boundary must not fabricate provider owner authority');
   });
 
   test(entry + ': no owner configuration preserves legacy primary startup without a provider health request', async t => {
