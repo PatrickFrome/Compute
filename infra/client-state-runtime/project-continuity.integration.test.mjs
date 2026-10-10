@@ -10,6 +10,7 @@ import test from 'node:test';
 import postgres from 'postgres';
 import { createProjectContinuityRoutes } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, compileRpcRequest } from './db-api-core.mjs';
+import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 
 const exec = promisify(execFile);
 const bin = process.env.LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR;
@@ -22,12 +23,36 @@ test('disposable PostgreSQL project lineage, history cursors, budget waits and i
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'compute-project-continuity-')));
   const data = path.join(root, 'pgdata'), port = await freePort();
   await exec(path.join(bin, 'initdb' + suffix), ['-D', data, '-A', 'trust', '--no-locale', '-E', 'UTF8'], { windowsHide: true });
-  const processPg = spawn(path.join(bin, 'postgres' + suffix), ['-D', data, '-h', '127.0.0.1', '-p', String(port)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let pgOutput = ''; for (const stream of [processPg.stdout, processPg.stderr]) stream.on('data', value => { pgOutput = (pgOutput + value).slice(-8192); });
-  const closed = new Promise(resolve => processPg.once('close', resolve));
+  let owned = null;
+  let processPg = null;
+  let pgOutput = '';
+  let closed = Promise.resolve();
+  if (process.platform !== 'win32') {
+    processPg = spawn(path.join(bin, 'postgres' + suffix), ['-D', data, '-h', '127.0.0.1', '-p', String(port)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const stream of [processPg.stdout, processPg.stderr]) stream.on('data', value => { pgOutput = (pgOutput + value).slice(-8192); });
+    closed = new Promise(resolve => processPg.once('close', resolve));
+  }
   const sql = postgres({ host: '127.0.0.1', port, database: 'postgres', username: process.env.USERNAME || process.env.USER || 'postgres', max: 5, prepare: false, connect_timeout: 1 });
-  t.after(async () => { await sql.end({ timeout: 2 }); await exec(path.join(bin, 'pg_ctl' + suffix), ['-D', data, 'stop', '-m', 'fast', '-w'], { windowsHide: true }); await closed; const relative = path.relative(os.tmpdir(), await fs.realpath(root)); assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative)); await fs.rm(root, { recursive: true, force: true }); });
-  for (let tries = 0; ; tries++) { try { await sql`select 1`; break; } catch { if (tries > 40 || processPg.exitCode !== null) throw new Error(pgOutput); await new Promise(resolve => setTimeout(resolve, 100)); } }
+  t.after(async () => {
+    await sql.end({ timeout: 2 });
+    if (process.platform === 'win32') {
+      if (owned) assert.equal((await owned.stop()).cleanup_confirmed, true);
+    } else {
+      await exec(path.join(bin, 'pg_ctl' + suffix), ['-D', data, 'stop', '-m', 'fast', '-w'], { windowsHide: true });
+      await closed;
+    }
+    const relative = path.relative(os.tmpdir(), await fs.realpath(root));
+    assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  if (process.platform === 'win32') {
+    owned = await startOwnedWindowsPostgres({ pgBinDir: bin, pgDataDir: data, databasePort: port, startupTimeoutMs: 60000 });
+    assert.equal((await owned.verify()).pid, owned.pid);
+  }
+  for (let tries = 0; ; tries++) {
+    try { await sql`select 1`; break; }
+    catch { if (tries > 40 || (processPg && processPg.exitCode !== null)) throw new Error(pgOutput || 'disposable_pg_readiness_failed'); await new Promise(resolve => setTimeout(resolve, 100)); }
+  }
   await sql.unsafe('create role anon; create role authenticated; create role service_role; create schema destruktion_meta; create schema extensions; create extension pgcrypto with schema extensions;');
   const baseline = await source('20260929010000_client_v1_fresh_project_bootstrap_v1.sql');
   await sql.unsafe(baseline.slice(baseline.indexOf('create table if not exists destruktion_meta.devos_fleet_task_h205f22'), baseline.indexOf('create table if not exists public.compute_fabric_a2_supervisor_mesh_instance_h205f22')));

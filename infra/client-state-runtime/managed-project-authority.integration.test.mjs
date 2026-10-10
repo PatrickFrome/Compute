@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import postgres from 'postgres';
 import { compileRpcRequest, RPC_CATALOG_QUERY, RPC_ALLOWLIST } from './db-api-core.mjs';
+import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { createManagedProjectRoutes } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/managed-project-routes.mjs';
 import { createManagedTaskProjectAuthorityResolver, createManagedTaskProjectBindingTransport, managedProjectEffectKey } from '../../apps/metaengine-browser/src/managed-task-project-authority-resolver.mjs';
 import { createManagedTaskProjectHost } from '../../apps/metaengine-browser/src/managed-task-project-host.mjs';
@@ -41,21 +42,39 @@ test('physical disposable PostgreSQL enforces project fences through loopback CL
   assert.match(version, /PostgreSQL\) 17\./);
   const executableSha = crypto.createHash('sha256').update(await fs.readFile(path.join(bin, 'postgres' + suffix))).digest('hex');
   await exec(path.join(bin, 'initdb' + suffix), ['-D', data, '-A', 'trust', '--no-locale', '-E', 'UTF8'], { windowsHide: true });
-  const child = spawn(path.join(bin, 'postgres' + suffix), ['-D', data, '-h', '127.0.0.1', '-p', String(port)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let output = ''; child.stdout.on('data', bytes => { output = (output + bytes).slice(-8192); }); child.stderr.on('data', bytes => { output = (output + bytes).slice(-8192); });
-  const closed = new Promise(resolve => child.once('close', resolve));
+  // pg_ctl starts an owner-bound, restricted-token postmaster even when the
+  // hosted Windows CI runner has administrator membership. Direct postgres.exe
+  // refuses that token and must not be used as a CI/production workaround.
+  let owned = null;
+  let child = null;
+  let output = '';
+  let closed = Promise.resolve();
+  if (process.platform !== 'win32') {
+    child = spawn(path.join(bin, 'postgres' + suffix), ['-D', data, '-h', '127.0.0.1', '-p', String(port)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.on('data', bytes => { output = (output + bytes).slice(-8192); });
+    child.stderr.on('data', bytes => { output = (output + bytes).slice(-8192); });
+    closed = new Promise(resolve => child.once('close', resolve));
+  }
   const sql = postgres({ host: '127.0.0.1', port, database: 'postgres', username: process.env.USERNAME || process.env.USER || 'postgres', max: 2, prepare: false, connect_timeout: 1 });
   t.after(async () => {
     await sql.end({ timeout: 2 });
-    await exec(path.join(bin, 'pg_ctl' + suffix), ['-D', data, 'stop', '-m', 'fast', '-w'], { windowsHide: true });
-    await closed;
+    if (process.platform === 'win32') {
+      if (owned) assert.equal((await owned.stop()).cleanup_confirmed, true);
+    } else {
+      await exec(path.join(bin, 'pg_ctl' + suffix), ['-D', data, 'stop', '-m', 'fast', '-w'], { windowsHide: true });
+      await closed;
+    }
     const relative = path.relative(os.tmpdir(), await fs.realpath(root));
     assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
     await fs.rm(root, { recursive: true, force: true });
   });
+  if (process.platform === 'win32') {
+    owned = await startOwnedWindowsPostgres({ pgBinDir: bin, pgDataDir: data, databasePort: port, startupTimeoutMs: 60000 });
+    assert.equal((await owned.verify()).pid, owned.pid);
+  }
   for (let attempt = 0; ; attempt++) {
     try { await sql`select 1`; break; }
-    catch (error) { if (attempt >= 40 || child.exitCode !== null) throw new Error('disposable_pg_start_failed:' + output); await new Promise(resolve => setTimeout(resolve, 100)); }
+    catch (error) { if (attempt >= 40 || (child && child.exitCode !== null)) throw new Error('disposable_pg_start_failed:' + output); await new Promise(resolve => setTimeout(resolve, 100)); }
   }
   await sql.unsafe("create role anon; create role authenticated; create role service_role; create schema destruktion_meta;");
   const baseline = await fs.readFile(baselineUrl, 'utf8');
