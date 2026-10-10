@@ -22,7 +22,14 @@ function validCapabilities(value) {
   return Array.isArray(value) && value.length <= 16 &&
     new Set(value).size === value.length && value.every(item => CAPABILITIES.has(item));
 }
-export function classifyHybridNode(node, task, nowMs) {
+function validEnrollment(entry) {
+  return entry && typeof entry === 'object' &&
+    ID.test(String(entry.node_id || '')) &&
+    ID.test(String(entry.incarnation_id || '')) &&
+    DOMAINS.has(entry.domain) && validInt(entry.generation, 1) &&
+    HASH.test(String(entry.source_sha || ''));
+}
+export function classifyHybridNode(node, task, nowMs, enrollment) {
   if (!node || typeof node !== 'object' || !ID.test(String(node.node_id || '')) ||
       !DOMAINS.has(node.domain) || !ID.test(String(node.incarnation_id || '')) ||
       !validInt(node.generation, 1) || !validInt(node.registry_generation, 1) ||
@@ -32,7 +39,10 @@ export function classifyHybridNode(node, task, nowMs) {
       !validInt(node.total_slots, 1, 4096) || !validInt(node.in_use_slots, 0, 4096) ||
       !validInt(node.cost_units, 0, 1_000_000) ||
       !validInt(node.latency_ms, 0, 600_000)) return nodeResult('NODE_INVALID');
-  if (node.generation !== node.registry_generation ||
+  if (!validEnrollment(enrollment) || enrollment.node_id !== node.node_id) return nodeResult('NODE_NOT_ENROLLED');
+  if (node.incarnation_id !== enrollment.incarnation_id || node.domain !== enrollment.domain ||
+      node.generation !== enrollment.generation || node.registry_generation !== enrollment.generation ||
+      node.source_sha !== enrollment.source_sha ||
       node.heartbeat_seq < node.registry_min_seq) return nodeResult('NODE_GENERATION_OR_SEQUENCE_FENCED');
   if (node.observed_at_ms > nowMs || nowMs - node.observed_at_ms > MAX_AGE_MS) return nodeResult('NODE_STALE');
   if (node.source_sha !== task.source_sha) return nodeResult('SOURCE_SHA_MISMATCH');
@@ -63,12 +73,19 @@ export function proposeHybridPlacement({ task, snapshot, now_ms } = {}) {
   if (!snapshot || snapshot.schema !== 'metaengine.hybrid.registry-snapshot.v1' ||
       snapshot.workspace_id !== task.workspace_id ||
       snapshot.source_sha !== task.source_sha || snapshot.readback_source !== 'EXISTING_CONTROL_PLANE' ||
-      !Array.isArray(snapshot.nodes) || snapshot.nodes.length > 4096 || !validInt(now_ms)) {
+      !Array.isArray(snapshot.nodes) || snapshot.nodes.length > 4096 ||
+      !Array.isArray(snapshot.enrollments) || snapshot.enrollments.length > 4096 || !validInt(now_ms)) {
     return hold('REGISTRY_SNAPSHOT_NOT_ADMITTED');
   }
   // An active mutation must first be admitted through the existing DB lease,
   // VEF and effect journal. This module never acquires or infers that lease.
   if (task.effect_class === 'MUTATING') return hold('MUTATION_REQUIRES_EXISTING_LEASE_AND_VEF');
+  const enrollmentMap = new Map();
+  for (const entry of snapshot.enrollments) {
+    if (!validEnrollment(entry)) return hold('REGISTRY_ENROLLMENT_INVALID');
+    if (enrollmentMap.has(entry.node_id)) return hold('DUPLICATE_REGISTRY_ENROLLMENT');
+    enrollmentMap.set(entry.node_id, entry);
+  }
   const seen = new Set();
   const eligible = [];
   const reasons = {};
@@ -76,7 +93,7 @@ export function proposeHybridPlacement({ task, snapshot, now_ms } = {}) {
     const key = node && typeof node.node_id === 'string' ? node.node_id : null;
     if (key && seen.has(key)) return hold('DUPLICATE_NODE_ID');
     if (key) seen.add(key);
-    const result = classifyHybridNode(node, task, now_ms);
+    const result = classifyHybridNode(node, task, now_ms, enrollmentMap.get(node?.node_id));
     if (!result.eligible) reasons[result.reason] = (reasons[result.reason] || 0) + 1;
     else eligible.push(node);
   }
@@ -85,7 +102,7 @@ export function proposeHybridPlacement({ task, snapshot, now_ms } = {}) {
   eligible.sort((a, b) => a.cost_units - b.cost_units ||
     a.latency_ms - b.latency_ms || (a.domain === 'LOCAL' ? -1 : 1) -
     (b.domain === 'LOCAL' ? -1 : 1) ||
-    a.node_id.localeCompare(b.node_id, 'en'));
+    (a.node_id < b.node_id ? -1 : a.node_id > b.node_id ? 1 : 0));
   const winner = eligible[0];
   return Object.freeze({
     schema: SCHEMA, state: 'PROPOSAL_ONLY', task_id: task.task_id,
