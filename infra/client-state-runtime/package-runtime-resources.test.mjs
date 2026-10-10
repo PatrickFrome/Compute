@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { sourceClosure } from './startup-source-manifest.mjs';
 import {
-  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY,
+  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_PROVIDER_ENTRY,
   reviewedBundlePlan, stageRuntimeSourceBundle, verifyRuntimeSourceBundle,
 } from './package-runtime-resources.mjs';
 
@@ -39,7 +39,7 @@ function refreshDigest(manifest) {
 }
 
 async function receipt(root, { includeRuntimeHost = false } = {}) {
-  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY] : BUNDLE_ENTRY_POINTS;
+  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_PROVIDER_ENTRY] : BUNDLE_ENTRY_POINTS;
   const closure = await sourceClosure(entries.map(name => join(root, name)), root);
   const records = [];
   const add = async (path, id, kind) => {
@@ -122,16 +122,18 @@ test('reviewed runtime host source is included only by explicit host selection',
     await writeFile(join(repository, RUNTIME_HOST_ENTRY), "import './launcher.mjs'; export const host = true;\n");
     await writeFile(join(repository, FIRST_RUN_INITDB_ENTRY), "export const firstRun = true;\n");
     await writeFile(join(repository, REMOTE_SUPPORT_ENTRY), "import './windows-local-computer-executor.mjs'; export const remoteSupport = true;\n");
+    await writeFile(join(repository, ATTACHED_PROVIDER_ENTRY), "import './runtime-host.mjs'; export const attachedProvider = true;\n");
     await writeFile(join(repository, 'apps/metaengine-browser/src/windows-local-computer-executor.mjs'), "import './computer-authority-plane.mjs'; export const executor = true;\n");
     await writeFile(join(repository, 'apps/metaengine-browser/src/computer-authority-plane.mjs'), "export const authority = true;\n");
     const manifest = await receipt(repository, { includeRuntimeHost: true });
     const hostOptions = { ...options, startupManifest: manifest, expectedSourceDigest: manifest.source_manifest_sha256 };
     await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch|bundle_unexpected_source_record/);
     const bundle = await stageRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true });
-    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY]);
+    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_PROVIDER_ENTRY]);
     assert.ok(bundle.files.some(file => file.path === RUNTIME_HOST_ENTRY));
     assert.ok(bundle.files.some(file => file.path === FIRST_RUN_INITDB_ENTRY));
     assert.ok(bundle.files.some(file => file.path === REMOTE_SUPPORT_ENTRY));
+    assert.ok(bundle.files.some(file => file.path === ATTACHED_PROVIDER_ENTRY));
     assert.ok(bundle.files.some(file => file.path === 'apps/metaengine-browser/src/windows-local-computer-executor.mjs'));
     assert.ok(bundle.files.some(file => file.path === 'apps/metaengine-browser/src/computer-authority-plane.mjs'));
     const unreviewed = structuredClone(manifest);
