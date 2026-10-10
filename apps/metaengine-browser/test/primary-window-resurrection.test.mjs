@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 
 import {
   PRIMARY_WINDOW_RESURRECTION_SCHEMA,
+  initialPrimaryRecoveryAllowed,
   primaryWindowResurrectionContract,
   requestPrimaryWindowResurrection,
 } from '../src/primary-window-resurrection.mjs';
@@ -31,6 +32,21 @@ test('primary window resurrection preserves single-runtime and authority invaria
   assert.equal(contract.activation_event_is_request_not_proof, true);
   assert.equal(contract.exact_launch_ack_remains_owned_by_main_entry, true);
   assert.equal(contract.authority_effect, false);
+});
+
+test('unprovisioned local owner boundary is not mislabeled a Browser recovery failure', async () => {
+  assert.equal(initialPrimaryRecoveryAllowed({ localBoundaryExpected: true }), false);
+  assert.equal(initialPrimaryRecoveryAllowed({ localBoundaryExpected: false }), true);
+  assert.equal(initialPrimaryRecoveryAllowed({ installerShutdownRequested: true }), false);
+  assert.equal(initialPrimaryRecoveryAllowed({ primaryInstance: false }), false);
+  const main = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  const entry = await fs.readFile(new URL('../src/final-runtime-entry.mjs', import.meta.url), 'utf8');
+  assert.match(main, /__METAENGINE_LOCAL_BOUNDARY_EXPECTED__\s*=\s*firstRunOwnerMissing/);
+  assert.match(entry, /localStatusBoundaryExpected\s*=\s*globalThis\.__METAENGINE_LOCAL_BOUNDARY_EXPECTED__\s*===\s*true/);
+  assert.match(entry, /initialPrimaryRecoveryAllowed\(/);
+  assert.match(entry, /state:\s*'LOCAL_STATUS_BOUNDARY_DELEGATED'/);
+  assert.match(entry, /primary_window_readback_claimed:\s*false/);
+  assert.equal(entry.includes('SECOND_BROWSER_RUNTIME_FORCE_LAUNCH'),false);
 });
 
 test('existing primary window never emits synthetic activate', async () => {
