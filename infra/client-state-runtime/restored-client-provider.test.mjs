@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +9,20 @@ import { provisionRestoredClientProvider } from './restored-client-provider.mjs'
 import { localStateProviderOwnerFile } from '../../apps/metaengine-browser/src/local-state-provider-policy.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('missing real DB driver fails direct admission with a fixed category and no URL or dependency path',()=>{
+  const moduleUrl=new URL('./restored-client-provider.mjs',import.meta.url).href;
+  const code=[
+    'import {registerHooks} from "node:module";',
+    'registerHooks({resolve(specifier,context,nextResolve){if(specifier==="postgres")throw Object.assign(Error("private_dependency_path_and_password"),{code:"ERR_MODULE_NOT_FOUND"});return nextResolve(specifier,context);}});',
+    'const {inspectRestoredApiAdmission}=await import('+JSON.stringify(moduleUrl)+');',
+    'try {await inspectRestoredApiAdmission({databaseUrl:"postgres://private_api:private_url_password@127.0.0.1:35432/metaengine",roleMode:"direct"});throw Error("must_fail");} catch(error){process.stdout.write(error.message);}',
+  ].join('\n');
+  const result=spawnSync(process.execPath,['--input-type=module','--eval',code],{encoding:'utf8',windowsHide:true,timeout:10000});
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(result.stdout,'restored_provider_api_admission_unattested');
+  assert.equal(result.stderr,'');
+});
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'compute-restored-admission-')));
   t.after(() => fs.rm(root,{recursive:true,force:true}));

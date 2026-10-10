@@ -111,6 +111,32 @@ if (guard.installer_shutdown_control) {
     if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
   });
   try {
+  if (updatedLaunch && app.isPackaged === true) {
+    // An updater's durable PROBE_ONLY receipt describes an offline successor
+    // acknowledgement. Verify it while this process owns the singleton, before
+    // loading a provider that may be stopped or pinned to the prior package.
+    // --updated alone grants no exception: NORMAL/missing evidence continues
+    // through the same hard Owner admission below.
+    const offlineHandoff = await import('./self-update-handoff.mjs');
+    let expectedOfflineReceipt = null;
+    try { expectedOfflineReceipt = await offlineHandoff.readExpectedPreInstallReceipt(app); }
+    catch {
+      // Invalid receipt evidence cannot select an offline mode. The normal
+      // startup inspection retains its existing ambiguity/hold behavior.
+    }
+    if (expectedOfflineReceipt?.successor_startup === offlineHandoff.SUCCESSOR_STARTUP_PROBE_ONLY) {
+      const acknowledged = await offlineHandoff.persistUpdatedSuccessorReceipt(app, {
+        primaryInstance: true, appId: METAENGINE_BROWSER_APP_ID,
+      });
+      if (acknowledged?.successor_startup !== offlineHandoff.SUCCESSOR_STARTUP_PROBE_ONLY) {
+        throw new Error('self_update_offline_successor_receipt_unconfirmed');
+      }
+      console.log(JSON.stringify(acknowledged.row));
+      if (typeof app.releaseSingleInstanceLock === 'function') app.releaseSingleInstanceLock();
+      app.exit(0);
+      return;
+    }
+  }
   runtimeController = import('./local-runtime-host-controller.mjs');
   const { installLocalRuntimeHostShutdown } = await runtimeController;
   installLocalRuntimeHostShutdown(app);

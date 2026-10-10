@@ -197,6 +197,7 @@ function spawnDaemon(launch) {
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
+    windowsHide: true,
   });
   const fwd = (stream, toErr) => {
     let buf = '';

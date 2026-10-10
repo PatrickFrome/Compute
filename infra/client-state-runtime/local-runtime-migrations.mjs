@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import postgres from 'postgres';
 
 export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
   { path: '20260901034000_meta_orchestrator_controller_lease_v1.sql', signature: 'public.meta_orchestrator_controller_lease_v1(uuid,text,text,integer)', source_url: new URL('../../supabase/migrations/20260901034000_meta_orchestrator_controller_lease_v1.sql', import.meta.url),
@@ -132,8 +131,12 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.LOCAL_STATE_ADMIN_DATABASE_URL;
   if (!url || !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) throw new Error('local_state_loopback_database_required');
-  const sql = postgres(url, { max: 1, prepare: false });
-  try { console.log(JSON.stringify(await applyLocalRuntimeMigrations({ sql }))); }
-  catch (error) { console.error(JSON.stringify({ event: 'local_runtime_migration_failed', code: error.code || error.message })); process.exitCode = 1; }
-  finally { await sql.end({ timeout: 5 }); }
+  let sql;
+  try {
+    const { default: postgres } = await import('postgres');
+    sql = postgres(url, { max: 1, prepare: false });
+    console.log(JSON.stringify(await applyLocalRuntimeMigrations({ sql })));
+  }
+  catch (error) { console.error(JSON.stringify({ event: 'local_runtime_migration_failed', code: error.code === 'ERR_MODULE_NOT_FOUND' ? 'dependency_unavailable' : error.code || error.message })); process.exitCode = 1; }
+  finally { if (sql) await sql.end({ timeout: 5 }); }
 }

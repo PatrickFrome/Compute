@@ -1,6 +1,5 @@
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import postgres from 'postgres';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, quoteIdentifier } from './db-api-core.mjs';
 
 export function localApiRolePolicyName(login, operation) {
@@ -65,12 +64,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!databaseUrl) throw new Error('local_state_admin_database_url_required');
   const parsed = new URL(databaseUrl);
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) throw new Error('local_state_loopback_database_required');
-  const sql = postgres(databaseUrl, { max: 1, prepare: false });
+  let sql;
   try {
+    const { default: postgres } = await import('postgres');
+    sql = postgres(databaseUrl, { max: 1, prepare: false });
     const result = await provisionLocalApiLogin({ sql, databaseName: decodeURIComponent(parsed.pathname.slice(1)), login: process.env.LOCAL_STATE_API_DB_LOGIN || 'local_state_api', password: process.env.LOCAL_STATE_API_DB_PASSWORD });
     console.log(JSON.stringify(result));
   } catch (error) {
-    console.error(JSON.stringify({ event: 'local_state_api_grants_failed', code: error?.code || 'provisioning_failed' }));
+    console.error(JSON.stringify({ event: 'local_state_api_grants_failed', code: error?.code === 'ERR_MODULE_NOT_FOUND' ? 'dependency_unavailable' : error?.code || 'provisioning_failed' }));
     process.exitCode = 1;
-  } finally { await sql.end({ timeout: 5 }); }
+  } finally { if (sql) await sql.end({ timeout: 5 }); }
 }

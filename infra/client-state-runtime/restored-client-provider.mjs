@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import postgres from 'postgres';
 import { RPC_ALLOWLIST, TABLE_ALLOWLIST } from './db-api-core.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
@@ -85,10 +84,14 @@ const admissionQuery = `SELECT json_build_object(
 export async function inspectRestoredApiAdmission({ databaseUrl, postgresBinDirectory, roleMode = 'service_role' }) {
   const url = localDatabase(databaseUrl);
   if (roleMode === 'direct') {
-    const sql = postgres(url.href, { max: 1, prepare: false, connect_timeout: 3, debug: false, onnotice: () => {} });
-    try { return await inspectAttachedApiAdmission({ sql, apiLogin: decodeURIComponent(url.username) }); }
+    let sql;
+    try {
+      const { default: postgres } = await import('postgres');
+      sql = postgres(url.href, { max: 1, prepare: false, connect_timeout: 3, debug: false, onnotice: () => {} });
+      return await inspectAttachedApiAdmission({ sql, apiLogin: decodeURIComponent(url.username) });
+    }
     catch { fail('api_admission_unattested'); }
-    finally { await sql.end({ timeout: 5 }); }
+    finally { if (sql) await sql.end({ timeout: 5 }); }
   }
   if (roleMode !== 'service_role') fail('api_admission_unattested');
   const env = { ...process.env };

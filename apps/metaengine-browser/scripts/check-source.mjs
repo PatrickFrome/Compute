@@ -199,7 +199,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 export function runSourceChecks({ execute = spawnSync } = {}) {
   for (const file of SOURCE_CHECK_FILES) {
     const result = execute(process.execPath, ['--check', file], {
-      cwd: root, shell: false, stdio: 'inherit',
+      cwd: root, shell: false, stdio: 'inherit', windowsHide: true,
     });
     if (result.error || result.signal || result.status !== 0) {
       console.error('source_check_failed:' + file);

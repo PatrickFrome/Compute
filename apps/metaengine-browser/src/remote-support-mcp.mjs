@@ -85,7 +85,7 @@ export async function confirmRemoteSupportOnWindows({ scope, details = null }) {
   try {
     const {stdout} = await execute('powershell.exe',
       ['-NoProfile','-NonInteractive','-STA','-Command',script],
-      {windowsHide:false,shell:false,timeout:60000,maxBuffer:1024});
+      {windowsHide:true,shell:false,timeout:60000,maxBuffer:1024});
     return stdout.trim() === 'Yes';
   } catch { return false; }
 }

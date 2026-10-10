@@ -122,6 +122,10 @@ assert.match(String(manifest.source_head), /^[0-9a-f]{40}$/);
 if (args.expectedSha) assert.equal(String(manifest.source_head), String(args.expectedSha).toLowerCase());
 assert.match(String(manifest.daemon_version), /^\d+\.\d+\.\d+(?:[-+].+)?$/);
 assert.equal(manifest.runtime_embedded, true);
+assert.equal(manifest.build_compile_target, 'bun-windows-x64');
+assert.equal(manifest.build_bun_version, '1.4.3');
+assert.ok(['npx-pinned-bun-1.4.3', 'explicit-pinned-bun-1.4.3'].includes(manifest.build_bun_compiler_source));
+assert.equal(manifest.cpu_compatibility, 'NEHALEM_SSE42_OR_NEWER');
 assert.equal(manifest.external_bun_required, false);
 assert.equal(manifest.default_browser_host_boot_mode, 'probe');
 assert.equal(manifest.probe_only_entrypoint, 'browser-probe-entry.ts');
@@ -149,6 +153,9 @@ const proof = {
   executable_sha256: manifest.executable_sha256,
   executable_bytes: manifest.executable_bytes,
   runtime_embedded: true,
+  build_bun_version: manifest.build_bun_version,
+  build_compile_target: manifest.build_compile_target,
+  cpu_compatibility: manifest.cpu_compatibility,
   external_bun_required: false,
   package_manifest_verified: true,
   probe_only_entrypoint: manifest.probe_only_entrypoint,

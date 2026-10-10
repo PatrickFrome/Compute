@@ -6,6 +6,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
 const { buildOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
+const { localBuildSelected, captureLocalBuildIdentity } = require('./local-build-identity.cjs');
 const {
   createBuildIdentity,
   createBuildIdentityV3,
@@ -263,7 +264,10 @@ async function metaengineGuardianNativeBeforePack(context) {
   } catch (error) {
     throw new Error(`guardian_machine_bootstrap_binding_invalid:${String(error?.message || error)}`);
   }
-  const buildIdentity = buildIdentityRequired()
+  if (localBuildSelected() && buildIdentityRequired()) throw new Error('local_build_ci_identity_conflict');
+  const buildIdentity = localBuildSelected()
+    ? captureLocalBuildIdentity({ appRoot, repoRoot, sourceHead: trustRoot.build_sha, packageVersion })
+    : buildIdentityRequired()
     ? buildPackageIdentityMetadata({ appRoot, trustRoot, packageVersion })
     : null;
   context.packager.config.extraMetadata = {

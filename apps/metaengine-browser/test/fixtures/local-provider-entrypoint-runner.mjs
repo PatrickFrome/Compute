@@ -64,12 +64,12 @@ const realOnce = app.once.bind(app);
 app.on = (event, listener) => { trace('on', event); return realOn(event, listener); };
 app.once = (event, listener) => { trace('once', event); return realOnce(event, listener); };
 app.getPath = () => options.userData;
-app.getVersion = () => '0.7.0-dev.singleton-fixture';
+app.getVersion = () => options.packageVersion || '0.7.0-dev.singleton-fixture';
 app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
 app.isReady = () => ready;
-app.isPackaged = Boolean(options.firstRunWizard);
+app.isPackaged = Boolean(options.firstRunWizard || options.packaged);
 app.whenReady = () => ready ? Promise.resolve() : new Promise(resolve => app.once('ready', resolve));
 app.exit = code => { trace('exit', code); process.exit(code); };
 app.quit = () => {

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { VERIFIER_FILE, assertPackagedOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
+const { localBuildSelected, captureLocalBuildIdentity, assertLocalBuildIdentity } = require('./local-build-identity.cjs');
 const {
   BUILD_IDENTITY_SCHEMA_V3,
   loadDependencyResolutionProof,
@@ -225,7 +226,11 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     resourcesDir,
   });
   const requireBuildIdentity = buildIdentityRequired();
-  const buildIdentity = requireBuildIdentity
+  if (localBuildSelected() && requireBuildIdentity) throw new Error('local_build_ci_identity_conflict');
+  const buildIdentity = localBuildSelected()
+    ? assertLocalBuildIdentity(packageJson.metaengineBuildIdentity,
+      captureLocalBuildIdentity({ appRoot, repoRoot, sourceHead: expectedHead, packageVersion }))
+    : requireBuildIdentity
     ? assertPackagedBuildIdentity(packageJson.metaengineBuildIdentity, {
         appRoot,
         expectedHead,
@@ -264,6 +269,8 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     client_state_runtime_verifier_sha256: offlineRuntime.runtime_verifier_sha256,
     client_state_runtime_packaged_resources_verified: true,
     build_identity_required: requireBuildIdentity,
+    local_build_identity_verified: localBuildSelected(),
+    local_build_id: localBuildSelected() ? buildIdentity.build_id : null,
     build_identity_sha256: buildIdentity?.build_identity_sha256 || null,
     dependency_resolution_sha256: buildIdentity?.dependency_resolution_sha256 || null,
     package_lock_sha256: buildIdentity?.package_lock_sha256 || null,

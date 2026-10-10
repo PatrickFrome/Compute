@@ -21,10 +21,13 @@ const SHA = /^[a-f0-9]{64}$/;
 export const ISOLATED_OWNER_MARKER = 'metaengine-isolated-launch-qa.json';
 export const INSTALLED_LAUNCH_SOURCE_FILES = Object.freeze([
   'src/final-runtime-entry.mjs', 'src/main-entry.mjs', 'src/main.mjs',
+  'src/single-instance-guard.mjs', 'src/self-update-handoff.mjs',
+  'src/self-update-transaction-journal.mjs', 'src/durable-json-file.cjs',
   'src/local-state-provider-bootstrap.mjs', 'src/local-state-provider-policy.mjs',
   'src/local-runtime-host-controller.mjs', 'src/local-restored-pg17-setup.mjs',
   'src/local-restored-pg17-auto-prepare.mjs',
   'src/private-windows-storage-acl.mjs',
+  'src/remote-support-mcp.mjs', 'src/me2/me2-daemon-host.mjs',
   'src/local-restored-pg17-setup.html', 'src/local-restored-pg17-setup-preload.cjs',
   'src/me2/me2-ui-host.mjs', 'src/me2/me2-ui-gateway.mjs',
 ]);
@@ -90,6 +93,39 @@ export function assertOwnerStartupGrace({ before, after, sentinelBefore, sentine
     || progressAfter.progress_seq <= progressBefore.progress_seq
     || !Number.isFinite(progressAge) || progressAge < 0 || progressAge > 30000) fail('normal_startup_grace_survival_unproven');
   return true;
+}
+
+export function assertOfflineSuccessorBinding({ preInstall, preInstallBytes, successor, transaction, transactionBefore,
+  pid, appId, expectedVersion, expectedHead }) {
+  const preInstallSha256 = digest(preInstallBytes);
+  if (preInstall?.schema !== 'metaengine.self-update.pre-install-receipt.v1'
+    || preInstall.version !== expectedVersion || preInstall.available_version !== expectedVersion
+    || preInstall.successor_startup !== 'PROBE_ONLY' || preInstall.metadata_verified !== true
+    || preInstall.restart_gate_safe !== true || preInstall.authority_effect !== false
+    || preInstall.resolved_git_sha !== expectedHead || !/^[a-f0-9]{40}$/.test(expectedHead || '')
+    || successor?.schema !== 'metaengine.self-update.successor-receipt.v1'
+    || successor.version !== expectedVersion || successor.pid !== pid || successor.primary_instance !== true
+    || successor.app_id !== appId || successor.successor_startup !== 'PROBE_ONLY'
+    || successor.qualification_state !== 'BOOT_VERIFIED'
+    || successor.pre_install_receipt_sha256 !== preInstallSha256
+    || successor.pre_install_recorded_at !== preInstall.recorded_at || successor.authority_effect !== false
+    || transaction?.schema !== 'metaengine.self-update.transaction.v1'
+    || transaction.state !== 'SUCCESSOR_BOOTED' || transaction.target_version !== expectedVersion
+    || transaction.resolved_git_sha !== expectedHead || transaction.qualified !== false || transaction.quarantined !== false
+    || transaction.automatic_retry_allowed !== false || transaction.authority_effect !== false
+    || transactionBefore?.state !== 'PREPARED' || !transactionBefore.transaction_id
+    || transaction.transaction_id !== transactionBefore.transaction_id
+    || transaction.source_version !== transactionBefore.source_version
+    || transaction.created_at !== transactionBefore.created_at || transaction.attempt_count !== transactionBefore.attempt_count
+    || transaction.evidence?.updated_argv !== true || transaction.evidence?.primary_instance !== true
+    || transaction.evidence?.boot_version_match !== true || transaction.evidence?.physical_effect_attempted === true
+    || transaction.evidence?.effect_barrier_crossed === true) {
+    fail('offline_successor_binding_invalid');
+  }
+  if (!Number.isSafeInteger(successor.pid) || successor.pid < 1
+    || !SHA.test(successor.pre_install_receipt_sha256)
+    || !Number.isFinite(Date.parse(successor.recorded_at))) fail('offline_successor_receipt_invalid');
+  return Object.freeze({ pre_install_receipt_sha256: preInstallSha256, transaction_id: transaction.transaction_id });
 }
 
 async function freePort() {
@@ -202,6 +238,112 @@ async function profileProbe(executable, env, directory) {
     await stop(launch);
     await fs.writeFile(path.join(directory, 'installed-profile-probe-' + randomUUID() + '.log'), launch.output());
   }
+}
+
+async function storageSnapshot(root) {
+  const rows = {};
+  async function visit(directory) {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name), relative = path.relative(root, file);
+      if (entry.isSymbolicLink()) fail('offline_fixture_storage_link_refused');
+      if (entry.isDirectory()) { rows[relative] = 'DIRECTORY'; await visit(file); }
+      else if (entry.isFile()) rows[relative] = digest(await fs.readFile(file));
+      else fail('offline_fixture_storage_type_invalid');
+    }
+  }
+  await visit(root);
+  return Object.fromEntries(Object.entries(rows).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+// The normal CLI uses the exact installed executable without module loader or
+// provider bypass flags. Process boundaries are injectable only for behavior
+// tests; receipt persistence and final-path readback use production modules.
+export async function qualifyInstalledOfflineSuccessor({ executable, archive, directory, identity }, {
+  launchProcess = start, stopProcess = stop, probeProfile = profileProbe,
+} = {}) {
+  if (!/^[a-f0-9]{40}$/.test(identity?.source_head || '') || !identity.package_version
+    || !SHA.test(identity.bundle_sha256 || '')) fail('offline_successor_identity_invalid');
+  const root = path.join(directory, 'offline-successor-' + randomUUID());
+  const appData = path.join(root, 'Roaming'), localAppData = path.join(root, 'Local'), temporaryDirectory = path.join(root, 'Temp');
+  const protectedStorage = path.join(root, 'protected-storage');
+  for (const target of [appData, localAppData, temporaryDirectory, protectedStorage]) await fs.mkdir(target, { recursive: true });
+  const ports = [];
+  while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
+  const env = isolatedLaunchEnvironment({ appData, localAppData, temporaryDirectory,
+    uiPort: ports[0], gatewayPort: ports[1], daemonPort: ports[2] });
+  const artifactHashes = { installed_executable_sha256: digest(await fs.readFile(executable)),
+    installed_asar_sha256: digest(await fs.readFile(archive)) };
+  const profile = await probeProfile(executable, env, root);
+  const userData = await fs.realpath(profile.user_data_path);
+  if (!contained(await fs.realpath(appData), userData) || profile.version !== identity.package_version
+    || profile.app_id !== 'com.metaengine.browser.test' || profile.primary_instance !== true) fail('offline_profile_binding_invalid');
+  const ownerFile = path.join(appData, '@metaengine', 'browser-shell', 'metaengine-state-provider-v1.json');
+  await fs.mkdir(path.dirname(ownerFile), { recursive: true });
+  // A provider bootstrap cannot accept this owner. Exit 0 with a bound receipt
+  // therefore exercises the receipt-first admission fence in installed bytes.
+  const ownerBytes = Buffer.from('isolated-offline-successor-invalid-owner\n');
+  await fs.writeFile(ownerFile, ownerBytes, { flag: 'wx' });
+  for (const name of ['pg-data', 'runtime-state', 'vault']) {
+    const target = path.join(protectedStorage, name);
+    await fs.mkdir(target); await fs.writeFile(path.join(target, 'qualification-sentinel'), randomUUID(), { flag: 'wx' });
+  }
+  const storageBefore = await storageSnapshot(protectedStorage);
+  const { persistPreInstallReceipt, selfUpdateHandoffPaths } = await import('../src/self-update-handoff.mjs');
+  const { readSelfUpdateTransaction } = await import('../src/self-update-transaction-journal.mjs');
+  const app = { isPackaged: true, hasSingleInstanceLock: () => true,
+    getPath: () => userData, getVersion: () => identity.package_version };
+  const preInstall = { schema: 'metaengine.self-update.pre-install-receipt.v1', version: identity.package_version,
+    available_version: identity.package_version, resolved_git_sha: identity.source_head,
+    metadata_verified: true, restart_gate_safe: true, successor_startup: 'PROBE_ONLY',
+    recorded_at: new Date().toISOString(), qa_synthetic_handoff: true, installation_performed: false, authority_effect: false };
+  await persistPreInstallReceipt(app, preInstall);
+  const paths = selfUpdateHandoffPaths(app), transactionBefore = await readSelfUpdateTransaction(app);
+  const preInstallBytes = await fs.readFile(paths.pre_install);
+  const launch = launchProcess(executable, ['--updated', '--user-data-dir=' + userData], env, root);
+  let successor, transaction, binding;
+  try {
+    const result = await Promise.race([launch.closed, deadline(20000, 'offline_successor_exit_timeout')]);
+    if (result.code !== 0 || result.signal) fail('offline_successor_exit_invalid');
+    successor = JSON.parse(await fs.readFile(paths.successor, 'utf8'));
+    transaction = await readSelfUpdateTransaction(app);
+    binding = assertOfflineSuccessorBinding({ preInstall, preInstallBytes, successor, transaction, transactionBefore,
+      pid: launch.child.pid, appId: profile.app_id, expectedVersion: identity.package_version, expectedHead: identity.source_head });
+    const output = launch.output().split(/\r?\n/).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    if (!output.some(row => row.schema === successor.schema && JSON.stringify(row) === JSON.stringify(successor))) fail('offline_successor_output_readback_mismatch');
+    if (/LOCAL_PROVIDER_STARTUP_BLOCKED|RUNTIME_IMPORT_OK|ME2_INTEGRATION_START|DAEMON_HEALTHY|ME2_PRIMARY_SHELL_VISIBLE/.test(launch.output())) fail('offline_successor_runtime_admitted');
+    if (!(await fs.readFile(paths.pre_install)).equals(preInstallBytes)) fail('offline_pre_install_receipt_modified');
+    if (!(await fs.readFile(ownerFile)).equals(ownerBytes)) fail('offline_owner_fixture_modified');
+    if (JSON.stringify(await storageSnapshot(protectedStorage)) !== JSON.stringify(storageBefore)) fail('offline_fixture_storage_modified');
+    for (const name of ['metaengine-browser-startup-journal-v1.json', 'metaengine-browser-sentinel-v1.json', 'runtime-host-lock.json']) {
+      try { await fs.stat(path.join(userData, name)); fail('offline_successor_runtime_artifact_created'); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    for (const port of ports) await assertPortClosed(port);
+    if (digest(await fs.readFile(executable)) !== artifactHashes.installed_executable_sha256
+      || digest(await fs.readFile(archive)) !== artifactHashes.installed_asar_sha256) fail('offline_installed_artifacts_modified');
+  } finally {
+    await stopProcess(launch);
+    await fs.writeFile(path.join(directory, 'installed-offline-successor.log'), launch.output());
+  }
+  // Remove only the synthetic owner created above. The ordinary exact-binary
+  // profile probe can then independently reacquire the same singleton profile.
+  await fs.unlink(ownerFile);
+  const transactionBytes = await fs.readFile(path.join(userData, 'metaengine-self-update-transaction-v1.json'));
+  const successorBytes = await fs.readFile(paths.successor);
+  const reacquired = await probeProfile(executable, env, root);
+  if (reacquired.primary_instance !== true || reacquired.user_data_path !== profile.user_data_path
+    || reacquired.version !== identity.package_version || reacquired.app_id !== profile.app_id) fail('offline_singleton_reacquisition_invalid');
+  if (!(await fs.readFile(paths.successor)).equals(successorBytes)
+    || !(await fs.readFile(path.join(userData, 'metaengine-self-update-transaction-v1.json'))).equals(transactionBytes)) fail('offline_handoff_modified_by_profile_probe');
+  return Object.freeze({ schema: 'metaengine.browser.installed-offline-successor-proof.v1', ...identity, ...artifactHashes, ...binding,
+    launch: 'INSTALLED_UPDATED_PROBE_ONLY', profile_isolated: true, synthetic_handoff: true, installation_performed: false,
+    durable_successor_receipt_verified: true, successor_startup: successor.successor_startup,
+    successor_pid: successor.pid, successor_app_id: successor.app_id, transaction_state: transaction.state,
+    receipt_first_admission_fence_verified: true, malformed_owner_fixture_unchanged: true,
+    isolated_fixture_storage_unchanged: true, runtime_startup_artifacts_absent: true, runtime_ports_closed: true,
+    installed_artifacts_unchanged: true, process_cleanup_confirmed: true, singleton_reacquisition_verified: true,
+    offline_successor_probe_qualified: true, physical_update_qualified: false,
+    owner_boot_qualified: false, production_ready: false, authority_effect: false });
 }
 
 export async function qualifyInstalledFirstRun({ executable, directory, identity }) {
@@ -471,6 +613,8 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
   const resourcesDir = path.join(await fs.realpath(installRoot), 'resources');
   const executable = path.join(path.dirname(resourcesDir), 'METAENGINE Browser Test.exe');
   const archive = path.join(resourcesDir, 'app.asar');
+  const installedHashes = { installed_asar_sha256: digest(await fs.readFile(archive)),
+    installed_executable_sha256: digest(await fs.readFile(executable)) };
   const asar = await import('@electron/asar');
   const pkg = JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8'));
   const identity = assertInstalledLaunchIdentity(pkg, { expectedHead, expectedVersion });
@@ -487,15 +631,21 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
   });
   const isolatedDirectory = path.join(directory, 'isolated-launch-' + randomUUID());
   await fs.mkdir(isolatedDirectory);
+  const offlineSuccessor = await qualifyInstalledOfflineSuccessor({ executable, archive, directory: isolatedDirectory, identity });
+  if (offlineSuccessor.installed_asar_sha256 !== installedHashes.installed_asar_sha256
+    || offlineSuccessor.installed_executable_sha256 !== installedHashes.installed_executable_sha256) fail('installed_artifact_identity_changed');
+  await fs.writeFile(path.join(directory, 'installed-offline-successor-proof.json'), JSON.stringify(offlineSuccessor, null, 2) + '\n');
   const firstRun = await qualifyInstalledFirstRun({ executable, directory: isolatedDirectory, identity });
   await fs.writeFile(path.join(directory, 'installed-first-run-proof.json'), JSON.stringify(firstRun, null, 2) + '\n');
   const uiHost = await qualifyInstalledUiHost({ executable, asar, archive, directory: isolatedDirectory, resourcesDir, identity });
   await fs.writeFile(path.join(directory, 'installed-owned-ui-host-proof.json'), JSON.stringify(uiHost, null, 2) + '\n');
   const owner = ownerQaRoot ? await qualifyInstalledOwnerBoot({ executable, resourcesDir, directory: isolatedDirectory, ownerQaRoot, identity }) : null;
   if (owner) await fs.writeFile(path.join(directory, 'installed-owner-boot-proof.json'), JSON.stringify(owner, null, 2) + '\n');
+  if (digest(await fs.readFile(archive)) !== installedHashes.installed_asar_sha256
+    || digest(await fs.readFile(executable)) !== installedHashes.installed_executable_sha256) fail('installed_artifact_identity_changed');
   const proof = Object.freeze({ schema: 'metaengine.browser.installed-launch-qualification.v1', ...identity,
     installed_source_files: sourceFiles, installed_source_bytes_verified: true,
-    installed_asar_sha256: digest(await fs.readFile(archive)), installed_executable_sha256: digest(await fs.readFile(executable)),
+    ...installedHashes, offline_successor_probe_qualified: offlineSuccessor.offline_successor_probe_qualified === true,
     protected_offline_runtime_verified: runtime.packaged_resources_verified === true,
     first_run_qualified: firstRun.first_run_visible, installed_ui_host_qualified: uiHost.child_owned,
     os_ui_listener_verified: uiHost.os_listener.loopback_only === true,

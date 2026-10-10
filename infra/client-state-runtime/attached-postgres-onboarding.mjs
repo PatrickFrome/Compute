@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import postgres from 'postgres';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST } from './db-api-core.mjs';
 import { localApiRolePolicyName, provisionLocalApiLogin } from './db-api-grants.mjs';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
@@ -288,8 +287,14 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
     if (verified?.manifest?.bundle_sha256 !== options.expectedBundleDigest) fail('bundle_unattested');
     const plan = await (hooks.loadMigrationPlan || loadLocalRuntimeMigrationPlan)();
     if (plan?.source_manifest_sha256 !== options.expectedMigrationSourcesSha256) fail('migration_source_pin_mismatch');
-    const connect = hooks.connect || ((url) => postgres(url, { max: 1, prepare: false, connect_timeout: 5,
-      idle_timeout: 10, debug: false, onnotice: () => {}, onparameter: () => {} }));
+    let connect = hooks.connect;
+    if (!connect) {
+      // Pure configuration/catalog imports do not open or require a DB driver.
+      // Real setup resolves the packaged, lock-pinned dependency only here.
+      const { default: postgres } = await import('postgres');
+      connect = url => postgres(url, { max: 1, prepare: false, connect_timeout: 5,
+        idle_timeout: 10, debug: false, onnotice: () => {}, onparameter: () => {} });
+    }
     sql = connect(admin.href);
     await inspectIdentity(sql, options, physical, admin, pidBytes);
     const [capability] = await sql.unsafe(`SELECT pg_catalog.has_database_privilege(current_user, current_database(), 'CREATE') AS database_create,

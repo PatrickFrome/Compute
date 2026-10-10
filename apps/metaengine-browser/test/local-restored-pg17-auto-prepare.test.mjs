@@ -88,7 +88,7 @@ test('attached preparation preserves running Keeper and only writes a new protec
   assert.equal(f.calls.length,0,'attached preparation must never execute PG tools');
   const updated=JSON.parse(await fs.readFile(result.configFile));
   assert.equal(updated.expected_cluster_system_identifier,identifier);
-  assert.equal(updated.pg_data_directory,f.original);
+  assert.equal(updated.pg_data_directory,await fs.realpath(f.original));
   assert.equal(updated.bundle_directory,await fs.realpath(f.bundle));
   assert.equal(updated.expected_bundle_sha256,NEW);
   assert.ok(f.aclCalls.some(row=>row.target===f.state&&row.operation==='PROTECT_DIRECTORY'));
