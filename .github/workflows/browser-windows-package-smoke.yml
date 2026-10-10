@@ -884,9 +884,96 @@ jobs:
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
 
 
+      - name: Classify exact installed local owner admission
+        id: installed_owner_mode
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $owner = Join-Path $env:APPDATA '@metaengine\browser-shell\metaengine-state-provider-v1.json'
+          if (Test-Path -LiteralPath $owner) {
+            if (-not (Test-Path -LiteralPath $owner -PathType Leaf)) { throw 'packaged_owner_config_not_a_file' }
+            'mode=CONFIGURED' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            'mode=FIRST_RUN' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Prove first-run restored PG17 wizard visible with no owner
+        if: steps.installed_owner_mode.outputs.mode == 'FIRST_RUN'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $owner = Join-Path $env:APPDATA '@metaengine\browser-shell\metaengine-state-provider-v1.json'
+          if (Test-Path -LiteralPath $owner) { throw 'first_run_unexpected_owner_config' }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $exe -PathType Leaf)) { throw 'first_run_installed_exe_missing' }
+          $stdout = Join-Path $env:RUNNER_TEMP 'first-run-wizard.stdout'
+          $stderr = Join-Path $env:RUNNER_TEMP 'first-run-wizard.stderr'
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class MetaengineFirstRunWindow {
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+          }
+          '@
+          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $null = $p.Handle
+          $stableSince = [DateTime]::MinValue
+          $lastHandle = [IntPtr]::Zero
+          $qualified = $false
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(70)
+            while ([DateTime]::UtcNow -lt $deadline) {
+              $p.Refresh()
+              if ($p.HasExited) {
+                Get-Content $stderr -ErrorAction SilentlyContinue | Write-Host
+                throw "first_run_wizard_primary_exited:$($p.ExitCode)"
+              }
+              $live = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
+              $handle = if ($live) { $live.MainWindowHandle } else { [IntPtr]::Zero }
+              $title = if ($live) { [string]$live.MainWindowTitle } else { '' }
+              $visible = $handle -ne [IntPtr]::Zero -and [MetaengineFirstRunWindow]::IsWindowVisible($handle)
+              if ($visible -and $title.Contains('Connect existing PostgreSQL 17')) {
+                if ($handle -ne $lastHandle) {
+                  $lastHandle = $handle
+                  $stableSince = [DateTime]::UtcNow
+                } elseif (([DateTime]::UtcNow - $stableSince).TotalMilliseconds -ge 1500) {
+                  $qualified = $true
+                  break
+                }
+              } else {
+                $stableSince = [DateTime]::MinValue
+                $lastHandle = [IntPtr]::Zero
+              }
+              Start-Sleep -Milliseconds 200
+            }
+            if (-not $qualified) {
+              Get-Content $stderr -ErrorAction SilentlyContinue | Write-Host
+              throw 'first_run_wizard_visible_readback_timeout'
+            }
+            if (Test-Path -LiteralPath $owner) { throw 'first_run_wizard_fabricated_owner' }
+            [pscustomobject]@{
+              schema = 'metaengine.browser.first-run-wizard-installed-proof.v1'
+              source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
+              wizard_visible = $true
+              window_stable_ms = 1500
+              owner_config_created = $false
+              main_runtime_admitted = $false
+              authority_effect = $false
+            } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $env:RUNNER_TEMP 'first-run-wizard-proof.json')
+            Write-Host 'first_run_restored_pg17_wizard_visible=PASS'
+          } finally {
+            if ($p -and -not $p.HasExited) {
+              try { $null = $p.CloseMainWindow() } catch {}
+              if (-not $p.WaitForExit(4000)) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+
       - name: Prove normal packaged UI boot and second-instance activation
         # The owned provider requires an explicit private fixture, absent on this runner.
-        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')
+        if: steps.installed_owner_mode.outputs.mode == 'CONFIGURED' && (github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1'))
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
