@@ -96,7 +96,9 @@ test('invalid task and untrusted registry shape cannot bypass admission', () => 
     'REGISTRY_SNAPSHOT_NOT_ADMITTED');
 });
 test('duplicate node IDs cannot game deterministic selection', () => {
-  assert.equal(place([node('duplicate', 'LOCAL'),node('duplicate', 'CLOUD')]).reason,'DUPLICATE_NODE_ID');
+  const original=snapshot([node('duplicate','LOCAL')]);
+  const duplicated={...original,nodes:[node('duplicate','LOCAL'),node('duplicate','CLOUD')]};
+  assert.equal(proposeHybridPlacement({task:task(),snapshot:duplicated,now_ms:now}).reason,'DUPLICATE_NODE_ID');
 });
 test('node tie-breaking is deterministic regardless of input order', () => {
   const nodes = [node('z_node', 'CLOUD'),node('a_node', 'LOCAL'),
