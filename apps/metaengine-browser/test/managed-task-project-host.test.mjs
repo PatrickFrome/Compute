@@ -21,7 +21,10 @@ const unitStorage = { protectStorage: () => verified(null, { operation: 'PROTECT
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-project-host-')));
   const userDataPath = path.join(root, 'user-data'); const repo = path.join(root, 'repo'); const managed = path.join(root, 'projects');
-  await fs.mkdir(userDataPath); await fs.mkdir(repo); await fs.mkdir(managed);
+  await fs.mkdir(userDataPath); await fs.mkdir(repo);
+  // Production requires owner-only managed storage on POSIX as well as Windows.
+  // The fixture must create the trusted directory with the same invariant.
+  await fs.mkdir(managed, { mode: 0o700 });
   const git = argv => exec('git', argv, { cwd: repo, shell: false, windowsHide: true });
   await git(['init', '-q']);
   await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'seed']);
