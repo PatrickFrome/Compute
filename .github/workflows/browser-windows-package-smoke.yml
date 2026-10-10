@@ -1410,6 +1410,9 @@ jobs:
             ${{ runner.temp }}/browser-sentinel-worker-heartbeat-v1.json
             ${{ runner.temp }}/package-profile-probe.out
             ${{ runner.temp }}/package-profile-probe.err
+            ${{ runner.temp }}/first-run-wizard-proof.json
+            ${{ runner.temp }}/first-run-wizard.stdout
+            ${{ runner.temp }}/first-run-wizard.stderr
             ${{ runner.temp }}/package-normal-ui.out
             ${{ runner.temp }}/package-normal-ui.err
             ${{ runner.temp }}/package-second-instance.out

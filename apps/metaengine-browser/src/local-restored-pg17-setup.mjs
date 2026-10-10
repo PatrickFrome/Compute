@@ -93,19 +93,28 @@ export async function connectInstalledRestoredPostgres({
 // effects are gated by the local OS file chooser and a separate confirmation.
 export async function showInstalledRestoredProviderWizard({
   app, BrowserWindow, dialog, ipcMain, resourcesPath = process.resourcesPath,
-  operator = connectInstalledRestoredPostgres, env = process.env,
+  operator = connectInstalledRestoredPostgres, env = process.env, platform = process.platform,
 } = {}) {
-  if (!app?.isPackaged || process.platform !== 'win32' || !local(env.APPDATA)
+  if (!app?.isPackaged || platform !== 'win32' || !local(env.APPDATA)
     || !local(env.LOCALAPPDATA) || !local(resourcesPath))
     fail('installed_windows_required');
   await app.whenReady();
+  console.log(JSON.stringify({schema:'metaengine.browser.restored-pg17-first-run.v1',state:'ELECTRON_READY_FOR_WIZARD',authority_effect:false}));
+  const wizardTitle = 'METAENGINE - Connect existing PostgreSQL 17';
   const win = new BrowserWindow({
     width:740,height:770,minWidth:600,minHeight:630,show:false,
     title:'METAENGINE — Connect existing PostgreSQL 17',autoHideMenuBar:true,
     webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true,
       preload:fileURLToPath(new URL('./local-restored-pg17-setup-preload.cjs',import.meta.url))},
   });
+  win.setTitle('METAENGINE - Preparing local PostgreSQL setup');
   win.setMenu(null);
+  win.webContents.on('did-fail-load',(_event,code,_description,_url,isMainFrame)=>{
+    if (isMainFrame) console.error(JSON.stringify({schema:'metaengine.browser.restored-pg17-first-run.v1',state:'WIZARD_DOCUMENT_NAVIGATION_FAILED',code:Number(code),authority_effect:false}));
+  });
+  win.webContents.on('render-process-gone',(_event,details)=>{
+    console.error(JSON.stringify({schema:'metaengine.browser.restored-pg17-first-run.v1',state:'WIZARD_RENDERER_GONE',reason:String(details?.reason||'unknown').slice(0,50),authority_effect:false}));
+  });
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',event=>event.preventDefault());
   let configFile=null,restoreReceiptFile=null,claimed=false,busy=false,closed=false,verifiedClose=false;
@@ -163,7 +172,32 @@ export async function showInstalledRestoredProviderWizard({
     ipcMain.removeHandler(prefix+'choose');ipcMain.removeHandler(prefix+'connect');
     resolveResult({state:'CANCELLED',authority_effect:false});
   });
-  await win.loadFile(fileURLToPath(new URL('./local-restored-pg17-setup.html',import.meta.url)));
+  // Show the trusted, zero-authority setup frame before waiting on renderer
+  // navigation. A stuck loadFile used to leave a live primary with NO window.
+  // The final title is assigned only after the bundled wizard actually loads:
+  // installed CI must never mistake a blank preparatory frame for a ready UI.
   win.show();
+  console.log(JSON.stringify({schema:'metaengine.browser.restored-pg17-first-run.v1',state:'WIZARD_FRAME_SHOWN',authority_effect:false}));
+  let loadTimeout;
+  try {
+    await Promise.race([
+      win.loadFile(fileURLToPath(new URL('./local-restored-pg17-setup.html',import.meta.url))),
+      new Promise((_,reject)=>{loadTimeout=setTimeout(()=>reject(new Error('wizard_renderer_load_timeout')),20_000);}),
+    ]);
+    if (win.isDestroyed()) throw new Error('wizard_destroyed_during_load');
+    win.setTitle(wizardTitle);
+    win.show();
+    console.log(JSON.stringify({schema:'metaengine.browser.restored-pg17-first-run.v1',state:'WIZARD_DOCUMENT_LOADED',authority_effect:false}));
+  } catch(error) {
+    // Never fabricate a provider owner, start runtime agents or use cloud
+    // defaults. Keep an explicitly labelled error surface in the SAME window.
+    console.error(JSON.stringify({schema:'metaengine.browser.restored-pg17-first-run.v1',state:'WIZARD_LOAD_BLOCKED',reason:String(error?.message||'wizard_load_error').slice(0,120),authority_effect:false}));
+    if (!win.isDestroyed()) {
+      win.setTitle('METAENGINE - Local setup unavailable');
+      const boundary='<!doctype html><meta charset="utf-8"><style>body{background:#101216;color:#f0f0f0;font:16px sans-serif;padding:36px}</style><h2>Local setup unavailable</h2><p>PostgreSQL connection has not been configured. Close this window and review the startup diagnostics. No provider changes were made.</p>';
+      // Even a broken renderer must not block owner cancellation or shutdown.
+      void win.webContents.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(boundary)).catch(()=>{});
+    }
+  } finally {clearTimeout(loadTimeout);}
   return completed;
 }

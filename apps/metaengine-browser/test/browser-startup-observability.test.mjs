@@ -293,5 +293,8 @@ test('Windows installed smoke qualifies missing-owner wizard separately from con
   assert.match(workflow, /first_run_wizard_visible_readback_timeout/);
   assert.match(workflow, /first_run_wizard_fabricated_owner/);
   assert.match(workflow, /first_run_restored_pg17_wizard_visible=PASS/);
+  assert.match(workflow, /first-run-wizard-proof\.json/);
+  assert.match(workflow, /first-run-wizard\.stdout/);
+  assert.match(workflow, /first-run-wizard\.stderr/);
   assert.match(workflow, /normal_ui_second_instance_ack_contract_invalid/);
 });
