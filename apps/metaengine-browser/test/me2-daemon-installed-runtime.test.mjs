@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { resolveMe2DaemonLaunch, waitForMe2DaemonReady } from '../src/me2/me2-daemon-host.mjs';
-import { decideMe2UiInitialAction, me2UiExternalAdoptionAllowed, projectMe2UiRoutingAuthority, resolveMe2UiLaunch, startMe2UiHost, stopMe2UiHost, me2UiHostStatus } from '../src/me2/me2-ui-host.mjs';
+import { ME2_UI_LOOPBACK_HOST, me2UiChildEnvironment, decideMe2UiInitialAction, me2UiExternalAdoptionAllowed, projectMe2UiRoutingAuthority, resolveMe2UiLaunch, startMe2UiHost, stopMe2UiHost, me2UiHostStatus } from '../src/me2/me2-ui-host.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
@@ -59,7 +59,7 @@ test('R85 packaged ME2 UI prefers installed resources and embedded Electron node
     bin: execPath,
     args: ['server.js'],
     launch_mode: 'EMBEDDED_NODE_STANDALONE',
-    env_patch: { ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' },
+    env_patch: { ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', HOSTNAME: '127.0.0.1' },
   });
 
   const missingPackagedLaunch = resolveMe2UiLaunch({
@@ -72,6 +72,29 @@ test('R85 packaged ME2 UI prefers installed resources and embedded Electron node
   assert.equal(missingPackagedLaunch, null, 'packaged runtime must not escape to a source-tree UI');
 });
 
+
+test('ME2 child process always binds Next standalone to local loopback, despite hostile inherited HOSTNAME', () => {
+  assert.equal(ME2_UI_LOOPBACK_HOST, '127.0.0.1');
+  const env = me2UiChildEnvironment({ parentEnv: { HOSTNAME: '0.0.0.0', PORT: '3000' },
+    patch: { HOSTNAME: '::', PORT: '443', NODE_ENV: 'production' }, port: 3000 });
+  assert.deepEqual({
+    host: env.HOSTNAME, port: env.PORT, hosted: env.ME2_HOSTED_BY_BROWSER,
+    watchdog: env.ME2_WATCHDOG, nodeEnv: env.NODE_ENV,
+  }, { host: '127.0.0.1', port: '3000', hosted: '1', watchdog: 'off', nodeEnv: 'production' });
+  assert.throws(() => me2UiChildEnvironment({port:0}), /me2_ui_port_invalid/);
+  assert.throws(() => me2UiChildEnvironment({port:70000}), /me2_ui_port_invalid/);
+});
+
+test('packaged UI launch has a pinned HOSTNAME and does not use the public 0.0.0.0 Next default', () => {
+  const resources = path.join(path.sep, 'test-install', 'resources');
+  const exe = path.join(path.sep, 'test-install', 'METAENGINE Browser Test.exe');
+  const dir = path.join(resources, 'me2-ui');
+  const launch = resolveMe2UiLaunch({ resourcesPath: resources, execPath: exe,
+    env: { HOSTNAME: '0.0.0.0' },
+    exists: file => [path.join(resources,'app.asar'),path.join(dir,'package.json'),path.join(dir,'server.js')].includes(file) });
+  assert.equal(launch.env_patch.HOSTNAME, '127.0.0.1');
+  assert.equal(me2UiChildEnvironment({parentEnv:{HOSTNAME:'0.0.0.0'},patch:launch.env_patch}).HOSTNAME,'127.0.0.1');
+});
 
 test('R85 Browser owns packaged ME2 UI lifecycle and never adopts a healthy port by default', () => {
   assert.equal(me2UiExternalAdoptionAllowed({ env: {} }), false);

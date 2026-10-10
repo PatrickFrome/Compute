@@ -1,6 +1,6 @@
 import { registerHooks } from 'node:module';
 import { app, BaseWindow } from 'electron';
-import { requestPrimaryWindowResurrection } from './primary-window-resurrection.mjs';
+import { initialPrimaryRecoveryAllowed, requestPrimaryWindowResurrection } from './primary-window-resurrection.mjs';
 import { isInstallerShutdownArgv } from './single-instance-guard.mjs';
 
 const mainUrl = new URL('./main.mjs', import.meta.url).href;
@@ -124,7 +124,25 @@ await import('./main-entry.mjs');
 // main.mjs still fences actual window creation.
 const primaryInstance = typeof app.hasSingleInstanceLock !== 'function'
   || app.hasSingleInstanceLock() === true;
-if (primaryUiRecoveryEnabled && primaryInstance && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
+const localStatusBoundaryExpected = globalThis.__METAENGINE_LOCAL_BOUNDARY_EXPECTED__ === true;
+if (primaryUiRecoveryEnabled && primaryInstance && localStatusBoundaryExpected) {
+  console.log(JSON.stringify({
+    schema: 'metaengine.browser.final-runtime-initial-ui-bootstrap.v1',
+    state: 'LOCAL_STATUS_BOUNDARY_DELEGATED',
+    reason: 'NO_REGISTERED_LOCAL_POSTGRES_OWNER',
+    browser_runtime_ready: false,
+    provider_authority_attested: false,
+    primary_window_readback_claimed: false,
+    second_browser_runtime_started: false,
+    update_authority_effect: false,
+    authority_effect: false,
+  }));
+}
+if (initialPrimaryRecoveryAllowed({
+  enabled: primaryUiRecoveryEnabled, primaryInstance,
+  localBoundaryExpected: localStatusBoundaryExpected,
+  installerShutdownRequested: globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true,
+})) {
   const requestInitialPrimaryUi = () => {
     void requestPrimaryWindowResurrection({
       app,
