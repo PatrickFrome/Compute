@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import postgres from 'postgres';
-import { inspectLocalApiSchemaCatalog } from './db-api-core.mjs';
+import { inspectLocalApiSchemaCatalog, RPC_ALLOWLIST } from './db-api-core.mjs';
 import { initializeFreshClientPg17 } from './fresh-pg17-initdb.mjs';
 import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
@@ -140,7 +140,7 @@ test('new owned PG17+Vault cold-restarts with exact persisted SQL row and unchan
   assert(version.major >= 170000 && version.major < 180000);
   const catalog = await inspectLocalApiSchemaCatalog({ sql });
   assert.equal(catalog.state, 'BASELINE_SCHEMA_MISSING');
-  assert.equal(catalog.required_rpc_count, 40);
+  assert.equal(catalog.required_rpc_count, RPC_ALLOWLIST.length);
   assert.equal(catalog.required_table_count, 5);
   assert.equal(catalog.runtime_ready, false);
   assert.equal(catalog.initialization_authorized, false);
