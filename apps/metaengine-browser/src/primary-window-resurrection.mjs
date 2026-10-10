@@ -11,6 +11,17 @@ function usableWindowCount(BaseWindow) {
   }).length;
 }
 
+// A missing-owner launch intentionally creates an inert status boundary,
+// not the full Browser main/activate handler. Never misreport that deliberate
+// fail-closed state as a failed primary UI resurrection.
+export function initialPrimaryRecoveryAllowed({
+  enabled = true, primaryInstance = true, localBoundaryExpected = false,
+  installerShutdownRequested = false,
+} = {}) {
+  return enabled === true && primaryInstance === true
+    && localBoundaryExpected !== true && installerShutdownRequested !== true;
+}
+
 export function primaryWindowResurrectionContract() {
   return Object.freeze({
     schema: PRIMARY_WINDOW_RESURRECTION_SCHEMA,
