@@ -109,8 +109,8 @@ if (guard.installer_shutdown_control) {
     if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
   });
   // Only a first interactive packaged launch without an owner must be deferred.
-  // Its setup wizard awaits app.whenReady(), and doing that from the entrypoint's
-  // top-level module evaluation deadlocks the Electron ready event. Preserve the
+  // Its inert local-runtime status boundary awaits app.whenReady(), which cannot
+  // be awaited from the entrypoint's own top-level module evaluation. Preserve the
   // original awaited order for provisioned owners, updater and probe launches.
   const ownerPath = localStateProviderOwnerFile();
   let firstRunOwnerMissing = false;
@@ -136,15 +136,16 @@ if (guard.installer_shutdown_control) {
     let bootstrapState = providerBoot.persistentLocalProviderBootstrap.state;
     if (app.isPackaged && browserRuntimeNeeded && interactiveNormalLaunch
       && !bypassSingleInstance && bootstrapState === 'NO_OWNER_CONFIG') {
-      // First-run setup is an offline, consented LOCAL_POSTGRES surface. It
-      // cannot import Browser/main/HostResilience until a previously restored
-      // PostgreSQL 17 is independently qualified and owner-bound.
-      const { showInstalledRestoredProviderWizard } = await import('./local-restored-pg17-setup.mjs');
-      const setup = await showInstalledRestoredProviderWizard({ app, BrowserWindow, dialog, ipcMain });
-      if (setup.state === 'CONFIGURED') {
-        const readyProvider = await providerBoot.bootstrapPersistentLocalProvider();
-        bootstrapState = readyProvider.state;
-      }
+      // Already registered LOCAL_POSTGRES owners are reconnected automatically
+      // by bootstrapPersistentLocalProvider, with current health attestation.
+      // With NO owner, do NOT start the Browser, forge owner authority, attempt
+      // initdb against ambiguous local files, or display the retired manual
+      // 'Connect existing PostgreSQL 17' restore-selection wizard.
+      // Show an inert, read-only status boundary until a separately qualified
+      // fresh provisioner or explicit recovery operator establishes ownership.
+      const { showUnprovisionedLocalStateBoundary } = await import('./local-provider-unavailable-boundary.mjs');
+      await showUnprovisionedLocalStateBoundary({ app, BrowserWindow });
+      return;
     }
     requirePackagedLocalProviderAdmission({
       isPackaged: app.isPackaged,
@@ -765,7 +766,7 @@ if (guard.installer_shutdown_control) {
       } catch {}
   };
   if (firstRunOwnerMissing) {
-    // End ESM evaluation before the first-run wizard can await Electron ready.
+    // End ESM evaluation before the missing-owner boundary awaits Electron ready.
     // The singleton and installer-shutdown barrier were installed above.
     setImmediate(() => { void runPrimaryStartup().catch(onDeferredFirstRunError); });
   } else {

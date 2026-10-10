@@ -897,7 +897,7 @@ jobs:
             'mode=FIRST_RUN' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           }
 
-      - name: Prove first-run restored PG17 wizard visible with no owner
+      - name: Prove no-owner local-state boundary visible with zero database effects
         if: steps.installed_owner_mode.outputs.mode == 'FIRST_RUN'
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -907,8 +907,8 @@ jobs:
           if (Test-Path -LiteralPath $owner) { throw 'first_run_unexpected_owner_config' }
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
           if (-not (Test-Path $exe -PathType Leaf)) { throw 'first_run_installed_exe_missing' }
-          $stdout = Join-Path $env:RUNNER_TEMP 'first-run-wizard.stdout'
-          $stderr = Join-Path $env:RUNNER_TEMP 'first-run-wizard.stderr'
+          $stdout = Join-Path $env:RUNNER_TEMP 'local-state-boundary.stdout'
+          $stderr = Join-Path $env:RUNNER_TEMP 'local-state-boundary.stderr'
           Add-Type -TypeDefinition @'
           using System;
           using System.Runtime.InteropServices;
@@ -927,13 +927,13 @@ jobs:
               $p.Refresh()
               if ($p.HasExited) {
                 Get-Content $stderr -ErrorAction SilentlyContinue | Write-Host
-                throw "first_run_wizard_primary_exited:$($p.ExitCode)"
+                throw "local_state_boundary_primary_exited:$($p.ExitCode)"
               }
               $live = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
               $handle = if ($live) { $live.MainWindowHandle } else { [IntPtr]::Zero }
               $title = if ($live) { [string]$live.MainWindowTitle } else { '' }
               $visible = $handle -ne [IntPtr]::Zero -and [MetaengineFirstRunWindow]::IsWindowVisible($handle)
-              if ($visible -and $title.Contains('Connect existing PostgreSQL 17')) {
+              if ($visible -and $title.Contains('Local runtime unavailable')) {
                 if ($handle -ne $lastHandle) {
                   $lastHandle = $handle
                   $stableSince = [DateTime]::UtcNow
@@ -949,19 +949,19 @@ jobs:
             }
             if (-not $qualified) {
               Get-Content $stderr -ErrorAction SilentlyContinue | Write-Host
-              throw 'first_run_wizard_visible_readback_timeout'
+              throw 'local_state_boundary_visible_readback_timeout'
             }
-            if (Test-Path -LiteralPath $owner) { throw 'first_run_wizard_fabricated_owner' }
+            if (Test-Path -LiteralPath $owner) { throw 'local_state_boundary_fabricated_owner' }
             [pscustomobject]@{
-              schema = 'metaengine.browser.first-run-wizard-installed-proof.v1'
+              schema = 'metaengine.browser.local-state-boundary-installed-proof.v1'
               source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
-              wizard_visible = $true
+              local_state_boundary_visible = $true
               window_stable_ms = 1500
               owner_config_created = $false
               main_runtime_admitted = $false
               authority_effect = $false
-            } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $env:RUNNER_TEMP 'first-run-wizard-proof.json')
-            Write-Host 'first_run_restored_pg17_wizard_visible=PASS'
+            } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $env:RUNNER_TEMP 'local-state-boundary-proof.json')
+            Write-Host 'local_state_missing_owner_boundary_visible=PASS'
           } finally {
             if ($p -and -not $p.HasExited) {
               try { $null = $p.CloseMainWindow() } catch {}
@@ -1410,9 +1410,9 @@ jobs:
             ${{ runner.temp }}/browser-sentinel-worker-heartbeat-v1.json
             ${{ runner.temp }}/package-profile-probe.out
             ${{ runner.temp }}/package-profile-probe.err
-            ${{ runner.temp }}/first-run-wizard-proof.json
-            ${{ runner.temp }}/first-run-wizard.stdout
-            ${{ runner.temp }}/first-run-wizard.stderr
+            ${{ runner.temp }}/local-state-boundary-proof.json
+            ${{ runner.temp }}/local-state-boundary.stdout
+            ${{ runner.temp }}/local-state-boundary.stderr
             ${{ runner.temp }}/package-normal-ui.out
             ${{ runner.temp }}/package-normal-ui.err
             ${{ runner.temp }}/package-second-instance.out

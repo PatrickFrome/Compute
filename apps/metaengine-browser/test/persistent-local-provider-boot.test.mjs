@@ -239,7 +239,9 @@ test('packaged owner admission precedes HostResilience and main imports', async 
   assert.match(entry, /isPackaged: app\.isPackaged/);
   assert.match(entry, /let bootstrapState = providerBoot\.persistentLocalProviderBootstrap\.state/);
   assert.match(entry, /bootstrapState,\s*\}\)/);
-  assert.match(entry, /showInstalledRestoredProviderWizard/);
-  assert.match(entry, /if \(setup\.state === 'CONFIGURED'\)/);
-  assert.match(entry, /bootstrapState = readyProvider\.state/);
+  assert.match(entry, /showUnprovisionedLocalStateBoundary/);
+  assert.doesNotMatch(entry, /showInstalledRestoredProviderWizard|local-restored-pg17-setup\.mjs/);
+  assert.match(entry, /bootstrapState === 'NO_OWNER_CONFIG'/);
+  assert.match(entry, /await showUnprovisionedLocalStateBoundary\(\{ app, BrowserWindow \}\)/);
+  assert.match(entry, /return;/);
 });

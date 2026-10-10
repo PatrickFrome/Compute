@@ -158,7 +158,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/local-restored-pg17-setup.mjs",
   "src/local-restored-pg17-auto-prepare.mjs",
   "src/private-windows-storage-acl.mjs",
-  "src/local-restored-pg17-setup-preload.cjs",
+  "src/local-provider-unavailable-boundary.mjs",
   "src/remote-support-mcp.mjs",
   "src/managed-task-project-runtime.mjs",
   "src/managed-task-project-command-adapter.mjs",
