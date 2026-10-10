@@ -18,10 +18,15 @@ function node(node_id, domain, overrides = {}) {
     capabilities: ['GIT_READ', 'TEST_RUN'], total_slots: 2, in_use_slots: 0,
     latency_ms: 25, cost_units: 10, ...overrides };
 }
+function enrollment(n) {
+  return {node_id:n.node_id, incarnation_id:n.incarnation_id, generation:n.generation,
+    domain:n.domain, source_sha:n.source_sha};
+}
 function snapshot(nodes = []) {
   return { schema: 'metaengine.hybrid.registry-snapshot.v1',
     workspace_id: 'workspace_alpha', source_sha: sha,
-    readback_source: 'EXISTING_CONTROL_PLANE', nodes };
+    readback_source: 'EXISTING_CONTROL_PLANE', nodes,
+    enrollments: nodes.filter(Boolean).map(enrollment) };
 }
 function place(nodes, intent = task(), time = now) {
   return proposeHybridPlacement({ task: intent, snapshot: snapshot(nodes), now_ms: time });
@@ -110,8 +115,33 @@ test('empty fleet is a HOLD rather than fabricated cloud fallback', () => {
   assert.equal(result.dispatch_allowed, false);
 });
 test('malformed node is rejected with bounded diagnostics', () => {
-  assert.deepEqual(classifyHybridNode({...node('local01','LOCAL'),capabilities:['RAW_CDP']},task(),now),
+  assert.deepEqual(classifyHybridNode({...node('local01','LOCAL'),capabilities:['RAW_CDP']},task(),now,enrollment(node('local01','LOCAL'))),
     {eligible:false,reason:'NODE_INVALID'});
+});
+
+test('unenrolled worker is not eligible', () => {
+  const registered=snapshot([node('local01','LOCAL')]);
+  const result=proposeHybridPlacement({task:task(),snapshot:{...registered,enrollments:[]},now_ms:now});
+  assert.equal(result.state,'HOLD');
+  assert.equal(result.excluded.NODE_NOT_ENROLLED,1);
+});
+test('reincarnated worker cannot reuse old enrollment', () => {
+  const registered=snapshot([node('local01','LOCAL')]);
+  const changed={...registered,nodes:[node('local01','LOCAL',{incarnation_id:'boot_0002'})]};
+  const result=proposeHybridPlacement({task:task(),snapshot:changed,now_ms:now});
+  assert.equal(result.excluded.NODE_GENERATION_OR_SEQUENCE_FENCED,1);
+});
+test('duplicate registrations are rejected, not first-write-wins', () => {
+  const registered=snapshot([node('local01','LOCAL')]);
+  const result=proposeHybridPlacement({task:task(),
+    snapshot:{...registered,enrollments:[...registered.enrollments,...registered.enrollments]},now_ms:now});
+  assert.equal(result.reason,'DUPLICATE_REGISTRY_ENROLLMENT');
+});
+test('registration domain mismatch cannot promote local node to cloud', () => {
+  const registered=snapshot([node('local01','LOCAL')]);
+  const modified={...registered,enrollments:[{...registered.enrollments[0],domain:'CLOUD'}]};
+  const result=proposeHybridPlacement({task:task(),snapshot:modified,now_ms:now});
+  assert.equal(result.excluded.NODE_GENERATION_OR_SEQUENCE_FENCED,1);
 });
 test('registry must exactly match task source and workspace', () => {
   const s=snapshot([node('local01','LOCAL')]);
