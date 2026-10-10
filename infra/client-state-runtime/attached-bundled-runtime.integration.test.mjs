@@ -319,6 +319,9 @@ test('verified bundled onboarding and attached host restart preserve an existing
     assert.equal((await owned.verify()).pid, owned.pid);
     assert.equal((await fs.readFile(path.join(data, 'postmaster.pid'))).equals(pidBytes), true);
     assert.equal(await fileDigest(path.join(data, 'client-vault.key')), vaultDigest);
+    assert.equal((await fs.lstat(verified.paths.denoExecutable)).nlink, 1,
+      'Deno node compatibility links must never target the protected bundle executable');
+    await verifyOfflineRuntimeBundle({ bundleDirectory, expectedBundleDigest });
     const [identity] = await sql.unsafe('SELECT system_identifier::text AS id FROM pg_catalog.pg_control_system()');
     assert.equal(identity.id, cluster.id);
     for (const secret of [ownerPassword, apiPassword, config.database_url, config.inspect_database_url]) assert.equal(host.output().includes(secret), false);

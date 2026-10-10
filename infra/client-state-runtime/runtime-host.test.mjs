@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { runtimeProviderDescriptor, stageManagedDenoCache, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
+import { runtimeProviderDescriptor, stageManagedDenoCache, stageManagedDenoExecutable, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
 const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version: 1,
@@ -36,7 +36,8 @@ async function fixture(t, overrides = {}) {
     startupManifest: { source_manifest_sha256: 'd'.repeat(64) }, finished,
     stop: async reason => { calls += 1; const outcome = { reason, children_stopped: true }; finish(outcome); return outcome; } };
   return { root, config, configFile, runtime, verified, finish, stopCalls: () => calls,
-    hooks: { verifyBundle: async () => verified, stageDenoCache: async () => root, launchRuntime: async () => runtime } };
+    hooks: { verifyBundle: async () => verified, stageDenoCache: async () => root,
+      stageDenoExecutable: async () => path.join(root, 'private-deno.exe'), launchRuntime: async () => runtime } };
 }
 
 test('host rejects private-state overlap, extra config fields and unqualified providers', () => {
@@ -143,6 +144,8 @@ test('attached host passes through mode and shutdown never claims the external P
   assert.equal(launched.postgresMode, 'attached');
   assert.equal(launched.apiRoleMode, 'direct');
   assert.equal(launched.expectedClusterSystemIdentifier, '7654321098765432100');
+  assert.equal(launched.denoPath, path.join(f.root, 'private-deno.exe'));
+  assert.notEqual(launched.denoPath, f.verified.paths.denoExecutable);
   assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).postgres_mode, 'attached');
   assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).api_role_mode, 'direct');
   assert.equal(f.runtime.children.some(child => child.name === 'postgres'), false);
@@ -236,4 +239,53 @@ test('cache staging rejects changed source bytes and private-cache directory ali
   await rm(path.join(f.config.state_directory, 'deno-cache'), { recursive: true });
   await symlink(path.dirname(source), path.join(f.config.state_directory, 'deno-cache'), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(stageManagedDenoCache({ verified, stateDirectory: f.config.state_directory }), /path_invalid/);
+});
+
+async function denoCopyFixture(t) {
+  const f = await fixture(t);
+  const bytes = Buffer.from('synthetic pinned executable bytes');
+  const source = path.join(f.config.bundle_directory, 'runtime', 'deno', 'deno.exe');
+  await mkdir(path.dirname(source), { recursive: true });
+  await writeFile(source, bytes);
+  const verified = { manifest: { files: [{ component: 'deno', path: 'runtime/deno/deno.exe',
+    bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }] }, paths: { denoExecutable: source } };
+  return { ...f, bytes, source, options: { verified, stateDirectory: f.config.state_directory } };
+}
+
+test('Deno compatibility hardlinks remain private across successive executable staging', async t => {
+  const f = await denoCopyFixture(t);
+  const target = await stageManagedDenoExecutable(f.options);
+  const first = await lstat(target);
+  const source = await lstat(f.source);
+  assert.notEqual(first.ino, source.ino);
+  assert.equal(first.nlink, 1);
+  const compatibility = path.join(f.config.state_directory, 'deno-cache', 'node_compat_bin', 'node.exe');
+  await mkdir(path.dirname(compatibility), { recursive: true });
+  await link(target, compatibility);
+  assert.equal((await lstat(target)).nlink, 2, 'simulate the real Deno node compatibility hardlink');
+  assert.equal(await stageManagedDenoExecutable(f.options), target);
+  assert.equal((await lstat(target)).nlink, 1, 'new run gets an independent single-link private executable');
+  assert.equal((await lstat(f.source)).nlink, 1, 'sealed package never acquires a compatibility hardlink');
+  assert.notEqual((await lstat(target)).ino, (await lstat(compatibility)).ino);
+  assert.deepEqual(await readFile(compatibility), f.bytes);
+  assert.deepEqual(await readFile(f.source), f.bytes);
+});
+
+test('private Deno executable tampering and bundled executable aliases fail before launch', async t => {
+  const f = await denoCopyFixture(t);
+  const target = await stageManagedDenoExecutable(f.options);
+  await writeFile(target, 'changed private executable');
+  await assert.rejects(stageManagedDenoExecutable(f.options), /deno_executable_digest_mismatch/);
+  assert.equal(await readFile(target, 'utf8'), 'changed private executable', 'never silently repairs tampered executable');
+  await link(f.source, path.join(f.root, 'foreign-deno-link.exe'));
+  await assert.rejects(stageManagedDenoExecutable(f.options), /deno_executable_path_invalid/);
+});
+
+test('private Deno staging rejects directory aliases and changed bundled executable bytes', async t => {
+  const f = await denoCopyFixture(t);
+  await writeFile(f.source, 'changed bundled executable');
+  await assert.rejects(stageManagedDenoExecutable(f.options), /deno_executable_digest_mismatch/);
+  await writeFile(f.source, f.bytes);
+  await symlink(f.config.bundle_directory, path.join(f.config.state_directory, 'deno-runtime'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(stageManagedDenoExecutable(f.options), /path_invalid/);
 });

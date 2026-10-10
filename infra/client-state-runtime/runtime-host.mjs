@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { constants, createReadStream } from 'node:fs';
+import { copyFile, lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchClientStateRuntime, normalizeLauncherConfig } from './launcher.mjs';
@@ -194,6 +195,64 @@ export async function stageManagedDenoCache({ verified, stateDirectory }) {
   return cacheDirectory;
 }
 
+async function denoExecutableIdentity(file, expected, singleLink) {
+  await requireCanonicalPath(path.dirname(file), 'directory');
+  const before = await lstat(file);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink < 1 || (singleLink && before.nlink !== 1)) {
+    throw failure('runtime_host_deno_executable_path_invalid');
+  }
+  const hash = createHash('sha256');
+  for await (const bytes of createReadStream(file)) hash.update(bytes);
+  const after = await lstat(file);
+  if (before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+    || after.isSymbolicLink() || !after.isFile() || (singleLink && after.nlink !== 1)
+    || after.size !== expected.bytes || hash.digest('hex') !== expected.sha256) {
+    throw failure('runtime_host_deno_executable_digest_mismatch');
+  }
+  return after;
+}
+
+// Deno creates DENO_DIR/node_compat_bin/node.exe as a hardlink to its running
+// executable. Running the sealed bundle's Deno would therefore change its link
+// count and invalidate the next bundle verification. Execute an independently
+// copied, pinned private binary; generated node compatibility links stay private.
+export async function stageManagedDenoExecutable({ verified, stateDirectory }) {
+  await requireCanonicalPath(stateDirectory, 'directory');
+  const source = verified?.paths?.denoExecutable;
+  const record = verified?.manifest?.files?.find(file => file.path === 'runtime/deno/deno.exe' && file.component === 'deno');
+  if (!record || !/^[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.bytes) || record.bytes < 1
+    || !path.isAbsolute(source || '') || within(stateDirectory, source)) throw failure('runtime_host_deno_executable_pin_required');
+  const sourceIdentity = await denoExecutableIdentity(source, record, true);
+  const root = path.join(stateDirectory, 'deno-runtime');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await requireCanonicalPath(root, 'directory');
+  const directory = path.join(root, record.sha256);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await requireCanonicalPath(directory, 'directory');
+  const target = path.join(directory, 'deno.exe');
+  try {
+    // A previous private copy may have its normal Deno compatibility hardlink.
+    // Verify it before replacement; changed private bytes are never repaired.
+    await denoExecutableIdentity(target, record, false);
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const temporary = path.join(directory, '.deno-' + randomUUID() + '.exe');
+  try {
+    await copyFile(source, temporary, constants.COPYFILE_EXCL);
+    const copyIdentity = await denoExecutableIdentity(temporary, record, true);
+    if (copyIdentity.ino === sourceIdentity.ino && copyIdentity.dev === sourceIdentity.dev) {
+      throw failure('runtime_host_deno_executable_copy_aliased');
+    }
+    await denoExecutableIdentity(source, record, true);
+    // Atomic replacement gives this run a single-link copy even when the
+    // previous private inode remains reachable from node_compat_bin/node.exe.
+    await rename(temporary, target);
+    await denoExecutableIdentity(target, record, true);
+    return target;
+  } finally {
+    try { await unlink(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+}
+
 export function runtimeProviderDescriptor(runtime) {
   if (!/^[a-f0-9-]{36}$/i.test(runtime?.instanceId || '') || runtime?.edgeHealth?.runtime_ready !== true
     || runtime.edgeHealth.state_provider !== 'LOCAL_POSTGRES' || runtime.edgeHealth.hosted_supabase_required !== false
@@ -268,7 +327,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     await persist(baseStatus);
     if (abortRequested) throw failure('runtime_host_startup_cancelled');
     const denoDir = await (hooks.stageDenoCache || stageManagedDenoCache)({ verified, stateDirectory: config.state_directory });
-    runtime = await (hooks.launchRuntime || launchClientStateRuntime)({ ...launcherConfig, denoDir });
+    const denoPath = await (hooks.stageDenoExecutable || stageManagedDenoExecutable)({ verified, stateDirectory: config.state_directory });
+    runtime = await (hooks.launchRuntime || launchClientStateRuntime)({ ...launcherConfig, denoDir, denoPath });
     if (abortRequested) { await stop('startup_cancelled'); throw failure('runtime_host_startup_cancelled'); }
     const descriptor = Object.freeze({ ...runtimeProviderDescriptor(runtime), status_file: path.join(config.state_directory, 'runtime-instance.json') });
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
