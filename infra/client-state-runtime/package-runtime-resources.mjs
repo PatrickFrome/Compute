@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { captureStartupSource, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
+import { LOCAL_RUNTIME_MIGRATIONS } from './local-runtime-migrations.mjs';
 
 export const BUNDLE_SCHEMA = 'compute.runtime-source-bundle.v1';
 export const BUNDLE_MANIFEST_FILE = 'runtime-source-bundle.json';
@@ -10,6 +11,7 @@ export const BUNDLE_ENTRY_POINTS = Object.freeze([
   'infra/client-state-runtime/launcher.mjs',
   'infra/client-state-runtime/db-api.mjs',
   'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts',
+  'infra/client-state-runtime/local-runtime-migrations.mjs',
 ]);
 export const RUNTIME_HOST_ENTRY = 'infra/client-state-runtime/runtime-host.mjs';
 export const FIRST_RUN_INITDB_ENTRY = 'infra/client-state-runtime/fresh-pg17-initdb.mjs';
@@ -19,6 +21,7 @@ const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_EN
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';
 const locks = Object.freeze(['package.json', 'package-lock.json', 'deno.lock']);
+const migrationResources = new Set(LOCAL_RUNTIME_MIGRATIONS.map(migration => `supabase/migrations/${migration.path}`));
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const slash = value => value.split(sep).join('/');
 const digestPattern = /^[a-f0-9]{64}$/;
@@ -49,7 +52,7 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
 ]);
 function sourcePathAllowed(value) {
-  return (REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
+  return (migrationResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
     || /^(?:infra\/client-state-runtime\/[^/]+\.mjs|apps\/metaengine-browser\/src\/meta-(?:objective|orchestrator)-[^/]+\.mjs|apps\/metaengine-browser\/supabase\/a2-browser-native-supervisor-v1\/[^/]+\.(?:mjs|ts))$/.test(value))
     && !/(?:\.test\.|-fixture\.)/.test(value);
 }
@@ -116,7 +119,7 @@ export function reviewedBundlePlan(startupManifest, expectedSourceDigest, { incl
     const selected = classifyRecord(record);
     if (selected) records.push(selected);
   }
-  for (const name of [...selectedEntries(includeRuntimeHost), ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
+  for (const name of [...selectedEntries(includeRuntimeHost), ...migrationResources, ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
     if (!records.some(record => record.path === name)) fail('bundle_required_resource_missing');
   }
   const paths = records.map(record => record.path);

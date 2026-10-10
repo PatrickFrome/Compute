@@ -7,6 +7,8 @@ import { createMetaSupervisorRoutes } from './meta-routes.mjs';
 import { createCognitiveDeltaRoutes } from './cognitive-delta-routes.mjs';
 import { createEmergencyCommandRoutes } from './emergency-routes.mjs';
 import { projectNativeSupervisorRuntimeCapabilityHealth, runtimeCapabilityHealthResponseFields } from './runtime-capability-health.mjs';
+import { createManagedProjectRoutes } from './managed-project-routes.mjs';
+import { createProjectContinuityRoutes } from './project-continuity-routes.mjs';
 import { openRealtimeCommandWake } from './realtime-command-wake.mjs';
 import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
 import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
@@ -545,6 +547,8 @@ async function health(){const capability=await projectNativeSupervisorRuntimeCap
 async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'POSTGREST_RPC',direct_postgres_query_plane:false,direct_postgres_diagnostics_only:true,device_auth_required:true,admin_device_grant_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':(DB_SESSION_URL?'POSTGRES_NOTIFY_PROXY':'BOUNDED_DB_POLL'),effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2','computer-v1'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:Boolean(DB_SESSION_URL),postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
+const managedProjectRoutes=createManagedProjectRoutes({rpc,workspaceId:WORKSPACE_ID});
+const projectContinuityRoutes=createProjectContinuityRoutes({rpc,workspaceId:WORKSPACE_ID});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
 const metaRoutes=createMetaSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID});
 const cognitiveRoutes=createCognitiveDeltaRoutes({rpc,workspaceId:WORKSPACE_ID,json});
@@ -599,6 +603,8 @@ Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
     const canonicalPath=`${SERVICE_MARKER}${path}`;
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
+    const managedProject=await managedProjectRoutes({req,path,body,identity});if(managedProject)return managedProject;
+    const projectContinuity=await projectContinuityRoutes({req,path,body,identity});if(projectContinuity)return projectContinuity;
     if(req.method==='GET'&&path==='/v1/admin/status')return json(200,await adminStatus(identity));
     const chatCommand=await chatCommandRoutes({req,path,body,identity});if(chatCommand)return chatCommand;
     if(req.method==='POST'&&path==='/v1/device/guardian-enrollment/ticket')return issueGuardianEnrollmentTicket(identity);

@@ -79,6 +79,8 @@ test('electron-builder owns the single Guardian native staging build boundary', 
   assert.match(hook, /build-guardian-native-staging\.ps1/);
   assert.match(hook, /guardian_native_staging_windows_toolchain_required/);
   assert.match(hook, /guardian_native_staging_build_failed/);
+  assert.doesNotMatch(hook, /ME2_GUARDIAN_NATIVE_REUSE_DIR|reuseVerifiedNativeStaging/,
+    'source-bound packages require fresh native compilation; editable cache manifests cannot prove producer provenance');
   assert.doesNotMatch(hook, /\b(?:sc\.exe|Start-Service|New-Service|CreateServiceW|StartServiceW)\b/i);
 });
 

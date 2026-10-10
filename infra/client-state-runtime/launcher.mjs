@@ -329,6 +329,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     const fixtureEntry = (command, fallback) => command ? command.args.find((arg) => path.isAbsolute(arg) && /\.(mjs|js|ts)$/.test(arg)) || fallback : fallback;
     const captureOptions = {
       repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry),
+        path.join(here, 'local-runtime-migrations.mjs'),
         ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs')] : [])],
       nodePath: config.nodePath, denoPath: config.denoPath, denoLockPath: config.denoLockPath,
       pgBinDir: hooks.inspectPostgres ? undefined : config.pgBinDir, env, fixture, policy: safeRuntimePolicy(config, { fixture }),

@@ -116,7 +116,7 @@ test('HTTP requires local authority, role transaction and validates routing/body
     assert.equal(health.status, 200);
     const value = await health.json();
     assert.equal(value.instance_id, 'test-owned-instance');
-    assert.equal(value.rpc_catalog.available, 40);
+    assert.equal(value.rpc_catalog.available, RPC_ALLOWLIST.length);
     assert.equal(value.runtime_capabilities.schema, 'test-capabilities');
     assert.equal((await fetch(runtime.address + '/health')).status, 401);
     assert.equal((await get('/health', { headers: { authorization: 'Bearer different' } })).status, 401);
@@ -213,7 +213,7 @@ test('fresh PostgreSQL catalog is explicitly missing all API functions/tables/ro
   assert.equal(observed.state, 'BASELINE_SCHEMA_MISSING');
   assert.deepEqual(observed.missing_rpc, RPC_ALLOWLIST);
   assert.deepEqual(observed.missing_table, Object.keys(TABLE_ALLOWLIST));
-  assert.equal(observed.required_rpc_count, 40);
+  assert.equal(observed.required_rpc_count, RPC_ALLOWLIST.length);
   assert.equal(observed.required_table_count, 5);
   assert.equal(observed.service_role_present, false);
   assert.equal(observed.pgcrypto_present, false);

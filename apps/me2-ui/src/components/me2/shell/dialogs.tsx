@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMe2 } from "@/components/me2/store";
 import { eventsSearch, environmentReset, age, hhmmss, EVENT_STYLE, type Event } from "@/lib/me2-bus";
 import { projectActionFeed, projectFeedBinding } from "@/lib/project-action-feed.mjs";
+import { ManagedProjectHistory } from "@/components/me2/managed-project-history";
 import {
   Search, Gauge, Trash2, CheckCircle2,
   AlertTriangle, Activity, Globe2,
@@ -299,7 +300,7 @@ function TaskSheet() {
                 <div className="mb-2 space-y-1 font-mono text-[9px] text-zinc-500" data-testid="task-project-feed-status" aria-live="polite">
                   <p>{projectBinding.label} · {connected ? "live" : "offline"} · последнее событие #{actionFeed.cursor?.latest_seq ?? "—"}</p>
                   <p>Окно до 200 действий{streamCursor ? ` · прочитано из БД до #${streamCursor.returned_through_seq}` : " · курсор БД недоступен"}</p>
-                  <p className="text-zinc-600">Действия этой задачи. Общий журнал проекта пока недоступен: задача не содержит привязки к project/workspace.</p>
+                  <p className="text-zinc-600">Журнал действий выбранной задачи. Связь с общим проектом проверяется ниже по её точному ID.</p>
                   {streamState === "LOADING" ? <p className="text-cyan-400">Загрузка истории…</p> : null}
                   {streamCursor?.resync_required ? <p className="text-amber-400">Журнал изменился: прежний курсор недействителен. Загрузите последнее окно.</p> : streamState === "DEGRADED" ? <p className="text-amber-400">Синхронизация недоступна. Сохранены ранее прочитанные действия.</p> : null}
                   {streamCursor?.has_more ? <p className="text-cyan-400">В БД есть следующие действия. Загрузите следующую страницу.</p> : null}
@@ -324,6 +325,7 @@ function TaskSheet() {
                   <div ref={streamEndRef} />
                 </div>
               </div>
+              <ManagedProjectHistory key={detail.id} taskId={detail.id} />
             </div>
             <div className="flex shrink-0 flex-wrap gap-2 border-t border-zinc-800 p-3">
               <Button variant="ghost" size="sm" className="border-zinc-800 text-zinc-400" onClick={() => openTask(detail.id)} disabled={streamState === "LOADING"} title="Заново загрузить последние 200 действий этой задачи">

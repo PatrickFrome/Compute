@@ -4,9 +4,11 @@ import { pathToFileURL } from 'node:url';
 import postgres from 'postgres';
 
 export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
-  { path: '20260901034000_meta_orchestrator_controller_lease_v1.sql', signature: 'public.meta_orchestrator_controller_lease_v1(uuid,text,text,integer)' },
-  { path: '20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql', signature: 'public.meta_orchestrator_frontier_admit_v2(uuid,text,bigint,text[],text,bigint)' },
-  { path: '20260902183500_devos_live_ambiguity_reconciliation_v3.sql', signature: 'public.devos_fleet_reconcile_ambiguous_v2(uuid,text,uuid,text,bigint,text,text,bigint,jsonb)' },
+  { path: '20260901034000_meta_orchestrator_controller_lease_v1.sql', signature: 'public.meta_orchestrator_controller_lease_v1(uuid,text,text,integer)', source_url: new URL('../../supabase/migrations/20260901034000_meta_orchestrator_controller_lease_v1.sql', import.meta.url) },
+  { path: '20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql', signature: 'public.meta_orchestrator_frontier_admit_v2(uuid,text,bigint,text[],text,bigint)', source_url: new URL('../../supabase/migrations/20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql', import.meta.url) },
+  { path: '20260902183500_devos_live_ambiguity_reconciliation_v3.sql', signature: 'public.devos_fleet_reconcile_ambiguous_v2(uuid,text,uuid,text,bigint,text,text,bigint,jsonb)', source_url: new URL('../../supabase/migrations/20260902183500_devos_live_ambiguity_reconciliation_v3.sql', import.meta.url) },
+  { path: '20261009194157_managed_project_admission_v1.sql', signature: 'public.h205f22_a2_managed_project_admission_v1(uuid,uuid,text,bigint,bigint,uuid,bigint,uuid,text,bigint)', source_url: new URL('../../supabase/migrations/20261009194157_managed_project_admission_v1.sql', import.meta.url) },
+  { path: '20261010100000_project_continuity_history_v1.sql', signature: 'public.h205f22_project_register_v1(uuid,uuid,uuid,text,bigint)', source_url: new URL('../../supabase/migrations/20261010100000_project_continuity_history_v1.sql', import.meta.url) },
 ]);
 
 const REQUIRED_COLUMNS = {
@@ -16,7 +18,7 @@ const REQUIRED_COLUMNS = {
 
 export async function applyLocalRuntimeMigrations({ sql }) {
   const sources = await Promise.all(LOCAL_RUNTIME_MIGRATIONS.map(async (migration) => {
-    const source = await readFile(new URL('../../supabase/migrations/' + migration.path, import.meta.url), 'utf8');
+    const source = await readFile(migration.source_url, 'utf8');
     return { ...migration, source, sha256: createHash('sha256').update(source).digest('hex') };
   }));
   return sql.begin(async (tx) => {

@@ -1315,6 +1315,33 @@ export class NativeSupervisorClient {
     return true;
   }
 
+  async managedTaskProjectRequest({ method, path, body } = {}) {
+    if (method !== 'POST' || !['/v1/devos/project-admission', '/v1/devos/project-binding/reserve', '/v1/devos/project-binding/readback', '/v1/devos/project-repository/provision'].includes(path)) throw new Error('managed_project_transport_route_invalid');
+    const response = await this.#signedRequest(path, { method, payload: body });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) {
+      const code = typeof value?.error === 'string' && /^MANAGED_PROJECT_[A-Z0-9_]+$/.test(value.error) ? value.error : `MANAGED_PROJECT_HTTP_${response.status}`;
+      throw new Error(code);
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('managed_project_transport_response_invalid');
+    return value;
+  }
+
+  async projectContinuityRequest({ operation, body } = {}) {
+    if (!['register', 'snapshot', 'history', 'spawn', 'activity', 'policy', 'reconcile'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('project_continuity_transport_body_invalid');
+    const response = await this.#signedRequest(`/v1/devos/project/${operation}`, { method: 'POST', payload: structuredClone(body) });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(typeof value?.error === 'string' && /^PROJECT_CONTINUITY_[A-Z0-9_]+$/.test(value.error)
+        ? value.error : `PROJECT_CONTINUITY_HTTP_${response.status}`);
+      error.effect_outcome = response.status >= 500 ? 'UNKNOWN' : 'REJECTED';
+      throw error;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.authority_effect !== false) throw new Error('project_continuity_transport_response_invalid');
+    return value;
+  }
+
   async #signedRequest(path, { method = 'POST', payload = null, signal = null } = {}) {
     const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;

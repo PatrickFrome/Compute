@@ -998,7 +998,7 @@ export async function runFixedWindowsPowerShell(request, {
       };
       const timer = setTimeout(() => {
         try { child.kill(); } catch {}
-        finish(reject, new Error('computer_executor_timeout'));
+        finish(reject, new Error(`computer_executor_timeout:${request.action}`));
       }, timeoutMs);
 
       child.stdout.setEncoding('utf8');

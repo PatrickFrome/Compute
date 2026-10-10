@@ -1,0 +1,11 @@
+# Local diagnostics and tool state are not release sources.
+/.audit-local/
+/supabase/.temp/
+
+# Generated installer inputs and output artifacts.
+/apps/metaengine-browser/me2-ui-dist/
+/apps/metaengine-browser/me2-daemon-dist/
+/apps/metaengine-browser/native-dist/
+/apps/metaengine-browser/devos-source-snapshot/
+/apps/metaengine-browser/dist-test/
+/apps/metaengine-browser/client-state-runtime-dist-before-*/

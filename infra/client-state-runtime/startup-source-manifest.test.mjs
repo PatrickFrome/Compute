@@ -49,6 +49,20 @@ test('startup manifest hashes dependencies, binds instance and omits credential 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('literal migration resources belong to source closure and cannot escape the repository', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'compute-migration-closure-')));
+  try {
+    await writeFile(join(directory, 'migration.sql'), 'select 1;\n');
+    await writeFile(join(directory, 'entry.mjs'), "export const migration = new URL('./migration.sql', import.meta.url);\n");
+    const closure = await sourceClosure([join(directory, 'entry.mjs')], directory);
+    assert.deepEqual(closure.files, [join(directory, 'entry.mjs'), join(directory, 'migration.sql')].sort());
+    await writeFile(join(directory, 'entry.mjs'), "export const migration = new URL('../outside.sql', import.meta.url);\n");
+    await assert.rejects(sourceClosure([join(directory, 'entry.mjs')], directory), /source_outside_repository/);
+    await writeFile(join(directory, 'entry.mjs'), "export const migration = new URL('./missing.sql', import.meta.url);\n");
+    await assert.rejects(sourceClosure([join(directory, 'entry.mjs')], directory), { code: 'ENOENT' });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('startup bytes drift cannot become readiness and dependency aliases are rejected', async () => {
   const before = { manifest_sha256: 'a', files: [] };
   assert.throws(() => bindStartupManifest({ before, after: { manifest_sha256: 'b' }, instanceId: '11111111-1111-4111-8111-111111111111' }), /source_changed_during_launch/);

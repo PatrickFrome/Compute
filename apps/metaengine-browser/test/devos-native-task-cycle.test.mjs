@@ -61,6 +61,194 @@ const stop = { role: 'button', name: 'Stop generating' };
 const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
+test('project verification sweep advances on the existing heartbeat even when RESULT_READY leaves no running tasks', async () => {
+  let swept = 0; const order = [];
+  const cycle = new DevOsNativeTaskCycle({ getState: async () => state(),
+    executeCommand: async command => { if (command.action === 'FLEET_RECONCILE') return fleet; throw new Error('unexpected_physical_effect'); },
+    signedRequest: async endpoint => {
+      if (endpoint === '/v1/devos/cycle') { order.push('task-plan'); return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 0 }, running: [] }); }
+      throw new Error(`unexpected:${endpoint}`);
+    },
+  });
+  cycle.bindProjectRuntime({ prepareLease() {}, contextForLease() {}, continueConversation() {}, waitForChildren() {}, serveToolRequests() {},
+    tick: async () => { swept++; order.push('verification-sweep'); } });
+  await cycle.runOnce();
+  assert.equal(swept, 1); assert.deepEqual(order, ['verification-sweep', 'task-plan']);
+});
+
+test('project task tool results continue the same proven conversation before completion on the existing cycle', async () => {
+  const projectLease = { ...lease, task_spec: { ...lease.task_spec, project_continuity: { project_id: '11111111-1111-4111-8111-111111111111' } },
+    conversation_url_sha256: fleetTransportProof.conversation_url_sha256 };
+  const commands = []; let completions = 0; let sends = 0;
+  const projectRuntime = {
+    prepareLease: async () => ({ project_id: '11111111-1111-4111-8111-111111111111' }),
+    contextForLease: () => 'PROJECT CONTINUITY V1',
+    serveToolRequests: async ({ requests }) => requests.map(row => ({ request_id: row.request_id, status: 'COMPLETED', summary: 'child task queued by DB' })),
+    waitForChildren: async () => ({ waiting: true, failed: false, children: [{ task_id: '33333333-3333-4333-8333-333333333333', state: 'RUNNING' }] }),
+    continueConversation: async (_lease, results, submit) => { assert.equal(results[0].summary, 'child task queued by DB'); await submit('HOST CONFIRMED TOOL RESULTS; continue current task'); return { state: 'DELIVERED' }; },
+    recordActivity: async () => null,
+  };
+  const cycle = new DevOsNativeTaskCycle({
+    getState: async () => state(),
+    executeCommand: async command => {
+      commands.push(command.action);
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+      if (command.action === 'READ_TRANSCRIPT') {
+        const text = '```tool\nTOOL_REQUEST_V1\nrequest_id=project:child:one\naction=PROJECT_SPAWN\npayload_json={"children":[{"objective":"Useful child task","role":"CODER"}]}\n```';
+        return { text, total_chars: text.length, has_more: false, census_truncated: false };
+      }
+      if (command.action === 'SEMANTIC_TYPE') { typedDraft = command.payload.text; return { typed: true }; }
+      if (command.action === 'TYPED_CLICK') { sends++; typedDraft = ''; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; }
+      throw new Error(`unexpected_project_command:${command.action}`);
+    },
+    signedRequest: async endpoint => {
+      if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 1 }, running: [projectLease] });
+      if (endpoint === '/v1/devos/complete') { completions++; return response(200, { state: 'COMPLETED' }); }
+      throw new Error(`project_test_unexpected_route:${endpoint}`);
+    },
+  });
+  cycle.bindProjectRuntime(projectRuntime);
+  await cycle.runOnce();
+  assert.equal(sends, 1); assert.equal(completions, 0);
+  assert.equal(cycle.snapshot().result_ready.state, 'PROJECT_CONTINUING');
+  assert(!commands.includes('CREATE_TAB')); assert(!commands.includes('SELECT_TAB'));
+});
+
+test('registered root keeps its immutable spec and receives an exact result protocol recovered before transcript harvest', async () => {
+  const rootLease = structuredClone(lease);
+  const immutableSpec = structuredClone(rootLease.task_spec);
+  let member = false;
+  let prompt = '';
+  const projectRuntime = {
+    prepareLease: async () => { member = true; return { project_id: '11111111-1111-4111-8111-111111111111' }; },
+    contextForLease: () => member ? 'PROJECT CONTINUITY V1\nroot task registered by host' : null,
+    refreshContext: async () => { member = true; },
+    serveToolRequests: async () => [],
+    waitForChildren: async () => ({ waiting: false, failed: false, children: [] }),
+    continueConversation: async () => { throw new Error('no_tool_result_to_continue'); },
+    recordActivity: async () => null,
+  };
+  const dispatch = new DevOsNativeTaskCycle({
+    getState: async () => state(),
+    executeCommand: async command => {
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+      if (command.action === 'SEMANTIC_TYPE') { prompt = typedDraft = command.payload.text; return { replace_verified: true }; }
+      if (command.action === 'TYPED_CLICK') { typedDraft = ''; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; }
+      throw new Error(`unexpected_root_dispatch:${command.action}`);
+    },
+    signedRequest: async endpoint => {
+      if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease: rootLease, running: [] });
+      if (endpoint === '/v1/devos/mark-running') return response(200, { state: 'RUNNING' });
+      throw new Error(`unexpected_root_route:${endpoint}`);
+    },
+  });
+  dispatch.bindProjectRuntime(projectRuntime);
+  assert.equal((await dispatch.runOnce()).dispatch.state, 'RUNNING');
+  assert.deepEqual(rootLease.task_spec, immutableSpec);
+  assert.equal(rootLease.task_spec.meta_orchestrator, undefined);
+  assert.equal(rootLease.task_spec.project_continuity, undefined);
+  assert.match(prompt, /RESULT PROTOCOL RESULT_CLAIM_V1/);
+  assert.match(prompt, new RegExp(`"task_id":"${rootLease.task_id}","lease_generation":1`));
+
+  // A newly created cycle has no cached membership after process restart.
+  // DB membership recovery must happen before interpreting the model answer.
+  member = false;
+  const completions = [];
+  const claim = ['```result', 'RESULT_CLAIM_V1', JSON.stringify({ task_id: rootLease.task_id,
+    lease_generation: rootLease.lease_generation, disposition: 'READY', summary: 'Implemented the root deliverable.',
+    deliverable_refs: ['artifact:root-result'], evidence_refs: ['test:focused-suite'] }), '```'].join('\n');
+  const resumed = new DevOsNativeTaskCycle({
+    getState: async () => state(),
+    executeCommand: async command => {
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+      if (command.action === 'READ_TRANSCRIPT') {
+        assert.equal(member, true, 'membership must be recovered before harvesting tools and result claims');
+        return { text: claim, total_chars: claim.length, has_more: false, census_truncated: false };
+      }
+      throw new Error(`unexpected_root_observation:${command.action}`);
+    },
+    signedRequest: async (endpoint, options) => {
+      if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 1 },
+        running: [{ ...rootLease, conversation_url_sha256: fleetTransportProof.conversation_url_sha256 }] });
+      if (endpoint === '/v1/devos/complete') { completions.push(options.payload); return response(200, { state: options.payload.state }); }
+      throw new Error(`unexpected_root_resume_route:${endpoint}`);
+    },
+  });
+  resumed.bindProjectRuntime(projectRuntime);
+  assert.equal((await resumed.runOnce()).result_ready.state, 'RESULT_READY');
+  assert.equal(completions.length, 1);
+  assert.equal(completions[0].summary.result_claim_disposition, 'READY');
+  assert.match(completions[0].summary.result_claim_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(completions[0].summary.result_claim_deliverable_ref_count, 1);
+  assert.equal(completions[0].summary.result_claim_evidence_ref_count, 1);
+  assert.equal(completions[0].summary.model_claim_authority, false);
+  assert.deepEqual(rootLease.task_spec, immutableSpec);
+});
+
+test('resumed same-task conversation ignores historical result claims and tool requests below its durable boundary', async () => {
+  const oldClaim = ['```result', 'RESULT_CLAIM_V1', JSON.stringify({ task_id: lease.task_id, lease_generation: 1,
+    disposition: 'READY', summary: 'Historical claim', deliverable_refs: [], evidence_refs: [] }), '```'].join('\n');
+  const oldTool = '```tool\nTOOL_REQUEST_V1\nrequest_id=old:tool:request\naction=CAPTURE\npayload_json={}\n```';
+  const history = `${oldTool}\n${oldClaim}\n`;
+  const currentClaim = ['```result', 'RESULT_CLAIM_V1', JSON.stringify({ task_id: lease.task_id, lease_generation: 1,
+    disposition: 'READY', summary: 'Current result after tools', deliverable_refs: ['artifact:current'], evidence_refs: ['test:current'] }), '```'].join('\n');
+  const transcript = history + currentClaim;
+  const reads = [], completions = [];
+  const cycle = new DevOsNativeTaskCycle({ getState: async () => state(),
+    executeCommand: async command => {
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+      if (command.action === 'READ_TRANSCRIPT') { reads.push(command.payload.offset);
+        return { text: transcript.slice(command.payload.offset, command.payload.offset + command.payload.max_chars),
+          total_chars: transcript.length, has_more: false, census_truncated: false }; }
+      throw new Error(`historical_tool_must_not_run:${command.action}`);
+    },
+    signedRequest: async (endpoint, options) => {
+      if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 1 },
+        running: [{ ...lease, conversation_url_sha256: fleetTransportProof.conversation_url_sha256 }] });
+      if (endpoint === '/v1/devos/complete') { completions.push(options.payload); return response(200, { state: options.payload.state }); }
+      throw new Error(`historical_tool_must_not_be_issued:${endpoint}`);
+    } });
+  cycle.bindProjectRuntime({ prepareLease: async () => null, refreshContext: async () => null,
+    contextForLease: () => 'PROJECT CONTINUITY V1', latestTurnForLease: async () => ({ state: 'CONFIRMED', transcript_floor: history.length }),
+    waitForChildren: async () => null, continueConversation: async () => { assert.fail('historical tool must not require a continuation'); },
+    serveToolRequests: async () => { assert.fail('historical tool must not be served'); }, recordActivity: async () => null });
+  assert.equal((await cycle.runOnce()).result_ready.state, 'RESULT_READY');
+  assert.deepEqual(reads, [history.length]);
+  assert.equal(completions[0].summary.result_claim_disposition, 'READY');
+  assert.equal(completions[0].summary.result_claim_deliverable_ref_count, 1);
+  assert.equal(completions[0].summary.tool_results_count, 0);
+});
+
+test('uncertain continuation or lost transcript boundary cannot accept any result after restart', async () => {
+  for (const turn of [{ state: 'AMBIGUOUS' }, { state: 'CONFIRMED', transcript_floor: 4096 }]) {
+    const completions = []; let transcriptReads = 0;
+    const cycle = new DevOsNativeTaskCycle({ getState: async () => state(),
+      executeCommand: async command => {
+        if (command.action === 'FLEET_RECONCILE') return fleet;
+        if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+        if (command.action === 'READ_TRANSCRIPT') { transcriptReads++; return { text: '', total_chars: 100, has_more: false, census_truncated: false }; }
+        throw new Error(`unexpected_uncertain_turn_effect:${command.action}`);
+      }, signedRequest: async (endpoint, options) => {
+        if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 1 },
+          running: [{ ...lease, conversation_url_sha256: fleetTransportProof.conversation_url_sha256 }] });
+        if (endpoint === '/v1/devos/complete') { completions.push(options.payload); return response(200, { state: options.payload.state }); }
+        throw new Error(`unexpected_uncertain_turn_route:${endpoint}`);
+      } });
+    cycle.bindProjectRuntime({ prepareLease: async () => null, refreshContext: async () => null, contextForLease: () => 'PROJECT CONTINUITY V1',
+      latestTurnForLease: async () => turn, waitForChildren: async () => null, continueConversation: async () => { assert.fail('uncertain turn must never send'); },
+      serveToolRequests: async () => [], recordActivity: async () => null });
+    const result = await cycle.runOnce();
+    assert.equal(result.result_ready.state, turn.state === 'AMBIGUOUS' ? 'AMBIGUOUS' : 'BLOCKED');
+    assert.equal(transcriptReads, turn.state === 'AMBIGUOUS' ? 0 : 1);
+    assert.equal(completions[0].summary.result_claim_sha256, undefined);
+    if (turn.state === 'CONFIRMED') assert.equal(completions[0].summary.result_claim_state, 'TRANSCRIPT_CONTINUATION_BOUNDARY_LOST');
+  }
+});
+
 function response(status, body) { return { status, ok: status >= 200 && status < 300, async json(){ return structuredClone(body); } }; }
 function frame({ url = 'https://chatgpt.com/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {

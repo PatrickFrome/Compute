@@ -35,6 +35,8 @@ export const AGENT_TOOL_ACTIONS = Object.freeze([
   'SEMANTIC_FOCUS',
   'COMPUTER_OBSERVE',
   'COMPUTER_ACTION',
+  'PROJECT_SPAWN',
+  'PROJECT_HISTORY',
 ]);
 
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$/;
@@ -127,6 +129,7 @@ export function renderAgentToolProtocol({ tab_id = null, max_requests = MAX_REQU
     '```',
     `limits=max ${max_requests} requests per reply; requests beyond the limit are dropped`,
     `results=${result_delivery}: confirmed outcomes arrive as ${AGENT_TOOL_RESULT_MARKER} blocks in your NEXT task message; never invent a tool result; keep working with what you have if a result is late`,
+    'PROJECT_SPAWN payload_json={"children":[{"objective":"useful subtask","role":"IMPLEMENTER"}]}; PROJECT_HISTORY payload_json={"after_seq":0,"limit":16}. Project actions are proposals/readbacks through current task admission, never caller claims or paths.',
   ];
   return lines.join('\n');
 }

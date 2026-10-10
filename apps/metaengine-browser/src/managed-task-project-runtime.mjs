@@ -80,7 +80,11 @@ export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = 
       return new Promise((resolve, reject) => {
         // The repository remains trusted: Git can execute its configured hooks.
         // On timeout/output overflow wait for close before returning a receipt.
-        const child = spawnProcess('git', plan.argv.map(String), { cwd: plan.cwd, shell: false, windowsHide: true });
+        // Host roots are verified with Git overrides removed. Apply the same
+        // environment fence to inventory and creation, or inherited GIT_DIR /
+        // GIT_WORK_TREE could redirect the effect away from the admitted repo.
+        const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+        const child = spawnProcess('git', plan.argv.map(String), { cwd: plan.cwd, shell: false, windowsHide: true, env });
         const out = []; const err = []; let bytes = 0; let timer; let failure = null;
         const stop = (reason) => { if (failure) return; failure = new Error(reason); child.kill(); };
         const collect = (target, chunk) => { bytes += chunk.length; if (bytes > 8 * 1024 * 1024) { stop('managed_project_git_output_too_large'); return; } target.push(chunk); };

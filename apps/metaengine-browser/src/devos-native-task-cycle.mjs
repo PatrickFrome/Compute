@@ -424,6 +424,10 @@ export class DevOsNativeTaskCycle {
     if (typeof this.#inner?.bindMemoryRetriever === 'function') this.#inner.bindMemoryRetriever(fn);
   }
 
+  bindProjectRuntime(runtime) {
+    this.#inner.bindProjectRuntime(runtime);
+  }
+
   snapshot() {
     return {
       ...this.#inner.snapshot(),

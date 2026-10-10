@@ -61,6 +61,34 @@ test('same key with changed agent or repository identity is rejected', async (t)
   await assert.rejects(runtime.create({ ...request, trusted_repo: { ...request.trusted_repo, repo_id: 'github:test/other' } }), /idempotency_binding_conflict/);
 });
 
+test('ambient Git repository overrides cannot redirect physical project creation', async (t) => {
+  const request = await fixture(t); const other = await fixture(t);
+  const executor = createShellFreeGitExecutor();
+  const runtime = createManagedTaskProjectRuntime({ validateClaim: async () => true,
+    journal: createManagedTaskProjectMemoryJournal(), executePlan: plan => executor.execute(plan) });
+  const overrides = { GIT_DIR: path.join(other.trusted_repo.repo_root, '.git'),
+    GIT_WORK_TREE: other.trusted_repo.repo_root, GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.bare', GIT_CONFIG_VALUE_0: 'true' };
+  const previous = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
+  let created;
+  try {
+    Object.assign(process.env, overrides);
+    created = await runtime.create(request);
+  } finally {
+    for (const key of Object.keys(overrides)) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+  assert.equal(created.state, 'PROVEN');
+  const inventory = repo => exec('git', ['worktree', 'list', '--porcelain', '-z'], {
+    cwd: repo, windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key))),
+  });
+  assert.ok((await inventory(request.trusted_repo.repo_root)).stdout.includes(`branch refs/heads/${request.claim.branch_name}\0`));
+  assert.equal((await inventory(other.trusted_repo.repo_root)).stdout.includes(`branch refs/heads/${request.claim.branch_name}\0`), false);
+  assert.equal(created.proof.head_sha, request.claim.base_sha);
+});
+
 test('expired or advisory claim never calls the executor', async (t) => {
   const request = await fixture(t); let effects = 0;
   const runtime = createManagedTaskProjectRuntime({ validateClaim: async () => true, journal: createManagedTaskProjectMemoryJournal(), executePlan: async () => { effects++; } });

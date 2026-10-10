@@ -19,7 +19,7 @@ test('restored local PostgreSQL preserves HTTP, SQL and named RPC semantics', { 
   let runtime;
   try {
     const catalog = await admin.unsafe(RPC_CATALOG_QUERY, [JSON.stringify(RPC_ALLOWLIST)]);
-    assert.equal(new Set(catalog.map((row) => row.name)).size, 40);
+    assert.equal(new Set(catalog.map((row) => row.name)).size, RPC_ALLOWLIST.length);
     runtime = await startDbApi({ databaseUrl, apiKey: key, port: 0, instanceId: clientId });
     const request = (path, init = {}) => fetch(runtime.address + path, { ...init, headers: { apikey: key, ...init.headers } });
     const rpc = (name, args) => request('/rest/v1/rpc/' + name, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args) });
