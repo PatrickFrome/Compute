@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +12,8 @@ const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
 const schema = 'compute.runtime-host-config.v1';
 const configKeys = ['schema', 'version', 'bundle_directory', 'expected_bundle_sha256', 'state_directory', 'pg_data_directory',
   'database_url', 'inspect_database_url', 'api_port', 'edge_port', 'startup_timeout_ms'];
+const pgSystemId = /^[0-9]{15,22}$/;
+const runExecutable = promisify(execFile);
 const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
 const within = (root, target) => {
   const relative = path.relative(root, target);
@@ -25,8 +29,16 @@ function absoluteLocalPath(value) {
 }
 
 export function validateRuntimeHostConfig(value) {
-  if (!value || Array.isArray(value) || Object.keys(value).length !== configKeys.length || configKeys.some(key => !(key in value))
-    || value.schema !== schema || value.version !== 1) throw failure('runtime_host_config_contract_invalid');
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    configKeys.some(key => !Object.hasOwn(value, key)) ||
+    value.schema !== schema || value.version !== 1) throw failure('runtime_host_config_contract_invalid');
+  const attached = value.postgres_mode === 'attached';
+  const expectedKeys = attached ? [...configKeys, 'postgres_mode', 'postgres_system_id'] : configKeys;
+  if (Object.keys(value).length !== expectedKeys.length ||
+    expectedKeys.some(key => !Object.hasOwn(value, key)) ||
+    (attached && !pgSystemId.test(String(value.postgres_system_id || '')))) {
+    throw failure('runtime_host_config_contract_invalid');
+  }
   if (!/^[a-f0-9]{64}$/.test(value.expected_bundle_sha256 || '')) throw failure('runtime_host_bundle_pin_required');
   const bundle = absoluteLocalPath(value.bundle_directory);
   const state = absoluteLocalPath(value.state_directory);
@@ -177,6 +189,21 @@ export function runtimeProviderDescriptor(runtime) {
     hosted_supabase_required: false, authority_effect: false });
 }
 
+// An attached cluster belongs to a separately managed Windows service/keeper.
+ // PostgreSQL owns WAL replay and recovery; this host must never stop that DB.
+export async function verifyAttachedClusterSystemId({ pgBinDir, pgDataDir, expectedSystemId, exec = runExecutable } = {}) {
+  if (!pgSystemId.test(String(expectedSystemId || '')) || !path.isAbsolute(String(pgDataDir || '')) ||
+      !path.isAbsolute(String(pgBinDir || ''))) throw failure('runtime_host_attached_pg_identity_invalid');
+  let stdout;
+  try {
+    const result = await exec(path.join(pgBinDir, process.platform === 'win32' ? 'pg_controldata.exe' : 'pg_controldata'),
+      [pgDataDir], { timeout: 10000, windowsHide: true, shell: false, maxBuffer: 65536 });
+    stdout = result.stdout;
+  } catch { throw failure('runtime_host_attached_pg_control_unreadable'); }
+  const match = /^Database system identifier:\s*([0-9]+)\s*$/m.exec(String(stdout || ''));
+  if (!match || match[1] !== expectedSystemId) throw failure('runtime_host_attached_pg_identity_mismatch');
+  return Object.freeze({ system_id_verified: true, authority_effect: false });
+}
 export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks = {}) {
   const config = await readConfig(configFile);
   await requireCanonicalPath(config.state_directory, 'directory');
@@ -190,7 +217,13 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     || canonical(await realpath(hooks.executablePath || process.execPath)) !== canonical(verified.paths.nodeExecutable)) {
     throw failure('runtime_host_execution_resource_mismatch');
   }
-  const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode: 'owned',
+  if (config.postgres_mode === 'attached') {
+    await (hooks.verifyAttachedCluster || verifyAttachedClusterSystemId)({
+      pgBinDir: verified.paths.postgresBinDirectory, pgDataDir: config.pg_data_directory,
+      expectedSystemId: config.postgres_system_id,
+    });
+  }
+  const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode: config.postgres_mode || 'owned',
     databaseUrl: config.database_url, inspectDatabaseUrl: config.inspect_database_url,
     apiPort: config.api_port, edgePort: config.edge_port, startupTimeoutMs: config.startup_timeout_ms,
     pgDataDir: config.pg_data_directory, pgBinDir: verified.paths.postgresBinDirectory,
@@ -240,7 +273,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     await persist({ ...baseStatus, state: 'READY', runtime_ready: true, checked_at: new Date().toISOString(),
       instance_id: descriptor.instance_id, endpoint: descriptor.endpoint, capability_health: runtime.edgeHealth.capability_health,
-      postgres_mode: 'owned', children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
+      postgres_mode: config.postgres_mode || 'owned', children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
     const finished = runtime.finished.then(finalize, () => finalize({ reason: 'runtime_host_child_failed', children_stopped: false }));
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished };
