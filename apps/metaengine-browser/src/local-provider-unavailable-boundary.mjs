@@ -25,6 +25,10 @@ export async function inspectMissingLocalProvider({ localAppData = process.env.L
   return Object.freeze({ state: 'FRESH_LOCAL_DATABASE_NOT_PROVISIONED', authority_effect: false });
 }
 
+// Keep a strong reference while an Electron window is open. Otherwise GC can
+// close the status window after the nonblocking startup preflight returns.
+const openBoundaries = new Set();
+
 const recoveryMessages = Object.freeze({
   PRIVATE_STATE_RECONCILIATION_REQUIRED: 'Existing local PostgreSQL files were detected, but there is no verified owner registration. An incomplete restore or initialization must be reconciled before this client can safely connect. The database and Vault were not modified.',
   FRESH_LOCAL_DATABASE_NOT_PROVISIONED: 'This installation does not yet have an owner-bound local PostgreSQL runtime. Fresh automatic provisioning is not qualified in this release. The client has not initialized a database or selected a cloud provider.',
@@ -50,6 +54,7 @@ export async function showUnprovisionedLocalStateBoundary({
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true,
       webSecurity: true },
   });
+  openBoundaries.add(win);
   win.setMenu(null);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -66,7 +71,7 @@ No PostgreSQL ownership or execution authority was fabricated.</small></body></h
   // Return after the inert window is displayed, NOT after it is closed:
   // installer-shutdown and singleton handoff must never wait on human input.
   // The Electron window itself stays open independently until closed by user.
-  win.on('closed', () => {});
+  win.on('closed', () => { openBoundaries.delete(win); });
   // Show a trusted inert boundary even when rendering fails; never silently
   // start Browser/main or show the retired restore-selection wizard.
   win.show();
