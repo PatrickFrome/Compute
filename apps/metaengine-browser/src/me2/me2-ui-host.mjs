@@ -22,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export const ME2_UI_HOST_SCHEMA = 'metaengine.browser.me2.ui-host.v1';
+export const ME2_UI_LOOPBACK_HOST = '127.0.0.1';
 
 const UI_PORT = Number(process.env.ME2_UI_PORT || 3000);
 const UI_HEALTH_URL = process.env.ME2_UI_HEALTH_URL || `http://127.0.0.1:${UI_PORT}/`;
@@ -115,7 +116,7 @@ export function resolveMe2UiLaunch({
       bin: execPath,
       args: ['server.js'],
       launch_mode: 'EMBEDDED_NODE_STANDALONE',
-      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' }),
+      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', HOSTNAME: ME2_UI_LOOPBACK_HOST }),
     });
   }
   return Object.freeze({
@@ -123,19 +124,31 @@ export function resolveMe2UiLaunch({
     bin: env.ME2_UI_BIN || 'bun',
     args: dev ? ['run', 'dev'] : ['run', 'start'],
     launch_mode: dev ? 'SOURCE_DEV' : 'PACKAGE_SCRIPT',
-    env_patch: Object.freeze({}),
+    env_patch: Object.freeze({ HOSTNAME: ME2_UI_LOOPBACK_HOST }),
+  });
+}
+
+// Next standalone's generated server.js defaults to 0.0.0.0 unless HOSTNAME
+// is explicitly set. The raw :3000 service MUST stay private to this PC; only
+// the browser-owned gateway (also loopback-bound) is an authorized UI origin.
+export function me2UiChildEnvironment({ parentEnv = process.env, patch = {}, port = UI_PORT } = {}) {
+  if (!Number.isSafeInteger(Number(port)) || Number(port) < 1024 || Number(port) > 65535) {
+    throw new TypeError('me2_ui_port_invalid');
+  }
+  return Object.freeze({
+    ...parentEnv,
+    ...patch,
+    PORT: String(port),
+    HOSTNAME: ME2_UI_LOOPBACK_HOST,
+    ME2_HOSTED_BY_BROWSER: '1',
+    ME2_WATCHDOG: 'off',
   });
 }
 
 function spawnUi(launch) {
   lastLaunchMode = launch.launch_mode;
-  const env = {
-    ...process.env,
-    ...launch.env_patch,
-    PORT: String(UI_PORT),
-    ME2_HOSTED_BY_BROWSER: '1',
-    ME2_WATCHDOG: 'off',
-  };
+  const env = me2UiChildEnvironment({ patch: launch.env_patch });
+
   child = spawn(launch.bin, launch.args, {
     cwd: launch.dir,
     env,
