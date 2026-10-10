@@ -21,7 +21,8 @@ Local Windows may run BrowserCells, physical UI and trusted OS-specific actions.
 - Code: infra/hybrid-compute/placement.mjs. Tests: node --test infra/hybrid-compute/placement.test.mjs.
 - A task has a pinned 40-hex source SHA, workspace ID, effect class, data residency policy, capabilities, cloud opt-in, and cost/latency budgets.
 - A registry snapshot has the same workspace and SHA and is explicitly declared as readback by the existing control plane. **The declaration itself is not a signature or trust evidence**; real admission must verify signatures and database readback before calling the pure function.
-- Nodes have exact incarnation ID, monotonic heartbeat sequence and generation, fresh observation (max 30 seconds), capacity and declared capabilities. A planner cannot upgrade a node's rights.
+- The snapshot contains separate enrollments (node ID, incarnation ID, generation, domain and source SHA) and heartbeat observations. Every observation must match its enrolled incarnation/domain/generation; duplicate enrolled IDs are held. Enrollment entries are still only data until independently verified by the real coordinator.
+- Nodes have monotonic heartbeat sequence and generation, fresh observation (max 30 seconds), capacity and declared capabilities. A planner cannot upgrade a node's rights.
 - Responses are PROPOSAL_ONLY or HOLD, with authority_effect=false, dispatch_allowed=false and automatic_retry_allowed=false. No API, SQL, process, shell, or network side effects.
 
 ## Production security invariants
