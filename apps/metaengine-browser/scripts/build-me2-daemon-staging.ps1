@@ -54,7 +54,10 @@ try {
   # build the Browser compatibility process.
   $probeEntrypoint = Join-Path $daemonRoot 'browser-probe-entry.ts'
   if (-not (Test-Path $probeEntrypoint -PathType Leaf)) { throw 'me2_daemon_browser_probe_entry_missing' }
-  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
+  # Bun 1.3.3's default x64 executable can use AVX2 and fail with
+  # STATUS_ILLEGAL_INSTRUCTION on pre-Haswell Windows CPUs (e.g. Ivy Bridge).
+  # Ship the Nehalem-compatible baseline runtime; do not rely on CI CPU flags.
+  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64-baseline browser-probe-entry.ts --outfile $exePath
   if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
 } finally {
   Pop-Location
@@ -70,6 +73,8 @@ $manifest = [ordered]@{
   source_head = $sourceHead
   daemon_version = $runtimeVersion
   build_bun_version = $bunVersion
+  build_compile_target = 'bun-windows-x64-baseline'
+  cpu_compatibility = 'NEHALEM_SSE42_OR_NEWER'
   build_bun_toolchain_required = $bunToolchainRequired
   executable = 'me2-daemon.exe'
   executable_sha256 = $sha

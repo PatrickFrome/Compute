@@ -178,7 +178,9 @@ test('R103 Browser launch cannot be promoted to the historical full daemon by en
   assert.match(entry, /socket_mutation_surface_enabled:\s*false/);
   assert.doesNotMatch(entry, /import\(['"]\.\/index|from ['"]\.\/index|ME2_BOOT_MODE|ME2_HOSTED_BY_BROWSER|z-ai-web-dev-sdk|SqlMirror/);
 
-  assert.match(build, /build --compile --target=bun-windows-x64 browser-probe-entry\.ts --outfile/);
+  assert.match(build, /build --compile --target=bun-windows-x64-baseline browser-probe-entry\.ts --outfile/);
+  assert.match(build, /cpu_compatibility = 'NEHALEM_SSE42_OR_NEWER'/);
+  assert.match(verify, /manifest\.build_compile_target, 'bun-windows-x64-baseline'/);
   assert.match(build, /probe_only_entrypoint = 'browser-probe-entry\.ts'/);
   assert.match(build, /browser_host_mode_override_allowed = \$false/);
 
