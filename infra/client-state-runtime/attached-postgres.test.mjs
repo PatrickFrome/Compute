@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import path from 'node:path';
+import os from 'node:os';
 import { validateRuntimeHostConfig, verifyAttachedClusterSystemId } from './runtime-host.mjs';
 
 const identity = '7694034680113450848';
 const base = () => ({
   schema: 'compute.runtime-host-config.v1',
   version: 1,
-  bundle_directory: path.resolve('bundle'),
+  bundle_directory: path.join(os.tmpdir(), 'metaengine-attached-test-bundle'),
   expected_bundle_sha256: 'a'.repeat(64),
-  state_directory: path.resolve('state'),
-  pg_data_directory: path.resolve('state', 'postgresql-17-live'),
+  state_directory: path.join(os.tmpdir(), 'metaengine-attached-test-state'),
+  pg_data_directory: path.join(os.tmpdir(), 'metaengine-attached-test-state', 'postgresql-17-live'),
   database_url: 'postgresql://worker:password@127.0.0.1:55432/postgres',
   inspect_database_url: 'postgresql://owner:password@127.0.0.1:55432/postgres',
   api_port: 55433,
