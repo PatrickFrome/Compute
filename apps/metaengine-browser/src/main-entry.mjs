@@ -1,4 +1,6 @@
 import { app, BaseWindow, BrowserWindow, dialog, ipcMain } from 'electron';
+import { lstatSync } from 'node:fs';
+import { localStateProviderOwnerFile } from './local-state-provider-policy.mjs';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
@@ -106,6 +108,17 @@ if (guard.installer_shutdown_control) {
     const cleanup = await controller.stopOwnedLocalRuntimeHost();
     if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
   });
+  // Only a first interactive packaged launch without an owner must be deferred.
+  // Its setup wizard awaits app.whenReady(), and doing that from the entrypoint's
+  // top-level module evaluation deadlocks the Electron ready event. Preserve the
+  // original awaited order for provisioned owners, updater and probe launches.
+  const ownerPath = localStateProviderOwnerFile();
+  let firstRunOwnerMissing = false;
+  if (app.isPackaged && browserRuntimeNeeded && interactiveNormalLaunch && !bypassSingleInstance && ownerPath) {
+    try { lstatSync(ownerPath); }
+    catch (error) { if (error?.code === 'ENOENT') firstRunOwnerMissing = true; }
+  }
+  const runPrimaryStartup = async () => {
   try {
   runtimeController = import('./local-runtime-host-controller.mjs');
   const { installLocalRuntimeHostShutdown } = await runtimeController;
@@ -736,4 +749,26 @@ if (guard.installer_shutdown_control) {
   }
   }
   } finally { preparationFinished(); }
+  };
+  const onDeferredFirstRunError = (error) => {
+      // Fail closed: a rejected owner preflight must never import the Browser,
+      // substitute a cloud provider, or leave the failure invisible.
+      console.error(JSON.stringify({
+        schema: 'metaengine.browser.primary-startup.v1',
+        state: 'STARTUP_BLOCKED',
+        error: String(error?.message || error).slice(0, 240),
+        authority_effect: false,
+      }));
+      try {
+        dialog.showErrorBox('METAENGINE Browser — startup blocked',
+          `The local Browser startup could not complete.\n\nDiagnostic: ${String(error?.message || error).slice(0, 240)}`);
+      } catch {}
+  };
+  if (firstRunOwnerMissing) {
+    // End ESM evaluation before the first-run wizard can await Electron ready.
+    // The singleton and installer-shutdown barrier were installed above.
+    setImmediate(() => { void runPrimaryStartup().catch(onDeferredFirstRunError); });
+  } else {
+    await runPrimaryStartup();
+  }
 }
