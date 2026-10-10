@@ -28,6 +28,7 @@ async function fixture(t) {
   const state=path.join(root,'state'),bundle=path.join(root,'bundle'),
     appdata=path.join(root,'appdata'),data=path.join(state,'postgresql-17-live');
   await fs.mkdir(data,{recursive:true});
+  await fs.writeFile(path.join(data,'client-vault.key'),'f'.repeat(64)+'\n');
   await fs.mkdir(bundle);
   await fs.mkdir(appdata);
   const configFile=path.join(state,'attached-private-runtime.json');
@@ -110,6 +111,15 @@ test('uncertain host cleanup never publishes owner profile',async t=>{
   const f=await fixture(t);
   f.hooks.stopHost=async()=>({cleanup_confirmed:false});
   await assert.rejects(attachExistingRunningPostgres(f.options,f.hooks),/attached_provider_cleanup_unconfirmed/);
+  assert.equal(f.events.includes('owner_publish'),false);
+});
+test('changing Vault bytes during host proof must never publish owner',async t=>{
+  const f=await fixture(t);
+  const originalStop=f.hooks.stopHost;
+  f.hooks.stopHost=async()=>{const result=await originalStop();
+    await fs.writeFile(path.join(f.state,'postgresql-17-live','client-vault.key'),'0'.repeat(64)+'\n');
+    return result;};
+  await assert.rejects(attachExistingRunningPostgres(f.options,f.hooks),/attached_provider_evidence_changed/);
   assert.equal(f.events.includes('owner_publish'),false);
 });
 test('changed PG incarnation after health proof fences registration',async t=>{
