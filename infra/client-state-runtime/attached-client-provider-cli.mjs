@@ -72,6 +72,9 @@ export async function attachExistingRunningPostgres(options={}, hooks={}) {
       !samePath(cfg.bundle_directory,bundleDirectory) ||
       cfg.expected_bundle_sha256 !== expectedBundleDigest ||
       !samePath(path.dirname(configFile),cfg.state_directory)) fail('config_binding_mismatch');
+  const vaultFile=path.join(cfg.pg_data_directory,'client-vault.key');
+  const vaultBytes=await trustedBytes(vaultFile,128);
+  if (!/^[a-f0-9]{64}\n$/.test(vaultBytes.toString('utf8'))) fail('vault_key_invalid');
   const receiptBytes=await trustedBytes(restoreReceiptFile,4*1024*1024);
   if (digest(receiptBytes) !== expectedReceiptSha256) fail('restore_receipt_sha_mismatch');
   const receipt=parse(receiptBytes);
@@ -125,6 +128,7 @@ export async function attachExistingRunningPostgres(options={}, hooks={}) {
     if(before.pid !== after.pid || before.started_at !== after.started_at ||
       before.data_directory !== after.data_directory)fail('postgres_incarnation_changed');
     if(!(await trustedBytes(configFile)).equals(cfgBytes) ||
+       !(await trustedBytes(vaultFile,128)).equals(vaultBytes) ||
        !(await trustedBytes(restoreReceiptFile,4*1024*1024)).equals(receiptBytes))
       fail('evidence_changed');
     await (hooks.verifyBundle || verifyOfflineRuntimeBundle)({bundleDirectory,expectedBundleDigest});
