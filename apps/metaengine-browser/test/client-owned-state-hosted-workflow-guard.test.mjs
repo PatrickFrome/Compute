@@ -67,12 +67,16 @@ test('offline successor builds a physical package without qualifying historical 
   const normalStep = source.split('- name: Prove normal packaged UI boot and second-instance activation')[1].split('\n      - name:')[0];
   const condition = normalStep.match(/\n\s*if: ([^\r\n]+)/)?.[1];
   assert.ok(condition, 'normal boot has a separate admission condition');
-  const qualifiesNormalBoot = new Function('github', `return ${condition};`);
+  const qualifiesNormalBoot = new Function('github', 'steps', `return ${condition};`);
+  const configuredOwner = { installed_owner_mode: { outputs: { mode: 'CONFIGURED' } } };
+  const unconfiguredOwner = { installed_owner_mode: { outputs: { mode: 'FIRST_RUN' } } };
   for (const branch of ['work/client-runtime-restart-singleton-v1', 'work/client-restored-pg17-runtime-repair-v1', 'work/client-mcp-offline-installer-qualification-v1', 'work/client-mcp-db-connect-operator-v1', 'work/client-installed-pg17-setup-wizard-v1', 'work/client-github-chat-control-v1', 'work/client-github-chat-egress-redaction-v1', 'work/client-pg17-auto-prepare-durable-v1', 'work/client-github-chat-result-egress-v1', 'work/client-pg17-private-windows-acl-v1', 'work/client-pg17-private-windows-acl-r2-v1', 'work/client-pg17-private-windows-acl-r3-v1', 'work/client-pg17-private-windows-acl-r4-v1', 'work/client-autonomous-continuity-v1']) {
     assert.equal(produces({ event_name: 'pull_request', head_ref: branch }), true);
-    assert.equal(qualifiesNormalBoot({ event_name: 'pull_request', head_ref: branch }), false);
+    assert.equal(qualifiesNormalBoot({ event_name: 'pull_request', head_ref: branch }, configuredOwner), false);
   }
-  assert.equal(qualifiesNormalBoot({ event_name: 'pull_request', head_ref: 'work/another-candidate' }), true);
+  assert.equal(qualifiesNormalBoot({ event_name: 'pull_request', head_ref: 'work/another-candidate' }, configuredOwner), true);
+  assert.equal(qualifiesNormalBoot({ event_name: 'pull_request', head_ref: 'work/another-candidate' }, unconfiguredOwner), false,
+    'missing owner must qualify only the visible setup wizard, never normal UI');
   assert.match(source, /normal_ui_boot_verified=\$false/);
   assert.match(source, /client_state_runtime_packaged_resources_verified=\$true/);
 });

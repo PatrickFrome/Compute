@@ -62,13 +62,13 @@ async function fixture(t, mode = 'ready') {
 }
 
 async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emitReady = true,
-  managedHost, quitAfterBoot = false, installerAfterBoot = false, installerDuringStartup = false,
+  managedHost, packaged = false, quitAfterBoot = false, installerAfterBoot = false, installerDuringStartup = false,
   holdQuit = false } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (/^METAENGINE_(STATE_PROVIDER|SUPERVISOR_BASE_URL|FALLBACK_SUPERVISOR_BASE_URL|LOCAL_STATE_INSTANCE_ID|LOCAL_PROVIDER_|PROFILE_PROBE_|SINGLETON_TEST_)/.test(name)) delete env[name];
   }
-  const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, quitAfterBoot,
+  const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, packaged, quitAfterBoot,
     installerAfterBoot, installerDuringStartup, holdQuit };
   let output;
   try {
@@ -295,6 +295,22 @@ for (const entry of entries) {
       assert.equal(event(result, 'dialog'), undefined);
     }
     assert.equal(f.requests.length, 0);
+  });
+
+  test(entry + ': packaged first run defers the setup wizard until after ESM entry completes and Electron ready is emitted', async t => {
+    const f = await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result = await launch(f, { entry, packaged: true });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(eventIndex(result, 'entry-complete') >= 0, 'ESM must finish before ready');
+    assert.ok(eventIndex(result, 'entry-complete') < eventIndex(result, 'ready-emitted'));
+    assert.ok(eventIndex(result, 'ready-emitted') < eventIndex(result, 'first-run-wizard-ready'));
+    assert.deepEqual(event(result, 'first-run-wizard-ready'), ['first-run-wizard-ready', true]);
+    assert.equal(event(result, 'runtime-import'), undefined);
+    assert.equal(event(result, 'host-import'), undefined);
+    assert.equal(event(result, 'fetch'), undefined);
+    assert.equal(await fs.stat(f.ownerFile).then(() => true, () => false), false,
+      'cancelled wizard must not fabricate provider owner authority');
   });
 
   test(entry + ': no owner configuration preserves legacy primary startup without a provider health request', async t => {

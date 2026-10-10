@@ -65,6 +65,12 @@ app.on = (event, listener) => { trace('on', event); return realOn(event, listene
 app.once = (event, listener) => { trace('once', event); return realOnce(event, listener); };
 app.getPath = () => options.userData;
 app.getVersion = () => '0.7.0-dev.singleton-fixture';
+app.isPackaged = options.packaged === true;
+app.whenReady = () => {
+  trace('when-ready-called', ready);
+  if (ready) return Promise.resolve();
+  return new Promise(resolve => app.once('ready', resolve));
+};
 app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
@@ -146,6 +152,18 @@ const mocks = new Map([
     'export async function runSelfUpdateSmoke({ app }) { globalThis.__traceEntrypoint("self-update-smoke"); app.exit(0); }',
   )],
 ]);
+if (options.packaged) {
+  // An inert first-run wizard reproduces Electron readiness semantics without
+  // a real window, file picker, PostgreSQL provisioner or owner write.
+  mocks.set(new URL('local-restored-pg17-setup.mjs', src).href, dataModule([
+    'export async function showInstalledRestoredProviderWizard({ app }) {',
+    '  globalThis.__traceEntrypoint("first-run-wizard-entered", app.isReady());',
+    '  await app.whenReady();',
+    '  globalThis.__traceEntrypoint("first-run-wizard-ready", app.isReady());',
+    '  return { state:"CANCELLED", authority_effect:false };',
+    '}',
+  ].join('\n')));
+}
 if (options.managedHost) {
   globalThis.__singletonTestRuntimePaths = options.managedHost;
   mocks.set(offlineVerifier, dataModule([
