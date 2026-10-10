@@ -96,6 +96,17 @@ test('attached preparation preserves running Keeper and only writes a new protec
   assert.ok(f.aclCalls.every(row=>!row.target.startsWith(f.original)),'Keeper DACL must never be changed');
 });
 
+test('attached preparation accepts equivalent Windows forward-slash file paths',async t=>{
+  const f=await attachedFixture(t);
+  const prior=await fs.readFile(f.configFile);
+  const oldConfigFile=f.configFile.replaceAll('\\','/');
+  assert.deepEqual(await inspectRestoredRuntimePreparationMode(oldConfigFile,{verifyStorage:f.args.verifyStorage}),{postgresMode:'attached'});
+  const result=await prepareInstalledAttachedPg17({...f.args,oldConfigFile,bundleDirectory:f.bundle.replaceAll('\\','/')});
+  assert.equal(result.clusterPinPreserved,true);
+  assert.deepEqual(await fs.readFile(f.configFile),prior);
+  assert.equal(f.calls.length,0);
+});
+
 test('attached mode, role, pin, boundaries and private ACL failures deny publication',async t=>{
   for(const patch of [{api_role_mode:'service_role'},{expected_cluster_system_identifier:undefined},
     {expected_cluster_system_identifier:identifier+'x'},{postgres_mode:'owned'},

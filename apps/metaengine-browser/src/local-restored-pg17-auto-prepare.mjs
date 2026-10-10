@@ -29,6 +29,7 @@ async function absent(filename) {
 }
 async function physical(p,type) {
   if(!local(p))fail('local_path_required');
+  p=path.resolve(p);
   let current=path.parse(path.resolve(p)).root;
   for(const part of path.relative(current,p).split(path.sep).filter(Boolean)){
     current=path.join(current,part);
