@@ -54,11 +54,21 @@ try {
   # build the Browser compatibility process.
   $probeEntrypoint = Join-Path $daemonRoot 'browser-probe-entry.ts'
   if (-not (Test-Path $probeEntrypoint -PathType Leaf)) { throw 'me2_daemon_browser_probe_entry_missing' }
-  # Bun 1.3.3's default x64 executable can use AVX2 and fail with
-  # STATUS_ILLEGAL_INSTRUCTION on pre-Haswell Windows CPUs (e.g. Ivy Bridge).
-  # Ship the Nehalem-compatible baseline runtime; do not rely on CI CPU flags.
-  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64-baseline browser-probe-entry.ts --outfile $exePath
-  if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
+  # The Browser UI remains locked to Bun 1.3.3. The standalone daemon uses
+  # its separately pinned Bun 1.4.3 compiler, physically verified on Ivy Bridge.
+  # Bun 1.4.3 ships one Nehalem/SSE4.2 x64 binary with runtime CPU dispatch.
+  # Bun 1.3.3 cannot download the legacy baseline compile target reliably.
+  $daemonCompilerVersion = '1.4.3'
+  $daemonNpx = Get-Command npx.cmd -ErrorAction SilentlyContinue
+  if (-not $daemonNpx) { throw 'me2_daemon_pinned_npx_missing' }
+  $priorAction = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue' # npm may emit status notices on stderr.
+  try {
+    $actualCompilerVersion = [string](& $daemonNpx.Source --yes "bun@$daemonCompilerVersion" --version | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0 -or $actualCompilerVersion.Trim() -ne $daemonCompilerVersion) { throw 'me2_daemon_compiler_version_drift' }
+    & $daemonNpx.Source --yes "bun@$daemonCompilerVersion" build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
+    if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
+  } finally { $ErrorActionPreference = $priorAction }
 } finally {
   Pop-Location
 }
@@ -72,8 +82,10 @@ $manifest = [ordered]@{
   schema = 'metaengine.browser.me2-daemon-package.v1'
   source_head = $sourceHead
   daemon_version = $runtimeVersion
-  build_bun_version = $bunVersion
-  build_compile_target = 'bun-windows-x64-baseline'
+  build_bun_version = '1.4.3'
+  build_ui_bun_version = $bunVersion
+  build_bun_compiler_source = 'npx-pinned-bun-1.4.3'
+  build_compile_target = 'bun-windows-x64'
   cpu_compatibility = 'NEHALEM_SSE42_OR_NEWER'
   build_bun_toolchain_required = $bunToolchainRequired
   executable = 'me2-daemon.exe'
