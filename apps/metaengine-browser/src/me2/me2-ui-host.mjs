@@ -20,6 +20,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 export const ME2_UI_HOST_SCHEMA = 'metaengine.browser.me2.ui-host.v1';
 
@@ -201,15 +202,22 @@ function scheduleRestart() {
   }, delay);
 }
 
-export async function waitForMe2UiReady({ attempts = 60, intervalMs = 250, probe = me2UiHealthProbe } = {}) {
-  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 60));
-  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 250));
+// Cold Next.js startup can exceed 20 seconds on supported older Windows CPUs.
+// Keep readiness bounded while allowing its owned process to finish loading.
+export async function waitForMe2UiReady({ attempts = 120, intervalMs = 500, probe = me2UiHealthProbe,
+  wait = sleep, now = () => performance.now() } = {}) {
+  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 120));
+  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 500));
+  const deadline = now() + 60000;
   let last = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) return { ok: false, reason: 'readiness_timeout', attempt };
     if (child?.exitCode != null) return { ok: false, reason: `child_exit_${child.exitCode}`, attempt: attempt + 1 };
-    last = await probe(Math.min(1500, Math.max(250, delayMs * 4)));
+    last = await probe(Math.min(remainingMs, 1500, Math.max(250, delayMs * 4)));
+    if (now() >= deadline) return { ok: false, reason: 'readiness_timeout', attempt: attempt + 1 };
     if (last?.ok === true) return { ok: true, reason: 'READY', attempt: attempt + 1 };
-    if (attempt + 1 < maxAttempts) await sleep(delayMs);
+    if (attempt + 1 < maxAttempts) await wait(Math.min(delayMs, Math.max(0, deadline - now())));
   }
   return { ok: false, reason: String(last?.reason || 'readiness_timeout'), attempt: maxAttempts };
 }

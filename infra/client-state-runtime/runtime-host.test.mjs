@@ -4,8 +4,11 @@ import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'n
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import test from 'node:test';
 import { runtimeProviderDescriptor, stageManagedDenoCache, stageManagedDenoExecutable, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
+import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
 const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version: 1,
@@ -288,4 +291,18 @@ test('private Deno staging rejects directory aliases and changed bundled executa
   await writeFile(f.source, f.bytes);
   await symlink(f.config.bundle_directory, path.join(f.config.state_directory, 'deno-runtime'), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(stageManagedDenoExecutable(f.options), /path_invalid/);
+});
+
+test('private Deno executable inherits the protected state DACL instead of broader bundle grants', {
+  skip: process.platform !== 'win32', timeout: 180000,
+}, async t => {
+  const f = await denoCopyFixture(t);
+  await protectOwnerOnlyWindowsDirectory(f.config.state_directory);
+  await promisify(execFile)(path.win32.join(process.env.SystemRoot || process.env.SYSTEMROOT, 'System32', 'icacls.exe'),
+    [f.source, '/grant', '*S-1-1-0:(R)'], { windowsHide: true, shell: false, timeout: 120000, maxBuffer: 8192 });
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(f.source), /acl_not_confirmed_readback/);
+  const target = await stageManagedDenoExecutable(f.options);
+  assert.equal((await verifyOwnerOnlyWindowsStorage(target)).owner_dacl_verified, true);
+  assert.deepEqual(await readFile(target), f.bytes);
+  assert.equal((await lstat(f.source)).nlink, 1);
 });

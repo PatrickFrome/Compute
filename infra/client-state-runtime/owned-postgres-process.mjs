@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -10,6 +10,65 @@ const sleep = delay => new Promise(resolve => setTimeout(resolve, delay));
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
 const failure = code => Object.assign(new Error(code), { code });
 const maximumDiagnosticBytes = 32768;
+
+// pg_ctl exits while its restricted postmaster keeps inherited OS handles.
+// execFile's callback waits for pipe closure, which can take its entire timeout
+// even after exit(0). Use NUL handles and the control process exit; the caller
+// independently claims and attests the actual postmaster before trusting it.
+export async function runOwnedPostgresControlProcess(executable, args, {
+  env = process.env, timeoutMs, signal,
+} = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 130000) {
+    throw failure('owned_postgres_control_configuration_invalid');
+  }
+  if (signal?.aborted) throw failure('owned_postgres_control_cancelled');
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(executable, args, { env, shell: false, windowsHide: true, stdio: 'ignore' });
+    } catch { reject(failure('owned_postgres_control_failed')); return; }
+    let settled = false;
+    let timer;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      error ? reject(error) : resolve();
+    };
+    const terminateControl = category => {
+      // This handle belongs only to the just-spawned pg_ctl. The postmaster
+      // remains subject to the separate strict claim/stop ownership contract.
+      try { child.kill('SIGKILL'); } catch { /* The deadline remains bounded. */ }
+      finish(failure(category));
+    };
+    const abort = () => terminateControl('owned_postgres_control_cancelled');
+    child.once('error', () => finish(failure('owned_postgres_control_failed')));
+    child.once('exit', (code, exitSignal) => finish(code === 0 && exitSignal === null
+      ? null : failure('owned_postgres_control_failed')));
+    timer = setTimeout(() => terminateControl('owned_postgres_control_timeout'), timeoutMs);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+// PostgreSQL stores whole-second startup time after Windows has created the
+// process. Cold initialization may take much longer than timestamp precision.
+// Bind both readings to this launch and its finite startup budget, then retain
+// the exact readings for every later verification and cleanup claim.
+export function windowsPostgresStartupTimestampsMatch({
+  launchedAt, observedAt, startupTimeoutMs, processCreatedAt, postmasterStartIdentity,
+} = {}) {
+  const created = Date.parse(processCreatedAt);
+  const started = Number(postmasterStartIdentity) * 1000;
+  if (!Number.isFinite(launchedAt) || !Number.isFinite(observedAt) || observedAt < launchedAt
+    || !Number.isInteger(startupTimeoutMs) || startupTimeoutMs < 1000 || startupTimeoutMs > 120000
+    || !Number.isFinite(created) || created <= 0 || !Number.isSafeInteger(Number(postmasterStartIdentity))
+    || !Number.isFinite(started) || started <= 0) return false;
+  return created >= launchedAt - 2000 && created <= observedAt + 2000
+    && started >= launchedAt - 2000 && started <= observedAt + 2000
+    && started >= created - 1000 && started <= created + startupTimeoutMs + 2000;
+}
 
 async function regularFile(filename) {
   const info = await fs.lstat(filename);
@@ -150,20 +209,19 @@ export async function startOwnedWindowsPostgres({
   try { await fs.lstat(privateLog); throw failure('owned_postgres_private_log_exists'); }
   catch (error) { if (error?.code !== 'ENOENT') throw error; }
   const launchedAt = Date.now();
+  const startupDeadline = launchedAt + startupTimeoutMs + 5000;
+  const startupRemaining = limit => Math.max(1, Math.min(limit, startupDeadline - Date.now()));
   let identity;
   let stopAttempt = null;
   const commandMatches = record => windowsPostgresCommandMatches(record.command_line,
     { postgresExecutable, pgDataDir: dataDirectory, databasePort });
 
-  async function claim() {
+  async function claim({ timeoutMs = startupRemaining(30000) } = {}) {
     const selected = await pidFileIdentity(pidPath, dataDirectory, databasePort);
-    const processIdentity = await processRecord(selected.pid, env);
+    const processIdentity = await processRecord(selected.pid, env, timeoutMs);
     if (!processIdentity || !same(processIdentity.executable, postgresExecutable) || !commandMatches(processIdentity)
-      || Date.parse(processIdentity.created_at) < launchedAt - 2000
-      || Date.parse(processIdentity.created_at) > Date.now() + 2000
-      || Number(selected.postmasterStartIdentity) * 1000 < launchedAt - 2000
-      || Number(selected.postmasterStartIdentity) * 1000 > Date.now() + 2000
-      || Math.abs(Number(selected.postmasterStartIdentity) * 1000 - Date.parse(processIdentity.created_at)) > 2500) {
+      || !windowsPostgresStartupTimestampsMatch({ launchedAt, observedAt: Date.now(), startupTimeoutMs,
+        processCreatedAt: processIdentity.created_at, postmasterStartIdentity: selected.postmasterStartIdentity })) {
       throw failure('owned_postgres_process_identity_unconfirmed');
     }
     return Object.freeze({ ...selected, processCreatedAt: processIdentity.created_at });
@@ -203,8 +261,8 @@ export async function startOwnedWindowsPostgres({
       await verify({ timeoutMs: Math.max(1, Math.min(10000, deadline - Date.now())) });
       const remaining = deadline - Date.now();
       if (remaining < 1000) throw failure('runtime_cleanup_unconfirmed');
-      await exec(pgCtlExecutable, ['stop', '-D', dataDirectory, '-m', 'fast', '-w', '-t', String(Math.max(1, Math.floor((remaining - 1000) / 1000)))],
-        { env, shell: false, windowsHide: true, timeout: remaining, maxBuffer: maximumDiagnosticBytes });
+      await runOwnedPostgresControlProcess(pgCtlExecutable, ['stop', '-D', dataDirectory, '-m', 'fast', '-w', '-t', String(Math.max(1, Math.floor((remaining - 1000) / 1000)))],
+        { env, timeoutMs: remaining });
       do {
         if (await stopped(deadline)) return Object.freeze({ cleanup_confirmed: true, pid: identity.pid });
         await sleep(100);
@@ -222,15 +280,15 @@ export async function startOwnedWindowsPostgres({
   }
 
   try {
-    await exec(pgCtlExecutable, ['start', '-D', dataDirectory, '-p', postgresExecutable,
+    await runOwnedPostgresControlProcess(pgCtlExecutable, ['start', '-D', dataDirectory, '-p', postgresExecutable,
       '-o', `-h 127.0.0.1 -p ${databasePort}`, '-l', privateLog, '-w', '-t', String(Math.ceil(startupTimeoutMs / 1000))],
-      { env, shell: false, windowsHide: true, timeout: startupTimeoutMs + 5000,
-        maxBuffer: maximumDiagnosticBytes, ...(signal ? { signal } : {}) });
+      { env, timeoutMs: startupTimeoutMs + 5000, ...(signal ? { signal } : {}) });
     identity = await claim();
     if (identity.status !== 'ready') throw failure('owned_postgres_readiness_unconfirmed');
     await exec(pgIsReadyExecutable, ['-h', '127.0.0.1', '-p', String(databasePort), '--timeout=3'],
-      { env, shell: false, windowsHide: true, timeout: 5000, maxBuffer: maximumDiagnosticBytes });
-    await verify();
+      { env, shell: false, windowsHide: true, timeout: startupRemaining(5000), maxBuffer: maximumDiagnosticBytes });
+    await verify({ timeoutMs: startupRemaining(30000) });
+    if (Date.now() > startupDeadline) throw failure('owned_postgres_startup_unconfirmed');
     if (signal?.aborted) throw failure('owned_postgres_startup_cancelled');
     return Object.freeze({ pid: identity.pid, processCreatedAt: identity.processCreatedAt,
       postmasterStartIdentity: identity.postmasterStartIdentity, pgDataDir: dataDirectory, databasePort,
@@ -244,8 +302,9 @@ export async function startOwnedWindowsPostgres({
       catch { /* Diagnostic capture cannot authorize or prevent cleanup. */ }
     }
     try {
-      identity ||= await claim();
-      await stop();
+      const cleanupDeadline = Date.now() + 25000;
+      identity ||= await claim({ timeoutMs: Math.max(1, Math.min(30000, cleanupDeadline - Date.now())) });
+      await stop({ timeoutMs: Math.max(1, cleanupDeadline - Date.now()) });
     } catch {
       throw failure('runtime_cleanup_unconfirmed');
     }

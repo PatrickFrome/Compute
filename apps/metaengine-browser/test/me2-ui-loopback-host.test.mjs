@@ -7,11 +7,49 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { resolveMe2UiLaunch } from '../src/me2/me2-ui-host.mjs';
+import { resolveMe2UiLaunch, waitForMe2UiReady } from '../src/me2/me2-ui-host.mjs';
 
 const execute = promisify(execFile);
 const uiDirectory = path.resolve('fixture-ui');
 const exists = file => file === path.join(uiDirectory, 'package.json') || file === path.join(uiDirectory, 'server.js');
+
+test('normal readiness accepts a cold UI after 20 seconds and still bounds an unavailable child', async () => {
+  let elapsedMs = 0, probes = 0;
+  const ready = await waitForMe2UiReady({
+    probe: async () => { probes += 1; return { ok: elapsedMs >= 20500, reason: 'cold_start' }; },
+    wait: async ms => { elapsedMs += ms; },
+    now: () => elapsedMs,
+  });
+  assert.equal(ready.ok, true);
+  assert.equal(ready.reason, 'READY');
+  assert.equal(elapsedMs, 20500);
+  assert.equal(ready.attempt, probes);
+  elapsedMs = 0; probes = 0;
+  const unavailable = await waitForMe2UiReady({
+    probe: async () => { probes += 1; return { ok: false, reason: 'not_ready' }; },
+    wait: async ms => { elapsedMs += ms; },
+    now: () => elapsedMs,
+  });
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.reason, 'not_ready');
+  assert.equal(probes, 120);
+  assert.equal(elapsedMs, 59500);
+  elapsedMs = 0; probes = 0;
+  const slowProbeTimeouts = [];
+  const slow = await waitForMe2UiReady({
+    probe: async timeoutMs => {
+      probes += 1; slowProbeTimeouts.push(timeoutMs); elapsedMs += timeoutMs;
+      return { ok: elapsedMs >= 60000, reason: 'late_ready' };
+    },
+    wait: async ms => { elapsedMs += ms; },
+    now: () => elapsedMs,
+  });
+  assert.equal(slow.ok, false, 'readiness arriving at the deadline must not qualify');
+  assert.equal(slow.reason, 'readiness_timeout');
+  assert.equal(elapsedMs, 60000);
+  assert.ok(probes < 120, 'slow HTTP probes must consume the wall-clock budget');
+  assert.ok(slowProbeTimeouts.every(ms => ms > 0 && ms <= 1500));
+});
 
 test('standalone and package-script UI pin hostname despite an inherited wildcard', () => {
   for (const extraEnv of [{}, { ME2_UI_BIN: 'bun-custom' }]) {
@@ -60,7 +98,7 @@ try {
     const { stdout } = await execute(process.execPath, [path.join(fixture, 'harness.mjs'),
       new URL('../src/me2/me2-ui-host.mjs', import.meta.url).href,
       new URL('../scripts/verify-windows-tcp-listener.mjs', import.meta.url).href], {
-      cwd: fixture, windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024,
+      cwd: fixture, windowsHide: true, timeout: 90000, maxBuffer: 64 * 1024,
       env: { ...process.env, HOSTNAME: '0.0.0.0', ME2_UI_DIR: fixture, ME2_UI_PORT: String(port),
         ME2_UI_BIN: '', ME2_UI_DEV: '0', ME2_UI_ALLOW_EXTERNAL_ADOPT: '0', ME2_UI_HEALTH_URL: `http://127.0.0.1:${port}/` },
     });

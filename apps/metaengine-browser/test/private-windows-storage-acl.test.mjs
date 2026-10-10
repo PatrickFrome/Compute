@@ -143,3 +143,24 @@ test('Win32 real ACL protects fresh private directory and verifies inheriting co
     message:'private_windows_storage_acl_not_confirmed_readback',
   });
 });
+
+test('Win32 DACL protection can repeat on existing private state without changing owner or group', {
+  skip:process.platform!=='win32',timeout:180000,
+},async t=>{
+  const top=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-acl-reprotect-'));
+  t.after(()=>fs.rm(top,{recursive:true,force:true}));
+  const directory=path.join(top,'private-state');
+  await fs.mkdir(directory);
+  const executable=path.win32.join(process.env.SystemRoot||process.env.SYSTEMROOT,'System32','WindowsPowerShell','v1.0','powershell.exe');
+  const script="$s=[System.IO.Directory]::GetAccessControl($env:METAENGINE_ACL_TEST_DIRECTORY);@{owner=$s.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;group=$s.GetGroup([System.Security.Principal.SecurityIdentifier]).Value}|ConvertTo-Json -Compress";
+  const identity=async()=>JSON.parse((await promisify(execFile)(executable,
+    ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
+    {windowsHide:true,shell:false,timeout:120000,maxBuffer:8192,env:{...process.env,METAENGINE_ACL_TEST_DIRECTORY:directory}})).stdout);
+  const before=await identity();
+  assert.equal((await protectOwnerOnlyWindowsDirectory(directory)).owner_dacl_verified,true);
+  assert.equal((await protectOwnerOnlyWindowsDirectory(directory)).owner_dacl_verified,true);
+  assert.deepEqual(await identity(),before,'only DACL changes, owner and group remain intact');
+  const privateFile=path.join(directory,'private.json');
+  await fs.writeFile(privateFile,'{"test":"private"}',{flag:'wx'});
+  assert.equal((await verifyOwnerOnlyWindowsStorage(privateFile)).owner_dacl_verified,true);
+});

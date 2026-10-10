@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants, createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchClientStateRuntime, normalizeLauncherConfig } from './launcher.mjs';
@@ -237,7 +238,9 @@ export async function stageManagedDenoExecutable({ verified, stateDirectory }) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const temporary = path.join(directory, '.deno-' + randomUUID() + '.exe');
   try {
-    await copyFile(source, temporary, constants.COPYFILE_EXCL);
+    // A newly created file inherits the protected state DACL. Native Windows
+    // CopyFile can retain the source descriptor, which belongs to the bundle.
+    await pipeline(createReadStream(source), createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
     const copyIdentity = await denoExecutableIdentity(temporary, record, true);
     if (copyIdentity.ino === sourceIdentity.ino && copyIdentity.dev === sourceIdentity.dev) {
       throw failure('runtime_host_deno_executable_copy_aliased');

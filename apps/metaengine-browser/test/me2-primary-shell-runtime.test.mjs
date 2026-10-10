@@ -207,8 +207,8 @@ test('ME2 page navigation controls presentation only through the trusted preload
 
 test('packaged ME2 UI routing waits for bounded initial readiness', () => {
   assert.match(uiHost, /export async function waitForMe2UiReady/);
-  assert.match(uiHost, /attempts = 60/);
-  assert.match(uiHost, /intervalMs = 250/);
+  assert.match(uiHost, /attempts = 120/);
+  assert.match(uiHost, /intervalMs = 500/);
   assert.match(uiHost, /const ready = await waitForMe2UiReady\(\)/);
   assert.match(uiHost, /event: 'UI_HEALTHY', readiness_attempt: ready\.attempt/);
   assert.match(uiHost, /event: 'UI_INITIAL_READINESS_FAILED'/);

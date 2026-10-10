@@ -35,7 +35,7 @@ test('Windows query is bounded, numeric-only and omits raw diagnostics', async (
     assert.match(args[3], /Get-NetTCPConnection -State Listen -LocalPort 3000/);
     assert.doesNotMatch(args[3], /CommandLine|Environment|Remove-|Stop-/);
     assert.equal(options.windowsHide, true);
-    assert.equal(options.timeout, 15000);
+    assert.equal(options.timeout, 60000);
     assert.equal(options.maxBuffer, 64 * 1024);
     return { stdout: JSON.stringify([expected]) };
   };

@@ -53,7 +53,9 @@ export async function verifyWindowsTcpListener({ port, pid, platform = process.p
   try {
     ({ stdout } = await run(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-Command', script],
-      { windowsHide: true, timeout: 15000, maxBuffer: 64 * 1024, encoding: 'utf8' }));
+      // Cold Windows CIM/module discovery can exceed 15 seconds on supported
+      // machines. Keep one bounded query and the same exact address/PID gate.
+      { windowsHide: true, timeout: 60000, maxBuffer: 64 * 1024, encoding: 'utf8' }));
   } catch {
     throw new Error('me2_ui_os_listener_query_failed');
   }

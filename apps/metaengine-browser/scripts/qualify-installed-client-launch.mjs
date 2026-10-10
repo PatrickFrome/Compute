@@ -168,9 +168,9 @@ function start(executable, args, env, cwd) {
 async function stop(launch) {
   if (launch.child.exitCode !== null || launch.child.signalCode !== null) return launch.closed;
   // The tracked launch owns this exact PID; cleanup is never by image name.
-  try { await execute('taskkill.exe', ['/PID', String(launch.child.pid), '/T', '/F'], { windowsHide: true, timeout: 15000 }); }
+  try { await execute('taskkill.exe', ['/PID', String(launch.child.pid), '/T', '/F'], { windowsHide: true, timeout: 60000 }); }
   catch { if (launch.child.exitCode === null) fail('process_cleanup_unconfirmed'); }
-  await Promise.race([launch.closed, deadline(15000, 'process_cleanup_timeout')]);
+  await Promise.race([launch.closed, deadline(60000, 'process_cleanup_timeout')]);
 }
 
 async function waitUntil(action, launch, timeoutMs = 60000) {
@@ -363,10 +363,16 @@ export async function qualifyInstalledFirstRun({ executable, directory, identity
     '--proxy-server=127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost'], env, directory);
   let client;
   let proof;
+  let dom;
   try {
     const target = await waitUntil(() => targetAt(debuggingPort, url => /\/local-restored-pg17-setup\.html$/.test(url)), launch, 90000);
     client = await cdp(target.webSocketDebuggerUrl);
-    const result = await client.command('Runtime.evaluate', { returnByValue: true, expression: `(() => ({
+    // CDP can publish the navigation target before its document/context exists.
+    // Wait for that exact local document to finish loading, then enforce the
+    // complete consent contract without accepting a partial renderer readback.
+    await waitUntil(async () => {
+      const result = await client.command('Runtime.evaluate', { returnByValue: true, expression: `(() => ({
+      ready_state: document.readyState,
       heading: document.querySelector('h1')?.textContent,
       config: !!document.querySelector('#config'), receipt: !!document.querySelector('#receipt'),
       connect: !!document.querySelector('#connect'), digest: !!document.querySelector('#digest'),
@@ -375,7 +381,10 @@ export async function qualifyInstalledFirstRun({ executable, directory, identity
       csp: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content,
       url: location.href, resources: performance.getEntriesByType('resource').map(row => row.name)
     }))()` });
-    const dom = result.result?.value;
+      dom = result.result?.value;
+      return dom?.ready_state === 'complete' && /\/local-restored-pg17-setup\.html$/.test(dom.url || '') ? dom : null;
+    }, launch, 90000);
+    await fs.writeFile(path.join(directory, 'installed-first-run-dom.json'), JSON.stringify(dom ?? null, null, 2) + '\n');
     assertFirstRunDomContract(dom);
     const listener = await verifyWindowsTcpListener({ port: debuggingPort, pid: launch.child.pid });
     const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
@@ -397,6 +406,7 @@ export async function qualifyInstalledFirstRun({ executable, directory, identity
       screenshot_sha256: digest(png), screenshot_bytes: png.length, debugger_listener: listener,
       owner_boot_qualified: false, production_ready: false, authority_effect: false };
   } finally {
+    await fs.writeFile(path.join(directory, 'installed-first-run-dom.json'), JSON.stringify(dom ?? null, null, 2) + '\n');
     client?.close();
     await stop(launch);
     await fs.writeFile(path.join(directory, 'installed-first-run.log'), launch.output());
@@ -408,7 +418,7 @@ export async function qualifyInstalledFirstRun({ executable, directory, identity
 export async function qualifyInstalledUiHost({ executable, asar, archive, directory, resourcesDir, identity }) {
   const uiProof = verifyMe2UiBundle(path.join(resourcesDir, 'me2-ui'), identity.source_head);
   const port = await freePort();
-  const hostBytes = asar.extractFile(archive, 'src/me2/me2-ui-host.mjs');
+  const hostBytes = asar.extractFile(archive, path.normalize('src/me2/me2-ui-host.mjs'));
   const hostFile = path.join(directory, 'installed-me2-ui-host.mjs');
   await fs.writeFile(hostFile, hostBytes, { flag: 'wx' });
   const harnessFile = path.join(directory, 'installed-me2-ui-host-harness.mjs');
@@ -418,7 +428,7 @@ try {
   const state = await host.startMe2UiHost();
   if (state.state !== 'HEALTHY' || state.mode !== 'spawned' || state.child_owned !== true
     || state.launch_mode !== 'EMBEDDED_NODE_STANDALONE') throw new Error('installed_launch_host_not_owned');
-  process.send({ schema: 'metaengine.browser.installed-ui-host-readback.v1', ...state });
+  process.send({ ...state, schema: 'metaengine.browser.installed-ui-host-readback.v1' });
   await new Promise(resolve => process.once('message', resolve));
 } finally {
   const state = await host.stopMe2UiHostAndWait();
@@ -441,7 +451,7 @@ try {
     const state = await Promise.race([new Promise((resolve, reject) => {
       child.once('message', row => row.schema === 'metaengine.browser.installed-ui-host-readback.v1' ? resolve(row) : reject(new Error('installed_launch_host_readback_invalid')));
       child.once('error', reject); child.once('close', () => reject(new Error('installed_launch_host_ended')));
-    }), deadline(60000, 'host_ready_timeout')]);
+    }), deadline(150000, 'host_ready_timeout')]);
     const listener = await verifyWindowsTcpListener({ port, pid: state.child_pid });
     const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(10000) });
     assert(response.ok);
@@ -454,7 +464,7 @@ try {
       owner_boot_qualified: false, production_ready: false, authority_effect: false };
   } finally {
     if (child.connected) child.send({ command: 'stop' });
-    const result = await Promise.race([closed, delay(15000, null, { ref: false })]);
+    const result = await Promise.race([closed, delay(60000, null, { ref: false })]);
     await fs.writeFile(path.join(directory, 'installed-owned-ui-host.log'), output);
     if (!result || result.code !== 0 || !cleanup) {
       await stop({ child, closed });
@@ -487,7 +497,7 @@ async function ownerProfile({ ownerQaRoot, resourcesDir, identity }) {
 async function normalUiSocket(port, primaryPid, executable) {
   const script = `$ErrorActionPreference='Stop'; $rows=@(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop); $ids=@($rows.OwningProcess | Select-Object -Unique); if($ids.Count -ne 1){throw 'owner_socket_ambiguous'}; Get-CimInstance Win32_Process -Filter ('ProcessId='+$ids[0]) | Select-Object ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress`;
   const { stdout } = await execute(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-    ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15000, maxBuffer: 16384 });
+    ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 60000, maxBuffer: 16384 });
   const row = JSON.parse(stdout);
   if (row.ParentProcessId !== primaryPid || String(row.ExecutablePath).toLowerCase() !== executable.toLowerCase()) fail('normal_ui_child_process_mismatch');
   return verifyWindowsTcpListener({ port, pid: row.ProcessId });
@@ -620,14 +630,14 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
   const identity = assertInstalledLaunchIdentity(pkg, { expectedHead, expectedVersion });
   const sourceFiles = {};
   for (const relative of INSTALLED_LAUNCH_SOURCE_FILES) {
-    const installed = asar.extractFile(archive, relative);
+    const installed = asar.extractFile(archive, path.normalize(relative));
     const source = await fs.readFile(path.join(sourceRoot, 'apps/metaengine-browser', relative));
     if (!installed.equals(source)) fail('installed_source_bytes_mismatch');
     sourceFiles[relative] = digest(installed);
   }
   const runtime = await assertPackagedOfflineRuntimeBinding(pkg.metaengineClientStateRuntime, {
     expectedHead, packageVersion: expectedVersion, resourcesDir,
-    verifierBytes: asar.extractFile(archive, 'infra/client-state-runtime/offline-runtime-bundle.mjs'),
+    verifierBytes: asar.extractFile(archive, path.normalize('infra/client-state-runtime/offline-runtime-bundle.mjs')),
   });
   const isolatedDirectory = path.join(directory, 'isolated-launch-' + randomUUID());
   await fs.mkdir(isolatedDirectory);

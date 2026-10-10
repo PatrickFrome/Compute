@@ -4,9 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createPackage } from '@electron/asar';
 import { assertInstalledLaunchIdentity, assertFirstRunDomContract, assertOwnerStartupGrace,
   assertOfflineSuccessorBinding, qualifyInstalledOfflineSuccessor,
-  isolatedLaunchEnvironment } from '../scripts/qualify-installed-client-launch.mjs';
+  isolatedLaunchEnvironment, INSTALLED_LAUNCH_SOURCE_FILES,
+  qualifyInstalledClientLaunch } from '../scripts/qualify-installed-client-launch.mjs';
 import { persistUpdatedSuccessorReceipt, selfUpdateHandoffPaths } from '../src/self-update-handoff.mjs';
 
 const expectedHead = 'a'.repeat(40), expectedVersion = '0.7.0-dev.37781000050.1';
@@ -29,6 +31,36 @@ test('installed launch refuses a stale executable package or a differently pinne
     assert.throws(() => assertInstalledLaunchIdentity(value, { expectedHead, expectedVersion }), /package_identity_mismatch/);
   }
 });
+
+test('installed launch reads actual nested ASAR bytes on Windows before enforcing the runtime binding',
+  { skip: process.platform !== 'win32' }, async t => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-installed-asar-paths-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const installRoot = path.join(root, 'installed'), resources = path.join(installRoot, 'resources');
+    const archiveSource = path.join(root, 'archive-source'), sourceRoot = path.join(root, 'source');
+    const sourceApp = path.join(sourceRoot, 'apps', 'metaengine-browser');
+    await fs.mkdir(resources, { recursive: true });
+    await fs.mkdir(archiveSource, { recursive: true });
+    await fs.writeFile(path.join(installRoot, 'METAENGINE Browser Test.exe'), 'inert-unlaunchable-fixture');
+    await fs.writeFile(path.join(archiveSource, 'package.json'), JSON.stringify(identity()));
+    for (const relative of INSTALLED_LAUNCH_SOURCE_FILES) {
+      const bytes = Buffer.from('exact nested source fixture: ' + relative);
+      for (const directory of [archiveSource, sourceApp]) {
+        const target = path.join(directory, relative);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, bytes);
+      }
+    }
+    const verifier = path.join(archiveSource, 'infra', 'client-state-runtime', 'offline-runtime-bundle.mjs');
+    await fs.mkdir(path.dirname(verifier), { recursive: true });
+    await fs.writeFile(verifier, 'inert runtime verifier fixture');
+    await createPackage(archiveSource, path.join(resources, 'app.asar'));
+    // The inert executable must never run. Successful nested source/verifier
+    // reads reach the real runtime admission gate, which denies this fixture.
+    await assert.rejects(qualifyInstalledClientLaunch({ installRoot, sourceRoot, expectedHead, expectedVersion,
+      evidenceDirectory: root }), /packaged_client_state_runtime_binding_missing/);
+    assert.equal((await fs.readdir(root)).some(name => name.startsWith('isolated-launch-')), false);
+  });
 
 test('isolated launch drops all inherited credentials, owner endpoint, module loaders and UI adoption overrides', () => {
   const env = isolatedLaunchEnvironment({ appData: 'qa/roaming', localAppData: 'qa/local', temporaryDirectory: 'qa/temp',
