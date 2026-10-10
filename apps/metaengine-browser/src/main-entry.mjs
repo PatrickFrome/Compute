@@ -118,6 +118,10 @@ if (guard.installer_shutdown_control) {
     try { lstatSync(ownerPath); }
     catch (error) { if (error?.code === 'ENOENT') firstRunOwnerMissing = true; }
   }
+  // Diagnostic routing only: a deliberately unprovisioned local status window
+  // has no Browser main.mjs activate handler. This flag never admits work,
+  // selects a provider, or substitutes for runtime health evidence.
+  globalThis.__METAENGINE_LOCAL_BOUNDARY_EXPECTED__ = firstRunOwnerMissing;
   const runPrimaryStartup = async () => {
   try {
   runtimeController = import('./local-runtime-host-controller.mjs');
