@@ -49,6 +49,41 @@ test('host rejects private-state overlap, extra config fields and unqualified pr
   assert.throws(() => runtimeProviderDescriptor({ instanceId: randomUUID(), edgeHealth: { runtime_ready: true } }), /provider_unattested/);
 });
 
+test('attached host mode permits an independent PGDATA and rejects ambiguous ownership', () => {
+  const root = path.resolve(os.tmpdir(), 'synthetic-attached-host-config');
+  const attached = { ...configValue(root), postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(root, 'keeper-data') };
+  assert.equal(validateRuntimeHostConfig(attached).postgres_mode, 'attached');
+  assert.equal(validateRuntimeHostConfig(attached).api_role_mode, 'direct');
+  for (const api_role_mode of ['service_role', undefined]) {
+    assert.throws(() => validateRuntimeHostConfig({ ...attached, api_role_mode }), /attached_direct_api_required|api_role_mode_invalid/);
+  }
+  const { api_role_mode, ...unselectedRole } = attached;
+  assert.throws(() => validateRuntimeHostConfig(unselectedRole), /attached_direct_api_required/);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, api_role_mode: 'superuser' }), /api_role_mode_invalid/);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, expected_cluster_system_identifier: undefined }), /cluster_identity_pin_required/);
+  assert.equal(validateRuntimeHostPhysicalBoundaries({
+    bundleDirectory: attached.bundle_directory, stateDirectory: attached.state_directory,
+    pgDataDirectory: attached.pg_data_directory, privateConfigFile: path.join(root, 'private.json'),
+    repositoryDirectory: path.join(root, 'checkout'), postgresMode: 'attached',
+  }), true);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, postgres_mode: 'unknown' }), /postgres_mode_invalid/);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, pg_data_directory: attached.state_directory }), /private_state_boundary_invalid/);
+  const sourceDirectory = path.resolve(path.dirname(hostEntry), '../..');
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, pg_data_directory: path.join(sourceDirectory, 'pgdata') }), /private_state_boundary_invalid/);
+  for (const pgDataDirectory of [path.join(root, 'checkout', 'pgdata'), root]) {
+    assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+      bundleDirectory: attached.bundle_directory, stateDirectory: attached.state_directory,
+      pgDataDirectory, privateConfigFile: path.join(root, 'private.json'),
+      repositoryDirectory: path.join(root, 'checkout'), postgresMode: 'attached',
+    }), /private_state_boundary_invalid/);
+  }
+  assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+    bundleDirectory: attached.bundle_directory, stateDirectory: attached.state_directory,
+    pgDataDirectory: attached.pg_data_directory, privateConfigFile: path.join(root, 'private.json'),
+    repositoryDirectory: path.join(root, 'checkout'), postgresMode: 'unknown',
+  }), /postgres_mode_invalid/);
+});
+
 test('physical directory identity fences short-name aliases and private PGDATA overlap', () => {
   // The normalized names stand in for realpath() results of two distinct path
   // spellings (e.g. RUNNER~1 and runneradmin). Works on Windows and Linux
@@ -94,6 +129,26 @@ test('host owns one lock, publishes public status and idempotently stops its run
   assert.equal(f.stopCalls(), 1);
   await assert.rejects(readFile(path.join(f.config.state_directory, 'runtime-host-lock.json')), { code: 'ENOENT' });
   assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).state, 'STOPPED');
+});
+
+test('attached host passes through mode and shutdown never claims the external PostgreSQL', async t => {
+  const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(os.tmpdir(), `compute-attached-data-${randomUUID()}`) });
+  t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));
+  await mkdir(f.config.state_directory, { recursive: true });
+  await writeFile(path.join(f.config.state_directory, 'PG_VERSION'), '17\n');
+  await writeFile(path.join(f.config.state_directory, 'client-vault.key'), 'b'.repeat(64) + '\n');
+  let launched;
+  const hooks = { ...f.hooks, launchRuntime: async config => { launched = config; return f.runtime; } };
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, hooks);
+  assert.equal(launched.postgresMode, 'attached');
+  assert.equal(launched.apiRoleMode, 'direct');
+  assert.equal(launched.expectedClusterSystemIdentifier, '7654321098765432100');
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).postgres_mode, 'attached');
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).api_role_mode, 'direct');
+  assert.equal(f.runtime.children.some(child => child.name === 'postgres'), false);
+  await host.stop();
+  await host.finished;
+  assert.equal(f.stopCalls(), 1);
 });
 
 test('resource path mismatch refuses launch and an already cancelled startup releases ownership', async t => {

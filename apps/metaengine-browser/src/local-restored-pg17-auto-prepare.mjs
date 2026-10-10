@@ -4,11 +4,13 @@ import { pipeline } from 'node:stream/promises';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import path from 'node:path';
 import os from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const exec=promisify(execFile);
+const sourceOrInstallationRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const SHA=/^[0-9a-f]{64}$/;
 const CONFIG_KEYS=['schema','version','bundle_directory','expected_bundle_sha256','state_directory',
   'pg_data_directory','database_url','inspect_database_url','api_port','edge_port','startup_timeout_ms'];
@@ -117,6 +119,82 @@ async function readOldConfig(filename){
   if((await fs.lstat(filename)).mtimeMs!==stat.mtimeMs)fail('old_config_changed');
   try{return validatePreviousConfig(JSON.parse(old.toString('utf8')));}
   catch{fail('old_private_config_unverified');}
+}
+
+async function stablePrivateConfig(filename, verifyStorage) {
+  const file=await physical(filename,'file');
+  if((await verifyStorage(file,{operation:'VERIFY_PRIVATE_FILE'}))?.owner_dacl_verified!==true)
+    fail('private_file_acl_unverified');
+  const before=await fs.lstat(file);
+  if(before.size<1||before.size>16384)fail('old_private_config_unverified');
+  const bytes=await fs.readFile(file);
+  const after=await fs.lstat(file);
+  if(bytes.length!==before.size||after.ino!==before.ino||after.mtimeMs!==before.mtimeMs||after.size!==before.size)
+    fail('old_config_changed');
+  let value;
+  try{value=JSON.parse(bytes.toString('utf8'));}catch{fail('old_private_config_unverified');}
+  return {file,bytes,value};
+}
+
+export async function inspectRestoredRuntimePreparationMode(configFile,{
+  verifyStorage=verifyOwnerOnlyWindowsStorage,
+}={}) {
+  const {value}=await stablePrivateConfig(configFile,verifyStorage);
+  if(!value||typeof value!=='object'||Array.isArray(value))fail('old_private_config_unverified');
+  const mode=value.postgres_mode??'owned';
+  if(!['owned','attached'].includes(mode))fail('postgres_mode_unverified');
+  if(mode==='attached'&&(value.api_role_mode!=='direct'||typeof value.expected_cluster_system_identifier!=='string'
+    ||!/^[1-9][0-9]{0,19}$/.test(value.expected_cluster_system_identifier)))fail('attached_direct_cluster_pin_required');
+  return Object.freeze({postgresMode:mode});
+}
+
+// Rebind only client runtime configuration. Keeper PGDATA and its lifecycle are
+// handled solely by the verified attached host; this preparation runs no PG tools.
+export async function prepareInstalledAttachedPg17({
+  oldConfigFile,bundleDirectory,bundleDigest,platform=process.platform,
+  protectStorage=protectOwnerOnlyWindowsDirectory,verifyStorage=verifyOwnerOnlyWindowsStorage,
+}={}) {
+  if(platform!=='win32'||![oldConfigFile,bundleDirectory].every(local)||!SHA.test(bundleDigest||''))fail('arguments_invalid');
+  const original=await stablePrivateConfig(oldConfigFile,verifyStorage);
+  const config=original.value;
+  const keys=[...CONFIG_KEYS,'postgres_mode','api_role_mode','expected_cluster_system_identifier'];
+  if(!config||Array.isArray(config)||Object.keys(config).sort().join('|')!==keys.sort().join('|')
+    ||config.schema!=='compute.runtime-host-config.v1'||config.version!==1
+    ||config.postgres_mode!=='attached'||config.api_role_mode!=='direct'
+    ||typeof config.expected_cluster_system_identifier!=='string'||!/^[1-9][0-9]{0,19}$/.test(config.expected_cluster_system_identifier)
+    ||!SHA.test(config.expected_bundle_sha256||'')||![config.bundle_directory,config.state_directory,config.pg_data_directory].every(local))
+    fail('attached_direct_cluster_pin_required');
+  let api,inspect;
+  try{api=new URL(config.database_url);inspect=new URL(config.inspect_database_url);}catch{fail('attached_database_binding_invalid');}
+  if(![api,inspect].every(url=>['postgres:','postgresql:'].includes(url.protocol)&&url.hostname==='127.0.0.1'
+    &&url.username&&url.password&&!url.search&&!url.hash&&/^\/[A-Za-z0-9_-]+$/.test(url.pathname)
+    &&Number.isSafeInteger(Number(url.port))&&Number(url.port)>=1024&&Number(url.port)<=65535)
+    ||api.port!==inspect.port||api.pathname!==inspect.pathname||api.username===inspect.username
+    ||api.password===inspect.password||![config.api_port,config.edge_port].every(port=>Number.isSafeInteger(port)&&port>=1024&&port<=65535)
+    ||new Set([Number(api.port),config.api_port,config.edge_port]).size!==3
+    ||!Number.isSafeInteger(config.startup_timeout_ms)||config.startup_timeout_ms<1000||config.startup_timeout_ms>300000)
+    fail('attached_database_binding_invalid');
+  const [state,data,bundle]=await Promise.all([physical(config.state_directory,'directory'),
+    physical(config.pg_data_directory,'directory'),physical(bundleDirectory,'directory')]);
+  if(prefix(state,data)||prefix(data,state)||prefix(bundle,state)||prefix(state,bundle)
+    ||prefix(bundle,data)||prefix(data,bundle)||!prefix(state,original.file)
+    ||prefix(sourceOrInstallationRoot,state)||prefix(state,sourceOrInstallationRoot)
+    ||prefix(sourceOrInstallationRoot,data)||prefix(data,sourceOrInstallationRoot)
+    ||prefix(config.bundle_directory,state)||prefix(state,config.bundle_directory)
+    ||prefix(config.bundle_directory,data)||prefix(data,config.bundle_directory))fail('private_state_overlap');
+  await absent(path.join(state,'runtime-host-lock.json'));
+  if((await protectStorage(state))?.owner_dacl_verified!==true)fail('private_storage_acl_unverified');
+  if((await verifyStorage(state,{operation:'VERIFY_DIRECTORY'}))?.owner_dacl_verified!==true)fail('private_storage_acl_unverified');
+  // Preserve original config bytes. A failed attempt leaves its independent new
+  // private file for review; no silent overwrite, retry, role change or repair.
+  const configFile=path.join(state,'attached-installed-'+randomUUID()+'.json');
+  const updated={...config,bundle_directory:bundle,expected_bundle_sha256:bundleDigest,state_directory:state,pg_data_directory:data};
+  await fs.writeFile(configFile,JSON.stringify(updated,null,2)+'\n',{flag:'wx',mode:0o600});
+  if((await verifyStorage(configFile))?.owner_dacl_verified!==true)fail('private_file_acl_unverified');
+  await absent(path.join(state,'runtime-host-lock.json'));
+  if(!(await fs.readFile(original.file)).equals(original.bytes))fail('old_config_changed');
+  return Object.freeze({configFile,postgresMode:'attached',apiRoleMode:'direct',clusterPinPreserved:true,
+    copyVerified:false,vaultPreserved:true,postgresLifecycleOwned:false,automaticRetryAllowed:false});
 }
 
 /**

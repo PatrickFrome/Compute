@@ -223,3 +223,58 @@ test('unexpected host death blocks local readiness without a cloud fallback or r
   assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
   assert.equal(f.verifications(), 1);
 });
+
+test('a ready IPC followed by exit before the startup continuation cannot publish a dead owned host', async t => {
+  const f = await fixture(t);
+  const child = new EventEmitter();
+  child.pid = 12345;
+  child.connected = false;
+  child.stderr = new EventEmitter();
+  await assert.rejects(startConfiguredLocalRuntimeHost({ ...f,
+    startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 100,
+    spawnImpl: () => {
+      queueMicrotask(() => {
+        child.emit('message', { schema: 'compute.runtime-host-provider.v1', provider: 'LOCAL_POSTGRES',
+          endpoint: f.config.base_url, instance_id: instance, status_file: f.config.runtime_identity_file,
+          runtime_ready: true, automatic_cloud_fallback: false, hosted_supabase_required: false, authority_effect: false });
+        child.emit('exit', 2);
+      });
+      return child;
+    },
+  }), /local_runtime_host_exited_before_ready/);
+  assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 100 })).state, 'NO_OWNED_HOST');
+});
+
+test('host shutdown during bootstrap health cannot overwrite BLOCKED with stale READY', async t => {
+  const f = await fixture(t);
+  const previousArgv = process.argv;
+  let bootstrapPersistentLocalProvider;
+  try {
+    // Import the callable bootstrap without running this test process's real
+    // profile; diagnostic mode is already a production entrypoint boundary.
+    process.argv = [...previousArgv, '--metaengine-version-probe'];
+    ({ bootstrapPersistentLocalProvider } = await import('../src/local-state-provider-bootstrap.mjs'));
+  } finally { process.argv = previousArgv; }
+  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
+  const ownerFile = path.join(path.dirname(f.evidenceFile), 'owner.json');
+  await fs.writeFile(ownerFile, JSON.stringify(f.config));
+  const health = { ok: true, instance_id: instance, state_provider: 'LOCAL_POSTGRES', runtime_ready: true,
+    hosted_supabase_required: false, capability_health: { state: 'ATTESTED', authority_effect: false } };
+  await fs.writeFile(f.config.runtime_identity_file, JSON.stringify({ ...health,
+    schema: 'metaengine.client-state.runtime-status.v1', state: 'READY', endpoint: f.config.base_url,
+    automatic_cloud_fallback: false, authority_effect: false }));
+  let requests = 0;
+  await assert.rejects(bootstrapPersistentLocalProvider({ env: f.env, ownerFile,
+    fetchImpl: async () => ({ ok: true, json: async () => {
+      requests++;
+      const stopped = await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 });
+      assert.equal(stopped.cleanup_confirmed, true);
+      return health;
+    } }),
+  }), /local_state_provider_owned_host_not_ready/);
+  assert.equal(requests, 1);
+  assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
+  assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'local_state_provider_owned_host_not_ready');
+  assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
+  assert.equal(f.verifications(), 1);
+});

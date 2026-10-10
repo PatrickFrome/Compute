@@ -6,6 +6,7 @@ import test from 'node:test';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {protectOwnerOnlyWindowsDirectory,verifyOwnerOnlyWindowsStorage} from '../src/private-windows-storage-acl.mjs';
+import {secureAttachedPrivateFile} from '../../../infra/client-state-runtime/attached-postgres-onboarding.mjs';
 
 test('DACL operator is a fixed PowerShell program, never a private path assembled into script or argv',async t=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-dacl-contract-'));
@@ -128,6 +129,11 @@ test('Win32 real ACL protects fresh private directory and verifies inheriting co
   const vault=path.join(directory,'client-vault.key');
   await fs.writeFile(vault,'a'.repeat(64)+'\n',{flag:'wx'});
   assert.equal((await verifyOwnerOnlyWindowsStorage(config)).owner_dacl_verified,true);
+  const attachedConfig=path.join(directory,'onboarded-config.json');
+  await fs.writeFile(attachedConfig,'{"secret":"stays_local"}',{flag:'wx'});
+  await secureAttachedPrivateFile(attachedConfig);
+  assert.equal((await verifyOwnerOnlyWindowsStorage(attachedConfig,{operation:'VERIFY_PRIVATE_FILE'})).owner_dacl_verified,true);
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(attachedConfig),/private_windows_storage_acl_not_confirmed/);
   assert.equal((await verifyOwnerOnlyWindowsStorage(vault)).owner_dacl_verified,true);
   // A longer startup allowance must never accept a broader real NTFS grant.
   const windowsRoot=process.env.SystemRoot||process.env.SYSTEMROOT;

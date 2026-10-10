@@ -32,6 +32,15 @@ The login has no superuser, role creation, database creation, replication or RLS
 
 Provisioning adds grants on the allowed functions and tables. Existing restored `service_role` grants are preserved because other supervisor SQL paths may use them. The HTTP surface remains explicitly restricted regardless of those grants. The supervisor's separate read-only database inspection lane may require its own read-only login; it does not automatically enter the API transaction role.
 
+Existing running clusters use [attached onboarding](README-attached-onboarding.md)
+with `roleMode: 'direct'` instead. This new login has no memberships, receives
+column SELECT/INSERT and RPC EXECUTE grants directly, and uses role-specific RLS
+policies. `LOCAL_STATE_API_ROLE_MODE=direct` keeps API transactions under this
+login while retaining the transaction-local JWT claims required by the signed
+device protocol. Provisioning leaves shared `service_role` grants unchanged;
+migrations can retain their own grants. PostgreSQL PUBLIC privileges still
+apply, so these grants do not attest an exact SQL allowlist for the database.
+
 ## Runtime
 
 The launcher passes `LOCAL_STATE_DATABASE_URL`, `LOCAL_STATE_API_KEY`, `LOCAL_STATE_INSTANCE_ID`, `LOCAL_STATE_API_HOST=127.0.0.1` and `LOCAL_STATE_API_PORT` (default 15432). Database connection host must be local. The body limit is 1 MiB, including chunked requests; at most six requests are admitted simultaneously. SQL statements have a 10-second timeout and lock acquisition a 3-second timeout. Connection failures expose only a generic error.

@@ -106,6 +106,33 @@ function fakeDatabase() {
   return { calls, sql: { begin: async (run) => run(tx), array: (value) => value, json: (value) => value } };
 }
 
+test('direct API keeps the login identity while preserving signed protocol claims', async () => {
+  const database = fakeDatabase();
+  const apiKey = 'c'.repeat(64);
+  await assert.rejects(startDbApi({ apiKey, port: 0, sql: database.sql, roleMode: 'admin' }), /api_role_mode_invalid/);
+  const runtime = await startDbApi({ apiKey, port: 0, sql: database.sql, roleMode: 'direct' });
+  try {
+    const response = await fetch(runtime.address + '/health', { headers: { apikey: apiKey } });
+    assert.equal(response.status, 200);
+    assert.equal(database.calls.some(call => /SET LOCAL ROLE/.test(call.text)), false);
+    const jwt = database.calls.find(call => call.text.includes('request.jwt.claims'));
+    assert.deepEqual(JSON.parse(jwt.values[0]), { role: 'service_role', aud: 'authenticated', iss: 'local-state-runtime' });
+  } finally { await runtime.close(); }
+});
+
+test('direct API refuses a missing or overloaded RPC catalog before binding a listener', async () => {
+  for (const catalog of [RPC_ALLOWLIST.slice(1).map(name => signature(name)),
+    [...RPC_ALLOWLIST.map(name => signature(name)), signature(RPC_ALLOWLIST[0])]]) {
+    const database = fakeDatabase();
+    const unsafe = database.sql.begin;
+    database.sql.begin = run => unsafe(tx => run({ ...tx,
+      unsafe: (text, values) => text === RPC_CATALOG_QUERY ? Promise.resolve(catalog) : tx.unsafe(text, values),
+    }));
+    await assert.rejects(startDbApi({ apiKey: 'd'.repeat(64), port: 0, sql: database.sql, roleMode: 'direct' }),
+      /local_state_rpc_catalog_(incomplete|overloaded)/);
+  }
+});
+
 test('HTTP requires local authority, role transaction and validates routing/body', async () => {
   const database = fakeDatabase();
   const secret = 'b'.repeat(64);

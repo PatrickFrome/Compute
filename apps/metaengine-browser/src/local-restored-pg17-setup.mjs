@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { verifyInstalledClientStateResources } from './local-runtime-host-controller.mjs';
-import { prepareDurableRestoredPg17 } from './local-restored-pg17-auto-prepare.mjs';
+import { inspectRestoredRuntimePreparationMode, prepareDurableRestoredPg17, prepareInstalledAttachedPg17 } from './local-restored-pg17-auto-prepare.mjs';
+import { isInstallerShutdownArgv } from './single-instance-guard.mjs';
 
 const exec = promisify(execFile);
 const SHA = /^[a-f0-9]{64}$/;
@@ -19,7 +20,9 @@ const fail = name => { throw new Error('installed_restored_setup_' + name); };
 export async function connectInstalledRestoredPostgres({
   configFile, restoreReceiptFile, restoreReceiptSha256, appDataDirectory,
   autoPrepareSource = false, localAppDataDirectory = process.env.LOCALAPPDATA,
+  expectedPostgresMode,
   prepare = prepareDurableRestoredPg17,
+  prepareAttached = prepareInstalledAttachedPg17, inspectMode = inspectRestoredRuntimePreparationMode,
   resourcesPath = process.resourcesPath, packageFile = new URL('../package.json', import.meta.url),
   verify = verifyInstalledClientStateResources, launch = exec, platform = process.platform,
 } = {}) {
@@ -44,17 +47,27 @@ export async function connectInstalledRestoredPostgres({
   // CLI callers still use their explicitly verified prepared configs.
   // No new DB is created, and all inputs stay on the owner's Windows host.
   let attachedConfigFile=configFile;
+  let postgresMode='owned';
   if(autoPrepareSource===true){
     if(!local(localAppDataDirectory))fail('local_appdata_required');
     let prepared;
     try {
-      prepared=await prepare({oldConfigFile:configFile,localAppData:localAppDataDirectory,
+      const selection=await inspectMode(configFile);
+      postgresMode=selection?.postgresMode;
+      if(!['owned','attached'].includes(postgresMode))fail('postgres_mode_unverified');
+      if(expectedPostgresMode!==undefined&&postgresMode!==expectedPostgresMode)fail('postgres_mode_changed');
+      prepared=postgresMode==='attached'
+        ? await prepareAttached({oldConfigFile:configFile,bundleDirectory,bundleDigest:expectedBundleDigest,platform})
+        : await prepare({oldConfigFile:configFile,localAppData:localAppDataDirectory,
         bundleDirectory,bundleDigest:expectedBundleDigest,
         restoreReceiptFile,restoreReceiptSha256,
         postgresBinDirectory:verified.paths.postgresBinDirectory,platform});
     }catch{fail('durable_copy_or_rebinding_unconfirmed');}
-    if(!local(prepared?.configFile)||prepared.copyVerified!==true
-      ||prepared.vaultPreserved!==true)fail('durable_copy_unverified');
+    if(!local(prepared?.configFile)||prepared.vaultPreserved!==true
+      ||(postgresMode==='owned'&&prepared.copyVerified!==true)
+      ||(postgresMode==='attached'&&(prepared.postgresMode!=='attached'||prepared.apiRoleMode!=='direct'
+        ||prepared.clusterPinPreserved!==true||prepared.postgresLifecycleOwned!==false||prepared.copyVerified!==false)))
+      fail('durable_copy_unverified');
     attachedConfigFile=prepared.configFile;
   }
   const argv = [entry,'--config',attachedConfigFile,'--bundle-sha256',expectedBundleDigest,
@@ -82,8 +95,11 @@ export async function connectInstalledRestoredPostgres({
     || receipt.bundle_sha256 !== expectedBundleDigest
     || receipt.source_restore_receipt_sha256 !== restoreReceiptSha256)
     fail('receipt_unverified');
+  if(postgresMode==='attached'&&(receipt.postgres_mode!=='attached'||receipt.api_role_mode!=='direct'
+    ||receipt.postgres_lifecycle_owned!==false||receipt.attached_postmaster_preserved!==true))fail('attached_receipt_unverified');
   // Return only fixed public booleans. Never return the subprocess' raw JSON.
   return Object.freeze({state:'CONFIGURED',provider:'LOCAL_POSTGRES',
+    postgres_mode:receipt.postgres_mode||postgresMode,
     owner_profile_written:true,private_vault_key_preserved:true,
     cleanup_confirmed:true,runtime_ready:false,installed_cold_boot_verified:false,
     automatic_cloud_fallback:false,authority_effect:false});
@@ -99,6 +115,7 @@ export async function showInstalledRestoredProviderWizard({
     || !local(env.LOCALAPPDATA) || !local(resourcesPath))
     fail('installed_windows_required');
   await app.whenReady();
+  if(globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true)return {state:'CANCELLED',authority_effect:false};
   const win = new BrowserWindow({
     width:740,height:770,minWidth:600,minHeight:630,show:false,
     title:'METAENGINE — Connect existing PostgreSQL 17',autoHideMenuBar:true,
@@ -113,6 +130,10 @@ export async function showInstalledRestoredProviderWizard({
   const completed = new Promise(resolve=>{resolveResult=resolve;});
   const prefix='metaengine:local-postgres-setup:';
   const authorized=event=>!closed && !win.isDestroyed() && event.sender.id===win.webContents.id;
+  const onInstallerControl=(_event,argv)=>{
+    if(isInstallerShutdownArgv(argv)&&(!busy||!claimed)&&!win.isDestroyed())win.close();
+  };
+  app.on('second-instance',onInstallerControl);
   ipcMain.handle(prefix+'choose',async(event,kind)=>{
     if(!authorized(event) || busy || !['config','receipt'].includes(kind)) fail('sender_invalid');
     const choice=await dialog.showOpenDialog(win,{
@@ -131,19 +152,26 @@ export async function showInstalledRestoredProviderWizard({
       return {state:'BLOCKED',reason:'independent_evidence_required'};
     busy=true;
     try {
+      let mode;
+      try{mode=(await inspectRestoredRuntimePreparationMode(configFile)).postgresMode;}
+      catch{return {state:'BLOCKED',reason:'private_configuration_unverified'};}
       const approval=await dialog.showMessageBox(win,{
         type:'warning',buttons:['Cancel','Connect existing PostgreSQL'],defaultId:0,cancelId:0,
         title:'Confirm PostgreSQL owner registration',
         message:'Connect only the selected existing PostgreSQL 17',
         detail:'Configuration: '+configFile+'\nRestore report: '+restoreReceiptFile+
           '\nExpected report SHA-256: '+pin+
-          '\n\nThis verifies one stopped TEMP PostgreSQL 17 copy, copies it to permanent LOCALAPPDATA/METAENGINE state with full file hash comparison, writes a NEW private config pinned to this installed package, and checks the database before registering the previously absent owner. The original PGDATA, private configuration and Vault are never overwritten. If anything is ambiguous the wizard stops without retry.',
+          (mode==='attached'
+            ? '\n\nThis connects to the selected running PostgreSQL 17 using its previously provisioned restricted API role and cluster identity. It secures only the separate client state directory, writes a NEW private config pinned to this installed package, checks the API and registers the previously absent owner. Keeper is kept running; its PGDATA, roles, migrations and Vault are preserved.'
+            : '\n\nThis verifies one stopped TEMP PostgreSQL 17 copy, copies it to permanent LOCALAPPDATA/METAENGINE state with full file hash comparison, writes a NEW private config pinned to this installed package, and checks the database before registering the previously absent owner. The original PGDATA, private configuration and Vault are never overwritten.')+
+          ' If anything is ambiguous the wizard stops without retry.',
         noLink:true,
       });
       if(!authorized(event) || approval.response!==1) return {state:'BLOCKED',reason:'local_approval_required'};
       claimed=true;
       let receipt;
       try { receipt=await operator({configFile,restoreReceiptFile,restoreReceiptSha256:pin,
+        expectedPostgresMode:mode,
         autoPrepareSource:true,localAppDataDirectory:env.LOCALAPPDATA,
         appDataDirectory:env.APPDATA,resourcesPath}); }
       catch { return {state:'BLOCKED',reason:'operator_not_confirmed_no_automatic_retry'}; }
@@ -160,6 +188,7 @@ export async function showInstalledRestoredProviderWizard({
   win.on('close',event=>{if(busy && claimed && !verifiedClose)event.preventDefault();});
   win.on('closed',()=>{
     closed=true;
+    app.removeListener('second-instance',onInstallerControl);
     ipcMain.removeHandler(prefix+'choose');ipcMain.removeHandler(prefix+'connect');
     resolveResult({state:'CANCELLED',authority_effect:false});
   });

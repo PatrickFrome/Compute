@@ -15,8 +15,9 @@ export const BUNDLE_ENTRY_POINTS = Object.freeze([
 ]);
 export const RUNTIME_HOST_ENTRY = 'infra/client-state-runtime/runtime-host.mjs';
 export const FIRST_RUN_INITDB_ENTRY = 'infra/client-state-runtime/fresh-pg17-initdb.mjs';
+export const ATTACHED_ONBOARDING_ENTRY = 'infra/client-state-runtime/attached-postgres-onboarding.mjs';
 export const REMOTE_SUPPORT_ENTRY = 'apps/metaengine-browser/src/remote-support-mcp.mjs';
-const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY] : [...BUNDLE_ENTRY_POINTS];
+const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY] : [...BUNDLE_ENTRY_POINTS];
 
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';

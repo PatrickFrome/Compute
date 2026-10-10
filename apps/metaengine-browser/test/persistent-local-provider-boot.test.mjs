@@ -240,6 +240,6 @@ test('packaged owner admission precedes HostResilience and main imports', async 
   assert.match(entry, /let bootstrapState = providerBoot\.persistentLocalProviderBootstrap\.state/);
   assert.match(entry, /bootstrapState,\s*\}\)/);
   assert.match(entry, /showInstalledRestoredProviderWizard/);
-  assert.match(entry, /if \(setup\.state === 'CONFIGURED'\)/);
+  assert.match(entry, /if \(setup\.state === 'CONFIGURED' && globalThis\.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true\)/);
   assert.match(entry, /bootstrapState = readyProvider\.state/);
 });

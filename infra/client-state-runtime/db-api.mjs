@@ -54,7 +54,8 @@ function driverValues(sql, values) {
   });
 }
 
-export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', sql: injectedSql } = {}) {
+export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql } = {}) {
+  if (!['service_role', 'direct'].includes(roleMode)) throw new Error('local_state_api_role_mode_invalid');
   if (host !== '127.0.0.1') throw new Error('local_state_loopback_host_required');
   if (typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(apiKey)) throw new Error('local_state_random_api_key_required');
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error('local_state_api_port_invalid');
@@ -75,7 +76,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
   let tableAccess;
   let activeRequests = 0;
   const transaction = (run) => sql.begin(async (tx) => {
-    await tx.unsafe("SET LOCAL ROLE service_role");
+    if (roleMode === 'service_role') await tx.unsafe("SET LOCAL ROLE service_role");
     await tx.unsafe("SET LOCAL search_path = pg_catalog, public, extensions");
     await tx.unsafe("SET LOCAL statement_timeout = '10s'");
     await tx.unsafe("SET LOCAL lock_timeout = '3s'");
@@ -87,13 +88,38 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
     if (!injectedSql) {
       const [role] = await sql.unsafe('SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = session_user');
       if (!role || Object.values(role).some((value) => value === true)) throw new Error('local_state_restricted_login_required');
+      if (roleMode === 'direct') {
+        const [direct] = await sql.unsafe(`SELECT r.rolcanlogin AND NOT r.rolinherit AS restricted,
+          NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member=r.oid) AS no_memberships
+          FROM pg_catalog.pg_roles r WHERE r.rolname=session_user`);
+        if (direct?.restricted !== true || direct?.no_memberships !== true) throw new Error('local_state_direct_login_required');
+      }
     }
     signatures = await transaction((tx) => tx.unsafe(RPC_CATALOG_QUERY, [JSON.stringify(RPC_ALLOWLIST)]));
     if (!signatures.length) throw new Error('local_state_rpc_catalog_empty');
-    tableAccess = injectedSql ? Object.keys(TABLE_ALLOWLIST).map((name) => ({ name, readable: true }))
-      : await transaction((tx) => tx.unsafe(`SELECT c.relname AS name, pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT') AS readable
+    if (roleMode === 'direct') {
+      if (RPC_ALLOWLIST.some(name => !signatures.some(signature => signature.name === name))) throw new Error('local_state_rpc_catalog_incomplete');
+      if (signatures.length !== RPC_ALLOWLIST.length) throw new Error('local_state_rpc_catalog_overloaded');
+    }
+    if (roleMode === 'direct' && !injectedSql) {
+      const privileges = await transaction(tx => tx.unsafe(`SELECT p.oid FROM pg_catalog.pg_proc p
+        WHERE p.oid IN (SELECT (pg_catalog.jsonb_array_elements_text($1::text::jsonb))::oid)
+        AND pg_catalog.has_function_privilege(current_user, p.oid, 'EXECUTE')`, [JSON.stringify(signatures.map(row => row.oid))]));
+      if (privileges.length !== signatures.length) throw new Error('local_state_rpc_grants_incomplete');
+    }
+    tableAccess = injectedSql ? Object.keys(TABLE_ALLOWLIST).map((name) => ({ name, readable: true, writable: true }))
+      : await transaction((tx) => tx.unsafe(`SELECT c.relname AS name,
+        NOT EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements_text(policy.value->'select') col(name)
+          WHERE NOT pg_catalog.has_column_privilege(current_user,c.oid,col.name,'SELECT')) AS readable,
+        NOT EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements_text(policy.value->'insert') col(name)
+          WHERE NOT pg_catalog.has_column_privilege(current_user,c.oid,col.name,'INSERT')) AS writable
         FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relname::text IN (SELECT pg_catalog.jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(Object.keys(TABLE_ALLOWLIST))]));
+        JOIN pg_catalog.jsonb_each($1::text::jsonb) policy ON policy.key=c.relname
+        WHERE n.nspname = 'public'`, [JSON.stringify(Object.fromEntries(Object.entries(TABLE_ALLOWLIST)
+          .map(([name, policy]) => [name, { select: [...new Set([...policy.select, ...policy.filters, ...policy.order])], insert: policy.insert || [] }])))]));
+    if (roleMode === 'direct' && Object.keys(TABLE_ALLOWLIST).some(name => !tableAccess.some(table => table.name === name && table.readable && table.writable))) {
+      throw new Error('local_state_table_grants_incomplete');
+    }
   } catch (error) {
     if (!injectedSql) await sql.end({ timeout: 5 });
     throw error;
@@ -113,7 +139,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       const url = new URL(request.url, `http://${expectedHost}`);
       if (url.pathname === '/health' && request.method === 'GET' && !url.search) {
         const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((signature) => signature.name === name));
-        const unavailableTables = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable));
+        const unavailableTables = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
         const capabilityPlan = compileRpcRequest('devos_runtime_capabilities_v1', {}, signatures);
         const capabilityRows = await transaction((tx) => tx.unsafe(capabilityPlan.text, driverValues(sql, capabilityPlan.values)));
         return send(response, missing.length || unavailableTables.length ? 503 : 200, {
@@ -167,6 +193,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   startDbApi({
     databaseUrl: process.env.LOCAL_STATE_DATABASE_URL,
+    roleMode: process.env.LOCAL_STATE_API_ROLE_MODE || 'service_role',
     apiKey: process.env.LOCAL_STATE_API_KEY,
     host: process.env.LOCAL_STATE_API_HOST || '127.0.0.1',
     port: Number(process.env.LOCAL_STATE_API_PORT || 15432),

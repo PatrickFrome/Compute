@@ -9,6 +9,9 @@ protocol; it does not create a second scheduler or bypass admission.
 
 - [Launcher](README-launcher.md): PostgreSQL process ownership, local API/Edge
   startup, database identity, capability readiness and failure cleanup.
+- [Existing PostgreSQL onboarding](README-attached-onboarding.md): reviewed
+  migrations, separate administrative and restricted API credentials, private
+  attached runtime config and fail-closed setup ownership.
 - [Database API](README-db-api.md): the explicit Native Supervisor REST/RPC
   subset, SQL role isolation and parameterized queries.
 - [Vault](README-vault.md): the declared local pgcrypto adaptation with a

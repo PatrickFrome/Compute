@@ -63,13 +63,13 @@ async function fixture(t, mode = 'ready') {
 
 async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emitReady = true,
   managedHost, quitAfterBoot = false, installerAfterBoot = false, installerDuringStartup = false,
-  holdQuit = false } = {}) {
+  holdQuit = false, firstRunWizard } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (/^METAENGINE_(STATE_PROVIDER|SUPERVISOR_BASE_URL|FALLBACK_SUPERVISOR_BASE_URL|LOCAL_STATE_INSTANCE_ID|LOCAL_PROVIDER_|PROFILE_PROBE_|SINGLETON_TEST_)/.test(name)) delete env[name];
   }
   const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, quitAfterBoot,
-    installerAfterBoot, installerDuringStartup, holdQuit };
+    installerAfterBoot, installerDuringStartup, holdQuit, firstRunWizard };
   let output;
   try {
     output = await execute(process.execPath, [runner], {
@@ -132,6 +132,35 @@ function noProviderOrRuntime(result) {
 }
 
 for (const entry of entries) {
+  test(entry + ': first-run wizard releases ESM before ready and keeps runtime planes behind provider admission',async t=>{
+    const f=await fixture(t);
+    const ownerJson=await fs.readFile(f.ownerFile,'utf8');
+    await fs.rm(f.ownerFile);
+    const result=await launch(f,{entry,firstRunWizard:{ownerFile:f.ownerFile,ownerJson,outcome:'CONFIGURED'},
+      extraEnv:{ME2_INTEGRATION:'1'}});
+    assert.equal(result.code,0,result.stderr);
+    assert.ok(eventIndex(result,'entry-complete')<eventIndex(result,'ready-emitted'));
+    assert.ok(eventIndex(result,'wizard-await-ready')<eventIndex(result,'ready-emitted'));
+    assert.ok(eventIndex(result,'ready-emitted')<eventIndex(result,'wizard-shown'));
+    assert.ok(eventIndex(result,'wizard-completed')<eventIndex(result,'fetch'));
+    assert.ok(eventIndex(result,'fetch-returned')<eventIndex(result,'runtime-import'));
+    assert.equal(event(result,'runtime-import')?.[1],'READY');
+    if(entry==='final-runtime-entry.mjs')assert.ok(eventIndex(result,'runtime-import')<eventIndex(result,'me2-start'));
+    assert.equal(result.boot_state,'READY');
+    assert.equal(f.requests.length,1);
+  });
+
+  test(entry + ': cancelled first-run setup cannot import the runtime or ME2',async t=>{
+    const f=await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result=await launch(f,{entry,firstRunWizard:{outcome:'CANCELLED'},extraEnv:{ME2_INTEGRATION:'1'}});
+    assert.equal(event(result,'runtime-import'),undefined);
+    assert.equal(event(result,'me2-import'),undefined);
+    assert.equal(event(result,'fetch'),undefined);
+    assert.equal(f.requests.length,0);
+    assert.equal(event(result,'quit-requested')?.[0],'quit-requested');
+  });
+
   test(entry + ': installer shutdown waits for managed IPC stop before a forced fallback, including a startup race', async t => {
     for (const duringStartup of [false, true]) {
       const f = await fixture(t);

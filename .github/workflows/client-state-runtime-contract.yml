@@ -7,6 +7,9 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/test/**'
+      - 'apps/metaengine-browser/scripts/verify-windows-tcp-listener.mjs'
+      - 'supabase/migrations/20261009194157_managed_project_admission_v1.sql'
+      - 'supabase/migrations/20261010100000_project_continuity_history_v1.sql'
       - 'apps/me2-ui/src/lib/cloud.ts'
       - 'apps/me2-ui/src/lib/fallback-console.ts'
       - 'apps/me2-ui/src/lib/pg.ts'
@@ -17,6 +20,9 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/test/**'
+      - 'apps/metaengine-browser/scripts/verify-windows-tcp-listener.mjs'
+      - 'supabase/migrations/20261009194157_managed_project_admission_v1.sql'
+      - 'supabase/migrations/20261010100000_project_continuity_history_v1.sql'
       - 'apps/me2-ui/src/lib/cloud.ts'
       - 'apps/me2-ui/src/lib/fallback-console.ts'
       - 'apps/me2-ui/src/lib/pg.ts'
@@ -111,3 +117,7 @@ jobs:
       - name: Verify selected client provider and supervisor compatibility
         working-directory: apps/metaengine-browser
         run: node --test test/explicit-local-supervisor-provider.test.mjs test/native-supervisor-local-provider-pin.test.mjs test/local-provider-recovery-environment.test.mjs test/persistent-local-provider-boot.test.mjs test/local-provider-singleton-admission.test.mjs test/local-runtime-host-controller.test.mjs test/browser-sentinel.test.mjs test/host-resilience-runtime.test.mjs test/agent-access-capsule.test.mjs test/self-hosted-supervisor-config.test.mjs test/runtime-capability-health-route-contract.test.mjs test/native-supervisor-realtime-command-wake-migration.test.mjs test/r83-edge-v14-canary-source-binding.test.mjs test/me2-ui-local-profile-outbound-guard.test.mjs test/client-owned-state-hosted-workflow-guard.test.mjs test/package-build-reservation-workflow.test.mjs
+
+      - name: Verify normal UI host pins its child listener to loopback
+        working-directory: apps/metaengine-browser
+        run: node --test test/me2-ui-loopback-host.test.mjs test/verify-windows-tcp-listener.test.mjs

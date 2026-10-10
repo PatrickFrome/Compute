@@ -69,6 +69,8 @@ app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
 app.isReady = () => ready;
+app.isPackaged = Boolean(options.firstRunWizard);
+app.whenReady = () => ready ? Promise.resolve() : new Promise(resolve => app.once('ready', resolve));
 app.exit = code => { trace('exit', code); process.exit(code); };
 app.quit = () => {
   trace('quit-requested');
@@ -146,6 +148,22 @@ const mocks = new Map([
     'export async function runSelfUpdateSmoke({ app }) { globalThis.__traceEntrypoint("self-update-smoke"); app.exit(0); }',
   )],
 ]);
+if(options.firstRunWizard){
+  globalThis.__completeFirstRunWizard=()=>{
+    if(options.firstRunWizard.outcome==='CONFIGURED')fs.writeFileSync(options.firstRunWizard.ownerFile,options.firstRunWizard.ownerJson);
+    return {state:options.firstRunWizard.outcome,authority_effect:false};
+  };
+  mocks.set(new URL('local-restored-pg17-setup.mjs',src).href,dataModule([
+    'export async function showInstalledRestoredProviderWizard({app}) {',
+    ' globalThis.__traceEntrypoint("wizard-await-ready"); await app.whenReady();',
+    ' globalThis.__traceEntrypoint("wizard-shown"); await new Promise(resolve=>setTimeout(resolve,30));',
+    ' globalThis.__traceEntrypoint("wizard-completed"); return globalThis.__completeFirstRunWizard();',
+    '}',
+  ].join('\n')));
+  mocks.set(new URL('me2/me2-integration-entry.mjs',src).href,dataModule(
+    'globalThis.__traceEntrypoint("me2-import"); export function startMe2Integration() { globalThis.__traceEntrypoint("me2-start"); }',
+  ));
+}
 if (options.managedHost) {
   globalThis.__singletonTestRuntimePaths = options.managedHost;
   mocks.set(offlineVerifier, dataModule([
@@ -178,6 +196,10 @@ try {
     ready = true;
     app.emit('ready');
     app.emit('ready'); // A one-shot primary continuation must survive duplicate delivery.
+  }
+  if(options.firstRunWizard){
+    await globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__?.catch(()=>{});
+    trace('deferred-provider-settled');
   }
 } catch (error) {
   trace('entry-failed', String(error?.message || error));

@@ -93,6 +93,10 @@ if (guard.installer_shutdown_control) {
     app.exit(0);
   }
 } else {
+  let firstRunSetupDeferred = false;
+  let releaseFirstRunEvaluation;
+  const firstRunEvaluation = new Promise(resolve => { releaseFirstRunEvaluation = resolve; });
+  const prepareAdmittedPrimary = async () => {
   let preparationFinished;
   const primaryPreparation = new Promise(resolve => { preparationFinished = resolve; });
   let runtimeController;
@@ -127,8 +131,13 @@ if (guard.installer_shutdown_control) {
       // cannot import Browser/main/HostResilience until a previously restored
       // PostgreSQL 17 is independently qualified and owner-bound.
       const { showInstalledRestoredProviderWizard } = await import('./local-restored-pg17-setup.mjs');
+      // Finish entrypoint evaluation before this UI awaits app.whenReady().
+      // Electron's first ready event may depend on that evaluation completing.
+      firstRunSetupDeferred = true;
+      globalThis.__METAENGINE_PRIMARY_PROVIDER_SETUP_PENDING__ = true;
+      releaseFirstRunEvaluation();
       const setup = await showInstalledRestoredProviderWizard({ app, BrowserWindow, dialog, ipcMain });
-      if (setup.state === 'CONFIGURED') {
+      if (setup.state === 'CONFIGURED' && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
         const readyProvider = await providerBoot.bootstrapPersistentLocalProvider();
         bootstrapState = readyProvider.state;
       }
@@ -736,4 +745,18 @@ if (guard.installer_shutdown_control) {
   }
   }
   } finally { preparationFinished(); }
+  };
+  const providerPreparation = prepareAdmittedPrimary();
+  globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__ = providerPreparation;
+  await Promise.race([providerPreparation, firstRunEvaluation]);
+  if (firstRunSetupDeferred) {
+    void providerPreparation.then(() => {
+      globalThis.__METAENGINE_PRIMARY_PROVIDER_SETUP_PENDING__ = false;
+    }, () => {
+      // Detailed bounded provider diagnostics were already presented above.
+      // Use normal quit so owned host cleanup remains authoritative.
+      process.exitCode = 1;
+      app.quit();
+    });
+  }
 }

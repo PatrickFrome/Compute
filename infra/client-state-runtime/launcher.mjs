@@ -27,6 +27,9 @@ function port(value, label) {
 export function normalizeLauncherConfig(input) {
   if (input.mode !== 'local') throw runtimeError('explicit_local_mode_required');
   if (!['owned', 'attached'].includes(input.postgresMode)) throw runtimeError('explicit_postgres_mode_required');
+  const apiRoleMode = input.apiRoleMode ?? 'service_role';
+  if (!['service_role', 'direct'].includes(apiRoleMode)) throw runtimeError('api_role_mode_invalid');
+  if (input.expectedClusterSystemIdentifier !== undefined && !/^[1-9][0-9]{0,19}$/.test(input.expectedClusterSystemIdentifier)) throw runtimeError('cluster_identity_pin_invalid');
   let database;
   try { database = new URL(input.databaseUrl); } catch { throw runtimeError('local_database_url_invalid'); }
   if (!['postgres:', 'postgresql:'].includes(database.protocol) || database.hostname !== '127.0.0.1') {
@@ -56,6 +59,7 @@ export function normalizeLauncherConfig(input) {
   if (input.instanceId !== undefined && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.instanceId)) throw runtimeError('runtime_instance_id_invalid');
   return {
     ...input,
+    apiRoleMode,
     databaseUrl: database.href,
     database,
     inspectDatabase,
@@ -83,6 +87,8 @@ export function configFromEnvironment(env = process.env) {
   return normalizeLauncherConfig({
     mode: env.LOCAL_STATE_MODE,
     postgresMode: env.LOCAL_STATE_POSTGRES_MODE,
+    apiRoleMode: env.LOCAL_STATE_API_ROLE_MODE,
+    expectedClusterSystemIdentifier: env.LOCAL_STATE_EXPECTED_CLUSTER_SYSTEM_IDENTIFIER,
     databaseUrl: env.LOCAL_STATE_DATABASE_URL,
     inspectDatabaseUrl: env.LOCAL_STATE_INSPECT_DATABASE_URL,
     pgBinDir: env.LOCAL_STATE_PG_BIN_DIR,
@@ -147,7 +153,8 @@ async function runBounded(command, args, { env = process.env, timeoutMs = 5000 }
 }
 
 export async function inspectPostgres(config) {
-  const query = "SELECT json_build_object('data_directory',current_setting('data_directory'),'version',current_setting('server_version_num')::int,'address',host(inet_server_addr()),'port',inet_server_port(),'started_at',pg_postmaster_start_time())::text";
+  const query = "SELECT json_build_object('data_directory',current_setting('data_directory'),'version',current_setting('server_version_num')::int,'address',host(inet_server_addr()),'port',inet_server_port(),'started_at',pg_postmaster_start_time()" +
+    (config.expectedClusterSystemIdentifier ? ",'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system())" : '') + ")::text";
   const output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config) });
   try { return JSON.parse(output); } catch { throw runtimeError('postgres_identity_invalid'); }
 }
@@ -156,6 +163,7 @@ export async function assertPostgresIdentity(record, config, ownedPid = null) {
   if (record?.version < 170000 || record?.version >= 180000 || record?.address !== '127.0.0.1' || record?.port !== config.databasePort || !record?.started_at) {
     throw runtimeError('postgres_identity_mismatch');
   }
+  if (config.expectedClusterSystemIdentifier && record.system_identifier !== config.expectedClusterSystemIdentifier) throw runtimeError('postgres_cluster_identity_mismatch');
   const actual = await realpath(record.data_directory);
   const expected = await realpath(config.pgDataDir);
   const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
@@ -179,6 +187,7 @@ export function runtimeEnvironment(config) {
     LOCAL_STATE_RUNTIME: 'LOCAL_POSTGRES',
     LOCAL_STATE_INSTANCE_ID: config.instanceId,
     LOCAL_STATE_DATABASE_URL: config.databaseUrl,
+    LOCAL_STATE_API_ROLE_MODE: config.apiRoleMode,
     LOCAL_STATE_API_KEY: config.apiKey,
     LOCAL_STATE_API_HOST: '127.0.0.1',
     LOCAL_STATE_API_PORT: String(config.apiPort),
@@ -197,6 +206,7 @@ export function runtimeEnvironment(config) {
 const allowedEnvironment = [
   'LOCAL_STATE_MODE', 'LOCAL_STATE_RUNTIME', 'LOCAL_STATE_INSTANCE_ID', 'LOCAL_STATE_EDGE_PORT', 'LOCAL_STATE_API_BASE_URL',
   'LOCAL_STATE_DATABASE_URL', 'LOCAL_STATE_API_KEY', 'LOCAL_STATE_API_PORT',
+  'LOCAL_STATE_API_ROLE_MODE',
   'SUPABASE_URL', 'SUPABASE_DB_URL', 'SUPABASE_DB_SESSION_URL',
   'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEYS', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY',
   'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSSLMODE',
@@ -330,7 +340,8 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     const captureOptions = {
       repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry),
         path.join(here, 'local-runtime-migrations.mjs'),
-        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs')] : [])],
+        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs'), path.join(here, 'attached-postgres-onboarding.mjs'),
+          path.join(projectRoot, 'apps/metaengine-browser/src/remote-support-mcp.mjs')] : [])],
       nodePath: config.nodePath, denoPath: config.denoPath, denoLockPath: config.denoLockPath,
       pgBinDir: hooks.inspectPostgres ? undefined : config.pgBinDir, env, fixture, policy: safeRuntimePolicy(config, { fixture }),
     };

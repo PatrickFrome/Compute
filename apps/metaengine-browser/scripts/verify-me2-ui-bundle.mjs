@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
+import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
 
 // Verify the installed copy, not merely a source manifest or extraResources entry.
 // electron-builder 26 excludes node_modules at the root of each FileSet.
@@ -97,7 +98,12 @@ export async function smokeMe2UiBundle(directory, runtime = process.execPath, ti
       const assetBytes = Buffer.from(await asset.arrayBuffer());
       assert.ok(assetBytes.length, 'me2_ui_static_empty');
       assert.ok(child.exitCode === null && child.signalCode === null, 'me2_ui_server_died_during_probe');
-      return { runtime_smoke: 'PASS', html_sha256: createHash('sha256').update(html).digest('hex'), static_path: staticPath, static_sha256: createHash('sha256').update(assetBytes).digest('hex') };
+      const osListener = process.platform === 'win32'
+        ? await verifyWindowsTcpListener({ port, pid: child.pid }) : null;
+      assert.ok(child.exitCode === null && child.signalCode === null, 'me2_ui_server_died_during_listener_probe');
+      return { runtime_smoke: 'PASS', html_sha256: createHash('sha256').update(html).digest('hex'), static_path: staticPath, static_sha256: createHash('sha256').update(assetBytes).digest('hex'),
+        os_listener_verified: osListener !== null, os_listener: osListener,
+        os_listener_verification: osListener ? 'PASS' : 'UNSUPPORTED_PLATFORM' };
     }
     throw new Error(`me2_ui_smoke_timeout:${output}`);
   } finally {
