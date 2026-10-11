@@ -39,6 +39,7 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
   const heartbeatMs = Date.parse(snapshot.last_heartbeat_at || '');
   const heartbeatFresh = Number.isFinite(heartbeatMs) && now >= heartbeatMs - 5_000 && now - heartbeatMs <= 30_000;
   const agents = Array.isArray(fleet.agents) ? fleet.agents : [];
+  const ambiguousAgents = agents.filter((agent) => agent.lifecycle_state === 'PROVISIONING_AMBIGUOUS');
   const provenAgents = agents.filter((agent) => hasExactAgentOrigin(agent) && isCurrentBinding({
     tab_id: agent.tab_id, target_id: agent.target_id,
     conversation_url_sha256: agent.transport_proof.conversation_url_sha256,
@@ -71,6 +72,11 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
     reason = 'SUPERVISOR_ADMISSION_NOT_OBSERVED'; label = 'Recovery required'; detail = 'Supervisor admission has not reconciled with workspace authority.';
   } else if (snapshot.continuous_service?.actuation_allowed !== true) {
     reason = 'NATIVE_CONTROL_NOT_ARMED'; label = 'Control unavailable'; detail = 'Native actuation is held. Dispatch cannot proceed.';
+  } else if (keepalive.state === 'RECOVERING' && !keepalive.conversation_url && !keepalive.tab_id
+    && !keepalive.pending_wake && !keepalive.active_wake && !keepalive.rollover_attempt
+    && ambiguousAgents.length === 0) {
+    reason = 'SUPERVISOR_SESSION_STARTING'; label = 'Starting chats';
+    detail = 'A fresh Supervisor conversation is being prepared. Check sessions if sign-in is required.';
   } else if (!['WAITING', 'GENERATING', 'DONE'].includes(keepalive.state)
     || typeof keepalive.conversation_url !== 'string' || !keepalive.conversation_url
     || !isCurrentBinding({ tab_id: keepalive.tab_id, conversation_url: keepalive.conversation_url })) {
@@ -107,7 +113,6 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
     continuous_autonomy: capability(autonomyReady, !codingReady ? codingReason
       : !guardianReady ? 'GUARDIAN_CONTINUITY_NOT_PROVEN' : 'INDEPENDENT_VERIFIER_UNAVAILABLE'),
   });
-  const ambiguousAgents = agents.filter((agent) => agent.lifecycle_state === 'PROVISIONING_AMBIGUOUS');
   const supervisorAmbiguous = ['WAKE_AMBIGUOUS', 'ROLLOVER_AMBIGUOUS'].includes(keepalive.state);
   const recovery = Object.freeze({
     schema: 'metaengine.client.work-recovery-readback.v1',

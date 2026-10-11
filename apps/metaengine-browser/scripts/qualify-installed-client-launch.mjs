@@ -250,8 +250,12 @@ async function assertPortClosed(port) {
   });
 }
 
-function start(executable, args, env, cwd) {
-  const child = spawn(executable, args, { env, cwd, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+export function startInstalledQualificationProcess(executable, args, env, cwd, { visibleGui = false, spawnProcess = spawn } = {}) {
+  if (typeof visibleGui !== 'boolean' || typeof spawnProcess !== 'function') fail('launch_visibility_options_invalid');
+  // On Windows, windowsHide sets STARTUPINFO.wShowWindow=SW_HIDE for GUI
+  // executables too. A normal Browser qualification must permit its real
+  // first show; probes and console helpers retain hidden process startup.
+  const child = spawnProcess(executable, args, { env, cwd, windowsHide: !visibleGui, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '', spawnError = null;
   const append = bytes => { output = (output + bytes.toString('utf8')).slice(-256 * 1024); };
   child.stdout.on('data', append); child.stderr.on('data', append);
@@ -264,6 +268,7 @@ function start(executable, args, env, cwd) {
   };
   return { child, closed, alive, output: () => output };
 }
+const start = startInstalledQualificationProcess;
 
 async function stop(launch) {
   if (launch.child.exitCode !== null || launch.child.signalCode !== null) return launch.closed;
@@ -322,6 +327,30 @@ async function targetAt(port, matches) {
   const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
   const targets = await response.json();
   return targets.find(target => target.type === 'page' && matches(target.url) && target.webSocketDebuggerUrl);
+}
+
+// Browser.getWindowForTarget and Browser.getWindowBounds are browser-scoped
+// DevTools commands. They must be sent over the browser websocket advertised
+// by /json/version; a page target websocket only owns the Page/Runtime domains
+// and correctly rejects Browser.* requests. Keep this endpoint separate from
+// the page websocket used for the screenshot below.
+export async function browserEndpointAt(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) });
+  const browser = await response.json();
+  if (typeof browser?.webSocketDebuggerUrl !== 'string'
+    || !browser.webSocketDebuggerUrl.includes('/devtools/browser/')) return null;
+  return browser;
+}
+
+export async function readInstalledCdpWindow(browserClient, targetId) {
+  if (!browserClient || typeof browserClient.command !== 'function' || typeof targetId !== 'string' || !targetId) {
+    fail('normal_primary_cdp_target_invalid');
+  }
+  // CDP requires the page target identity even on the browser websocket.
+  const window = await browserClient.command('Browser.getWindowForTarget', { targetId });
+  const readback = await browserClient.command('Browser.getWindowBounds', { windowId: window.windowId });
+  return { window_id: window.windowId, window_state: readback.bounds?.windowState,
+    width: readback.bounds?.width, height: readback.bounds?.height };
 }
 
 async function profileProbe(executable, env, directory) {
@@ -642,16 +671,10 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
   const attachedPostmasterBefore = fixture.config.postgres_mode === 'attached' ? await fs.readFile(postmasterFile, 'utf8') : null;
   const launch = start(executable, [`--remote-debugging-port=${debuggingPort}`, '--remote-debugging-address=127.0.0.1',
     '--user-data-dir=' + profile.user_data_path,
-    '--proxy-server=127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost'], env, directory);
+    '--proxy-server=127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost'], env, directory, { visibleGui: true });
   const currentEvents = journal => journal.events?.filter(row => row.boot_id === journal.current_boot_id && row.pid === launch.child.pid && row.version === identity.package_version) || [];
   const journal = () => fs.readFile(journalPath, 'utf8').then(JSON.parse);
-  let client, proof, statusBefore;
-  const liveCdpWindow = async () => {
-    const window = await client.command('Browser.getWindowForTarget');
-    const readback = await client.command('Browser.getWindowBounds', { windowId: window.windowId });
-    return { window_id: window.windowId, window_state: readback.bounds?.windowState,
-      width: readback.bounds?.width, height: readback.bounds?.height };
-  };
+  let client, browserClient, proof, statusBefore, target;
   try {
     const before = await waitUntil(async () => {
       const row = await journal();
@@ -679,9 +702,11 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     assert(health.ok && localStateProviderHealthAttested(await health.json(), runtimeIdentity.instance_id));
     const uiListener = await normalUiSocket(uiPort, launch.child.pid, executable);
     const gatewayListener = await verifyWindowsTcpListener({ port: gatewayPort, pid: launch.child.pid });
-    const target = await waitUntil(() => targetAt(debuggingPort, url => url.startsWith(`http://127.0.0.1:${gatewayPort}/`)), launch);
+    target = await waitUntil(() => targetAt(debuggingPort, url => url.startsWith(`http://127.0.0.1:${gatewayPort}/`)), launch);
     client = await cdp(target.webSocketDebuggerUrl);
-    const cdpWindowBefore = await liveCdpWindow();
+    const browser = await waitUntil(() => browserEndpointAt(debuggingPort), launch);
+    browserClient = await cdp(browser.webSocketDebuggerUrl);
+    const cdpWindowBefore = await readInstalledCdpWindow(browserClient, target.id);
     assertInstalledPrimaryCdpWindow(cdpWindowBefore);
     const osWindowBefore = await verifyInstalledVisiblePrimaryWindow(launch.child.pid);
     const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
@@ -707,7 +732,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter,
       pid: launch.child.pid, version: identity.package_version });
     const journalWindow = assertInstalledPrimaryWindowJournal(after, { pid: launch.child.pid, version: identity.package_version });
-    const cdpWindowAfter = await liveCdpWindow();
+    const cdpWindowAfter = await readInstalledCdpWindow(browserClient, target.id);
     assertInstalledPrimaryCdpWindow(cdpWindowBefore, cdpWindowAfter);
     const osWindowAfter = await verifyInstalledVisiblePrimaryWindow(launch.child.pid, osWindowBefore.handle);
     const activation = currentEvents(after).find(row => row.state === 'PRIMARY_WINDOW_ACTIVATED' && row.details.launch_id === ack.launch_id
@@ -738,6 +763,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       current_os_window: osWindowAfter, current_os_window_visible: true, same_os_window_across_startup_grace: true,
       owner_boot_qualified: true, production_ready: false, authority_effect: false };
   } finally {
+    browserClient?.close();
     client?.close();
     // Use the existing installer shutdown barrier to stop the owned API/edge
     // host. An attached PostgreSQL clone stays with the fixture's owner.

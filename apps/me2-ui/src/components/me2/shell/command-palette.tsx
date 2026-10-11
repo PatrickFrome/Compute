@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
 import { sendCommand, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
+import { filterSupportedLegacyDaemonActionCatalog } from "@/lib/task-content-snapshot.mjs";
 const PAGE_META: Record<string, { hint: string }> = {
   browser: { hint: "Agent conversations" },
   code: { hint: "Repository and workspace" },
@@ -28,21 +29,13 @@ function laneChip(lane: string): string {
   }
 }
 
-const RETIRED_DAEMON_TASK_ACTIONS = new Set([
-  "TASK_ENQUEUE",
-  "TASK_SCHEDULE",
-  "TASK_CANCEL",
-  "TASK_RETRY",
-  "TASK_ARCHIVE",
-]);
-
 export function CommandPalette() {
   const open = useMe2((s) => s.paletteOpen);
   const setOpen = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const setDialog = useMe2((s) => s.setDialog);
   const catalog = useMe2((s) => s.catalog);
-  const visibleCatalog = useMemo(() => catalog.filter((row) => !RETIRED_DAEMON_TASK_ACTIONS.has(row.action)), [catalog]);
+  const visibleCatalog = useMemo(() => filterSupportedLegacyDaemonActionCatalog(catalog), [catalog]);
   const snap = useMe2((s) => s.snap);
   const openTask = useMe2((s) => s.openTask);
   const [mode, setMode] = useState<"all" | "pages" | "tasks" | "actions">("all");
@@ -66,7 +59,7 @@ export function CommandPalette() {
   }, [snap]);
 
   const runRegistryAction = (meta: ActionMeta) => {
-    if (RETIRED_DAEMON_TASK_ACTIONS.has(meta.action)) return;
+    if (!filterSupportedLegacyDaemonActionCatalog([meta]).length) return;
     const direct: Record<string, () => void> = {
       PING: () => { void sendCommand("PING", {}, { quiet: true, successMsg: "pong" }); },
       STATE_SNAPSHOT: () => { void sendCommand("STATE_SNAPSHOT", {}, { quiet: true }); },

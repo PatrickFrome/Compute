@@ -13,6 +13,7 @@ import {
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
 import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
 import { taskEventRowsConflict, validateTaskEventPage } from "@/lib/project-action-feed.mjs";
+import { taskContentSnapshotForDisplay } from "@/lib/task-content-snapshot.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -551,6 +552,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
       },
       onDisconnect: () => set({ connected: false }),
       onSnapshot: (s) => {
+        if (!taskContentSnapshotForDisplay(s)) {
+          set({ snap: null, detail: null });
+          return;
+        }
         set((st) => {
           // live-синхронизация открытой детали задачи
           let detail = st.detail;
@@ -590,7 +595,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
 
     // REST-fallback начального состояния + каталог + зеркало + тик
     void me2Fetch<Snapshot>("/state?XTransformPort=3041").then((d) => {
-      if (d?.ok) set({ snap: d, events: d.events ?? [] });
+      if (taskContentSnapshotForDisplay(d)) set({ snap: d, events: d?.events ?? [] });
+      else set({ snap: null, detail: null });
     });
     void me2Fetch<{ ok?: boolean; actions: ActionMeta[] }>("/actions?XTransformPort=3041").then((d) => {
       if (d?.ok) set({ catalog: d.actions ?? [] });

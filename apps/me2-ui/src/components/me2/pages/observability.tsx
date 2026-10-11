@@ -22,6 +22,7 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { mergeExactTaskEvidenceEvents } from "@/lib/r95e-evidence-contracts.mjs";
 import { captureEventLogWindow, eventLogWindow } from "@/lib/event-log-window";
+import { LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type Probe = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
@@ -558,6 +559,9 @@ export function ObservabilityPage() {
   }, []);
 
   const runEval = useCallback(async () => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     setEvalBusy(true); // честный прогресс: запрос долгий (2-10с), не рвём его
     try {
       const r = await me2Fetch<{ verdict?: string; passed?: number; total?: number; duration_ms?: number; failed?: number; warned?: number }>(
@@ -573,9 +577,13 @@ export function ObservabilityPage() {
         await loadEval();
       } else toast({ title: "eval ✗", description: "daemon недоступен или прогон не вернул вердикт", variant: "destructive" });
     } finally { setEvalBusy(false); }
+    */
   }, [loadEval, toast]);
 
   const hygOp = useCallback(async (op: "checkpoint" | "vacuum") => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     if (op === "vacuum" && !window.confirm("VACUUM базы daemon? Операция блокирует БД на время пересборки (осмысленно при freelist ≥ 10%).")) return;
     setHygBusy(true);
     try {
@@ -587,6 +595,7 @@ export function ObservabilityPage() {
       else toast({ title: `db ${op} ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
       await loadHyg();
     } finally { setHygBusy(false); }
+    */
   }, [loadHyg, toast]);
 
   const verifyEvChain = useCallback(async (limit: number) => {

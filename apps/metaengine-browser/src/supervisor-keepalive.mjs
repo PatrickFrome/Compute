@@ -924,6 +924,10 @@ export class SupervisorKeepalive {
     this.#state.previous_worker_generation = {};
     this.#state.last_wake_at = null;
     this.#state.last_wake_reason = null;
+    // The new epoch has no inherited research intent. Let the existing
+    // lifecycle enqueue a fresh bootstrap on its next admitted cycle instead
+    // of waiting up to researchMs on the archived epoch's scheduling timestamp.
+    this.#state.last_research_wake_at = null;
     this.#state.state = this.#state.paused ? 'PAUSED' : this.#state.admission_state === 'CLOSED' ? 'PARKED' : 'RECOVERING';
     try { await this.#persist(); } catch (error) { this.#state = before; throw error; }
     return this.snapshot();

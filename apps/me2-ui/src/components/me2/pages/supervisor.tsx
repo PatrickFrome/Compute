@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы (порт legacy 1:1) ──────────────────────────────────────────────────────
 type WorkGraphData = {
@@ -155,6 +156,9 @@ export function SupervisorPage() {
 
   // ── мутации: POST ?XTransformPort=3041 (порт legacy mcxOp L1918-1935) ──
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after?: () => Promise<void>) => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return null;
+    /*
     setMcxBusy(true);
     try {
       const res = await fetch(`/${path}?XTransformPort=3041`, {
@@ -171,6 +175,7 @@ export function SupervisorPage() {
       toast({ title: `${path} ✗`, description: "daemon недоступен", variant: "destructive" });
     } finally { setMcxBusy(false); }
     return null;
+    */
   }, [toast]);
 
   // R27 C1: цели (exact legacy payload формы: {op:"create", title, spec} — priority дефолтится daemon'ом)
@@ -219,13 +224,17 @@ export function SupervisorPage() {
 
   // R43 G10: автопилот спроса — toggle (exact legacy payload {op:"config", enabled}) + tick {op:"tick"}
   const demandToggle = useCallback(async (v: boolean) => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     setMcxBusy(true);
     try {
       const r = await fetch("/demand?XTransformPort=3041", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "config", enabled: v }) }).then((x) => x.json()) as { ok?: boolean; config?: { enabled: boolean; max: number } } | null;
       if (r?.ok) toast({ title: `автопилот спроса: ${r.config?.enabled ? "включен" : "выключен"} (max ${r.config?.max})` });
-    } catch { /* daemon недоступен */ }
+    } catch { }
     finally { setMcxBusy(false); }
     await loadDemand();
+    */
   }, [loadDemand, toast]);
   const demandTick = useCallback(async () => {
     await mcxOp("demand", { op: "tick" }, "тик автопилота выполнен — решение в /demand", loadDemand);

@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { useClientRuntimeStatus, refreshClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 import { capabilityLabel } from "@/lib/client-readiness-labels";
 import { InterruptedSetupRecovery } from "@/components/me2/interrupted-setup-recovery";
+import { LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type TokensT = {
@@ -312,8 +313,12 @@ export function SystemPage() {
 
   // ── опасная зона ──
   const budgetFlushOp = useCallback(async () => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     if (!window.confirm("Сбросить очередь команд шины (BUDGET_FLUSH, полоса EMERGENCY)? Все отложенные команды будут сняты.")) return;
     await sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" });
+    */
   }, []);
 
   return (

@@ -235,6 +235,62 @@ test('real keepalive and fleet archive methods preserve unknown history and neve
   assert.equal(fleet.snapshot().agents[0].automatic_retry_allowed, false);
 });
 
+test('fresh setup schedules the new epoch on the next lifecycle cycle despite a recent archived research wake', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-recovery-fresh-cycle-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const original = fixture();
+  original.keepalive.last_research_wake_at = new Date().toISOString();
+  const { SupervisorBootstrapKeepalive: BootstrapKeepalive } = await import('../src/supervisor-bootstrap-keepalive.mjs');
+  let saved = structuredClone(original.keepalive);
+  const keepalive = new BootstrapKeepalive({ processIncarnationId: 'process_current',
+    loadState: async () => saved, saveState: async value => { saved = structuredClone(value); } });
+  await keepalive.init();
+  // Execute the production lifecycle queue method without Electron/browser
+  // dependencies. Queueing a fresh intent creates no physical send effect.
+  const source = await fs.readFile(new URL('../src/supervisor-lifecycle-runtime-core.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('  async #queueResearch() {');
+  const end = source.indexOf('  async #ensureContinuousWake()', begin);
+  assert.ok(begin >= 0 && end > begin);
+  const QueueLifecycle = vm.runInNewContext(`(class {
+    #keepalive; #researchMs = 30 * 60 * 1000;
+    constructor(keepalive) { this.#keepalive = keepalive; }
+    ${source.slice(begin, end)}
+    async cycle() { await this.#queueResearch(); }
+  })`);
+  const lifecycle = new QueueLifecycle(keepalive);
+  await lifecycle.cycle();
+  assert.equal(keepalive.snapshot().queued_wakes.length, 0, 'the predecessor research timestamp is still fresh');
+  let fleetSaved = structuredClone(original.fleet);
+  const fleet = new FleetProvisioner({ createTab: () => assert.fail('recovery cannot create tabs'), loadTab: () => assert.fail('recovery cannot navigate'),
+    tabExists: () => false, loadState: async () => fleetSaved, saveState: async value => { fleetSaved = structuredClone(value); }, policy: {} });
+  await fleet.init();
+  const before = { keepalive: keepalive.snapshot(), fleet: fleet.snapshot(), tabs: [] };
+  const controller = new InterruptedSetupRecovery({ directory, uuid: () => recoveryId.slice(9),
+    getSnapshot: async () => ({ keepalive: keepalive.snapshot(), fleet: fleet.snapshot(), tabs: [] }),
+    applyFleet: binding => fleet.archiveInterruptedBootstrapAgents(binding),
+    applySupervisor: binding => keepalive.archiveInterruptedBootstrapForNewEpoch(binding) });
+  await controller.init();
+  await controller.execute(request(before));
+  assert.equal(keepalive.snapshot().last_research_wake_at, null);
+  assert.equal(saved.last_research_wake_at, null, 'the scheduling reset is in the same durable epoch checkpoint');
+  assert.equal(keepalive.snapshot().pending_wake, null, 'the recovery action itself sends no prompt');
+  await lifecycle.cycle();
+  const queued = keepalive.snapshot().queued_wakes;
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].key, 'RESEARCH_ACCELERATOR_DUE:epoch-3');
+  assert.equal(queued[0].process_incarnation_id, 'process_current');
+  const prepared = await keepalive.prepareBootstrapWake();
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.pending.supervisor_epoch, 3);
+  assert.equal(prepared.pending.cycle_seq, 1);
+  assert.notEqual(prepared.pending.wake_id, before.keepalive.pending_wake.wake_id);
+  assert.equal(prepared.message.includes(before.keepalive.pending_wake.wake_id), false);
+  const archived = keepalive.snapshot().ambiguous_history.at(-1);
+  for (const [key, value] of Object.entries(before.keepalive.pending_wake)) assert.deepEqual(archived[key], value);
+  assert.equal(archived.previous_effect_outcome, 'UNKNOWN');
+  assert.equal(archived.automatic_retry_allowed, false);
+});
+
 test('native recovery hold serializes explicit operations and remains closed after uncertain apply', async () => {
   const source = await fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
   const begin = source.indexOf('  canStartMaintenance() {');

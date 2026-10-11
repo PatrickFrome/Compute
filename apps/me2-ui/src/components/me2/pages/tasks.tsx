@@ -420,7 +420,7 @@ export function TasksPage() {
                     >
                       <span className={`h-1.5 w-1.5 rounded-full ${tb.dot}`} aria-hidden />
                       {tb.label}
-                      <span className="text-[11px] text-zinc-400">{branchCounts[tb.key]}</span>
+                      <span className="text-[11px] text-zinc-400">{snap ? branchCounts[tb.key] : "—"}</span>
                     </button>
                   );
                 })}
@@ -430,7 +430,7 @@ export function TasksPage() {
               {branchTasks.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-zinc-400">
                   <p>{snap ? "No tasks in this view" : "Task branches are unavailable"}</p>
-                  <p className="mt-2 text-xs text-zinc-500">{snap ? "Run a task from the agent workspace to follow its progress here." : "A successful connection is required before task counts can be shown."}</p>
+                  <p className="mt-2 text-xs text-zinc-500">{snap ? "Run a task from the agent workspace to follow its progress here." : "The current task source is not available in this view. Projects and history remain on this computer."}</p>
                 </div>
               ) : (
                 <BranchGraph

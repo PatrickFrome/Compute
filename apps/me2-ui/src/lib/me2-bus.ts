@@ -4,6 +4,7 @@
 // Секреты никогда не проходят через этот модуль (vault только через /tokens, значения маскированы).
 
 import type { Socket } from "socket.io-client";
+import { isSupportedLegacyDaemonAction, LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы (зеркало store.ts daemon) ──────────────────────────────────────────────
 export type Agent = { id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string };
@@ -29,6 +30,7 @@ export type ActionMeta = { action: string; lane: string; cost: number; desc: str
 export type Mirror = { mode: string; pending: number; method: string | null; last_error: string | null; last_sent_seq: number; storage?: { ok: boolean; bucket: string; objects: number }; ddl?: { last_result: string | null; retry_every_min: number; next_retry_at: string | null; attempts_total: number } };
 export type Snapshot = {
   ok: boolean; ts: string; agents: Agent[]; tasks: Task[]; archived?: Task[]; workers: Worker[];
+  task_content_authority?: boolean;
   commands: Command[]; events: Event[];
   budget: { used: number; limit: number; window_ms: number };
   stats: Record<string, number>;
@@ -178,6 +180,10 @@ export async function sendCommand(
   payload: Record<string, unknown> = {},
   opts: SendOpts = {},
 ): Promise<unknown | null> {
+  if (!isSupportedLegacyDaemonAction(action)) {
+    if (!opts.quiet) toastBus({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return null;
+  }
   const idem = `${action.toLowerCase()}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const viaWs = (): Promise<{ ok: boolean; error?: string; result?: unknown } | null> => new Promise((resolve) => {
     if (!socket?.connected) return resolve(null);

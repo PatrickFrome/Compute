@@ -4,13 +4,18 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { createPackage, uncache } from '@electron/asar';
 import { assertInstalledLaunchIdentity, assertMissingDescriptorAdmissionContract, assertOwnerStartupGrace,
   assertInstalledPrimaryWindowJournal, assertInstalledPrimaryCdpWindow,
   assertInstalledVisibleWindow,
+  browserEndpointAt,
+  readInstalledCdpWindow,
   prepareIsolatedAttachedAutoConnect, assertAutomaticAttachedOwnerBinding, ISOLATED_OWNER_MARKER,
   REMOVED_DATABASE_WIZARD_FILES,
   assertOfflineSuccessorBinding, qualifyInstalledOfflineSuccessor,
+  startInstalledQualificationProcess,
   isolatedLaunchEnvironment, INSTALLED_LAUNCH_SOURCE_FILES,
   qualifyInstalledClientLaunch } from '../scripts/qualify-installed-client-launch.mjs';
 import { persistUpdatedSuccessorReceipt, selfUpdateHandoffPaths } from '../src/self-update-handoff.mjs';
@@ -20,6 +25,80 @@ const identity = () => ({ version: expectedVersion, main: 'src/final-runtime-ent
   metaengineEmergencyTrustRoot: { build_sha: expectedHead },
   metaengineBuildIdentity: { source_head: expectedHead, package_version: expectedVersion },
   metaengineClientStateRuntime: { source_head_sha: expectedHead, package_version: expectedVersion, bundle_sha256: 'b'.repeat(64) } });
+
+test('normal GUI qualification permits the Windows first show while probes and helper children stay hidden', async () => {
+  for (const visibleGui of [false, true]) {
+    let spawned;
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 712, exitCode: null, signalCode: null, stdout: new PassThrough(), stderr: new PassThrough() });
+    const environment = { APPDATA: 'isolated-profile' }, args = ['--user-data-dir=isolated-profile'];
+    const launch = startInstalledQualificationProcess('exact-installed.exe', args, environment, 'isolated-directory', {
+      visibleGui, spawnProcess: (...received) => { spawned = received; return child; },
+    });
+    assert.equal(spawned[0], 'exact-installed.exe'); assert.equal(spawned[1], args);
+    assert.equal(spawned[2].env, environment); assert.equal(spawned[2].cwd, 'isolated-directory');
+    assert.equal(spawned[2].windowsHide, !visibleGui); assert.equal(spawned[2].shell, false);
+    assert.deepEqual(spawned[2].stdio, ['ignore', 'pipe', 'pipe']);
+    launch.alive(); child.exitCode = 0; child.emit('close', 0, null);
+    assert.deepEqual(await launch.closed, { code: 0, signal: null });
+    assert.throws(() => launch.alive(), /process_ended_before_readback/);
+  }
+});
+
+test('installed CDP qualification keeps browser-window commands on /json/version and page capture on /json/list', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  try {
+    globalThis.fetch = async url => {
+      requests.push(String(url));
+      return { json: async () => ({ webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/browser-identity' }) };
+    };
+    const endpoint = await browserEndpointAt(9222);
+    assert.deepEqual(endpoint, { webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/browser-identity' });
+    assert.deepEqual(requests, ['http://127.0.0.1:9222/json/version']);
+
+    globalThis.fetch = async () => ({
+      json: async () => ({ webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/page-identity' }),
+    });
+    assert.equal(await browserEndpointAt(9222), null, 'page target sockets cannot own Browser.* commands');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const source = await fs.readFile(new URL('../scripts/qualify-installed-client-launch.mjs', import.meta.url), 'utf8');
+  assert.match(source, /browserClient\s*=\s*await cdp\(browser\.webSocketDebuggerUrl\)/);
+  assert.match(source, /readInstalledCdpWindow\(browserClient, target\.id\)/);
+  assert.match(source, /client\.command\('Page\.captureScreenshot'/);
+  assert.doesNotMatch(source, /readInstalledCdpWindow\(client,/);
+});
+
+test('CDP native-window readback stays on browser websocket and binds the selected page targetId', async () => {
+  const browserCalls = [];
+  const browserClient = { async command(method, params) {
+    browserCalls.push({ method, params });
+    if (method === 'Browser.getWindowForTarget') return { windowId: 37 };
+    if (method === 'Browser.getWindowBounds') return { bounds: { windowState: 'normal', width: 1200, height: 800 } };
+    throw new Error('unexpected_browser_domain_command');
+  } };
+  const pageCalls = [];
+  const pageClient = { async command(method, params) {
+    pageCalls.push({ method, params });
+    if (method === 'Page.captureScreenshot') return { data: 'c2NyZWVuc2hvdA==' };
+    throw new Error('page_target_does_not_own_browser_window_commands');
+  } };
+
+  const window = await readInstalledCdpWindow(browserClient, 'page-target-123');
+  assert.deepEqual(window, { window_id: 37, window_state: 'normal', width: 1200, height: 800 });
+  assert.deepEqual(browserCalls, [
+    { method: 'Browser.getWindowForTarget', params: { targetId: 'page-target-123' } },
+    { method: 'Browser.getWindowBounds', params: { windowId: 37 } },
+  ]);
+  assert.equal((await pageClient.command('Page.captureScreenshot', { format: 'png' })).data, 'c2NyZWVuc2hvdA==');
+  assert.deepEqual(pageCalls, [{ method: 'Page.captureScreenshot', params: { format: 'png' } }]);
+  for (const targetId of ['', null, 37]) {
+    await assert.rejects(readInstalledCdpWindow(browserClient, targetId), /normal_primary_cdp_target_invalid/);
+  }
+});
 
 test('installed launch refuses a stale executable package or a differently pinned runtime', () => {
   assert.equal(assertInstalledLaunchIdentity(identity(), { expectedHead, expectedVersion }).bundle_sha256, 'b'.repeat(64));
