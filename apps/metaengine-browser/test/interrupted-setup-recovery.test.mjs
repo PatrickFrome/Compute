@@ -174,7 +174,7 @@ test('missing fleet readback after local apply cannot be treated as confirmed re
       state.keepalive.pending_wake = null; state.keepalive.supervisor_epoch += 1; setState(state);
     } });
   await controller.init();
-  await assert.rejects(controller.execute(request(getState())), /apply_readback_unconfirmed/);
+  await assert.rejects(controller.execute(request(getState())), /readback_changed_before_supervisor/);
   assert.equal(controller.status().fenced, true);
   assert.equal((await fs.readdir(directory)).some(name => name.endsWith('.committed.json')), false);
 });
@@ -258,10 +258,141 @@ test('native recovery hold serializes explicit operations and remains closed aft
     return { state: 'FRESH_SETUP_PREPARED' };
   });
   await assert.rejects(client.withInterruptedSetupRecovery(() => assert.fail('no concurrent recovery')), /native_mutation_busy/);
+  assert.equal(client.canStartMaintenance(), false, 'losing concurrent caller cannot release the acquired hold');
   release();
   assert.equal((await operation).state, 'FRESH_SETUP_PREPARED');
   assert.equal(client.canStartMaintenance(), true);
   await assert.rejects(client.withInterruptedSetupRecovery(() => { throw new Error('uncertain_apply'); }), /uncertain_apply/);
   assert.equal(client.canStartMaintenance(), false);
   await assert.rejects(client.withInterruptedSetupRecovery(() => assert.fail('no retry')), /native_mutation_busy/);
+  client.setInterruptedSetupRecoveryFence(false);
+  await assert.rejects(client.withInterruptedSetupRecovery(() => { throw new Error('request_rejected_before_archive'); }, {
+    retainFenceOnError: () => false,
+  }), /request_rejected_before_archive/);
+  assert.equal(client.canStartMaintenance(), true, 'only the acquired owner releases its pre-archive validation hold');
+});
+
+for (const stage of ['before-supervisor', 'after-supervisor']) test(`new predecessor/conversation census at ${stage} keeps UNKNOWN setup fenced`, async t => {
+  const { directory, effects, getState, setState } = await harness(t);
+  const controller = new InterruptedSetupRecovery({ directory, uuid: () => recoveryId.slice(9), getSnapshot: getState,
+    applyFleet: () => {
+      effects.push('fleet'); const state = getState(); state.fleet.agents[0].lifecycle_state = 'RETIRED';
+      if (stage === 'before-supervisor') state.tabs.push({ tab_id: 'tab_old_agent', url: 'https://chatgpt.com/' });
+      setState(state);
+    },
+    applySupervisor: binding => {
+      effects.push('supervisor'); const state = getState();
+      state.keepalive.ambiguous_history.push({ ...state.keepalive.pending_wake, operator_recovery_id: binding.recovery_id });
+      state.keepalive.pending_wake = null; state.keepalive.supervisor_epoch += 1;
+      if (stage === 'after-supervisor') state.tabs.push({ tab_id: 'tab_spa_new', url: 'https://chatgpt.com/c/late-new-conversation' });
+      setState(state);
+    } });
+  await controller.init();
+  await assert.rejects(controller.execute(request(getState())), stage === 'before-supervisor' ? /readback_changed_before_supervisor/ : /apply_readback_unconfirmed/);
+  assert.equal(controller.status().fenced, true);
+  assert.deepEqual(effects, stage === 'before-supervisor' ? ['fleet'] : ['fleet', 'supervisor']);
+});
+
+test('main command guard accounts already admitted direct mutations and denies new mutation entries', async () => {
+  const source = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('function assertInterruptedSetupCommandAllowed(action)');
+  const end = source.indexOf('async function handleCommand(command, payload = {})', begin);
+  assert.ok(begin >= 0 && end > begin);
+  let hold = false;
+  const lane = vm.runInNewContext(`(() => {
+    let interruptedSetupPhysicalMutationsInFlight = 0;
+    ${source.slice(begin, end)}
+    return { run: runInterruptedSetupPhysicalMutation, count: () => interruptedSetupPhysicalMutationsInFlight };
+  })()`, { nativeSupervisor: { interruptedSetupRecoveryFenced: () => hold },
+    classifyNativeSupervisorCommand: ({ action }) => ({ read_only: action === 'CAPTURE' || action === 'READ_TRANSCRIPT' }) });
+  let finish;
+  const longOperation = lane.run('FLEET_RECONCILE', () => new Promise(resolve => { finish = resolve; }));
+  assert.equal(lane.count(), 1, 'fresh IPC must reject while a previously admitted shell mutation awaits');
+  hold = true;
+  for (const action of ['FLEET_RECONCILE', 'FLEET_SET_PROFILE', 'NEW_TAB', 'CLOSE_TAB', 'NAVIGATE', 'GATE_DISABLE', 'MANAGED_PROJECT_WORKTREE_CREATE']) {
+    await assert.rejects(lane.run(action, () => assert.fail('hold denies physical mutation')), /recovery_fenced/);
+  }
+  assert.equal(await lane.run('CAPTURE', () => 'safe-read'), 'safe-read');
+  assert.equal(lane.count(), 1);
+  finish(); await longOperation;
+  assert.equal(lane.count(), 0);
+});
+
+test('concurrent real start-fresh IPC loser cannot release the first pre-archive hold', async () => {
+  const [nativeSource, mainSource] = await Promise.all([
+    fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8'),
+  ]);
+  const nativeBegin = nativeSource.indexOf('  canStartMaintenance() {');
+  const nativeEnd = nativeSource.indexOf('  async archiveInterruptedBootstrapForNewEpoch(binding)', nativeBegin);
+  const NativeHold = vm.runInNewContext(`(class {
+    #interruptedSetupRecoveryHold = false; #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
+    ${nativeSource.slice(nativeBegin, nativeEnd)}
+  })`);
+  const native = new NativeHold();
+  let finish;
+  const pauseBeforeArchive = new Promise(resolve => { finish = resolve; });
+  let executeCount = 0;
+  const recovery = { status: () => ({ fenced: false }), execute: async () => { executeCount++; await pauseBeforeArchive; return { state: 'FRESH_SETUP_PREPARED' }; } };
+  const ipcBegin = mainSource.indexOf("ipcMain.handle('metaengine:client:interrupted-setup-start-fresh'");
+  const ipcEnd = mainSource.indexOf("ipcMain.handle('metaengine:client:work-readiness'", ipcBegin);
+  assert.ok(ipcBegin >= 0 && ipcEnd > ipcBegin);
+  let handler;
+  vm.runInNewContext(mainSource.slice(ipcBegin, ipcEnd), {
+    ipcMain: { handle: (name, callback) => { handler = callback; } }, assertShellSender: () => {},
+    ensureInterruptedSetupRecovery: async () => recovery, nativeSupervisor: native,
+    interruptedSetupPhysicalMutationsInFlight: 0, publishSnapshot: async () => {},
+  });
+  const frame = {};
+  const event = { sender: { mainFrame: frame }, senderFrame: frame };
+  const first = handler(event, request(fixture()));
+  for (let index = 0; index < 5 && executeCount === 0; index++) await Promise.resolve();
+  assert.equal(executeCount, 1);
+  await assert.rejects(handler(event, request(fixture())), /native_mutation_busy/);
+  assert.equal(native.interruptedSetupRecoveryFenced(), true, 'IPC rejection cannot release another operation before its archive starts');
+  assert.equal(executeCount, 1);
+  finish();
+  assert.equal((await first).state, 'FRESH_SETUP_PREPARED');
+  assert.equal(native.interruptedSetupRecoveryFenced(), false);
+});
+
+test('deferred physical tab entrypoints obey the same recovery hold without losing arguments', async () => {
+  const source = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
+  const names = ['createTab', 'loadTab', 'closeTab'];
+  const bodies = names.map(name => {
+    const begin = source.indexOf(`async function ${name}(`);
+    const end = source.indexOf(`async function ${name}WithRecoveryAdmission(`, begin);
+    assert.ok(begin >= 0 && end > begin);
+    return source.slice(begin, end);
+  }).join('\n');
+  const guardBegin = source.indexOf('function assertInterruptedSetupCommandAllowed(action)');
+  const guardEnd = source.indexOf('async function handleCommand(command, payload = {})', guardBegin);
+  let hold = false;
+  const observed = [];
+  const implementation = name => (...args) => { observed.push({ name, args }); return name; };
+  const tabApi = vm.runInNewContext(`(() => {
+    let interruptedSetupPhysicalMutationsInFlight = 0;
+    ${source.slice(guardBegin, guardEnd)}
+    ${bodies}
+    return { createTab, loadTab, closeTab, count: () => interruptedSetupPhysicalMutationsInFlight };
+  })()`, {
+    AGENT_PLATFORM_HOME_URL: 'https://chatgpt.com/', nativeSupervisor: { interruptedSetupRecoveryFenced: () => hold },
+    classifyNativeSupervisorCommand: () => ({ read_only: false }),
+    createTabWithRecoveryAdmission: implementation('createTab'), loadTabWithRecoveryAdmission: implementation('loadTab'), closeTabWithRecoveryAdmission: implementation('closeTab'),
+  });
+  hold = true;
+  await assert.rejects(tabApi.createTab('https://example.com/'), /recovery_fenced/);
+  await assert.rejects(tabApi.loadTab('tab_exact', 'https://example.com/'), /recovery_fenced/);
+  await assert.rejects(tabApi.closeTab('tab_exact'), /recovery_fenced/);
+  assert.deepEqual(observed, []);
+  hold = false;
+  await tabApi.createTab('https://example.com/', { role: 'AGENT', select: false, load: false, awaitLoad: false, created_by_continuity_id: 'continuity-exact' });
+  await tabApi.loadTab('tab_exact', 'https://example.com/'); await tabApi.closeTab('tab_exact');
+  assert.equal(observed[0].args[0], 'https://example.com/');
+  assert.equal(observed[0].args[1].role, 'AGENT');
+  assert.equal(observed[0].args[1].select, false);
+  assert.equal(observed[0].args[1].created_by_continuity_id, 'continuity-exact');
+  assert.deepEqual(observed[1].args, ['tab_exact', 'https://example.com/']);
+  assert.deepEqual(observed[2].args, ['tab_exact']);
+  assert.equal(tabApi.count(), 0);
 });

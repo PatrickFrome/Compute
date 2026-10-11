@@ -52,6 +52,7 @@ import { projectMissionControl } from './metaengine-mission-control-projection.m
 import { SupervisorLoopbackRpcServer } from './supervisor-loopback-rpc-server.mjs';
 import { createManagedTaskProjectHost } from './managed-task-project-host.mjs';
 import { InterruptedSetupRecovery } from './interrupted-setup-recovery.mjs';
+import { classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
 import { MANAGED_PROJECT_COMMAND_ACTIONS } from './managed-task-project-command-adapter.mjs';
 import { createManagedTaskProjectAuthorityResolver, createManagedTaskProjectBindingTransport, createManagedTaskProjectRepositoryProvisioner } from './managed-task-project-authority-resolver.mjs';
 import { prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile, assertManagedProjectPhysicalDirectory, assertManagedProjectPrivateReceipt } from './managed-task-project-storage.mjs';
@@ -114,6 +115,7 @@ let nativeSupervisor = null;
 let managedTaskProjectHost = null;
 let interruptedSetupRecovery = null;
 let interruptedSetupRecoveryInit = null;
+let interruptedSetupPhysicalMutationsInFlight = 0;
 let autonomousProjectRuntime = null;
 let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
@@ -1212,6 +1214,10 @@ function wireRemoteView(tab, view) {
 }
 
 async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
+  return runInterruptedSetupPhysicalMutation('NEW_TAB', () => createTabWithRecoveryAdmission(input, { select, load, awaitLoad, role, created_by_continuity_id }));
+}
+
+async function createTabWithRecoveryAdmission(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
   if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
@@ -1240,6 +1246,10 @@ async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load 
 }
 
 async function loadTab(tabId, input) {
+  return runInterruptedSetupPhysicalMutation('NAVIGATE', () => loadTabWithRecoveryAdmission(tabId, input));
+}
+
+async function loadTabWithRecoveryAdmission(tabId, input) {
   const view = views.get(String(tabId));
   if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
   const d = navigationDecision(input);
@@ -1265,6 +1275,10 @@ async function loadTab(tabId, input) {
 }
 
 async function closeTab(tabId) {
+  return runInterruptedSetupPhysicalMutation('CLOSE_TAB', () => closeTabWithRecoveryAdmission(tabId));
+}
+
+async function closeTabWithRecoveryAdmission(tabId) {
   const id = String(tabId);
   const view = views.get(id);
   if (view) {
@@ -1479,7 +1493,26 @@ async function runDevelopmentPlaneSmoke() {
   app.exit(invariant ? 0 : 1);
 }
 
+function assertInterruptedSetupCommandAllowed(action) {
+  if (nativeSupervisor?.interruptedSetupRecoveryFenced?.() === true
+    && classifyNativeSupervisorCommand({ action: String(action || '').toUpperCase() }).read_only !== true) {
+    throw new Error('interrupted_setup_recovery_fenced');
+  }
+}
+
+async function runInterruptedSetupPhysicalMutation(action, operation) {
+  assertInterruptedSetupCommandAllowed(action);
+  const mutates = classifyNativeSupervisorCommand({ action: String(action || '').toUpperCase() }).read_only !== true;
+  if (mutates) interruptedSetupPhysicalMutationsInFlight += 1;
+  try { return await operation(); }
+  finally { if (mutates) interruptedSetupPhysicalMutationsInFlight -= 1; }
+}
+
 async function handleCommand(command, payload = {}) {
+  return runInterruptedSetupPhysicalMutation(command, () => handleCommandWithRecoveryAdmission(command, payload));
+}
+
+async function handleCommandWithRecoveryAdmission(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
   if (command === 'SHELL_LAYOUT_SET') {
@@ -1748,6 +1781,10 @@ function systemDeltaPublisher() {
 }
 
 async function executeNativeSupervisorCommand(command) {
+  return runInterruptedSetupPhysicalMutation(command?.action, () => executeNativeSupervisorCommandWithRecoveryAdmission(command));
+}
+
+async function executeNativeSupervisorCommandWithRecoveryAdmission(command) {
   // T3-8: every supervisor command completion (ok or failed) is a system
   // delta on the cognitive bus — Mission Control live effects.
   const startedAt = Date.now();
@@ -1784,6 +1821,10 @@ async function executeNativeSupervisorCommand(command) {
 }
 
 async function executeNativeSupervisorCommandFenced(command) {
+  return runInterruptedSetupPhysicalMutation(command?.action, () => executeNativeSupervisorCommandFencedWithRecoveryAdmission(command));
+}
+
+async function executeNativeSupervisorCommandFencedWithRecoveryAdmission(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
   // ChatGPT-only execution fence. Historical GLM/Z.ai tabs may still be read,
@@ -3022,16 +3063,12 @@ ipcMain.handle('metaengine:client:interrupted-setup-start-fresh', async (event, 
   assertShellSender(event);
   if (event.senderFrame !== event.sender.mainFrame) throw new Error('interrupted_setup_main_frame_required');
   const recovery = await ensureInterruptedSetupRecovery();
-  try {
-    const receipt = await nativeSupervisor.withInterruptedSetupRecovery(() => recovery.execute(request));
-    await publishSnapshot();
-    return receipt;
-  } catch (error) {
-    // A request rejected before archive intent can release the temporary hold.
-    // Once durable uncertainty exists, the coordinator retains the fence.
-    nativeSupervisor.setInterruptedSetupRecoveryFence(recovery.status().fenced);
-    throw error;
-  }
+  if (interruptedSetupPhysicalMutationsInFlight > 0) throw new Error('interrupted_setup_physical_mutation_busy');
+  const receipt = await nativeSupervisor.withInterruptedSetupRecovery(() => recovery.execute(request), {
+    retainFenceOnError: () => recovery.status().fenced,
+  });
+  await publishSnapshot();
+  return receipt;
 });
 ipcMain.handle('metaengine:client:work-readiness', async (event) => {
   assertShellSender(event);

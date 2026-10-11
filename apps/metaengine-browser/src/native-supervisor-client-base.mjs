@@ -1543,23 +1543,34 @@ export class NativeSupervisorClient {
     this.#interruptedSetupRecoveryHold = fenced;
   }
 
-  async withInterruptedSetupRecovery(operation) {
+  interruptedSetupRecoveryFenced() {
+    return this.#interruptedSetupRecoveryHold;
+  }
+
+  async withInterruptedSetupRecovery(operation, { retainFenceOnError = null } = {}) {
     if (typeof operation !== 'function') throw new Error('interrupted_setup_recovery_operation_required');
-    if (this.#interruptedSetupRecoveryHold || this.#currentCommands.size > 0 || this.#legacyFastlaneBusy) {
+    if (retainFenceOnError != null && typeof retainFenceOnError !== 'function') throw new Error('interrupted_setup_recovery_error_policy_invalid');
+    if (this.#interruptedSetupRecoveryHold || this.#currentCommands.size > 0 || this.#legacyFastlaneBusy || this.canStartMaintenance() !== true) {
       throw new Error('interrupted_setup_native_mutation_busy');
     }
     this.#interruptedSetupRecoveryHold = true;
+    let operationStarted = false;
     try {
       await this.#maintenancePromise;
       // A remote lease may have arrived while the maintenance lane drained.
       // It cannot execute a mutation under the hold; require it fully settled.
       if (this.#currentCommands.size > 0) throw new Error('interrupted_setup_native_mutation_busy');
+      operationStarted = true;
       const result = await operation();
       this.#interruptedSetupRecoveryHold = false;
       return result;
     } catch (error) {
-      // Only the recovery coordinator's durable readback can release this
-      // fence after an uncertain local apply. It never grants SQL admission.
+      // This catch owns the acquired hold. A rejected concurrent caller never
+      // enters it and therefore cannot release another operation's fence.
+      if (!operationStarted) this.#interruptedSetupRecoveryHold = false;
+      else if (retainFenceOnError) {
+        try { this.#interruptedSetupRecoveryHold = retainFenceOnError() !== false; } catch { this.#interruptedSetupRecoveryHold = true; }
+      }
       throw error;
     }
   }

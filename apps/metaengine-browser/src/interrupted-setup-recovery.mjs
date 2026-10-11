@@ -197,14 +197,30 @@ export class InterruptedSetupRecovery {
     await writeExclusiveDurable(path.join(this.#directory, `${id}.fleet-applied.json`), {
       recovery_id: id, state: this.#last.state, archive_sha256: binding.archive_sha256, previous_effect_outcome: 'UNKNOWN', at,
     }, this.#fs, this.#verifyFile);
+    const beforeSupervisor = await this.#snapshot();
+    const oldAgents = new Set(plan.affected_agent_ids);
+    const fleetReadbackConfirmed = state => Array.isArray(state.fleet?.agents)
+      && [...oldAgents].every(id => state.fleet.agents.filter(row => row.agent_id === id && row.lifecycle_state === 'RETIRED').length === 1)
+      && state.fleet.agents.every(row => row.lifecycle_state === 'RETIRED');
+    // Preserve the original target list when checking census after retirement:
+    // retired rows intentionally no longer contain their old tab bindings.
+    if (!fleetReadbackConfirmed(beforeSupervisor)
+      || !planInterruptedSetupRecovery({ ...beforeSupervisor, fleet: snapshot.fleet }).eligible
+      || interruptedSetupDigest(interruptedSetupIdentity({ ...beforeSupervisor, fleet: snapshot.fleet })) !== plan.expected_recovery_sha256) {
+      throw new Error('interrupted_setup_readback_changed_before_supervisor');
+    }
     await this.#applySupervisor(binding);
     const after = await this.#snapshot();
-    const oldAgents = new Set(plan.affected_agent_ids);
     const afterAgents = after.fleet?.agents;
+    const priorTabs = new Set([snapshot.keepalive.pending_wake?.ambiguity_continuation_tab_id,
+      ...snapshot.fleet.agents.map(row => row.tab_id)].filter(Boolean));
     if (after.keepalive?.pending_wake || after.keepalive?.active_wake || after.keepalive?.conversation_url
       || after.keepalive?.supervisor_epoch !== plan.next_supervisor_epoch
       || !(after.keepalive?.ambiguous_history || []).some(row => row.wake_id === plan.supervisor_wake_id && row.operator_recovery_id === id)
       || !Array.isArray(afterAgents)
+      || !Array.isArray(after.tabs)
+      || after.tabs.some(tab => priorTabs.has(tab.tab_id) || /^https:\/\/(?:www\.)?chatgpt\.com\/c\//i.test(String(tab.url || '')))
+      || !fleetReadbackConfirmed(after)
       || [...oldAgents].some(id => afterAgents.filter(row => row.agent_id === id && row.lifecycle_state === 'RETIRED').length !== 1)
       || afterAgents.some(row => oldAgents.has(row.agent_id) && row.lifecycle_state !== 'RETIRED')) {
       throw new Error('interrupted_setup_apply_readback_unconfirmed');
