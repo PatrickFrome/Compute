@@ -8,6 +8,28 @@
 !define MUI_FINISHPAGE_TITLE "METAENGINE Browser installed"
 !define MUI_FINISHPAGE_TEXT "Version ${VERSION} is installed.$\r$\n$\r$\nOpen the client to review its current connection and work status."
 
+; MUI initializes its branding controls before this supported callback. Color
+; the outer dialog too, so the footer does not flash white against the pages.
+!define MUI_CUSTOMFUNCTION_GUIINIT metaengineInstallerGuiInit
+Function metaengineInstallerGuiInit
+  Push $0
+  SetCtlColors $HWNDPARENT "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
+  GetDlgItem $0 $HWNDPARENT 1028
+  SetCtlColors $0 "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
+  GetDlgItem $0 $HWNDPARENT 1256
+  SetCtlColors $0 "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
+
+  ; Keep the OS caption and keyboard-accessible buttons. Unsupported DWM
+  ; attributes return an error and leave the native caption available.
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 20, *i 1, i 4) i.r0'
+  StrCmp $0 "0" metaengine_installer_dark_caption_ready
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 19, *i 1, i 4) i.r0'
+metaengine_installer_dark_caption_ready:
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 35, *i 0x0026201d, i 4) i.r0'
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 36, *i 0x00dfd7d4, i 4) i.r0'
+  Pop $0
+FunctionEnd
+
 !macro customWelcomePage
   !insertmacro MUI_PAGE_WELCOME
 !macroend

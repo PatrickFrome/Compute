@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const read = relative => fs.readFile(new URL(relative, import.meta.url), 'utf8');
@@ -48,4 +50,34 @@ test('new uninstaller uses the same exact-path cleanup gate before removing file
   const section = /Section "un\.\$\{UNINSTALL_SECTION_NAME\}"([\s\S]*?)SectionEnd/.exec(uninstaller)?.[1];
   assert.ok(section);
   assert.ok(section.indexOf('call un.checkAppRunning') < section.indexOf('!insertmacro customRemoveFiles'));
+});
+
+test('installer colors the existing outer dialog after the bundled MUI controls are initialized', async t => {
+  const nsisRoot = process.env.METAENGINE_NSIS_TEST_ROOT || path.join(os.homedir(), 'AppData', 'Local',
+    'electron-builder', 'Cache', 'nsis-3.0.4.1', 'nsis-3.0.4.1-1mx3n');
+  let template;
+  try {
+    template = await fs.readFile(path.join(nsisRoot, 'Contrib', 'Modern UI 2', 'Interface.nsh'), 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    t.skip('NSIS bundled Modern UI 2 template is unavailable on this host');
+    return;
+  }
+  const custom = await read('../build/installer.nsh');
+  const guiInit = /!macro MUI_FUNCTION_GUIINIT\b([\s\S]*?)!macroend/.exec(template)?.[1];
+  assert.ok(guiInit, 'the actual NSIS template must expose the GUI initialization callback');
+  const initControls = guiInit.indexOf('!insertmacro MUI_GUIINIT_OUTERDIALOG');
+  const callCustom = guiInit.indexOf('Call "${MUI_CUSTOMFUNCTION_GUIINIT}"');
+  assert.ok(initControls >= 0 && callCustom > initControls, 'brand handles exist before our callback');
+  assert.match(template, /GetDlgItem \$mui\.Branding\.Background \$HWNDPARENT 1028/);
+  assert.match(template, /GetDlgItem \$mui\.Branding\.Text \$HWNDPARENT 1256/);
+  assert.match(custom, /!define MUI_CUSTOMFUNCTION_GUIINIT metaengineInstallerGuiInit/);
+  const callback = /Function metaengineInstallerGuiInit\b([\s\S]*?)FunctionEnd/.exec(custom)?.[1];
+  assert.ok(callback);
+  assert.match(callback, /SetCtlColors \$HWNDPARENT/);
+  assert.match(callback, /GetDlgItem \$0 \$HWNDPARENT 1028\s*SetCtlColors \$0/);
+  assert.match(callback, /GetDlgItem \$0 \$HWNDPARENT 1256\s*SetCtlColors \$0/);
+  assert.match(callback, /DwmSetWindowAttribute\(p \$HWNDPARENT, i 20/);
+  assert.match(callback, /Push \$0[\s\S]*Pop \$0/);
+  assert.doesNotMatch(callback, /Exec|shutdown|CHECK_APP_RUNNING|SendMessage|GetDlgItem.*(?: 1| 2| 3)\b/i);
 });
