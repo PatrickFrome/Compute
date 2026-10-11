@@ -333,10 +333,28 @@ async function cdp(url) {
   };
 }
 
-async function targetAt(port, matches) {
-  const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
-  const targets = await response.json();
-  return targets.find(target => target.type === 'page' && matches(target.url) && target.webSocketDebuggerUrl);
+export function selectInstalledPrimaryCdpTarget(targets, { debuggingPort, gatewayPort } = {}) {
+  if (!Array.isArray(targets) || ![debuggingPort, gatewayPort].every(port =>
+    Number.isSafeInteger(port) && port >= 1024 && port <= 65535)) fail('normal_primary_cdp_target_invalid');
+  // The packaged primary loads this exact URL. Other gateway pages and hidden
+  // probes must never stand in for the product shell.
+  const expectedUrl = `http://127.0.0.1:${gatewayPort}/#browser`;
+  const matches = targets.filter(target => target?.type === 'page' && target.url === expectedUrl);
+  if (matches.length > 1) fail('normal_primary_cdp_target_ambiguous');
+  if (!matches.length) return null;
+  const target = matches[0];
+  let socket;
+  try { socket = new URL(target.webSocketDebuggerUrl); } catch { fail('normal_primary_cdp_target_invalid'); }
+  if (typeof target.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(target.id)
+    || socket.protocol !== 'ws:' || socket.hostname !== '127.0.0.1' || Number(socket.port) !== debuggingPort
+    || socket.username || socket.password || socket.search || socket.hash
+    || socket.pathname !== '/devtools/page/' + target.id) fail('normal_primary_cdp_target_invalid');
+  return target;
+}
+
+async function targetAt(debuggingPort, gatewayPort) {
+  const response = await fetch(`http://127.0.0.1:${debuggingPort}/json/list`, { signal: AbortSignal.timeout(2000) });
+  return selectInstalledPrimaryCdpTarget(await response.json(), { debuggingPort, gatewayPort });
 }
 
 // Optional browser endpoint discovery for protocol diagnostics. Its presence
@@ -353,7 +371,7 @@ const PRIMARY_SHELL_IDS = Object.freeze(['me2-shell', 'topbar', 'admin-connectio
   'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail',
   'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
 const PRIMARY_SHELL_OBSERVATION = `JSON.stringify({href:location.href, visibility:document.visibilityState,
-  ready_state:document.readyState, shell_contract_present:${JSON.stringify(PRIMARY_SHELL_IDS)}.every(id=>!!document.getElementById(id))})`;
+  ready_state:document.readyState, shell_contract_present:${JSON.stringify(PRIMARY_SHELL_IDS)}.every(id=>!!document.querySelector('[data-testid="'+id+'"]'))})`;
 
 // Electron exposes page CDP but does not implement Chrome's Browser window
 // methods (-32601 on the physical packaged build). Native window visibility
@@ -684,6 +702,30 @@ export function assertAutomaticAttachedOwnerBinding({ previous, current, config,
   return true;
 }
 
+export function assertInstalledPrimaryActivationAck(ack, { pid, version } = {}) {
+  if (ack?.schema !== 'metaengine.browser.secondary-launch.v1'
+    || ack.state !== 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED' || ack.primary_pid !== pid
+    || ack.primary_version !== version || ack.second_browser_runtime_started !== false
+    || ack.authority_effect !== false
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(ack.launch_id || '')
+    || !Number.isSafeInteger(ack.event_sequence) || ack.event_sequence < 1) fail('second_instance_ack_invalid');
+  return ack;
+}
+
+async function activateInstalledPrimary({ executable, profile, env, directory, pid, version }) {
+  // Native BaseWindow child pages track Windows occlusion. Exercise the real
+  // product's normal activation path before observing visibility; never force
+  // Page Visibility, disable throttling or inject an always-on-top window.
+  const secondary = start(executable, ['--user-data-dir=' + profile.user_data_path], env, directory);
+  try {
+    const result = await Promise.race([secondary.closed, deadline(20000, 'second_instance_timeout')]);
+    if (result.code !== 0 || result.signal) fail('second_instance_exit_invalid');
+    const ack = secondary.output().split(/\r?\n/).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } })
+      .find(row => row.schema === 'metaengine.browser.secondary-launch.v1');
+    return assertInstalledPrimaryActivationAck(ack, { pid, version });
+  } finally { await stop(secondary); }
+}
+
 async function normalUiSocket(port, primaryPid, executable) {
   const script = `$ErrorActionPreference='Stop'; $rows=@(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop); $ids=@($rows.OwningProcess | Select-Object -Unique); if($ids.Count -ne 1){throw 'owner_socket_ambiguous'}; Get-CimInstance Win32_Process -Filter ('ProcessId='+$ids[0]) | Select-Object ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress`;
   const { stdout } = await execute(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
@@ -737,9 +779,11 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     assert(health.ok && localStateProviderHealthAttested(await health.json(), runtimeIdentity.instance_id));
     const uiListener = await normalUiSocket(uiPort, launch.child.pid, executable);
     const gatewayListener = await verifyWindowsTcpListener({ port: gatewayPort, pid: launch.child.pid });
-    target = await waitUntil(() => targetAt(debuggingPort, url => url.startsWith(`http://127.0.0.1:${gatewayPort}/`)), launch);
+    target = await waitUntil(() => targetAt(debuggingPort, gatewayPort), launch);
     client = await cdp(target.webSocketDebuggerUrl);
     const debuggingListener = await verifyWindowsTcpListener({ port: debuggingPort, pid: launch.child.pid });
+    const activationInput = { executable, profile, env, directory, pid: launch.child.pid, version: identity.package_version };
+    const ack = await activateInstalledPrimary(activationInput);
     const cdpSurfaceBefore = await waitUntil(() => readInstalledCdpSurface(client, {
       targetId: target.id, expectedUrl: target.url,
     }), launch);
@@ -747,32 +791,27 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
     const png = Buffer.from(screenshot.data, 'base64'); assert(png.length > 4096);
     await fs.writeFile(path.join(directory, 'installed-owner-ui.png'), png);
-    const second = start(executable, ['--user-data-dir=' + profile.user_data_path], env, directory);
-    let secondResult;
-    try { secondResult = await Promise.race([second.closed, deadline(20000, 'second_instance_timeout')]); }
-    finally { await stop(second); }
-    assert.equal(secondResult.code, 0);
-    const ack = second.output().split(/\r?\n/).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } })
-      .find(row => row.schema === 'metaengine.browser.secondary-launch.v1');
-    if (ack?.state !== 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED' || ack.primary_pid !== launch.child.pid
-      || ack.second_browser_runtime_started !== false || ack.primary_version !== identity.package_version) fail('second_instance_ack_invalid');
     const sentinelPath = path.join(profile.user_data_path, 'metaengine-browser-sentinel-v1.json');
     const progressPath = sentinelPath + '.parent-progress-v1.json';
     const sentinelBefore = JSON.parse(await fs.readFile(sentinelPath, 'utf8'));
     const progressBefore = JSON.parse(await fs.readFile(progressPath, 'utf8'));
     await delay(190000); launch.alive();
+    const afterAck = await activateInstalledPrimary(activationInput);
     const after = await journal();
     const sentinelAfter = JSON.parse(await fs.readFile(sentinelPath, 'utf8'));
     const progressAfter = JSON.parse(await fs.readFile(progressPath, 'utf8'));
     assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter,
       pid: launch.child.pid, version: identity.package_version });
     const journalWindow = assertInstalledPrimaryWindowJournal(after, { pid: launch.child.pid, version: identity.package_version });
-    const cdpSurfaceAfter = await readInstalledCdpSurface(client, { targetId: target.id, expectedUrl: target.url });
+    const cdpSurfaceAfter = await waitUntil(() => readInstalledCdpSurface(client, { targetId: target.id, expectedUrl: target.url }), launch);
     assertInstalledPrimaryCdpSurface(cdpSurfaceBefore, cdpSurfaceAfter);
     const osWindowAfter = await verifyInstalledVisiblePrimaryWindow(launch.child.pid, osWindowBefore.handle);
-    const activation = currentEvents(after).find(row => row.state === 'PRIMARY_WINDOW_ACTIVATED' && row.details.launch_id === ack.launch_id
-      && row.sequence === ack.event_sequence && row.details.visible === true);
-    if (!activation || activation.details.window_id !== journalWindow.window_id) fail('second_instance_activation_missing');
+    for (const acknowledged of [ack, afterAck]) {
+      const activation = currentEvents(after).find(row => row.state === 'PRIMARY_WINDOW_ACTIVATED'
+        && row.details.launch_id === acknowledged.launch_id && row.sequence === acknowledged.event_sequence
+        && row.details.visible === true);
+      if (!activation || activation.details.window_id !== journalWindow.window_id) fail('second_instance_activation_missing');
+    }
     const log = launch.output();
     for (const state of ['DAEMON_HEALTHY', 'ME2_CONTRACT_OK', 'ME2_PRIMARY_SHELL_VISIBLE', 'ME2_R97_UI_CONTRACT_CONFIRMED']) {
       if (!log.includes(state)) fail('normal_ui_contract_missing');
@@ -789,7 +828,8 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       database_wizard_removed: true, automatic_attached_connection_qualified: true,
       automatic_owner_publication_verified: true, private_autoconnect_descriptor_verified: true,
       descriptor_sha256: automatic.descriptorSha256, source_config_preserved: true,
-      second_instance_activation_verified: true, startup_grace_survival_seconds: 190,
+      second_instance_activation_verified: true, native_activation_before_and_after_grace_verified: true,
+      surface_visibility_observation: 'AFTER_NORMAL_SECOND_INSTANCE_ACTIVATION', startup_grace_survival_seconds: 190,
       sentinel_relaunch_attempted: false, ui_listener: uiListener, gateway_listener: gatewayListener,
       api_listener: apiListener, edge_listener: edgeListener,
       same_ui_child_across_startup_grace: true, screenshot_sha256: digest(png), screenshot_bytes: png.length,

@@ -6,11 +6,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { runInNewContext } from 'node:vm';
 import { createPackage, uncache } from '@electron/asar';
 import { assertInstalledLaunchIdentity, assertMissingDescriptorAdmissionContract, assertOwnerStartupGrace,
-  assertInstalledPrimaryWindowJournal, assertInstalledPrimaryCdpSurface,
+  assertInstalledPrimaryWindowJournal, assertInstalledPrimaryCdpSurface, assertInstalledPrimaryActivationAck,
   assertInstalledVisibleWindow,
-  browserEndpointAt,
+  browserEndpointAt, selectInstalledPrimaryCdpTarget,
   readInstalledCdpSurface,
   prepareIsolatedAttachedAutoConnect, assertAutomaticAttachedOwnerBinding, ISOLATED_OWNER_MARKER,
   REMOVED_DATABASE_WIZARD_FILES,
@@ -67,28 +68,77 @@ test('browser endpoint discovery admits only the explicit browser websocket', as
 
 });
 
+test('native activation acknowledgement rejects stale, ambiguous or second-runtime evidence', () => {
+  const ack = { schema: 'metaengine.browser.secondary-launch.v1', state: 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED',
+    primary_pid: 712, primary_version: expectedVersion, second_browser_runtime_started: false,
+    launch_id: '11111111-2222-4333-8444-555555555555', event_sequence: 7, authority_effect: false };
+  assert.equal(assertInstalledPrimaryActivationAck(ack, { pid: 712, version: expectedVersion }), ack);
+  for (const patch of [{ state: 'PRIMARY_UI_ACTIVATION_UNPROVEN' }, { primary_pid: 713 },
+    { primary_version: 'old' }, { second_browser_runtime_started: true }, { launch_id: '' },
+    { event_sequence: 0 }, { event_sequence: 1.5 }, { authority_effect: true }]) {
+    assert.throws(() => assertInstalledPrimaryActivationAck({ ...ack, ...patch }, { pid: 712, version: expectedVersion }), /second_instance_ack_invalid/);
+  }
+});
+
+test('primary target selection requires the exact product route and same loopback debugging socket', () => {
+  const options = { debuggingPort: 19222, gatewayPort: 19002 };
+  const primary = { id: 'page-123', type: 'page', url: 'http://127.0.0.1:19002/#browser',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:19222/devtools/page/page-123' };
+  const hiddenProbe = { ...primary, id: 'probe-123', url: 'http://127.0.0.1:19002/' };
+  assert.equal(selectInstalledPrimaryCdpTarget([hiddenProbe, primary], options), primary);
+  assert.equal(selectInstalledPrimaryCdpTarget([hiddenProbe], options), null);
+  assert.throws(() => selectInstalledPrimaryCdpTarget([primary, { ...primary, id: 'duplicate' }], options), /target_ambiguous/);
+  for (const patch of [{ id: '' }, { id: '../other' },
+    { webSocketDebuggerUrl: 'ws://external.invalid:19222/devtools/page/page-123' },
+    { webSocketDebuggerUrl: 'ws://127.0.0.1:19223/devtools/page/page-123' },
+    { webSocketDebuggerUrl: 'ws://127.0.0.1:19222/devtools/browser/page-123' },
+    { webSocketDebuggerUrl: 'ws://secret:password@127.0.0.1:19222/devtools/page/page-123' },
+    { webSocketDebuggerUrl: 'ws://127.0.0.1:19222/devtools/page/other-page' }]) {
+    assert.throws(() => selectInstalledPrimaryCdpTarget([{ ...primary, ...patch }], options), /target_invalid/);
+  }
+});
+
 function cdpSurfaceFixture(change = {}) {
-  const expectedUrl = 'http://127.0.0.1:19002/';
+  const expectedUrl = 'http://127.0.0.1:19002/#browser';
   const observed = { href: expectedUrl, visibility: 'visible', ready_state: 'complete', shell_contract_present: true,
     ...change.page };
-  const client = { async command(method) {
+  const selectors = [];
+  const client = { async command(method, params) {
     if (method === 'Target.getTargetInfo') return { targetInfo: { targetId: 'page-target-123', type: 'page', url: expectedUrl, ...change.target } };
     if (method === 'DOM.getDocument') return { root: { backendNodeId: 81, ...change.document } };
-    if (method === 'Runtime.evaluate') return change.observation ?? { result: { type: 'string', value: JSON.stringify(observed) } };
+    if (method === 'Runtime.evaluate') {
+      if (change.observation) return change.observation;
+      assert.equal(params.returnByValue, true);
+      const value = runInNewContext(params.expression, {
+        location: { href: observed.href },
+        document: { visibilityState: observed.visibility, readyState: observed.ready_state,
+          getElementById() { throw new Error('product_contract_uses_data_testid'); },
+          querySelector(selector) {
+            selectors.push(selector);
+            assert.match(selector, /^\[data-testid="[a-z0-9-]+"\]$/);
+            return observed.shell_contract_present ? {} : null;
+          },
+        },
+      }, { timeout: 1000 });
+      return { result: { type: 'string', value } };
+    }
     if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800, ...change.metrics } };
     // Match the real Electron protocol refusal if a Chrome window method leaks
     // back into this proof. The Win32 visible-window check is independent.
     throw Object.assign(new Error('method_not_found'), { code: -32601 });
   } };
-  return { client, inputs: { targetId: 'page-target-123', expectedUrl } };
+  return { client, selectors, inputs: { targetId: 'page-target-123', expectedUrl } };
 }
 
-test('CDP renderer proof binds the exact gateway page and document with unsupported Browser window methods', async () => {
-  const { client, inputs } = cdpSurfaceFixture();
+test('CDP renderer proof binds the exact gateway page and executes the product data-testid selectors', async () => {
+  const { client, selectors, inputs } = cdpSurfaceFixture();
   const surface = await readInstalledCdpSurface(client, inputs);
   assert.deepEqual(surface, { target_id: inputs.targetId, document_backend_node_id: 81,
     url_sha256: createHash('sha256').update(inputs.expectedUrl).digest('hex'), visibility: 'visible',
     ready_state: 'complete', shell_contract_present: true, width: 1200, height: 800 });
+  assert.deepEqual(selectors, ['me2-shell', 'topbar', 'admin-connection-badge', 'client-goal-composer',
+    'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail', 'fleet-picker-toggle', 'global-cmdbar',
+    'settings-button'].map(id => `[data-testid="${id}"]`));
   for (const patch of [{ targetId: '' }, { targetId: 37 }, { expectedUrl: 'https://127.0.0.1:19002/' },
     { expectedUrl: 'http://external.invalid:19002/' }, { expectedUrl: 'http://secret:password@127.0.0.1:19002/' }]) {
     await assert.rejects(readInstalledCdpSurface(client, { ...inputs, ...patch }), /normal_primary_cdp_target_invalid/);
