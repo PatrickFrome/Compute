@@ -63,13 +63,13 @@ async function fixture(t, mode = 'ready') {
 
 async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emitReady = true,
   managedHost, quitAfterBoot = false, installerAfterBoot = false, installerDuringStartup = false,
-  holdQuit = false, firstRunWizard } = {}) {
+  holdQuit = false, firstRunAutoConnect } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (/^METAENGINE_(STATE_PROVIDER|SUPERVISOR_BASE_URL|FALLBACK_SUPERVISOR_BASE_URL|LOCAL_STATE_INSTANCE_ID|LOCAL_PROVIDER_|PROFILE_PROBE_|SINGLETON_TEST_)/.test(name)) delete env[name];
   }
   const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, quitAfterBoot,
-    installerAfterBoot, installerDuringStartup, holdQuit, firstRunWizard };
+    installerAfterBoot, installerDuringStartup, holdQuit, firstRunAutoConnect };
   let output;
   try {
     output = await execute(process.execPath, [runner], {
@@ -136,7 +136,7 @@ for (const entry of entries) {
     const f=await fixture(t);
     const ownerJson=await fs.readFile(f.ownerFile,'utf8');
     await fs.rm(f.ownerFile);
-    const result=await launch(f,{entry,firstRunWizard:{ownerFile:f.ownerFile,ownerJson,outcome:'CONFIGURED'},
+    const result=await launch(f,{entry,firstRunAutoConnect:{ownerFile:f.ownerFile,ownerJson,outcome:'CONFIGURED'},
       extraEnv:{ME2_INTEGRATION:'1'}});
     assert.equal(result.code,0,result.stderr);
     assert.ok(eventIndex(result,'entry-complete')<eventIndex(result,'ready-emitted'));
@@ -152,7 +152,7 @@ for (const entry of entries) {
   test(entry + ': missing attached descriptor cannot import the runtime or ME2',async t=>{
     const f=await fixture(t);
     await fs.rm(f.ownerFile);
-    const result=await launch(f,{entry,firstRunWizard:{outcome:'CANCELLED'},extraEnv:{ME2_INTEGRATION:'1'}});
+    const result=await launch(f,{entry,firstRunAutoConnect:{outcome:'NO_DESCRIPTOR'},extraEnv:{ME2_INTEGRATION:'1'}});
     assert.equal(event(result,'runtime-import'),undefined);
     assert.equal(event(result,'me2-import'),undefined);
     assert.equal(event(result,'fetch'),undefined);

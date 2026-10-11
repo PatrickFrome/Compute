@@ -69,7 +69,7 @@ app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
 app.isReady = () => ready;
-app.isPackaged = Boolean(options.firstRunWizard || options.packaged);
+app.isPackaged = Boolean(options.firstRunAutoConnect || options.packaged);
 app.whenReady = () => ready ? Promise.resolve() : new Promise(resolve => app.once('ready', resolve));
 app.exit = code => { trace('exit', code); process.exit(code); };
 app.quit = () => {
@@ -148,15 +148,15 @@ const mocks = new Map([
     'export async function runSelfUpdateSmoke({ app }) { globalThis.__traceEntrypoint("self-update-smoke"); app.exit(0); }',
   )],
 ]);
-if(options.firstRunWizard){
-  globalThis.__completeFirstRunWizard=()=>{
-    if(options.firstRunWizard.outcome==='CONFIGURED')fs.writeFileSync(options.firstRunWizard.ownerFile,options.firstRunWizard.ownerJson);
-    return {state:options.firstRunWizard.outcome,authority_effect:false};
+if(options.firstRunAutoConnect){
+  globalThis.__completeFirstRunAutoConnect=()=>{
+    if(options.firstRunAutoConnect.outcome==='CONFIGURED')fs.writeFileSync(options.firstRunAutoConnect.ownerFile,options.firstRunAutoConnect.ownerJson);
+    return {state:options.firstRunAutoConnect.outcome,authority_effect:false};
   };
   mocks.set(new URL('local-restored-pg17-setup.mjs',src).href,dataModule([
     'export async function autoConnectInstalledAttachedProvider() {',
     ' globalThis.__traceEntrypoint("autoconnect-start");',
-    ' const result=globalThis.__completeFirstRunWizard();',
+    ' const result=globalThis.__completeFirstRunAutoConnect();',
     ' if(result.state!=="CONFIGURED") return {state:"NO_DESCRIPTOR",authority_effect:false};',
     ' globalThis.__traceEntrypoint("autoconnect-completed");',
     ' return {state:"CONFIGURED",owner_profile_written:true,postgres_mode:"attached",automatic_cloud_fallback:false,authority_effect:false};',
@@ -199,7 +199,7 @@ try {
     app.emit('ready');
     app.emit('ready'); // A one-shot primary continuation must survive duplicate delivery.
   }
-  if(options.firstRunWizard){
+  if(options.firstRunAutoConnect){
     await globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__?.catch(()=>{});
     trace('deferred-provider-settled');
   }

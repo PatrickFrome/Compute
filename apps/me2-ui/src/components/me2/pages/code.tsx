@@ -37,10 +37,11 @@ type SandboxProbeT = { ok: boolean; escape: boolean; ms: number; checks: { write
 // legacy L66 — demo-дифф петли edit→run→green
 const EXEC_DEFAULT_DIFF = `--- /dev/null\n+++ p0a-demo.js\n@@ -0,0 +1,2 @@\n+console.log("me2-p0a: edit-run-green");\n+console.log("agent loop live");\n`;
 // Честность R74: op-switch плоскости песочниц недостижим (первый /sandbox POST-хендлер отвечает probe/run/config)
-const PLANE_LOCKED = "плоскость недоступна в daemon v0.57.1 (мёртвый маршрут /sandbox op-switch) — read-only";
+const PLANE_LOCKED = "Sandbox operations are unavailable in this runtime. This panel is read only.";
 
 export function CodePage() {
   const { toast } = useToast();
+  const [observed, setObserved] = useState(false);
 
   // ── ГРАФ КОДА (legacy cgOpen L3291) ──
   const [cg, setCg] = useState<CGData | null>(null);
@@ -54,16 +55,16 @@ export function CodePage() {
     setCgBusy(true);
     try {
       const g = await me2Fetch<CGData>(`/codegraph?XTransformPort=3041${force ? "&force=1" : ""}`);
-      if (g?.ok) setCg(g);
+      setCg(g?.ok === true ? g : null);
       const [o, w, v] = await Promise.all([
         me2Fetch<OtelData>("/spans?XTransformPort=3041"),
         me2Fetch<WorktreeData>("/worktrees?XTransformPort=3041"),
         me2Fetch<VDData>("/verdicts?XTransformPort=3041"),
       ]);
-      if (o?.ok) setOtel(o);
-      if (w?.ok) setWt(w);
-      if (v?.ok) setVd(v);
-    } finally { setCgBusy(false); }
+      setOtel(o?.ok === true ? o : null);
+      setWt(w?.ok === true ? w : null);
+      setVd(v?.ok === true ? v : null);
+    } finally { setCgBusy(false); setObserved(true); }
   }, []);
   const runImpact = useCallback(async () => {
     const q = cgQuery.trim();
@@ -101,8 +102,8 @@ export function CodePage() {
       me2Fetch<ExecData>("/exec?XTransformPort=3041"),
       me2Fetch<FileData>("/file?XTransformPort=3041"),
     ]);
-    if (e?.ok) setEx(e);
-    if (f?.ok) setFx(f);
+    setEx(e?.ok === true ? e : null);
+    setFx(f?.ok === true ? f : null);
   }, []);
   const exRun = useCallback(async (cmd: string, cwd: string, label: string) => {
     setExBusy(true); setExOut(null);
@@ -169,7 +170,7 @@ export function CodePage() {
   const [rvBusy, setRvBusy] = useState(false);
   const loadRv = useCallback(async () => {
     const r = await me2Fetch<ReviewData>("/review?XTransformPort=3041");
-    if (r?.ok) setRv(r);
+    setRv(r?.ok === true ? r : null);
   }, []);
   const rvDecide = useCallback(async (op: "approve" | "deny", id: number) => {
     setRvBusy(true);
@@ -202,7 +203,7 @@ export function CodePage() {
   const [sbxCwd, setSbxCwd] = useState("");
   const loadSbx = useCallback(async () => {
     const r = await me2Fetch<SandboxOSData>("/sandbox?XTransformPort=3041");
-    if (r?.ok) setSbx(r);
+    setSbx(r?.ok === true ? r : null);
   }, []);
   const sbxAction = useCallback(async (op: "probe" | "run", cmd?: string, cwd?: string) => {
     setSbxBusy(true);
@@ -231,7 +232,7 @@ export function CodePage() {
   const [sbRun, setSbRun] = useState<SandboxRun | null>(null);
   const loadSb = useCallback(async () => {
     const r = await me2Fetch<PlaneData>("/sandboxes?XTransformPort=3041");
-    if (r?.ok) setSb(r);
+    setSb(r?.ok === true ? r : null);
   }, []);
   const sbExec = useCallback(async (id: string, cmd: string) => {
     setSbBusy(true);
@@ -288,15 +289,21 @@ export function CodePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-code" data-panel-code>
-      <PageHeader title="CODE" sub="exec · edit · review · песочницы · worktrees · граф кода" />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-2">
+      <PageHeader title="Code" sub="Projects, workspace history and available development tools."
+        actions={refreshBtn(() => { void loadCg(); void loadEx(); void loadRv(); void loadSbx(); void loadSb(); }, cgBusy, "Refresh development tools")} />
+      {!observed || (!cg && !ex && !rv && !sbx && !sb) ? (
+        <div role="status" className="mb-3 rounded-xl bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
+          {!observed ? "Loading development tools…" : "Development tool data is unavailable. Project availability is shown separately below."}
+        </div>
+      ) : null}
+      <div className="mc-scroll grid min-h-0 flex-1 auto-rows-max grid-cols-1 items-start gap-3 overflow-y-auto pr-1 xl:grid-cols-2">
         {/* кол.1: граф кода · exec/edit · review */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
           <ManagedProjects />
           <ManagedProjectHistory />
-          <Sec id="code-codegraph" title="ГРАФ КОДА" icon={Network} tone="teal"
+          <Sec id="code-codegraph" defaultOpen={false} title="Code relationships" icon={Network} tone="teal"
             right={<>
-              {cg && <span className="font-mono text-[10px] text-zinc-500" title={`regex-tier v1 · детерминированный скан src/ + me2-daemon · сгенерирован ${new Date(cg.generatedAt).toLocaleTimeString("ru-RU", { hour12: false })}`}>{cg.symbols} эксп · {cg.edges} рёбер</span>}
+              {cg && <span className="text-xs text-zinc-500" title={`regex-tier v1 · детерминированный скан src/ + me2-daemon · сгенерирован ${new Date(cg.generatedAt).toLocaleTimeString("ru-RU", { hour12: false })}`}>{cg.symbols} эксп · {cg.edges} рёбер</span>}
               {refreshBtn(() => void loadCg(true), cgBusy, "Пересканировать репозиторий (force=1)")}
             </>}>
             <div data-testid="codegraph" className="space-y-2.5">
@@ -312,11 +319,11 @@ export function CodePage() {
 
               <form onSubmit={(e) => { e.preventDefault(); void runImpact(); }} className="flex gap-2">
                 <input value={cgQuery} onChange={(e) => setCgQuery(e.target.value)} placeholder="impact: src/lib/db или src/app/page.tsx" aria-label="Файл для impact-анализа"
-                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900" />
-                <button type="submit" disabled={cgBusy} className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">кто зависит</button>
+                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-[11px] text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-teal-900" />
+                <button type="submit" disabled={cgBusy} className="h-7 shrink-0 rounded border border-zinc-700 px-2 text-xs text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">кто зависит</button>
               </form>
               {cgImpact && (
-                <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 font-mono text-[10px]" aria-live="polite">
+                <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 text-xs" aria-live="polite">
                   {cgImpact.found ? (
                     <>
                       <div className="mb-1 text-zinc-300">{cgImpact.file} · входящих рёбер {cgImpact.inboundRoot}</div>
@@ -333,21 +340,21 @@ export function CodePage() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
-                  <div className="mb-1 text-[9px] uppercase tracking-wider text-zinc-600">top fan-in</div>
-                  <ul className="space-y-0.5 font-mono text-[10px] text-zinc-400">
+                  <div className="mb-1 text-[11px] text-zinc-400">top fan-in</div>
+                  <ul className="space-y-0.5 text-xs text-zinc-400">
                     {(cg?.topFanIn ?? []).slice(0, 5).map((f) => (
                       <li key={f.path} className="flex justify-between gap-2"><span className="truncate" title={f.path}>{f.path}</span><span className="shrink-0 text-teal-400">{f.inbound}</span></li>
                     ))}
-                    {!cg && <li className="text-zinc-600">—</li>}
+                    {!cg && <li className="text-zinc-400">—</li>}
                   </ul>
                 </div>
                 <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
-                  <div className="mb-1 text-[9px] uppercase tracking-wider text-zinc-600">top fan-out</div>
-                  <ul className="space-y-0.5 font-mono text-[10px] text-zinc-400">
+                  <div className="mb-1 text-[11px] text-zinc-400">top fan-out</div>
+                  <ul className="space-y-0.5 text-xs text-zinc-400">
                     {(cg?.topFanOut ?? []).slice(0, 5).map((f) => (
                       <li key={f.path} className="flex justify-between gap-2"><span className="truncate" title={f.path}>{f.path}</span><span className="shrink-0 text-amber-400/90">{f.outbound}</span></li>
                     ))}
-                    {!cg && <li className="text-zinc-600">—</li>}
+                    {!cg && <li className="text-zinc-400">—</li>}
                   </ul>
                 </div>
               </div>
@@ -361,7 +368,7 @@ export function CodePage() {
               )}
 
               {wt && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 font-mono text-[10px] text-zinc-500">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 text-xs text-zinc-500">
                   <GitBranch className="h-3 w-3 shrink-0 text-fuchsia-400" aria-hidden />
                   <span>worktrees {wt.worktrees.worktrees.length} · HEAD {wt.head}</span>
                   <span className={wt.rerere.enabled ? "text-emerald-400" : "text-amber-500/80"} title="rerere — переиспользование записанных разрешений конфликтов (M4)">
@@ -369,7 +376,7 @@ export function CodePage() {
                   </span>
                   {!wt.rerere.enabled && (
                     <button type="button" onClick={() => void enableRerere()} disabled={cgBusy}
-                      className="ml-auto rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">
+                      className="ml-auto rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">
                       включить
                     </button>
                   )}
@@ -377,12 +384,12 @@ export function CodePage() {
               )}
 
               {otel && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-zinc-500"
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500"
                   title="OTel-lite: спаны команд шины и задач; OTLP-JSON на /spans/otlp (совместимо с Perfetto-конвертерами)">
-                  <span className="uppercase tracking-wider text-zinc-600">otel-lite</span>
+                  <span className="text-zinc-400">otel-lite</span>
                   <span>спанов {otel.spans}/{otel.ringCap}</span>
                   {vd && (
-                    <span className={vd.count > 0 ? "text-rose-400/90" : "text-zinc-600"}
+                    <span className={vd.count > 0 ? "text-rose-400/90" : "text-zinc-400"}
                       title="Reward-hacking вердикты (tier-1): finish без реальной работы. Подозрение не меняет статус задачи — решает оператор (/verdicts)">
                       вердиктов RH: {vd.count}
                     </span>
@@ -395,14 +402,14 @@ export function CodePage() {
             </div>
           </Sec>
 
-          <Sec id="code-exec" title="EXEC · EDIT" icon={Terminal} tone="emerald"
+          <Sec id="code-exec" defaultOpen={false} title="Execution and edits" icon={Terminal} tone="emerald"
             right={<>
-              {ex && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="белый список бинарей по сегментам · prlimit as=4GiB/nofile=256/core=0 · cwd только в песочницах/worktrees">run {ex.counters.runs} · отказ {ex.counters.denied}{fx ? ` · edit ${fx.counters.applied}` : ""}</span>}
+              {ex && <span className="hidden text-xs text-zinc-500 sm:inline" title="Execution and edit counters reported by this runtime">run {ex.counters.runs} · denied {ex.counters.denied}{fx ? ` · edits ${fx.counters.applied}` : ""}</span>}
               {refreshBtn(() => void loadEx(), exBusy, "Обновить статус exec/edit-плоскостей")}
             </>}>
             <div data-testid="exec-log" className="space-y-2.5">
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-zinc-600" title="Enforcement-цепочка P0-a: allowlist по сегментам → prlimit → таймаут → env-белый-список">
-                <span className={ex?.caps.prlimit ? "text-emerald-500/80" : "text-rose-400"}>prlimit {ex?.caps.prlimit ? "✓ as=4GiB·nofile=256·core=0" : "✗"}</span>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-zinc-400" title="Capabilities reported by this runtime; availability depends on the operating system">
+                <span>Process limits {ex ? (ex.caps.prlimit ? "available" : "unavailable") : "—"}</span>
                 <span>timeout ≤ {ex ? ex.caps.timeout_max_ms / 1000 : "?"}с</span>
                 <span>подстановки $() {ex?.caps.substitution === "denied" ? "запрещены" : "?"}</span>
                 <span className="hidden sm:inline" title={(ex?.allowlist ?? []).join(", ")}>allowlist {ex?.allowlist.length ?? "—"}</span>
@@ -411,34 +418,34 @@ export function CodePage() {
 
               <form onSubmit={(e) => { e.preventDefault(); const cmd = exCmd.trim(); const cwd = exCwd.trim(); if (cmd && cwd) void exRun(cmd, cwd, "TERMINAL_RUN"); }} className="space-y-1.5">
                 <input value={exCmd} onChange={(e) => setExCmd(e.target.value)} placeholder="команда: git status | bun test (curl/bash/$() отклоняются)" aria-label="Команда TERMINAL_RUN (белый список бинарей)"
-                  className="h-7 w-full rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-emerald-900" />
+                  className="h-7 w-full rounded border border-zinc-800 bg-zinc-950/60 px-2 text-[11px] text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-emerald-900" />
                 <div className="flex gap-2">
                   <input value={exCwd} onChange={(e) => setExCwd(e.target.value)} placeholder="cwd: управляемый корень (roots)" aria-label="Рабочий каталог (управляемый корень)" list="exec-roots"
-                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-emerald-900" />
+                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-[11px] text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-emerald-900" />
                   <datalist id="exec-roots">
                     {(ex?.roots ?? []).map((r) => <option key={r} value={r} />)}
                   </datalist>
-                  <button type="submit" disabled={exBusy} className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">▶ run</button>
-                  <button type="button" disabled={exBusy} onClick={() => void exDemo()} title="FILE_EDIT создаёт p0a-demo.js → TERMINAL_RUN bun → зелёный вывод (петля Cursor edit→run→green)"
-                    className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">demo</button>
+                  <button type="submit" disabled={exBusy || !ex} className="h-7 shrink-0 rounded border border-zinc-700 px-2 text-xs text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">Run</button>
+                  <button type="button" disabled={exBusy || !ex || !fx} onClick={() => void exDemo()} title="Create a demo file and run it in the selected managed workspace"
+                    className="h-7 shrink-0 rounded border border-zinc-700 px-2 text-xs text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">demo</button>
                 </div>
               </form>
 
               {exOut !== null && (
-                <div className={`rounded-md border p-2 font-mono text-[10px] ${exOk ? "border-zinc-800 bg-zinc-950/60" : "border-rose-900/50 bg-rose-950/20"}`} aria-live="polite">
-                  <pre tabIndex={0} role="region" aria-label="Вывод команды" className={`max-h-28 overflow-y-auto mc-scroll whitespace-pre-wrap font-mono ${exOk ? "text-zinc-500" : "text-rose-400/80"}`}>{exOut}</pre>
+                <div className={`rounded-md border p-2 text-xs ${exOk ? "border-zinc-800 bg-zinc-950/60" : "border-rose-900/50 bg-rose-950/20"}`} aria-live="polite">
+                  <pre tabIndex={0} role="region" aria-label="Вывод команды" className={`max-h-28 overflow-y-auto mc-scroll whitespace-pre-wrap ${exOk ? "text-zinc-500" : "text-rose-400/80"}`}>{exOut}</pre>
                 </div>
               )}
 
               {(ex?.recent.length ?? 0) > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[9px] uppercase tracking-wider text-zinc-600">последние прогоны (журнал exec_runs)</div>
+                  <div className="text-[11px] text-zinc-400">последние прогоны (журнал exec_runs)</div>
                   <div tabIndex={0} role="region" aria-label="Журнал прогонов" className="max-h-24 space-y-1 overflow-y-auto mc-scroll">
                     {ex?.recent.slice(0, 6).map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                      <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 text-[11px]">
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.ok ? "bg-emerald-400" : "bg-rose-500"}`} aria-hidden />
                         <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.cmd}>$ {r.cmd}</span>
-                        <span className="shrink-0 text-zinc-600">{r.ok ? `exit ${r.exit}` : r.reason} · {r.ms}мс</span>
+                        <span className="shrink-0 text-zinc-400">{r.ok ? `exit ${r.exit}` : r.reason} · {r.ms}мс</span>
                       </div>
                     ))}
                   </div>
@@ -447,16 +454,16 @@ export function CodePage() {
 
               {(fx?.recent.length ?? 0) > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[9px] uppercase tracking-wider text-zinc-600">правки (журнал file_edits · durable rollback)</div>
+                  <div className="text-[11px] text-zinc-400">правки (журнал file_edits · durable rollback)</div>
                   <div tabIndex={0} role="region" aria-label="Журнал правок" className="max-h-24 space-y-1 overflow-y-auto mc-scroll">
                     {fx?.recent.slice(0, 6).map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                      <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 text-[11px]">
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.ok ? (r.rollback_done ? "bg-zinc-500" : "bg-cyan-400") : "bg-rose-500"}`} aria-hidden />
                         <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.path}>{r.path.split("/").pop()}</span>
-                        <span className="shrink-0 text-zinc-600">{r.op}{r.hunks ? ` · ${r.hunks}h` : ""}{r.ok && !r.rollback_done && r.op === "apply" ? (r.has_backup ? " · backup жив" : " · создание (без бэкапа)") : r.rollback_done ? " · откачено" : ""}</span>
+                        <span className="shrink-0 text-zinc-400">{r.op}{r.hunks ? ` · ${r.hunks}h` : ""}{r.ok && !r.rollback_done && r.op === "apply" ? (r.has_backup ? " · backup жив" : " · создание (без бэкапа)") : r.rollback_done ? " · откачено" : ""}</span>
                         {r.ok && r.op === "apply" && !r.rollback_done && r.has_backup && (
                           <button type="button" onClick={() => void fileRollback(r.id)} disabled={exBusy} title="Восстановить исходное содержимое байт-в-байт из журнала (durable-rollback)"
-                            className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">↩ откат</button>
+                            className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">↩ откат</button>
                         )}
                       </div>
                     ))}
@@ -466,53 +473,53 @@ export function CodePage() {
             </div>
           </Sec>
 
-          <Sec id="code-review" title="RUN MODES / REVIEW" icon={ShieldCheck} tone="amber"
+          <Sec id="code-review" defaultOpen={false} title="Command review" icon={ShieldCheck} tone="amber"
             right={<>
-              {rv && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="канон Cursor D02: allowlist → prlimit → classifier; классификатор НЕ security boundary; ask ждёт оператора">ask {rv.stats_24h.CLASSIFIER_ASK ?? 0} · block {rv.stats_24h.CLASSIFIER_BLOCK ?? 0} · ✓{rv.stats_24h.CLASSIFIER_APPROVED ?? 0} ✗{rv.stats_24h.CLASSIFIER_DENIED ?? 0}</span>}
+              {rv && <span className="hidden text-xs text-zinc-500 sm:inline" title="Command review counters reported by this runtime">ask {rv.stats_24h.CLASSIFIER_ASK ?? 0} · block {rv.stats_24h.CLASSIFIER_BLOCK ?? 0} · ✓{rv.stats_24h.CLASSIFIER_APPROVED ?? 0} ✗{rv.stats_24h.CLASSIFIER_DENIED ?? 0}</span>}
               {refreshBtn(() => void loadRv(), rvBusy, "Обновить статус классификатора и очереди одобрений")}
             </>}>
             <div data-testid="review-queue" className="space-y-2.5">
-              <div className="flex flex-wrap gap-1.5" title="Канон Cursor Auto-review (корпус R61 D02): вердикты allow/ask/block; эвристика детерминированная; LLM — opt-in (policy.json classifier), таймаут → ask (fail-closed)">
-                <Chip label="тир-3" value={rv ? (rv.config.enabled ? "вкл" : "выкл (policy)") : "—"} tone={rv?.config.enabled ? "emerald" : "zinc"} />
+              <div className="flex flex-wrap gap-1.5" title="Current review configuration reported by the runtime">
+                <Chip label="review" value={rv ? (rv.config.enabled ? "enabled" : "disabled") : "—"} tone={rv?.config.enabled ? "emerald" : "zinc"} />
                 <Chip label="LLM" value={rv ? (rv.config.llm_enabled ? `вкл (${rv.config.model})` : "выкл (эвристика)") : "—"} tone={rv?.config.llm_enabled ? "violet" : "zinc"} title={rv ? `таймаут ≤ ${rv.config.timeout_ms}мс` : undefined} />
                 <Chip label="queue ≤" value={rv?.config.queue_max ?? "—"} />
-                <Chip label="граница" value="не security" tone="amber" title="Cursor: «explicitly NOT a security boundary»; security = tier-1 allowlist + prlimit + P0-2" />
+                <Chip label="review" value="advisory" title="Review does not establish execution isolation; runtime policy still applies." />
               </div>
 
               {(rv?.queue.pending.length ?? 0) > 0 ? (
                 <div className="space-y-1">
-                  <div className="text-[9px] uppercase tracking-wider text-amber-500/80">ждут оператора (ask → одобрение; канон Approvals UI Cursor)</div>
+                  <div className="text-xs text-amber-300/80">Waiting for your decision</div>
                   <div tabIndex={0} role="region" aria-label="Очередь одобрений" className="max-h-28 space-y-1 overflow-y-auto mc-scroll">
                     {rv?.queue.pending.map((p) => (
-                      <div key={p.id} className="rounded border border-amber-900/40 bg-amber-950/10 px-2 py-1.5 font-mono text-[9px]">
+                      <div key={p.id} className="rounded border border-amber-900/40 bg-amber-950/10 px-2 py-1.5 text-[11px]">
                         <div className="flex items-center gap-2">
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden />
                           <span className="min-w-0 flex-1 truncate text-zinc-400" title={p.cmd}>$ {p.cmd}</span>
                           <button type="button" onClick={() => void rvDecide("approve", p.id)} disabled={rvBusy} title="Исполнить команду (POST /review op:approve — tier-1 остаётся)"
-                            className="shrink-0 rounded border border-emerald-800/60 px-1.5 py-0.5 text-[9px] text-emerald-400 transition hover:bg-emerald-950/40 disabled:opacity-40">✓</button>
+                            className="shrink-0 rounded border border-emerald-800/60 px-1.5 py-0.5 text-[11px] text-emerald-400 transition hover:bg-emerald-950/40 disabled:opacity-40">✓</button>
                           <button type="button" onClick={() => void rvDecide("deny", p.id)} disabled={rvBusy} title="Отклонить команду (POST /review op:deny)"
-                            className="shrink-0 rounded border border-rose-900/60 px-1.5 py-0.5 text-[9px] text-rose-400 transition hover:bg-rose-950/40 disabled:opacity-40">✗</button>
+                            className="shrink-0 rounded border border-rose-900/60 px-1.5 py-0.5 text-[11px] text-rose-400 transition hover:bg-rose-950/40 disabled:opacity-40">✗</button>
                         </div>
-                        <div className="mt-0.5 truncate text-zinc-600" title={p.reason}>{p.engine} · {p.reason}</div>
+                        <div className="mt-0.5 truncate text-zinc-400" title={p.reason}>{p.engine} · {p.reason}</div>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : (
-                <div className="rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5 font-mono text-[9px] text-zinc-600">
+                <div className="rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5 text-[11px] text-zinc-400">
                   очередь пуста — команды ask из /exec попадают сюда на одобрение; block отказывается сразу (CLASSIFIER_BLOCK в hash-chain)
                 </div>
               )}
 
               {(rv?.queue.recent.filter((r) => r.status !== "pending").length ?? 0) > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[9px] uppercase tracking-wider text-zinc-600">разрешения (журнал review_queue)</div>
+                  <div className="text-[11px] text-zinc-400">разрешения (журнал review_queue)</div>
                   <div tabIndex={0} role="region" aria-label="Журнал очереди" className="max-h-24 space-y-1 overflow-y-auto mc-scroll">
                     {rv?.queue.recent.filter((r) => r.status !== "pending").slice(0, 6).map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                      <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 text-[11px]">
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.status === "executed" ? "bg-emerald-400" : r.status === "denied" ? "bg-rose-500" : "bg-zinc-500"}`} aria-hidden />
                         <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.cmd}>$ {r.cmd}</span>
-                        <span className="shrink-0 text-zinc-600">{r.status}{r.status === "executed" ? ` · exit ${r.run_exit}` : ""} · {r.engine}</span>
+                        <span className="shrink-0 text-zinc-400">{r.status}{r.status === "executed" ? ` · exit ${r.run_exit}` : ""} · {r.engine}</span>
                       </div>
                     ))}
                   </div>
@@ -523,14 +530,14 @@ export function CodePage() {
         </div>
 
         {/* кол.2: sandbox OS · sandboxes plane */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="code-sandbox-os" title="SANDBOX OS" icon={Lock} tone="teal"
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="code-sandbox-os" defaultOpen={false} title="Execution isolation" icon={Lock} tone="teal"
             right={<>
-              {sbx && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="слои R64: ns (userns+mountns: ro-root, rw-rebind, hide-секретов) + seccomp (deny-лист + net=deny); Landlock ≥5.13 — честный skip на 5.10; strict fail-closed">слои {sbx.caps.layers_available.join("+")} · net {sbx.config.net} · runs {sbx.counters.runs}</span>}
+              {sbx && <span className="hidden text-xs text-zinc-500 sm:inline" title="Isolation layers reported by this runtime">layers {sbx.caps.layers_available.join("+") || "none"} · net {sbx.config.net} · runs {sbx.counters.runs}</span>}
               {refreshBtn(() => void loadSbx(), sbxBusy, "Обновить статус сандбокса")}
             </>}>
             <div data-testid="sandbox-probe" className="space-y-2.5">
-              <div className="flex flex-wrap gap-1.5" title="Landlock появился в ядре 5.13 — здесь 5.10 → честный skip; конфайнмент несёт ns+seccomp; strict: обязательные слои не применились → команда НЕ исполнена">
+              <div className="flex flex-wrap gap-1.5" title="Platform-specific isolation capabilities reported by the runtime">
                 <Chip label="landlock ABI" value={sbx?.caps.landlock_abi ?? "—"} />
                 <Chip label="userns" value={sbx?.caps.userns_max ?? "—"} />
                 <Chip label="seccomp" value={sbx?.caps.seccomp_mode ?? "—"} />
@@ -538,7 +545,7 @@ export function CodePage() {
                 <Chip label="verdict" value={sbx?.caps.verdict ?? "—"} tone={sbx?.caps.verdict === "sandboxable" ? "emerald" : "amber"} />
               </div>
               <div className="flex flex-wrap gap-1.5">
-                <Chip label="auto_sandbox" value={sbx ? (sbx.config.auto_sandbox ? "вкл" : "выкл") : "—"} tone={sbx?.config.auto_sandbox ? "teal" : "zinc"} title="канон D02: tier-2 sandbox-ability резолвит fs-риски до classifier" />
+                <Chip label="auto_sandbox" value={sbx ? (sbx.config.auto_sandbox ? "вкл" : "выкл") : "—"} tone={sbx?.config.auto_sandbox ? "teal" : "zinc"} title="Runtime configuration for automatic isolation" />
                 <Chip label="net" value={sbx?.config.net ?? "—"} />
                 <Chip label="strict" value={sbx ? (sbx.config.strict ? "вкл" : "выкл") : "—"} tone={sbx?.config.strict ? "emerald" : "amber"} title="strict fail-closed" />
                 <Chip label="runs" value={sbx?.counters.runs ?? "—"} />
@@ -547,7 +554,7 @@ export function CodePage() {
               </div>
 
               {sbxProbeRes && (
-                <div className={`rounded border px-2 py-1.5 font-mono text-[9px] ${sbxProbeRes.ok ? "border-teal-900/50 bg-teal-950/20 text-teal-300/90" : "border-rose-900/50 bg-rose-950/20 text-rose-300/90"}`}>
+                <div className={`rounded border px-2 py-1.5 text-[11px] ${sbxProbeRes.ok ? "border-teal-900/50 bg-teal-950/20 text-teal-300/90" : "border-rose-900/50 bg-rose-950/20 text-rose-300/90"}`}>
                   probe {sbxProbeRes.ok ? "✓ 4/4" : "✗"}{sbxProbeRes.escape ? " · ЭСКАПИРОВАНО!" : ""} · {sbxProbeRes.ms}мс ·{" "}
                   <span title={sbxProbeRes.checks.write_inside.detail}>внутрь {sbxProbeRes.checks.write_inside.ok ? "✓" : "✗"}</span> ·{" "}
                   <span title={sbxProbeRes.checks.write_outside_denied.detail}>секреты {sbxProbeRes.checks.write_outside_denied.ok ? "скрыты ✓" : "✗"}</span> ·{" "}
@@ -559,32 +566,32 @@ export function CodePage() {
               <div className="space-y-1">
                 <div className="flex gap-1.5">
                   <input value={sbxCmd} onChange={(e) => setSbxCmd(e.target.value)} placeholder="команда (белый список)…" aria-label="Команда для запуска в сандбоксе"
-                    className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900" />
+                    className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-teal-900" />
                   <input value={sbxCwd} onChange={(e) => setSbxCwd(e.target.value)} placeholder="cwd…" aria-label="cwd в управляемом корне" list="exec-roots"
-                    className="w-28 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900 sm:w-40" />
+                    className="w-28 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-teal-900 sm:w-40" />
                 </div>
                 <div className="flex gap-1.5">
-                  <button type="button" onClick={() => void sbxAction("run", sbxCmd, sbxCwd)} disabled={sbxBusy || !sbxCmd || !sbxCwd}
-                    title="Запуск в сандбоксе: tier-1 план → unshare userns+mountns → ro-root/rw-rebind/hide → seccomp net=deny (POST /sandbox op:run)"
-                    className="rounded border border-teal-800/60 px-2 py-1 text-[10px] text-teal-300 transition hover:bg-teal-950/40 disabled:opacity-40">В сандбоксе</button>
-                  <button type="button" onClick={() => void sbxAction("probe")} disabled={sbxBusy}
-                    title="Живая верификация: запись внутрь ok · запись в секреты отказ · сеть EPERM · контроль net=allow (POST /sandbox op:probe)"
-                    className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">Probe</button>
+                  <button type="button" onClick={() => void sbxAction("run", sbxCmd, sbxCwd)} disabled={sbxBusy || !sbx || !sbxCmd || !sbxCwd}
+                    title="Request isolated execution; runtime policy determines whether it is permitted"
+                    className="rounded border border-teal-800/60 px-2 py-1 text-xs text-teal-300 transition hover:bg-teal-950/40 disabled:opacity-40">В сандбоксе</button>
+                  <button type="button" onClick={() => void sbxAction("probe")} disabled={sbxBusy || !sbx}
+                    title="Run isolation checks and display the returned results"
+                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">Probe</button>
                 </div>
               </div>
 
               <div className="space-y-1">
-                <div className="text-[9px] uppercase tracking-wider text-zinc-600">sandbox-прогоны (exec_runs sandboxed=1)</div>
+                <div className="text-[11px] text-zinc-400">sandbox-прогоны (exec_runs sandboxed=1)</div>
                 <div tabIndex={0} role="region" aria-label="Журнал sandbox-прогонов" className="max-h-24 space-y-1 overflow-y-auto mc-scroll">
                   {(sbx?.recent ?? []).map((r) => (
-                    <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                    <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 text-[11px]">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.ok ? "bg-teal-400" : "bg-rose-500"}`} aria-hidden />
                       <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.cmd}>$ {r.cmd}</span>
-                      <span className="shrink-0 text-zinc-600">{r.ok ? `exit ${r.exit}` : r.reason || "fail"} · {r.ms ?? 0}мс</span>
+                      <span className="shrink-0 text-zinc-400">{r.ok ? `exit ${r.exit}` : r.reason || "fail"} · {r.ms ?? 0}мс</span>
                     </div>
                   ))}
                   {(sbx?.recent.length ?? 0) === 0 && (
-                    <div className="rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5 font-mono text-[9px] text-zinc-600">
+                    <div className="rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5 text-[11px] text-zinc-400">
                       прогов ещё не было — Probe верифицирует конфайнмент живыми негативами (секреты/сеть)
                     </div>
                   )}
@@ -593,64 +600,64 @@ export function CodePage() {
             </div>
           </Sec>
 
-          <Sec id="code-sandboxes-plane" title="SANDBOXES · LEGACY LOCKED" icon={Boxes} tone="amber" defaultOpen={false}
+          <Sec id="code-sandboxes-plane" title="Sandbox records" icon={Boxes} tone="amber" defaultOpen={false}
             right={<>
-              {sb && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="local: git worktree + prlimit + tar.gz sha256 · vercel: нужен SANDBOX_VERCEL_TOKEN">{sb.sandboxes.length} шт · local:{sb.providers.local === "READY" ? "✓" : "?"}</span>}
+              {sb && <span className="hidden text-xs text-zinc-500 sm:inline" title="Sandbox records and provider state reported by the runtime">{sb.sandboxes.length} records · local:{sb.providers.local === "READY" ? "available" : "unavailable"}</span>}
               {refreshBtn(() => void loadSb(), sbBusy, "Обновить список песочниц")}
             </>}>
             <div data-testid="sandboxes-plane" className="space-y-2.5">
-              <div className="rounded border border-amber-900/40 bg-amber-950/10 px-2 py-1.5 font-mono text-[9px] text-amber-300/80">
-                legacy capability unavailable: create/exec/snapshot/restore/destroy через старый POST /sandbox op-switch не маршрутизируются в daemon v0.57.1. Контур свёрнут по умолчанию и остаётся fail-close; рабочий SANDBOX OS находится выше.
+              <div className="rounded border border-amber-900/40 bg-amber-950/10 px-2 py-1.5 text-[11px] text-amber-300/80">
+                Sandbox lifecycle operations are unavailable in this runtime. The panel shows existing records; execution requires a runtime that advertises and enforces the requested capability.
               </div>
 
               <form className="flex gap-2" onSubmit={(e) => e.preventDefault()}>
                 <input disabled placeholder="имя: r18-fix (a-z0-9._-)" aria-label="Имя новой песочницы (недоступно)" title={PLANE_LOCKED}
-                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/40 px-2 font-mono text-[11px] text-zinc-500 placeholder:text-zinc-700" />
+                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/40 px-2 text-[11px] text-zinc-500 placeholder:text-zinc-500" />
                 <button type="submit" disabled title={`create: ${PLANE_LOCKED}`}
-                  className="h-7 shrink-0 rounded border border-zinc-800 px-2 font-mono text-[10px] text-zinc-600 disabled:opacity-40">+ создать</button>
+                  className="h-7 shrink-0 rounded border border-zinc-800 px-2 text-xs text-zinc-400 disabled:opacity-40">+ создать</button>
               </form>
 
               <div className="space-y-1.5" aria-label="Активные песочницы">
                 {(sb?.sandboxes ?? []).map((s) => (
                   <div key={s.id} className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5">
-                    <div className="flex items-center gap-2 font-mono text-[10px]">
+                    <div className="flex items-center gap-2 text-xs">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.status === "READY" ? "bg-emerald-400" : s.status === "RESTORED" ? "bg-cyan-400" : "bg-rose-500"}`} aria-hidden />
                       <span className="shrink-0 font-semibold text-zinc-300">{s.id}</span>
-                      <span className="text-zinc-600">{s.provider}</span>
-                      <span className="text-zinc-600" title={`HEAD ${s.head} · ${s.status} · создана ${s.createdAt}`}>{s.head.slice(0, 7)}</span>
-                      <span className="text-zinc-600">· cmds {s.cmds}</span>
-                      {typeof s.diskKb === "number" && <span className="text-zinc-600">· {(s.diskKb / 1024).toFixed(1)} МБ</span>}
+                      <span className="text-zinc-400">{s.provider}</span>
+                      <span className="text-zinc-400" title={`HEAD ${s.head} · ${s.status} · создана ${s.createdAt}`}>{s.head.slice(0, 7)}</span>
+                      <span className="text-zinc-400">· cmds {s.cmds}</span>
+                      {typeof s.diskKb === "number" && <span className="text-zinc-400">· {(s.diskKb / 1024).toFixed(1)} МБ</span>}
                       <span className="ml-auto flex shrink-0 items-center gap-1">
                         <button type="button" disabled title={`снапшот (tar.gz + sha256): ${PLANE_LOCKED}`} aria-label={`Снапшот песочницы ${s.id} (недоступно)`}
-                          className="rounded border border-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-600 disabled:opacity-40">снап</button>
+                          className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400 disabled:opacity-40">снап</button>
                         <button type="button" disabled title={`destroy (git worktree remove): ${PLANE_LOCKED}`} aria-label={`Уничтожить песочницу ${s.id} (недоступно)`}
-                          className="rounded border border-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-600 disabled:opacity-40">✕</button>
+                          className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400 disabled:opacity-40">✕</button>
                       </span>
                     </div>
-                    {s.lastCmd && <div className="mt-0.5 truncate pl-3.5 font-mono text-[9px] text-zinc-600" title={`last: ${s.lastCmd} · exit ${s.lastExit ?? "—"}`}>$ {s.lastCmd} · exit {s.lastExit ?? "—"}</div>}
+                    {s.lastCmd && <div className="mt-0.5 truncate pl-3.5 text-[11px] text-zinc-400" title={`last: ${s.lastCmd} · exit ${s.lastExit ?? "—"}`}>$ {s.lastCmd} · exit {s.lastExit ?? "—"}</div>}
                   </div>
                 ))}
                 {sb && sb.sandboxes.length === 0 && (
-                  <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">
-                    пусто — создание недоступно (мёртвый op-switch), существующие песочницы видны здесь
+                  <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center text-xs text-zinc-400">
+                    No sandbox records. Sandbox creation is unavailable in this runtime.
                   </div>
                 )}
               </div>
 
               {(sb?.sandboxes.length ?? 0) > 0 && (
                 <form onSubmit={(e) => { e.preventDefault(); const id = sb?.sandboxes[0]?.id; const cmd = sbCmd.trim(); if (id && cmd) { void sbExec(id, cmd); setSbCmd(""); } }} className="flex gap-2">
-                  <input value={sbCmd} onChange={(e) => setSbCmd(e.target.value)} placeholder={`exec в ${sb?.sandboxes[0].id}: bun run lint | git status | … (ожидаем честный отказ daemon'а)`} aria-label="Команда для исполнения в первой песочнице"
-                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-cyan-900" />
-                  <button type="submit" disabled={sbBusy} title='POST /sandbox {op:"exec", id, cmd} — op-switch мёртв: покажем реальную ошибку daemon&#39;а'
-                    className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">▶ run</button>
+                  <input disabled value={sbCmd} onChange={(e) => setSbCmd(e.target.value)} placeholder="Sandbox execution is unavailable" aria-label="Команда для исполнения в первой песочнице"
+                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-[11px] text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-cyan-900" />
+                  <button type="submit" disabled={true} title={PLANE_LOCKED}
+                    className="h-7 shrink-0 rounded border border-zinc-700 px-2 text-xs text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">▶ run</button>
                 </form>
               )}
 
               {sbRun && (
-                <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 font-mono text-[10px]" aria-live="polite">
+                <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 text-xs" aria-live="polite">
                   <div className="mb-1 flex items-center gap-2 text-zinc-400">
                     <span className={sbRun.ok ? "text-emerald-400" : "text-rose-400"}>exit {sbRun.exitCode}</span>
-                    <span className="text-zinc-600">· {sbRun.ms}мс · {sbRun.limit}</span>
+                    <span className="text-zinc-400">· {sbRun.ms}мс · {sbRun.limit}</span>
                   </div>
                   <div className="max-h-28 overflow-y-auto mc-scroll whitespace-pre-wrap text-zinc-500">
                     {sbRun.stdout || "(stdout пуст)"}
@@ -661,21 +668,21 @@ export function CodePage() {
 
               {(sb?.snapshots.length ?? 0) > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[9px] uppercase tracking-wider text-zinc-600">снапшоты (durable, read-only)</div>
+                  <div className="text-[11px] text-zinc-400">снапшоты (durable, read-only)</div>
                   {(sb?.snapshots ?? []).slice(0, 4).map((sn) => (
-                    <div key={sn.file} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px] text-zinc-500">
+                    <div key={sn.file} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 text-[11px] text-zinc-500">
                       <span className="min-w-0 flex-1 truncate" title={`${sn.file} · sha256 ${sn.sha256}`}>{sn.file.split("/").pop()}</span>
-                      <span className="shrink-0 text-zinc-600">{(sn.bytes / 1048576).toFixed(1)} МБ</span>
-                      <span className="shrink-0 text-zinc-600" title={`sha256 ${sn.sha256}`}>{sn.createdAt ? new Date(sn.createdAt).toLocaleDateString("ru-RU") : ""}</span>
+                      <span className="shrink-0 text-zinc-400">{(sn.bytes / 1048576).toFixed(1)} МБ</span>
+                      <span className="shrink-0 text-zinc-400" title={`sha256 ${sn.sha256}`}>{sn.createdAt ? new Date(sn.createdAt).toLocaleDateString("ru-RU") : ""}</span>
                       <button type="button" disabled title={`restore (распаковать в новую песочницу): ${PLANE_LOCKED}`}
-                        className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-600 disabled:opacity-40">restore</button>
+                        className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400 disabled:opacity-40">restore</button>
                     </div>
                   ))}
                 </div>
               )}
 
               {sb && (
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-zinc-600" title="Провайдеры плоскости">
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-zinc-400" title="Провайдеры плоскости">
                   {Object.entries(sb.providers).map(([k, v]) => (
                     <span key={k}><span className="text-zinc-500">{k}</span> = {v}</span>
                   ))}

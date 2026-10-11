@@ -12,6 +12,8 @@ import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
 import { verifyMe2UiBundle } from './verify-me2-ui-bundle.mjs';
 import { validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity,
   localStateProviderHealthAttested } from '../src/local-state-provider-policy.mjs';
+import { localAttachedProviderAutoConnectFile, LOCAL_ATTACHED_AUTOCONNECT_SCHEMA } from '../src/local-restored-pg17-setup.mjs';
+import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../src/private-windows-storage-acl.mjs';
 
 const execute = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -19,6 +21,9 @@ const { assertPackagedOfflineRuntimeBinding } = require('./offline-runtime-packa
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const SHA = /^[a-f0-9]{64}$/;
 export const ISOLATED_OWNER_MARKER = 'metaengine-isolated-launch-qa.json';
+export const REMOVED_DATABASE_WIZARD_FILES = Object.freeze([
+  'src/local-restored-pg17-setup.html', 'src/local-restored-pg17-setup-preload.cjs',
+]);
 export const INSTALLED_LAUNCH_SOURCE_FILES = Object.freeze([
   'src/final-runtime-entry.mjs', 'src/main-entry.mjs', 'src/main.mjs',
   'src/single-instance-guard.mjs', 'src/self-update-handoff.mjs',
@@ -27,8 +32,8 @@ export const INSTALLED_LAUNCH_SOURCE_FILES = Object.freeze([
   'src/local-runtime-host-controller.mjs', 'src/local-restored-pg17-setup.mjs',
   'src/local-restored-pg17-auto-prepare.mjs',
   'src/private-windows-storage-acl.mjs',
+  'src/github-repository-connection.mjs', 'src/preload-shell.cjs',
   'src/remote-support-mcp.mjs', 'src/me2/me2-daemon-host.mjs',
-  'src/local-restored-pg17-setup.html', 'src/local-restored-pg17-setup-preload.cjs',
   'src/me2/me2-ui-host.mjs', 'src/me2/me2-ui-gateway.mjs',
 ]);
 
@@ -47,6 +52,7 @@ export function isolatedLaunchEnvironment({ appData, localAppData, temporaryDire
     if (typeof inherited[key] === 'string') env[key] = inherited[key];
   }
   Object.assign(env, { APPDATA: appData, LOCALAPPDATA: localAppData, TEMP: temporaryDirectory, TMP: temporaryDirectory,
+    METAENGINE_GITHUB_CONNECTION_OFFLINE: '1', METAENGINE_DISABLE_SELF_UPDATE: '1',
     HOSTNAME: '0.0.0.0', HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9',
     ALL_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1,localhost', NODE_USE_ENV_PROXY: '1' });
   if (uiPort) Object.assign(env, { ME2_UI_PORT: String(uiPort), ME2_UI_HEALTH_URL: `http://127.0.0.1:${uiPort}/`,
@@ -70,15 +76,109 @@ export function assertInstalledLaunchIdentity(pkg, { expectedHead, expectedVersi
     bundle_sha256: pkg.metaengineClientStateRuntime.bundle_sha256 });
 }
 
-export function assertFirstRunDomContract(dom) {
-  if (!dom?.config || !dom.receipt || !dom.connect || !dom.digest || !dom.consent_preload
-    || dom.node_in_page !== false || !/connect-src 'none'/.test(dom.csp || '')
-    || !/PostgreSQL 17/i.test(dom.heading || '') || !/^file:/.test(dom.url)
-    || !Array.isArray(dom.resources) || !dom.resources.every(url => /^(file:|data:)/.test(url))) fail('first_run_dom_contract_invalid');
+export function assertMissingDescriptorAdmissionContract(row, output = '') {
+  if (row?.schema !== 'metaengine.browser.provider-startup.v1' || row.state !== 'LOCAL_PROVIDER_STARTUP_BLOCKED'
+    || row.reason !== 'local_state_packaged_owner_not_ready' || row.browser_runtime_started !== false
+    || row.automatic_cloud_fallback !== false || row.authority_effect !== false
+    || /RUNTIME_IMPORT_OK|ME2_INTEGRATION_START|DAEMON_HEALTHY|ME2_PRIMARY_SHELL_VISIBLE/.test(output)) {
+    fail('missing_descriptor_admission_contract_invalid');
+  }
   return true;
 }
 
-export function assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter, pid, now = Date.now() }) {
+export function assertInstalledPrimaryWindowJournal(journal, { pid, version, expectedWindowId } = {}) {
+  if (!journal?.current_boot_id || journal.current_pid !== pid || journal.current_version !== version
+    || !Array.isArray(journal.events)) fail('normal_primary_window_journal_identity_invalid');
+  const events = journal.events.filter(event => event.boot_id === journal.current_boot_id);
+  if (events.some(event => event.pid !== pid || event.version !== version || !Number.isSafeInteger(event.sequence)
+    || event.sequence < 1 || /FAILED/.test(event.state || ''))) fail('normal_primary_window_journal_failed');
+  const imported = events.find(event => event.state === 'RUNTIME_IMPORT_OK');
+  const stable = events.findLast(event => event.state === 'PRIMARY_WINDOW_STABLE');
+  const windowId = stable?.details?.window_id;
+  if (!imported || !stable || imported.sequence >= stable.sequence || stable.details?.visible !== true
+    || !Number.isSafeInteger(windowId) || windowId < 1 || !Number.isFinite(stable.details.stable_ms) || stable.details.stable_ms < 1500
+    || (expectedWindowId !== undefined && windowId !== expectedWindowId)) fail('normal_primary_window_stability_unproven');
+  for (const event of events.filter(event => /TIMEOUT/.test(event.state || ''))) {
+    if (event.state !== 'PRIMARY_WINDOW_STABLE_TIMEOUT' || event.sequence >= stable.sequence
+      || event.details?.window_id !== windowId || !Number.isSafeInteger(event.details.window_count)
+      || event.details.window_count < 1) fail('normal_primary_window_timeout_unreconciled');
+  }
+  return Object.freeze({ window_id: windowId, stable_sequence: stable.sequence,
+    bootstrap_timeout_superseded: events.some(event => event.state === 'PRIMARY_WINDOW_STABLE_TIMEOUT'),
+    visible: true, authority_effect: false });
+}
+
+export function assertInstalledPrimaryCdpWindow(before, after = before) {
+  const valid = row => row && Number.isSafeInteger(row.window_id) && row.window_id > 0
+    && ['normal', 'maximized'].includes(row.window_state) && row.width > 400 && row.height > 300;
+  if (!valid(before) || !valid(after) || before.window_id !== after.window_id) fail('normal_primary_cdp_window_unproven');
+  return true;
+}
+
+export function assertInstalledVisibleWindow(rows, { pid, expectedHandle } = {}) {
+  const windows = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  const candidates = windows.filter(row => row?.pid === pid && row.visible === true
+    && row.minimized === false && row.class_name === 'Chrome_WidgetWin_1' && row.title === 'METAENGINE Browser'
+    && row.width > 400 && row.height > 300 && /^[1-9][0-9]*$/.test(String(row.handle || '')));
+  if (candidates.length !== 1 || (expectedHandle !== undefined && candidates[0].handle !== expectedHandle)) {
+    fail('normal_primary_os_window_unproven');
+  }
+  return Object.freeze({ pid, handle: candidates[0].handle, width: candidates[0].width,
+    height: candidates[0].height, title: 'METAENGINE Browser', class_name: 'Chrome_WidgetWin_1',
+    visible: true, minimized: false, authority_effect: false });
+}
+
+export async function verifyInstalledVisiblePrimaryWindow(pid, expectedHandle) {
+  if (!Number.isSafeInteger(pid) || pid < 1) fail('normal_primary_os_window_identity_invalid');
+  const script = `$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @'
+using System; using System.Text; using System.Collections.Generic; using System.Runtime.InteropServices;
+public static class MetaengineVisibleWindow {
+  public delegate bool Visitor(IntPtr handle, IntPtr data);
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [DllImport("user32.dll")] static extern bool EnumWindows(Visitor visitor, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle, out uint pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr handle);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr handle);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr handle, out Rect rect);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassNameW(IntPtr handle, StringBuilder text, int length);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextW(IntPtr handle, StringBuilder text, int length);
+  public static string[] Read(uint wanted) {
+    var rows = new List<string>();
+    EnumWindows((handle, data) => {
+      uint pid; Rect rect; GetWindowThreadProcessId(handle, out pid);
+      var title = new StringBuilder(256); var className = new StringBuilder(128);
+      GetWindowTextW(handle, title, title.Capacity); GetClassNameW(handle, className, className.Capacity);
+      if (pid == wanted && IsWindowVisible(handle) && !IsIconic(handle)
+          && title.ToString() == "METAENGINE Browser" && className.ToString() == "Chrome_WidgetWin_1"
+          && GetClientRect(handle, out rect))
+        rows.Add(handle.ToInt64().ToString()+","+(rect.Right-rect.Left).ToString()+","+(rect.Bottom-rect.Top).ToString());
+      return true;
+    }, IntPtr.Zero); return rows.ToArray();
+  }
+}
+'@
+$rows=@([MetaengineVisibleWindow]::Read([uint32]$env:METAENGINE_QUALIFY_WINDOW_PID) | ForEach-Object {
+ $parts=$_.Split(','); @{pid=[int]$env:METAENGINE_QUALIFY_WINDOW_PID;handle=$parts[0];width=[int]$parts[1];height=[int]$parts[2];visible=$true;minimized=$false;title='METAENGINE Browser';class_name='Chrome_WidgetWin_1'}
+})
+ConvertTo-Json -InputObject $rows -Compress`;
+  const windows = 'C:\\Windows';
+  const safeEnv = Object.fromEntries(['USERPROFILE', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'HOMEDRIVE', 'HOMEPATH']
+    .filter(key => typeof process.env[key] === 'string').map(key => [key, process.env[key]]));
+  Object.assign(safeEnv, { SystemRoot: windows, SYSTEMROOT: windows, WINDIR: windows,
+    PATH: path.win32.join(windows, 'System32'),
+    PSModulePath: path.win32.join(windows, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+    METAENGINE_QUALIFY_WINDOW_PID: String(pid) });
+  const result = await execute(path.win32.join(windows, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    { windowsHide: true, shell: false, timeout: 60000, maxBuffer: 16384,
+      env: safeEnv });
+  return assertInstalledVisibleWindow(JSON.parse(result.stdout), { pid, expectedHandle });
+}
+
+export function assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter, pid, now = Date.now(), version }) {
+  const initialWindow = assertInstalledPrimaryWindowJournal(before, { pid, version });
+  assertInstalledPrimaryWindowJournal(after, { pid, version, expectedWindowId: initialWindow.window_id });
   const progressAge = now - Date.parse(progressAfter?.progress_at);
   if (after?.current_boot_id !== before?.current_boot_id || !before?.current_boot_id
     || !sentinelBefore?.token || sentinelAfter?.token !== sentinelBefore.token
@@ -352,62 +452,31 @@ export async function qualifyInstalledFirstRun({ executable, directory, identity
   const temporaryDirectory = path.join(directory, 'first-run', 'Temp');
   for (const target of [appData, localAppData, temporaryDirectory]) await fs.mkdir(target, { recursive: true });
   const ports = [];
-  while (ports.length < 4) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
-  const [uiPort, gatewayPort, daemonPort, debuggingPort] = ports;
+  while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
+  const [uiPort, gatewayPort, daemonPort] = ports;
   const env = isolatedLaunchEnvironment({ appData, localAppData, temporaryDirectory, uiPort, gatewayPort, daemonPort });
+  const descriptorFile = localAttachedProviderAutoConnectFile({ env, platform: 'win32' });
+  await assert.rejects(fs.stat(descriptorFile), { code: 'ENOENT' });
   const profile = await profileProbe(executable, env, directory);
-  // This is the ordinary installed entry. CDP supplies observation only;
-  // no application smoke/probe flag or provider bypass is present.
-  const launch = start(executable, [`--remote-debugging-port=${debuggingPort}`, '--remote-debugging-address=127.0.0.1',
-    '--user-data-dir=' + profile.user_data_path,
-    '--proxy-server=127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost'], env, directory);
-  let client;
+  // Missing trust input must block ordinary startup. A separate real-runtime
+  // Owner run proves successful automatic attachment and the primary UI.
+  const launch = start(executable, ['--user-data-dir=' + profile.user_data_path], env, directory);
   let proof;
-  let dom;
   try {
-    const target = await waitUntil(() => targetAt(debuggingPort, url => /\/local-restored-pg17-setup\.html$/.test(url)), launch, 90000);
-    client = await cdp(target.webSocketDebuggerUrl);
-    // CDP can publish the navigation target before its document/context exists.
-    // Wait for that exact local document to finish loading, then enforce the
-    // complete consent contract without accepting a partial renderer readback.
-    await waitUntil(async () => {
-      const result = await client.command('Runtime.evaluate', { returnByValue: true, expression: `(() => ({
-      ready_state: document.readyState,
-      heading: document.querySelector('h1')?.textContent,
-      config: !!document.querySelector('#config'), receipt: !!document.querySelector('#receipt'),
-      connect: !!document.querySelector('#connect'), digest: !!document.querySelector('#digest'),
-      consent_preload: typeof window.metaengineRestore?.connect === 'function',
-      node_in_page: typeof window.require !== 'undefined' || typeof window.process !== 'undefined',
-      csp: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content,
-      url: location.href, resources: performance.getEntriesByType('resource').map(row => row.name)
-    }))()` });
-      dom = result.result?.value;
-      return dom?.ready_state === 'complete' && /\/local-restored-pg17-setup\.html$/.test(dom.url || '') ? dom : null;
-    }, launch, 90000);
-    await fs.writeFile(path.join(directory, 'installed-first-run-dom.json'), JSON.stringify(dom ?? null, null, 2) + '\n');
-    assertFirstRunDomContract(dom);
-    const listener = await verifyWindowsTcpListener({ port: debuggingPort, pid: launch.child.pid });
-    const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
-    const png = Buffer.from(screenshot.data, 'base64');
-    assert(png.length > 4096);
-    await fs.writeFile(path.join(directory, 'installed-first-run.png'), png);
-    // Give asynchronous prewarm a chance to reveal an admission regression.
-    await delay(3000); launch.alive();
-    const log = launch.output();
-    if (/RUNTIME_IMPORT_OK|ME2_INTEGRATION_START|DAEMON_HEALTHY|ME2_PRIMARY_SHELL_VISIBLE/.test(log)) fail('first_run_bypassed_owner_admission');
+    const blocked = await waitUntil(async () => launch.output().split(/\r?\n/).flatMap(line => {
+      try { return [JSON.parse(line)]; } catch { return []; }
+    }).find(row => row.schema === 'metaengine.browser.provider-startup.v1' && row.state === 'LOCAL_PROVIDER_STARTUP_BLOCKED'), null, 90000);
+    assertMissingDescriptorAdmissionContract(blocked, launch.output());
     for (const file of [path.join(appData, '@metaengine', 'browser-shell', 'metaengine-state-provider-v1.json'),
       path.join(profile.user_data_path, 'metaengine-browser-startup-journal-v1.json')]) {
       await assert.rejects(fs.stat(file), { code: 'ENOENT' });
     }
-    proof = { schema: 'metaengine.browser.installed-first-run-proof.v1', ...identity,
-      launch: 'NORMAL_INSTALLED_ENTRY', profile_isolated: true, first_run_visible: true,
-      consent_preload_verified: true, node_renderer_access: false, renderer_connect_src_none: true,
-      owner_profile_written: false, browser_runtime_admitted: false,
-      screenshot_sha256: digest(png), screenshot_bytes: png.length, debugger_listener: listener,
+    proof = { schema: 'metaengine.browser.installed-first-run-proof.v2', ...identity,
+      launch: 'NORMAL_INSTALLED_ENTRY', profile_isolated: true, database_wizard_removed: true,
+      descriptor_absent: true, missing_descriptor_admission_fence_verified: true,
+      owner_profile_written: false, browser_runtime_admitted: false, automatic_cloud_fallback: false,
       owner_boot_qualified: false, production_ready: false, authority_effect: false };
   } finally {
-    await fs.writeFile(path.join(directory, 'installed-first-run-dom.json'), JSON.stringify(dom ?? null, null, 2) + '\n');
-    client?.close();
     await stop(launch);
     await fs.writeFile(path.join(directory, 'installed-first-run.log'), launch.output());
     for (const port of ports) await assertPortClosed(port);
@@ -491,7 +560,64 @@ async function ownerProfile({ ownerQaRoot, resourcesDir, identity }) {
   for (const key of ['pg_data_directory', 'state_directory']) if (!contained(root, config[key] || '')) fail('owner_fixture_outside_qa');
   const database = new URL(config.database_url);
   if (database.hostname !== '127.0.0.1' || !database.username) fail('owner_fixture_database_not_loopback');
-  return { root, appData, localAppData, temporaryDirectory, owner, ownerFile, ownerSha256: digest(ownerBytes), config };
+  return { root, appData, localAppData, temporaryDirectory, owner, ownerFile, ownerBytes, ownerSha256: digest(ownerBytes), config };
+}
+
+/** The fixture marker above excludes the user's profile. Only that disposable
+ * fixture's Owner is retired here so ordinary installed startup must consume
+ * a real private descriptor and publish a newly attested Owner itself. */
+export async function prepareIsolatedAttachedAutoConnect(fixture, identity, {
+  protectStorage = protectOwnerOnlyWindowsDirectory, verifyStorage = verifyOwnerOnlyWindowsStorage,
+} = {}) {
+  if (fixture.config?.postgres_mode !== 'attached' || fixture.config.api_role_mode !== 'direct'
+    || !contained(fixture.root, fixture.ownerFile) || !contained(fixture.root, fixture.owner.runtime_host.config_file)) {
+    fail('automatic_attached_fixture_required');
+  }
+  const marker = JSON.parse(await fs.readFile(path.join(fixture.root, ISOLATED_OWNER_MARKER), 'utf8'));
+  if (marker.schema !== 'metaengine.browser.isolated-owner-launch-fixture.v1' || marker.production_profile !== false
+    || marker.source_data_rows_restored !== 0 || marker.source_head !== identity.source_head) fail('owner_fixture_marker_invalid');
+  const restoreFile = path.join(fixture.root, 'schema-only-restore-report.json');
+  const restoreBytes = await fs.readFile(restoreFile);
+  const restore = JSON.parse(restoreBytes);
+  if (restore.schema !== 'metaengine.database-restore-report.v1' || restore.schema_verified !== true
+    || restore.data_verified !== true || restore.schema_only !== true || restore.disposable !== true
+    || restore.source_data_rows_restored !== 0 || !SHA.test(restore.source_dump_sha256 || '')
+    || !Array.isArray(restore.errors) || restore.errors.length !== 0) fail('automatic_attached_restore_fixture_invalid');
+  const descriptorFile = localAttachedProviderAutoConnectFile({ env: { LOCALAPPDATA: fixture.localAppData }, platform: 'win32' });
+  if (!contained(fixture.root, descriptorFile)) fail('automatic_attached_fixture_escape');
+  await fs.mkdir(path.dirname(descriptorFile), { recursive: true, mode: 0o700 });
+  const protectedDirectory = await protectStorage(path.dirname(descriptorFile));
+  if (protectedDirectory?.owner_dacl_verified !== true || protectedDirectory.operation !== 'PROTECT_DIRECTORY') fail('automatic_attached_descriptor_acl_unverified');
+  const descriptorBytes = Buffer.from(JSON.stringify({ schema: LOCAL_ATTACHED_AUTOCONNECT_SCHEMA, version: 1,
+    postgres_mode: 'attached', config_file: fixture.owner.runtime_host.config_file,
+    restore_receipt_file: restoreFile, restore_receipt_sha256: digest(restoreBytes), authority_effect: false }) + '\n');
+  await fs.writeFile(descriptorFile, descriptorBytes, { flag: 'wx', mode: 0o600 });
+  const privateFile = await verifyStorage(descriptorFile, { operation: 'VERIFY_FILE' });
+  if (privateFile?.owner_dacl_verified !== true || privateFile.operation !== 'VERIFY_FILE') fail('automatic_attached_descriptor_acl_unverified');
+  const currentOwner = await fs.readFile(fixture.ownerFile);
+  if (!currentOwner.equals(fixture.ownerBytes)) fail('automatic_attached_fixture_owner_changed');
+  const sourceConfigBytes = await fs.readFile(fixture.owner.runtime_host.config_file);
+  await fs.rename(fixture.ownerFile, path.join(fixture.root, 'owner-before-autoconnect.json'));
+  await assert.rejects(fs.stat(fixture.ownerFile), { code: 'ENOENT' });
+  return { descriptorFile, descriptorSha256: digest(descriptorBytes), sourceConfigBytes,
+    originalConfigFile: fixture.owner.runtime_host.config_file };
+}
+
+export function assertAutomaticAttachedOwnerBinding({ previous, current, config, expectedConfig,
+  resourcesDir, identity, fixtureRoot }) {
+  if (current?.base_url !== previous?.base_url || current?.runtime_identity_file !== previous?.runtime_identity_file
+    || current?.runtime_host?.expected_bundle_sha256 !== identity.bundle_sha256
+    || path.resolve(current?.runtime_host?.bundle_directory || '') !== path.resolve(resourcesDir, 'client-state-runtime')
+    || !contained(fixtureRoot, current?.runtime_host?.config_file || '')
+    || current.runtime_host.config_file === previous?.runtime_host?.config_file
+    || config?.postgres_mode !== 'attached' || config.api_role_mode !== 'direct') fail('automatic_attached_owner_binding_invalid');
+  // Rebinding changes only package path/digest. Credentials, PGDATA, state,
+  // ports and the pinned external cluster remain exactly the fixture's input.
+  const expected = { ...expectedConfig, bundle_directory: path.resolve(resourcesDir, 'client-state-runtime'),
+    expected_bundle_sha256: identity.bundle_sha256,
+    state_directory: path.resolve(expectedConfig.state_directory), pg_data_directory: path.resolve(expectedConfig.pg_data_directory) };
+  if (JSON.stringify(Object.entries(config).sort()) !== JSON.stringify(Object.entries(expected).sort())) fail('automatic_attached_config_binding_invalid');
+  return true;
 }
 
 async function normalUiSocket(port, primaryPid, executable) {
@@ -505,6 +631,7 @@ async function normalUiSocket(port, primaryPid, executable) {
 
 export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, directory, ownerQaRoot, identity }) {
   const fixture = await ownerProfile({ ownerQaRoot, resourcesDir, identity });
+  const automatic = await prepareIsolatedAttachedAutoConnect(fixture, identity);
   const ports = [];
   while (ports.length < 4) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
   const [uiPort, gatewayPort, daemonPort, debuggingPort] = ports;
@@ -519,14 +646,28 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
   const currentEvents = journal => journal.events?.filter(row => row.boot_id === journal.current_boot_id && row.pid === launch.child.pid && row.version === identity.package_version) || [];
   const journal = () => fs.readFile(journalPath, 'utf8').then(JSON.parse);
   let client, proof, statusBefore;
+  const liveCdpWindow = async () => {
+    const window = await client.command('Browser.getWindowForTarget');
+    const readback = await client.command('Browser.getWindowBounds', { windowId: window.windowId });
+    return { window_id: window.windowId, window_state: readback.bounds?.windowState,
+      width: readback.bounds?.width, height: readback.bounds?.height };
+  };
   try {
     const before = await waitUntil(async () => {
       const row = await journal();
       const events = currentEvents(row);
       if (events.some(event => event.state === 'RUNTIME_IMPORT_FAILED')) fail('normal_runtime_import_failed');
-      return events.some(event => event.state === 'PRIMARY_WINDOW_STABLE' && event.details.visible === true)
-        && events.some(event => event.state === 'RUNTIME_IMPORT_OK') ? row : null;
-    }, launch, 150000);
+      assertInstalledPrimaryWindowJournal(row, { pid: launch.child.pid, version: identity.package_version });
+      return row;
+    }, launch, 420000);
+    const ownerBytes = await fs.readFile(fixture.ownerFile);
+    const currentOwner = validateLocalStateProviderConfig(JSON.parse(ownerBytes));
+    const currentConfig = JSON.parse(await fs.readFile(currentOwner.runtime_host.config_file, 'utf8'));
+    assertAutomaticAttachedOwnerBinding({ previous: fixture.owner, current: currentOwner, config: currentConfig,
+      expectedConfig: fixture.config, resourcesDir, identity, fixtureRoot: fixture.root });
+    if (!(await fs.readFile(automatic.originalConfigFile)).equals(automatic.sourceConfigBytes)
+      || digest(await fs.readFile(automatic.descriptorFile)) !== automatic.descriptorSha256) fail('automatic_attached_input_changed');
+    fixture.owner = currentOwner; fixture.ownerSha256 = digest(ownerBytes); fixture.config = currentConfig;
     statusBefore = JSON.parse(await fs.readFile(fixture.owner.runtime_identity_file, 'utf8'));
     const runtimeIdentity = validateLocalStateRuntimeIdentity(statusBefore, fixture.owner.base_url);
     const apiChild = statusBefore.children?.find(row => row.name === 'api');
@@ -540,6 +681,9 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     const gatewayListener = await verifyWindowsTcpListener({ port: gatewayPort, pid: launch.child.pid });
     const target = await waitUntil(() => targetAt(debuggingPort, url => url.startsWith(`http://127.0.0.1:${gatewayPort}/`)), launch);
     client = await cdp(target.webSocketDebuggerUrl);
+    const cdpWindowBefore = await liveCdpWindow();
+    assertInstalledPrimaryCdpWindow(cdpWindowBefore);
+    const osWindowBefore = await verifyInstalledVisiblePrimaryWindow(launch.child.pid);
     const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
     const png = Buffer.from(screenshot.data, 'base64'); assert(png.length > 4096);
     await fs.writeFile(path.join(directory, 'installed-owner-ui.png'), png);
@@ -560,10 +704,15 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     const after = await journal();
     const sentinelAfter = JSON.parse(await fs.readFile(sentinelPath, 'utf8'));
     const progressAfter = JSON.parse(await fs.readFile(progressPath, 'utf8'));
-    assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter, pid: launch.child.pid });
+    assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter,
+      pid: launch.child.pid, version: identity.package_version });
+    const journalWindow = assertInstalledPrimaryWindowJournal(after, { pid: launch.child.pid, version: identity.package_version });
+    const cdpWindowAfter = await liveCdpWindow();
+    assertInstalledPrimaryCdpWindow(cdpWindowBefore, cdpWindowAfter);
+    const osWindowAfter = await verifyInstalledVisiblePrimaryWindow(launch.child.pid, osWindowBefore.handle);
     const activation = currentEvents(after).find(row => row.state === 'PRIMARY_WINDOW_ACTIVATED' && row.details.launch_id === ack.launch_id
       && row.sequence === ack.event_sequence && row.details.visible === true);
-    if (!activation) fail('second_instance_activation_missing');
+    if (!activation || activation.details.window_id !== journalWindow.window_id) fail('second_instance_activation_missing');
     const log = launch.output();
     for (const state of ['DAEMON_HEALTHY', 'ME2_CONTRACT_OK', 'ME2_PRIMARY_SHELL_VISIBLE', 'ME2_R97_UI_CONTRACT_CONFIRMED']) {
       if (!log.includes(state)) fail('normal_ui_contract_missing');
@@ -577,10 +726,16 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       launch: 'NORMAL_INSTALLED_ENTRY', profile_isolated: true, fixture_source_rows_restored: 0,
       real_local_runtime_attested: true, runtime_instance_id: runtimeIdentity.instance_id,
       normal_ui_boot_verified: true, me2_r97_dom_contract_verified: true,
+      database_wizard_removed: true, automatic_attached_connection_qualified: true,
+      automatic_owner_publication_verified: true, private_autoconnect_descriptor_verified: true,
+      descriptor_sha256: automatic.descriptorSha256, source_config_preserved: true,
       second_instance_activation_verified: true, startup_grace_survival_seconds: 190,
       sentinel_relaunch_attempted: false, ui_listener: uiListener, gateway_listener: gatewayListener,
       api_listener: apiListener, edge_listener: edgeListener,
       same_ui_child_across_startup_grace: true, screenshot_sha256: digest(png), screenshot_bytes: png.length,
+      stable_primary_window_id: journalWindow.window_id, same_primary_window_across_startup_grace: true,
+      current_cdp_window: cdpWindowAfter, bootstrap_window_timeout_superseded: journalWindow.bootstrap_timeout_superseded,
+      current_os_window: osWindowAfter, current_os_window_visible: true, same_os_window_across_startup_grace: true,
       owner_boot_qualified: true, production_ready: false, authority_effect: false };
   } finally {
     client?.close();
@@ -628,6 +783,8 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
   const asar = await import('@electron/asar');
   const pkg = JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8'));
   const identity = assertInstalledLaunchIdentity(pkg, { expectedHead, expectedVersion });
+  const installedEntries = new Set(asar.listPackage(archive).map(entry => path.normalize(entry).replace(/^[\\/]+/, '')));
+  if (REMOVED_DATABASE_WIZARD_FILES.some(file => installedEntries.has(path.normalize(file)))) fail('database_wizard_still_packaged');
   const sourceFiles = {};
   for (const relative of INSTALLED_LAUNCH_SOURCE_FILES) {
     const installed = asar.extractFile(archive, path.normalize(relative));
@@ -655,9 +812,11 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
     || digest(await fs.readFile(executable)) !== installedHashes.installed_executable_sha256) fail('installed_artifact_identity_changed');
   const proof = Object.freeze({ schema: 'metaengine.browser.installed-launch-qualification.v1', ...identity,
     installed_source_files: sourceFiles, installed_source_bytes_verified: true,
+    database_wizard_removed: true,
     ...installedHashes, offline_successor_probe_qualified: offlineSuccessor.offline_successor_probe_qualified === true,
     protected_offline_runtime_verified: runtime.packaged_resources_verified === true,
-    first_run_qualified: firstRun.first_run_visible, installed_ui_host_qualified: uiHost.child_owned,
+    first_run_qualified: firstRun.missing_descriptor_admission_fence_verified, installed_ui_host_qualified: uiHost.child_owned,
+    automatic_attached_connection_qualified: owner?.automatic_attached_connection_qualified === true,
     os_ui_listener_verified: uiHost.os_listener.loopback_only === true,
     owner_boot_qualified: owner?.owner_boot_qualified === true,
     normal_ui_boot_verified: owner?.normal_ui_boot_verified === true,

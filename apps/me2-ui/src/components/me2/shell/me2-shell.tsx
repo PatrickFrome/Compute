@@ -11,6 +11,7 @@ import { refreshClientRuntimeStatus, useClientRuntimeStatus } from "@/hooks/use-
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
+import { InterruptedSetupRecovery } from "@/components/me2/interrupted-setup-recovery";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 const CodePage = lazy(() => import("@/components/me2/pages/code").then((m) => ({ default: m.CodePage })));
 const TasksPage = lazy(() => import("@/components/me2/pages/tasks").then((m) => ({ default: m.TasksPage })));
@@ -29,6 +30,8 @@ type PrimaryChatActor = {
   title: string;
   model: string;
   exact_native_binding: boolean;
+  recovery_required?: boolean;
+  recovery_reason?: string | null;
 };
 
 type PrimaryChatRoster = {
@@ -256,6 +259,7 @@ function usePrimaryChatRoster() {
 }
 
 function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean; onDetailOpenChange: (open: boolean) => void }) {
+  const setPage = useMe2((s) => s.setPage);
   const [goal, setGoal] = useState("");
   const [pending, setPending] = useState(false);
   const [receipt, setReceipt] = useState<ClientGoalSubmission | null>(null);
@@ -427,14 +431,14 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         placeholder="Describe the task for your agents…"
         aria-label="User goal"
         data-testid="client-goal-input"
-        className="h-8 min-w-0 flex-1 border border-zinc-700 bg-zinc-950 px-2.5 text-[13px] text-zinc-100 placeholder:text-zinc-400 disabled:opacity-60"
+        className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-[13px] text-zinc-100 placeholder:text-zinc-400 disabled:opacity-60"
       />
       <button
         type="button"
         onClick={() => void submit()}
         disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"}
         data-testid="client-goal-submit"
-        className="h-8 shrink-0 border border-cyan-700 bg-cyan-950/50 px-3 text-[12px] font-semibold text-cyan-100 hover:bg-cyan-950 disabled:opacity-40"
+        className="mc-soft-action h-8 shrink-0 rounded-lg px-4 text-[12px] font-medium disabled:opacity-40"
       >
         {pending ? "Submitting…" : "Run"}
       </button>
@@ -450,6 +454,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           {readiness.label}
         </span>
       ) : null}
+      {readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || readiness?.reason === "AGENT_ORIGIN_UNPROVEN" ? (
+        <button type="button" onClick={() => setPage("supervisor")} className="h-8 shrink-0 px-2.5 text-[12px] text-amber-200" data-testid="client-inspect-sessions">Check sessions</button>
+      ) : null}
       {readiness?.reason === "WORKSPACE_EXECUTION_PAUSED" || recoveryResult?.state === "RECONCILE_REQUIRED" || recoveryResult?.state === "ABSENCE_CONFIRMED" ? (
         <button
           type="button"
@@ -461,18 +468,19 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           {recoveryPending ? "Checking…" : recoveryResult?.state === "RECONCILE_REQUIRED" ? "Check recovery" : "Resume execution"}
         </button>
       ) : null}
-      {(receipt || journalEntry || error) ? (
+      {(receipt || journalEntry || error || (readiness && !readiness.execution_ready)) ? (
         <button type="button" onClick={() => onDetailOpenChange(true)} data-testid="client-goal-details"
           className="h-8 shrink-0 px-2 text-[12px] text-zinc-300 hover:bg-zinc-800">Status</button>
       ) : null}
       {detailOpen ? <Dialog open onOpenChange={onDetailOpenChange}>
-        <DialogContent showCloseButton={false} className="mc-dark border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
+        <DialogContent showCloseButton={false} className="mc-dark max-h-[85vh] overflow-y-auto border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
           onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
           <DialogDescription className="text-zinc-400">{status || "No task submitted"}. A queued task has been accepted for execution. A received result still requires independent verification before acceptance.</DialogDescription>
           {readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
             Execution: {readiness.label}. {readiness.detail}
           </p> : null}
+          {readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" ? <InterruptedSetupRecovery /> : null}
           {recoveryResult ? <p className="text-[12px] text-amber-200" data-testid="client-admission-recovery-result">
             Recovery: {recoveryResult.confirmed_open ? "workspace open confirmed by fresh readback" : recoveryResult.state.toLowerCase().replaceAll("_", " ")}.
             {recoveryResult.prior_effect_replayed === false ? " No prior effect was replayed." : ""}
@@ -524,6 +532,7 @@ function actorTone(actor: PrimaryChatActor) {
 }
 
 function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean; onPickerOpenChange: (open: boolean) => void }) {
+  const setPage = useMe2((s) => s.setPage);
   const { roster, state, refresh } = usePrimaryChatRoster();
   const setChatId = useMe2((s) => s.setChatId);
   const attemptedInitial = useRef<string | null>(null);
@@ -546,7 +555,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
     setSelectionError(null);
     try {
       const agentId = actor.actor_id.startsWith("agent:") ? actor.actor_id.slice("agent:".length) : "";
-      const result = actor.actor_type === "AGENT"
+      const result = actor.actor_type === "AGENT" && !actor.recovery_required
         ? await clientControlBridge()?.selectAgent?.(agentId)
         : await shellBridge()?.selectPrimaryChatActor?.(actor.actor_id);
       if (result?.selection_applied !== true || result.exact_native_binding !== true || result.actor_id !== actor.actor_id || result.tab_id !== actor.tab_id) {
@@ -570,7 +579,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
   // No retry loop: exact binding must already exist for selection to succeed.
   useEffect(() => {
     if (state !== "LIVE" || roster.selected_actor_id || roster.actors.length === 0) return;
-    const first = roster.actors.find((actor) => actor.exact_native_binding);
+    const first = roster.actors.find((actor) => actor.exact_native_binding && !actor.recovery_required);
     if (!first || attemptedInitial.current === first.actor_id) return;
     attemptedInitial.current = first.actor_id;
     void select(first);
@@ -603,13 +612,13 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
               <strong className="block truncate text-[13px] font-medium">
                 {actor.actor_type === "SUPERVISOR" ? "Supervisor" : actor.role.toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}
               </strong>
-              <small className="block truncate font-mono text-[11px] text-zinc-400" data-testid="chat-actor-short-id">
-                {actor.actor_id.split(":").at(-1)?.slice(0, 18) || actor.actor_id.slice(0, 18)}
+              <small className="block truncate text-[11px] text-zinc-400" data-testid="chat-actor-short-id" title={actor.actor_id}>
+                {actor.title || actor.model || "ChatGPT session"}
               </small>
             </span>
             <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
               <i aria-hidden className={`h-1.5 w-1.5 rounded-full ${actorTone(actor)}`} />
-              {selecting === actor.actor_id ? "Opening…" : actor.state.toLowerCase().replaceAll("_", " ")}
+              {selecting === actor.actor_id ? "Opening…" : actor.recovery_required ? "Check session" : actor.state.toLowerCase().replaceAll("_", " ")}
             </span>
           </button>
         );
@@ -629,7 +638,10 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
         {state === "LOADING" && ordered.length === 0 ? <p role="status" className="px-3 py-4 text-[12px] text-zinc-400">Connecting to the Browser…</p> : null}
         {state === "UNAVAILABLE" ? <p role="status" className="px-3 py-4 text-[12px] text-amber-300">The Browser roster is unavailable. Refresh to reconnect.{roster.actor_count ? " Previous agents are shown below." : ""}</p> : null}
         {selectionError ? <p role="alert" className="px-3 pb-3 text-[12px] text-amber-300">{selectionError}</p> : null}
-        {state === "LIVE" && ordered.length === 0 ? <p className="px-3 py-4 text-[12px] text-zinc-400">{query ? "No matching agents." : "No connected agents. Check Supervisor in Settings to see fleet readiness."}</p> : null}
+        {state === "LIVE" && ordered.length === 0 ? <div className="mx-3 rounded-xl bg-zinc-900/70 p-4 text-[13px] leading-relaxed text-zinc-400">
+          <p>{query ? "No matching agents." : "No verified sessions are available yet."}</p>
+          {!query ? <><p className="mt-2">Check agent setup and any interrupted connections.</p><button type="button" onClick={() => setPage("supervisor")} className="mt-3 min-h-8 px-2 text-[12px] text-cyan-200">View agent status</button></> : null}
+        </div> : null}
         {supervisors.length ? section("Supervisors", supervisors) : null}
         {agents.length ? section("Agents", agents) : null}
       </div>
@@ -656,6 +668,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
 }
 
 function PrimaryChatFleetWorkspace({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean; onPickerOpenChange: (open: boolean) => void }) {
+  const setPage = useMe2((s) => s.setPage);
   return (
     <div
       className="flex h-full min-h-0 min-w-0 overflow-hidden bg-[#09090b]"
@@ -663,12 +676,14 @@ function PrimaryChatFleetWorkspace({ pickerOpen, onPickerOpenChange }: { pickerO
     >
       <ChatFleetRail pickerOpen={pickerOpen} onPickerOpenChange={onPickerOpenChange} />
       <section
-        className="relative min-w-0 flex-1 overflow-hidden bg-black"
+        className="relative min-w-0 flex-1 overflow-hidden bg-[#09090b]"
         data-testid="native-chat-surface-slot"
         aria-label="Selected chat agent website"
       >
-        <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-[13px] text-zinc-400">
-          <div><h1 className="mb-2 text-[18px] font-medium text-zinc-200">Your agent workspace</h1><p>Select an agent to view its conversation.</p></div>
+        <div className="absolute inset-0 grid place-items-center p-8 text-center text-[13px] text-zinc-400">
+          <div className="max-w-[420px]"><h1 className="mb-3 text-[24px] font-medium tracking-tight text-zinc-200">A place for your next task</h1><p className="leading-relaxed">Describe what you want to build, or choose an agent conversation from the sidebar. Your projects and history stay on this computer.</p>
+            <div className="mt-5 flex justify-center gap-2"><button type="button" onClick={() => setPage("tasks")} className="mc-soft-action min-h-9 px-4 text-[13px]">Projects and tasks</button><button type="button" onClick={() => setPage("supervisor")} className="min-h-9 px-4 text-[13px]">Agent status</button></div>
+          </div>
         </div>
       </section>
     </div>
@@ -724,7 +739,7 @@ export function Me2Shell() {
       <TopBar fleetPickerOpen={fleetPickerOpen} onOpenFleet={() => setFleetPickerOpen(true)} />
       {mainWorkspace ? <GoalComposer detailOpen={goalDetailOpen} onDetailOpenChange={setGoalDetailOpen} /> : null}
       <main
-        className={mainWorkspace ? "min-h-0 min-w-0 flex-1 overflow-hidden" : "min-h-0 min-w-0 flex-1 overflow-auto p-1.5"}
+        className={mainWorkspace ? "min-h-0 min-w-0 flex-1 overflow-hidden" : "min-h-0 min-w-0 flex-1 overflow-auto p-5 sm:p-6"}
         data-testid="page-outlet"
         data-page={page}
       >

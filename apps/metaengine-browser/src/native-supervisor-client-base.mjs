@@ -423,6 +423,7 @@ export class NativeSupervisorClient {
   #supervisorMode = 'CONTROL';
   #armed = true;
   #lifecycle = null;
+  #interruptedSetupRecoveryHold = false;
   #mesh = null;
   #selfUpdate = null;
   #continuityStatus = {
@@ -576,10 +577,13 @@ export class NativeSupervisorClient {
 
     const continuousServiceCanActuate = () => controlModeAllows(this.#supervisorMode)
       && armedAllows(this.#armed)
+      && this.#interruptedSetupRecoveryHold !== true
       && devosRuntimeControlAllowsContinuousService(this.#runtimeControl);
     const executeSupervisorCommand = async (command) => {
       const action = String(command?.action || '');
+      if (this.#interruptedSetupRecoveryHold && !READ_ONLY_ACTIONS.has(action)) throw new Error('interrupted_setup_recovery_fenced');
       if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
+        if (this.#interruptedSetupRecoveryHold) throw new Error('interrupted_setup_recovery_fenced');
         if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
         if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
         if (!devosRuntimeControlAllowsContinuousService(this.#runtimeControl)) throw new Error('continuous_service_admission_fenced');
@@ -727,7 +731,8 @@ export class NativeSupervisorClient {
         cycle_errors_terminal: false,
         runtime_control: structuredClone(this.#runtimeControl),
         authoritative_admission_required: true,
-        actuation_allowed: devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+        actuation_allowed: !this.#interruptedSetupRecoveryHold && devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+        interrupted_setup_recovery_fenced: this.#interruptedSetupRecoveryHold,
         authority_effect: false,
       },
       result_receipt_reconciliation: {
@@ -1530,10 +1535,42 @@ export class NativeSupervisorClient {
   // admission hook while its bounded turn is active; the DB remains the sole
   // task/command lease authority.
   canStartMaintenance() {
-    return true;
+    return this.#interruptedSetupRecoveryHold !== true;
+  }
+
+  setInterruptedSetupRecoveryFence(fenced) {
+    if (typeof fenced !== 'boolean') throw new Error('interrupted_setup_recovery_fence_invalid');
+    this.#interruptedSetupRecoveryHold = fenced;
+  }
+
+  async withInterruptedSetupRecovery(operation) {
+    if (typeof operation !== 'function') throw new Error('interrupted_setup_recovery_operation_required');
+    if (this.#interruptedSetupRecoveryHold || this.#currentCommands.size > 0 || this.#legacyFastlaneBusy) {
+      throw new Error('interrupted_setup_native_mutation_busy');
+    }
+    this.#interruptedSetupRecoveryHold = true;
+    try {
+      await this.#maintenancePromise;
+      // A remote lease may have arrived while the maintenance lane drained.
+      // It cannot execute a mutation under the hold; require it fully settled.
+      if (this.#currentCommands.size > 0) throw new Error('interrupted_setup_native_mutation_busy');
+      const result = await operation();
+      this.#interruptedSetupRecoveryHold = false;
+      return result;
+    } catch (error) {
+      // Only the recovery coordinator's durable readback can release this
+      // fence after an uncertain local apply. It never grants SQL admission.
+      throw error;
+    }
+  }
+
+  async archiveInterruptedBootstrapForNewEpoch(binding) {
+    if (!this.#interruptedSetupRecoveryHold) throw new Error('interrupted_setup_native_hold_required');
+    return this.#lifecycle?.archiveInterruptedBootstrapForNewEpoch(binding);
   }
 
   #kickMaintenance() {
+    if (this.#interruptedSetupRecoveryHold) return this.#maintenancePromise;
     if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
     if (this.canStartMaintenance() !== true) return this.#maintenancePromise;
     const now = Date.now();
@@ -1859,6 +1896,9 @@ export class NativeSupervisorClient {
   }
 
   async #executeLocalOrRemote(command) {
+    if (this.#interruptedSetupRecoveryHold && !READ_ONLY_ACTIONS.has(String(command?.action || ''))) {
+      throw new Error('interrupted_setup_recovery_fenced');
+    }
     const action = String(command?.action || '').toUpperCase();
     // This is the only program-policy bypass. The command has already traversed
     // enrollment + device-signed lease transport before reaching this function.
@@ -1933,6 +1973,7 @@ export class NativeSupervisorClient {
       if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
       return this.#selfUpdate?.applyWhenSafe();
     }
+    if (this.#interruptedSetupRecoveryHold && !READ_ONLY_ACTIONS.has(action)) throw new Error('interrupted_setup_recovery_fenced');
     if (!controlModeAllows(this.#supervisorMode) && !READ_ONLY_ACTIONS.has(action)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
     if (!armedAllows(this.#armed) && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
     return this.#executeCommand(command);

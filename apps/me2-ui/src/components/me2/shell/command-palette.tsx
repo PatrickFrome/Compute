@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
 import { sendCommand, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
 const PAGE_META: Record<string, { hint: string }> = {
-  browser: { hint: "Native z.ai conversations" },
+  browser: { hint: "Agent conversations" },
   code: { hint: "Repository and workspace" },
   tasks: { hint: "Queue and task details" },
   supervisor: { hint: "Coordination and readiness" },
@@ -204,7 +204,7 @@ export function CommandPalette() {
         <CommandEmpty>не найдено</CommandEmpty>
 
         {/* PAGES */}
-        {(mode === "all" || mode === "pages") && <CommandGroup heading="Advanced surfaces · search">
+        {(mode === "all" || mode === "pages") && <CommandGroup heading="Workspace">
           {PAGES.filter((p) => p.key !== "browser").map((p) => {
             const m = PAGE_META[p.key];
             return (
@@ -212,7 +212,7 @@ export function CommandPalette() {
                 key={p.key} value={`page ${p.key} ${p.label} ${m?.hint ?? ""}`}
                 onSelect={() => { setPage(p.key); setOpen(false); }}
               >
-                {p.label}
+                {p.key === "observability" ? "Activity" : p.key === "system" ? "Settings" : p.label.charAt(0) + p.label.slice(1).toLowerCase()}
                 <span data-palette-detail className="ml-3 truncate text-[12px] text-zinc-400">{m?.hint}</span>
               </CommandItem>
             );
@@ -223,8 +223,8 @@ export function CommandPalette() {
         {/* Native agents live in the Browser workspace rail. The palette does
             not spawn daemon/API agents or invent a second fleet projection. */}
         {mode === "all" ? (
-          <CommandGroup heading="Native Agent fleet">
-            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}> Open native ChatGPT agent fleet
+          <CommandGroup heading="Agents">
+            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}> Open agent workspace
               <span data-palette-detail className="ml-auto text-[12px] text-zinc-400">Existing sessions</span>
             </CommandItem>
           </CommandGroup>

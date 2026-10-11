@@ -101,6 +101,7 @@ function parseLine(line, lineNumber) {
     throw new Error(`rsi_runtime_ledger_json_invalid:${lineNumber}`);
   }
   if (row?.schema !== RSI_RUNTIME_LEDGER_EVENT_SCHEMA) throw new Error(`rsi_runtime_ledger_schema_invalid:${lineNumber}`);
+  if (row.authority_effect !== false) throw new Error(`rsi_runtime_ledger_authority_effect_invalid:${lineNumber}`);
   if (!Number.isSafeInteger(row.seq) || row.seq < 1) throw new Error(`rsi_runtime_ledger_seq_invalid:${lineNumber}`);
   exactSha(row.source_sha);
   eventType(row.type);
@@ -122,12 +123,66 @@ function parseLine(line, lineNumber) {
   return Object.freeze({ ...core, event_digest: row.event_digest });
 }
 
+// Operator-invoked recovery for the historical concurrent-start defect. Every
+// event still has to pass schema, payload and digest verification. Only repeated
+// RUNTIME_BOUND forks from the immediately preceding startup are eligible; task,
+// learning, truncated or tampered events remain a hard failure.
+export function planRsiRuntimeStartupForkRecovery(text) {
+  if (typeof text !== 'string' || !text.endsWith('\n') || Buffer.byteLength(text, 'utf8') > 16 * 1024 * 1024) {
+    throw new Error('rsi_runtime_recovery_complete_bounded_ledger_required');
+  }
+  const lines = text.split('\n').slice(0, -1);
+  if (lines.some(line => !line.trim())) throw new Error('rsi_runtime_recovery_blank_line_forbidden');
+  const rows = lines.map((line, index) => parseLine(line, index + 1));
+  let accepted = 0;
+  let previous = null;
+  for (const row of rows) {
+    if (row.seq !== accepted + 1 || row.previous_digest !== previous) break;
+    accepted += 1;
+    previous = row.event_digest;
+  }
+  if (accepted === rows.length) throw new Error('rsi_runtime_recovery_not_needed');
+  if (accepted < 2) throw new Error('rsi_runtime_recovery_verified_prefix_required');
+  const bound = rows[accepted - 1];
+  const parent = rows[accepted - 2];
+  const quarantine = rows.slice(accepted);
+  if (bound.type !== 'RUNTIME_BOUND' || quarantine.length > 64) {
+    throw new Error('rsi_runtime_recovery_startup_fork_required');
+  }
+  let previousAt = Date.parse(bound.at);
+  for (let index = 0; index < quarantine.length; index += 1) {
+    const row = quarantine[index];
+    const at = Date.parse(row.at);
+    if (row.type !== 'RUNTIME_BOUND' || row.source_sha !== bound.source_sha
+      || row.seq !== bound.seq + 2 * (index + 1)
+      || row.previous_digest !== parent.event_digest
+      || canonical(row.payload) !== canonical(bound.payload)
+      || at < previousAt || at - Date.parse(bound.at) > 10_000) {
+      throw new Error('rsi_runtime_recovery_startup_fork_required');
+    }
+    previousAt = at;
+  }
+  return Object.freeze({
+    schema: 'metaengine.rsi.runtime-startup-fork-recovery-plan.v1',
+    original_sha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+    original_event_count: rows.length,
+    accepted_event_count: accepted,
+    accepted_last_digest: bound.event_digest,
+    quarantined_event_digests: Object.freeze(quarantine.map(row => row.event_digest)),
+    accepted_prefix: lines.slice(0, accepted).join('\n') + '\n',
+    authority_effect: false,
+  });
+}
+
 export class RsiRuntimeLedger {
   #path;
   #sourceSha;
   #clock;
   #events = [];
   #initialized = false;
+  #initializing = null;
+  #appendTail = Promise.resolve();
+  #writeFailed = false;
 
   constructor({ ledgerPath, source_sha, clock = () => Date.now() } = {}) {
     if (!ledgerPath || typeof ledgerPath !== 'string') throw new Error('rsi_runtime_ledger_path_required');
@@ -139,6 +194,16 @@ export class RsiRuntimeLedger {
 
   async init() {
     if (this.#initialized) return this.snapshot();
+    if (this.#initializing) return this.#initializing;
+    this.#initializing = this.#initialize();
+    try {
+      return await this.#initializing;
+    } finally {
+      this.#initializing = null;
+    }
+  }
+
+  async #initialize() {
     await fs.mkdir(path.dirname(this.#path), { recursive: true });
     let text = '';
     try {
@@ -147,40 +212,63 @@ export class RsiRuntimeLedger {
       if (error?.code !== 'ENOENT') throw error;
     }
     const lines = text.split(/\r?\n/).filter(Boolean);
+    const events = [];
     let previous = null;
     for (let i = 0; i < lines.length; i += 1) {
       const row = parseLine(lines[i], i + 1);
       if (row.seq !== i + 1) throw new Error(`rsi_runtime_ledger_sequence_gap:${i + 1}`);
       if ((row.previous_digest ?? null) !== previous) throw new Error(`rsi_runtime_ledger_chain_mismatch:${i + 1}`);
-      this.#events.push(row);
+      events.push(row);
       previous = row.event_digest;
     }
+    // Publish the replay only after every row has passed. A failed or concurrent
+    // init must never duplicate a valid prefix in the next event's sequence.
+    this.#events = events;
     this.#initialized = true;
     return this.snapshot();
   }
 
   async append(type, payload = {}) {
     if (!this.#initialized) throw new Error('rsi_runtime_ledger_not_initialized');
+    const normalizedType = eventType(type);
+    const normalizedPayload = normalizePayload(payload);
+    // Sequence assignment, durable write and in-memory publication form one
+    // operation. Parallel callers must observe the previous completed write.
+    const operation = this.#appendTail.then(() => this.#append(normalizedType, normalizedPayload));
+    this.#appendTail = operation.catch(() => {});
+    return operation;
+  }
+
+  async #append(type, payload) {
+    if (this.#writeFailed) throw new Error('rsi_runtime_ledger_write_failed_restart_required');
     const core = {
       schema: RSI_RUNTIME_LEDGER_EVENT_SCHEMA,
       seq: this.#events.length + 1,
-      type: eventType(type),
+      type,
       at: new Date(this.#clock()).toISOString(),
       source_sha: this.#sourceSha,
       previous_digest: this.#events.at(-1)?.event_digest || null,
-      payload: normalizePayload(payload),
+      payload,
       authority_effect: false,
     };
     const row = Object.freeze({ ...core, event_digest: digest(core) });
     const serialized = `${JSON.stringify(row)}\n`;
     if (Buffer.byteLength(serialized, 'utf8') > MAX_EVENT_BYTES + 8192) throw new Error('rsi_runtime_ledger_event_too_large');
 
-    const handle = await fs.open(this.#path, 'a', 0o600);
+    let handle;
     try {
-      await handle.write(serialized, null, 'utf8');
+      handle = await fs.open(this.#path, 'a', 0o600);
+      await handle.writeFile(serialized, 'utf8');
       await handle.sync();
-    } finally {
       await handle.close();
+      handle = null;
+    } catch (error) {
+      // A write/fsync error may have persisted some bytes. Require a fresh
+      // validated replay instead of assigning another sequence from stale state.
+      this.#writeFailed = true;
+      throw error;
+    } finally {
+      await handle?.close().catch(() => {});
     }
     this.#events.push(row);
     return structuredClone(row);

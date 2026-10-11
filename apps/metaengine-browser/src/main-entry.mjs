@@ -10,6 +10,7 @@ import {
   activateExistingPrimaryWindow,
   beginBrowserStartupJournal,
   recordBrowserStartupEvent,
+  observePrimaryWindowStartup,
   waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
 } from './browser-startup-observability.mjs';
@@ -279,6 +280,7 @@ if (guard.installer_shutdown_control) {
           {
             launch_id: launchData?.launch_id ?? null,
             window_count: activation.window_count ?? 0,
+            window_id: activation.window_id ?? null,
             restored: activation.restored === true,
             visible: activation.visible === true,
             focused: activation.focused === true,
@@ -654,23 +656,29 @@ if (guard.installer_shutdown_control) {
         // A successful import is still not a usable Browser. Require independent
         // readback that a visible BaseWindow survived for a bounded stability
         // interval. CI consumes the same durable event on a normal no-flag boot.
-        void waitForStablePrimaryWindow(BaseWindow)
-          .then((windowReadback) => recordStartup(
+        const windowObserver = observePrimaryWindowStartup(BaseWindow, {
+          onReadback: (windowReadback) => recordStartup(
             windowReadback.ok ? 'PRIMARY_WINDOW_STABLE' : 'PRIMARY_WINDOW_STABLE_TIMEOUT',
             windowReadback.reason,
             {
               window_count: windowReadback.window_count ?? 0,
+              window_id: windowReadback.window_id ?? null,
               stable_ms: windowReadback.stable_ms ?? 0,
               visible: windowReadback.visible === true,
               focused: windowReadback.focused === true,
+              elapsed_ms: windowReadback.elapsed_ms ?? 0,
+              timeout_ms: windowReadback.timeout_ms ?? 0,
+              observation_phase: windowReadback.observation_phase,
             },
-          ))
-          .catch((error) => recordStartup(
+          ),
+          onError: (error) => recordStartup(
             'PRIMARY_WINDOW_OBSERVER_FAILED',
             'PRIMARY_WINDOW_READBACK_ERROR',
             {},
             error,
-          ));
+          ),
+        });
+        app.once('will-quit', () => windowObserver.stop());
       }
 
       if (resumeSuccessorQualification) {

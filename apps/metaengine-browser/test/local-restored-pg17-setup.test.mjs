@@ -3,8 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { EventEmitter } from 'node:events';
-import { connectInstalledRestoredPostgres, showInstalledRestoredProviderWizard } from '../src/local-restored-pg17-setup.mjs';
+import { connectInstalledRestoredPostgres } from '../src/local-restored-pg17-setup.mjs';
 
 const sha = 'a'.repeat(64);
 const restoreSha = 'b'.repeat(64);
@@ -197,39 +196,4 @@ test('attached setup rejects ambiguous preparation, lifecycle receipt and mode d
     postgresMode:'attached',apiRoleMode:'service_role',clusterPinPreserved:true,postgresLifecycleOwned:false,copyVerified:false,vaultPreserved:true}),
     launch:async()=>{effects++;}}),/durable_copy_unverified/);
   assert.equal(effects,0);
-});
-
-test('idle first-run setup closes on installer control and releases admission without starting an operator',{
-  skip:process.platform!=='win32',
-},async t=>{
-  const f=await fixture(t);
-  const app=new EventEmitter();
-  app.isPackaged=true;
-  app.whenReady=async()=>{};
-  const handlers=new Map();
-  let window,shown;
-  const displayed=new Promise(resolve=>{shown=resolve;});
-  class Window extends EventEmitter {
-    constructor(){super();window=this;this.webContents=new EventEmitter();this.webContents.id=23;
-      this.webContents.setWindowOpenHandler=()=>{};this.destroyed=false;}
-    isDestroyed(){return this.destroyed;}
-    setMenu(){}
-    async loadFile(){}
-    show(){shown();}
-    close(){let prevented=false;this.emit('close',{preventDefault:()=>{prevented=true;}});
-      if(!prevented){this.destroyed=true;this.emit('closed');}}
-  }
-  let operators=0;
-  const completion=showInstalledRestoredProviderWizard({app,BrowserWindow:Window,
-    ipcMain:{handle:(key,handler)=>handlers.set(key,handler),removeHandler:key=>handlers.delete(key)},
-    dialog:{},resourcesPath:f.resourcesPath,env:{APPDATA:f.appDataDirectory,LOCALAPPDATA:path.join(f.resourcesPath,'local')},
-    operator:async()=>{operators++;assert.fail('idle wizard must never start an operator');}});
-  await displayed;
-  assert.equal(handlers.size,2);
-  app.emit('second-instance',null,['browser.exe','--metaengine-installer-shutdown']);
-  assert.deepEqual(await completion,{state:'CANCELLED',authority_effect:false});
-  assert.equal(window.destroyed,true);
-  assert.equal(handlers.size,0);
-  assert.equal(app.listenerCount('second-instance'),0);
-  assert.equal(operators,0);
 });

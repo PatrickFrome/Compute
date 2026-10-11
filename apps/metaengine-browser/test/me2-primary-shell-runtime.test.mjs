@@ -420,14 +420,13 @@ test('R106 primary shell consumes no retired COMMAND AgentChat feed', () => {
 });
 
 test('R85 unavailable legacy sandbox plane is fail-close and collapsed by default', () => {
-  assert.match(me2CodePage, /title="SANDBOXES · LEGACY LOCKED"/);
-  assert.match(me2CodePage, /defaultOpen=\{false\}/);
-  assert.match(me2CodePage, /legacy capability unavailable/);
+  assert.match(me2CodePage, /id="code-sandboxes-plane" title="Sandbox records"[^\n]+defaultOpen=\{false\}/);
+  assert.match(me2CodePage, /Sandbox lifecycle operations are unavailable in this runtime/);
 });
 
 test('R85 Tasks is task-focused and does not duplicate Browser or Mirror control planes', () => {
   assert.match(me2TasksPage, /data-testid="page-tasks"/);
-  assert.match(me2TasksPage, /title={`ВЕТКИ · ЗАДАЧИ/);
+  assert.match(me2TasksPage, /title=\{`Task branches/);
   assert.doesNotMatch(me2TasksPage, /loadBrowserTabs|type BrowserTab|me2:cast-toggle|me2:cast-ctl/);
   assert.doesNotMatch(me2TasksPage, /<MirrorPanel|mirror-panel/);
   assert.doesNotMatch(me2TasksPage, /MonitorPlay|MousePointerClick|AppWindow/);
@@ -647,7 +646,13 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
 
   assert.match(main, /let primaryShellOverlayActive = false/);
-  assert.match(main, /primaryShellPage === 'browser'\s*&& primaryShellOverlayActive !== true/);
+  const nativeVisibility = main.slice(main.indexOf('function nativeBrowserSurfaceAllowed('), main.indexOf('async function preparePrimaryShellTarget('));
+  assert.match(nativeVisibility, /primaryShellPage !== 'browser'\s*\|\| primaryShellOverlayActive === true\) return false/);
+  assert.match(nativeVisibility, /const roster = primaryChatFleetRoster\(\)/);
+  assert.match(nativeVisibility, /actor\.selected === true[\s\S]*actor\.actor_id === roster\.selected_actor_id && actor\.exact_native_binding === true/);
+  const nativeRoster = main.slice(main.indexOf('function primaryChatFleetRoster('), main.indexOf('function selectPrimaryChatActor('));
+  assert.match(nativeRoster, /binding\.tab_id !== tabId \|\| binding\.web_contents_id !== Number\(view\.webContents\.id\)/);
+  assert.match(nativeRoster, /expectedTargetId[\s\S]*webcontents:\$\{binding\.web_contents_id\}/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-overlay'/);
   assert.match(main, /typeof rawActive !== 'boolean'/);
 

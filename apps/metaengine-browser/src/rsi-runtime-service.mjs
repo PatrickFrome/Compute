@@ -193,6 +193,7 @@ export class RsiRuntimeService {
   #verifiedArchive;
   #roots;
   #running = false;
+  #starting = null;
   #startedAt = null;
   #lastObservationDigest = null;
   #lastObservationAt = null;
@@ -291,6 +292,16 @@ export class RsiRuntimeService {
 
   async start() {
     if (this.#running) return this.snapshot();
+    if (this.#starting) return this.#starting;
+    this.#starting = this.#start();
+    try {
+      return await this.#starting;
+    } finally {
+      this.#starting = null;
+    }
+  }
+
+  async #start() {
     await this.#commandAttribution.init();
     await this.#experienceStore.init();
     await this.#skillLifecycle.init();

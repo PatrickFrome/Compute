@@ -6,6 +6,10 @@ export const MANAGED_TASK_PROJECT_DIRECTORY_NAME = 'managed-task-projects-v1';
 const fail = code => { throw new Error(`managed_project_storage_${code}`); };
 
 export async function assertManagedProjectPhysicalDirectory(directory) {
+  // Electron's Windows userData path can contain a package-name slash, e.g.
+  // @metaengine/browser-shell. Canonicalize separators before exact-path and
+  // physical-object checks; dot segments, aliases and remote paths still fail.
+  if (process.platform === 'win32' && typeof directory === 'string') directory = directory.replaceAll('/', path.sep);
   if (typeof directory !== 'string' || !path.isAbsolute(directory) || path.resolve(directory) !== directory
       || directory.length > 2048 || /^(?:\\\\|\/\/)/.test(directory) || /[\x00-\x1f]/.test(directory)) fail('directory_invalid');
   let current = path.parse(directory).root;
@@ -15,6 +19,7 @@ export async function assertManagedProjectPhysicalDirectory(directory) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail('directory_alias_forbidden');
   }
   if (await fs.realpath(directory) !== directory) fail('directory_alias_forbidden');
+  return directory;
 }
 
 export function assertManagedProjectPrivateReceipt(receipt, operation) {
@@ -26,8 +31,8 @@ export function assertManagedProjectPrivateReceipt(receipt, operation) {
 export async function prepareManagedTaskProjectStorage({ userDataPath, platform = process.platform,
   protectStorage = protectOwnerOnlyWindowsDirectory, verifyStorage = verifyOwnerOnlyWindowsStorage } = {}) {
   if (!['win32', 'linux', 'darwin'].includes(platform)) fail('platform_unsupported');
-  await assertManagedProjectPhysicalDirectory(userDataPath);
-  const directory = path.join(userDataPath, MANAGED_TASK_PROJECT_DIRECTORY_NAME);
+  const physicalUserDataPath = await assertManagedProjectPhysicalDirectory(userDataPath);
+  const directory = path.join(physicalUserDataPath, MANAGED_TASK_PROJECT_DIRECTORY_NAME);
   let created = false;
   try { await fs.mkdir(directory, { mode: 0o700 }); created = true; }
   catch (error) { if (error.code !== 'EEXIST') throw error; }

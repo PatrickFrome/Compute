@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import test from 'node:test';
+
+const read = relative => fs.readFile(new URL(relative, import.meta.url), 'utf8');
+
+test('assisted installer preview has no client shutdown and committed install gates old-version removal and extraction', async () => {
+  const [custom, entry, section, check, assisted] = await Promise.all([
+    read('../build/installer.nsh'),
+    read('../node_modules/app-builder-lib/templates/nsis/installer.nsi'),
+    read('../node_modules/app-builder-lib/templates/nsis/installSection.nsh'),
+    read('../node_modules/app-builder-lib/templates/nsis/include/allowOnlyOneInstallerInstance.nsh'),
+    read('../node_modules/app-builder-lib/templates/nsis/assistedInstaller.nsh'),
+  ]);
+  // Validate the actual dependency hook placement: customInstall runs too late.
+  const running = section.indexOf('!insertmacro CHECK_APP_RUNNING');
+  const remove = section.indexOf('!insertmacro uninstallOldVersion');
+  const extract = section.indexOf('!insertmacro installApplicationFiles');
+  assert.ok(running >= 0 && running < remove && remove < extract);
+  assert.ok(section.indexOf('!insertmacro customInstall') > extract);
+  assert.match(check, /!macro CHECK_APP_RUNNING[\s\S]*?!ifmacrodef customCheckAppRunning\s*!insertmacro customCheckAppRunning/);
+
+  const onInit = /Function \.onInit\b([\s\S]*?)FunctionEnd/.exec(entry)?.[1];
+  assert.ok(onInit);
+  assert.doesNotMatch(onInit, /CHECK_APP_RUNNING|customCheckAppRunning|customInstall/);
+  assert.doesNotMatch(custom, /!macro (?:customInit|preInit)\b/);
+  const welcome = /!macro customWelcomePage\b([\s\S]*?)!macroend/.exec(custom)?.[1];
+  assert.match(welcome, /!insertmacro MUI_PAGE_WELCOME/);
+  assert.doesNotMatch(welcome, /Exec|CHECK_APP_RUNNING|shutdown|Call/i);
+  assert.ok(assisted.indexOf('!insertmacro customWelcomePage') < assisted.indexOf('!insertmacro MUI_PAGE_INSTFILES'));
+
+  const shutdown = /!macro customCheckAppRunning\b([\s\S]*?)!macroend/.exec(custom)?.[1];
+  assert.ok(shutdown);
+  assert.match(shutdown, /File \/oname=\$PLUGINSDIR\\metaengine-installer-shutdown\.ps1/);
+  assert.match(shutdown, /ExecWait [^\n]+-InstalledExe "\$INSTDIR\\\$\{APP_EXECUTABLE_FILENAME\}"/);
+  assert.match(shutdown, /-WindowStyle Hidden/);
+  assert.doesNotMatch(shutdown, /IfFileExists/);
+  assert.match(shutdown, /StrCmp \$0 "0" metaengine_installer_shutdown_done/);
+  assert.match(shutdown, /metaengine_installer_shutdown_abort:\s*Abort/);
+  assert.doesNotMatch(shutdown, /taskkill|Stop-Process\s+-Name/i);
+});
+
+test('new uninstaller uses the same exact-path cleanup gate before removing files', async () => {
+  const custom = await read('../build/installer.nsh');
+  const uninstaller = await read('../node_modules/app-builder-lib/templates/nsis/uninstaller.nsh');
+  assert.match(custom, /!macro customCheckAppRunning/);
+  assert.match(uninstaller, /Function un\.checkAppRunning\s*!insertmacro CHECK_APP_RUNNING\s*FunctionEnd/);
+  const section = /Section "un\.\$\{UNINSTALL_SECTION_NAME\}"([\s\S]*?)SectionEnd/.exec(uninstaller)?.[1];
+  assert.ok(section);
+  assert.ok(section.indexOf('call un.checkAppRunning') < section.indexOf('!insertmacro customRemoveFiles'));
+});

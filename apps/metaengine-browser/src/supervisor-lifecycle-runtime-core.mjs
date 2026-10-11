@@ -242,6 +242,20 @@ export class SupervisorLifecycleRuntime {
     return this.snapshot();
   }
 
+  async archiveInterruptedBootstrapForNewEpoch(binding) {
+    if (!this.#keepalive) throw new Error('supervisor_operator_recovery_not_ready');
+    const result = await this.#keepalive.archiveInterruptedBootstrapForNewEpoch(binding);
+    this.#activeRequest = null;
+    this.#lastSupervisorGeneration = 'UNKNOWN';
+    this.#lastRecovery = {
+      action: 'OPERATOR_ARCHIVED_UNKNOWN_PREDECESSOR_BOOTSTRAP', recovery_id: binding.recovery_id,
+      supervisor_epoch: result.supervisor_epoch, confirmed: false, ambiguous: false,
+      previous_effect_outcome: 'UNKNOWN', prior_effect_replayed: false,
+      automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+    };
+    return result;
+  }
+
   snapshot() {
     return {
       schema: 'metaengine.supervisor-lifecycle-runtime.v4',

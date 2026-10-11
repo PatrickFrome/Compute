@@ -74,7 +74,12 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
   } else if (!['WAITING', 'GENERATING', 'DONE'].includes(keepalive.state)
     || typeof keepalive.conversation_url !== 'string' || !keepalive.conversation_url
     || !isCurrentBinding({ tab_id: keepalive.tab_id, conversation_url: keepalive.conversation_url })) {
-    reason = 'SUPERVISOR_RECOVERY_REQUIRED'; label = 'Recovery required'; detail = 'The Supervisor needs a verified conversation recovery before dispatch.';
+    reason = 'SUPERVISOR_RECOVERY_REQUIRED'; label = 'Recovery required';
+    detail = keepalive.state === 'WAKE_AMBIGUOUS'
+      ? 'The previous Supervisor send has an unknown result. Inspect its existing conversation; another send is held until the original wake is verified.'
+      : keepalive.state === 'ROLLOVER_AMBIGUOUS'
+        ? 'The Supervisor conversation rollover has an unknown result. Inspect the existing conversation before continuing.'
+        : 'The Supervisor needs a verified conversation recovery before dispatch.';
   } else if (provenAgents.length === 0) {
     reason = 'AGENT_ORIGIN_UNVERIFIED'; label = 'Agents unverified'; detail = 'No active Agent session has matching origin and generation evidence.';
   } else {
@@ -102,6 +107,28 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
     continuous_autonomy: capability(autonomyReady, !codingReady ? codingReason
       : !guardianReady ? 'GUARDIAN_CONTINUITY_NOT_PROVEN' : 'INDEPENDENT_VERIFIER_UNAVAILABLE'),
   });
+  const ambiguousAgents = agents.filter((agent) => agent.lifecycle_state === 'PROVISIONING_AMBIGUOUS');
+  const supervisorAmbiguous = ['WAKE_AMBIGUOUS', 'ROLLOVER_AMBIGUOUS'].includes(keepalive.state);
+  const recovery = Object.freeze({
+    schema: 'metaengine.client.work-recovery-readback.v1',
+    required: supervisorAmbiguous || ambiguousAgents.length > 0,
+    supervisor_state: typeof keepalive.state === 'string' ? keepalive.state.slice(0, 48) : null,
+    supervisor_reason: keepalive.state === 'WAKE_AMBIGUOUS' ? 'SUPERVISOR_SEND_EFFECT_UNKNOWN'
+      : keepalive.state === 'ROLLOVER_AMBIGUOUS' ? 'SUPERVISOR_ROLLOVER_EFFECT_UNKNOWN' : null,
+    supervisor_readback_required: supervisorAmbiguous,
+    agent_readback_required_count: ambiguousAgents.length,
+    agent_reasons: Object.freeze([...new Set(ambiguousAgents.map((agent) => (
+      agent.ambiguous_reason === 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING'
+        ? 'AGENT_BOOTSTRAP_EFFECT_UNKNOWN' : 'AGENT_PROVISIONING_EFFECT_UNKNOWN'
+    )))]),
+    next_step: supervisorAmbiguous || ambiguousAgents.length > 0 ? 'INSPECT_EXISTING_CONVERSATIONS' : null,
+    // Reopening workspace admission does not settle an ambiguous send. This
+    // readback offers no replay, reset or alternative execution route.
+    admission_resume_resolves_unknown_effect: false,
+    prior_effect_replayed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
   return Object.freeze({
     schema: CLIENT_WORK_READINESS_SCHEMA,
     observed_at: new Date(now).toISOString(),
@@ -109,6 +136,7 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
     execution_ready: state === 'READY',
     readiness_scope: 'CHAT_DISPATCH',
     capabilities,
+    recovery,
     continuous_autonomy_ready: autonomyReady,
     heartbeat_fresh: heartbeatFresh,
     generation_floor: count(runtime.generation_floor),
@@ -118,7 +146,7 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
     proven_agent_count: provenAgents.length,
     active_agent_count: agents.filter((agent) => agent.lifecycle_state === 'ACTIVE').length,
     bound_unverified_agent_count: agents.filter((agent) => agent.lifecycle_state === 'BOUND_UNVERIFIED').length,
-    ambiguous_agent_count: agents.filter((agent) => agent.lifecycle_state === 'PROVISIONING_AMBIGUOUS').length,
+    ambiguous_agent_count: ambiguousAgents.length,
     useful_work_verified: false,
     verified_self_improvement: false,
     recovery_effect_exposed: false,

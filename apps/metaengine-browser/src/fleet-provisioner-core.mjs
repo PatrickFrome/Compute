@@ -595,6 +595,39 @@ export class FleetProvisioner {
     });
   }
 
+  async archiveInterruptedBootstrapAgents({ recovery_id, archive_sha256, plan, expected_agents } = {}) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      if (!/^recovery_[a-f0-9-]{36}$/i.test(String(recovery_id || '')) || !/^[a-f0-9]{64}$/.test(String(archive_sha256 || ''))
+        || !plan?.eligible || !Array.isArray(expected_agents) || expected_agents.length !== plan.affected_agent_ids?.length) {
+        throw new Error('fleet_operator_recovery_archive_binding_required');
+      }
+      const rows = expected_agents.map(expected => {
+        const row = this.#requireAgent(expected.agent_id);
+        if (!plan.affected_agent_ids.includes(row.agent_id) || row.lifecycle_state !== 'PROVISIONING_AMBIGUOUS'
+          || row.ambiguous_reason !== 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING' || row.transport_proof || row.conversation_url_sha256
+          || row.generation_epoch !== expected.generation_epoch || row.tab_id !== expected.tab_id || row.target_id !== expected.target_id
+          || (row.tab_id && this.#tabExists(row.tab_id))) throw new Error('fleet_operator_recovery_readback_changed');
+        return row;
+      });
+      if (this.#state.agents.filter(row => row.lifecycle_state !== 'RETIRED').some(row => !plan.affected_agent_ids.includes(row.agent_id))) {
+        throw new Error('fleet_operator_recovery_readback_changed');
+      }
+      if (new Set(rows.map(row => row.agent_id)).size !== rows.length) throw new Error('fleet_operator_recovery_duplicate_agent');
+      const before = clone(this.#state);
+      for (const row of rows) {
+        row.lifecycle_state = 'RETIRED';
+        row.lost_reason = 'OPERATOR_ARCHIVED_UNKNOWN_PREDECESSOR_BOOTSTRAP';
+        row.tab_id = null; row.target_id = null; row.transport_proof = null;
+        row.generation_epoch += 1;
+        row.automatic_retry_allowed = false;
+        row.updated_at = iso(this.#clock);
+      }
+      try { await this.#persist(); } catch (error) { this.#state = before; throw error; }
+      return this.snapshot();
+    });
+  }
+
   #newRegisteredAgent() {
     const at = iso(this.#clock);
     return {

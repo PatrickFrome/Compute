@@ -296,6 +296,17 @@ const activateClientGuardian = () => ipcRenderer.invoke('metaengine:client:activ
 const clientGithubChatStatus = () => ipcRenderer.invoke('metaengine:client:github-chat-status');
 const connectClientGithubChat = () => ipcRenderer.invoke('metaengine:client:github-chat-connect');
 const disconnectClientGithubChat = () => ipcRenderer.invoke('metaengine:client:github-chat-disconnect');
+const clientGithubRepositoryStatus = () => ipcRenderer.invoke('metaengine:client:github-repository-status');
+const connectClientGithubRepository = () => ipcRenderer.invoke('metaengine:client:github-repository-connect');
+const inspectInterruptedSetupRecovery = () => ipcRenderer.invoke('metaengine:client:interrupted-setup-inspect');
+const startFreshSetup = request => {
+  if (!request || typeof request !== 'object' || Array.isArray(request)
+    || Object.keys(request).some(key => !['schema', 'action', 'operator_initiated', 'expected_recovery_sha256'].includes(key))
+    || request.schema !== 'metaengine.client.interrupted-setup-request.v1'
+    || request.action !== 'ARCHIVE_INTERRUPTED_SETUP_AND_START_NEW' || request.operator_initiated !== true
+    || !/^[a-f0-9]{64}$/.test(String(request.expected_recovery_sha256 || ''))) throw new Error('interrupted_setup_explicit_typed_action_required');
+  return ipcRenderer.invoke('metaengine:client:interrupted-setup-start-fresh', { ...request });
+};
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
@@ -336,6 +347,10 @@ if (isPrimaryMe2PresentationDocument()) {
     githubChatStatus: clientGithubChatStatus,
     connectGithubChat: connectClientGithubChat,
     disconnectGithubChat: disconnectClientGithubChat,
+    githubRepositoryStatus: clientGithubRepositoryStatus,
+    connectGithubRepository: connectClientGithubRepository,
+    inspectInterruptedSetupRecovery,
+    startFreshSetup,
     typed_positive_api: true,
     generic_command_exposed: false,
     project_operations_accept_caller_claim: false,

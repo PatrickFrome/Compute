@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
+import { interruptedSetupDigest } from './interrupted-setup-recovery.mjs';
 
 export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
@@ -887,6 +888,44 @@ export class SupervisorKeepalive {
     this.#state.last_completed_cycle_at = retiredAt;
     this.#state.state = this.#postWakeSettlementState('RECOVERING');
     await this.#persist();
+    return this.snapshot();
+  }
+
+  async archiveInterruptedBootstrapForNewEpoch({ recovery_id, archive_sha256, plan, expected_pending_wake } = {}) {
+    if (!/^recovery_[a-f0-9-]{36}$/i.test(String(recovery_id || '')) || !/^[a-f0-9]{64}$/.test(String(archive_sha256 || ''))) {
+      throw new Error('keepalive_operator_recovery_archive_binding_required');
+    }
+    const pending = this.#state.pending_wake;
+    if (!plan?.eligible || !pending?.ambiguous_at || this.#state.conversation_url || this.#state.active_wake || this.#state.rollover_attempt
+      || pending.automatic_retry_allowed !== false || !pending.process_boundary_fenced_at || !this.#state.predecessor_fenced_at
+      || !pending.process_incarnation_id || pending.process_incarnation_id === this.#state.process_incarnation_id
+      || interruptedSetupDigest(pending) !== interruptedSetupDigest(expected_pending_wake)
+      || plan.current_process_incarnation_id !== this.#state.process_incarnation_id
+      || plan.expected_admission_generation_floor !== this.#state.admission_generation_floor
+      || plan.next_supervisor_epoch !== this.#state.supervisor_epoch + 1) {
+      throw new Error('keepalive_operator_recovery_readback_changed');
+    }
+    const before = clone(this.#state);
+    const archivedAt = iso(this.#clock);
+    this.#state.ambiguous_history = [...this.#state.ambiguous_history, {
+      ...clone(pending), archived_at: archivedAt, retired_at: archivedAt,
+      retired_reason: 'OPERATOR_ARCHIVED_UNKNOWN_PREDECESSOR_BOOTSTRAP',
+      operator_recovery_id: recovery_id, operator_recovery_archive_sha256: archive_sha256,
+      previous_effect_outcome: 'UNKNOWN', prior_effect_replayed: false,
+      automatic_retry_allowed: false, authority_effect: false,
+    }].slice(-MAX_WAKE_HISTORY);
+    this.#state.pending_wake = null;
+    this.#state.active_wake = null;
+    this.#state.supervisor_epoch = plan.next_supervisor_epoch;
+    this.#state.cycle_seq = 0;
+    this.#state.conversation_url = null;
+    this.#state.tab_id = null;
+    this.#state.queued_wakes = [];
+    this.#state.previous_worker_generation = {};
+    this.#state.last_wake_at = null;
+    this.#state.last_wake_reason = null;
+    this.#state.state = this.#state.paused ? 'PAUSED' : this.#state.admission_state === 'CLOSED' ? 'PARKED' : 'RECOVERING';
+    try { await this.#persist(); } catch (error) { this.#state = before; throw error; }
     return this.snapshot();
   }
 
