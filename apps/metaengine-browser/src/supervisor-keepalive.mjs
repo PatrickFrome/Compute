@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 import { interruptedSetupDigest } from './interrupted-setup-recovery.mjs';
+import { buildSupervisorWakeTransportIntent } from './supervisor-wake-transport-intent.mjs';
 
 export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
@@ -229,6 +230,7 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch, r
 export class SupervisorKeepalive {
   #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch; #processIncarnationId;
   #saveTail = Promise.resolve();
+  #transportIntentPersistenceFenced = false;
 
   constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), processIncarnationId = null, minWakeIntervalMs = 60000, maxCyclesPerEpoch = null } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('keepalive_persistence_required');
@@ -798,6 +800,51 @@ export class SupervisorKeepalive {
   async prepareWake(reason, metadata = {}) {
     await this.enqueueWake(reason, metadata);
     return this.prepareNextWake();
+  }
+
+  // Preserve the precise origin of a wake before the first physical Send.
+  // This is NOT send confirmation, model proof, nor permission to replay.
+  async recordWakeTransportIntent({ wake_id, phase, tab_id, frame, message } = {}) {
+    if (this.#transportIntentPersistenceFenced) throw new Error('keepalive_transport_intent_persistence_fenced');
+    const pending = this.#state.pending_wake;
+    if (!pending || pending.wake_id !== wake_id || pending.ambiguous_at
+      || pending.process_incarnation_id !== this.#processIncarnationId) {
+      throw new Error('keepalive_transport_intent_current_wake_required');
+    }
+    const intent = buildSupervisorWakeTransportIntent({
+      pending, phase, tab_id, frame, message,
+      processIncarnationId: this.#processIncarnationId,
+      recorded_at: iso(this.#clock),
+    });
+    const intents = Array.isArray(pending.transport_intents) ? pending.transport_intents : [];
+    // A completed intent publication grants only ONE attempt to cross Send.
+    // Never turn a repeated call into permission to dispatch a duplicate click.
+    if (intents.some(row => row.phase === phase)) {
+      throw new Error('keepalive_transport_intent_already_recorded');
+    }
+    if (intents.length >= 2 || (phase === 'ROOT_SEED' && (intents.length !== 0
+      || this.#state.conversation_url))
+      || (phase === 'WAKE' && !this.#state.conversation_url
+        && !intents.some(row => row.phase === 'ROOT_SEED'))) {
+      throw new Error('keepalive_transport_intent_sequence_invalid');
+    }
+    // A known supervisor must never switch its target during an in-flight
+    // wake. The new-conversation bootstrap is the only unbound exception.
+    if (phase === 'WAKE' && this.#state.conversation_url
+      && (intent.conversation_url !== this.#state.conversation_url
+        || (this.#state.tab_id && tab_id !== this.#state.tab_id))) {
+      throw new Error('keepalive_transport_intent_binding_mismatch');
+    }
+    pending.transport_intents = [...intents, intent];
+    try { await this.#persist(); }
+    catch (error) {
+      // The rename may have succeeded even though the caller lost its ACK.
+      // Fence this process incarnation; the next process will observe the
+      // pending wake as unknown rather than issuing a duplicate physical Send.
+      this.#transportIntentPersistenceFenced = true;
+      throw error;
+    }
+    return Object.freeze(clone(intent));
   }
 
   async confirmWakeSent(wakeId) {

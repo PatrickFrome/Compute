@@ -38,6 +38,7 @@ import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-resul
 // METAENGINE_SUPERVISOR_BASE_URL env override). Re-exported here for backwards
 // compatibility with existing importers and tests.
 import { NATIVE_SUPERVISOR_BASE } from './native-supervisor-endpoints.mjs';
+import { localStateProviderConnectionReady } from './local-state-provider-policy.mjs';
 export { NATIVE_SUPERVISOR_BASE };
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
@@ -998,7 +999,8 @@ export class NativeSupervisorClient {
     const heartbeatFresh = Number.isFinite(heartbeatAtMs)
       && Date.now() - heartbeatAtMs <= Math.max(15_000, this.#intervalMs * 5);
     const hasDevice = Boolean(identity?.device_id);
-    const adminReady = this.#adminStatus?.admin_ready === true;
+    const localRuntimeReady = localStateProviderConnectionReady(this.#running);
+    const adminReady = localRuntimeReady && this.#adminStatus?.admin_ready === true;
     let cloudControlState = 'LOCAL_ONLY';
     if (!hasDevice) {
       cloudControlState = ['PENDING','PENDING_APPROVAL','RETRY_REQUIRED'].includes(String(this.#enrollmentStatus))
@@ -1012,7 +1014,7 @@ export class NativeSupervisorClient {
 
     return Object.freeze({
       schema: 'metaengine.client.connection-status.v1',
-      local_runtime_ready: this.#running === true,
+      local_runtime_ready: localRuntimeReady,
       secure_device_key_ready: Boolean(identity?.key_fingerprint_sha256),
       device_enrolled: hasDevice,
       device_id: hasDevice ? String(identity.device_id) : null,

@@ -8,7 +8,7 @@ import {
   installLocalRuntimeHostShutdown, localRuntimeHostEnvironment,
   startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost, validatePackagedLocalRuntimeBinding,
 } from '../src/local-runtime-host-controller.mjs';
-import { LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, LOCAL_STATE_PROVIDER_PROFILE, validateLocalStateProviderConfig } from '../src/local-state-provider-policy.mjs';
+import { LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, LOCAL_STATE_PROVIDER_PROFILE, localStateProviderConnectionReady, validateLocalStateProviderConfig } from '../src/local-state-provider-policy.mjs';
 
 const instance = 'bbc91d2a-44a7-4674-b4b4-5e265ebd2770';
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -220,6 +220,7 @@ test('unexpected host death blocks local readiness without a cloud fallback or r
   await waitForFixtureExitObservation(f.env);
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'OWNED_RUNTIME_HOST_EXITED');
+  assert.equal(localStateProviderConnectionReady(true, f.env), false);
   assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
   assert.equal(f.verifications(), 1);
 });

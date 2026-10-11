@@ -25,6 +25,8 @@ const HEALTH_FAILURE_CODES = new Set([
   'postgres_identity_mismatch', 'postgres_cluster_identity_mismatch', 'postgres_data_directory_mismatch',
   'postgres_owned_pid_mismatch', 'postgres_incarnation_mismatch', 'postgres_identity_invalid',
   'postgres_pid_file_invalid', 'postgres_inspection_failed', 'postgres_process_verification_failed',
+  'postgres_inspection_timeout', 'postgres_inspection_spawn_failed', 'postgres_inspection_query_failed',
+  'postgres_inspection_output_limit',
 ]);
 
 // Public diagnostic data contains finite categories only. Never forward an
@@ -158,29 +160,55 @@ function postgresEnvironment(config) {
 
 async function runBounded(command, args, { env = process.env, timeoutMs = 5000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    let text = '';
+    let child;
+    try { child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch { reject(runtimeError('runtime_command_spawn_failed')); return; }
+    const chunks = [];
+    let bytes = 0;
     let settled = false;
+    let timer;
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       error ? reject(error) : resolve(value);
     };
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(runtimeError('runtime_command_timeout'));
-    }, timeoutMs);
-    child.stdout.on('data', chunk => { text += chunk; if (text.length > 65536) child.kill(); });
+    const terminate = code => {
+      finish(runtimeError(code));
+      try { child.kill(); } catch { /* Only this new child handle is owned. */ }
+    };
+    timer = setTimeout(() => terminate('runtime_command_timeout'), timeoutMs);
+    child.stdout.on('data', chunk => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > 65536) { terminate('runtime_command_output_limit'); return; }
+      chunks.push(buffer);
+    });
+    child.stdout.once('error', () => terminate('runtime_command_output_failed'));
     child.once('error', () => finish(runtimeError('runtime_command_spawn_failed')));
-    child.once('exit', code => finish(code === 0 ? null : runtimeError('runtime_command_failed'), text.trim()));
+    // exit can precede the last stdout bytes. close confirms that the pipes
+    // have drained, so a successful psql cannot yield a truncated identity.
+    child.once('close', (code, signal) => finish(code === 0 && !signal
+      ? null : runtimeError('runtime_command_failed'), Buffer.concat(chunks).toString('utf8').trim()));
   });
 }
 
 export async function inspectPostgres(config) {
   const query = "SELECT json_build_object('data_directory',current_setting('data_directory'),'version',current_setting('server_version_num')::int,'address',host(inet_server_addr()),'port',inet_server_port(),'started_at',pg_postmaster_start_time()" +
     (config.expectedClusterSystemIdentifier ? ",'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system())" : '') + ")::text";
-  const output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config) });
+  let output;
+  try {
+    output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config) });
+  } catch (error) {
+    const categories = {
+      runtime_command_timeout: 'postgres_inspection_timeout',
+      runtime_command_spawn_failed: 'postgres_inspection_spawn_failed',
+      runtime_command_failed: 'postgres_inspection_query_failed',
+      runtime_command_output_limit: 'postgres_inspection_output_limit',
+    };
+    throw runtimeError(categories[error?.code] || 'postgres_inspection_failed');
+  }
   try { return JSON.parse(output); } catch { throw runtimeError('postgres_identity_invalid'); }
 }
 

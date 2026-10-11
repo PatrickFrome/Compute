@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import durableJson from './durable-json-file.cjs';
 import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
@@ -110,19 +111,27 @@ function tabLiveness(state, tabId) {
 }
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
-  catch (e) { if (e?.code === 'ENOENT' || e instanceof SyntaxError) return null; throw e; }
+  catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    // A partially published or corrupted wake record is UNKNOWN, not an
+    // empty history. Never create a new supervisor epoch and send from a
+    // fabricated blank state while the old effect may have crossed Send.
+    if (error instanceof SyntaxError) throw new Error('supervisor_keepalive_corrupt_json_fenced');
+    throw error;
+  }
 }
 async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  // R82-ATOMIC-SAVE (live 2026-09-26): keepalive mutations fire from
-  // un-awaited call sites (e.g. requestRollover(...).catch(() => {})); two
-  // overlapping saves sharing one `.tmp` path race the rename into ENOENT
-  // and the loser throws into an unrelated cycle — live-observed as a cycle
-  // aborting before its rollover dispatch. A unique temp name per save makes
-  // concurrent writers last-writer-wins instead of intermittent ENOENT.
-  const temp = `${file}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, file);
+  // The wake transport-intent must be durable BEFORE typing/sending.
+  // The existing writer preserves unique temp names but lacked fsync.
+  // Reuse the tested exclusive-temp/rename/readback writer.
+  const result = await durableJson.durableWriteJson(file, value);
+  if (result?.contract !== 'METAENGINE_DURABLE_JSON_V1'
+    || result.file_synced !== true || result.rename_committed !== true) {
+    throw new Error('supervisor_keepalive_durable_write_unconfirmed');
+  }
+  if (await fs.readFile(file, 'utf8') !== JSON.stringify(value, null, 2) + '\n') {
+    throw new Error('supervisor_keepalive_durable_readback_mismatch');
+  }
 }
 
 export class SupervisorLifecycleRuntime {
@@ -465,7 +474,20 @@ export class SupervisorLifecycleRuntime {
     return true;
   }
 
-  async #typeAndSend(tabId, message, positiveMarker) {
+  async #recordWakeTransportIntentIfCurrent({ tabId, frame, message, marker, phase, requireWakeIntent = false }) {
+    const wake = this.#keepalive.snapshot().pending_wake;
+    if (!wake || wake.wake_id !== marker || wake.ambiguous_at) {
+      if (requireWakeIntent) throw new Error('supervisor_wake_transport_intent_current_wake_required');
+      return false;
+    }
+    // Must complete durable write/readback before any actual page send effect.
+    await this.#keepalive.recordWakeTransportIntent({
+      wake_id: marker, phase, tab_id: tabId, frame, message,
+    });
+    return true;
+  }
+
+  async #typeAndSend(tabId, message, positiveMarker, { requireWakeIntent = false } = {}) {
     let clicked = false;
     // D-C7: a freshly opened root tab hydrates asynchronously — the first
     // CAPTURE can transiently show zero or several textboxes, which used to
@@ -511,7 +533,11 @@ export class SupervisorLifecycleRuntime {
     // conversation surface where replace+Enter are live-proven. Established
     // conversation surfaces never pay the seed cost.
     if (classifyAgentPlatformSurface(before?.url)?.stage === 'PRECONVERSATION_ROOT') {
-      const seed = await this.#seedRootConversation(tabId, box);
+      await this.#recordWakeTransportIntentIfCurrent({
+        tabId, frame: before, message: GLM_SUPERVISOR_CONVERSATION_SEED,
+        marker: positiveMarker, phase: 'ROOT_SEED', requireWakeIntent,
+      });
+      const seed = await this.#seedRootConversation(tabId, box, { positiveMarker, requireWakeIntent });
       if (!seed.ok) {
         this.#lastError = `supervisor_root_seed:${seed.reason}`;
         return { ok: false, reason: seed.reason, clicked: seed.clicked === true, event_driven_readback: true };
@@ -526,9 +552,26 @@ export class SupervisorLifecycleRuntime {
     // Once Send dispatch starts, uncertainty never permits a second click.
     let submitted;
     try {
+      await this.#recordWakeTransportIntentIfCurrent({
+        tabId, frame: before, message,
+        marker: positiveMarker, phase: 'WAKE', requireWakeIntent,
+      });
+      if (this.#canActuate() !== true) {
+        return { ok: false, reason: 'SUPERVISOR_ADMISSION_CLOSED_BEFORE_SEND', clicked, event_driven_readback: false };
+      }
       submitted = await submitFencedChatGptPrompt({
         executeCommand: this.#execute, tab_id: tabId, frame: before, text: message,
-        beforeSend: async () => { clicked = true; },
+        beforeSend: async () => {
+          if (this.#canActuate() !== true) throw new Error('supervisor_admission_closed_at_send_boundary');
+          if (requireWakeIntent) {
+            const pending = this.#keepalive.snapshot().pending_wake;
+            if (pending?.wake_id !== positiveMarker || pending.ambiguous_at
+              || !pending.transport_intents?.some(row => row.phase === 'WAKE')) {
+              throw new Error('supervisor_wake_binding_changed_at_send_boundary');
+            }
+          }
+          clicked = true;
+        },
       });
     } catch (error) {
       return { ok: false, reason: String(error?.message || error).slice(0, 180), clicked, event_driven_readback: true };
@@ -568,13 +611,23 @@ export class SupervisorLifecycleRuntime {
   // (#typeAndSend): a provably pre-effect reason is a clean abort
   // (clicked=false), anything else stays conservatively ambiguous
   // (clicked=true), retaining the original attempt for positive readback.
-  async #seedRootConversation(tabId, box) {
+  async #seedRootConversation(tabId, box, { positiveMarker = null, requireWakeIntent = false } = {}) {
     let clicked = false;
     let submitted;
     try {
       submitted = await submitFencedChatGptPrompt({
         executeCommand: this.#execute, tab_id: tabId, frame: await this.#capture(tabId), text: GLM_SUPERVISOR_CONVERSATION_SEED,
-        beforeSend: async () => { clicked = true; },
+        beforeSend: async () => {
+          if (this.#canActuate() !== true) throw new Error('supervisor_admission_closed_at_send_boundary');
+          if (requireWakeIntent) {
+            const pending = this.#keepalive.snapshot().pending_wake;
+            if (pending?.wake_id !== positiveMarker || pending.ambiguous_at
+              || !pending.transport_intents?.some(row => row.phase === 'ROOT_SEED')) {
+              throw new Error('supervisor_seed_binding_changed_at_send_boundary');
+            }
+          }
+          clicked = true;
+        },
       });
     } catch (error) {
       return { ok: false, clicked, reason: String(error?.message || error).slice(0, 180), frame: null };
@@ -615,7 +668,7 @@ export class SupervisorLifecycleRuntime {
     if (this.#canActuate() !== true) return false;
     let clicked = false;
     try {
-      const sent = await this.#typeAndSend(prepared.tab_id, prepared.message, prepared.pending.wake_id);
+      const sent = await this.#typeAndSend(prepared.tab_id, prepared.message, prepared.pending.wake_id, { requireWakeIntent: true });
       clicked = sent.clicked === true;
       if (sent.ok) {
         await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
@@ -737,7 +790,7 @@ export class SupervisorLifecycleRuntime {
 
       prepared = await this.#keepalive.prepareBootstrapWake();
       if (!prepared?.ok) return false;
-      const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id);
+      const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id, { requireWakeIntent: true });
       if (!sent.ok) {
         if (sent.clicked === true) {
           await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', { continuation_tab_id: tab.tab_id });
