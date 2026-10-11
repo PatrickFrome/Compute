@@ -1,4 +1,5 @@
 import { app, BaseWindow, dialog } from 'electron';
+import { secondaryDiagnosticRefusal, SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE } from './secondary-diagnostic-refusal.mjs';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
@@ -87,10 +88,18 @@ if (guard.installer_shutdown_control) {
       }));
       app.exit(0);
     }
+  } else if (versionProbe || profileProbe || clientGoalJournalProbe || instanceHoldProbe) {
+    // The old silent exit(0) allowed a new candidate's secondary probe to
+    // masquerade as a successfully qualified primary when an older installed
+    // Browser already owned the singleton. An explicit refusal is not a
+    // version, profile, or journal proof and grants no retry permission.
+    console.error(JSON.stringify(secondaryDiagnosticRefusal({
+      argv: process.argv, version: app.getVersion(),
+    })));
+    app.exit(SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE);
   } else {
-    // Probe/smoke and updater-successor launches preserve the existing
-    // fail-closed singleton behavior. They are not interactive user launches
-    // and must not manufacture a second process authority path.
+    // Smoke and updater-successor launches retain their existing fail-closed
+    // singleton behavior, without manufacturing another Browser runtime.
     app.exit(0);
   }
 } else {
