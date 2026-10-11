@@ -79,7 +79,7 @@ import {
 } from './client-control-contract.mjs';
 import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
 import { ensureClientGoalProject } from './client-goal-project-link.mjs';
-import { ClientAdmissionRecoveryJournal } from './client-admission-recovery-journal.mjs';
+import { createClientAdmissionRecoveryJournalFileStore } from './client-admission-recovery-journal-file-store.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 import { notifyPrimaryWindowShown } from './browser-startup-observability.mjs';
@@ -344,10 +344,6 @@ function devosSessionLayoutStatePath() {
   return path.join(app.getPath('userData'), 'metaengine-devos-session-layout-registry-v1.json');
 }
 
-function clientAdmissionRecoveryJournalStatePath() {
-  return path.join(app.getPath('userData'), 'metaengine-client-admission-recovery-v1.json');
-}
-
 async function ensureClientGoalJournal() {
   if (clientGoalJournal) {
     await clientGoalJournal.load();
@@ -371,16 +367,9 @@ async function ensureClientAdmissionRecoveryJournal() {
       return null;
     }
   }
-  const target = clientAdmissionRecoveryJournalStatePath();
-  clientAdmissionRecoveryJournal = new ClientAdmissionRecoveryJournal({
-    loadState: async () => JSON.parse(await fs.readFile(target, 'utf8')),
-    saveState: async (snapshot) => {
-      const temp = target + '.tmp';
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(temp, JSON.stringify(snapshot, null, 2) + '\n', { mode: 0o600 });
-      await fs.rename(temp, target);
-    },
-  });
+  // Use the same fsync/readback/ambiguity fence as the user-goal journal.
+  // Admission must not be reopened on an unconfirmed local persistence effect.
+  clientAdmissionRecoveryJournal = createClientAdmissionRecoveryJournalFileStore(app.getPath('userData')).journal;
   try {
     await clientAdmissionRecoveryJournal.load();
     return clientAdmissionRecoveryJournal;

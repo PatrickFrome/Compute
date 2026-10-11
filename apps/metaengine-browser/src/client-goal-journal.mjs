@@ -102,6 +102,7 @@ export class ClientGoalJournal {
   #state = emptyState();
   #loaded = false;
   #writeTail = Promise.resolve();
+  #persistenceFenced = false;
 
   constructor({ loadState, saveState, maxEntries = 32 } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') {
@@ -151,6 +152,14 @@ export class ClientGoalJournal {
     return this.#state.entries.at(-1) || null;
   }
 
+  // If a durable write fails after an unknown filesystem effect, the old
+  // in-memory view may differ from disk. Never allow another write (including
+  // another SUBMITTING) from this incarnation; restart and reconcile by ID.
+  persistenceStatus() {
+    return Object.freeze({ schema: 'metaengine.client.goal-journal-persistence.v1',
+      fenced: this.#persistenceFenced, automatic_retry_allowed: false, authority_effect: false });
+  }
+
   get(rawRequestId) {
     const id = requestId(rawRequestId);
     return this.#state.entries.find((row) => row.request_id === id) || null;
@@ -158,6 +167,7 @@ export class ClientGoalJournal {
 
   #replace(id, change) {
     const write = this.#writeTail.then(async () => {
+      if (this.#persistenceFenced) throw new Error('client_goal_journal_persistence_reconciliation_required');
       if (!this.#loaded) await this.load();
       const existing = this.get(id);
       const next = change(existing);
@@ -168,7 +178,13 @@ export class ClientGoalJournal {
       while (entries.length > this.#maxEntries) entries.shift();
       const state = Object.freeze({ ...emptyState(), entries: Object.freeze(entries) });
       // Do not publish an in-memory state that failed to become durable.
-      await this.#saveState(clone(state));
+      try { await this.#saveState(clone(state)); }
+      catch (error) {
+        // The rename might have completed even when fsync/readback failed.
+        // A rejected write must not be followed by another state transition.
+        this.#persistenceFenced = true;
+        throw error;
+      }
       this.#state = state;
       return normalized;
     });
