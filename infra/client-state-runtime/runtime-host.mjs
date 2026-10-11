@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
+import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-reconciliation.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
@@ -135,12 +136,24 @@ async function readConfig(configFile) {
   return config;
 }
 
-async function acquireOwnership(stateDirectory) {
+async function acquireOwnership(stateDirectory, config) {
+  // A crashed lock-reconciliation attempt may have quarantined the previous
+  // lock but not yet acquired the successor. Never bypass its durable gate.
+  try { await lstat(path.join(stateDirectory, 'runtime-host-recovery-gate.json')); throw failure('runtime_host_recovery_gate_unresolved'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
   const lockPath = path.join(stateDirectory, 'runtime-host-lock.json');
   const bytes = JSON.stringify({ schema: 'compute.runtime-host-lock.v1', pid: process.pid, owner_nonce: randomUUID() }) + '\n';
   let handle;
   try { handle = await open(lockPath, 'wx', 0o600); }
-  catch (error) { if (error.code === 'EEXIST') throw failure('runtime_host_owner_lock_exists'); throw failure('runtime_host_owner_lock_failed'); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw failure('runtime_host_owner_lock_failed');
+    if (config.postgres_mode !== 'attached') throw failure('runtime_host_owner_lock_exists');
+    // Never delete or overwrite a prior owner's lock. Only exact stale-lock,
+    // child-PID and port absence can quarantine an abandoned attached host.
+    await reconcileAbandonedAttachedRuntimeLock({config});
+    try { handle = await open(lockPath, 'wx', 0o600); }
+    catch { throw failure('runtime_host_owner_reacquisition_unconfirmed'); }
+  }
   try { await handle.writeFile(bytes); await handle.sync(); }
   catch { throw failure('runtime_host_owner_lock_write_failed'); }
   finally { await handle.close(); }
@@ -294,7 +307,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     expectedStartupFilesSha256: verified.manifest.reviewed_startup_files_sha256, includeRuntimeHost: true, signal,
     startupManifestPath: path.join(config.state_directory, `runtime-startup-${randomUUID()}.json`),
   });
-  const release = await acquireOwnership(config.state_directory);
+  const release = await acquireOwnership(config.state_directory, config);
   const baseStatus = { schema: 'metaengine.client-state.runtime-status.v1', state: 'STARTING', runtime_ready: false,
     state_provider: 'LOCAL_POSTGRES', hosted_supabase_required: false, automatic_cloud_fallback: false,
     host_pid: process.pid, bundle_sha256: config.expected_bundle_sha256, process_code_attested: false,

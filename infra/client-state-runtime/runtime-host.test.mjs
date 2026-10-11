@@ -215,6 +215,61 @@ test('attached host passes through mode and shutdown never claims the external P
   assert.equal(f.stopCalls(), 1);
 });
 
+test('real attached-host startup adopts only a physically absent predecessor and writes a fresh owner lock', async t => {
+  const net = await import('node:net');
+  const keeper = net.createServer(socket => socket.end());
+  await new Promise(resolve => keeper.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => keeper.close(resolve)));
+  const keeperPort = keeper.address().port;
+  const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct',
+    expected_cluster_system_identifier: '7654321098765432100',
+    pg_data_directory: path.join(os.tmpdir(), 'runtime-host-recovery-attached-' + randomUUID()),
+    database_url: 'postgresql://synthetic:private-password@127.0.0.1:' + keeperPort + '/fixture',
+    inspect_database_url: 'postgresql://synthetic:private-password@127.0.0.1:' + keeperPort + '/fixture' });
+  t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));
+  await mkdir(f.config.state_directory, { recursive: true });
+  const predecessorPid = 19551001;
+  const priorLock = JSON.stringify({ schema: 'compute.runtime-host-lock.v1',
+    pid: predecessorPid, owner_nonce: randomUUID() }) + '\n';
+  const priorStatus = JSON.stringify({ schema: 'metaengine.client-state.runtime-status.v1',
+    state: 'READY', runtime_ready: true, state_provider: 'LOCAL_POSTGRES',
+    hosted_supabase_required: false, automatic_cloud_fallback: false, authority_effect: false,
+    host_pid: predecessorPid, bundle_sha256: f.config.expected_bundle_sha256,
+    instance_id: randomUUID(), postgres_mode: 'attached', api_role_mode: 'direct',
+    endpoint: 'http://127.0.0.1:' + f.config.edge_port + '/a2-browser-native-supervisor-v1',
+    children: [{ name: 'api', pid: 19551002 }, { name: 'edge', pid: 19551003 }] }) + '\n';
+  const lockFile = path.join(f.config.state_directory, 'runtime-host-lock.json');
+  await writeFile(lockFile, priorLock);
+  await writeFile(path.join(f.config.state_directory, 'runtime-instance.json'), priorStatus);
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, f.hooks);
+  const newLock = JSON.parse(await readFile(lockFile, 'utf8'));
+  assert.equal(newLock.pid, process.pid);
+  assert.notEqual(newLock.owner_nonce, JSON.parse(priorLock).owner_nonce);
+  const archived = (await (await import('node:fs/promises')).readdir(f.config.state_directory))
+    .filter(name => /^runtime-host-lock\.orphan-[0-9a-f-]+\.json$/.test(name));
+  assert.equal(archived.length, 1);
+  assert.equal(await readFile(path.join(f.config.state_directory, archived[0]), 'utf8'), priorLock);
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).state, 'READY');
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).postgres_mode, 'attached');
+  await host.stop();
+  await host.finished;
+  assert.equal(f.stopCalls(), 1);
+  await assert.rejects(readFile(lockFile), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(f.config.state_directory, archived[0]), 'utf8'), priorLock);
+  assert.equal(keeper.listening, true, 'attached PostgreSQL stand-in must not be stopped');
+});
+
+test('a leftover recovery gate blocks an otherwise unclaimed host without touching attached data', async t => {
+  const f = await fixture(t);
+  const gate = path.join(f.config.state_directory, 'runtime-host-recovery-gate.json');
+  await writeFile(gate, JSON.stringify({ prior: 'ambiguous-recovery' }));
+  await assert.rejects(startManagedRuntimeHost({ configFile: f.configFile }, f.hooks),
+    /runtime_host_recovery_gate_unresolved/);
+  assert.equal(await readFile(gate, 'utf8'), JSON.stringify({ prior: 'ambiguous-recovery' }));
+  await assert.rejects(readFile(path.join(f.config.state_directory, 'runtime-host-lock.json')), { code: 'ENOENT' });
+  assert.equal(f.stopCalls(), 0);
+});
+
 test('resource path mismatch refuses launch and an already cancelled startup releases ownership', async t => {
   const f = await fixture(t);
   let launches = 0;
