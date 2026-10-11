@@ -135,6 +135,64 @@ test('host owns one lock, publishes public status and idempotently stops its run
   assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).state, 'STOPPED');
 });
 
+test('host persists a finite health failure before terminal cleanup and retains it after STOPPED', async t => {
+  const f = await fixture(t);
+  let report;
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks,
+    launchRuntime: async (_config, hooks) => { report = hooks.report; return f.runtime; } });
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'health_http_failed',
+    component: 'api', consecutive_failures: 3, http_status: 503, authority_effect: false };
+  await report({ event: 'health_failure', health_failure: diagnostic });
+  const before = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(before.state, 'READY');
+  assert.equal(before.runtime_ready, true, 'diagnostics do not grant or remove readiness authority');
+  assert.deepEqual(before.last_health_failure, diagnostic);
+  f.finish({ reason: 'runtime_health_failed', children_stopped: true, last_health_failure: diagnostic });
+  await host.finished;
+  await report({ event: 'health_recovered' });
+  const after = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(after.state, 'STOPPED');
+  assert.equal(after.runtime_ready, false);
+  assert.deepEqual(after.last_health_failure, diagnostic);
+  assert.equal(JSON.stringify(after).includes('private-password'), false);
+});
+
+test('host clears a recovered health failure and refuses unvalidated private payloads', async t => {
+  const f = await fixture(t);
+  let report;
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks,
+    launchRuntime: async (_config, hooks) => { report = hooks.report; return f.runtime; } });
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'health_capability_unattested',
+    component: 'edge', consecutive_failures: 1, http_status: null, authority_effect: false };
+  await report({ event: 'health_failure', health_failure: diagnostic });
+  await report({ event: 'health_recovered' });
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).last_health_failure, null);
+  await report({ event: 'health_failure', health_failure: { ...diagnostic, stderr: 'synthetic-private-secret' } });
+  await report({ event: 'health_failure', health_failure: { ...diagnostic, code: 'synthetic-private-secret' } });
+  f.finish({ reason: 'runtime_health_failed', children_stopped: true,
+    last_health_failure: { ...diagnostic, url: 'synthetic-private-secret' } });
+  await host.finished;
+  const after = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(after.last_health_failure, null);
+  assert.equal(JSON.stringify(after).includes('synthetic-private-secret'), false);
+});
+
+test('host serializes overlapping health and terminal status writes', async t => {
+  const f = await fixture(t);
+  let report;
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks,
+    launchRuntime: async (_config, hooks) => { report = hooks.report; return f.runtime; } });
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'postgres_incarnation_mismatch',
+    component: 'postgres', consecutive_failures: 1, http_status: null, authority_effect: false };
+  const pendingReport = report({ event: 'health_failure', health_failure: diagnostic });
+  f.finish({ reason: 'runtime_health_failed', children_stopped: true, last_health_failure: diagnostic });
+  await Promise.all([pendingReport, host.finished]);
+  const status = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(status.state, 'STOPPED');
+  assert.equal(status.instance_id, f.runtime.instanceId);
+  assert.deepEqual(status.last_health_failure, diagnostic);
+});
+
 test('attached host passes through mode and shutdown never claims the external PostgreSQL', async t => {
   const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(os.tmpdir(), `compute-attached-data-${randomUUID()}`) });
   t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));

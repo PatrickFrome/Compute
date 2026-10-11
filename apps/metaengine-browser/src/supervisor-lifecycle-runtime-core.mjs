@@ -692,8 +692,8 @@ export class SupervisorLifecycleRuntime {
       || before.conversation_url
       || before.pending_wake
       || before.active_wake
-      || !Array.isArray(before.queued_wakes)
-      || before.queued_wakes.length === 0) return false;
+      || !Array.isArray(before.queued_wakes)) return false;
+    if (before.queued_wakes.length === 0 && !await this.#keepalive.ensureBootstrapWake()) return false;
 
     let prepared = null;
     try {

@@ -18,6 +18,31 @@ function runtimeError(code) {
   return error;
 }
 
+const HEALTH_FAILURE_SCHEMA = 'metaengine.client-state.health-failure.v1';
+const HEALTH_FAILURE_CODES = new Set([
+  'health_http_failed', 'health_response_invalid', 'health_not_ready', 'health_capability_unattested',
+  'health_timeout', 'health_connection_refused', 'health_network_failed', 'health_instance_mismatch',
+  'postgres_identity_mismatch', 'postgres_cluster_identity_mismatch', 'postgres_data_directory_mismatch',
+  'postgres_owned_pid_mismatch', 'postgres_incarnation_mismatch', 'postgres_identity_invalid',
+  'postgres_pid_file_invalid', 'postgres_inspection_failed', 'postgres_process_verification_failed',
+]);
+
+// Public diagnostic data contains finite categories only. Never forward an
+// exception message, endpoint, response body, configuration or child stderr.
+export function normalizeRuntimeHealthFailure(value) {
+  const fields = ['schema', 'code', 'component', 'consecutive_failures', 'http_status', 'authority_effect'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.length || fields.some(name => !Object.hasOwn(value, name))
+    || value.schema !== HEALTH_FAILURE_SCHEMA || !HEALTH_FAILURE_CODES.has(value.code)
+    || !['api', 'edge', 'postgres'].includes(value.component)
+    || value.code.startsWith('postgres_') !== (value.component === 'postgres')
+    || !Number.isSafeInteger(value.consecutive_failures) || value.consecutive_failures < 1 || value.consecutive_failures > 3
+    || (value.http_status !== null && (!Number.isSafeInteger(value.http_status) || value.http_status < 100 || value.http_status > 599))
+    || (value.code === 'health_http_failed') !== (value.http_status !== null)
+    || value.authority_effect !== false) throw runtimeError('runtime_health_failure_contract_invalid');
+  return Object.freeze(Object.fromEntries(fields.map(name => [name, value[name]])));
+}
+
 function port(value, label) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1024 || parsed > 65535) throw runtimeError(`${label}_invalid`);
@@ -229,6 +254,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   let postgresIdentity;
   let startupManifest;
   let postgresPreparation;
+  let lastHealthFailure = null;
 
   const stopChild = async child => {
     if (exits.has(child)) return;
@@ -281,7 +307,8 @@ export async function launchClientStateRuntime(input, hooks = {}) {
       catch { cleanupFailure = runtimeError('runtime_cleanup_unconfirmed'); }
     }
     report({ event: 'stopped', instance_id: config.instanceId, reason });
-    finish({ reason: cleanupFailure ? cleanupFailure.code : reason, children_stopped: !cleanupFailure });
+    finish({ reason: cleanupFailure ? cleanupFailure.code : reason, children_stopped: !cleanupFailure,
+      ...(lastHealthFailure ? { last_health_failure: lastHealthFailure } : {}) });
     if (cleanupFailure) throw cleanupFailure;
     return finished;
   };
@@ -319,13 +346,37 @@ export async function launchClientStateRuntime(input, hooks = {}) {
 
   async function health(which) {
     const endpoint = which === 'api' ? `http://127.0.0.1:${config.apiPort}/health` : `http://127.0.0.1:${config.edgePort}/a2-browser-native-supervisor-v1/health`;
-    const response = await fetch(endpoint, { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(3000) });
-    if (!response.ok) throw runtimeError(`${which}_health_failed`);
-    const body = await response.json();
-    if (body.instance_id !== config.instanceId) throw runtimeError(`${which}_instance_mismatch`);
-    if (body.ok !== true) throw runtimeError(`${which}_health_failed`);
+    let response;
+    try { response = await fetch(endpoint, { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(3000) }); }
+    catch (cause) {
+      const error = runtimeError(`${which}_health_failed`);
+      error.healthFailureCode = cause?.name === 'TimeoutError' || cause?.name === 'AbortError' ? 'health_timeout'
+        : cause?.cause?.code === 'ECONNREFUSED' || cause?.code === 'ECONNREFUSED' ? 'health_connection_refused' : 'health_network_failed';
+      throw error;
+    }
+    if (!response.ok) {
+      const error = runtimeError(`${which}_health_failed`);
+      error.healthFailureCode = 'health_http_failed'; error.healthHttpStatus = response.status;
+      // A failing peer can send an arbitrarily large body. Cancel it without
+      // buffering, parsing, logging, or delaying the fail-closed classification.
+      void response.body?.cancel().catch(() => {});
+      throw error;
+    }
+    let body;
+    try { body = await response.json(); }
+    catch (cause) {
+      const error = runtimeError(`${which}_health_failed`);
+      error.healthFailureCode = cause?.name === 'TimeoutError' || cause?.name === 'AbortError' ? 'health_timeout' : 'health_response_invalid';
+      throw error;
+    }
+    if (body?.instance_id !== config.instanceId) {
+      const error = runtimeError(`${which}_instance_mismatch`); error.healthFailureCode = 'health_instance_mismatch'; throw error;
+    }
+    if (body.ok !== true) {
+      const error = runtimeError(`${which}_health_failed`); error.healthFailureCode = 'health_not_ready'; throw error;
+    }
     if (which === 'edge' && (body.runtime_ready !== true || body.capability_health?.state !== 'ATTESTED')) {
-      throw runtimeError('edge_runtime_unattested');
+      const error = runtimeError('edge_runtime_unattested'); error.healthFailureCode = 'health_capability_unattested'; throw error;
     }
     return body;
   }
@@ -388,16 +439,35 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     monitor = setInterval(async () => {
       if (stopping || probing) return;
       probing = true;
+      let component = 'api';
+      let postgresStage = 'inspection';
       try {
         await health('api');
+        component = 'edge';
         await health('edge');
+        component = 'postgres';
         const session = children.find(item => item.name === 'postgres')?.session;
-        if (session) await session.verify();
+        if (session) { postgresStage = 'process'; await session.verify(); }
+        postgresStage = 'inspection';
         const current = await assertPostgresIdentity(await inspector(config), config, ownedPostgresPid);
         if (current.pid !== postgresIdentity.pid || current.started_at !== postgresIdentity.started_at) throw runtimeError('postgres_incarnation_mismatch');
+        if (stopping) return;
         failedProbes = 0;
+        if (lastHealthFailure) {
+          lastHealthFailure = null;
+          await Promise.resolve().then(() => report({ event: 'health_recovered' })).catch(() => {});
+        }
       } catch (error) {
+        if (stopping) return;
         failedProbes += 1;
+        const code = component === 'postgres'
+          ? HEALTH_FAILURE_CODES.has(error?.code) && error.code.startsWith('postgres_') ? error.code
+            : postgresStage === 'process' ? 'postgres_process_verification_failed' : 'postgres_inspection_failed'
+          : String(error?.code || '') === `${component}_instance_mismatch` ? 'health_instance_mismatch'
+            : error.healthFailureCode || 'health_network_failed';
+        lastHealthFailure = normalizeRuntimeHealthFailure({ schema: HEALTH_FAILURE_SCHEMA, code, component,
+          consecutive_failures: Math.min(3, failedProbes), http_status: error.healthHttpStatus ?? null, authority_effect: false });
+        await Promise.resolve().then(() => report({ event: 'health_failure', health_failure: lastHealthFailure })).catch(() => {});
         if (String(error.code || '').includes('mismatch') || failedProbes >= 3) void stop('runtime_health_failed').catch(() => {});
       } finally { probing = false; }
     }, config.healthIntervalMs);

@@ -729,6 +729,23 @@ export class SupervisorKeepalive {
     return events;
   }
 
+  async ensureBootstrapWake() {
+    // Restart retires predecessor queue entries, but the research cadence is
+    // still durable. A clean unbound startup needs its own fresh intent rather
+    // than waiting for that cadence or reconstructing a predecessor wake.
+    if (this.#state.paused || this.#state.admission_state === 'CLOSED'
+      || this.#state.state !== 'RECOVERING' || this.#state.conversation_url
+      || this.#state.tab_id || this.#state.pending_wake || this.#state.active_wake
+      || this.#state.rollover_attempt || this.#state.parked_reason
+      || this.#state.queued_wakes.length !== 0) return false;
+    if (this.#state.last_unsent_attempt_at) {
+      const since = this.#clock() - new Date(this.#state.last_unsent_attempt_at).getTime();
+      if (Number.isFinite(since) && since < this.#minWakeIntervalMs) return false;
+    }
+    await this.enqueueWake('SUPERVISOR_RECOVERY_REQUIRED', { key: `startup-${this.#processIncarnationId}` });
+    return true;
+  }
+
   canWake() {
     if (this.#state.admission_state === 'CLOSED'
       || this.#state.paused

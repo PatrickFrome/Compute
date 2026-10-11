@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } fro
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchClientStateRuntime, normalizeLauncherConfig } from './launcher.mjs';
+import { launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
@@ -297,19 +297,47 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   const release = await acquireOwnership(config.state_directory);
   const baseStatus = { schema: 'metaengine.client-state.runtime-status.v1', state: 'STARTING', runtime_ready: false,
     state_provider: 'LOCAL_POSTGRES', hosted_supabase_required: false, automatic_cloud_fallback: false,
-    host_pid: process.pid, bundle_sha256: config.expected_bundle_sha256, process_code_attested: false, authority_effect: false };
+    host_pid: process.pid, bundle_sha256: config.expected_bundle_sha256, process_code_attested: false,
+    last_health_failure: null, authority_effect: false };
   let runtime;
   let terminalPromise;
   let stopPromise;
   let abortRequested = signal?.aborted === true;
   let lastStatus = baseStatus;
-  const persist = async status => { await writeStatus(config.state_directory, status); lastStatus = status; };
+  let lastHealthFailure = null;
+  let persistTail = Promise.resolve();
+  // Serialize health and lifecycle writes so a late diagnostic cannot replace
+  // the terminal state. Functional updates use the latest persisted metadata.
+  const persist = update => {
+    const pending = persistTail.then(async () => {
+      const status = typeof update === 'function' ? update(lastStatus) : update;
+      await writeStatus(config.state_directory, status);
+      lastStatus = status;
+    });
+    persistTail = pending.catch(() => {});
+    return pending;
+  };
+  const reportRuntimeHealth = async event => {
+    if (terminalPromise) return;
+    if (event?.event === 'health_failure') {
+      let diagnostic;
+      try { diagnostic = normalizeRuntimeHealthFailure(event.health_failure); } catch { return; }
+      lastHealthFailure = diagnostic;
+      await persist(previous => ({ ...previous, last_health_failure: diagnostic }));
+    } else if (event?.event === 'health_recovered') {
+      lastHealthFailure = null;
+      await persist(previous => ({ ...previous, last_health_failure: null }));
+    }
+  };
   const finalize = outcome => {
     if (!terminalPromise) terminalPromise = (async () => {
       const confirmed = outcome.children_stopped === true;
-      try { await persist({ ...lastStatus, state: confirmed ? 'STOPPED' : 'FAILED', runtime_ready: false,
+      if (outcome.last_health_failure) {
+        try { lastHealthFailure = normalizeRuntimeHealthFailure(outcome.last_health_failure); } catch { /* Never forward unvalidated diagnostics. */ }
+      }
+      try { await persist(previous => ({ ...previous, state: confirmed ? 'STOPPED' : 'FAILED', runtime_ready: false,
         reason: confirmed ? String(outcome.reason || 'runtime_ended') : 'runtime_host_cleanup_unconfirmed',
-        children_stopped: confirmed, stopped_at: new Date().toISOString() }); }
+        children_stopped: confirmed, last_health_failure: lastHealthFailure, stopped_at: new Date().toISOString() })); }
       finally { signal?.removeEventListener('abort', onAbort); if (confirmed) await release(); }
       return outcome;
     })();
@@ -331,11 +359,12 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if (abortRequested) throw failure('runtime_host_startup_cancelled');
     const denoDir = await (hooks.stageDenoCache || stageManagedDenoCache)({ verified, stateDirectory: config.state_directory });
     const denoPath = await (hooks.stageDenoExecutable || stageManagedDenoExecutable)({ verified, stateDirectory: config.state_directory });
-    runtime = await (hooks.launchRuntime || launchClientStateRuntime)({ ...launcherConfig, denoDir, denoPath });
+    runtime = await (hooks.launchRuntime || launchClientStateRuntime)({ ...launcherConfig, denoDir, denoPath }, { report: reportRuntimeHealth });
     if (abortRequested) { await stop('startup_cancelled'); throw failure('runtime_host_startup_cancelled'); }
     const descriptor = Object.freeze({ ...runtimeProviderDescriptor(runtime), status_file: path.join(config.state_directory, 'runtime-instance.json') });
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     await persist({ ...baseStatus, state: 'READY', runtime_ready: true, checked_at: new Date().toISOString(),
+      last_health_failure: lastHealthFailure,
       instance_id: descriptor.instance_id, endpoint: descriptor.endpoint, capability_health: runtime.edgeHealth.capability_health,
       postgres_mode: postgresMode, api_role_mode: launcherConfig.apiRoleMode, children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
     const finished = runtime.finished.then(finalize, () => finalize({ reason: 'runtime_host_child_failed', children_stopped: false }));

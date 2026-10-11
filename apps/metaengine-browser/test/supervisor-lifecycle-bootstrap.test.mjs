@@ -6,6 +6,7 @@ import test from 'node:test';
 import crypto from 'node:crypto';
 
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
+import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 
 const WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const ROOT_URL = 'https://chatgpt.com/';
@@ -54,8 +55,21 @@ async function tempStatePath(prefix) {
   return { dir, statePath: path.join(dir, 'keepalive.json') };
 }
 
-test('authoritative OPEN bootstraps one dedicated root into the first bound supervisor conversation', async () => {
+for (const restored of [false, true]) test(`authoritative OPEN bootstraps one dedicated root${restored ? ' after restart with a recent research wake' : ''}`, async () => {
   const { dir, statePath } = await tempStatePath('metaengine-bootstrap-success-');
+  let priorResearchAt = null;
+  if (restored) {
+    const previous = new SupervisorKeepalive({
+      loadState: async () => null,
+      saveState: value => fs.writeFile(statePath, JSON.stringify(value)),
+      processIncarnationId: 'process_bootstrap_predecessor',
+    });
+    await previous.init();
+    await previous.applyAdmissionOpen({ authoritative: true, state: 'OPEN', continuous_service_allowed: true,
+      refill_enabled: true, supervisor_admission_enabled: true, generation_floor: runtimeOpen.generation_floor });
+    await previous.enqueueWake('RESEARCH_ACCELERATOR_DUE', { key: 'predecessor-research' });
+    priorResearchAt = previous.snapshot().last_research_wake_at;
+  }
   const tabs = [
     { tab_id: 'user_root', url: ROOT_URL, selected: true },
     { tab_id: 'fleet_tab', url: FLEET_URL, selected: false },
@@ -128,6 +142,7 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
     monitorMs: 1000,
     researchMs: 5 * 60 * 1000,
     requireAuthoritativeAdmission: true,
+    processIncarnationId: 'process_bootstrap_success_current',
   });
   await runtime.applyRuntimeControl(runtimeOpen);
   await runtime.start();
@@ -147,10 +162,52 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
   assert.equal(snap.keepalive.cycle_seq, 1);
   assert.equal(snap.keepalive.active_wake?.cycle_seq, 1);
   assert.equal(snap.last_recovery?.action, 'SUPERVISOR_BOOTSTRAP_BOUND');
+  if (restored) {
+    assert.equal(snap.keepalive.last_research_wake_at, priorResearchAt, 'startup must preserve the independent research cadence');
+    assert.equal(snap.keepalive.predecessor_queued_wake_count, 1);
+    assert.equal(snap.keepalive.active_wake.reason, 'SUPERVISOR_RECOVERY_REQUIRED');
+    assert.notEqual(snap.keepalive.active_wake.queue_key, 'RESEARCH_ACCELERATOR_DUE:predecessor-research');
+  }
   assert.equal(tabs.find((row) => row.tab_id === 'user_root')?.url, ROOT_URL, 'existing user root must not be hijacked');
   assert.equal(tabs.find((row) => row.tab_id === 'fleet_tab')?.url, FLEET_URL, 'fleet tab must not be selected as supervisor');
 
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+for (const [name, options] of Object.entries({
+  paused: { seed: { paused: true } },
+  closed: { control: { ...runtimeOpen, refill_enabled: false, supervisor_admission_enabled: false } },
+  unobserved: { control: null },
+  actuation_held: { canActuate: false },
+  unknown_send: { seed: { state: 'WAKE_PENDING', pending_wake: { wake_id: 'wake_startup_unknown',
+    reason: 'CONTINUE_DEVELOPMENT', supervisor_epoch: 1, cycle_seq: 1,
+    process_incarnation_id: 'process_bootstrap_fenced_current', automatic_retry_allowed: false } } },
+})) test(`empty recent-research startup performs no provider effect while ${name}`, async t => {
+  const { dir, statePath } = await tempStatePath('metaengine-bootstrap-fenced-');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.writeFile(statePath, JSON.stringify({ schema: 'metaengine.supervisor-keepalive.state.v1',
+    supervisor_id: 'METAENGINE_SUPERVISOR', state: 'RECOVERING',
+    process_incarnation_id: 'process_bootstrap_fenced_current',
+    last_research_wake_at: new Date().toISOString(), queued_wakes: [], ...options.seed }));
+  const commands = [];
+  const runtime = new SupervisorLifecycleRuntime({
+    getState: async () => ({ tabs: [], fleet: { agents: [] } }),
+    executeCommand: async command => { commands.push(command.action); throw new Error('provider_effect_forbidden'); },
+    canActuate: () => options.canActuate !== false, statePath,
+    monitorMs: 1000, researchMs: 30 * 60 * 1000, requireAuthoritativeAdmission: true,
+    processIncarnationId: 'process_bootstrap_fenced_current',
+  });
+  if (options.control !== null) await runtime.applyRuntimeControl(options.control || runtimeOpen);
+  await runtime.start();
+  await runtime.cycle({ force: true });
+  const snapshot = runtime.snapshot();
+  assert.deepEqual(commands, []);
+  assert.deepEqual(snapshot.keepalive.queued_wakes, []);
+  if (options.seed?.pending_wake) {
+    assert.equal(snapshot.keepalive.pending_wake.wake_id, 'wake_startup_unknown');
+    assert.equal(snapshot.keepalive.pending_wake.automatic_retry_allowed, false);
+    assert.equal(snapshot.keepalive.state, 'WAKE_AMBIGUOUS');
+  }
 });
 
 test('ambiguous bootstrap is fenced after one submit and cannot create a second root on the next cycle', async () => {
