@@ -62,9 +62,11 @@ async function awaitWorkerBinding() {
 async function writeWorkerHeartbeat() {
   const current = await readState().catch(() => null);
   if (!validBinding(current)) return false;
-  const temp = `${WORKER_HEARTBEAT_PATH}.${process.pid}.tmp`;
-  await fs.mkdir(path.dirname(WORKER_HEARTBEAT_PATH), { recursive: true });
-  await fs.writeFile(temp, `${JSON.stringify({
+  // Windows readers or scanners can briefly deny replacement with EPERM.
+  // The shared writer syncs the payload, retries only bounded transient rename
+  // errors, and confirms an already-completed publication by exact readback.
+  // This is a local health record; process/task actuation is never replayed.
+  await durableWriteJson(WORKER_HEARTBEAT_PATH, {
     schema: 'metaengine.browser-sentinel.worker-heartbeat.v1',
     token: TOKEN,
     parent_pid: PARENT_PID,
@@ -72,8 +74,7 @@ async function writeWorkerHeartbeat() {
     lifecycle: 'READY',
     heartbeat_at: new Date().toISOString(),
     authority_effect: false,
-  }, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, WORKER_HEARTBEAT_PATH);
+  }, { sequence: Date.now() });
   return true;
 }
 
