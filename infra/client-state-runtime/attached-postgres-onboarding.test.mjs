@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST } from './db-api-core.mjs';
 import { localApiRolePolicyName } from './db-api-grants.mjs';
-import { inspectAttachedApiAdmission, onboardAttachedPostgres, readAttachedOnboardingOptionsFile,
+import { inspectAttachedApiAdmission, onboardAttachedPostgres, postmasterPidStartEpochMatchesLive, readAttachedOnboardingOptionsFile,
   secureAttachedPrivateFile } from './attached-postgres-onboarding.mjs';
 
 const admission = { restricted_login: true, api_role_mode: 'direct', memberships: 0,
@@ -279,4 +279,42 @@ test('CLI argument failure emits a fixed code and never echoes arbitrary credent
   assert.equal(result.status, 1); assert.equal(result.stdout, '');
   assert.deepEqual(JSON.parse(result.stderr), { event: 'attached_postgres_onboarding_failed', code: 'attached_onboarding_private_options_file_argument_required' });
   assert.doesNotMatch(result.stderr, /private-leak-marker/);
+});
+
+test('SQL-visible startup may follow its exact postmaster.pid epoch by at most two seconds', async t => {
+  const startedAt='2026-10-10T09:00:00.000Z';
+  const epoch=Date.parse(startedAt)/1000;
+  for(const seconds of [0,1,2]) {
+    assert.equal(postmasterPidStartEpochMatchesLive(epoch-seconds,startedAt),true);
+    const f=await fixture(t);
+    const file=path.join(f.options.pgDataDirectory,'postmaster.pid');
+    const bytes=`21999\n${f.options.pgDataDirectory}\n${epoch-seconds}\n35432\n127.0.0.1\n`;
+    f.original.set('postmaster.pid',bytes);
+    await fs.writeFile(file,bytes);
+    const configured=await onboardAttachedPostgres(f.options,f.hooks);
+    assert.equal(configured.state,'CONFIGURED_UNQUALIFIED');
+    assert.equal(f.events.includes('commit'),true);
+    await assertDataPreserved(f);
+  }
+});
+
+test('negative, excessive and invalid postmaster timestamp drift cannot mutate an attached cluster', async t => {
+  const startedAt='2026-10-10T09:00:00.000Z';
+  const epoch=Date.parse(startedAt)/1000;
+  for(const seconds of [-1,3,60,3600]) {
+    assert.equal(postmasterPidStartEpochMatchesLive(epoch-seconds,startedAt),false);
+    const f=await fixture(t);
+    const file=path.join(f.options.pgDataDirectory,'postmaster.pid');
+    const bytes=`21999\n${f.options.pgDataDirectory}\n${epoch-seconds}\n35432\n127.0.0.1\n`;
+    f.original.set('postmaster.pid',bytes);
+    await fs.writeFile(file,bytes);
+    await assert.rejects(onboardAttachedPostgres(f.options,f.hooks),{code:'attached_onboarding_postmaster_file_binding_unattested'});
+    assert.equal(f.events.includes('begin'),false);
+    await assert.rejects(fs.stat(f.options.runtimeConfigFile),{code:'ENOENT'});
+    await assertDataPreserved(f);
+  }
+  for(const value of ['',null,NaN,Infinity,-1,'invalid','999999999999999999999999']) {
+    assert.equal(postmasterPidStartEpochMatchesLive(value,startedAt),false);
+  }
+  assert.equal(postmasterPidStartEpochMatchesLive(epoch,'invalid'),false);
 });

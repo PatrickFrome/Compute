@@ -148,6 +148,20 @@ const identityQuery = `SELECT current_setting('server_version_num')::int AS vers
   r.rolsuper AS superuser, r.rolcanlogin AS can_login
   FROM pg_catalog.pg_roles r WHERE r.rolname = session_user`;
 
+// A live PostgreSQL postmaster writes postmaster.pid before its SQL-visible
+// start timestamp is finalized. The SQL clock can be one or two seconds later
+// than the integral PID-file epoch (observed +1 second on the live Keeper).
+// Only a finite NONNEGATIVE drift is accepted, in addition to exact PGDATA,
+// socket port, cluster system identifier, and trusted expected SQL start time.
+export function postmasterPidStartEpochMatchesLive(pidEpochSeconds, startedAt) {
+  const pidEpoch = Number(pidEpochSeconds);
+  const parsed = Date.parse(startedAt);
+  if (!Number.isSafeInteger(pidEpoch) || pidEpoch <= 0
+    || !Number.isFinite(parsed)) return false;
+  const driftSeconds = Math.floor(parsed / 1000) - pidEpoch;
+  return Number.isSafeInteger(driftSeconds) && driftSeconds >= 0 && driftSeconds <= 2;
+}
+
 async function inspectIdentity(sql, options, physical, admin, pidBytes) {
   const [record] = await sql.unsafe(identityQuery);
   if (!record || record.version < 170000 || record.version >= 180000 || record.address !== '127.0.0.1'
@@ -158,7 +172,7 @@ async function inspectIdentity(sql, options, physical, admin, pidBytes) {
   if (!equal(await privatePath(record.data_directory, 'directory'), physical.data)) fail('live_data_directory_mismatch');
   const lines = pidBytes.toString('utf8').trim().split(/\r?\n/);
   if (!Number.isSafeInteger(Number(lines[0])) || Number(lines[0]) <= 0 || Number(lines[3]) !== Number(admin.port)
-    || Number(lines[2]) !== Math.floor(Date.parse(record.started_at) / 1000)
+    || !postmasterPidStartEpochMatchesLive(lines[2], record.started_at)
     || !equal(await privatePath(lines[1], 'directory'), physical.data)) fail('postmaster_file_binding_unattested');
   return { systemIdentifier: record.system_identifier, startedAt: new Date(record.started_at).toISOString() };
 }
