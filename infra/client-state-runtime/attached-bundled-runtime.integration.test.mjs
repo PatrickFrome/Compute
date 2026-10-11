@@ -246,7 +246,11 @@ test('verified bundled onboarding and attached host restart preserve an existing
   await assert.rejects(fs.lstat(path.join(state, 'runtime-host-lock.json')), { code: 'ENOENT' });
   t.diagnostic('wrong live cluster binding rejected before API role and private config publication');
   const setup = await runOnboarding(options);
-  assert.deepEqual(setup.closed, { code: 0, signal: null });
+  const setupFailure = setup.receipt?.event === 'attached_postgres_onboarding_failed'
+    && /^attached_onboarding_[a-z0-9_]{1,160}$/.test(setup.receipt.code || '')
+    ? setup.receipt.code : 'attached_bundle_fixture_onboarding_failure_unattested';
+  if (setup.closed.code !== 0) t.diagnostic('bundled attached onboarding failure: ' + setupFailure);
+  assert.deepEqual(setup.closed, { code: 0, signal: null }, setupFailure);
   assert.equal(setup.receipt.state, 'CONFIGURED_UNQUALIFIED');
   assert.equal(setup.receipt.source_manifest_sha256, plan.source_manifest_sha256);
   assert.equal(setup.receipt.restricted_api_admission.rpc_names_granted, 50);

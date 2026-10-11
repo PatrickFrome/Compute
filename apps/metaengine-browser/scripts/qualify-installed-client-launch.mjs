@@ -108,10 +108,16 @@ export function assertInstalledPrimaryWindowJournal(journal, { pid, version, exp
     visible: true, authority_effect: false });
 }
 
-export function assertInstalledPrimaryCdpWindow(before, after = before) {
-  const valid = row => row && Number.isSafeInteger(row.window_id) && row.window_id > 0
-    && ['normal', 'maximized'].includes(row.window_state) && row.width > 400 && row.height > 300;
-  if (!valid(before) || !valid(after) || before.window_id !== after.window_id) fail('normal_primary_cdp_window_unproven');
+export function assertInstalledPrimaryCdpSurface(before, after = before) {
+  const valid = row => row && typeof row.target_id === 'string' && row.target_id.length > 0
+    && Number.isSafeInteger(row.document_backend_node_id) && row.document_backend_node_id > 0
+    && SHA.test(row.url_sha256 || '') && row.visibility === 'visible' && row.ready_state === 'complete'
+    && row.shell_contract_present === true && Number.isSafeInteger(row.width) && Number.isSafeInteger(row.height)
+    && row.width > 400 && row.width <= 65535 && row.height > 300 && row.height <= 65535;
+  if (!valid(before) || !valid(after) || before.target_id !== after.target_id
+    || before.document_backend_node_id !== after.document_backend_node_id || before.url_sha256 !== after.url_sha256) {
+    fail('normal_primary_cdp_surface_unproven');
+  }
   return true;
 }
 
@@ -305,7 +311,11 @@ async function cdp(url) {
     const request = pending.get(row.id);
     if (!request) return;
     pending.delete(row.id); clearTimeout(request.timer);
-    row.error ? request.reject(new Error('installed_launch_cdp_request_failed')) : request.resolve(row.result);
+    if (row.error) {
+      const method = /^[A-Za-z]+\.[A-Za-z0-9]+$/.test(request.method) ? request.method.replace('.', '_').toLowerCase() : 'unknown';
+      const code = Number.isSafeInteger(row.error.code) ? String(row.error.code).replace('-', 'minus_') : 'unknown';
+      request.reject(new Error('installed_launch_cdp_request_failed_' + method + '_' + code));
+    } else request.resolve(row.result);
   });
   socket.addEventListener('close', () => {
     for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('installed_launch_cdp_closed')); }
@@ -316,7 +326,7 @@ async function cdp(url) {
       return new Promise((resolve, reject) => {
         const id = ++sequence;
         const timer = setTimeout(() => { pending.delete(id); reject(new Error('installed_launch_cdp_request_timeout')); }, 10000);
-        pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
+        pending.set(id, { resolve, reject, timer, method }); socket.send(JSON.stringify({ id, method, params }));
       });
     },
     close() { socket.close(); },
@@ -329,11 +339,8 @@ async function targetAt(port, matches) {
   return targets.find(target => target.type === 'page' && matches(target.url) && target.webSocketDebuggerUrl);
 }
 
-// Browser.getWindowForTarget and Browser.getWindowBounds are browser-scoped
-// DevTools commands. They must be sent over the browser websocket advertised
-// by /json/version; a page target websocket only owns the Page/Runtime domains
-// and correctly rejects Browser.* requests. Keep this endpoint separate from
-// the page websocket used for the screenshot below.
+// Optional browser endpoint discovery for protocol diagnostics. Its presence
+// does not attest support for Chrome-specific native-window commands.
 export async function browserEndpointAt(port) {
   const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) });
   const browser = await response.json();
@@ -342,15 +349,43 @@ export async function browserEndpointAt(port) {
   return browser;
 }
 
-export async function readInstalledCdpWindow(browserClient, targetId) {
-  if (!browserClient || typeof browserClient.command !== 'function' || typeof targetId !== 'string' || !targetId) {
+const PRIMARY_SHELL_IDS = Object.freeze(['me2-shell', 'topbar', 'admin-connection-badge',
+  'client-goal-composer', 'primary-chat-fleet', 'native-chat-surface-slot', 'chat-fleet-rail',
+  'fleet-picker-toggle', 'global-cmdbar', 'settings-button']);
+const PRIMARY_SHELL_OBSERVATION = `JSON.stringify({href:location.href, visibility:document.visibilityState,
+  ready_state:document.readyState, shell_contract_present:${JSON.stringify(PRIMARY_SHELL_IDS)}.every(id=>!!document.getElementById(id))})`;
+
+// Electron exposes page CDP but does not implement Chrome's Browser window
+// methods (-32601 on the physical packaged build). Native window visibility
+// and identity are independently attested by Win32 for the exact primary PID.
+// CDP attests the gateway document, renderer identity and rendered viewport.
+export async function readInstalledCdpSurface(client, { targetId, expectedUrl } = {}) {
+  let url;
+  try { url = new URL(expectedUrl); } catch { fail('normal_primary_cdp_target_invalid'); }
+  if (!client || typeof client.command !== 'function' || typeof targetId !== 'string' || !targetId
+    || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password) {
     fail('normal_primary_cdp_target_invalid');
   }
-  // CDP requires the page target identity even on the browser websocket.
-  const window = await browserClient.command('Browser.getWindowForTarget', { targetId });
-  const readback = await browserClient.command('Browser.getWindowBounds', { windowId: window.windowId });
-  return { window_id: window.windowId, window_state: readback.bounds?.windowState,
-    width: readback.bounds?.width, height: readback.bounds?.height };
+  const info = await client.command('Target.getTargetInfo');
+  if (info?.targetInfo?.targetId !== targetId || info.targetInfo.type !== 'page'
+    || info.targetInfo.url !== expectedUrl) fail('normal_primary_cdp_target_mismatch');
+  const document = await client.command('DOM.getDocument', { depth: 0 });
+  const observation = await client.command('Runtime.evaluate', {
+    expression: PRIMARY_SHELL_OBSERVATION, returnByValue: true,
+  });
+  let page;
+  try {
+    if (observation.exceptionDetails || observation.result?.type !== 'string') throw new Error();
+    page = JSON.parse(observation.result.value);
+  } catch { fail('normal_primary_cdp_document_unproven'); }
+  if (page?.href !== expectedUrl) fail('normal_primary_cdp_target_mismatch');
+  const metrics = await client.command('Page.getLayoutMetrics');
+  const surface = { target_id: targetId, document_backend_node_id: document.root?.backendNodeId,
+    url_sha256: digest(expectedUrl), visibility: page.visibility, ready_state: page.ready_state,
+    shell_contract_present: page.shell_contract_present,
+    width: metrics.cssLayoutViewport?.clientWidth, height: metrics.cssLayoutViewport?.clientHeight };
+  assertInstalledPrimaryCdpSurface(surface);
+  return surface;
 }
 
 async function profileProbe(executable, env, directory) {
@@ -674,7 +709,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     '--proxy-server=127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost'], env, directory, { visibleGui: true });
   const currentEvents = journal => journal.events?.filter(row => row.boot_id === journal.current_boot_id && row.pid === launch.child.pid && row.version === identity.package_version) || [];
   const journal = () => fs.readFile(journalPath, 'utf8').then(JSON.parse);
-  let client, browserClient, proof, statusBefore, target;
+  let client, proof, statusBefore, target;
   try {
     const before = await waitUntil(async () => {
       const row = await journal();
@@ -704,10 +739,10 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     const gatewayListener = await verifyWindowsTcpListener({ port: gatewayPort, pid: launch.child.pid });
     target = await waitUntil(() => targetAt(debuggingPort, url => url.startsWith(`http://127.0.0.1:${gatewayPort}/`)), launch);
     client = await cdp(target.webSocketDebuggerUrl);
-    const browser = await waitUntil(() => browserEndpointAt(debuggingPort), launch);
-    browserClient = await cdp(browser.webSocketDebuggerUrl);
-    const cdpWindowBefore = await readInstalledCdpWindow(browserClient, target.id);
-    assertInstalledPrimaryCdpWindow(cdpWindowBefore);
+    const debuggingListener = await verifyWindowsTcpListener({ port: debuggingPort, pid: launch.child.pid });
+    const cdpSurfaceBefore = await waitUntil(() => readInstalledCdpSurface(client, {
+      targetId: target.id, expectedUrl: target.url,
+    }), launch);
     const osWindowBefore = await verifyInstalledVisiblePrimaryWindow(launch.child.pid);
     const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
     const png = Buffer.from(screenshot.data, 'base64'); assert(png.length > 4096);
@@ -732,8 +767,8 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     assertOwnerStartupGrace({ before, after, sentinelBefore, sentinelAfter, progressBefore, progressAfter,
       pid: launch.child.pid, version: identity.package_version });
     const journalWindow = assertInstalledPrimaryWindowJournal(after, { pid: launch.child.pid, version: identity.package_version });
-    const cdpWindowAfter = await readInstalledCdpWindow(browserClient, target.id);
-    assertInstalledPrimaryCdpWindow(cdpWindowBefore, cdpWindowAfter);
+    const cdpSurfaceAfter = await readInstalledCdpSurface(client, { targetId: target.id, expectedUrl: target.url });
+    assertInstalledPrimaryCdpSurface(cdpSurfaceBefore, cdpSurfaceAfter);
     const osWindowAfter = await verifyInstalledVisiblePrimaryWindow(launch.child.pid, osWindowBefore.handle);
     const activation = currentEvents(after).find(row => row.state === 'PRIMARY_WINDOW_ACTIVATED' && row.details.launch_id === ack.launch_id
       && row.sequence === ack.event_sequence && row.details.visible === true);
@@ -759,11 +794,12 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       api_listener: apiListener, edge_listener: edgeListener,
       same_ui_child_across_startup_grace: true, screenshot_sha256: digest(png), screenshot_bytes: png.length,
       stable_primary_window_id: journalWindow.window_id, same_primary_window_across_startup_grace: true,
-      current_cdp_window: cdpWindowAfter, bootstrap_window_timeout_superseded: journalWindow.bootstrap_timeout_superseded,
+      current_cdp_surface: cdpSurfaceAfter, debugging_listener: debuggingListener,
+      surface_proof_method: 'CDP_PAGE_AND_WIN32_NATIVE_WINDOW', same_cdp_document_across_startup_grace: true,
+      bootstrap_window_timeout_superseded: journalWindow.bootstrap_timeout_superseded,
       current_os_window: osWindowAfter, current_os_window_visible: true, same_os_window_across_startup_grace: true,
       owner_boot_qualified: true, production_ready: false, authority_effect: false };
   } finally {
-    browserClient?.close();
     client?.close();
     // Use the existing installer shutdown barrier to stop the owned API/edge
     // host. An attached PostgreSQL clone stays with the fixture's owner.
@@ -838,6 +874,7 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
     || digest(await fs.readFile(executable)) !== installedHashes.installed_executable_sha256) fail('installed_artifact_identity_changed');
   const proof = Object.freeze({ schema: 'metaengine.browser.installed-launch-qualification.v1', ...identity,
     installed_source_files: sourceFiles, installed_source_bytes_verified: true,
+    qualification_script_sha256: digest(await fs.readFile(fileURLToPath(import.meta.url))),
     database_wizard_removed: true,
     ...installedHashes, offline_successor_probe_qualified: offlineSuccessor.offline_successor_probe_qualified === true,
     protected_offline_runtime_verified: runtime.packaged_resources_verified === true,

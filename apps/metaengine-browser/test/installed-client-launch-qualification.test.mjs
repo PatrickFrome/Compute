@@ -8,10 +8,10 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createPackage, uncache } from '@electron/asar';
 import { assertInstalledLaunchIdentity, assertMissingDescriptorAdmissionContract, assertOwnerStartupGrace,
-  assertInstalledPrimaryWindowJournal, assertInstalledPrimaryCdpWindow,
+  assertInstalledPrimaryWindowJournal, assertInstalledPrimaryCdpSurface,
   assertInstalledVisibleWindow,
   browserEndpointAt,
-  readInstalledCdpWindow,
+  readInstalledCdpSurface,
   prepareIsolatedAttachedAutoConnect, assertAutomaticAttachedOwnerBinding, ISOLATED_OWNER_MARKER,
   REMOVED_DATABASE_WIZARD_FILES,
   assertOfflineSuccessorBinding, qualifyInstalledOfflineSuccessor,
@@ -45,7 +45,7 @@ test('normal GUI qualification permits the Windows first show while probes and h
   }
 });
 
-test('installed CDP qualification keeps browser-window commands on /json/version and page capture on /json/list', async () => {
+test('browser endpoint discovery admits only the explicit browser websocket', async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
   try {
@@ -65,38 +65,48 @@ test('installed CDP qualification keeps browser-window commands on /json/version
     globalThis.fetch = originalFetch;
   }
 
-  const source = await fs.readFile(new URL('../scripts/qualify-installed-client-launch.mjs', import.meta.url), 'utf8');
-  assert.match(source, /browserClient\s*=\s*await cdp\(browser\.webSocketDebuggerUrl\)/);
-  assert.match(source, /readInstalledCdpWindow\(browserClient, target\.id\)/);
-  assert.match(source, /client\.command\('Page\.captureScreenshot'/);
-  assert.doesNotMatch(source, /readInstalledCdpWindow\(client,/);
 });
 
-test('CDP native-window readback stays on browser websocket and binds the selected page targetId', async () => {
-  const browserCalls = [];
-  const browserClient = { async command(method, params) {
-    browserCalls.push({ method, params });
-    if (method === 'Browser.getWindowForTarget') return { windowId: 37 };
-    if (method === 'Browser.getWindowBounds') return { bounds: { windowState: 'normal', width: 1200, height: 800 } };
-    throw new Error('unexpected_browser_domain_command');
+function cdpSurfaceFixture(change = {}) {
+  const expectedUrl = 'http://127.0.0.1:19002/';
+  const observed = { href: expectedUrl, visibility: 'visible', ready_state: 'complete', shell_contract_present: true,
+    ...change.page };
+  const client = { async command(method) {
+    if (method === 'Target.getTargetInfo') return { targetInfo: { targetId: 'page-target-123', type: 'page', url: expectedUrl, ...change.target } };
+    if (method === 'DOM.getDocument') return { root: { backendNodeId: 81, ...change.document } };
+    if (method === 'Runtime.evaluate') return change.observation ?? { result: { type: 'string', value: JSON.stringify(observed) } };
+    if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800, ...change.metrics } };
+    // Match the real Electron protocol refusal if a Chrome window method leaks
+    // back into this proof. The Win32 visible-window check is independent.
+    throw Object.assign(new Error('method_not_found'), { code: -32601 });
   } };
-  const pageCalls = [];
-  const pageClient = { async command(method, params) {
-    pageCalls.push({ method, params });
-    if (method === 'Page.captureScreenshot') return { data: 'c2NyZWVuc2hvdA==' };
-    throw new Error('page_target_does_not_own_browser_window_commands');
-  } };
+  return { client, inputs: { targetId: 'page-target-123', expectedUrl } };
+}
 
-  const window = await readInstalledCdpWindow(browserClient, 'page-target-123');
-  assert.deepEqual(window, { window_id: 37, window_state: 'normal', width: 1200, height: 800 });
-  assert.deepEqual(browserCalls, [
-    { method: 'Browser.getWindowForTarget', params: { targetId: 'page-target-123' } },
-    { method: 'Browser.getWindowBounds', params: { windowId: 37 } },
-  ]);
-  assert.equal((await pageClient.command('Page.captureScreenshot', { format: 'png' })).data, 'c2NyZWVuc2hvdA==');
-  assert.deepEqual(pageCalls, [{ method: 'Page.captureScreenshot', params: { format: 'png' } }]);
-  for (const targetId of ['', null, 37]) {
-    await assert.rejects(readInstalledCdpWindow(browserClient, targetId), /normal_primary_cdp_target_invalid/);
+test('CDP renderer proof binds the exact gateway page and document with unsupported Browser window methods', async () => {
+  const { client, inputs } = cdpSurfaceFixture();
+  const surface = await readInstalledCdpSurface(client, inputs);
+  assert.deepEqual(surface, { target_id: inputs.targetId, document_backend_node_id: 81,
+    url_sha256: createHash('sha256').update(inputs.expectedUrl).digest('hex'), visibility: 'visible',
+    ready_state: 'complete', shell_contract_present: true, width: 1200, height: 800 });
+  for (const patch of [{ targetId: '' }, { targetId: 37 }, { expectedUrl: 'https://127.0.0.1:19002/' },
+    { expectedUrl: 'http://external.invalid:19002/' }, { expectedUrl: 'http://secret:password@127.0.0.1:19002/' }]) {
+    await assert.rejects(readInstalledCdpSurface(client, { ...inputs, ...patch }), /normal_primary_cdp_target_invalid/);
+  }
+});
+
+test('CDP renderer proof rejects target swaps, hidden or incomplete documents, missing UI and failed evaluation', async () => {
+  for (const change of [
+    { target: { targetId: 'different-target' } }, { target: { type: 'iframe' } }, { target: { url: 'http://127.0.0.1:19003/' } },
+    { document: { backendNodeId: undefined } }, { page: { href: 'http://127.0.0.1:19003/' } },
+    { page: { visibility: 'hidden' } }, { page: { ready_state: 'interactive' } }, { page: { shell_contract_present: false } },
+    { metrics: { clientWidth: 0 } }, { metrics: { clientHeight: 200 } }, { metrics: { clientWidth: Infinity } },
+    { observation: { result: { type: 'object', value: {} } } },
+    { observation: { result: { type: 'string', value: 'invalid-json' } } },
+    { observation: { exceptionDetails: {}, result: { type: 'string', value: '{}' } } },
+  ]) {
+    const { client, inputs } = cdpSurfaceFixture(change);
+    await assert.rejects(readInstalledCdpSurface(client, inputs), /normal_primary_cdp_/);
   }
 });
 
@@ -318,11 +328,14 @@ test('installed primary journal accepts a later stable proof only for the exact 
     { pid: fixture.pid, version: expectedVersion, expectedWindowId: 48 }), /normal_primary_window_stability_unproven/);
 });
 
-test('current CDP window proof requires the same visible-sized unminimized native browser window after grace', () => {
-  const before = { window_id: 37, window_state: 'normal', width: 1200, height: 800 };
-  assert.equal(assertInstalledPrimaryCdpWindow(before, { ...before, window_state: 'maximized' }), true);
-  for (const patch of [{ window_id: 38 }, { window_state: 'minimized' }, { width: 0 }, { height: 200 }]) {
-    assert.throws(() => assertInstalledPrimaryCdpWindow(before, { ...before, ...patch }), /normal_primary_cdp_window_unproven/);
+test('CDP proof after startup grace requires the same visible gateway renderer document', () => {
+  const before = { target_id: 'page-123', document_backend_node_id: 81, url_sha256: 'b'.repeat(64),
+    visibility: 'visible', ready_state: 'complete', shell_contract_present: true, width: 1200, height: 800 };
+  assert.equal(assertInstalledPrimaryCdpSurface(before, { ...before, width: 1600 }), true);
+  for (const patch of [{ target_id: 'page-124' }, { document_backend_node_id: 82 }, { url_sha256: 'c'.repeat(64) },
+    { visibility: 'hidden' }, { ready_state: 'interactive' }, { shell_contract_present: false },
+    { width: 0 }, { height: 200 }, { width: Infinity }, { height: 300.5 }]) {
+    assert.throws(() => assertInstalledPrimaryCdpSurface(before, { ...before, ...patch }), /normal_primary_cdp_surface_unproven/);
   }
 });
 
