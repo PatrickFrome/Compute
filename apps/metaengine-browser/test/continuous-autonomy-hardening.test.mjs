@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
-import { HostResilienceRuntime } from '../src/host-resilience-runtime.mjs';
+import { HostResilienceRuntime } from './helpers/host-resilience-offline-fixture.mjs';
 
 const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const NEXT_CONVERSATION = 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444';
