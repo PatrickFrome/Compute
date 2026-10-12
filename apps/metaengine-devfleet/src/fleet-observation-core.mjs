@@ -7,7 +7,8 @@ const SAFE_ERRORS=new Set([
   'observation_tab_not_live','observation_origin_not_chatgpt',
   'observation_target_changed','observation_tree_too_large',
   'observation_identity_invalid','observation_origin_invalid',
-  'observation_timeout','observation_readback_invalid'
+  'observation_timeout','observation_readback_invalid',
+  'observation_empty_ax_tree'
 ]);
 const safeError = value => SAFE_ERRORS.has(String(value)) ? String(value) : 'observation_failed';
 export const OBSERVATION_SCHEMA='metaengine.devfleet.batch-observation.v1';
@@ -72,11 +73,14 @@ export async function runObservationBatch({params,ownedTabs,observe,timeoutMs=80
       try {
         let timer;
         let info;
+        const controller=new AbortController();
         try {
           info=await Promise.race([
-            Promise.resolve().then(()=>observe(tab_id)),
-            new Promise((_,reject)=>{timer=setTimeout(
-              ()=>reject(Error('observation_timeout')),timeoutMs);})
+            Promise.resolve().then(()=>observe(tab_id,controller.signal)),
+            new Promise((_,reject)=>{timer=setTimeout(()=>{
+              controller.abort();
+              reject(Error('observation_timeout'));
+            },timeoutMs);})
           ]);
         } finally { clearTimeout(timer); }
         if(info?.tab_id!==tab_id || !HASH.test(info?.revision||'') ||
