@@ -28,6 +28,26 @@ function fixture() {
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
+test('restart restores owned WebContents at bounded concurrency, preserving blocked identities',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const sessions=(await seed.create({request_id:'restore-bounded-create-20261012',count:8})).sessions;
+ let active=0,peak=0,total=0;
+ const adapter={...f.adapter,async create(tab_id,url){
+   active++;peak=Math.max(active,peak);total++;
+   await new Promise(resolve=>setTimeout(resolve,12));
+   active--;
+   if(tab_id===sessions[3].tab_id)throw Error('synthetic_load_failed');
+   return {tab_id,url};
+ }};
+ const reboot=new DevFleetOperator({adapter,store:f.store});
+ const snapshot=await reboot.init();
+ assert.equal(total,8);assert.equal(peak,4);
+ assert.equal(snapshot.session_count,8);
+ assert.equal(snapshot.sessions[3].state,'RESTORE_BLOCKED');
+ assert.equal(snapshot.sessions.filter(x=>x.state==='OPEN').length,7);
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.filter(x=>x.operation==='create').length,1);
+});
 test('batch poll is an O(1) native hint: no Send, AX read or durable receipt',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
  const tabs=(await op.create({request_id:'hint-cells-20261012',count:2})).sessions;

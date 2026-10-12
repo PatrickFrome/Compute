@@ -123,3 +123,24 @@ test('even an alphanumeric private exception never enters observer output',async
  assert.equal(data.records[0].error,'observation_failed');
  assert(!JSON.stringify(data).includes('privateBearerABC123'));
 });
+
+test('timed-out observer is explicitly aborted before delayed AX result can publish',async()=>{
+ const owned=[tab(1)];
+ let capturedSignal;
+ let finish;
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const result=await runObservationBatch({
+   params:{},ownedTabs:owned,timeoutMs:20,
+   observe:async (_id,signal)=>{
+     capturedSignal=signal;
+     await pending;
+     return {tab_id:tab(1),revision:'b'.repeat(64),chars:6,complete:true,authority_effect:false};
+   }
+ });
+ assert.equal(result.records[0].state,'UNKNOWN');
+ assert.equal(result.records[0].error,'observation_timeout');
+ assert.equal(capturedSignal.aborted,true);
+ finish();
+ await Promise.resolve();
+ assert.equal(result.observed,0);
+});

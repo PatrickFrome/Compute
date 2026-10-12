@@ -12,9 +12,21 @@ import { LiveUiSlots } from './live-ui-slots.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'METAENGINE DevFleet';
 const RPC_SCHEMA = 'metaengine.devfleet.loopback.v1';
+// A physically isolated, explicit QA profile. On Windows Electron uses the
+// shell known-folder for appData, so changing the APPDATA environment variable
+// does NOT reliably isolate the Chromium profile.
+const QA_SWITCH='--devfleet-qa-userdata=';
+const qaArgs=process.argv.filter(arg=>arg.startsWith(QA_SWITCH));
+if(qaArgs.length>1)throw Error('devfleet_qa_profile_ambiguous');
+const qaRoot=path.resolve(process.env.LOCALAPPDATA ||
+  path.join(os.homedir(),'AppData','Local'),'METAENGINE-DevFleet-Update-Backup');
+const qaCandidate=qaArgs.length ? path.resolve(qaArgs[0].slice(QA_SWITCH.length)) : null;
+if(qaCandidate && (!qaCandidate.toLowerCase().startsWith((qaRoot+path.sep).toLowerCase())
+   || qaCandidate===qaRoot))
+  throw Error('devfleet_qa_profile_outside_private_backup');
 const dataDir = process.argv.includes('--devfleet-live-ui-smoke')
   ? path.join(os.tmpdir(),'metaengine-devfleet-live-ui-smoke-'+process.pid)
-  : path.join(app.getPath('appData'), 'METAENGINE DevFleet');
+  : qaCandidate || path.join(app.getPath('appData'), 'METAENGINE DevFleet');
 app.setName(APP_NAME);
 app.setPath('userData', dataDir);
 app.commandLine.appendSwitch('disable-features','Translate');
