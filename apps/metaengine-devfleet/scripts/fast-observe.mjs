@@ -17,14 +17,16 @@ function argument(name, fallback, min, max) {
   if (!Number.isSafeInteger(value) || value < min || value > max) throw Error('invalid_argument_' + name);
   return value;
 }
-const allowed = new Set(['--quick', '--read', '--help']);
+const allowed = new Set(['--quick', '--read', '--help', '--only-conversations', '--compact']);
 const extra = process.argv.slice(2).filter(x => !x.includes('='));
-if (extra.some(x => !allowed.has(x)) || extra.length > 1) throw Error('unsupported_action');
+if (extra.some(x => !allowed.has(x)) || extra.filter(x=>x==='--quick' || x==='--read' || x==='--help').length > 1) throw Error('unsupported_action');
 if (extra.includes('--help')) {
-  console.log('Usage: node fast-observe.mjs [--quick|--read] [--parallel=1..6] [--max-tabs=1..16] [--excerpt=0..400]');
+  console.log('Usage: node fast-observe.mjs [--quick|--read] [--only-conversations] [--compact] [--parallel=1..6] [--max-tabs=1..16] [--excerpt=0..400]');
   process.exit(0);
 }
 const read = extra.includes('--read');
+const onlyConversations = extra.includes('--only-conversations');
+const compact = extra.includes('--compact');
 const parallel = argument('parallel', 3, 1, 6);
 const maxTabs = argument('max-tabs', 16, 1, 16);
 const excerpt = argument('excerpt', 0, 0, 400);
@@ -62,7 +64,7 @@ const output = { schema:'metaengine.devfleet.fast-observe.v1', source:'LIVE_DEVF
   checked:sessions.length, parallelism:read?parallel:0, records:sessions,
   hosted_database:false, automatic_retry_allowed:false, authority_effect:false };
 if (read) {
-  const jobs = sessions.filter(s=>s.state==='OPEN');
+  const jobs = sessions.filter(s=>s.state==='OPEN' && (!onlyConversations || s.conversation));
   let next = 0;
   const observations = new Map();
   const workers = Array.from({length:Math.min(parallel,jobs.length)}, async()=>{
@@ -90,10 +92,12 @@ if (read) {
   });
   await Promise.all(workers);
   for (const item of sessions) item.readback = observations.get(item.tab_id) ||
-    {observation:item.state==='OPEN'?'UNKNOWN':'NOT_OPEN'};
+    {observation:onlyConversations && !item.conversation?'SKIPPED_NO_CONVERSATION':item.state==='OPEN'?'UNKNOWN':'NOT_OPEN'};
   output.read_success = sessions.filter(x=>x.readback.observation==='UNTRUSTED_PAGE_TEXT').length;
-  output.read_unknown = sessions.length-output.read_success;
+  output.read_unknown = jobs.length-output.read_success;
+  output.skipped_empty_chat = onlyConversations ? sessions.length-jobs.length : 0;
   output.sum_individual_read_ms = sessions.reduce((n,s)=>n+(s.readback.read_ms||0),0);
 }
 output.elapsed_ms=Math.round(performance.now()-started);
+if (compact) output.records = sessions.filter(s=>s.conversation || s.readback?.observation==='UNKNOWN');
 console.log(JSON.stringify(output,null,2));
