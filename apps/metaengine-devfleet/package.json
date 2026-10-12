@@ -1,6 +1,6 @@
 {
   "name": "metaengine-devfleet",
-  "version": "0.1.0-dev.10.20261013.1",
+  "version": "0.1.0-dev.11.20261013.1",
   "private": true,
   "type": "module",
   "description": "Separate ChatGPT multi-chat development client for METAENGINE",
