@@ -50,3 +50,25 @@ The module **does not certify Windows ACLs, user authorization, keeper process i
 6. Real admitted user goal -> lease -> agent ChatGPT effect -> independent critic -> durable result -> next goal; later measured multiagent scaling and crash-recovery soak.
 
 No attempt in this stage accessed the installed database or changed the running Browser/Guardian/keeper.
+
+## Follow-up: disposable executor with actual subprocess semantics
+
+`infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.mjs` now owns the complete test-only operation rather than relying on a caller to perform an ad hoc dump between the intent barrier and readback:
+- refuses live Keeper port 55432 and known API/Edge ports and any source PGDATA or journal outside the canonical OS temporary directory;
+- resolves exact regular `pg_dump.exe`, `psql.exe` and `pg_restore.exe` resources; binds the custom pg_dump binary to a caller-pinned SHA-256;
+- ensures PostgreSQL server 17 SQL identity, system identifier, port and start time agree before and after the dump, with an exact postmaster.pid readback matching the fixture-owned postmaster PID;
+- narrows inherited environment to minimum Windows functionality plus explicit loopback connection settings; SQLSTATE diagnostics are finite and private stderr is bounded (16 KiB) and not persisted;
+- records the exact one-shot durable effect barrier before spawning pg_dump; on timeout, failed process, stderr warning, failed archive integrity or ambiguous readback, the barrier is never removed and the effect cannot be blindly retried;
+- validates PGDMP header, regular file, size and SHA-256, plus an independently executed `pg_restore --list` and rehashed archive; emits an immutable `ARCHIVE_ONLY_VERIFIED` receipt, explicitly `physical_restore_proven:false` and `upgrade_authorized:false`;
+- has a real isolated two-cluster integration test, including the independent actual restore and same-count content corruption check. Unit tests reject the installed source port, a production PGDATA path, a mismatched executable digest and a retargeted connection before any effect intent.
+
+Critical limitation: **this executor is deliberately DISPOSABLE-ONLY**, and the test fixture currently provides a temporary password through the child environment (never printed or persisted by the executor). This is not suitable for production authority/secret handling. A future installed-Owner executor needs independent native attestation of process incarnation/ACL, protected credential ingress (such as a locked-down passfile), active local capabilities, isolated archive storage, a fresh backup namespace and an independent physical restore with all application roles, extensions and source-data verification. This artifact is not a new live backup and does not lift the installed update gate.
+
+Official references:
+- https://www.postgresql.org/docs/17/app-pgdump.html (pg_dump archive format, stderr warnings, global-data limitations)
+- https://www.postgresql.org/docs/17/app-pgrestore.html (readable TOC versus actual transactional restore)
+- https://docs.temporal.io/activity-definition (workflow history does not guarantee an Activity side effect occurs only once)
+
+### Qualified result on this source turn
+
+Windows disposable executor integration: **5/5 PASS** (real two-cluster physical PG17 export/restore plus four pre-effect authority/digest/retarget fences). Backup and restore existing regressions: **37 PASS, 1 SKIP**, no failures. METAENGINE source check: **190 PASS**. The isolated source and destination PG17 clusters are stopped by the fixture. Exact commit SHA will be recorded by Git after these tests. Installed backup remains explicitly unqualified.

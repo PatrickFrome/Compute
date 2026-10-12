@@ -10,7 +10,8 @@ import test from 'node:test';
 import {promisify} from 'node:util';
 import {startOwnedWindowsPostgres} from './owned-postgres-process.mjs';
 import {classifyPostgresUtilityFailure} from './postgres-utility-diagnostic.mjs';
-import {buildBackupEffectIntent,publishBackupEffectIntent,crossBackupEffectBarrier,readBackupEffectFence} from './pg17-backup-effect-barrier.mjs';
+import {buildBackupEffectIntent,crossBackupEffectBarrier,readBackupEffectFence} from './pg17-backup-effect-barrier.mjs';
+import {executeDisposableOneShotPg17Dump} from './pg17-one-shot-disposable-dump-executor.mjs';
 
 const exec=promisify(execFile);
 const bin=process.env.LOCAL_STATE_TEST_PG_BIN_DIR;
@@ -108,15 +109,16 @@ test('real PostgreSQL17 custom dump -> separate postmaster restore -> exact data
     ownerSha256:'a'.repeat(64),postmasterSha256:'b'.repeat(64),
     archivePath:archive,
   });
-  await publishBackupEffectIntent({journalDirectory:root,intent});
-  await crossBackupEffectBarrier({journalDirectory:root,intent});
+  const archiveProof=await executeDisposableOneShotPg17Dump({
+    intent,journalDirectory:root,pgBinDir:bin,
+    expectedPgDumpSha256:await hash(executable('pg_dump')),
+    sourceDataDirectory:from,sourcePort,connectionEnv:sourceEnv,
+  });
+  assert.equal(archiveProof.state,'ARCHIVE_ONLY_VERIFIED');
+  assert.equal(archiveProof.physical_restore_proven,false);
+  assert.equal(archiveProof.upgrade_authorized,false);
   await assert.rejects(crossBackupEffectBarrier({journalDirectory:root,intent}),
-    /backup_effect_write_ambiguous/);
-  await command('pg_dump',[
-    '--format=custom','--no-owner','--no-acl','--no-password','--lock-wait-timeout=5000',
-    '--file='+archive,'--host=127.0.0.1','--port='+sourcePort,'--username=postgres',
-    '--dbname=postgres',
-  ],sourceEnv,'dump',90000);
+    /backup_effect_(?:archive_existing|write_ambiguous)/);
   const before=(await fs.stat(archive)).size;
   assert(before>1024,'real custom-format dump must not be empty');
   const digestBefore=await hash(archive);
