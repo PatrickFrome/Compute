@@ -67,6 +67,7 @@ export class DevFleetOperator {
     return this.snapshot();
   }
   #requireInit() { if (!this.#initialized) throw new Error('operator_not_initialized'); }
+  isBusy() { return this.#busy || this.#persistenceFenced; }
   #find(tabId) {
     const validated = validateTab(tabId);
     const s = this.#state.sessions.find(x => x.tab_id === validated);

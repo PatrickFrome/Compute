@@ -49,3 +49,56 @@ page is not evidence that real sends have succeeded.
 
 The installed product is independent of the standalone dev-worktree; use the
 version and EXE SHA-256 readback rather than assuming sources are installed.
+
+## Live Development Console (0.1.0-dev.2; staged development)
+
+**One bootstrap installation, many checked UI iterations.** Open the
+**DevFleet > Live Development Console** menu (`Ctrl+Shift+D`). Choose the
+trusted `apps/metaengine-devfleet` source directory once through the local
+directory picker. This pins the source folder; pages and model outputs cannot
+set or change it. Subsequent iterations:
+
+1. Edit `src/index.html` in the pinned source worktree using your normal
+   IDE/terminal/Codex tools; keep application title, embedded entrypoint and
+   typed `window.devfleet` bridge.
+2. In the Console, press **Stage**. The host parses the exact local HTML and
+   JavaScript, blocks external scripts/iframes, checks size and ABI, and copies
+   the file to a SHA-256-addressed private immutable slot.
+3. Press **Activate**. Only the main DevFleet UI is reloaded from this
+   exact staged copy; ChatGPT `WebContentsView` sessions and cookies are
+   separate and MUST remain intact. The activation generation, hash and
+   previous slot are recorded atomically.
+4. If unsuitable, press **Rollback** to the prior live UI. On ambiguous
+   load or persistence failure, the host fails closed to the last-known-good
+   page until manual reconciliation. Do **not** reattempt blindly.
+
+After the one-time local directory selection, a trusted command-line process
+on the authorized PC may also use the **separate developer-only bearer
+capability**, `%APPDATA%\METAENGINE DevFleet\developer-rpc.json`, to run:
+
+```powershell
+node apps/metaengine-devfleet/scripts/devfleet-live-cli.mjs status
+node apps/metaengine-devfleet/scripts/devfleet-live-cli.mjs stage
+node apps/metaengine-devfleet/scripts/devfleet-live-cli.mjs activate
+node apps/metaengine-devfleet/scripts/devfleet-live-cli.mjs rollback
+node apps/metaengine-devfleet/scripts/devfleet-live-cli.mjs reconcile
+```
+
+The regular `operator-rpc.json` bearer **cannot** stage or activate UI.
+The developer capability never accepts arbitrary paths, script bodies, SQL,
+OS commands or CDP expressions: it acts only on the already operator-pinned
+source tree. Neither token should ever appear in a chat/log/repository.
+
+**Boundary:** this first phase hot-updates *the UI and workflows implemented
+within that UI using the existing three typed chat tools*. A new Electron
+main-process feature, preload privilege or native capability still needs a
+qualified application release; future signed ABI-versioned runtime modules
+will permit more backend logic without reinstalling the bootstrap. Such
+native/privilege changes are never silently injected from a ChatGPT page.
+
+**Cross-client contract:** the same stable-bootstrap + versioned feature
+module + evidence/rollback model is mandatory for the principal METAENGINE
+Browser, while preserving **its own PostgreSQL**, Guardian and Supervisor
+authority. See
+`coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md`
+section "Binding cross-client requirement: Live Development Plane".
