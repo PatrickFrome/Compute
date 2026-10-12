@@ -1,0 +1,18 @@
+{
+  "name": "metaengine-devfleet",
+  "version": "0.1.0-dev.1",
+  "private": true,
+  "type": "module",
+  "description": "Separate ChatGPT multi-chat development client for METAENGINE",
+  "author": "METAENGINE",
+  "main": "src/main.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "start": "electron .",
+    "package:win": "electron-builder --config electron-builder.json --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "44.0.0",
+    "electron-builder": "26.15.7"
+  }
+}
