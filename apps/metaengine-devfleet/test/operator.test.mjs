@@ -49,6 +49,29 @@ test('batch refuses unverified model and existing draft before any persisted sen
  assert.equal(f.sends.length,0);
  assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,0);
 });
+test('unknown first Send blocks later batch effects even after restart',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'batch-unknown-chats-20261012',count:2})).sessions;
+ const assignments=tabs.map((x,i)=>({tab_id:x.tab_id,request_id:'batch-unknown-task-20261012-'+i,text:'Task '+i}));
+ f.failSend(true);
+ const a=await op.batchAssign({assignments});
+ assert.equal(a.state,'HALTED');assert.equal(a.ambiguous,1);
+ assert.equal(a.receipts[1].state,'NOT_ATTEMPTED');assert.equal(f.sends.length,1);
+ const resumed=new DevFleetOperator(f);await resumed.init();
+ const b=await resumed.batchAssign({assignments});
+ assert.equal(b.state,'HALTED');assert.equal(b.receipts[0].state,'AMBIGUOUS');
+ assert.equal(f.sends.length,1);
+});
+test('bad batch identity never reaches probe, receipt ledger or Send',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tab=(await op.create({request_id:'batch-invalid-chats-20261012',count:1})).sessions[0].tab_id;
+ const row={tab_id:tab,request_id:'batch-collision-20261012',text:'A'};
+ await assert.rejects(op.batchAssign({assignments:[]}),/batch_size_invalid/);
+ await assert.rejects(op.batchAssign({assignments:[row,row]}),/duplicate_id_or_tab/);
+ await assert.rejects(op.batchAssign({assignments:[{...row,unknown:'value'}]}),/params_invalid/);
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,0);
+});
 test('7 chats, read their output, give two successive tasks with separate identities',async()=>{
   const f=fixture(),op=new DevFleetOperator(f);
   await op.init();
