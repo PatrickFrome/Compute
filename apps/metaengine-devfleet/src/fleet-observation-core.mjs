@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 
 const HASH = /^[a-f0-9]{64}$/;
 const TAB = /^tab_[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -60,12 +61,14 @@ export async function runObservationBatch({params,ownedTabs,observe,timeoutMs=80
   if(!Number.isSafeInteger(timeoutMs) || timeoutMs<10 || timeoutMs>30000)
     throw Error('observation_timeout_policy_invalid');
   if(typeof observe!=='function')throw Error('observation_adapter_missing');
+  const started=performance.now();
   const {ids,parallelism,previous}=validateObservationRequest(params,ownedTabs);
   const result=new Array(ids.length);
   let next=0;
   const worker=async()=>{
     while(next<ids.length){
       const index=next++, tab_id=ids[index];
+      const itemStarted=performance.now();
       try {
         let timer;
         let info;
@@ -85,17 +88,19 @@ export async function runObservationBatch({params,ownedTabs,observe,timeoutMs=80
           complete:info.complete,
           change:!info.complete?'TRUNCATED_UNVERIFIED':
             prior===undefined?'INITIAL':prior===info.revision?'UNCHANGED':'CHANGED',
-          authority_effect:false};
+          read_ms:Math.round(performance.now()-itemStarted),authority_effect:false};
       }catch(e){
         result[index]={tab_id,state:'UNKNOWN',change:'UNVERIFIED',
-          error:safeError(e?.message),authority_effect:false};
+          error:safeError(e?.message),read_ms:Math.round(performance.now()-itemStarted),authority_effect:false};
       }
     }
   };
   await Promise.all(Array.from({length:Math.min(ids.length,parallelism)},worker));
   return {schema:OBSERVATION_SCHEMA,scope:'READ_ONLY',source:'OWNED_WEB_CONTENTS',
+    observed_at:new Date().toISOString(),elapsed_ms:Math.round(performance.now()-started),
     records:result,observed:result.filter(x=>x.state==='OBSERVED').length,
     unknown:result.filter(x=>x.state==='UNKNOWN').length,
+    sum_read_ms:result.reduce((sum,row)=>sum+row.read_ms,0),
     // Revision is a client-local bounded UI digest, not task completion proof.
     completion_proven:false,authority_effect:false,automatic_retry_allowed:false};
 }
