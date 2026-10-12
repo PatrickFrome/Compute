@@ -178,6 +178,55 @@ test('HTTP requires local authority, role transaction and validates routing/body
   } finally { await runtime.close(); }
 });
 
+test('HTTP Host observer seam requires authentication and never claims product readiness', async () => {
+  const database = fakeDatabase();
+  const secret = 'h'.repeat(64);
+  const atMs = Date.now();
+  const timestamp = delay => new Date(atMs + delay).toISOString();
+  const browser = { pid: 3321, created_at: timestamp(-20_000), process_incarnation_id: 'http-host-incarnation-3321' };
+  const observation = {
+    schema: 'metaengine.operator.host-incarnation.evidence.v1',
+    source: 'TRUSTED_HOST_READBACK', observed_at: timestamp(-100), authority_effect: false,
+    browser,
+    guardian: {
+      schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
+      state: 'READY', ready: true, guardian_service_ready: true,
+      owner_binding_proven: true, device_binding_proven: true, stale: false,
+      observed_at: timestamp(-150), automatic_retry_allowed: false, authority_effect: false,
+    },
+    runtime_probe: { source: 'OS_PROCESS_INVENTORY', ...browser, state: 'PRESENT', observed_at: timestamp(-120) },
+    heartbeat_fence: {
+      valid: true, reason: 'EXACT_SPLIT_HEARTBEATS_FENCED',
+      pid: browser.pid, process_incarnation_id: browser.process_incarnation_id,
+      channels: Object.fromEntries(['startup', 'liveness', 'readiness', 'progress']
+        .map(name => [name, { sequence: 1, observed_at_ms: atMs - 100 }])),
+    },
+    metadata: { token: 'MUST_NOT_LEAK_HTTP_SECRET', command_line: '--private' },
+  };
+  let reads = 0;
+  const runtime = await startDbApi({
+    apiKey: secret, port: 0, sql: database.sql,
+    hostObservationReadback: async () => { reads += 1; return observation; },
+  });
+  try {
+    assert.equal((await fetch(runtime.address + '/operator/v1/context')).status, 401);
+    assert.equal(reads, 0);
+    const denied = await fetch(runtime.address + '/operator/v1/context?pid=3321', { headers: { apikey: secret } });
+    assert.equal(denied.status, 400);
+    assert.equal(reads, 0);
+    const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: secret } });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(reads, 1);
+    assert.equal(payload.planes.host.state, 'AVAILABLE');
+    assert.equal(payload.planes.host.details.product_readiness_proven, false);
+    assert.equal(payload.operational_state, 'NOT_PROVEN');
+    assert.equal(payload.authority_effect, false);
+    assert.equal(JSON.stringify(payload).includes('MUST_NOT_LEAK_HTTP_SECRET'), false);
+    assert.equal(JSON.stringify(payload).includes(browser.process_incarnation_id), false);
+  } finally { await runtime.close(); }
+});
+
 test('HTTP rejects oversized declared bodies before database work', async () => {
   const database = fakeDatabase();
   const secret = 'c'.repeat(64);

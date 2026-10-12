@@ -53,6 +53,14 @@ test('stale heartbeat, stale guardian and future timestamp are STALE', () => {
   assert.equal(host(b).state, 'STALE');
   const c = evidence(); c.observed_at = at(5_001);
   assert.equal(host(c).state, 'STALE');
+  const d = evidence(); d.guardian.stale = true;
+  assert.equal(host(d).state, 'STALE');
+});
+test('impossible future process creation cannot become AVAILABLE', () => {
+  const v = evidence();
+  v.browser.created_at = at(60_000);
+  v.runtime_probe.created_at = at(60_000);
+  assert.equal(host(v).state, 'UNVERIFIED');
 });
 test('missing Guardian or heartbeat yields UNKNOWN, never PID-derived READY', () => {
   const v = evidence(); delete v.guardian;

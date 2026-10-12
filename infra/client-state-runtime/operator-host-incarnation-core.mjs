@@ -48,6 +48,7 @@ export function reduceHostProcessObservation(observation, { nowMs, maxAgeMs } = 
       || probe.source !== 'OS_PROCESS_INVENTORY') return result('UNVERIFIED');
   const limit = Math.min(FRESH_MS, maxAgeMs);
   if (!Number.isSafeInteger(nowMs) || !Number.isSafeInteger(limit) || limit < 100) return result('UNVERIFIED');
+  if (guardian.stale === true) return result('STALE');
   if (guardian.schema !== GUARDIAN_SCHEMA || guardian.authority_effect !== false
       || guardian.automatic_retry_allowed !== false || guardian.stale !== false) {
     return result('UNVERIFIED');
@@ -56,6 +57,11 @@ export function reduceHostProcessObservation(observation, { nowMs, maxAgeMs } = 
   const ages = dates.map(date => age(date, nowMs, limit));
   if (ages.some(value => value === null)) return result('UNVERIFIED');
   if (ages.some(value => value.stale)) return result('STALE');
+  // The claimed process may not start after its OS inventory or the observer.
+  if (instant(browser.created_at) > nowMs + SKEW_MS
+      || instant(browser.created_at) > instant(probe.observed_at) + SKEW_MS) {
+    return result('UNVERIFIED');
+  }
   // Binding checks precede process/Guardian state checks, including PID reuse.
   if (!matches(browser, probe) || heartbeat.pid !== browser.pid
       || heartbeat.process_incarnation_id !== browser.process_incarnation_id) {
