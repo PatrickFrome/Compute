@@ -4,6 +4,12 @@
 
 The API binds only `127.0.0.1` and rejects requests with a different Host header or any browser Origin header. Every request requires the launcher-generated `apikey`. An optional `Authorization: Bearer` header must contain the same key. The key is random local service identity, not a Supabase token or JWT.
 
+## Unified Operator Context (P0, own PostgreSQL only)
+
+Authenticated `GET /operator/v1/context` returns the bounded `metaengine.operator.context.v1` read-only projection. It uses the **existing local PostgreSQL** capabilities readback and startup RPC/table catalog; it does not contact Supabase or any hosted database. On this first slice, only `database` can report `AVAILABLE`; `client`, `supervisor`, `fleet`, `host`, `source` and `continuity` remain explicitly `UNKNOWN` until independent trusted adapters are implemented. Availability never means complete product readiness. No arbitrary SQL, credentials, role metadata, raw model/page data, or mutation endpoints are exposed.
+
+The route shares the current `127.0.0.1` restriction, Host/Origin validation, `apikey` authentication, request admission, statement timeouts and direct/service-role transaction behavior. Query parameters are forbidden and non-GET methods are rejected. This is a local primitive, **not** a remotely reachable GPT/MCP endpoint; P1 will add a separately authenticated own-host Gateway. The response has `authority_effect=false`, `automatic_retry_allowed=false` and `remote_fallback_allowed=false`.
+
 ## Interface
 
 Authenticated `GET /health` returns `mode: LOCAL_POSTGRES`, the launcher instance ID, the availability of all currently allowlisted RPC names and five table endpoints, and the actual `devos_runtime_capabilities_v1` attestation from the database. Missing objects or unreadable tables fail readiness.
