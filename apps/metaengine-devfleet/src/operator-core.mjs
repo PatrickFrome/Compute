@@ -341,7 +341,7 @@ export class DevFleetOperator {
       throw new Error('input_probe_unverified');
     return {schema:SCHEMA,state:'INPUT_PROBED',...plain(result),authority_effect:false};
   }
-  async #assignLocked(params,requireHigh=false) {
+  async #assignLocked(params) {
     this.#requireInit();
     fields(params, ['request_id','tab_id','text']);
     const id = validateId(params.request_id);
@@ -358,26 +358,20 @@ export class DevFleetOperator {
       throw new Error('operator_tab_ambiguous_reconciliation_required');
     if (this.#state.requests.length >= 500) throw new Error('operator_request_history_full');
     {
-      // Read-only preflight before writing an effect intent. Refuse nonempty
-      // existing drafts instead of overwriting user/agent work or creating
-      // an AMBIGUOUS receipt for a known precondition failure.
-      if (requireHigh) {
-        if (typeof this.#adapter.modelProbe !== 'function')
-          throw new Error('operator_model_proof_unavailable');
-        const model = await this.#adapter.modelProbe(tab.tab_id);
-        if (model?.tab_id !== tab.tab_id || model?.authority_effect !== false ||
-            model?.mode !== 'CHAT' || model?.model_selection_proven !== true ||
-            model?.high_selection_proven !== true)
-          throw new Error('operator_gpt6_high_not_proven');
-      }
+      // Read-only origin/mode/composer preflight before any write-ahead
+      // effect intent. Existing composer drafts may be replaced with the
+      // exact new task; historical AMBIGUOUS sends remain fenced.
+      // The account owner has selected GPT-6 High, so absence of an
+      // accessibility-tree label is not a native Send precondition.
+      // Replacing existing composer text is explicitly owner-authorized.
+      // Empty composers may not display Send until the prompt is typed.
       if(typeof this.#adapter.inputProbe !== 'function')
         throw new Error('operator_input_preflight_unavailable');
       const pre=await this.#adapter.inputProbe(tab.tab_id);
       if(pre?.tab_id!==tab.tab_id||pre?.authority_effect!==false
         ||pre?.mode!=='CHAT'||pre?.page_failure
-        ||pre?.unique_composer!==true||pre?.unique_send!==true
-        ||pre?.composer_nonempty!==false)
-        throw new Error('operator_chat_input_not_ready_or_draft_present');
+        ||pre?.unique_composer!==true)
+        throw new Error('operator_chat_input_not_ready');
       const log = { ...recordFor(id,'assign',fingerprint), tab_id: tab.tab_id };
       this.#state.requests.push(log);
       await this.#save(); // never repeat a send after an uncertain OS/network outcome
@@ -438,7 +432,7 @@ export class DevFleetOperator {
           continue;
         }
         try {
-          const receipt = await this.#assignLocked(row,true);
+          const receipt = await this.#assignLocked(row);
           receipts.push(receipt);
           if (receipt.state === 'AMBIGUOUS') halted = true;
         } catch (error) {
