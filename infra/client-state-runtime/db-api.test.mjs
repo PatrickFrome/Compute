@@ -99,6 +99,9 @@ function fakeDatabase() {
   const tx = { unsafe: async (text, values = []) => {
     calls.push({ text, values });
     if (text.includes('FROM pg_catalog.pg_proc')) return catalog;
+    if (text.includes('pg_postmaster_start_time')) return [{
+      observed_at: new Date(), started_at: new Date(Date.now() - 60_000), database_name: 'disposable_test',
+    }];
     if (text.includes('devos_runtime_capabilities_v1')) return [{ value: { schema: 'test-capabilities' } }];
     if (text.startsWith('SELECT "public".')) return [{ value: { accepted: true } }];
     return [];
@@ -301,4 +304,32 @@ test('partial catalog, denied admin and SQL errors fail closed without leaking S
   });
   const noConnection = () => inspectLocalApiSchemaCatalog({});
   await assert.rejects(noConnection(), /connection_required/);
+});
+
+test('HTTP context denies positive database proof when local PG clock/identity readback is missing', async () => {
+  const database = fakeDatabase();
+  const rawBegin = database.sql.begin;
+  database.sql.begin = run => rawBegin(tx => run({
+    ...tx,
+    unsafe: (text, values) => text.includes('pg_postmaster_start_time') ? Promise.resolve([]) : tx.unsafe(text, values),
+  }));
+  const key = 'g'.repeat(64);
+  const runtime = await startDbApi({ apiKey: key, port: 0, sql: database.sql });
+  try {
+    const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: key } });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.planes.database.state, 'UNVERIFIED');
+    assert.equal(result.planes.database.proof, 'NONE');
+    assert.equal(result.planes.client.state, 'UNKNOWN');
+    assert.equal(result.planes.supervisor.state, 'UNKNOWN');
+    assert.equal(result.planes.fleet.state, 'UNKNOWN');
+    assert.equal(result.planes.host.state, 'UNKNOWN');
+    assert.equal(result.planes.source.state, 'UNKNOWN');
+    assert.equal(result.planes.continuity.state, 'UNKNOWN');
+    assert.equal(result.operational_state, 'NOT_PROVEN');
+    assert.equal(result.authority_effect, false);
+    assert.equal(result.automatic_retry_allowed, false);
+    assert.equal(result.storage, 'OWN_POSTGRES_ONLY');
+  } finally { await runtime.close(); }
 });

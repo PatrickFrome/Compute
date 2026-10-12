@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import postgres from 'postgres';
 import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
+import { OPERATOR_DB_IDENTITY_SQL, qualifyLocalPostgresEvidence } from './operator-truth-readback.mjs';
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -146,19 +147,21 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((item) => item.name === name));
         const unavailable = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
         const plan = compileRpcRequest('devos_runtime_capabilities_v1', {}, signatures);
-        const rows = await transaction(tx => tx.unsafe(plan.text, driverValues(sql, plan.values)));
+        // Read both witnesses inside one local PostgreSQL transaction. The
+        // timestamp is DB-owned, not invented at HTTP response time.
+        const [rows, clockRows] = await transaction(async tx => [
+          await tx.unsafe(plan.text, driverValues(sql, plan.values)),
+          await tx.unsafe(OPERATOR_DB_IDENTITY_SQL),
+        ]);
         const nowMs = Date.now();
         return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
-          database: {
-            source: 'LOCAL_POSTGRES', proven: true,
-            observed_at: new Date(nowMs).toISOString(),
-            state: rows[0]?.value && !missing.length && !unavailable.length ? 'AVAILABLE' : 'DEGRADED',
-            rpc_available: RPC_ALLOWLIST.length - missing.length,
-            rpc_expected: RPC_ALLOWLIST.length,
-            tables_available: Object.keys(TABLE_ALLOWLIST).length - unavailable.length,
-            tables_expected: Object.keys(TABLE_ALLOWLIST).length,
-            capability_schema: rows[0]?.value?.schema ?? null,
-          },
+          database: qualifyLocalPostgresEvidence({
+            clockRows, capabilityRows: rows, nowMs,
+            rpcAvailable: RPC_ALLOWLIST.length - missing.length,
+            rpcExpected: RPC_ALLOWLIST.length,
+            tablesAvailable: Object.keys(TABLE_ALLOWLIST).length - unavailable.length,
+            tablesExpected: Object.keys(TABLE_ALLOWLIST).length,
+          }),
         } }));
       }
       if (url.pathname === '/health' && request.method === 'GET' && !url.search) {
