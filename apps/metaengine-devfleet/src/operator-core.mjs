@@ -253,7 +253,7 @@ export class DevFleetOperator {
       throw new Error('input_probe_unverified');
     return {schema:SCHEMA,state:'INPUT_PROBED',...plain(result),authority_effect:false};
   }
-  async assign(params) {
+  async #assignLocked(params,requireHigh=false) {
     this.#requireInit();
     fields(params, ['request_id','tab_id','text']);
     const id = validateId(params.request_id);
@@ -267,10 +267,20 @@ export class DevFleetOperator {
     if (this.#state.requests.some(r => r.operation === 'assign' &&
       r.state === 'AMBIGUOUS' && r.tab_id === tab.tab_id))
       throw new Error('operator_tab_ambiguous_reconciliation_required');
-    return this.#exclusive(async () => {
+    if (this.#state.requests.length >= 500) throw new Error('operator_request_history_full');
+    {
       // Read-only preflight before writing an effect intent. Refuse nonempty
       // existing drafts instead of overwriting user/agent work or creating
       // an AMBIGUOUS receipt for a known precondition failure.
+      if (requireHigh) {
+        if (typeof this.#adapter.modelProbe !== 'function')
+          throw new Error('operator_model_proof_unavailable');
+        const model = await this.#adapter.modelProbe(tab.tab_id);
+        if (model?.tab_id !== tab.tab_id || model?.authority_effect !== false ||
+            model?.mode !== 'CHAT' || model?.model_selection_proven !== true ||
+            model?.high_selection_proven !== true)
+          throw new Error('operator_gpt6_high_not_proven');
+      }
       if(typeof this.#adapter.inputProbe !== 'function')
         throw new Error('operator_input_preflight_unavailable');
       const pre=await this.#adapter.inputProbe(tab.tab_id);
@@ -296,8 +306,15 @@ export class DevFleetOperator {
         log.receipt = { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
           tab_id: tab.tab_id, automatic_retry_allowed: false };
       }
-      await this.#save().catch(() => {});
+      try { await this.#save(); }
+      catch { return { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
+        tab_id: tab.tab_id, automatic_retry_allowed: false }; }
       return plain(log.receipt);
-    });
+    }
   }
+  async assign(params) {
+    this.#requireInit();
+    return this.#exclusive(() => this.#assignLocked(params));
+  }
+
 }
