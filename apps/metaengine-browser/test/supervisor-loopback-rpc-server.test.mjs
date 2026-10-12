@@ -116,7 +116,7 @@ test('snapshot hides the token; stop closes the listener and removes the manifes
     assert.equal(snapshot.state, 'LISTENING');
     assert.equal(snapshot.token_exposed, false);
     assert.equal(snapshot.command_transport_authority, 'SHARED_FENCED_EXECUTOR');
-    assert.deepEqual(new Set(Object.keys(SUPERVISOR_LOOPBACK_RPC_METHODS)), new Set(['supervisor.health', 'supervisor.snapshot', 'supervisor.command', 'client.connection-status', 'client.work-readiness']));
+    assert.deepEqual(new Set(Object.keys(SUPERVISOR_LOOPBACK_RPC_METHODS)), new Set(['supervisor.health', 'supervisor.snapshot', 'supervisor.command', 'client.connection-status', 'client.work-readiness', 'chat.create', 'chat.read', 'chat.assign']));
     assert.equal(JSON.stringify(snapshot).includes(token), false);
     await server.stop();
     assert.equal(server.snapshot().state, 'STOPPED');

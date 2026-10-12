@@ -44,15 +44,17 @@ test('actual local profile setter cannot switch to cloud, another port or anothe
     local.replace('15433', '15435'), local.replace('/a2-browser', '/other/a2-browser'),
   ]) {
     const result = await inspect(env, `m.setNativeSupervisorBase(${JSON.stringify(target)});`);
-    assert.deepEqual(result, { ok: false, error: 'native_supervisor_local_provider_endpoint_pinned' });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /^native_supervisor_(local_provider_endpoint_pinned|base_url_(protocol_denied|invalid))$/);
   }
   const unchanged = await inspect(env, `m.setNativeSupervisorBase(${JSON.stringify(`${local}/`)});`);
   assert.equal(unchanged.base, local);
 });
 
-test('without a local provider marker legacy cloud and reserve swaps remain available', async () => {
+test('without an own-Postgres owner no fallback, runtime URL or setter is allowed', async () => {
+  assert.deepEqual(await inspect({}), { ok: true, base: null, provider: null });
   const result = await inspect({}, `m.setNativeSupervisorBase(${JSON.stringify(local)});`);
-  assert.equal(result.ok, true);
-  assert.equal(result.base, local);
-  assert.equal(result.provider, null);
+  assert.deepEqual(result, { ok: false, error: 'native_supervisor_local_owner_unconfigured' });
+  const remote = await inspect({}, `m.resolveNativeSupervisorBase('https://example.supabase.co/functions/v1/edge');`);
+  assert.deepEqual(remote, { ok: false, error: 'native_supervisor_base_url_protocol_denied' });
 });

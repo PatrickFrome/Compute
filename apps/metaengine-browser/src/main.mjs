@@ -1,5 +1,6 @@
 import { app, BaseWindow, BrowserWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_MODEL, AGENT_PLATFORM_PROVIDER, isAgentPlatformHost } from './browser-agent-platform.mjs';
+import { ChatFleetOperator } from './chat-fleet-operator-core.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -2225,22 +2226,10 @@ async function initNativeSupervisor() {
   // no dual-authority window. If METAENGINE_SUPERVISOR_BASE_URL pins the base,
   // swapping is disabled. A canonical local provider also omits the hosted
   // health sentinel; device-signed control remains on the selected endpoint.
-  if (!fallbackConsole && !explicitLocalSupervisorBase()) {
-    const rawLocalBase = String(process.env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL || '').trim();
-    const localReserveBase = rawLocalBase ? resolveNativeSupervisorBase(rawLocalBase) : null;
-    const reserveSentinel = createSupabaseHealthSentinel({
-      cloud_base: NATIVE_SUPERVISOR_DEFAULT_BASE,
-      local_base: localReserveBase,
-      failover_enabled: localReserveBase != null,
-      degraded_latency_ms: Number(process.env.METAENGINE_FALLBACK_DEGRADED_LATENCY_MS || 0) || undefined,
-    });
-    fallbackConsole = createFallbackConsoleRuntime({
-      sentinel: reserveSentinel,
-      local_base: localReserveBase,
-      cloud_default_base: NATIVE_SUPERVISOR_DEFAULT_BASE,
-      base_pinned_by_env: Boolean(String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim()),
-    });
-    fallbackConsole.start({ on_mode_change: () => { void publishSnapshot().catch(() => {}); } });
+  // Own-PostgreSQL-only: do not start the historical cloud/reserve fallback
+  // sentinel. An absent local Owner leaves control blocked, never remote.
+  if (!explicitLocalSupervisorBase()) {
+    recordStartupSubsystemDegraded('LOCAL_POSTGRES_OWNER', new Error('local_owner_unconfigured'));
   }
   // T3-11 supervisor loopback RPC primary: local callers get the SAME fenced
   // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
@@ -2250,8 +2239,23 @@ async function initNativeSupervisor() {
     const manifestPath = path.join(directory, 'supervisor-rpc.json');
     const existingManifest = await fs.lstat(manifestPath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (existingManifest) await verifyManagedProjectPrivateFile(manifestPath);
+    const chatOperator = new ChatFleetOperator({
+      // A narrow explicit local operator lane: one user-owned chat tab,
+      // never a leased autonomous Agent/Guardian/Supervisor tab.
+      executeCommand: executeNativeSupervisorCommand,
+      authorize: () => {
+        const status = readClientConnectionStatus();
+        return {
+          own_postgres_only: status.state_provider === 'LOCAL_POSTGRES'
+            && status.hosted_supabase_required === false,
+          trusted_local_owner: status.local_runtime_ready === true
+            && explicitLocalSupervisorBase() != null,
+        };
+      },
+    });
     supervisorLoopbackRpc = new SupervisorLoopbackRpcServer({
       executeCommand: executeNativeSupervisorCommand,
+      chatOperator,
       manifestPath,
       snapshotProvider: () => nativeSupervisorState(),
       clientConnectionStatusProvider: () => readClientConnectionStatus(),
@@ -2726,12 +2730,12 @@ function readClientConnectionStatus() {
   const localProvider = explicitLocalSupervisorBase();
   return Object.freeze({
     ...status,
-    state_provider: localProvider ? 'LOCAL_POSTGRES' : 'HOSTED',
-    hosted_supabase_required: localProvider == null,
-    fallback_mode: localProvider ? 'LOCAL_PINNED' : (reserve?.gate?.mode || 'CLOUD_AUTHORITY'),
-    fallback_ready: reserve?.gate?.reserve_usable === true,
-    fallback_enabled: reserve?.failover?.enabled === true,
-    cloud_health: localProvider ? 'NOT_CONFIGURED' : (reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN'),
+    state_provider: localProvider ? 'LOCAL_POSTGRES' : 'UNCONFIGURED',
+    hosted_supabase_required: false,
+    fallback_mode: localProvider ? 'LOCAL_PINNED' : 'DISABLED',
+    fallback_ready: false,
+    fallback_enabled: false,
+    cloud_health: 'NOT_CONFIGURED',
     legacy_daemon_feed_is_authority: false,
     authority_effect: false,
   });
