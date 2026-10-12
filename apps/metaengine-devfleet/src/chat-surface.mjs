@@ -374,17 +374,33 @@ export class ChatSurface {
     const typedComposer = composerControls(typed)[0] || null;
     const typedValue = typedComposer ? val(typedComposer,'value') : '';
     if (typedValue !== text) throw new Error('composer_exact_draft_not_proven');
-    const send = sendControls(typed)[0] || null;
-    if (!send || sendControls(typed).length!==1) throw new Error('send_button_not_unique');
-    // Re-validate origin, process target, composer and immutable typed content
-    // immediately before a SINGLE physical click. No Enter/click fallback.
+    const sends = sendControls(typed);
+    if (sends.length>1) throw new Error('send_button_not_unique');
+    // Verify stable target and Chat—not Work—immediately before the single
+    // physical submit. The owner authorizes replacing the composer, NOT
+    // dispatching to an uncertain page or repeating AMBIGUOUS outcomes.
     if (view.webContents.getURL() !== initialUrl || !this.#views.has(tabId))
       throw new Error('chatgpt_target_changed_before_send');
-    // Verify Chat—not Work—again after typing, immediately before the sole Send click.
     const finalMode = await this.#mode(view);
     if (finalMode.mode !== 'CHAT' || finalMode.page_failure)
       throw new Error('chat_only_send_gate_refused');
-    await clickNode(view,send.backendDOMNodeId);
+    // Some ChatGPT UI revisions expose a Send control only with a tooltip
+    // or an unnamed icon. After exact typed-value and CHAT checks, submit
+    // with one Enter if no named Send button exists. This is mutually exclusive
+    // with the button click. Unknown outcome remains AMBIGUOUS, never retried.
+    const dbg=view.webContents.debugger;
+    if (sends.length===1) {
+      await clickNode(view,sends[0].backendDOMNodeId);
+    } else {
+      if (singleButton(typed,stopNames))
+        throw new Error('chatgpt_current_generation_active');
+      await dbg.sendCommand('DOM.enable');
+      await dbg.sendCommand('DOM.focus',{backendNodeId:typedComposer.backendDOMNodeId});
+      await dbg.sendCommand('Input.dispatchKeyEvent',{
+        type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+      await dbg.sendCommand('Input.dispatchKeyEvent',{
+        type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    }
     for (let i=0;i<35;i++) {
       await sleep(350);
       const url = view.webContents.getURL();
