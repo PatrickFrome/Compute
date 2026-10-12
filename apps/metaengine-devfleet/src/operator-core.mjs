@@ -62,10 +62,23 @@ export class DevFleetOperator {
       this.#state = plain(disk);
     }
     this.#initialized = true;
-    for (const s of this.#state.sessions) {
-      try { await this.#adapter.create(s.tab_id, s.url); }
-      catch { s.state = 'RESTORE_BLOCKED'; }
-    }
+    // Restoring 13 ChatGPT WebContents one-by-one can postpone the entire
+    // authenticated operator RPC for several minutes. Each target owns its
+    // WebContents, so only the loading phase is parallelized. No Send or
+    // model-picker actions are permitted during bootstrap.
+    let next = 0;
+    const sessions = this.#state.sessions;
+    const restoreWorker = async () => {
+      while (next < sessions.length) {
+        const s = sessions[next++];
+        try {
+          const created = await this.#adapter.create(s.tab_id, s.url);
+          if (created?.tab_id !== s.tab_id || !ownChatUrl(created?.url))
+            throw new Error('restore_readback_invalid');
+        } catch { s.state = 'RESTORE_BLOCKED'; }
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(4,sessions.length)},restoreWorker));
     return this.snapshot();
   }
   #requireInit() { if (!this.#initialized) throw new Error('operator_not_initialized'); }
