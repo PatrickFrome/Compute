@@ -149,9 +149,11 @@ test('autonomy source invariants close UI, restart, host wiring and self-update 
   const oversizedDraftCanaryAt = lifecycle.indexOf("reason: 'ROOT_DRAFT_OVERSIZED'", typeAndSendAt);
   const firstSemanticSubmitAt = lifecycle.indexOf('await this.#seedRootConversation(', typeAndSendAt);
   assert.ok(oversizedDraftCanaryAt > typeAndSendAt && firstSemanticSubmitAt > oversizedDraftCanaryAt, 'oversized root-draft canary must fail before any physical submit');
-  assert.match(lifecycle, /POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1/);
+  assert.match(lifecycle, /NATIVE_EFFECT_RECEIPT_OR_EXPLICIT_RECOVERY_V2/);
   const ambiguityReadback = lifecycle.slice(lifecycle.indexOf('async #recoverAmbiguousWakeFromFrame'), lifecycle.indexOf('async #observeSupervisor'));
-  assert.match(ambiguityReadback, /NO_POSITIVE_SEND_READBACK/);
+  assert.match(ambiguityReadback, /classifyUntrustedWakeMarker/);
+  assert.match(ambiguityReadback, /AMBIGUOUS_WAKE_READBACK_REQUIRED/);
+  assert.doesNotMatch(ambiguityReadback, /resolveAmbiguous\(\{ observed_sent: true \}\)/);
   assert.doesNotMatch(ambiguityReadback, /action:\s*'(?:TYPED_CLICK|SEMANTIC_TYPE|NEW_TAB)'/);
   assert.doesNotMatch(ambiguityReadback, /markAmbiguousContinuationAttempt/);
   const continuationPersistValueAt = keepalive.indexOf('pending.ambiguity_continuation_attempted_at = iso(this.#clock)');

@@ -11,6 +11,8 @@ import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-pol
 import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
 import { SupervisorBootstrapKeepalive } from './supervisor-bootstrap-keepalive.mjs';
 import { evaluateActiveWakeTerminalRetirement } from './supervisor-terminal-retirement.mjs';
+import { classifyUntrustedWakeMarker, classifyUntrustedRolloverMarker } from './supervisor-untrusted-marker-evidence.mjs';
+import { mapBoundedObservations } from './supervisor-bounded-observation.mjs';
 import {
   devosRuntimeControlAllowsContinuousService,
   normalizeDevosRuntimeControl,
@@ -285,8 +287,8 @@ export class SupervisorLifecycleRuntime {
         external_confirmation_required_for_continuation: false,
         terminal_requires_user_message: false,
         restart_resumable: true,
-        restart_pending_wake_reconciliation: 'POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1',
-        restart_rollover_reconciliation: 'ROLLOVER_POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1',
+        restart_pending_wake_reconciliation: 'NATIVE_EFFECT_RECEIPT_OR_EXPLICIT_RECOVERY_V2',
+        restart_rollover_reconciliation: 'NATIVE_EFFECT_RECEIPT_OR_EXPLICIT_RECOVERY_V2',
         prompt_plaintext_persisted: false,
         orphaned_stall_stop_only: true,
         ambiguous_terminal_retirement: false,
@@ -361,14 +363,16 @@ export class SupervisorLifecycleRuntime {
   }
 
   async #observeWorkers(state) {
-    const signals = [];
-    for (const agent of state?.fleet?.agents || []) {
+    // Capture is read-only. A small stable worker pool avoids an N×capture
+    // latency tick while keeping every agent's signal in original registry
+    // order. Durable wake publication remains one serialized operation.
+    const signals = await mapBoundedObservations(state?.fleet?.agents || [], async (agent) => {
       let generation_state = ['LOST','RETIRED','PROVISIONING_AMBIGUOUS'].includes(String(agent?.lifecycle_state || '')) ? 'TERMINAL' : 'UNKNOWN';
       if (agent?.tab_id && generation_state !== 'TERMINAL') {
         try { generation_state = generating(await this.#capture(agent.tab_id)) ? 'GENERATING' : 'IDLE'; } catch {}
       }
-      signals.push({ agent_id: agent?.agent_id, lifecycle_state: agent?.lifecycle_state, generation_state });
-    }
+      return { agent_id: agent?.agent_id, lifecycle_state: agent?.lifecycle_state, generation_state };
+    }, { concurrency: 4 });
     this.#lastWorkerSignals = signals;
     await this.#keepalive.observeWorkers(signals);
   }
@@ -377,7 +381,9 @@ export class SupervisorLifecycleRuntime {
     for (let i = 0; i < attempts; i += 1) {
       if (i > 0) await sleep(700);
       const observed = await this.#capture(tabId);
-      if (generating(observed) || (marker && String(observed?.text_excerpt || '').includes(marker))) return { ok: true, observed };
+      // A page-controlled wake marker is not a Send receipt. Only the
+      // generation signal can be a provisional readback at this boundary.
+      if (generating(observed)) return { ok: true, observed };
     }
     return { ok: false, observed: null };
   }
@@ -385,29 +391,15 @@ export class SupervisorLifecycleRuntime {
   async #recoverAmbiguousWakeFromFrame(tab, frame, row, keepalive) {
     const pending = keepalive.pending_wake;
     if (!pending?.ambiguous_at) return false;
-    const message = buildSupervisorWakeMessage({
-      supervisorEpoch: pending.supervisor_epoch,
-      cycleSeq: pending.cycle_seq,
-      wakeId: pending.wake_id,
-      reason: pending.reason,
-    });
-    const markerObserved = String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''));
-    if (markerObserved) {
-      await this.#keepalive.resolveAmbiguous({ observed_sent: true });
-      this.#activateRequest(pending, tab.tab_id, true);
-      this.#lastRecovery = {
-        action: 'AMBIGUOUS_WAKE_POSITIVELY_REBOUND', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
-        proof: 'WAKE_MARKER_IN_TRANSCRIPT', confirmed: true, ambiguous: false,
-        automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
-      };
-      return true;
-    }
+    // The text excerpt is page-controlled. Even the exact wake marker in a
+    // transcript-like view can be a retained draft or quoted message.
+    const markerReadback = classifyUntrustedWakeMarker({ frame, marker: pending.wake_id });
     // A retained draft or an idle surface cannot prove that an ambiguous Send
     // never executed. Preserve the durable intent until positive readback or
     // explicit recovery; no automatic click, retype, or fresh wake is allowed.
     this.#lastRecovery = {
       action:'AMBIGUOUS_WAKE_READBACK_REQUIRED', wake_id:pending.wake_id, tab_id:String(tab.tab_id),
-      proof:'NO_POSITIVE_SEND_READBACK', confirmed:false, ambiguous:true,
+      proof:markerReadback.state, confirmed:false, ambiguous:true,
       automatic_retry_allowed:false, at:new Date().toISOString(), authority_effect:false,
     };
     return true;
@@ -811,8 +803,8 @@ export class SupervisorLifecycleRuntime {
       let observed = sent.observed;
       if (!CHAT_RE.test(String(observed?.url || ''))) observed = await this.#capture(tab.tab_id);
       const url = String(observed?.url || '');
-      const markerObserved = String(observed?.text_excerpt || '').includes(String(prepared.pending.wake_id));
-      if (!CHAT_RE.test(url) || !(generating(observed) || markerObserved || sent.event_driven_readback === true)) {
+      // A page marker without a trusted submit effect is not positive proof.
+      if (!CHAT_RE.test(url) || !(generating(observed) || sent.event_driven_readback === true)) {
         await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', { continuation_tab_id: tab.tab_id });
         this.#lastRecovery = {
           action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
@@ -1149,8 +1141,15 @@ export class SupervisorLifecycleRuntime {
     for (const tab of ordered) {
       let frame;
       try { frame = await this.#capture(tab.tab_id); } catch { continue; }
-      const marker = String(frame?.text_excerpt || '').includes(String(attempt.attempt_id));
-      if (CHAT_RE.test(String(frame?.url || '')) && marker) return this.#bindRecoveredRollover(tab.tab_id, frame);
+      // A marker inside untrusted page text cannot establish that the original
+      // rollover was submitted. Retain the ambiguous attempt for native proof.
+      const markerReadback = classifyUntrustedRolloverMarker({ frame, attemptId: attempt.attempt_id });
+      if (markerReadback.marker_seen) this.#lastRecovery = {
+        action: 'ROLLOVER_PAGE_MARKER_UNTRUSTED', rollover_attempt_id: attempt.attempt_id,
+        tab_id: String(tab.tab_id), proof: markerReadback.state,
+        confirmed: false, ambiguous: true, automatic_retry_allowed: false,
+        at: new Date().toISOString(), authority_effect: false,
+      };
       if ((CHAT_ROOT_RE.test(String(frame?.url || '')) || CHAT_RE.test(String(frame?.url || ''))) && composerMatches(frame, message)) composerMatchesRows.push({ tab, frame });
     }
     if (composerMatchesRows.length !== 1 || this.#canActuate() !== true) return false;
@@ -1180,17 +1179,13 @@ export class SupervisorLifecycleRuntime {
     if (!frame) {
       try { frame = await this.#capture(supervisor.tab_id); } catch { return false; }
     }
-    const markerObserved = String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''));
-    if (markerObserved) {
-      await this.#keepalive.settleRolloverBlockedAmbiguousWake({ observed_sent: true });
-      this.#lastRecovery = {
-        action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_CONFIRMED', wake_id: pending.wake_id,
-        tab_id: String(supervisor.tab_id || ''), proof: 'WAKE_MARKER_IN_TRANSCRIPT',
-        confirmed: true, ambiguous: false, at: new Date().toISOString(), authority_effect: false,
-      };
-      return true;
-    }
-    // An idle surface without a marker does not settle an unknown Send.
+    const readback = classifyUntrustedWakeMarker({ frame, marker: pending.wake_id });
+    this.#lastRecovery = {
+      action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_READBACK_REQUIRED', wake_id: pending.wake_id,
+      tab_id: String(supervisor.tab_id || ''), proof: readback.state,
+      confirmed: false, ambiguous: true, automatic_retry_allowed: false,
+      at: new Date().toISOString(), authority_effect: false,
+    };
     return false;
   }
 
@@ -1262,8 +1257,8 @@ export class SupervisorLifecycleRuntime {
         return false;
       }
       const observed = sent.observed || await this.#capture(tab.tab_id);
-      const markerObserved = String(observed?.text_excerpt || '').includes(String(attempt.attempt_id));
-      if (CHAT_RE.test(String(observed?.url || '')) && (generating(observed) || markerObserved)) {
+      // The persisted attempt marker is page text, not a native effect receipt.
+      if (CHAT_RE.test(String(observed?.url || '')) && (generating(observed) || sent.event_driven_readback === true)) {
         await this.#keepalive.bindRollover({ url: observed.url, tab_id: tab.tab_id });
         this.#activeRequest = null;
         this.#lastRecovery = {
