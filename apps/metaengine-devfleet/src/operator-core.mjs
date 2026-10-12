@@ -317,4 +317,53 @@ export class DevFleetOperator {
     return this.#exclusive(() => this.#assignLocked(params));
   }
 
+  async batchAssign(params) {
+    this.#requireInit();
+    fields(params,['assignments']);
+    const items = params.assignments;
+    if (!Array.isArray(items) || items.length < 1 || items.length > 8)
+      throw new Error('operator_batch_size_invalid');
+    const ids = new Set(), tabs = new Set();
+    let totalChars = 0;
+    for (const row of items) {
+      fields(row,['request_id','tab_id','text']);
+      const id = validateId(row.request_id);
+      const tab = this.#find(row.tab_id);
+      if (typeof row.text !== 'string' || !row.text.trim() || row.text.length > 12000)
+        throw new Error('operator_prompt_invalid');
+      if (ids.has(id) || tabs.has(tab.tab_id))
+        throw new Error('operator_batch_duplicate_id_or_tab');
+      ids.add(id); tabs.add(tab.tab_id); totalChars += row.text.length;
+    }
+    if (totalChars > 32000) throw new Error('operator_batch_budget_exceeded');
+    return this.#exclusive(async () => {
+      const receipts = [];
+      let halted = false;
+      for (const row of items) {
+        if (halted) {
+          receipts.push({state:'NOT_ATTEMPTED',request_id:row.request_id,
+            tab_id:row.tab_id,automatic_retry_allowed:false});
+          continue;
+        }
+        try {
+          const receipt = await this.#assignLocked(row,true);
+          receipts.push(receipt);
+          if (receipt.state === 'AMBIGUOUS') halted = true;
+        } catch (error) {
+          const reason = String(error?.message || 'operator_batch_refused');
+          receipts.push({state:'REFUSED',request_id:row.request_id,tab_id:row.tab_id,
+            error:/^[a-zA-Z0-9_:-]{1,100}$/.test(reason)?reason:'operator_batch_refused',
+            automatic_retry_allowed:false});
+          if (this.#persistenceFenced || /persistence_reconciliation|required|request_collision/.test(reason))
+            halted = true;
+        }
+      }
+      return {schema:SCHEMA,state:halted?'HALTED':'COMPLETED',receipts,
+        sent:receipts.filter(x=>x.state==='SENT').length,
+        ambiguous:receipts.filter(x=>x.state==='AMBIGUOUS').length,
+        mutation_attempted:receipts.some(x=>['SENT','AMBIGUOUS'].includes(x.state)),
+        automatic_retry_allowed:false};
+    });
+  }
+
 }
