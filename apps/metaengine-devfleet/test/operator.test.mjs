@@ -11,6 +11,7 @@ function fixture() {
         total_chars:full.length,has_more:offset+max_chars<full.length,authority_effect:false};
     },
     async observe(tab_id){return {tab_id,revision:'e'.repeat(64),chars:24,complete:true,authority_effect:false};},
+    pollHint(tab_id){return {tab_id,hint:'DIRTY_HINT',age_ms:null,authority_effect:false};},
     async modelProbe(tab_id){return {tab_id,mode:'CHAT',model_selection_proven:modelProven,high_selection_proven:modelProven,authority_effect:false};},
     async inputProbe(tab_id){return {tab_id,mode:'CHAT',page_failure:null,unique_composer:true,unique_send:true,composer_nonempty:draftPresent,authority_effect:false};},
     async closeTab(tab_id){closes.push(tab_id);return {tab_id,closed:true,authority_effect:false};},
@@ -27,6 +28,18 @@ function fixture() {
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
+test('batch poll is an O(1) native hint: no Send, AX read or durable receipt',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'hint-cells-20261012',count:2})).sessions;
+ const before=f.disk.requests.length;
+ const poll=await op.batchPoll({});
+ assert.equal(poll.records.length,2);
+ assert(poll.records.every(x=>x.hint==='DIRTY_HINT'));
+ assert.equal(poll.hints_only,true);assert.equal(poll.completion_proven,false);
+ assert.equal(f.sends.length,0);assert.equal(f.disk.requests.length,before);
+ assert.deepEqual((await op.batchPoll({tab_ids:[tabs[1].tab_id]})).records.map(x=>x.tab_id),[tabs[1].tab_id]);
+ await assert.rejects(op.batchPoll({tab_ids:[tabs[0].tab_id,tabs[0].tab_id]}),/ids_invalid/);
+});
 test('operator batches digest-only observation without issuing Send or new receipts',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
  const tabs=(await op.create({request_id:'native-observe-chat-20261012',count:3})).sessions;
