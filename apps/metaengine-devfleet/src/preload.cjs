@@ -8,6 +8,7 @@ const api=Object.freeze({
   modelProbe: p=>ipcRenderer.invoke('devfleet:model-probe',p),
   inputProbe: p=>ipcRenderer.invoke('devfleet:input-probe',p),
   recover: p=>ipcRenderer.invoke('devfleet:recover',p),
+  close: p=>ipcRenderer.invoke('devfleet:close',p),
   assign: p=>ipcRenderer.invoke('devfleet:assign',p),
   select: id=>ipcRenderer.invoke('devfleet:select',id),
   onReady: cb=>{if(typeof cb==='function')ipcRenderer.once('devfleet:ready',cb);}

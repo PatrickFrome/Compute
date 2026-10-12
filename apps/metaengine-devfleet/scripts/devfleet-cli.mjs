@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const [verb,...argv] = process.argv.slice(2);
-if (!['create','read','assign','list','inspect','recover','model_probe','input_probe'].includes(verb)) throw new Error('usage: devfleet-cli.mjs create|read|assign|list [--count N] [--tab ID] [--file FILE] [--id REQUEST_ID]');
+if (!['create','read','assign','list','inspect','recover','model_probe','input_probe','close'].includes(verb)) throw new Error('usage: devfleet-cli.mjs create|read|assign|list [--count N] [--tab ID] [--file FILE] [--id REQUEST_ID]');
 const flags={};
 for(let i=0;i<argv.length;i+=2) {
   if(i+1>=argv.length || !['--count','--tab','--file','--id','--offset','--max-chars'].includes(argv[i])
@@ -25,10 +25,11 @@ if (manifest.schema!=='metaengine.devfleet.loopback.v1' ||
   throw new Error('untrusted_devfleet_manifest');
 const params={};
 if(verb==='create'){params.request_id=flags['--id']||crypto.randomUUID();params.count=Number(flags['--count']||1);}
-if(verb==='read'||verb==='assign'||verb==='inspect'||verb==='recover'||verb==='model_probe'||verb==='input_probe'){
+if(verb==='read'||verb==='assign'||verb==='inspect'||verb==='recover'||verb==='model_probe'||verb==='input_probe'||verb==='close'){
   if(!flags['--tab'])throw new Error('tab_required');
   params.tab_id=flags['--tab'];
 }
+if(verb==='close')params.request_id=flags['--id']||crypto.randomUUID();
 if(verb==='assign'){
   if(!flags['--file'])throw new Error('prompt_file_required');
   const stat=await fs.stat(flags['--file']);

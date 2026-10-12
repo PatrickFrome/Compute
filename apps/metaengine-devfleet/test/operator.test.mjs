@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DevFleetOperator,SCHEMA} from '../src/operator-core.mjs';
 function fixture() {
-  let persisted=null, creates=0, sends=[], failedWrites=false, failSend=false, draftPresent=false;
+  let persisted=null, creates=0, sends=[], closes=[], failedWrites=false, failSend=false, draftPresent=false;
   const adapter={
     async create(tab_id,url){creates++;return {tab_id,url};},
     async read(tab_id,offset,max_chars){
@@ -11,6 +11,7 @@ function fixture() {
         total_chars:full.length,has_more:offset+max_chars<full.length,authority_effect:false};
     },
     async inputProbe(tab_id){return {tab_id,mode:'CHAT',page_failure:null,unique_composer:true,unique_send:true,composer_nonempty:draftPresent,authority_effect:false};},
+    async closeTab(tab_id){closes.push(tab_id);return {tab_id,closed:true,authority_effect:false};},
     async send(tab_id,text){
       sends.push({tab_id,text});
       if(failSend)throw Error('post_click_network_unknown');
@@ -21,7 +22,7 @@ function fixture() {
     async load(){return persisted?structuredClone(persisted):null;},
     async save(state){if(failedWrites)throw Error('disk_write_failed');persisted=structuredClone(state);}
   };
-  return {adapter,store,get creates(){return creates;},get sends(){return sends;},
+  return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},get disk(){return persisted;}};
 }
 test('7 chats, read their output, give two successive tasks with separate identities',async()=>{
@@ -45,6 +46,27 @@ test('7 chats, read their output, give two successive tasks with separate identi
   assert.equal((await op.assign({tab_id:tab,text:'Investigate P0',request_id:'p0-step1-20261012'})).state,'SENT');
   assert.equal(f.sends.length,2);
   await assert.rejects(op.assign({tab_id:tab,text:'Changed text',request_id:'p0-step1-20261012'}),/request_collision/);
+});
+test('problem tab close is durable, idempotent, and releases the bounded chat slot',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'create-tabs-close-20261012',count:2})).sessions;
+ const id='close-failed-tab-20261012';
+ const receipt=await op.closeTab({request_id:id,tab_id:tabs[1].tab_id});
+ assert.equal(receipt.state,'CLOSED');
+ assert.equal(op.snapshot().session_count,1);
+ assert.deepEqual(f.closes,[tabs[1].tab_id]);
+ assert.equal((await op.closeTab({request_id:id,tab_id:tabs[1].tab_id})).state,'CLOSED');
+ assert.equal(f.closes.length,1);
+ assert.equal((await op.create({request_id:'create-replacement-20261012',count:1})).state,'CREATED');
+ assert.equal(op.snapshot().session_count,2);
+});
+test('ambiguous Send prevents closing a tab with unknown external outcome',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tab=(await op.create({request_id:'create-ambiguous-close-20261012',count:1})).sessions[0].tab_id;
+ f.failSend(true);
+ assert.equal((await op.assign({request_id:'ambiguous-close-task-20261012',tab_id:tab,text:'P0'})).state,'AMBIGUOUS');
+ await assert.rejects(op.closeTab({request_id:'close-blocked-20261012',tab_id:tab}),/blocked_by_ambiguous_send/);
+ assert.equal(f.closes.length,0);assert.equal(op.snapshot().session_count,1);
 });
 test('existing draft is refused before write-ahead or Send, no phantom AMBIGUOUS',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();

@@ -97,7 +97,7 @@ export class DevFleetOperator {
     return { schema: SCHEMA, client: 'METAENGINE_DEVFLEET_STANDALONE',
       session_count: this.#state.sessions.length, sessions: this.#state.sessions.map(s => ({
         tab_id: s.tab_id, url: s.url, state: s.state })),
-      only_actions: ['create','read','assign'],
+      only_actions: ['create','read','assign','close'],
       primary_browser_shared_profile: false,
       hosted_database: false,
       automatic_retry_allowed: false, authority_effect: false };
@@ -139,6 +139,41 @@ export class DevFleetOperator {
       log.receipt = { schema: SCHEMA, state: 'CREATED', request_id: id,
         sessions: result, automatic_retry_allowed: false };
       await this.#save();
+      return plain(log.receipt);
+    });
+  }
+  async closeTab(params) {
+    this.#requireInit();
+    fields(params, ['request_id','tab_id']);
+    const id=validateId(params.request_id);
+    const tabId=validateTab(params.tab_id);
+    const fingerprint=sha('close:' + tabId);
+    const prior=this.#prior(id,'close',fingerprint);
+    if(prior) return prior;
+    const tab=this.#find(tabId);
+    if(this.#state.requests.some(r=>r.operation==='assign' && r.state==='AMBIGUOUS' && r.tab_id===tabId))
+      throw new Error('tab_close_blocked_by_ambiguous_send');
+    if(this.#state.requests.some(r=>r.operation==='close' && r.state==='AMBIGUOUS' && r.tab_id===tabId))
+      throw new Error('tab_close_reconciliation_required');
+    if(typeof this.#adapter.closeTab!=='function')throw new Error('tab_close_unavailable');
+    return this.#exclusive(async()=>{
+      if(this.#state.requests.length>=500)throw new Error('operator_request_history_full');
+      const log={...recordFor(id,'close',fingerprint),tab_id:tabId};
+      this.#state.requests.push(log);
+      await this.#save();
+      try {
+        const outcome=await this.#adapter.closeTab(tab.tab_id);
+        if(outcome?.tab_id!==tabId || outcome?.closed!==true || outcome?.authority_effect!==false)
+          throw new Error('tab_close_readback_invalid');
+        this.#state.sessions=this.#state.sessions.filter(s=>s.tab_id!==tabId);
+        log.state='CLOSED';
+        log.receipt={schema:SCHEMA,state:'CLOSED',request_id:id,tab_id:tabId,
+          session_count:this.#state.sessions.length,automatic_retry_allowed:false};
+      } catch {
+        log.receipt={schema:SCHEMA,state:'AMBIGUOUS',request_id:id,tab_id:tabId,
+          automatic_retry_allowed:false};
+      }
+      await this.#save().catch(()=>{});
       return plain(log.receipt);
     });
   }
