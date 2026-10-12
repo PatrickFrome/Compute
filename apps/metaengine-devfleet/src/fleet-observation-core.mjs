@@ -53,7 +53,9 @@ export function validateObservationRequest(params, ownedTabs) {
   }
   return {ids,parallelism,previous};
 }
-export async function runObservationBatch({params,ownedTabs,observe}) {
+export async function runObservationBatch({params,ownedTabs,observe,timeoutMs=8000}) {
+  if(!Number.isSafeInteger(timeoutMs) || timeoutMs<10 || timeoutMs>30000)
+    throw Error('observation_timeout_policy_invalid');
   if(typeof observe!=='function')throw Error('observation_adapter_missing');
   const {ids,parallelism,previous}=validateObservationRequest(params,ownedTabs);
   const result=new Array(ids.length);
@@ -62,7 +64,15 @@ export async function runObservationBatch({params,ownedTabs,observe}) {
     while(next<ids.length){
       const index=next++, tab_id=ids[index];
       try {
-        const info=await observe(tab_id);
+        let timer;
+        let info;
+        try {
+          info=await Promise.race([
+            Promise.resolve().then(()=>observe(tab_id)),
+            new Promise((_,reject)=>{timer=setTimeout(
+              ()=>reject(Error('observation_timeout')),timeoutMs);})
+          ]);
+        } finally { clearTimeout(timer); }
         if(info?.tab_id!==tab_id || !HASH.test(info?.revision||'') ||
             !Number.isSafeInteger(info?.chars) || info.chars<0 || info.chars>180000 ||
             typeof info.complete!=='boolean' || info.authority_effect!==false)
