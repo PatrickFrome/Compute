@@ -27,7 +27,7 @@ export function fingerprintAxSnapshot({tab_id,process_epoch,target_id,navigation
     throw Error('observation_origin_invalid');
   // No page text, cookie, URL query or private target internals are returned.
   const revision=crypto.createHash('sha256')
-    .update(JSON.stringify([process_epoch,target_id,navigation_generation,u.origin+u.pathname,text]))
+    .update(JSON.stringify([tab_id,process_epoch,target_id,navigation_generation,u.origin+u.pathname,text]))
     .digest('hex');
   return {tab_id,revision,chars:text.length,complete:text.length<180000,
     authority_effect:false};
