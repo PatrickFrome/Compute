@@ -18,6 +18,10 @@ test('digest binds process incarnation, native target, navigation and bounded te
   assert.equal(first.complete,true);
   assert.match(first.revision,/^[a-f0-9]{64}$/);
   assert(!JSON.stringify(first).includes('answer'));
+  assert.notEqual(first.revision,fingerprintAxSnapshot({
+    tab_id:tab(2),process_epoch:epoch,target_id:'webcontents:7',
+    navigation_generation:1,url:'https://chatgpt.com/c/abcd-1234',text:'answer'
+  }).revision);
   assert.notEqual(first.revision,page('new answer').revision);
   assert.notEqual(first.revision,page('answer',2).revision);
   assert.notEqual(first.revision,page('answer',1,'https://chatgpt.com/c/xyz-1234').revision);
