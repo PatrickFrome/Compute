@@ -305,7 +305,7 @@ async function start() {
   await mainWindow.loadFile(activeUiFile);
   surface=new ChatSurface(mainWindow);
   operator=new DevFleetOperator({adapter:surface,store:disk});
-  await operator.init();
+  await operator.init({deferRestore:true});
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});
   ipcMain.handle('devfleet:read',async(e,p)=>{uiSender(e);return operator.read(p);});
@@ -317,8 +317,14 @@ async function start() {
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
   registerDevConsole();
+  // Publish the authenticated localhost control plane while physical ChatGPT
+  // pages restore; chat.list truthfully reports RESTORING. All other operator
+  // methods fail closed as operator_restoring until every cell is settled.
   await listenLocal();
-  mainWindow.webContents.send('devfleet:ready');
+  void operator.whenRestored().then(()=>{
+    if(mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('devfleet:ready');
+  }).catch(()=>{ /* Early loopback remains available for diagnostic list. */ });
   mainWindow.on('closed',()=>{mainWindow=null;});
 }
 app.on('second-instance',()=>{if(mainWindow){mainWindow.show();mainWindow.focus();}});

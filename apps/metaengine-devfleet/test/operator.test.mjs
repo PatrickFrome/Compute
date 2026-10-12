@@ -28,6 +28,42 @@ function fixture() {
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
+test('early restore exposes truthful RESTORING list while fencing all external effects',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const created=(await seed.create({request_id:'early-restore-cells-20261013',count:4})).sessions;
+ let unblock;const gate=new Promise(resolve=>{unblock=resolve;});
+ let active=0;
+ const adapter={...f.adapter,async create(tab_id,url){
+   active++;await gate;active--;
+   return {tab_id,url};
+ }};
+ const op=new DevFleetOperator({adapter,store:f.store});
+ const baseline=f.disk.requests.length;
+ const early=await op.init({deferRestore:true});
+ assert.equal(early.bootstrap_state,'RESTORING');
+ assert.equal(early.restored_count,0);
+ assert.equal(early.session_count,4);
+ assert(early.sessions.every(s=>s.state==='RESTORING'));
+ assert.equal(op.isBusy(),true);
+ assert.equal(active,4);
+ await assert.rejects(op.create({request_id:'early-restore-denied-20261013',count:1}),/operator_restoring/);
+ await assert.rejects(op.batchAssign({assignments:[{
+   request_id:'early-restore-task-20261013',tab_id:created[0].tab_id,text:'Must never send'
+ }]}),/operator_restoring/);
+ await assert.rejects(op.batchObserve({}),/operator_restoring/);
+ await assert.rejects(op.inputProbe({tab_id:created[0].tab_id}),/operator_restoring/);
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.length,baseline);
+ unblock();
+ const ready=await op.whenRestored();
+ assert.equal(ready.bootstrap_state,'READY');
+ assert.equal(ready.restored_count,4);
+ assert.equal(op.isBusy(),false);
+ assert(ready.sessions.every(s=>s.state==='OPEN'));
+ const repeat=await op.init();
+ assert.equal(repeat.bootstrap_state,'READY');
+ assert.equal(f.disk.requests.length,baseline);
+});
 test('restart restores owned WebContents at bounded concurrency, preserving blocked identities',async()=>{
  const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
  const sessions=(await seed.create({request_id:'restore-bounded-create-20261012',count:8})).sessions;
@@ -47,6 +83,134 @@ test('restart restores owned WebContents at bounded concurrency, preserving bloc
  assert.equal(snapshot.sessions.filter(x=>x.state==='OPEN').length,7);
  assert.equal(f.sends.length,0);
  assert.equal(f.disk.requests.filter(x=>x.operation==='create').length,1);
+});
+
+test('restore must retain the saved conversation; root and different chat readbacks stay blocked',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const sessions=(await seed.create({request_id:'restore-exact-chats-20261013',count:3})).sessions;
+ for(const s of sessions)await seed.read({tab_id:s.tab_id});
+ let effects=0;
+ const adapter={...f.adapter,
+   async create(tab_id,url){
+     return {tab_id,url:tab_id===sessions[0].tab_id?'https://chatgpt.com/'
+       :tab_id===sessions[1].tab_id?'https://chatgpt.com/c/other-chat':url};
+   },
+   async read(){effects++;throw Error('unexpected_read');},
+   async inspect(){effects++;throw Error('unexpected_inspection');},
+   async recover(){effects++;throw Error('unexpected_recovery');},
+   async inputProbe(){effects++;throw Error('unexpected_input_probe');},
+   async modelProbe(){effects++;throw Error('unexpected_model_probe');},
+   async send(){effects++;throw Error('unexpected_send');},
+ };
+ const op=new DevFleetOperator({adapter,store:f.store});
+ const ready=await op.init();
+ assert.deepEqual(ready.sessions.map(s=>s.state),['RESTORE_BLOCKED','RESTORE_BLOCKED','OPEN']);
+ assert.equal(ready.sessions[0].url,'https://chatgpt.com/c/abcd-1234');
+ const tab_id=sessions[0].tab_id;
+ for(const method of ['read','inspect','recover','inputProbe','modelProbe'])
+   await assert.rejects(op[method]({tab_id}),/operator_tab_not_open/);
+ const request_id='restore-blocked-send-20261013';
+ await assert.rejects(op.assign({tab_id,request_id,text:'Do not use a lost conversation'}),/operator_tab_not_open/);
+ const batch=await op.batchAssign({assignments:[{tab_id,request_id,text:'Do not use a lost conversation'}]});
+ assert.equal(batch.receipts[0].state,'REFUSED');
+ assert.equal(effects,0);
+ assert.equal(f.disk.requests.filter(r=>r.operation==='assign').length,0);
+ assert.equal((await op.closeTab({tab_id,request_id:'restore-blocked-close-20261013'})).state,'CLOSED');
+ assert.equal(op.snapshot().session_count,2);
+});
+
+test('failed restore cannot resend a known request or erase an ambiguous receipt',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const tab_id=(await seed.create({request_id:'restore-receipt-chat-20261013',count:1})).sessions[0].tab_id;
+ const request={tab_id,request_id:'restore-receipt-send-20261013',text:'Preserve the first delivery'};
+ assert.equal((await seed.assign(request)).state,'SENT');
+ const op=new DevFleetOperator({store:f.store,adapter:{...f.adapter,
+   async create(){throw Error('synthetic_load_failed');}}});
+ await op.init();
+ assert.equal(op.snapshot().sessions[0].state,'RESTORE_BLOCKED');
+ assert.equal((await op.assign(request)).state,'SENT');
+ assert.equal(f.sends.length,1);
+ await assert.rejects(op.assign({...request,request_id:'restore-receipt-new-20261013'}),/operator_tab_not_open/);
+ f.failSend(true);
+ assert.equal((await seed.assign({...request,request_id:'restore-unknown-send-20261013'})).state,'AMBIGUOUS');
+ const after=new DevFleetOperator({store:f.store,adapter:{...f.adapter,
+   async create(){throw Error('synthetic_load_failed');}}});
+ await after.init();
+ assert.equal((await after.assign({...request,request_id:'restore-unknown-send-20261013'})).state,'AMBIGUOUS');
+ await assert.rejects(after.closeTab({tab_id,request_id:'restore-unknown-close-20261013'}),/blocked_by_ambiguous_send/);
+ assert.equal(f.sends.length,2);
+});
+
+test('restore accepts equivalent www and trailing slash without changing conversation identity',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const tab=(await seed.create({request_id:'restore-canonical-chat-20261013',count:1})).sessions[0];
+ await seed.read({tab_id:tab.tab_id});
+ const op=new DevFleetOperator({store:f.store,adapter:{...f.adapter,
+   async create(tab_id){return {tab_id,url:'https://www.chatgpt.com/c/abcd-1234/'};}}});
+ assert.equal((await op.init()).sessions[0].state,'OPEN');
+ assert.equal((await op.read({tab_id:tab.tab_id})).state,'READ');
+});
+
+test('final close persistence failure returns ambiguous and fences replacement across restart',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const tab_id=(await seed.create({request_id:'close-save-chat-20261013',count:1})).sessions[0].tab_id;
+ const adapter={...f.adapter,async closeTab(tab){
+   const result=await f.adapter.closeTab(tab);f.failWrite(true);return result;
+ }};
+ const op=new DevFleetOperator({adapter,store:f.store});await op.init();
+ const request={tab_id,request_id:'close-save-failed-20261013'};
+ const receipt=await op.closeTab(request);
+ assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.automatic_retry_allowed,false);
+ assert.equal((await op.closeTab(request)).state,'AMBIGUOUS');
+ assert.equal(f.disk.sessions.length,1);
+ assert.equal(f.disk.requests.find(r=>r.request_id===request.request_id).state,'AMBIGUOUS');
+ f.failWrite(false);
+ await assert.rejects(op.create({request_id:'close-save-replacement-20261013',count:1}),/persistence_reconciliation_required/);
+ const reboot=new DevFleetOperator(f);await reboot.init();
+ assert.equal((await reboot.closeTab(request)).state,'AMBIGUOUS');
+ await assert.rejects(reboot.closeTab({...request,request_id:'close-save-retry-20261013'}),/close_reconciliation_required/);
+ assert.equal(f.closes.length,1);
+});
+
+test('failed final Send receipt fences in-process retries and remains ambiguous after restart',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const tab_id=(await seed.create({request_id:'send-save-chat-20261013',count:1})).sessions[0].tab_id;
+ const adapter={...f.adapter,async send(tab,text){
+   const result=await f.adapter.send(tab,text);f.failWrite(true);return result;
+ }};
+ const op=new DevFleetOperator({adapter,store:f.store});await op.init();
+ const request={tab_id,request_id:'send-save-failed-20261013',text:'Single delivery only'};
+ assert.equal((await op.assign(request)).state,'AMBIGUOUS');
+ await assert.rejects(op.assign(request),/persistence_reconciliation_required/);
+ assert.equal(f.disk.requests.find(r=>r.request_id===request.request_id).state,'AMBIGUOUS');
+ f.failWrite(false);
+ const reboot=new DevFleetOperator(f);await reboot.init();
+ assert.equal((await reboot.assign(request)).state,'AMBIGUOUS');
+ assert.equal(f.sends.length,1);
+});
+
+test('operator deadline aborts the native capture and prevents a late quiet baseline',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const sessions=(await seed.create({request_id:'native-abort-cells-20261013',count:2})).sessions;
+ let captured,finish,quiet=false;
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const adapter={...f.adapter,async observe(tab_id,signal){
+   if(tab_id===sessions[1].tab_id)return f.adapter.observe(tab_id);
+   captured=signal;
+   await pending;
+   if(signal?.aborted)throw Error('observation_timeout');
+   quiet=true;
+   return f.adapter.observe(tab_id);
+ }};
+ const op=new DevFleetOperator({adapter,store:f.store});await op.init();
+ const result=await op.batchObserve({parallelism:2});
+ assert.equal(result.observed,1);assert.equal(result.unknown,1);
+ assert.equal(result.records[0].error,'observation_timeout');
+ assert.equal(captured?.aborted,true);
+ finish();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(quiet,false);
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.length,1);
 });
 test('batch poll is an O(1) native hint: no Send, AX read or durable receipt',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();

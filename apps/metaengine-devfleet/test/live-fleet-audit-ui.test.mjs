@@ -36,7 +36,7 @@ function harness(scenarios){
     setTimeout:()=>{},crypto:{randomUUID:()=> 'test-id'},
   };
   vm.runInNewContext(extracted[0][1],context,{timeout:3000});
-  return {nodes,used,run:async()=>nodes.get('audit-all').onclick()};
+  return {nodes,used,sessions,devfleet,run:async()=>nodes.get('audit-all').onclick()};
 }
 
 test('fleet audit never sends a prompt or reloads a chat and fails closed on Work',async()=>{
@@ -68,4 +68,25 @@ test('only explicit Chat plus High plus GPT-6 mark a session ready',async()=>{
   assert.equal(report.counts.unverified,1);
   assert.equal(report.counts.blocked_work,1);
   assert.equal(h.used.assign,0);
+});
+
+test('blocked restore can be replaced without inspecting the missing cell; ambiguous close stops creation',async()=>{
+  for(const state of ['CLOSED','AMBIGUOUS']){
+    const h=harness([{mode:'UNKNOWN',page_failure:null}]);
+    h.sessions[0].state='RESTORE_BLOCKED';
+    const doomed=h.sessions[0].tab_id;
+    let closes=0;
+    h.devfleet.close=async p=>{assert.equal(p.tab_id,doomed);closes++;return {state};};
+    h.devfleet.create=async()=>{
+      h.used.create++;
+      const replacement={tab_id:'tab_99999999-0000-4000-8000-000000000000',url:'https://chatgpt.com/',state:'OPEN'};
+      h.sessions.splice(0,1,replacement);return {state:'CREATED',sessions:[replacement]};
+    };
+    await h.nodes.get('refresh').onclick();
+    await h.nodes.get('replace').onclick();
+    assert.equal(h.used.inspect.length,0);
+    assert.equal(closes,1);
+    assert.equal(h.used.create,state==='CLOSED'?1:0);
+    assert.equal(h.used.assign,0);
+  }
 });
