@@ -337,6 +337,24 @@ export class ChatSurface {
     }
     throw new Error('send_outcome_requires_manual_readback');
   }
+  async closeTab(tabId) {
+    const view=this.#views.get(tabId);
+    if(!view || view.webContents.isDestroyed())throw new Error('tab_not_live');
+    const selected=this.#selected===tabId;
+    const destroyed=new Promise((resolve,reject)=>{
+      const expiry=setTimeout(()=>reject(new Error('tab_destruction_unverified')),5000);
+      view.webContents.once('destroyed',()=>{clearTimeout(expiry);resolve();});
+    });
+    if(selected)this.#selected=null;
+    try{this.#window.contentView.removeChildView(view);}catch{}
+    view.webContents.close();
+    await destroyed;
+    this.#views.delete(tabId);
+    if(selected && this.#views.size) {
+      this.select(this.#views.keys().next().value);
+    }
+    return {tab_id:tabId,closed:true,authority_effect:false};
+  }
   close() {
     for (const view of this.#views.values()) {
       try {view.webContents.close();}catch {}

@@ -191,6 +191,7 @@ function listenLocal() {
     if (!chatAuthorized) return respond(403,{ok:false,error:'chat_capability_token_required'});
     const routes={
       'chat.create': p=>operator.create(p),
+      'chat.close': p=>operator.closeTab(p),
       'chat.read': p=>operator.read(p),
       'chat.assign': p=>operator.assign(p),
       'chat.inspect': p=>operator.inspect(p),
@@ -297,6 +298,7 @@ async function start() {
   ipcMain.handle('devfleet:model-probe',async(e,p)=>{uiSender(e);return operator.modelProbe(p);});
   ipcMain.handle('devfleet:input-probe',async(e,p)=>{uiSender(e);return operator.inputProbe(p);});
   ipcMain.handle('devfleet:recover',async(e,p)=>{uiSender(e);return operator.recover(p);});
+  ipcMain.handle('devfleet:close',async(e,p)=>{uiSender(e);return operator.closeTab(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
   registerDevConsole();
