@@ -137,3 +137,38 @@ upgrade. The UI for them was independently hot-activated through Dev Console
 in generation 4 while retaining nine owned tabs and two historical ambiguous
 send receipts. Do not reuse either ambiguous task ID until exact prior
 conversation evidence has been reconciled; never send into Work.
+
+
+## Guarded one-call dispatch (source candidate, not installed)
+
+The authenticated local `chat.batch_assign` route takes at most eight distinct
+`{tab_id,request_id,text}` records (32,000 characters total) in one HTTP request.
+It performs an exact GPT-6 High selection readback, Chat-only input/draft
+preflight, a persisted request receipt **before** each Send, and readback
+after each Send. A previous request ID is replayed from the receipt and does
+not click Send again. On AMBIGUOUS outcome it marks remaining records
+NOT_ATTEMPTED. A refused model, missing composer, or existing draft does not
+create a false send receipt.
+
+Input file example for the trusted CLI (replace IDs with owned tab IDs):
+
+```json
+{"assignments":[
+  {"tab_id":"tab_11111111-1111-4111-8111-111111111111","request_id":"roadmap-p0-20261012-001","text":"Implement independently scoped P0 fix"},
+  {"tab_id":"tab_22222222-2222-4222-8222-222222222222","request_id":"roadmap-p1-20261012-002","text":"Implement independently scoped P1 fix"}
+]}
+```
+
+`node apps/metaengine-devfleet/scripts/devfleet-cli.mjs batch_assign --file .\\batch.json`
+
+**Safety and performance:** one call eliminates external command round-trips,
+but **does not parallelize physical Sends**. A ChatGPT tab shares the visible
+WebContents selection; this build deliberately serializes every UI send under
+the existing operator lock. GPT-6 High is checked independently for every
+item; source code and user assertions are not sufficient. Real native
+endpoint, packaged client and ChatGPT delivery qualification remain release
+gates. Installed versions without this route return method_unknown.
+
+The independent read-only `scripts/fast-observe.mjs` can already batch
+parallel tab reads on compatible installed DevFleet builds, without granting
+any additional mutation authority.
