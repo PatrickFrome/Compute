@@ -1,3 +1,5 @@
+import { reduceHostProcessObservation } from './operator-host-incarnation-core.mjs';
+
 // Unified Command & Continuity Plane P0 — pure read-only projection.
 // Raw observations are never execution authority and are not allowed to carry secrets.
 export const OPERATOR_CONTEXT_SCHEMA = 'metaengine.operator.context.v1';
@@ -17,6 +19,7 @@ const MAX_SKEW_MS = 5_000;
 const nonNegativeInt = x => Number.isSafeInteger(x) && x >= 0 ? x : null;
 
 function reducePlane(name, value, nowMs, maxAgeMs) {
+  if (name === 'host') return reduceHostProcessObservation(value, { nowMs, maxAgeMs });
   const unknown = { state: 'UNKNOWN', source: SOURCES[name], observed_at: null, proof: 'NONE', fresh: false };
   if (Array.isArray(value)) return value.length === 0 ? unknown : { ...unknown, state: value.length > 1 ? 'AMBIGUOUS' : 'UNVERIFIED' };
   if (!value || typeof value !== 'object') return unknown;
@@ -75,7 +78,9 @@ export function buildUnifiedOperatorContext({ observations = {}, nowMs = Date.no
   const planes = {};
   for (const name of OPERATOR_PLANES) planes[name] = reducePlane(name, observations?.[name], nowMs, maxAgeMs);
   // Individually fresh but mutually inconsistent Owners are not a healthy world.
-  const ownerIds = new Set(OPERATOR_PLANES.filter(name => name !== 'database' && planes[name].fresh)
+  // Host is independently fenced by Guardian/incarnation evidence, not by
+  // the generic owner_id adapter field, which Host does not yet export.
+  const ownerIds = new Set(OPERATOR_PLANES.filter(name => name !== 'database' && name !== 'host' && planes[name].fresh)
     .map(name => observations[name].owner_id));
   if (ownerIds.size > 1) for (const name of OPERATOR_PLANES) {
     if (name !== 'database' && planes[name].fresh)

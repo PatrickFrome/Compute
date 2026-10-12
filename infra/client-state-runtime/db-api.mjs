@@ -56,7 +56,8 @@ function driverValues(sql, values) {
   });
 }
 
-export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql } = {}) {
+export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql, hostObservationReadback = null } = {}) {
+  if (hostObservationReadback !== null && typeof hostObservationReadback !== 'function') throw new Error('operator_host_readback_invalid');
   if (!['service_role', 'direct'].includes(roleMode)) throw new Error('local_state_api_role_mode_invalid');
   if (host !== '127.0.0.1') throw new Error('local_state_loopback_host_required');
   if (typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(apiKey)) throw new Error('local_state_random_api_key_required');
@@ -147,14 +148,26 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((item) => item.name === name));
         const unavailable = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
         const plan = compileRpcRequest('devos_runtime_capabilities_v1', {}, signatures);
-        // Read both witnesses inside one local PostgreSQL transaction. The
-        // timestamp is DB-owned, not invented at HTTP response time.
+        // Local PostgreSQL capability and identity witnesses share a transaction.
         const [rows, clockRows] = await transaction(async tx => [
           await tx.unsafe(plan.text, driverValues(sql, plan.values)),
           await tx.unsafe(OPERATOR_DB_IDENTITY_SQL),
         ]);
+        // Only a trusted in-process Owner may inject optional Host evidence.
+        let hostObservation = null;
+        if (hostObservationReadback) {
+          let timer;
+          try {
+            hostObservation = await Promise.race([
+              Promise.resolve().then(() => hostObservationReadback()),
+              new Promise(resolve => { timer = setTimeout(() => resolve(null), 750); }),
+            ]);
+          } catch { hostObservation = null; }
+          finally { clearTimeout(timer); }
+        }
         const nowMs = Date.now();
         return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
+          ...(hostObservation ? { host: hostObservation } : {}),
           database: qualifyLocalPostgresEvidence({
             clockRows, capabilityRows: rows, nowMs,
             rpcAvailable: RPC_ALLOWLIST.length - missing.length,
