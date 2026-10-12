@@ -224,7 +224,7 @@ export async function inspectPostgres(config) {
     (config.expectedClusterSystemIdentifier ? ",'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system())" : '') + ")::text";
   let output;
   try {
-    output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config), diagnosticOperation:'inspection' });
+    output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-At', '-c', query], { env: postgresEnvironment(config), diagnosticOperation:'inspection' });
   } catch (error) {
     const categories = {
       runtime_command_timeout: 'postgres_inspection_timeout',

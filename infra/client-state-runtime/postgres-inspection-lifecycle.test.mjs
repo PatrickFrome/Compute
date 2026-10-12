@@ -15,7 +15,7 @@ function installSpawn(t, behavior) {
   child.stderr = new PassThrough();
   child.kills = 0;
   child.kill = () => { child.kills++; child.emit('close', null, 'SIGTERM'); return true; };
-  childProcess.spawn = () => { queueMicrotask(() => behavior(child)); return child; };
+  childProcess.spawn = (...args) => { child.spawnArgs=args; queueMicrotask(() => behavior(child)); return child; };
   syncBuiltinESMExports();
   t.after(() => { child.stdout.destroy(); child.stderr.destroy(); childProcess.spawn = previous; syncBuiltinESMExports(); });
   return child;
@@ -95,4 +95,19 @@ test('new inspection categories stay within the redacted host health contract', 
     assert.deepEqual(normalizeRuntimeHealthFailure(value),value);
     assert.throws(()=>normalizeRuntimeHealthFailure({...value,stderr:'PRIVATE_SECRET'}),/contract_invalid/);
   }
+});
+
+test('psql inspection requests SQLSTATE-only output and redacts the failure', async t => {
+  const child=installSpawn(t,c=>{
+    c.stderr.end('ERROR: 42501');
+    c.stdout.end();
+    c.emit('exit',1,null);
+    c.emit('close',1,null);
+  });
+  await assert.rejects(inspectPostgres(config),{code:'postgres_inspection_permission_denied'});
+  const args=child.spawnArgs?.[1]||[];
+  assert.ok(args.includes('VERBOSITY=sqlstate'), 'psql must emit bounded SQLSTATE-only diagnostics');
+  assert.ok(args.includes('ON_ERROR_STOP=1'));
+  assert.ok(args.includes('--no-password'));
+  assert.equal(args.join(' ').includes('PRIVATE_SECRET'),false);
 });

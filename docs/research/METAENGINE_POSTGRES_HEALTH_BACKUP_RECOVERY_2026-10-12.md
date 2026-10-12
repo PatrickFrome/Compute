@@ -44,3 +44,22 @@ The same pure classifier can be used by a **new separately-identified** backup a
 
 ## Explicit limits
 No live .59 diagnostic failure was reclassified retroactively; original raw stderr did not survive the old executor. A passing synthetic classifier test is not proof that current Keeper credentials work or that future pg_dump will complete. This document reports source-level hardening, not restored autonomy.
+
+## Continuation 2026-10-12 — SQLSTATE-first runtime diagnostics
+
+Research: PostgreSQL 17 error codes are stable across locale; prefer SQLSTATE to error text:
+https://www.postgresql.org/docs/17/errcodes-appendix.html
+The official PostgreSQL 17 psql client supports `-v VERBOSITY=sqlstate` to limit error reporting to severity + SQLSTATE where available:
+https://www.postgresql.org/docs/17/app-psql.html
+
+Source change: `launcher.mjs` inspection now invokes psql with `-v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate` and retains `--no-password`, same bounded child execution, same SQL identity proof and same exact Keeper fencing. `postgres-utility-diagnostic.mjs` recognizes a small allowlisted subset of five-character SQLSTATE lines (auth, privileges, transport, unavailable server, cancellation/lock timeout, missing database). SQLSTATE takes precedence over misleading free text; unknown codes remain generic. Pre-connection libpq failures may lack SQLSTATE and continue through 16-KiB redacted stderr fallback. Neither SQLSTATE nor message text is persisted or allowed to grant recovery/retry authority.
+
+The first test run uncovered a test fixture line-ending bug; fixed fixture uses `String.fromCharCode(10)` to provide an actual newline. Targeted synthetic suite passed 37/37 after correction. A separately launched disposable PostgreSQL 17 integration test with the packaged .61 bin path is an independent source-level test, not production database recovery.
+
+The installed .59 still lacks these new diagnostics and was not restarted/modified. No inference about the historical `pg_dump` failure is permitted from this implementation; original diagnostic stderr was discarded. No original backup retry or installer transaction was attempted. Final verification and source SHA must accompany the commit.
+
+## Exact offline physical qualification — source change verified
+
+On Windows, `launcher.pg.test.mjs` was run with the previously independently packaged PostgreSQL 17 binaries, against a **new temporary owned cluster**, never the installed Keeper. First run failed at the old 30-second `initdb` fsync deadline, not in `launcher.mjs`; the fixture now allows 120 seconds for Windows `initdb`, 180 seconds for the overall test, without `--no-sync` or any relaxation of data persistence.
+
+After fixing the fixture, isolated PG17 Owner stop/restart and durable row readback: **1/1 PASS**. Added a real missing-relation SQL query on this disposable cluster; psql with `VERBOSITY=sqlstate` emitted `42P01` without the missing table name in stderr. Full physical test rerun: **1/1 PASS** (~38 seconds), including both persistent data readback and SQLSTATE error sanitization. Runtime/host/source-manifest regression: 47/47 PASS. Targeted SQLSTATE and stderr lifecycle: 37/37 PASS. Source gate: 190/190 PASS. No installed Owner, working Keeper or historical backup was touched.

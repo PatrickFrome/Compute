@@ -24,14 +24,14 @@ async function freePort() {
   return result;
 }
 
-test('owned portable PostgreSQL 17 is qualified, cleanly stopped and restarted with durable data', { skip: !bin, timeout: 60000 }, async t => {
+test('owned portable PostgreSQL 17 is qualified, cleanly stopped and restarted with durable data', { skip: !bin, timeout: 180000 }, async t => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'compute-owned-pg-test-'));
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const dataDir = path.join(temporary, 'data');
   const passwordFile = path.join(temporary, 'password');
   const password = randomBytes(24).toString('hex');
   await writeFile(passwordFile, password, { mode: 0o600 });
-  await exec(executable('initdb'), ['-D', dataDir, '--username=postgres', '--auth=scram-sha-256', `--pwfile=${passwordFile}`, '--encoding=UTF8', '--no-locale'], { windowsHide: true, timeout: 30000 });
+  await exec(executable('initdb'), ['-D', dataDir, '--username=postgres', '--auth=scram-sha-256', `--pwfile=${passwordFile}`, '--encoding=UTF8', '--no-locale'], { windowsHide: true, timeout: process.platform === 'win32' ? 120000 : 30000 });
   const databasePort = await freePort();
   const config = {
     mode: 'local', postgresMode: 'owned',
@@ -44,7 +44,7 @@ test('owned portable PostgreSQL 17 is qualified, cleanly stopped and restarted w
     edgeCommand: { command: process.execPath, args: [fixture, 'edge'] },
   };
   const query = async text => {
-    const result = await exec(executable('psql'), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', text], {
+    const result = await exec(executable('psql'), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-At', '-c', text], {
       windowsHide: true, timeout: 5000,
       env: { ...process.env, PGHOST: '127.0.0.1', PGPORT: String(databasePort), PGUSER: 'postgres', PGPASSWORD: password, PGDATABASE: 'postgres', PGSSLMODE: 'disable', PGCONNECT_TIMEOUT: '3' },
     });
@@ -55,6 +55,12 @@ test('owned portable PostgreSQL 17 is qualified, cleanly stopped and restarted w
   t.after(() => first.stop());
   assert.equal(first.postgresIdentity.pid, first.children.find(child => child.name === 'postgres').pid);
   assert.equal(first.postgresIdentity.version >= 170000 && first.postgresIdentity.version < 180000, true);
+  // Real PostgreSQL 17 client/server contract: SQLSTATE-only psql diagnostics
+  // must not repeat an object identifier from a deliberately invalid query.
+  await assert.rejects(query('SELECT * FROM metaengine_missing_sqlstate_probe'), error =>
+    /42P01/.test(String(error.stderr || ''))
+    && !String(error.stderr || '').includes('metaengine_missing_sqlstate_probe')
+  );
   await query('CREATE TABLE durability_probe(value integer); INSERT INTO durability_probe VALUES(17)');
   await first.stop();
   await assert.rejects(readFile(path.join(dataDir, 'postmaster.pid')), { code: 'ENOENT' });
