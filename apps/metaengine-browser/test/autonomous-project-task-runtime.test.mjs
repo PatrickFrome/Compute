@@ -48,6 +48,72 @@ test('recursive root/child/grandchild admission shares committed history while e
   assert.equal((await f.runtime.waitForChildren(rootTask())).failed, true);
 });
 
+for (const [role, state] of [['CODER', 'FAILED'], ['CRITIC', 'BLOCKED'], ['CRITIC', 'AMBIGUOUS'], ['CODER', 'FENCED']]) {
+  test(`blocking ${role} child ${state} takes priority over open children and pending proposals`, async t => {
+    const f = await fixture(t);
+    await f.runtime.serveToolRequests({ lease: rootTask(), requests: [{ ...spawnRequest(), payload: { children: [
+      { objective: 'Produce or independently verify one child result', role },
+      { objective: 'Unfinished sibling work', role: 'CODER' },
+    ] } }] });
+    f.provider.update(value => {
+      value.tasks[1].state = state;
+      // Match the PostgreSQL projection: every non-COMPLETED child remains
+      // open, including a failed/rejected verifier, alongside queued work.
+      value.tasks[0].open_children = 2;
+      value.tasks[0].blocking_children = 1;
+      value.tasks[0].pending_proposals = 1;
+    });
+    const before = f.provider.read();
+    const result = await f.runtime.waitForChildren(rootTask());
+    assert.equal(result.failed, true);
+    assert.equal(result.waiting, false, 'the parent must reach its existing BLOCKED path instead of waiting indefinitely');
+    assert.deepEqual(result.children, before.tasks.slice(1).map(child => ({ task_id: child.task_id, state: child.state, role: child.role })));
+    assert.equal(result.authority_effect, false);
+    assert.equal(result.automatic_retry_allowed, false);
+    assert.deepEqual(f.provider.read(), before, 'readback must not repair, replay or promote a failed/unknown child');
+  });
+}
+
+for (const signal of ['blocking_children', 'selected_task_children_failed']) {
+  test(`blocking aggregate ${signal} takes priority when failed children are outside the resident page`, async t => {
+    const f = await fixture(t);
+    f.provider.update(value => {
+      value.tasks[0].open_children = 2;
+      value.tasks[0].pending_proposals = 1;
+      if (signal === 'blocking_children') value.tasks[0].blocking_children = 1;
+      else value.selected_task_children_failed = true;
+    });
+    const before = f.provider.read();
+    const result = await f.runtime.waitForChildren(rootTask());
+    assert.equal(result.failed, true);
+    assert.equal(result.waiting, false);
+    assert.deepEqual(result.children, []);
+    assert.deepEqual(f.provider.read(), before);
+  });
+}
+
+test('open and queued children without a blocking result still make the parent wait', async t => {
+  const f = await fixture(t);
+  f.provider.update(value => { value.tasks[0].open_children = 2; value.tasks[0].pending_proposals = 1; });
+  const result = await f.runtime.waitForChildren(rootTask());
+  assert.equal(result.failed, false);
+  assert.equal(result.waiting, true);
+});
+
+test('a rejected verifier in the visible child page blocks even without aggregate counters', async t => {
+  const f = await fixture(t);
+  await f.runtime.serveToolRequests({ lease: rootTask(), requests: [{ ...spawnRequest(),
+    payload: { children: [{ objective: 'Independently verify the proposed result', role: 'CRITIC' }] } }] });
+  f.provider.update(value => { value.tasks[1].state = 'BLOCKED'; });
+  const before = f.provider.read();
+  const result = await f.runtime.waitForChildren(rootTask());
+  assert.equal(result.failed, true);
+  assert.equal(result.waiting, false);
+  assert.equal(result.children[0].role, 'CRITIC');
+  assert.equal(result.children[0].state, 'BLOCKED');
+  assert.deepEqual(f.provider.read(), before);
+});
+
 test('physical process crash after provider COMMIT reconciles immutable batch without another child', async t => {
   const f = await fixture(t); await f.runtime.close();
   const script = fileURLToPath(new URL('./fixtures/autonomous-project-crash-child.mjs', import.meta.url));

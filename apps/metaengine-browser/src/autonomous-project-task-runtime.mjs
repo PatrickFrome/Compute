@@ -114,10 +114,14 @@ export class AutonomousProjectTaskRuntime {
       ? current.snapshot.immediate_children : current.snapshot.tasks.filter(row => row.parent_task_id === lease.task_id);
     const proposals = (current.snapshot.proposals || []).filter(row => row.parent_task_id === lease.task_id && row.status !== 'ADMITTED');
     const pending = descendants.filter(row => !['COMPLETED', 'FAILED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
-    const failed = descendants.filter(row => ['FAILED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
-    return { waiting: pending.length > 0 || proposals.length > 0 || Number(current.task.open_children) > 0
-        || Number(current.task.pending_proposals) > 0 || current.snapshot.selected_task_children_pending === true,
-      failed: failed.length > 0 || Number(current.task.blocking_children) > 0 || current.snapshot.selected_task_children_failed === true,
+    const failed = descendants.filter(row => ['FAILED', 'BLOCKED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
+    const blocked = failed.length > 0 || Number(current.task.blocking_children) > 0 || current.snapshot.selected_task_children_failed === true;
+    // PostgreSQL counts failed/rejected children as open until completion. A
+    // blocking result must reach the existing parent BLOCKED path instead of
+    // being hidden indefinitely by those open/queued-work counts.
+    return { waiting: !blocked && (pending.length > 0 || proposals.length > 0 || Number(current.task.open_children) > 0
+        || Number(current.task.pending_proposals) > 0 || current.snapshot.selected_task_children_pending === true),
+      failed: blocked,
       children: descendants.map(row => ({ task_id: row.task_id, state: row.state, role: row.role })),
       queued_proposals: proposals.length, ...flags };
   }

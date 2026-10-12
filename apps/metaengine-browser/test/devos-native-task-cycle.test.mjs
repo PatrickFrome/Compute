@@ -115,6 +115,70 @@ test('project task tool results continue the same proven conversation before com
   assert(!commands.includes('CREATE_TAB')); assert(!commands.includes('SELECT_TAB'));
 });
 
+for (const delivery of ['ACK', 'LOST_ACK_BLOCKED', 'LOST_ACK_UNRESOLVED']) {
+  test(`blocking child readback precedes continuation and preserves completion ${delivery}`, async () => {
+    const projectLease = { ...lease, conversation_url_sha256: fleetTransportProof.conversation_url_sha256,
+      task_spec: { ...lease.task_spec, project_continuity: { project_id: '11111111-1111-4111-8111-111111111111' } } };
+    const commands = [];
+    let continuations = 0;
+    let completionPosts = 0;
+    let statusReads = 0;
+    const cycle = new DevOsNativeTaskCycle({
+      getState: async () => state(),
+      executeCommand: async command => {
+        commands.push(command.action);
+        if (command.action === 'FLEET_RECONCILE') return fleet;
+        if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+        if (command.action === 'READ_TRANSCRIPT') return { text: '', total_chars: 0, has_more: false, census_truncated: false };
+        throw new Error(`unexpected_blocked_provider_effect:${command.action}`);
+      },
+      signedRequest: async (endpoint, options) => {
+        if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1',
+          backlog: { ready: 0, running: 1 }, running: [projectLease] });
+        if (endpoint === '/v1/devos/complete') {
+          completionPosts++;
+          assert.equal(options.payload.state, 'BLOCKED');
+          assert.equal(options.payload.error, 'CHILD_RESULT_FAILED');
+          assert.equal(options.payload.summary.child_results_failed, true);
+          if (delivery !== 'ACK') throw new Error('connection_reset_after_blocked_write');
+          return response(200, { state: 'BLOCKED' });
+        }
+        if (endpoint.endsWith('/status')) {
+          statusReads++;
+          return response(200, { task_id: lease.task_id, lease_generation: lease.lease_generation,
+            state: delivery === 'LOST_ACK_BLOCKED' ? 'BLOCKED' : 'RUNNING' });
+        }
+        throw new Error(`unexpected_blocked_route:${endpoint}`);
+      },
+    });
+    cycle.bindProjectRuntime({ prepareLease: async () => null, contextForLease: () => 'PROJECT CONTINUITY V1',
+      serveToolRequests: async () => [],
+      waitForChildren: async () => ({ waiting: true, failed: true, queued_proposals: 2, children: [
+        { task_id: '33333333-3333-4333-8333-333333333333', role: 'CRITIC', state: 'BLOCKED' },
+        { task_id: '44444444-4444-4444-8444-444444444444', role: 'CODER', state: 'RUNNING' },
+      ] }),
+      continueConversation: async () => { continuations++; return { state: 'DELIVERED' }; },
+      recordActivity: async () => null,
+    });
+    if (delivery === 'LOST_ACK_UNRESOLVED') {
+      await assert.rejects(cycle.runOnce(), error => {
+        assert.match(error.message, /devos_completion_transport_ambiguous/);
+        assert.equal(error.automatic_retry_allowed, false);
+        return true;
+      });
+    } else {
+      const result = await cycle.runOnce();
+      assert.equal(result.result_ready.state, 'BLOCKED');
+      assert.equal(result.result_ready.readback, delivery === 'ACK' ? 'WRITE_ACK' : 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE');
+      assert.equal(result.result_ready.automatic_retry_allowed, false);
+    }
+    assert.equal(continuations, 0, 'changing sibling/proposal counts must never send another parent continuation after a blocker');
+    assert.equal(completionPosts, 1, 'an uncertain completion must never be blindly retried');
+    assert.equal(statusReads, delivery === 'ACK' ? 0 : 1);
+    assert(!commands.some(action => ['SEMANTIC_TYPE', 'TYPED_CLICK', 'NEW_TAB', 'SELECT_TAB'].includes(action)));
+  });
+}
+
 test('registered root keeps its immutable spec and receives an exact result protocol recovered before transcript harvest', async () => {
   const rootLease = structuredClone(lease);
   const immutableSpec = structuredClone(rootLease.task_spec);

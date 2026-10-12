@@ -1267,6 +1267,10 @@ export class DevOsNativeTaskCycle {
 
     if (projectRuntime) {
       const childState = await projectRuntime.waitForChildren(lease);
+      // Do not send another parent turn after an authoritative child blocker.
+      // Changing sibling/proposal counts would otherwise keep producing fresh
+      // continuation digests and indefinitely postpone this BLOCKED outcome.
+      if (childState?.failed) return this.#postCompletionWithReadback(lease, 'BLOCKED', { child_results_failed: true, page_data_authority: false }, 'CHILD_RESULT_FAILED');
       const delivered = this.#projectDeliveredTools.get(`${lease.task_id}:${lease.lease_generation}`) || new Set();
       const projectResults = this.#toolbelt.resultsForLease(lease, { limit: 32 }).filter(row => !delivered.has(row.request_id));
       const continuationResults = childState?.children?.length || childState?.queued_proposals
@@ -1302,7 +1306,6 @@ export class DevOsNativeTaskCycle {
         if (continuation?.state === 'AMBIGUOUS') return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
       }
       if (childState?.waiting) return { state: 'WAIT_CHILDREN', task_id: lease.task_id, authority_effect: false };
-      if (childState?.failed) return this.#postCompletionWithReadback(lease, 'BLOCKED', { child_results_failed: true, page_data_authority: false }, 'CHILD_RESULT_FAILED');
     }
 
     const metaTask = (lease?.task_spec?.meta_orchestrator && typeof lease.task_spec.meta_orchestrator === 'object' && !Array.isArray(lease.task_spec.meta_orchestrator))
