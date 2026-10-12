@@ -45,15 +45,33 @@ if(!$profileContent.Contains($TunnelId)){throw 'existing_tunnel_profile_id_misma
 
 # Request credentials only after a valid local profile has been created.
 $secure=Read-Host 'Enter a NEW OpenAI Platform key with Tunnels Read+Use (locally only)' -AsSecureString
+if(!$secure -or $secure.Length -lt 16){
+  if($secure){$secure.Dispose()}
+  throw 'runtime_key_empty_or_incomplete; create a new restricted key and paste it into the local PowerShell prompt'
+}
 $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try{$env:CONTROL_PLANE_API_KEY=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)}
 finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr);$secure.Dispose()}
 try{
-  & $client doctor --profile metaengine-devfleet --explain
-  if($LASTEXITCODE -ne 0){throw 'tunnel_doctor_failed; check permission Read+Use and tunnel workspace'}
-  Write-Host 'Starting DevFleet private tunnel; leave this local window open.'
+  # doctor performs LOCAL checks only; it does not verify Read+Use or remotely
+  # authenticate against the OpenAI Platform tunnel control plane.
+  $doctorJson=(& $client doctor --profile metaengine-devfleet --json | Out-String)
+  $doctorExit=$LASTEXITCODE
+  try{$report=$doctorJson|ConvertFrom-Json -ErrorAction Stop}
+  catch{throw 'doctor_invalid_json; run tunnel-client doctor --profile metaengine-devfleet --explain locally'}
+  Write-Host ('Local doctor result: '+$report.result)
+  foreach($check in @($report.checks | Where-Object {$_.status -eq 'FAIL'})){
+    Write-Warning ('CHECK '+$check.id+' FAIL')
+    # Never echo arbitrary diagnostics containing secrets; only the check ID.
+  }
+  if($doctorExit -ne 0){
+    $ids=@($report.failed_checks) -join ','
+    throw ('tunnel_doctor_failed: '+$ids+'; run tunnel-client doctor --profile metaengine-devfleet --explain locally')
+  }
+  Write-Host 'Local checks passed. Starting DevFleet private tunnel; leave this window open.'
+  Write-Host 'Cloud tunnel authorization is evaluated only by the running daemon (401/403 may indicate a missing Read+Use role).'
   & $client run --profile metaengine-devfleet
-  if($LASTEXITCODE -ne 0){throw 'tunnel_run_failed'}
+  if($LASTEXITCODE -ne 0){throw 'tunnel_run_failed; inspect daemon output above (do not share secrets)'}
 }finally{
   Remove-Item Env:\CONTROL_PLANE_API_KEY -ErrorAction SilentlyContinue
 }
