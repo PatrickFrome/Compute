@@ -10,10 +10,11 @@ export const OBSERVATION_SCHEMA='metaengine.devfleet.batch-observation.v1';
 
 // A revision binds bounded page text to the *physical* WebContents incarnation.
 // The hash is a change detector, never a proof of ChatGPT's reasoning or model.
-export function fingerprintAxSnapshot({tab_id,process_epoch,target_id,url,text}) {
+export function fingerprintAxSnapshot({tab_id,process_epoch,target_id,navigation_generation,url,text}) {
   if (!TAB.test(tab_id||'') || typeof process_epoch!=='string' ||
       !/^[a-f0-9-]{36}$/i.test(process_epoch) ||
       typeof target_id!=='string' || !/^webcontents:[1-9][0-9]*$/.test(target_id) ||
+      !Number.isSafeInteger(navigation_generation) || navigation_generation<0 ||
       typeof url!=='string' || typeof text!=='string' || text.length>180000)
     throw Error('observation_identity_invalid');
   const u=new URL(url);
@@ -22,7 +23,7 @@ export function fingerprintAxSnapshot({tab_id,process_epoch,target_id,url,text})
     throw Error('observation_origin_invalid');
   // No page text, cookie, URL query or private target internals are returned.
   const revision=crypto.createHash('sha256')
-    .update(JSON.stringify([process_epoch,target_id,u.origin+u.pathname,text]))
+    .update(JSON.stringify([process_epoch,target_id,navigation_generation,u.origin+u.pathname,text]))
     .digest('hex');
   return {tab_id,revision,chars:text.length,complete:text.length<180000,
     authority_effect:false};
