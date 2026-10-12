@@ -20,6 +20,9 @@ export const SUPERVISOR_LOOPBACK_RPC_METHODS = Object.freeze({
   'client.connection-status': 'READ_ONLY',
   'client.work-readiness': 'READ_ONLY',
   'supervisor.command': 'SUPERVISOR_FENCE',
+  'chat.create': 'LOCAL_OPERATOR',
+  'chat.read': 'READ_ONLY',
+  'chat.assign': 'LOCAL_OPERATOR',
 });
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -133,6 +136,7 @@ export class SupervisorLoopbackRpcServer {
   #snapshotProvider;
   #clientConnectionStatusProvider;
   #clientWorkReadinessProvider;
+  #chatOperator;
   #host;
   #port;
   #token;
@@ -149,6 +153,7 @@ export class SupervisorLoopbackRpcServer {
     snapshotProvider = null,
     clientConnectionStatusProvider = null,
     clientWorkReadinessProvider = null,
+    chatOperator = null,
     host = '127.0.0.1',
     port = 0,
     token = null,
@@ -158,12 +163,14 @@ export class SupervisorLoopbackRpcServer {
     if (snapshotProvider != null && typeof snapshotProvider !== 'function') throw new Error('supervisor_loopback_snapshot_provider_invalid');
     if (clientConnectionStatusProvider != null && typeof clientConnectionStatusProvider !== 'function') throw new Error('supervisor_loopback_client_connection_status_provider_invalid');
     if (clientWorkReadinessProvider != null && typeof clientWorkReadinessProvider !== 'function') throw new Error('supervisor_loopback_client_work_readiness_provider_invalid');
+    if (chatOperator != null && (!chatOperator.create || !chatOperator.read || !chatOperator.assign)) throw new Error('supervisor_loopback_chat_operator_invalid');
     const bindHost = String(host || '127.0.0.1');
     if (!LOOPBACK_HOSTS.has(bindHost)) throw new Error('supervisor_loopback_host_not_loopback');
     this.#executeCommand = executeCommand;
     this.#snapshotProvider = snapshotProvider;
     this.#clientConnectionStatusProvider = clientConnectionStatusProvider;
     this.#clientWorkReadinessProvider = clientWorkReadinessProvider;
+    this.#chatOperator = chatOperator;
     this.#host = bindHost;
     this.#port = Number.isSafeInteger(Number(port)) && Number(port) >= 0 ? Number(port) : 0;
     this.#token = String(token || randomBytes(32).toString('hex'));
@@ -308,6 +315,28 @@ export class SupervisorLoopbackRpcServer {
         return;
       }
       jsonResponse(res, 200, { ok: true, schema: SUPERVISOR_LOOPBACK_RPC_SCHEMA, effect_class: 'READ_ONLY', result, authority_effect: false });
+      return;
+    }
+    if (method === 'chat.create' || method === 'chat.read' || method === 'chat.assign') {
+      if (!this.#chatOperator) {
+        this.#reject(res, 503, 'chat_fleet_operator_unavailable', 'no authenticated local operator owner');
+        return;
+      }
+      let result;
+      try {
+        if (!body?.params || typeof body.params !== 'object' || Array.isArray(body.params)) {
+          throw new Error('chat_fleet_params_required');
+        }
+        result = await this.#chatOperator[method.slice(5)](body.params);
+      } catch (error) {
+        this.#reject(res, 400, 'chat_fleet_operator_refused', error?.message || error);
+        return;
+      }
+      jsonResponse(res, 200, {
+        ok: true, schema: SUPERVISOR_LOOPBACK_RPC_SCHEMA,
+        effect_class: method === 'chat.read' ? 'READ_ONLY' : 'LOCAL_OPERATOR',
+        result, authority_effect: false,
+      });
       return;
     }
     if (method === 'supervisor.health') {

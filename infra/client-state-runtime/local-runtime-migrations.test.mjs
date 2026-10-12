@@ -5,10 +5,18 @@ import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './lo
 test('migration plan pins all managed-project and continuity RPCs with dependencies', async () => {
   const plan = await loadLocalRuntimeMigrationPlan();
   assert.match(plan.source_manifest_sha256, /^[a-f0-9]{64}$/);
-  assert.equal(plan.migrations.length, 5);
-  assert.equal(plan.migrations.slice(-2).flatMap(row => row.signatures.filter(value => value.startsWith('public.'))).length, 10);
-  assert.equal(plan.migrations.at(-1).relations.length, 4);
-  assert.equal(plan.migrations.at(-1).triggers.length, 3);
+  assert.equal(plan.migrations.length, 6);
+  const bySource = (name) => plan.migrations.find(row => row.source === name);
+  const managed = bySource('20261009194157_managed_project_admission_v1.sql');
+  const continuity = bySource('20261010100000_project_continuity_history_v1.sql');
+  const verifier = bySource('20261012130000_project_verifier_reference_transport_v1.sql');
+  assert.ok(managed && continuity && verifier, 'all exact own-Postgres migrations must be present');
+  assert.equal([managed, continuity].flatMap(row => row.signatures.filter(value => value.startsWith('public.'))).length, 10);
+  assert.equal(continuity.relations.length, 4);
+  assert.equal(continuity.triggers.length, 3);
+  assert.deepEqual(verifier.signatures, ['destruktion_meta.project_verifier_reference_transport_h205f22()']);
+  assert.deepEqual(verifier.relations, []);
+  assert.deepEqual(verifier.triggers, []);
   assert.deepEqual(await loadLocalRuntimeMigrationPlan(), plan);
 });
 
