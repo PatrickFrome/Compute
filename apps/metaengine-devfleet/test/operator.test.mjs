@@ -26,6 +26,29 @@ function fixture() {
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
+test('batch sends on distinct verified Chat surfaces with durable receipts and no replay',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'batch-created-chats-20261012',count:3})).sessions;
+ const assignments=tabs.map((x,i)=>({tab_id:x.tab_id,request_id:'batch-task-20261012-'+i,text:'Research lane '+i}));
+ const a=await op.batchAssign({assignments});
+ assert.equal(a.state,'COMPLETED');assert.equal(a.sent,3);assert.equal(a.ambiguous,0);
+ assert.equal(f.sends.length,3);
+ assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,3);
+ const b=await op.batchAssign({assignments});
+ assert.equal(b.sent,3);assert.equal(f.sends.length,3);
+ assert.deepEqual(a.receipts,b.receipts);
+});
+test('batch refuses unverified model and existing draft before any persisted send',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tab=(await op.create({request_id:'batch-model-chat-20261012',count:1})).sessions[0].tab_id;
+ const assignments=[{tab_id:tab,request_id:'batch-model-task-20261012',text:'Do not send until verified'}];
+ f.setModelProven(false);
+ assert.equal((await op.batchAssign({assignments})).receipts[0].state,'REFUSED');
+ f.setModelProven(true);f.setDraft(true);
+ assert.equal((await op.batchAssign({assignments})).receipts[0].state,'REFUSED');
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,0);
+});
 test('7 chats, read their output, give two successive tasks with separate identities',async()=>{
   const f=fixture(),op=new DevFleetOperator(f);
   await op.init();
