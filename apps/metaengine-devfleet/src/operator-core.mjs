@@ -37,6 +37,7 @@ export class DevFleetOperator {
   #busy = false;
   #initialized = false;
   #persistenceFenced = false;
+  #saveTail = Promise.resolve();
   constructor({ adapter, store }) {
     if (!adapter || !['create','read','send'].every(k => typeof adapter[k] === 'function')
       || !store || typeof store.load !== 'function' || typeof store.save !== 'function')
@@ -83,8 +84,14 @@ export class DevFleetOperator {
   }
   async #save() {
     if (this.#persistenceFenced) throw new Error('operator_persistence_reconciliation_required');
-    try { await this.#store.save(plain(this.#state)); }
-    catch (error) { this.#persistenceFenced = true; throw error; }
+    const snapshot = plain(this.#state);
+    const pending = this.#saveTail.then(async () => {
+      if (this.#persistenceFenced) throw new Error('operator_persistence_reconciliation_required');
+      try { await this.#store.save(snapshot); }
+      catch (error) { this.#persistenceFenced = true; throw error; }
+    });
+    this.#saveTail = pending.catch(() => {});
+    await pending;
   }
   async #exclusive(fn) {
     if (this.#persistenceFenced) throw new Error('operator_persistence_reconciliation_required');
