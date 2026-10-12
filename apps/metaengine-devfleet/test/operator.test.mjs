@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DevFleetOperator,SCHEMA} from '../src/operator-core.mjs';
 function fixture() {
-  let persisted=null, creates=0, sends=[], closes=[], failedWrites=false, failSend=false, draftPresent=false;
+  let persisted=null, creates=0, sends=[], closes=[], failedWrites=false, failSend=false, draftPresent=false, modelProven=true;
   const adapter={
     async create(tab_id,url){creates++;return {tab_id,url};},
     async read(tab_id,offset,max_chars){
@@ -10,6 +10,7 @@ function fixture() {
       return {tab_id,url:'https://chatgpt.com/c/abcd-1234',text:full.slice(offset,offset+max_chars),
         total_chars:full.length,has_more:offset+max_chars<full.length,authority_effect:false};
     },
+    async modelProbe(tab_id){return {tab_id,mode:'CHAT',model_selection_proven:modelProven,high_selection_proven:modelProven,authority_effect:false};},
     async inputProbe(tab_id){return {tab_id,mode:'CHAT',page_failure:null,unique_composer:true,unique_send:true,composer_nonempty:draftPresent,authority_effect:false};},
     async closeTab(tab_id){closes.push(tab_id);return {tab_id,closed:true,authority_effect:false};},
     async send(tab_id,text){
@@ -23,7 +24,7 @@ function fixture() {
     async save(state){if(failedWrites)throw Error('disk_write_failed');persisted=structuredClone(state);}
   };
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
-    failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},get disk(){return persisted;}};
+    failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
 test('7 chats, read their output, give two successive tasks with separate identities',async()=>{
   const f=fixture(),op=new DevFleetOperator(f);
