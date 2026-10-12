@@ -99,3 +99,23 @@ test('malformed adapter response never receives a positive observation',async()=
   assert.equal(data.records[0].state,'UNKNOWN');
   assert.equal(data.records[0].error,'observation_readback_invalid');
 });
+
+test('slow native observer times out per tab and does not block other results',async()=>{
+ const owned=[tab(1),tab(2)];
+ const data=await runObservationBatch({
+   params:{parallelism:2},ownedTabs:owned,timeoutMs:20,
+   observe: id=>id===tab(1)?new Promise(()=>{}):Promise.resolve({
+     tab_id:id,revision:'a'.repeat(64),chars:9,complete:true,authority_effect:false
+   })
+ });
+ assert.equal(data.observed,1);assert.equal(data.unknown,1);
+ assert.equal(data.records[0].error,'observation_timeout');
+ assert.equal(data.records[1].change,'INITIAL');
+});
+test('even an alphanumeric private exception never enters observer output',async()=>{
+ const data=await runObservationBatch({
+   params:{},ownedTabs:[tab(1)],observe:async()=>{throw Error('privateBearerABC123');}
+ });
+ assert.equal(data.records[0].error,'observation_failed');
+ assert(!JSON.stringify(data).includes('privateBearerABC123'));
+});
