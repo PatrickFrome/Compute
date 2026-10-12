@@ -234,6 +234,39 @@ export class DevFleetOperator {
       return {schema:SCHEMA,...result,automatic_retry_allowed:false};
     });
   }
+  async batchPoll(params={}) {
+    this.#requireInit();
+    fields(params,['tab_ids']);
+    if(typeof this.#adapter.pollHint!=='function')
+      throw Error('operator_event_hints_unavailable');
+    const owned=this.#state.sessions.filter(s=>s.state==='OPEN').map(s=>s.tab_id);
+    const ids=params.tab_ids===undefined?owned:params.tab_ids;
+    if(!Array.isArray(ids) || ids.length<1 || ids.length>16 ||
+        new Set(ids).size!==ids.length)
+      throw Error('operator_hint_ids_invalid');
+    for(const id of ids) {
+      validateTab(id);
+      if(!owned.includes(id))throw Error('operator_hint_tab_not_owned');
+    }
+    const hints=new Set(['UNINITIALIZED','DIRTY_HINT','RESCAN_DUE','QUIET_HINT']);
+    const records=ids.map(tab_id=>{
+      try{
+        const value=this.#adapter.pollHint(tab_id);
+        if(value?.tab_id!==tab_id || !hints.has(value?.hint) ||
+           value.authority_effect!==false ||
+           (value.age_ms!==null && (!Number.isSafeInteger(value.age_ms) ||
+            value.age_ms<0 || value.age_ms>10000)))
+          throw Error('hint_readback_invalid');
+        return {tab_id,hint:value.hint,age_ms:value.age_ms,
+          authority_effect:false};
+      }catch{
+        return {tab_id,hint:'UNKNOWN',age_ms:null,authority_effect:false};
+      }
+    });
+    return {schema:'metaengine.devfleet.ax-hints.v1',scope:'READ_ONLY',
+      hints_only:true,completion_proven:false,automatic_retry_allowed:false,
+      authority_effect:false,records};
+  }
   async batchObserve(params={}) {
     this.#requireInit();
     if (typeof this.#adapter.observe!=='function')

@@ -3,6 +3,7 @@ import { WebContentsView, session } from 'electron';
 import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttributes, retryWaitMs } from './chat-fleet-preflight.mjs';
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
+import { AxEventHints } from './ax-event-hints.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -88,6 +89,7 @@ export class ChatSurface {
   #window;
   #views = new Map();
   #navigationGenerations = new Map();
+  #eventHints = new AxEventHints();
   #selected = null;
   #partition;
   constructor(window) {
@@ -131,12 +133,23 @@ export class ChatSurface {
     }});
     this.#views.set(tabId,view);
     this.#navigationGenerations.set(tabId,0);
-    const advanceNavigation = () => this.#navigationGenerations.set(tabId,
-      (this.#navigationGenerations.get(tabId)||0)+1);
+    this.#eventHints.register(tabId,'webcontents:'+view.webContents.id);
+    const advanceNavigation = () => {
+      this.#navigationGenerations.set(tabId,
+        (this.#navigationGenerations.get(tabId)||0)+1);
+      this.#eventHints.invalidate(tabId);
+    };
     view.webContents.on('did-start-navigation',advanceNavigation);
+    view.webContents.on('did-navigate-in-page',advanceNavigation);
     view.webContents.on('render-process-gone',advanceNavigation);
+    // Subscribe to exact native-target CDP signals; never evaluate page JS.
+    view.webContents.debugger.on('message',(_event,method)=>{
+      if(method==='Accessibility.nodesUpdated' || method==='Accessibility.loadComplete')
+        this.#eventHints.invalidate(tabId);
+    });
+    view.webContents.debugger.on('detach',()=>this.#eventHints.invalidate(tabId));
     view.webContents.setWindowOpenHandler(({url})=>({action:'deny'}));
-    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#navigationGenerations.delete(tabId);});
+    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#navigationGenerations.delete(tabId);this.#eventHints.unregister(tabId);});
     // Only ChatGPT receives DevFleet commands; authentication redirects are
     // allowed for user-driven login, but never selected as command surfaces.
     if (!this.#selected) this.select(tabId);
@@ -171,6 +184,7 @@ export class ChatSurface {
     if (!chatUrl(initialUrl)) throw new Error('observation_origin_not_chatgpt');
     const navigation_generation = this.#navigationGenerations.get(tabId);
     const targetId = 'webcontents:' + view.webContents.id;
+    const startSignalSeq = this.#eventHints.sequence(tabId);
     const nodes = await ax(view);
     // A renderer reload, navigation, disappearing tab, or changed URL while
     // sampling invalidates the entire revision, even for equal page text.
@@ -180,10 +194,20 @@ export class ChatSurface {
       throw new Error('observation_target_changed');
     if (nodes.length>25000)throw new Error('observation_tree_too_large');
     const text = transcript(nodes);
-    return fingerprintAxSnapshot({
+    const snapshot=fingerprintAxSnapshot({
       tab_id:tabId,process_epoch:processEpoch,target_id:targetId,
       navigation_generation,url:initialUrl,text
     });
+    if(snapshot.complete) this.#eventHints.acknowledge(tabId,targetId,startSignalSeq);
+    else this.#eventHints.invalidate(tabId);
+    return snapshot;
+  }
+  pollHint(tabId) {
+    const view=this.#views.get(tabId);
+    if(!view || view.webContents.isDestroyed())throw Error('hint_tab_not_live');
+    if(!chatUrl(view.webContents.getURL()))throw Error('hint_origin_not_chatgpt');
+    return {tab_id:tabId,
+      ...this.#eventHints.poll(tabId,'webcontents:'+view.webContents.id)};
   }
   async #mode(view) {
     const nodes = await ax(view);
@@ -379,6 +403,7 @@ export class ChatSurface {
     await destroyed;
     this.#views.delete(tabId);
     this.#navigationGenerations.delete(tabId);
+    this.#eventHints.unregister(tabId);
     if(selected && this.#views.size) {
       this.select(this.#views.keys().next().value);
     }
@@ -388,6 +413,7 @@ export class ChatSurface {
     for (const view of this.#views.values()) {
       try {view.webContents.close();}catch {}
     }
+    for(const tabId of this.#views.keys())this.#eventHints.unregister(tabId);
     this.#views.clear();
     this.#navigationGenerations.clear();
   }
