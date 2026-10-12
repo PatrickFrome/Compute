@@ -153,6 +153,7 @@ test('HTTP requires local authority, role transaction and validates routing/body
     assert.equal(context.planes.database.state, 'AVAILABLE');
     assert.equal(context.planes.database.source, 'LOCAL_POSTGRES');
     assert.equal(context.planes.host.state, 'UNKNOWN');
+    assert.equal(context.planes.host.proof, 'NONE');
     assert.equal(context.planes.client.state, 'UNKNOWN');
     assert.equal(context.planes.fleet.state, 'UNKNOWN');
     assert.equal(context.operational_state, 'NOT_PROVEN');

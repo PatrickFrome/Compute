@@ -1,3 +1,5 @@
+import { reduceHostProcessObservation } from './operator-host-incarnation-core.mjs';
+
 // Unified Command & Continuity Plane P0 — pure read-only projection.
 // Raw observations are never execution authority and are not allowed to carry secrets.
 export const OPERATOR_CONTEXT_SCHEMA = 'metaengine.operator.context.v1';
@@ -17,6 +19,7 @@ const MAX_SKEW_MS = 5_000;
 const nonNegativeInt = x => Number.isSafeInteger(x) && x >= 0 ? x : null;
 
 function reducePlane(name, value, nowMs, maxAgeMs) {
+  if (name === 'host') return reduceHostProcessObservation(value, { nowMs, maxAgeMs });
   const unknown = { state: 'UNKNOWN', source: SOURCES[name], observed_at: null, proof: 'NONE', fresh: false };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return unknown;
   // A caller cannot relabel facts from another plane: fail closed on provenance mismatch.
