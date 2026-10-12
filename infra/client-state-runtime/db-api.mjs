@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import postgres from 'postgres';
+import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -137,6 +138,29 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       activeRequests += 1;
       admitted = true;
       const url = new URL(request.url, `http://${expectedHost}`);
+      if (url.pathname === '/operator/v1/context') {
+        if (request.method !== 'GET') throw new ApiError(405, 'operator_context_get_required');
+        if (url.search) throw new ApiError(400, 'operator_context_query_forbidden');
+        // P0: ask only the local PostgreSQL capabilities function. PID/socket presence is
+        // NOT sufficient evidence of Agent, Browser, Guardian or Supervisor readiness.
+        const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((item) => item.name === name));
+        const unavailable = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
+        const plan = compileRpcRequest('devos_runtime_capabilities_v1', {}, signatures);
+        const rows = await transaction(tx => tx.unsafe(plan.text, driverValues(sql, plan.values)));
+        const nowMs = Date.now();
+        return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
+          database: {
+            source: 'LOCAL_POSTGRES', proven: true,
+            observed_at: new Date(nowMs).toISOString(),
+            state: rows[0]?.value && !missing.length && !unavailable.length ? 'AVAILABLE' : 'DEGRADED',
+            rpc_available: RPC_ALLOWLIST.length - missing.length,
+            rpc_expected: RPC_ALLOWLIST.length,
+            tables_available: Object.keys(TABLE_ALLOWLIST).length - unavailable.length,
+            tables_expected: Object.keys(TABLE_ALLOWLIST).length,
+            capability_schema: rows[0]?.value?.schema ?? null,
+          },
+        } }));
+      }
       if (url.pathname === '/health' && request.method === 'GET' && !url.search) {
         const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((signature) => signature.name === name));
         const unavailableTables = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
