@@ -385,9 +385,21 @@ export class DevFleetOperator {
         log.receipt = { schema: SCHEMA, state: 'SENT', request_id: id,
           tab_id: tab.tab_id, conversation_url: tab.url, prompt_sha256: sha(prompt),
           automatic_retry_allowed: false };
-      } catch {
+      } catch (error) {
+        // Allowlisted diagnostic only. Preserve AMBIGUOUS and never leak
+        // prompt, page text, bearer token, stack or arbitrary exceptions.
+        const raw=String(error?.message||'');
+        const allowed=new Set([
+          'send_button_not_unique','composer_exact_draft_not_proven',
+          'chatgpt_target_changed_before_send','chat_only_send_gate_refused',
+          'send_outcome_requires_manual_readback','send_outcome_ambiguous',
+          'chatgpt_current_generation_active','send_button_geometry_unverified',
+          'send_button_outside_viewport','request_already_in_transcript',
+          'chatgpt_origin_changed_after_send','chatgpt_composer_not_unique_or_login_required'
+        ]);
         log.receipt = { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
-          tab_id: tab.tab_id, automatic_retry_allowed: false };
+          tab_id: tab.tab_id, error_code: allowed.has(raw)?raw:'send_error_unknown',
+          automatic_retry_allowed: false };
       }
       try { await this.#save(); }
       catch {
