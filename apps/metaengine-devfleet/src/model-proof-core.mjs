@@ -19,6 +19,13 @@ export function modelPickerCandidates(nodes) {
    && controlRoles.has(toRole(n)) && modelTop.test(toName(n)))
    .map(n=>({backendDOMNodeId:n.backendDOMNodeId,name:toName(n),role:toRole(n)}));
 }
+export function modelSubmenuCandidates(nodes) {
+ const names=/^(?:Выбрать модель|Choose model|Select model)$/iu;
+ return (nodes||[]).filter(n=>!n.ignored
+  && Number.isSafeInteger(n.backendDOMNodeId)
+  && ['menuitem','button'].includes(toRole(n)) && names.test(toName(n)))
+  .map(n=>({backendDOMNodeId:n.backendDOMNodeId,name:toName(n),role:toRole(n)}));
+}
 export function boundedModelControls(nodes) {
  return (nodes||[]).filter(n=>!n.ignored && uiRoles.has(toRole(n))
    && (controlRoles.has(toRole(n)) ? likely.test(toName(n))

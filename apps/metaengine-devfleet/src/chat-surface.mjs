@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { WebContentsView, session } from 'electron';
 import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttributes, retryWaitMs } from './chat-fleet-preflight.mjs';
-import { modelPickerCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
+import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -245,8 +245,24 @@ export class ChatSurface {
       await sleep(500);
       if(view.webContents.getURL()!==url) throw new Error('model_probe_target_navigated');
       const opened=await ax(view);
-      const menu=boundedModelControls(opened);
-      result.picker_menu_controls=menu;
+      const firstLevel=boundedModelControls(opened);
+      const nested=modelSubmenuCandidates(opened);
+      result.submenu_count=nested.length;
+      result.picker_menu_controls=firstLevel;
+      let menu=firstLevel;
+      if(nested.length===1) {
+        // Open *only* this exact, unambiguous model submenu. No model is
+        // selected or changed by an observation operation.
+        await clickNode(view,nested[0].backendDOMNodeId);
+        await sleep(500);
+        if(view.webContents.getURL()!==url)throw new Error('model_submenu_navigated');
+        const openedSecond=await ax(view);
+        menu=boundedModelControls(openedSecond);
+        result.picker_menu_controls=menu;
+        result.submenu_opened=true;
+      } else {
+        result.submenu_opened=false;
+      }
       const selected=gpt6FromControls(menu);
       result.gpt6_option_count=selected.gpt6_option_count;
       result.gpt6_selected=selected.gpt6_selected;
@@ -266,6 +282,7 @@ export class ChatSurface {
   async inputProbe(tabId) {
     const view=this.#views.get(tabId);
     if(!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
+    this.select(tabId); // hidden WebContents may be throttled; inspect the visible exact tab
     if(!chatUrl(view.webContents.getURL()))throw new Error('tab_origin_not_chatgpt');
     const state=await this.#mode(view);
     const controls=inspectSendSurface(await ax(view));
@@ -285,6 +302,7 @@ export class ChatSurface {
     if (singleButton(before,stopNames)) throw new Error('chatgpt_current_generation_active');
     const composer = composerControls(before)[0] || null;
     if (!composer) throw new Error('chatgpt_composer_not_unique_or_login_required');
+    if(val(composer,'value').length !== 0) throw new Error('existing_chat_draft_must_be_reconciled');
     const beforeText = transcript(before);
     // The request-ID suffix makes the sent message unique within each chat.
     if (beforeText.includes(text)) throw new Error('request_already_in_transcript');
