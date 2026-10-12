@@ -2,10 +2,13 @@ import crypto from 'node:crypto';
 
 const HASH = /^[a-f0-9]{64}$/;
 const TAB = /^tab_[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-const safeError = value => {
-  const v=String(value||'observation_failed');
-  return /^[a-z0-9_:-]{1,85}$/i.test(v) ? v : 'observation_failed';
-};
+const SAFE_ERRORS=new Set([
+  'observation_tab_not_live','observation_origin_not_chatgpt',
+  'observation_target_changed','observation_tree_too_large',
+  'observation_identity_invalid','observation_origin_invalid',
+  'observation_timeout','observation_readback_invalid'
+]);
+const safeError = value => SAFE_ERRORS.has(String(value)) ? String(value) : 'observation_failed';
 export const OBSERVATION_SCHEMA='metaengine.devfleet.batch-observation.v1';
 
 // A revision binds bounded page text to the *physical* WebContents incarnation.
