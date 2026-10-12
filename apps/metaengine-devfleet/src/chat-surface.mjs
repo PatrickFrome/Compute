@@ -177,7 +177,7 @@ export class ChatSurface {
       process_epoch:processEpoch,target_id:'webcontents:'+view.webContents.id,
       authority_effect:false};
   }
-  async observe(tabId) {
+  async observe(tabId,signal) {
     const view = this.#views.get(tabId);
     if (!view || view.webContents.isDestroyed()) throw new Error('observation_tab_not_live');
     const initialUrl = view.webContents.getURL();
@@ -185,7 +185,15 @@ export class ChatSurface {
     const navigation_generation = this.#navigationGenerations.get(tabId);
     const targetId = 'webcontents:' + view.webContents.id;
     const startSignalSeq = this.#eventHints.sequence(tabId);
-    const nodes = await ax(view);
+    if (signal?.aborted) throw Error('observation_timeout');
+    const onAbort=()=>this.#eventHints.invalidate(tabId);
+    signal?.addEventListener('abort',onAbort,{once:true});
+    let nodes;
+    try { nodes = await ax(view); }
+    finally { signal?.removeEventListener('abort',onAbort); }
+    if (signal?.aborted) throw Error('observation_timeout');
+    if (!Array.isArray(nodes) || nodes.length===0)
+      throw Error('observation_empty_ax_tree');
     // A renderer reload, navigation, disappearing tab, or changed URL while
     // sampling invalidates the entire revision, even for equal page text.
     if (this.#views.get(tabId)!==view || view.webContents.isDestroyed() ||
@@ -198,6 +206,7 @@ export class ChatSurface {
       tab_id:tabId,process_epoch:processEpoch,target_id:targetId,
       navigation_generation,url:initialUrl,text
     });
+    if(signal?.aborted) throw Error('observation_timeout');
     if(snapshot.complete) this.#eventHints.acknowledge(tabId,targetId,startSignalSeq);
     else this.#eventHints.invalidate(tabId);
     return snapshot;
