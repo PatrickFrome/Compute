@@ -35,6 +35,11 @@ app.whenReady().then(async()=>{
     await dbg.sendCommand('DOM.setAttributeValue',{
       nodeId:item.nodeId,name:'aria-label',value:'After change'});
     await delay(700);
+    const mutated=await dbg.sendCommand('Accessibility.getFullAXTree');
+    const mutatedNames=mutated.nodes.filter(n=>!n.ignored)
+      .map(n=>String(n?.name?.value||''));
+    if(!mutatedNames.some(n=>n.includes('After change')))
+      throw Error('synthetic_ax_change_not_observed');
     // Also probe a genuine document reload; CDP only promises updates
     // for nodes previously requested and may not emit on an offscreen cell.
     await dbg.sendCommand('Page.enable');
@@ -42,8 +47,7 @@ app.whenReady().then(async()=>{
     await delay(700);
     const after=await dbg.sendCommand('Accessibility.getFullAXTree');
     const names=after.nodes.filter(n=>!n.ignored).map(n=>String(n?.name?.value||''));
-    // A reload may reset the synthetic document; check the earlier DOM
-    // mutation via a fresh AX tree BEFORE reload, not after it.
+    // A reload resets the synthetic document; mutation was verified above.
     const changed=names.some(n=>n.includes('Before change'));
     // The physically observed question for this gate is CDP event delivery.
     if(!changed)throw Error('synthetic_ax_document_missing');
