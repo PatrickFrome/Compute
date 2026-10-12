@@ -195,6 +195,7 @@ function listenLocal() {
       'chat.read': p=>operator.read(p),
       'chat.assign': p=>operator.assign(p),
       'chat.batch_assign': p=>operator.batchAssign(p),
+      'chat.batch_observe': p=>operator.batchObserve(p),
       'chat.inspect': p=>operator.inspect(p),
       'chat.model_probe': p=>operator.modelProbe(p),
       'chat.input_probe': p=>operator.inputProbe(p),
