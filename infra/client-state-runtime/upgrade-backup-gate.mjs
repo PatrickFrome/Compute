@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
+import { qualifyIndependentDisposableRestore } from './upgrade-backup-restore-gate.mjs';
 
 const HEX = /^[a-f0-9]{64}$/;
 const fail = reason => ({
@@ -13,7 +14,7 @@ const fail = reason => ({
 });
 const canonical = s => process.platform === 'win32' ? s.toLowerCase() : s;
 
-export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocReadback, expected} = {}) {
+export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocReadback, expected, restoreReceipt = null} = {}) {
   if (!receipt || receipt.schema !== 'metaengine.local61.pre-upgrade-database-backup.v1'
     || receipt.state !== 'PASSED') return fail('RECEIPT_MISSING_OR_UNQUALIFIED');
   if (!expected || !Number.isSafeInteger(expected.keeperPid) || expected.keeperPid <= 0
@@ -65,10 +66,22 @@ export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocRea
     if (first.toString('ascii') !== 'PGDMP' || h.digest('hex') !== receipt.file_sha256)
       return fail('ARCHIVE_BYTES_UNVERIFIED');
   } catch { return fail('ARCHIVE_READ_FAILED'); }
+  // Only after independent archive bytes and TOC readback qualify the
+  // standalone disposable-restore evidence. An archive header and listing
+  // do NOT establish that it can reconstruct the actual user data.
+  const restore = qualifyIndependentDisposableRestore({
+    receipt:restoreReceipt, backupReceipt:receipt, tocReadback, expected,
+  });
   return {
     schema:'metaengine.installed-upgrade-backup-gate.v1',
     backup_verified:true, independent_toc_bound:true,
-    upgrade_authorized:false, // Separate quiescence, identity, authority and rollback gates remain.
-    automatic_retry_allowed:false, authority_effect:false, reason:'BACKUP_ONLY_VERIFIED',
+    restore_receipt_consistent:restore.restore_receipt_consistent,
+    restore_verified:false, physical_restore_proven:false,
+    restore_reason:restore.reason,
+    upgrade_authorized:false, // Later quiescence, identity, rollback & authority gates remain.
+    automatic_retry_allowed:false, authority_effect:false,
+    reason:restore.restore_receipt_consistent
+      ? 'BACKUP_AND_RESTORE_RECEIPT_CONSISTENT_PHYSICAL_PROOF_REQUIRED'
+      : 'BACKUP_ONLY_VERIFIED',
   };
 }
