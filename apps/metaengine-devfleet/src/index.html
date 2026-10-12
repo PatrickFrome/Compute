@@ -26,6 +26,8 @@ hr{width:100%;border:0;border-top:1px solid #334155}
   <div id="tabs" role="list" aria-label="DevFleet chats"></div>
   <div class="row"><button id="read">Прочитать</button><button id="refresh">Обновить</button></div>
   <div class="row"><button id="inspect">Проверить Chat</button><button id="recover">Перезагрузить ошибку</button></div>
+  <div class="row"><button id="audit-all">Аудит всех чатов</button></div>
+  <div class="help" id="fleet-evidence">Статус GPT-6 High проверяется отдельно в каждой вкладке. Неизвестное состояние ≠ готовность.</div>
   <textarea id="prompt" placeholder="Новое задание выбранному чату. У каждого запроса уникальный ID."></textarea>
   <button id="assign" class="primary">Отправить задание</button>
   <div id="status">Подключение локального управляющего интерфейса…</div>
@@ -37,7 +39,7 @@ hr{width:100%;border:0;border-top:1px solid #334155}
 const q=id=>document.getElementById(id);
 let selected=null,working=false,epoch=0;
 const showStatus=msg=>{q('status').textContent=String(msg).slice(0,450);};
-const setWorking=v=>{working=v;for(const id of ['create','read','assign','refresh','inspect','recover'])q(id).disabled=v;};
+const setWorking=v=>{working=v;for(const id of ['create','read','assign','refresh','inspect','recover','audit-all'])q(id).disabled=v;};
 const short=id=>id? id.slice(0,15)+'…':'—';
 function showOutput(value){q('output').textContent=String(value??'');}
 async function refresh() {
@@ -79,6 +81,37 @@ q('read').onclick=()=>run(async()=>{
   showStatus('Прочитано '+result.text.length+' символов · '+short(selected)+(result.has_more?' · есть продолжение':''));
 });
 q('refresh').onclick=()=>run(refresh);
+q('audit-all').onclick=()=>run(async()=>{
+  const state=await window.devfleet.list();
+  const result=[], counts={ready:0,blocked_work:0,error:0,unverified:0};
+  for(const [index,tab] of (state.sessions||[]).entries()){
+    showStatus('Проверка '+(index+1)+' / '+state.session_count+' · '+short(tab.tab_id));
+    try{
+      const check=await window.devfleet.inspect({tab_id:tab.tab_id});
+      const verdict=check.page_failure?'ERROR'
+        :check.mode==='WORK'?'WORK_BLOCKED'
+        :check.mode==='CHAT'&&check.high_label_visible&&check.gpt6_label_visible?'READY_GPT6_HIGH'
+        :'UNVERIFIED';
+      if(verdict==='READY_GPT6_HIGH')counts.ready++;
+      else if(verdict==='WORK_BLOCKED')counts.blocked_work++;
+      else if(verdict==='ERROR')counts.error++;
+      else counts.unverified++;
+      result.push({tab_id:tab.tab_id,mode:check.mode,
+        high:check.high_label_visible,gpt6:check.gpt6_label_visible,
+        failure:check.page_failure,verdict});
+    }catch(error){
+      counts.unverified++;
+      result.push({tab_id:tab.tab_id,verdict:'INSPECTION_FAILED',
+        diagnostic:String(error?.message||error).slice(0,90)});
+    }
+  }
+  const message='GPT-6 High подтверждены: '+counts.ready+' / '+result.length+
+    ' · Work: '+counts.blocked_work+' · Ошибки: '+counts.error+
+    ' · Не доказано: '+counts.unverified;
+  q('fleet-evidence').textContent=message;
+  showStatus(message);
+  showOutput(JSON.stringify({counts,results:result},null,2));
+});
 q('inspect').onclick=()=>run(async()=>{
   if(!selected)throw Error('Выберите чат');
   const r=await window.devfleet.inspect({tab_id:selected});

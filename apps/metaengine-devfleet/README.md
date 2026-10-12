@@ -102,3 +102,20 @@ Browser, while preserving **its own PostgreSQL**, Guardian and Supervisor
 authority. See
 `coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md`
 section "Binding cross-client requirement: Live Development Plane".
+
+### First live module: Chat fleet read-only qualification
+
+The `src/index.html` first post-install candidate adds **«Аудит всех чатов»**.
+This iterates only `window.devfleet.list/inspect` (no model send, reload,
+arbitrary scripts, owner database mutation or browser process intervention).
+The interface refuses to label a session ready unless it independently sees
+`mode=CHAT`, `high_label_visible=true`, `gpt6_label_visible=true` and
+no page failure. All other states remain unverified or blocked. A separate
+19-test source suite includes a mocked UI that verifies the auditor cannot
+invoke `chat.assign` or `chat.recover` while inspecting fleet state.
+
+The visual auditor is **not** a proof that ChatGPT actually selected GPT-6
+High in every tab, and the installed native Host only hard-enforces Chat
+rather than GPT-6 High. Do not automatically dispatch roadmap work until
+each exact chat has model-setting proof; ordinary chat prompts never alter
+the ChatGPT model picker.
