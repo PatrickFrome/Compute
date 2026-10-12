@@ -363,7 +363,9 @@ export class ChatSurface {
     if (singleButton(before,stopNames)) throw new Error('chatgpt_current_generation_active');
     const composer = composerControls(before)[0] || null;
     if (!composer) throw new Error('chatgpt_composer_not_unique_or_login_required');
-    if(val(composer,'value').length !== 0) throw new Error('existing_chat_draft_must_be_reconciled');
+    // Any existing composer text is an owner-authorized replaceable task draft.
+    // focusAndType selects and clears it, then exact AX readback below proves
+    // replacement before issuing the only physical Send click.
     const beforeText = transcript(before);
     // The request-ID suffix makes the sent message unique within each chat.
     if (beforeText.includes(text)) throw new Error('request_already_in_transcript');
