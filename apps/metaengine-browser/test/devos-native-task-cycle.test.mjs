@@ -248,6 +248,8 @@ test('registered root keeps its immutable spec and receives an exact result prot
   assert.match(completions[0].summary.result_claim_sha256, /^[a-f0-9]{64}$/);
   assert.equal(completions[0].summary.result_claim_deliverable_ref_count, 1);
   assert.equal(completions[0].summary.result_claim_evidence_ref_count, 1);
+  assert.deepEqual(completions[0].summary.result_claim_deliverable_refs, ['artifact:root-result']);
+  assert.deepEqual(completions[0].summary.result_claim_evidence_refs, ['test:focused-suite']);
   assert.equal(completions[0].summary.model_claim_authority, false);
   assert.deepEqual(rootLease.task_spec, immutableSpec);
 });
@@ -284,6 +286,8 @@ test('resumed same-task conversation ignores historical result claims and tool r
   assert.deepEqual(reads, [history.length]);
   assert.equal(completions[0].summary.result_claim_disposition, 'READY');
   assert.equal(completions[0].summary.result_claim_deliverable_ref_count, 1);
+  assert.deepEqual(completions[0].summary.result_claim_deliverable_refs, ['artifact:current']);
+  assert.deepEqual(completions[0].summary.result_claim_evidence_refs, ['test:current']);
   assert.equal(completions[0].summary.tool_results_count, 0);
 });
 

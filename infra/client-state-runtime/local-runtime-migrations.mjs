@@ -39,6 +39,9 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
       { relation: 'destruktion_meta.devos_fleet_task_h205f22', name: 'project_task_state_history_h205f22', signature: 'destruktion_meta.project_task_state_history_h205f22()' },
       { relation: 'destruktion_meta.devos_fleet_event_h205f22', name: 'project_fleet_event_history_h205f22', signature: 'destruktion_meta.project_fleet_event_history_h205f22()' },
     ]) },
+  // Marker is absent on v1 installations: apply replacement only in a new migration.
+  { path: '20261012130000_project_verifier_reference_transport_v1.sql', signature: 'destruktion_meta.project_verifier_reference_transport_h205f22()',
+    source_url: new URL('../../supabase/migrations/20261012130000_project_verifier_reference_transport_v1.sql', import.meta.url) },
 ]);
 
 const REQUIRED_COLUMNS = {

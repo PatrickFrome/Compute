@@ -168,7 +168,7 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
       role: lease.role,
       verification_subject: taskSpec.verification_subject || null,
     });
-    lines.push('', clip(resultProtocolBlock, 2600));
+    lines.push('', clip(resultProtocolBlock, ['CRITIC', 'FALSIFIER'].includes(String(lease.role || '').toUpperCase()) ? 11000 : 2600));
   }
   const toolResultsBlock = clip(renderAgentToolResults(tool_results), 2400).trim();
   if (toolResultsBlock) lines.push('', toolResultsBlock);
@@ -1340,6 +1340,9 @@ export class DevOsNativeTaskCycle {
         result_claim_disposition: claim.disposition,
         result_claim_deliverable_ref_count: claim.deliverable_refs.length,
         result_claim_evidence_ref_count: claim.evidence_refs.length,
+        // These are untrusted, protocol-bounded locators, not evidence of a successful effect.
+        result_claim_deliverable_refs: [...claim.deliverable_refs],
+        result_claim_evidence_refs: [...claim.evidence_refs],
         result_claim_subject_task_id: claim.subject_task_id,
         result_claim_subject_result_sha256: claim.subject_result_sha256,
         raw_model_claim_included: false,
