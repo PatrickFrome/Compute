@@ -211,3 +211,36 @@ claim that CDP `Accessibility.nodesUpdated` has been adopted or physically
 qualified. Event-driven caching and source-backed completion extraction
 require separate false-negative tests, renderer-restart/hidden-tab chaos,
 and physical Windows release qualification.
+
+
+## Fast event-hint polling candidate (not installed)
+
+After at least one **fresh native `chat.batch_observe`** has initialized
+a trusted WebContents baseline, `chat.batch_poll` returns a compact
+O(1)-per-tab hint without traversing the accessibility tree or opening
+a ChatGPT menu:
+
+```powershell
+node apps/metaengine-devfleet/scripts/devfleet-cli.mjs batch_observe
+node apps/metaengine-devfleet/scripts/devfleet-cli.mjs batch_poll
+```
+
+The listener is target-bound to native
+`debugger.on('message', method)` for
+`Accessibility.nodesUpdated` / `Accessibility.loadComplete`, with
+navigation, SPA route change, process death and debugger-detach invalidation.
+The 2-second monotonic TTL forces fresh readback even if a Chrome event is
+dropped or a hidden tab is throttled. Poll states are:
+
+- `UNINITIALIZED`: no valid exact WebContents baseline
+- `DIRTY_HINT`: new native signal or invalidated baseline; prioritize a full read
+- `RESCAN_DUE`: no signal but baseline has expired; do a full read
+- `QUIET_HINT`: short-lived advisory signal only, **not proof of unchanged text**
+- `UNKNOWN`: missing or inconsistent native observation
+
+These are **scheduling hints**, not credible completion, model, readiness
+or safety proofs; `completion_proven:false` is mandatory. A GPT operator
+or UI should call `batch_observe` before comparing revisions, and must use
+real source/CI/artifact readback before advancing tasks. No Send or page scripts
+are part of either endpoint. Live Electron/ChatGPT events have **not** yet
+been physically qualified on this source candidate.
