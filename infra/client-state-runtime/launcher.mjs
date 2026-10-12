@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
+import { classifyPostgresUtilityFailure } from './postgres-utility-diagnostic.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import net from 'node:net';
@@ -26,7 +27,11 @@ const HEALTH_FAILURE_CODES = new Set([
   'postgres_owned_pid_mismatch', 'postgres_incarnation_mismatch', 'postgres_identity_invalid',
   'postgres_pid_file_invalid', 'postgres_inspection_failed', 'postgres_process_verification_failed',
   'postgres_inspection_timeout', 'postgres_inspection_spawn_failed', 'postgres_inspection_query_failed',
-  'postgres_inspection_output_limit',
+  'postgres_inspection_output_limit', 'postgres_inspection_stderr_limit',
+  'postgres_inspection_auth_failed', 'postgres_inspection_permission_denied',
+  'postgres_inspection_row_security_denied', 'postgres_inspection_connection_refused',
+  'postgres_inspection_server_unavailable', 'postgres_inspection_query_timeout',
+  'postgres_inspection_database_missing',
 ]);
 
 // Public diagnostic data contains finite categories only. Never forward an
@@ -158,13 +163,15 @@ function postgresEnvironment(config) {
   };
 }
 
-async function runBounded(command, args, { env = process.env, timeoutMs = 5000 } = {}) {
+async function runBounded(command, args, { env = process.env, timeoutMs = 5000, diagnosticOperation = null } = {}) {
   return new Promise((resolve, reject) => {
     let child;
-    try { child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); }
+    try { child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch { reject(runtimeError('runtime_command_spawn_failed')); return; }
     const chunks = [];
+    const stderrChunks = [];
     let bytes = 0;
+    let stderrBytes = 0;
     let settled = false;
     let timer;
     const finish = (error, value) => {
@@ -186,11 +193,29 @@ async function runBounded(command, args, { env = process.env, timeoutMs = 5000 }
       chunks.push(buffer);
     });
     child.stdout.once('error', () => terminate('runtime_command_output_failed'));
+    child.stderr?.on('data', chunk => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      stderrBytes += buffer.length;
+      if (stderrBytes > 16384) { terminate('runtime_command_stderr_limit'); return; }
+      stderrChunks.push(buffer);
+    });
+    child.stderr?.once('error', () => terminate('runtime_command_stderr_limit'));
     child.once('error', () => finish(runtimeError('runtime_command_spawn_failed')));
     // exit can precede the last stdout bytes. close confirms that the pipes
     // have drained, so a successful psql cannot yield a truncated identity.
-    child.once('close', (code, signal) => finish(code === 0 && !signal
-      ? null : runtimeError('runtime_command_failed'), Buffer.concat(chunks).toString('utf8').trim()));
+    child.once('close', (code, signal) => {
+      if (code === 0 && !signal) {
+        finish(null, Buffer.concat(chunks).toString('utf8').trim());
+        return;
+      }
+      const error = runtimeError('runtime_command_failed');
+      // Only a finite safe code crosses the subprocess boundary; stderr bytes
+      // never become an exception message, receipt, or persisted diagnosis.
+      if (diagnosticOperation === 'inspection') error.diagnostic_code =
+        classifyPostgresUtilityFailure(Buffer.concat(stderrChunks), 'inspection').code;
+      finish(error);
+    });
   });
 }
 
@@ -199,12 +224,13 @@ export async function inspectPostgres(config) {
     (config.expectedClusterSystemIdentifier ? ",'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system())" : '') + ")::text";
   let output;
   try {
-    output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config) });
+    output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config), diagnosticOperation:'inspection' });
   } catch (error) {
     const categories = {
       runtime_command_timeout: 'postgres_inspection_timeout',
       runtime_command_spawn_failed: 'postgres_inspection_spawn_failed',
-      runtime_command_failed: 'postgres_inspection_query_failed',
+      runtime_command_failed: error?.diagnostic_code || 'postgres_inspection_query_failed',
+      runtime_command_stderr_limit: 'postgres_inspection_stderr_limit',
       runtime_command_output_limit: 'postgres_inspection_output_limit',
     };
     throw runtimeError(categories[error?.code] || 'postgres_inspection_failed');

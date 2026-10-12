@@ -26,6 +26,12 @@ test('source closure includes side-effect, re-export and dynamic literal imports
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('runtime source closure explicitly includes PostgreSQL stderr classifier and refuses silent omission', async () => {
+  const closure=await sourceClosure([join(here,'launcher.mjs')],repositoryRoot);
+  assert.ok(closure.files.includes(join(here,'postgres-utility-diagnostic.mjs')));
+  assert.ok(closure.files.includes(join(here,'launcher.mjs')));
+});
+
 test('startup manifest hashes dependencies, binds instance and omits credential material', async () => {
   const config = { postgresMode: 'attached', databasePort: 15434, apiPort: 15432, edgePort: 15433,
     databaseUrl: 'postgres://user:never-report-password@127.0.0.1/db', apiKey: 'never-report-key' };

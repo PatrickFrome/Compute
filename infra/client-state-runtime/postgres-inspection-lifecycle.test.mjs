@@ -12,11 +12,12 @@ function installSpawn(t, behavior) {
   const previous = childProcess.spawn;
   const child = new EventEmitter();
   child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
   child.kills = 0;
   child.kill = () => { child.kills++; child.emit('close', null, 'SIGTERM'); return true; };
   childProcess.spawn = () => { queueMicrotask(() => behavior(child)); return child; };
   syncBuiltinESMExports();
-  t.after(() => { child.stdout.destroy(); childProcess.spawn = previous; syncBuiltinESMExports(); });
+  t.after(() => { child.stdout.destroy(); child.stderr.destroy(); childProcess.spawn = previous; syncBuiltinESMExports(); });
   return child;
 }
 
@@ -49,6 +50,43 @@ test('an undrained psql pipe reaches the deadline rather than reporting a false 
   const child=installSpawn(t, c => c.emit('exit', 0, null));
   await assert.rejects(inspectPostgres(config), { code:'postgres_inspection_timeout' });
   assert.equal(child.kills, 1);
+});
+
+for (const [stderr, code] of [
+  ['FATAL: password authentication failed for user "SECRET_LOGIN"', 'postgres_inspection_auth_failed'],
+  ['ERROR: permission denied for function pg_control_system SECRET_TABLE', 'postgres_inspection_permission_denied'],
+  ['connection to server failed: Connection refused at SECRET_HOST', 'postgres_inspection_connection_refused'],
+  ['FATAL: the database system is starting up', 'postgres_inspection_server_unavailable'],
+  ['ERROR: canceling statement due to statement timeout', 'postgres_inspection_query_timeout'],
+]) test(`psql stderr maps to public ${code} without leaking details`, async t => {
+  installSpawn(t, c => {
+    c.stderr.end(stderr);
+    c.stdout.end('SECRET_DATABASE');
+    c.emit('exit', 1, null);
+    c.emit('close', 1, null);
+  });
+  await assert.rejects(inspectPostgres(config), error => error.code === code
+    && !JSON.stringify(error).includes('SECRET_')
+    && !error.message.includes('SECRET_'));
+});
+
+test('psql exit before stderr drain is classified only at close', async t => {
+  installSpawn(t, c => {
+    c.emit('exit',1,null);
+    setImmediate(()=>{
+      c.stderr.end('ERROR: permission denied for relation PRIVATE');
+      c.stdout.end();
+      c.emit('close',1,null);
+    });
+  });
+  await assert.rejects(inspectPostgres(config), {code:'postgres_inspection_permission_denied'});
+});
+
+test('oversized private stderr is fail-closed without capturing or exposing bytes', async t => {
+  const child=installSpawn(t,c=>c.stderr.write('PRIVATE_SECRET'.repeat(2200)));
+  await assert.rejects(inspectPostgres(config), e => e.code === 'postgres_inspection_stderr_limit'
+    && !e.message.includes('PRIVATE_SECRET'));
+  assert.equal(child.kills,1);
 });
 
 test('new inspection categories stay within the redacted host health contract', () => {
