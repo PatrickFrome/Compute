@@ -78,7 +78,10 @@ export class DevFleetOperator {
         const tab=sessions[next++];
         try {
           const opened=await this.#adapter.create(tab.tab_id,tab.url);
-          if(opened?.tab_id!==tab.tab_id || !ownChatUrl(opened?.url))
+          // An owned target must reconnect the exact saved conversation.
+          // A redirect to ChatGPT's root or another /c/ URL loses that binding.
+          if(opened?.tab_id!==tab.tab_id || !ownChatUrl(opened?.url) ||
+             ownChatUrl(opened.url).replace(/\/$/,'')!==ownChatUrl(tab.url).replace(/\/$/,''))
             throw Error('restore_readback_invalid');
           tab.state='OPEN';
         } catch {tab.state='RESTORE_BLOCKED';}
@@ -105,6 +108,10 @@ export class DevFleetOperator {
     const s = this.#state.sessions.find(x => x.tab_id === validated);
     if (!s) throw new Error('operator_tab_not_owned');
     return s;
+  }
+  #requireOpen(tab) {
+    if (tab.state !== 'OPEN') throw new Error('operator_tab_not_open');
+    return tab;
   }
   #prior(id, op, hash) {
     const r = this.#state.requests.find(x => x.request_id === id);
@@ -213,14 +220,19 @@ export class DevFleetOperator {
         log.receipt={schema:SCHEMA,state:'AMBIGUOUS',request_id:id,tab_id:tabId,
           automatic_retry_allowed:false};
       }
-      await this.#save().catch(()=>{});
+      try { await this.#save(); }
+      catch {
+        log.state = 'AMBIGUOUS';
+        log.receipt = { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
+          tab_id: tabId, automatic_retry_allowed: false };
+      }
       return plain(log.receipt);
     });
   }
   async read(params) {
     this.#requireInit();
     fields(params, ['tab_id','offset','max_chars']);
-    const tab = this.#find(params.tab_id);
+    const tab = this.#requireOpen(this.#find(params.tab_id));
     const offset = params.offset === undefined ? 0 : Number(params.offset);
     const size = params.max_chars === undefined ? 16000 : Number(params.max_chars);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 200000
@@ -243,7 +255,7 @@ export class DevFleetOperator {
   async inspect(params) {
     this.#requireInit();
     fields(params,['tab_id']);
-    const tab = this.#find(params.tab_id);
+    const tab = this.#requireOpen(this.#find(params.tab_id));
     if(typeof this.#adapter.inspect !== 'function') throw new Error('chat_inspection_unavailable');
     const inspection = await this.#adapter.inspect(tab.tab_id);
     if(inspection?.tab_id !== tab.tab_id || inspection?.authority_effect !== false)
@@ -253,7 +265,7 @@ export class DevFleetOperator {
   async recover(params) {
     this.#requireInit();
     fields(params,['tab_id']);
-    const tab=this.#find(params.tab_id);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
     if(this.#state.requests.some(r=>r.operation==='assign'
        && r.state==='AMBIGUOUS' && r.tab_id===tab.tab_id))
       throw new Error('chat_recovery_blocked_by_ambiguous_send');
@@ -306,13 +318,13 @@ export class DevFleetOperator {
     return runObservationBatch({
       params,
       ownedTabs:this.#state.sessions.filter(s=>s.state==='OPEN').map(s=>s.tab_id),
-      observe:tabId=>this.#adapter.observe(tabId)
+      observe:(tabId,signal)=>this.#adapter.observe(tabId,signal)
     });
   }
   async modelProbe(params) {
     this.#requireInit();
     fields(params,['tab_id']);
-    const tab=this.#find(params.tab_id);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
     if(typeof this.#adapter.modelProbe !== 'function')throw new Error('model_probe_not_supported');
     const result=await this.#adapter.modelProbe(tab.tab_id);
     if(result?.tab_id!==tab.tab_id||result?.authority_effect!==false)
@@ -322,7 +334,7 @@ export class DevFleetOperator {
   async inputProbe(params) {
     this.#requireInit();
     fields(params,['tab_id']);
-    const tab=this.#find(params.tab_id);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
     if(typeof this.#adapter.inputProbe !== 'function')throw new Error('input_probe_not_supported');
     const result=await this.#adapter.inputProbe(tab.tab_id);
     if(result?.tab_id!==tab.tab_id||result?.authority_effect!==false)
@@ -340,6 +352,7 @@ export class DevFleetOperator {
     const fingerprint = sha(tab.tab_id + '\0' + prompt);
     const prior = this.#prior(id,'assign',fingerprint);
     if (prior) return prior;
+    this.#requireOpen(tab);
     if (this.#state.requests.some(r => r.operation === 'assign' &&
       r.state === 'AMBIGUOUS' && r.tab_id === tab.tab_id))
       throw new Error('operator_tab_ambiguous_reconciliation_required');
@@ -383,8 +396,11 @@ export class DevFleetOperator {
           tab_id: tab.tab_id, automatic_retry_allowed: false };
       }
       try { await this.#save(); }
-      catch { return { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
-        tab_id: tab.tab_id, automatic_retry_allowed: false }; }
+      catch {
+        log.state = 'AMBIGUOUS';
+        log.receipt = { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
+          tab_id: tab.tab_id, automatic_retry_allowed: false };
+      }
       return plain(log.receipt);
     }
   }

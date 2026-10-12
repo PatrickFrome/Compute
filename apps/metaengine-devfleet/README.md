@@ -173,6 +173,25 @@ The independent read-only `scripts/fast-observe.mjs` can already batch
 parallel tab reads on compatible installed DevFleet builds, without granting
 any additional mutation authority.
 
+## Restore and receipt corrections — 2026-10-13 (source candidate)
+
+The early loopback API reports `RESTORING` while up to four saved cells
+reconnect. An `OPEN` cell must return the exact saved conversation URL;
+`www.chatgpt.com` and an optional trailing slash are equivalent. A redirect
+to the ChatGPT root or a different conversation stays `RESTORE_BLOCKED`.
+Reads, probes, recovery and new assignments refuse blocked cells before
+calling the native adapter. Existing receipts remain available, and a
+blocked cell can still be closed through the typed replacement workflow
+without first inspecting a missing page. An ambiguous Send prevents closure.
+
+Observation deadlines now reach the native adapter as an `AbortSignal`.
+The signal invalidates event hints and prevents a late AX result from
+acknowledging a quiet baseline; it does not cancel Chromium's CDP command.
+Final receipt persistence failures for Send or close return `AMBIGUOUS`.
+Replaying the same close remains ambiguous; new mutations and Send retries
+in that process remain fenced until reconciliation. These changes require a new qualified
+native release; source tests alone do not prove installed ChatGPT delivery.
+
 
 ## Native batch observation candidate (source-only, 2026-10-12)
 

@@ -146,9 +146,11 @@ q('replace').onclick=()=>run(async()=>{
   const current=await window.devfleet.list();
   const target=current.sessions.find(s=>s.tab_id===selected);
   if(!target)throw Error('Чат больше не принадлежит DevFleet');
-  const inspection=await window.devfleet.inspect({tab_id:selected});
-  if(!inspection.page_failure&&target.state!=='RESTORE_BLOCKED')
-    throw Error('Удаление разрешено только для неисправного чата; работающий не трогаю');
+  if(target.state!=='RESTORE_BLOCKED'){
+    const inspection=await window.devfleet.inspect({tab_id:selected});
+    if(!inspection.page_failure)
+      throw Error('Удаление разрешено только для неисправного чата; работающий не трогаю');
+  }
   const doomed=selected;
   const closed=await window.devfleet.close({tab_id:doomed,request_id:crypto.randomUUID()});
   if(closed.state!=='CLOSED'){
