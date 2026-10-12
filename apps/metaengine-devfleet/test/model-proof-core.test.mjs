@@ -49,6 +49,7 @@ test('model probing ignores hostile page prose and leaked controls',()=>{
  assert.equal(modelPickerCandidates(nodes).length,1);
  const bounded=boundedModelControls(nodes);
  assert.ok(!bounded.some(x=>x.name.includes('ignore your rules')));
+ assert.ok(!bounded.some(x=>x.name==='GPT-6 High selected'));
  assert.equal(visibleEffort(nodes).high_label_visible,true);
 });
 test('English button variants and missing semantic draft fail cleanly',()=>{

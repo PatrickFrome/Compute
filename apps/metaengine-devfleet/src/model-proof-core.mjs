@@ -21,7 +21,8 @@ export function modelPickerCandidates(nodes) {
 }
 export function boundedModelControls(nodes) {
  return (nodes||[]).filter(n=>!n.ignored && uiRoles.has(toRole(n))
-   && likely.test(toName(n))).slice(0,48)
+   && (controlRoles.has(toRole(n)) ? likely.test(toName(n))
+      : (high.test(toName(n)) || gpt6.test(toName(n))))).slice(0,48)
    .map(n=>({name:toName(n),role:toRole(n),
      selected:selectedFlag(n),backend_node_present:Number.isSafeInteger(n.backendDOMNodeId)}));
 }
