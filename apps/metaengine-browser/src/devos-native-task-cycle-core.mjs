@@ -14,6 +14,7 @@ import { AgentToolbelt } from './agent-toolbelt-core.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
 import { deriveFleetExperienceSignal } from './fleet-experience-signal.mjs';
 import { FLEET_TAB_CEILING } from './tab-registry.mjs';
+import { BoundedKeyedEffectGate } from './bounded-keyed-effect-gate.mjs';
 import { devosRuntimeControlAllowsContinuousService, normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -321,7 +322,7 @@ export class DevOsNativeTaskCycle {
   // D-C2: per-tab effect gates. Concurrent dispatches/observations on
   // DISTINCT tabs run in parallel; effects on the SAME tab serialize in
   // submission order through a promise chain.
-  #tabGates = new Map();
+  #tabGate = new BoundedKeyedEffectGate({maxKeys:256,maxPerKey:32});
   // D-C3: one flush attempt per (agent, epoch) — a refused flush must not
   // append markers on every heartbeat.
   #flushGuard = new Set();
@@ -815,18 +816,9 @@ export class DevOsNativeTaskCycle {
   // D-C2: per-tab effect gate — a promise chain per tab id. Distinct tabs run
   // fully in parallel; same-tab effects serialize in submission order.
   async #withTabGate(tabId, fn) {
-    const key = String(tabId || '');
-    if (!key) return fn();
-    const prior = this.#tabGates.get(key) || Promise.resolve();
-    const run = prior.then(fn, fn);
-    this.#tabGates.set(key, run.catch(() => {}));
-    if (this.#tabGates.size > 256) {
-      for (const [mapKey, chain] of this.#tabGates) {
-        if (mapKey !== key && this.#tabGates.size <= 256) break;
-        if (mapKey !== key) this.#tabGates.delete(mapKey);
-      }
-    }
-    return run;
+    // An unfinished lane is never evicted: overflow fails before a physical
+    // effect, while same-tab work remains serialized after prior failures.
+    return this.#tabGate.run(tabId, fn);
   }
 
   // D-C1: issue (or reuse) the agent's context token and render the
