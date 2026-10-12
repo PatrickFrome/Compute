@@ -226,6 +226,17 @@ export class DevFleetOperator {
       r.state === 'AMBIGUOUS' && r.tab_id === tab.tab_id))
       throw new Error('operator_tab_ambiguous_reconciliation_required');
     return this.#exclusive(async () => {
+      // Read-only preflight before writing an effect intent. Refuse nonempty
+      // existing drafts instead of overwriting user/agent work or creating
+      // an AMBIGUOUS receipt for a known precondition failure.
+      if(typeof this.#adapter.inputProbe !== 'function')
+        throw new Error('operator_input_preflight_unavailable');
+      const pre=await this.#adapter.inputProbe(tab.tab_id);
+      if(pre?.tab_id!==tab.tab_id||pre?.authority_effect!==false
+        ||pre?.mode!=='CHAT'||pre?.page_failure
+        ||pre?.unique_composer!==true||pre?.unique_send!==true
+        ||pre?.composer_nonempty!==false)
+        throw new Error('operator_chat_input_not_ready_or_draft_present');
       const log = { ...recordFor(id,'assign',fingerprint), tab_id: tab.tab_id };
       this.#state.requests.push(log);
       await this.#save(); // never repeat a send after an uncertain OS/network outcome

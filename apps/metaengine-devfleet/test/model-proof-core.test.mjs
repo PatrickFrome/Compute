@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {modelPickerCandidates,boundedModelControls,visibleEffort,
+import {modelPickerCandidates,modelSubmenuCandidates,boundedModelControls,visibleEffort,
  gpt6FromControls,sendControls,composerControls,inspectSendSurface} from '../src/model-proof-core.mjs';
 function ax(role,name,id,properties={}){
  return {role:{value:role},name:{value:name},backendDOMNodeId:id,
@@ -31,6 +31,12 @@ test('GPT-6 visible as an option does not imply selected model',()=>{
 test('native Russian ChatGPT model-picker label is allowed, not arbitrary Work',()=>{
  assert.equal(modelPickerCandidates([ax('button','Выбрать модель ChatGPT',77)]).length,1);
  assert.equal(modelPickerCandidates([ax('button','Переключить режим, текущий режим: ChatGPT',78)]).length,0);
+});
+test('model picker submenu is exact and does not select a model',()=>{
+ const nodes=[ax('menuitem','Выбрать модель',801),ax('menuitem','GPT-6',802),ax('paragraph','Выбрать модель',803)];
+ assert.equal(modelSubmenuCandidates(nodes).length,1);
+ assert.equal(modelSubmenuCandidates([ax('menuitem','Выбрать модель',801),ax('menuitem','Choose model',804)]).length,2);
+ assert.equal(gpt6FromControls(boundedModelControls(nodes)).gpt6_selected,false);
 });
 test('multiple model pickers or composer candidates fail closed',()=>{
  const nodes=[ax('button','ChatGPT',1),ax('button','ChatGPT',2)];
