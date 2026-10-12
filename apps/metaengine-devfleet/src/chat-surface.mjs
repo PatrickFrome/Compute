@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { WebContentsView, session } from 'electron';
+import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttributes, retryWaitMs } from './chat-fleet-preflight.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -154,12 +155,73 @@ export class ChatSurface {
       process_epoch:processEpoch,target_id:'webcontents:'+view.webContents.id,
       authority_effect:false};
   }
+  async #mode(view) {
+    const nodes = await ax(view);
+    const summary = summarizeModeNodes(nodes);
+    let mode = summary.state;
+    if (mode === 'UNKNOWN' && summary.chat_node != null) {
+      const workNodes = nodes.filter(n => /^(work|работа)$/i.test(String(n.name?.value || '').trim())
+        && ['button','tab','radio','radiobutton','link'].includes(String(n.role?.value||'').toLowerCase()));
+      const workNode = workNodes.length === 1 ? workNodes[0].backendDOMNodeId : null;
+      if (workNode != null) {
+        try {
+          const dbg = view.webContents.debugger;
+          await dbg.sendCommand('DOM.enable');
+          const a = await dbg.sendCommand('DOM.describeNode', { backendNodeId: summary.chat_node });
+          const b = await dbg.sendCommand('DOM.describeNode', { backendNodeId: workNode });
+          mode = inferModeFromAttributes(safeAttrs(a?.node?.attributes),safeAttrs(b?.node?.attributes));
+        } catch { /* Never turn unsupported DOM inspection into CHAT */ }
+      }
+    }
+    return {mode,chat_node:summary.chat_node,
+      page_failure:classifyPageFailure(transcript(nodes)),
+      high_label_visible:nodes.some(n => /^(high)$/i.test(String(n.name?.value||'').trim())),
+      gpt6_label_visible:nodes.some(n => /^GPT[ -]?6(?:\b|$)/i.test(String(n.name?.value||'').trim())),
+      mode_nodes:summary.nodes};
+  }
+  async #ensureChat(view) {
+    const initial = await this.#mode(view);
+    if (initial.page_failure) throw new Error('chatgpt_page_error_' + initial.page_failure.toLowerCase());
+    if (initial.mode === 'CHAT') return initial;
+    // A unique, identified Chat control may be selected; never click Work.
+    if (initial.chat_node == null) throw new Error('chat_mode_unverified');
+    await clickNode(view, initial.chat_node);
+    await sleep(650);
+    const confirmed = await this.#mode(view);
+    if (confirmed.mode !== 'CHAT' || confirmed.page_failure) throw new Error('chat_mode_not_confirmed_after_switch');
+    return confirmed;
+  }
+  async inspect(tabId) {
+    const view = this.#views.get(tabId);
+    if (!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
+    if (!chatUrl(view.webContents.getURL())) throw new Error('tab_origin_not_chatgpt');
+    const result = await this.#mode(view);
+    return {tab_id:tabId,mode:result.mode,page_failure:result.page_failure,
+      high_label_visible:result.high_label_visible,gpt6_label_visible:result.gpt6_label_visible,
+      mode_nodes:result.mode_nodes,authority_effect:false};
+  }
+  async recover(tabId) {
+    const view = this.#views.get(tabId);
+    if (!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
+    let current = await this.inspect(tabId);
+    if (!current.page_failure) return {tab_id:tabId,state:'NO_ERROR',...current};
+    for (let attempt=1;attempt<=5;attempt++) {
+      if (!chatUrl(view.webContents.getURL())) throw new Error('chat_recovery_origin_mismatch');
+      view.webContents.reload();
+      await sleep(retryWaitMs(attempt));
+      current = await this.inspect(tabId);
+      if (!current.page_failure) return {tab_id:tabId,state:'RECOVERED',
+        reload_count:attempt,...current};
+    }
+    return {tab_id:tabId,state:'BLOCKED',reload_count:5,...current};
+  }
   async send(tabId,text) {
     const view = this.#views.get(tabId);
     if (!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
     this.select(tabId);
     const initialUrl = view.webContents.getURL();
     if (!chatUrl(initialUrl)) throw new Error('chatgpt_login_or_origin_required');
+    await this.#ensureChat(view);
     const before = await ax(view);
     if (singleButton(before,stopNames)) throw new Error('chatgpt_current_generation_active');
     const composer = composerFrom(before);
@@ -178,6 +240,10 @@ export class ChatSurface {
     // immediately before a SINGLE physical click. No Enter/click fallback.
     if (view.webContents.getURL() !== initialUrl || !this.#views.has(tabId))
       throw new Error('chatgpt_target_changed_before_send');
+    // Verify Chat—not Work—again after typing, immediately before the sole Send click.
+    const finalMode = await this.#mode(view);
+    if (finalMode.mode !== 'CHAT' || finalMode.page_failure)
+      throw new Error('chat_only_send_gate_refused');
     await clickNode(view,send.backendDOMNodeId);
     for (let i=0;i<35;i++) {
       await sleep(350);

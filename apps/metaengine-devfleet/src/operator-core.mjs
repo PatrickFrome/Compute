@@ -67,6 +67,7 @@ export class DevFleetOperator {
     return this.snapshot();
   }
   #requireInit() { if (!this.#initialized) throw new Error('operator_not_initialized'); }
+  isBusy() { return this.#busy || this.#persistenceFenced; }
   #find(tabId) {
     const validated = validateTab(tabId);
     const s = this.#state.sessions.find(x => x.tab_id === validated);
@@ -163,6 +164,32 @@ export class DevFleetOperator {
       text: data.text, offset, total_chars: data.total_chars,
       has_more: Boolean(data.has_more), page_content_untrusted: true,
       automatic_retry_allowed: false, authority_effect: false };
+  }
+  async inspect(params) {
+    this.#requireInit();
+    fields(params,['tab_id']);
+    const tab = this.#find(params.tab_id);
+    if(typeof this.#adapter.inspect !== 'function') throw new Error('chat_inspection_unavailable');
+    const inspection = await this.#adapter.inspect(tab.tab_id);
+    if(inspection?.tab_id !== tab.tab_id || inspection?.authority_effect !== false)
+      throw new Error('chat_inspection_unverified');
+    return {schema:SCHEMA,state:'INSPECTED',...inspection,authority_effect:false};
+  }
+  async recover(params) {
+    this.#requireInit();
+    fields(params,['tab_id']);
+    const tab=this.#find(params.tab_id);
+    if(this.#state.requests.some(r=>r.operation==='assign'
+       && r.state==='AMBIGUOUS' && r.tab_id===tab.tab_id))
+      throw new Error('chat_recovery_blocked_by_ambiguous_send');
+    if(typeof this.#adapter.recover !== 'function') throw new Error('chat_recovery_unavailable');
+    return this.#exclusive(async()=>{
+      const result=await this.#adapter.recover(tab.tab_id);
+      if(result?.tab_id!==tab.tab_id || !['RECOVERED','BLOCKED','NO_ERROR'].includes(result.state)
+          || result.authority_effect!==false)
+        throw new Error('chat_recovery_readback_invalid');
+      return {schema:SCHEMA,...result,automatic_retry_allowed:false};
+    });
   }
   async assign(params) {
     this.#requireInit();

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline';">
+<title>METAENGINE Dev Console</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,Arial,sans-serif;color:#e2e8f0;background:#101723}
+body{margin:20px}h1{font-size:19px}p{font-size:12px;line-height:1.6;color:#a8b4c4}
+button{margin:4px 6px 4px 0;background:#1d3349;border:1px solid #416179;border-radius:7px;color:white;padding:10px;cursor:pointer}
+button:disabled{opacity:.35;cursor:wait}button.primary{background:#0f766e;border-color:#0e9e93}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.65 ui-monospace,Consolas,monospace;background:#0a111d;padding:12px;border-radius:9px;max-height:260px;overflow:auto}
+.warning{color:#fbbf24}
+</style></head><body>
+<h1>METAENGINE Dev Console</h1>
+<p>Versioned Live UI Slot · изолированный DevFleet · без переустановки EXE.
+Рабочая папка выбирается локально. Изменения проходят стадию, проверку SHA-256, активацию и откат.</p>
+<div><button id="choose">Подключить рабочую папку</button><button id="stage">Проверить и подготовить</button></div>
+<div><button class="primary" id="activate">Активировать UI</button><button id="rollback">Откатить UI</button><button id="reconcile">Восстановить после сбоя</button><button id="refresh">Обновить статус</button></div>
+<p class="warning">Новые возможности внутри UI можно применять без установки и без закрытия GPT-вкладок.
+Изменения Electron host, security ABI и системных полномочий требуют отдельного проверенного обновления.
+Активация заблокирована во время незавершённых операторских эффектов.</p>
+<pre id="status">Загрузка состояния...</pre>
+<script src="./dev-console-ui.js"></script></body></html>
