@@ -1,7 +1,7 @@
+import { HostResilienceRuntime } from './helpers/host-resilience-offline-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sentinelEnvironment } from '../src/browser-sentinel.mjs';
-import { HostResilienceRuntime } from '../src/host-resilience-runtime.mjs';
 
 const base = 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
 const instanceId = '28da46b7-6e1d-4c6a-b638-f4dc4bd8ee59';

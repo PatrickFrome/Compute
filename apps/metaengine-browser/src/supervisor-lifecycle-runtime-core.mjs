@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import durableJson from './durable-json-file.cjs';
 import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
@@ -10,6 +11,8 @@ import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-pol
 import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
 import { SupervisorBootstrapKeepalive } from './supervisor-bootstrap-keepalive.mjs';
 import { evaluateActiveWakeTerminalRetirement } from './supervisor-terminal-retirement.mjs';
+import { classifyUntrustedWakeMarker, classifyUntrustedRolloverMarker } from './supervisor-untrusted-marker-evidence.mjs';
+import { mapBoundedObservations } from './supervisor-bounded-observation.mjs';
 import {
   devosRuntimeControlAllowsContinuousService,
   normalizeDevosRuntimeControl,
@@ -110,19 +113,27 @@ function tabLiveness(state, tabId) {
 }
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
-  catch (e) { if (e?.code === 'ENOENT' || e instanceof SyntaxError) return null; throw e; }
+  catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    // A partially published or corrupted wake record is UNKNOWN, not an
+    // empty history. Never create a new supervisor epoch and send from a
+    // fabricated blank state while the old effect may have crossed Send.
+    if (error instanceof SyntaxError) throw new Error('supervisor_keepalive_corrupt_json_fenced');
+    throw error;
+  }
 }
 async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  // R82-ATOMIC-SAVE (live 2026-09-26): keepalive mutations fire from
-  // un-awaited call sites (e.g. requestRollover(...).catch(() => {})); two
-  // overlapping saves sharing one `.tmp` path race the rename into ENOENT
-  // and the loser throws into an unrelated cycle — live-observed as a cycle
-  // aborting before its rollover dispatch. A unique temp name per save makes
-  // concurrent writers last-writer-wins instead of intermittent ENOENT.
-  const temp = `${file}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, file);
+  // The wake transport-intent must be durable BEFORE typing/sending.
+  // The existing writer preserves unique temp names but lacked fsync.
+  // Reuse the tested exclusive-temp/rename/readback writer.
+  const result = await durableJson.durableWriteJson(file, value);
+  if (result?.contract !== 'METAENGINE_DURABLE_JSON_V1'
+    || result.file_synced !== true || result.rename_committed !== true) {
+    throw new Error('supervisor_keepalive_durable_write_unconfirmed');
+  }
+  if (await fs.readFile(file, 'utf8') !== JSON.stringify(value, null, 2) + '\n') {
+    throw new Error('supervisor_keepalive_durable_readback_mismatch');
+  }
 }
 
 export class SupervisorLifecycleRuntime {
@@ -242,6 +253,20 @@ export class SupervisorLifecycleRuntime {
     return this.snapshot();
   }
 
+  async archiveInterruptedBootstrapForNewEpoch(binding) {
+    if (!this.#keepalive) throw new Error('supervisor_operator_recovery_not_ready');
+    const result = await this.#keepalive.archiveInterruptedBootstrapForNewEpoch(binding);
+    this.#activeRequest = null;
+    this.#lastSupervisorGeneration = 'UNKNOWN';
+    this.#lastRecovery = {
+      action: 'OPERATOR_ARCHIVED_UNKNOWN_PREDECESSOR_BOOTSTRAP', recovery_id: binding.recovery_id,
+      supervisor_epoch: result.supervisor_epoch, confirmed: false, ambiguous: false,
+      previous_effect_outcome: 'UNKNOWN', prior_effect_replayed: false,
+      automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+    };
+    return result;
+  }
+
   snapshot() {
     return {
       schema: 'metaengine.supervisor-lifecycle-runtime.v4',
@@ -262,8 +287,8 @@ export class SupervisorLifecycleRuntime {
         external_confirmation_required_for_continuation: false,
         terminal_requires_user_message: false,
         restart_resumable: true,
-        restart_pending_wake_reconciliation: 'POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1',
-        restart_rollover_reconciliation: 'ROLLOVER_POSITIVE_TRANSCRIPT_PROOF_OR_EXPLICIT_RECOVERY_V1',
+        restart_pending_wake_reconciliation: 'NATIVE_EFFECT_RECEIPT_OR_EXPLICIT_RECOVERY_V2',
+        restart_rollover_reconciliation: 'NATIVE_EFFECT_RECEIPT_OR_EXPLICIT_RECOVERY_V2',
         prompt_plaintext_persisted: false,
         orphaned_stall_stop_only: true,
         ambiguous_terminal_retirement: false,
@@ -338,14 +363,16 @@ export class SupervisorLifecycleRuntime {
   }
 
   async #observeWorkers(state) {
-    const signals = [];
-    for (const agent of state?.fleet?.agents || []) {
+    // Capture is read-only. A small stable worker pool avoids an N×capture
+    // latency tick while keeping every agent's signal in original registry
+    // order. Durable wake publication remains one serialized operation.
+    const signals = await mapBoundedObservations(state?.fleet?.agents || [], async (agent) => {
       let generation_state = ['LOST','RETIRED','PROVISIONING_AMBIGUOUS'].includes(String(agent?.lifecycle_state || '')) ? 'TERMINAL' : 'UNKNOWN';
       if (agent?.tab_id && generation_state !== 'TERMINAL') {
         try { generation_state = generating(await this.#capture(agent.tab_id)) ? 'GENERATING' : 'IDLE'; } catch {}
       }
-      signals.push({ agent_id: agent?.agent_id, lifecycle_state: agent?.lifecycle_state, generation_state });
-    }
+      return { agent_id: agent?.agent_id, lifecycle_state: agent?.lifecycle_state, generation_state };
+    }, { concurrency: 4 });
     this.#lastWorkerSignals = signals;
     await this.#keepalive.observeWorkers(signals);
   }
@@ -354,7 +381,9 @@ export class SupervisorLifecycleRuntime {
     for (let i = 0; i < attempts; i += 1) {
       if (i > 0) await sleep(700);
       const observed = await this.#capture(tabId);
-      if (generating(observed) || (marker && String(observed?.text_excerpt || '').includes(marker))) return { ok: true, observed };
+      // A page-controlled wake marker is not a Send receipt. Only the
+      // generation signal can be a provisional readback at this boundary.
+      if (generating(observed)) return { ok: true, observed };
     }
     return { ok: false, observed: null };
   }
@@ -362,29 +391,15 @@ export class SupervisorLifecycleRuntime {
   async #recoverAmbiguousWakeFromFrame(tab, frame, row, keepalive) {
     const pending = keepalive.pending_wake;
     if (!pending?.ambiguous_at) return false;
-    const message = buildSupervisorWakeMessage({
-      supervisorEpoch: pending.supervisor_epoch,
-      cycleSeq: pending.cycle_seq,
-      wakeId: pending.wake_id,
-      reason: pending.reason,
-    });
-    const markerObserved = String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''));
-    if (markerObserved) {
-      await this.#keepalive.resolveAmbiguous({ observed_sent: true });
-      this.#activateRequest(pending, tab.tab_id, true);
-      this.#lastRecovery = {
-        action: 'AMBIGUOUS_WAKE_POSITIVELY_REBOUND', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
-        proof: 'WAKE_MARKER_IN_TRANSCRIPT', confirmed: true, ambiguous: false,
-        automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
-      };
-      return true;
-    }
+    // The text excerpt is page-controlled. Even the exact wake marker in a
+    // transcript-like view can be a retained draft or quoted message.
+    const markerReadback = classifyUntrustedWakeMarker({ frame, marker: pending.wake_id });
     // A retained draft or an idle surface cannot prove that an ambiguous Send
     // never executed. Preserve the durable intent until positive readback or
     // explicit recovery; no automatic click, retype, or fresh wake is allowed.
     this.#lastRecovery = {
       action:'AMBIGUOUS_WAKE_READBACK_REQUIRED', wake_id:pending.wake_id, tab_id:String(tab.tab_id),
-      proof:'NO_POSITIVE_SEND_READBACK', confirmed:false, ambiguous:true,
+      proof:markerReadback.state, confirmed:false, ambiguous:true,
       automatic_retry_allowed:false, at:new Date().toISOString(), authority_effect:false,
     };
     return true;
@@ -451,7 +466,20 @@ export class SupervisorLifecycleRuntime {
     return true;
   }
 
-  async #typeAndSend(tabId, message, positiveMarker) {
+  async #recordWakeTransportIntentIfCurrent({ tabId, frame, message, marker, phase, requireWakeIntent = false }) {
+    const wake = this.#keepalive.snapshot().pending_wake;
+    if (!wake || wake.wake_id !== marker || wake.ambiguous_at) {
+      if (requireWakeIntent) throw new Error('supervisor_wake_transport_intent_current_wake_required');
+      return false;
+    }
+    // Must complete durable write/readback before any actual page send effect.
+    await this.#keepalive.recordWakeTransportIntent({
+      wake_id: marker, phase, tab_id: tabId, frame, message,
+    });
+    return true;
+  }
+
+  async #typeAndSend(tabId, message, positiveMarker, { requireWakeIntent = false } = {}) {
     let clicked = false;
     // D-C7: a freshly opened root tab hydrates asynchronously — the first
     // CAPTURE can transiently show zero or several textboxes, which used to
@@ -497,7 +525,11 @@ export class SupervisorLifecycleRuntime {
     // conversation surface where replace+Enter are live-proven. Established
     // conversation surfaces never pay the seed cost.
     if (classifyAgentPlatformSurface(before?.url)?.stage === 'PRECONVERSATION_ROOT') {
-      const seed = await this.#seedRootConversation(tabId, box);
+      await this.#recordWakeTransportIntentIfCurrent({
+        tabId, frame: before, message: GLM_SUPERVISOR_CONVERSATION_SEED,
+        marker: positiveMarker, phase: 'ROOT_SEED', requireWakeIntent,
+      });
+      const seed = await this.#seedRootConversation(tabId, box, { positiveMarker, requireWakeIntent });
       if (!seed.ok) {
         this.#lastError = `supervisor_root_seed:${seed.reason}`;
         return { ok: false, reason: seed.reason, clicked: seed.clicked === true, event_driven_readback: true };
@@ -512,9 +544,26 @@ export class SupervisorLifecycleRuntime {
     // Once Send dispatch starts, uncertainty never permits a second click.
     let submitted;
     try {
+      await this.#recordWakeTransportIntentIfCurrent({
+        tabId, frame: before, message,
+        marker: positiveMarker, phase: 'WAKE', requireWakeIntent,
+      });
+      if (this.#canActuate() !== true) {
+        return { ok: false, reason: 'SUPERVISOR_ADMISSION_CLOSED_BEFORE_SEND', clicked, event_driven_readback: false };
+      }
       submitted = await submitFencedChatGptPrompt({
         executeCommand: this.#execute, tab_id: tabId, frame: before, text: message,
-        beforeSend: async () => { clicked = true; },
+        beforeSend: async () => {
+          if (this.#canActuate() !== true) throw new Error('supervisor_admission_closed_at_send_boundary');
+          if (requireWakeIntent) {
+            const pending = this.#keepalive.snapshot().pending_wake;
+            if (pending?.wake_id !== positiveMarker || pending.ambiguous_at
+              || !pending.transport_intents?.some(row => row.phase === 'WAKE')) {
+              throw new Error('supervisor_wake_binding_changed_at_send_boundary');
+            }
+          }
+          clicked = true;
+        },
       });
     } catch (error) {
       return { ok: false, reason: String(error?.message || error).slice(0, 180), clicked, event_driven_readback: true };
@@ -554,13 +603,23 @@ export class SupervisorLifecycleRuntime {
   // (#typeAndSend): a provably pre-effect reason is a clean abort
   // (clicked=false), anything else stays conservatively ambiguous
   // (clicked=true), retaining the original attempt for positive readback.
-  async #seedRootConversation(tabId, box) {
+  async #seedRootConversation(tabId, box, { positiveMarker = null, requireWakeIntent = false } = {}) {
     let clicked = false;
     let submitted;
     try {
       submitted = await submitFencedChatGptPrompt({
         executeCommand: this.#execute, tab_id: tabId, frame: await this.#capture(tabId), text: GLM_SUPERVISOR_CONVERSATION_SEED,
-        beforeSend: async () => { clicked = true; },
+        beforeSend: async () => {
+          if (this.#canActuate() !== true) throw new Error('supervisor_admission_closed_at_send_boundary');
+          if (requireWakeIntent) {
+            const pending = this.#keepalive.snapshot().pending_wake;
+            if (pending?.wake_id !== positiveMarker || pending.ambiguous_at
+              || !pending.transport_intents?.some(row => row.phase === 'ROOT_SEED')) {
+              throw new Error('supervisor_seed_binding_changed_at_send_boundary');
+            }
+          }
+          clicked = true;
+        },
       });
     } catch (error) {
       return { ok: false, clicked, reason: String(error?.message || error).slice(0, 180), frame: null };
@@ -601,7 +660,7 @@ export class SupervisorLifecycleRuntime {
     if (this.#canActuate() !== true) return false;
     let clicked = false;
     try {
-      const sent = await this.#typeAndSend(prepared.tab_id, prepared.message, prepared.pending.wake_id);
+      const sent = await this.#typeAndSend(prepared.tab_id, prepared.message, prepared.pending.wake_id, { requireWakeIntent: true });
       clicked = sent.clicked === true;
       if (sent.ok) {
         await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
@@ -678,8 +737,8 @@ export class SupervisorLifecycleRuntime {
       || before.conversation_url
       || before.pending_wake
       || before.active_wake
-      || !Array.isArray(before.queued_wakes)
-      || before.queued_wakes.length === 0) return false;
+      || !Array.isArray(before.queued_wakes)) return false;
+    if (before.queued_wakes.length === 0 && !await this.#keepalive.ensureBootstrapWake()) return false;
 
     let prepared = null;
     try {
@@ -723,7 +782,7 @@ export class SupervisorLifecycleRuntime {
 
       prepared = await this.#keepalive.prepareBootstrapWake();
       if (!prepared?.ok) return false;
-      const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id);
+      const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id, { requireWakeIntent: true });
       if (!sent.ok) {
         if (sent.clicked === true) {
           await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', { continuation_tab_id: tab.tab_id });
@@ -744,8 +803,8 @@ export class SupervisorLifecycleRuntime {
       let observed = sent.observed;
       if (!CHAT_RE.test(String(observed?.url || ''))) observed = await this.#capture(tab.tab_id);
       const url = String(observed?.url || '');
-      const markerObserved = String(observed?.text_excerpt || '').includes(String(prepared.pending.wake_id));
-      if (!CHAT_RE.test(url) || !(generating(observed) || markerObserved || sent.event_driven_readback === true)) {
+      // A page marker without a trusted submit effect is not positive proof.
+      if (!CHAT_RE.test(url) || !(generating(observed) || sent.event_driven_readback === true)) {
         await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', { continuation_tab_id: tab.tab_id });
         this.#lastRecovery = {
           action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
@@ -1082,8 +1141,15 @@ export class SupervisorLifecycleRuntime {
     for (const tab of ordered) {
       let frame;
       try { frame = await this.#capture(tab.tab_id); } catch { continue; }
-      const marker = String(frame?.text_excerpt || '').includes(String(attempt.attempt_id));
-      if (CHAT_RE.test(String(frame?.url || '')) && marker) return this.#bindRecoveredRollover(tab.tab_id, frame);
+      // A marker inside untrusted page text cannot establish that the original
+      // rollover was submitted. Retain the ambiguous attempt for native proof.
+      const markerReadback = classifyUntrustedRolloverMarker({ frame, attemptId: attempt.attempt_id });
+      if (markerReadback.marker_seen) this.#lastRecovery = {
+        action: 'ROLLOVER_PAGE_MARKER_UNTRUSTED', rollover_attempt_id: attempt.attempt_id,
+        tab_id: String(tab.tab_id), proof: markerReadback.state,
+        confirmed: false, ambiguous: true, automatic_retry_allowed: false,
+        at: new Date().toISOString(), authority_effect: false,
+      };
       if ((CHAT_ROOT_RE.test(String(frame?.url || '')) || CHAT_RE.test(String(frame?.url || ''))) && composerMatches(frame, message)) composerMatchesRows.push({ tab, frame });
     }
     if (composerMatchesRows.length !== 1 || this.#canActuate() !== true) return false;
@@ -1113,17 +1179,13 @@ export class SupervisorLifecycleRuntime {
     if (!frame) {
       try { frame = await this.#capture(supervisor.tab_id); } catch { return false; }
     }
-    const markerObserved = String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''));
-    if (markerObserved) {
-      await this.#keepalive.settleRolloverBlockedAmbiguousWake({ observed_sent: true });
-      this.#lastRecovery = {
-        action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_CONFIRMED', wake_id: pending.wake_id,
-        tab_id: String(supervisor.tab_id || ''), proof: 'WAKE_MARKER_IN_TRANSCRIPT',
-        confirmed: true, ambiguous: false, at: new Date().toISOString(), authority_effect: false,
-      };
-      return true;
-    }
-    // An idle surface without a marker does not settle an unknown Send.
+    const readback = classifyUntrustedWakeMarker({ frame, marker: pending.wake_id });
+    this.#lastRecovery = {
+      action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_READBACK_REQUIRED', wake_id: pending.wake_id,
+      tab_id: String(supervisor.tab_id || ''), proof: readback.state,
+      confirmed: false, ambiguous: true, automatic_retry_allowed: false,
+      at: new Date().toISOString(), authority_effect: false,
+    };
     return false;
   }
 
@@ -1195,8 +1257,8 @@ export class SupervisorLifecycleRuntime {
         return false;
       }
       const observed = sent.observed || await this.#capture(tab.tab_id);
-      const markerObserved = String(observed?.text_excerpt || '').includes(String(attempt.attempt_id));
-      if (CHAT_RE.test(String(observed?.url || '')) && (generating(observed) || markerObserved)) {
+      // The persisted attempt marker is page text, not a native effect receipt.
+      if (CHAT_RE.test(String(observed?.url || '')) && (generating(observed) || sent.event_driven_readback === true)) {
         await this.#keepalive.bindRollover({ url: observed.url, tab_id: tab.tab_id });
         this.#activeRequest = null;
         this.#lastRecovery = {

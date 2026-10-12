@@ -7,9 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, runtimeEnvironment } from './launcher.mjs';
+import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure, runtimeEnvironment } from './launcher.mjs';
 import { captureStartupSource, safeRuntimePolicy, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
-import { BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
+import { ATTACHED_ONBOARDING_ENTRY, BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, 'launcher-fixture.mjs');
@@ -61,6 +61,36 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+async function controlledSetup(t) {
+  const state = await setup(t);
+  const controlFile = path.join(state.input.pgDataDir, 'fixture-health-control.json');
+  await writeFile(controlFile, '{}');
+  for (const role of ['api', 'edge']) state.hooks[`${role}Command`].args.push(controlFile);
+  return { ...state, control: value => writeFile(controlFile, JSON.stringify(value)) };
+}
+
+async function bounded(promise, timeoutMs = 20000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('fixture_monitor_timeout')), timeoutMs);
+      timer.unref();
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+test('health diagnostics accept only finite public categories and bounded metadata', () => {
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'health_http_failed',
+    component: 'api', consecutive_failures: 3, http_status: 503, authority_effect: false };
+  assert.deepEqual(normalizeRuntimeHealthFailure(diagnostic), diagnostic);
+  assert.equal(Object.isFrozen(normalizeRuntimeHealthFailure(diagnostic)), true);
+  for (const mutation of [
+    { code: 'secret-exception-message' }, { component: 'secret-endpoint' }, { consecutive_failures: 0 },
+    { consecutive_failures: 4 }, { http_status: 600 }, { http_status: null }, { authority_effect: true },
+    { code: 'postgres_incarnation_mismatch' }, { response_body: 'synthetic-private-response' },
+  ]) assert.throws(() => normalizeRuntimeHealthFailure({ ...diagnostic, ...mutation }), /health_failure_contract_invalid/);
+});
+
 test('requires local mode, explicit PostgreSQL ownership, loopback URL and distinct ports', () => {
   const good = {
     mode: 'local', postgresMode: 'attached',
@@ -78,6 +108,15 @@ test('requires local mode, explicit PostgreSQL ownership, loopback URL and disti
     { apiPort: 15434 }, { edgePort: 15432 }, { apiKey: 'insecure' },
     { denoDir: 'relative-cache' }, { expectedStartupSourceSha256: 'bad' },
   ]) assert.throws(() => normalizeLauncherConfig({ ...good, ...mutation }));
+});
+
+test('attached cluster identity pin rejects replacement PG17 at the same path', async t => {
+  const { input, identity } = await setup(t);
+  const config = normalizeLauncherConfig({ ...input, expectedClusterSystemIdentifier: '7654321098765432100' });
+  await assert.rejects(assertPostgresIdentity({ ...identity, system_identifier: '7654321098765432199' }, config), /cluster_identity_mismatch/);
+  await assert.rejects(assertPostgresIdentity(identity, config), /cluster_identity_mismatch/);
+  const inspected = await assertPostgresIdentity({ ...identity, system_identifier: config.expectedClusterSystemIdentifier }, config);
+  assert.equal(inspected.system_identifier, config.expectedClusterSystemIdentifier);
 });
 
 test('owned server environment removes loader injection and unrelated access tokens', () => {
@@ -166,14 +205,14 @@ test('a startup source pin mismatch refuses every child before launch', async t 
   assert(alive(process.pid));
 });
 
-test('packaged host launch pins the complete current first-run source closure before children', async t => {
+test('packaged host launch pins the complete current onboarding and computer-control source closure before children', async t => {
   const { input, hooks, events } = await setup(t);
   const sourceRoot = await realpath(path.resolve(here, '../..'));
   const stage = await realpath(await mkdtemp(path.join(os.tmpdir(), 'compute-launcher-source-pin-')));
   t.after(() => rm(stage, { recursive: true, force: true }));
   // Use the packaging entry contract and actual source bytes, rather than a
   // miniature host stub that cannot expose a missing first-run dependency.
-  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY];
+  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY];
   const packagedClosure = await sourceClosure(entries.map(name => path.join(sourceRoot, name)), sourceRoot);
   for (const source of packagedClosure.files) {
     const destination = path.join(stage, path.relative(sourceRoot, source));
@@ -205,6 +244,11 @@ test('packaged host launch pins the complete current first-run source closure be
   });
   const firstRunClosure = await sourceClosure([path.join(stage, FIRST_RUN_INITDB_ENTRY)], stage);
   for (const source of firstRunClosure.files) {
+    const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
+    assert.ok(expected.files.some(file => file.id === id), id);
+  }
+  const computerClosure = await sourceClosure([path.join(stage, REMOTE_SUPPORT_ENTRY)], stage);
+  for (const source of computerClosure.files) {
     const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
     assert.ok(expected.files.some(file => file.id === id), id);
   }
@@ -303,7 +347,7 @@ test('HTTP liveness without database source attestation cannot produce a ready r
 });
 
 test('a PostgreSQL incarnation change fails closed instead of adopting another server', async t => {
-  const { input, hooks, identity } = await setup(t);
+  const { input, hooks, identity, events } = await setup(t);
   const runtime = await launchClientStateRuntime(input, hooks);
   t.after(() => runtime.stop());
   identity.started_at = '2026-10-07T13:00:00Z';
@@ -315,6 +359,62 @@ test('a PostgreSQL incarnation change fails closed instead of adopting another s
     }),
   ]);
   assert.equal(result.reason, 'runtime_health_failed');
+  assert.deepEqual(result.last_health_failure, { schema: 'metaengine.client-state.health-failure.v1',
+    code: 'postgres_incarnation_mismatch', component: 'postgres', consecutive_failures: 1, http_status: null, authority_effect: false });
+  assert.equal(events.filter(event => event.event === 'health_failure').length, 1);
   assert(runtime.children.every(child => !alive(child.pid)));
   assert(alive(process.pid));
+});
+
+for (const scenario of [
+  { name: 'HTTP overload', role: 'api', control: { http_status: 503 }, code: 'health_http_failed', status: 503, count: 3 },
+  { name: 'lost capability attestation', role: 'edge', control: { unattested: true }, code: 'health_capability_unattested', count: 3 },
+  { name: 'not-ready response', role: 'api', control: { not_ready: true }, code: 'health_not_ready', count: 3 },
+  { name: 'invalid response', role: 'api', control: { invalid_json: true }, code: 'health_response_invalid', count: 3 },
+  { name: 'network timeout', role: 'api', control: { delay_ms: 3500 }, code: 'health_timeout', count: 3 },
+  { name: 'instance mismatch', role: 'edge', control: { wrong_instance: true }, code: 'health_instance_mismatch', count: 1 },
+]) {
+  test(`health monitor reports ${scenario.name} before stopping without private response content`, { timeout: 30000 }, async t => {
+    const { input, hooks, events, control } = await controlledSetup(t);
+    const rejections = [];
+    const onUnhandled = error => rejections.push(error);
+    process.on('unhandledRejection', onUnhandled);
+    t.after(() => process.removeListener('unhandledRejection', onUnhandled));
+    const runtime = await launchClientStateRuntime(input, hooks);
+    t.after(() => runtime.stop());
+    await control({ [scenario.role]: scenario.control });
+    const result = await bounded(runtime.finished);
+    const failures = events.filter(event => event.event === 'health_failure');
+    assert.equal(result.reason, 'runtime_health_failed');
+    assert.deepEqual(failures.map(event => event.health_failure.consecutive_failures),
+      Array.from({ length: scenario.count }, (_, index) => index + 1));
+    assert.deepEqual(result.last_health_failure, { schema: 'metaengine.client-state.health-failure.v1',
+      code: scenario.code, component: scenario.role, consecutive_failures: scenario.count,
+      http_status: scenario.status ?? null, authority_effect: false });
+    assert.equal(events.at(-1).event, 'stopped');
+    assert.equal(JSON.stringify(failures).includes('synthetic-private'), false);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(rejections, []);
+    assert(runtime.children.every(child => !alive(child.pid)));
+    assert(alive(process.pid));
+  });
+}
+
+test('a successful complete health probe clears a transient failure before requested shutdown', async t => {
+  const { input, hooks, events, control } = await controlledSetup(t);
+  let recovered;
+  const recovery = new Promise(resolve => { recovered = resolve; });
+  hooks.report = async event => {
+    events.push(event);
+    if (event.event === 'health_failure') await control({});
+    if (event.event === 'health_recovered') recovered();
+  };
+  const runtime = await launchClientStateRuntime(input, hooks);
+  t.after(() => runtime.stop());
+  await control({ api: { http_status: 503 } });
+  await bounded(recovery);
+  assert.equal(events.filter(event => event.event === 'health_failure').length, 1);
+  assert.equal(events.filter(event => event.event === 'health_recovered').length, 1);
+  await runtime.stop();
+  assert.deepEqual(await runtime.finished, { reason: 'requested', children_stopped: true });
 });

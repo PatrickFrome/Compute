@@ -131,6 +131,7 @@ export class ClientAdmissionRecoveryJournal {
   #state = emptyState();
   #loaded = false;
   #writeTail = Promise.resolve();
+  #persistenceFenced = false;
 
   constructor({ loadState, saveState } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') {
@@ -171,15 +172,27 @@ export class ClientAdmissionRecoveryJournal {
   }
 
   hasPending() {
-    return PENDING.has(String(this.#state.latest?.state || ''));
+    return this.#persistenceFenced || PENDING.has(String(this.#state.latest?.state || ''));
+  }
+
+  persistenceStatus() {
+    return Object.freeze({ schema: 'metaengine.client.admission-recovery-persistence.v1',
+      fenced: this.#persistenceFenced, automatic_retry_allowed: false, authority_effect: false });
   }
 
   #replace(change) {
     const write = this.#writeTail.then(async () => {
+      if (this.#persistenceFenced) throw new Error('client_admission_recovery_persistence_reconciliation_required');
       if (!this.#loaded) await this.load();
       const next = normalizeAttempt(change(this.#state.latest));
       const state = Object.freeze({ ...emptyState(), latest: next });
-      await this.#saveState(clone(state));
+      try { await this.#saveState(clone(state)); }
+      catch (error) {
+        // The rename might already be durable, even if readback failed.
+        // Fail closed until the next process reads the exact on-disk record.
+        this.#persistenceFenced = true;
+        throw error;
+      }
       this.#state = state;
       return Object.freeze(clone(next));
     });
@@ -191,7 +204,13 @@ export class ClientAdmissionRecoveryJournal {
     if (!this.#loaded) await this.load();
     if (this.hasPending()) throw new Error('client_admission_recovery_pending_reconcile_required');
     const observed = nowIso();
-    return this.#replace(() => ({
+    return this.#replace(existing => {
+      // This check must execute INSIDE the serialized write tail. Two callers
+      // can both pass the optimistic hasPending() check before either write.
+      if (PENDING.has(String(existing?.state || ''))) {
+        throw new Error('client_admission_recovery_pending_reconcile_required');
+      }
+      return {
       schema: ATTEMPT_SCHEMA,
       attempt_id: attemptId(attempt_id),
       expected_generation_floor: floor(expected_generation_floor),
@@ -205,7 +224,8 @@ export class ClientAdmissionRecoveryJournal {
       effect_intent_durable: false,
       automatic_retry_allowed: false,
       authority_effect: false,
-    }));
+      };
+    });
   }
 
   async markSendIntent() {
@@ -256,23 +276,36 @@ export class ClientAdmissionRecoveryJournal {
   }
 
   async reconcile(environmentState) {
+    if (this.#persistenceFenced) throw new Error('client_admission_recovery_persistence_reconciliation_required');
     if (!this.#loaded) await this.load();
     const existing = this.#state.latest;
     if (!existing || !PENDING.has(existing.state)) return existing ? Object.freeze(clone(existing)) : null;
     const classification = classifyAdmissionRecoveryObservation(existing, environmentState);
     if (classification.terminal !== true) return Object.freeze(clone(existing));
-    const nextState = classification.disposition === 'OPEN_CONFIRMED'
-      ? 'OPEN_CONFIRMED'
-      : classification.disposition === 'ABSENCE_CONFIRMED'
-        ? 'ABSENCE_CONFIRMED'
-        : 'REJECTED';
-    return this.#replace((current) => ({
-      ...current,
-      state: nextState,
-      observation: clone(environmentState),
-      last_error: classification.disposition === 'GENERATION_DRIFT' ? 'GENERATION_DRIFT' : null,
-      updated_at: nowIso(),
-    }));
+    return this.#replace(current => {
+      // The readback was classified against a snapshot outside the write
+      // queue. Never let it finalize a newer attempt or a state advanced by
+      // another concurrent observer in the meantime.
+      if (!current || current.attempt_id !== existing.attempt_id
+        || current.state !== existing.state || current.updated_at !== existing.updated_at
+        || current.expected_generation_floor !== existing.expected_generation_floor) {
+        throw new Error('client_admission_recovery_reconcile_snapshot_changed');
+      }
+      const fresh = classifyAdmissionRecoveryObservation(current, environmentState);
+      if (fresh.terminal !== true || fresh.disposition !== classification.disposition) {
+        throw new Error('client_admission_recovery_reconcile_observation_stale');
+      }
+      const nextState = fresh.disposition === 'OPEN_CONFIRMED'
+        ? 'OPEN_CONFIRMED' : fresh.disposition === 'ABSENCE_CONFIRMED'
+          ? 'ABSENCE_CONFIRMED' : 'REJECTED';
+      return {
+        ...current,
+        state: nextState,
+        observation: clone(environmentState),
+        last_error: fresh.disposition === 'GENERATION_DRIFT' ? 'GENERATION_DRIFT' : null,
+        updated_at: nowIso(),
+      };
+    });
   }
 }
 

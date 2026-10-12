@@ -1,5 +1,6 @@
 param(
-  [string]$ExpectedSourceHead = ''
+  [string]$ExpectedSourceHead = '',
+  [string]$DaemonBunPath = $env:ME2_DAEMON_BUN_PATH
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,8 +55,35 @@ try {
   # build the Browser compatibility process.
   $probeEntrypoint = Join-Path $daemonRoot 'browser-probe-entry.ts'
   if (-not (Test-Path $probeEntrypoint -PathType Leaf)) { throw 'me2_daemon_browser_probe_entry_missing' }
-  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
-  if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
+  # UI dependency/build identity stays on Bun 1.3.3. The standalone daemon
+  # needs Bun 1.4.3's Nehalem/SSE4.2 runtime on pre-AVX2 Windows machines.
+  # An explicit local compiler avoids npx/registry access for offline builds.
+  $daemonCompilerVersion = '1.4.3'
+  $daemonCompilerSource = 'npx-pinned-bun-1.4.3'
+  $daemonNpx = $null
+  if ($DaemonBunPath) {
+    if (-not [System.IO.Path]::IsPathRooted($DaemonBunPath) -or -not (Test-Path -LiteralPath $DaemonBunPath -PathType Leaf)) {
+      throw 'me2_daemon_explicit_compiler_invalid'
+    }
+    $daemonCompiler = (Resolve-Path -LiteralPath $DaemonBunPath).Path
+    $daemonCompilerSource = 'explicit-pinned-bun-1.4.3'
+  } else {
+    $daemonNpx = Get-Command npx.cmd -ErrorAction SilentlyContinue
+    if (-not $daemonNpx) { throw 'me2_daemon_pinned_npx_missing' }
+  }
+  $priorAction = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $actualCompilerVersion = if ($DaemonBunPath) { [string](& $daemonCompiler --version | Select-Object -Last 1) }
+      else { [string](& $daemonNpx.Source --yes "bun@$daemonCompilerVersion" --version | Select-Object -Last 1) }
+    if ($LASTEXITCODE -ne 0 -or $actualCompilerVersion.Trim() -ne $daemonCompilerVersion) { throw 'me2_daemon_compiler_version_drift' }
+    if ($DaemonBunPath) {
+      & $daemonCompiler build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
+    } else {
+      & $daemonNpx.Source --yes "bun@$daemonCompilerVersion" build --compile --target=bun-windows-x64 browser-probe-entry.ts --outfile $exePath
+    }
+    if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
+  } finally { $ErrorActionPreference = $priorAction }
 } finally {
   Pop-Location
 }
@@ -69,7 +97,11 @@ $manifest = [ordered]@{
   schema = 'metaengine.browser.me2-daemon-package.v1'
   source_head = $sourceHead
   daemon_version = $runtimeVersion
-  build_bun_version = $bunVersion
+  build_bun_version = '1.4.3'
+  build_ui_bun_version = $bunVersion
+  build_bun_compiler_source = $daemonCompilerSource
+  build_compile_target = 'bun-windows-x64'
+  cpu_compatibility = 'NEHALEM_SSE42_OR_NEWER'
   build_bun_toolchain_required = $bunToolchainRequired
   executable = 'me2-daemon.exe'
   executable_sha256 = $sha

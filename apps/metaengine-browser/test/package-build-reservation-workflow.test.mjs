@@ -23,7 +23,7 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /^concurrency:/m);
   assert.doesNotMatch(workflow, /browser-windows-package-smoke-\$\{\{ github\.ref \}\}/);
-  assert.match(workflow, /windows-nsis-package-smoke:[\s\S]*?timeout-minutes:\s*35/);
+  assert.match(workflow, /windows-nsis-package-smoke:[\s\S]*?timeout-minutes:\s*60/);
   assert.match(workflow, /slsa-provenance-verify:[\s\S]*?timeout-minutes:\s*10/);
 
   const guard = workflow.indexOf('- name: Refuse duplicate source/version physical build');

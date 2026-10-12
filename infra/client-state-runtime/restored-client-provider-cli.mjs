@@ -30,6 +30,7 @@ const publicErrors = new Set([
     'source_pins_required', 'private_file_boundary_invalid', 'owner_file_invalid', 'owner_file_exists',
     'private_config_binding_mismatch', 'private_config_database_binding_invalid', 'existing_pg17_required',
     'existing_vault_key_required', 'existing_postmaster_state_requires_review', 'restore_receipt_pin_mismatch',
+    'attached_direct_api_required',
     'restore_evidence_unverified', 'host_identity_unattested', 'health_unattested', 'cleanup_unconfirmed',
     'private_input_changed', 'provisioning_failed',
   ].map(reason => 'restored_provider_' + reason),
@@ -114,6 +115,14 @@ function publicReceipt(receipt) {
     || !['source_dump_sha256', 'source_restore_receipt_sha256', 'bundle_sha256'].every(key => sha256(receipt[key]))) {
     fail('public_receipt_unconfirmed');
   }
+  const modeFields = ['postgres_mode', 'api_role_mode', 'postgres_lifecycle_owned', 'attached_postmaster_preserved'];
+  const hasModes = modeFields.some(key => Object.hasOwn(receipt, key));
+  if (hasModes && (!modeFields.every(key => Object.hasOwn(receipt, key))
+    || !['owned', 'attached'].includes(receipt.postgres_mode)
+    || !['service_role', 'direct'].includes(receipt.api_role_mode)
+    || receipt.postgres_lifecycle_owned !== (receipt.postgres_mode === 'owned')
+    || receipt.attached_postmaster_preserved !== (receipt.postgres_mode === 'attached')
+    || (receipt.postgres_mode === 'attached' && receipt.api_role_mode !== 'direct'))) fail('public_receipt_unconfirmed');
   // Select only the fixed public fields even if a future implementation adds
   // private paths, URLs, credentials or configuration to its return object.
   return Object.freeze(Object.fromEntries([
@@ -121,6 +130,7 @@ function publicReceipt(receipt) {
     'owner_profile_written', 'runtime_ready', 'cleanup_confirmed', 'attested_instance_id',
     'source_dump_sha256', 'source_restore_receipt_sha256', 'bundle_sha256',
     'private_vault_key_preserved', 'source_schema_exact', 'authority_effect',
+    ...(hasModes ? modeFields : []),
   ].map(key => [key, receipt[key]])));
 }
 
@@ -138,6 +148,9 @@ export async function runRestoredClientProviderCli(argv, { provision = provision
     bundleDirectory: config.bundle_directory,
   });
   const result = publicReceipt(receipt);
+  if ((config.postgres_mode || 'owned') === 'attached'
+    && (result.postgres_mode !== 'attached' || result.api_role_mode !== 'direct'
+      || result.postgres_lifecycle_owned !== false || result.attached_postmaster_preserved !== true)) fail('public_receipt_unconfirmed');
   if (result.bundle_sha256 !== options.expectedBundleDigest
     || result.source_restore_receipt_sha256 !== options.expectedRestoreReceiptSha256) fail('public_receipt_pin_conflict');
   return result;

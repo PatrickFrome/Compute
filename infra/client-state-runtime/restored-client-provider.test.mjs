@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +9,20 @@ import { provisionRestoredClientProvider } from './restored-client-provider.mjs'
 import { localStateProviderOwnerFile } from '../../apps/metaengine-browser/src/local-state-provider-policy.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+
+test('missing real DB driver fails direct admission with a fixed category and no URL or dependency path',()=>{
+  const moduleUrl=new URL('./restored-client-provider.mjs',import.meta.url).href;
+  const code=[
+    'import {registerHooks} from "node:module";',
+    'registerHooks({resolve(specifier,context,nextResolve){if(specifier==="postgres")throw Object.assign(Error("private_dependency_path_and_password"),{code:"ERR_MODULE_NOT_FOUND"});return nextResolve(specifier,context);}});',
+    'const {inspectRestoredApiAdmission}=await import('+JSON.stringify(moduleUrl)+');',
+    'try {await inspectRestoredApiAdmission({databaseUrl:"postgres://private_api:private_url_password@127.0.0.1:35432/metaengine",roleMode:"direct"});throw Error("must_fail");} catch(error){process.stdout.write(error.message);}',
+  ].join('\n');
+  const result=spawnSync(process.execPath,['--input-type=module','--eval',code],{encoding:'utf8',windowsHide:true,timeout:10000});
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(result.stdout,'restored_provider_api_admission_unattested');
+  assert.equal(result.stderr,'');
+});
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'compute-restored-admission-')));
   t.after(() => fs.rm(root,{recursive:true,force:true}));
@@ -71,6 +86,25 @@ test('explicit owner action and source pins are required before any filesystem/s
     await assert.rejects(provisionRestoredClientProvider({...f.options,...change},f.hooks),/source_pins_required/);
   }
   assert.deepEqual(f.events,[]); await assert.rejects(fs.stat(f.options.ownerFile),{code:'ENOENT'});
+});
+
+test('attached provider preserves running PostgreSQL and admits direct API before owner publication', async t => {
+  const f = await fixture(t);
+  const pgDataDirectory = path.join(f.root, 'keeper-data');
+  await fs.rename(f.options.pgDataDirectory, pgDataDirectory);
+  const config = { ...f.config, pg_data_directory: pgDataDirectory, postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100' };
+  await fs.writeFile(f.options.privateConfigFile, JSON.stringify(config));
+  const pidFile = path.join(pgDataDirectory, 'postmaster.pid');
+  const pidBytes = '1234\n' + pgDataDirectory + '\n1790000000\n35432\n';
+  await fs.writeFile(pidFile, pidBytes);
+  const hooks = { ...f.hooks, inspectApiAdmission: async input => {
+    assert.equal(input.roleMode, 'direct'); f.events.push('direct-role-grants');
+  } };
+  const result = await provisionRestoredClientProvider({ ...f.options, pgDataDirectory }, hooks);
+  assert.equal(result.postgres_mode, 'attached'); assert.equal(result.api_role_mode, 'direct');
+  assert.equal(await fs.readFile(pidFile, 'utf8'), pidBytes);
+  assert.equal(await fs.readFile(path.join(pgDataDirectory, 'client-vault.key'), 'utf8'), f.vault);
+  assert.deepEqual(f.events, ['verify', 'start', 'direct-role-grants', 'health', 'stop', 'verify']);
 });
 
 test('missing existing vault key or postmaster state cannot initialize, repair or start the database',async t=>{

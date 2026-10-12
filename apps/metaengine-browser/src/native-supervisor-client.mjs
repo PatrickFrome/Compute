@@ -20,6 +20,8 @@ import { buildSupervisorLifecycleStatusSnapshot } from './supervisor-lifecycle-r
 import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
 import { buildDevosRuntimeObservability, mergeDevosRuntimeObservability } from './devos-runtime-observability.mjs';
 import { normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
+import { normalizeClientProjectRegistration, normalizeClientProjectSnapshotRequest, normalizeClientProjectSnapshot,
+  normalizeClientProjectHistoryRequest, normalizeClientProjectHistory } from './client-project-continuity.mjs';
 
 export * from './native-supervisor-client-core.mjs';
 
@@ -895,6 +897,29 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       observed_at: new Date().toISOString(),
       observation_source: 'AUTHENTICATED_POST_RESPONSE',
     });
+  }
+
+  async projectRegister(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1
+      || !COMMAND_ID_RE.test(input.request_id || '')) throw new Error('client_project_registration_request_invalid');
+    const requestId = input.request_id.toLowerCase();
+    const raw = await this.projectContinuityRequest({ operation: 'register', body: { request_id: requestId } });
+    return normalizeClientProjectRegistration(raw, requestId);
+  }
+
+  async projectSnapshot(input) {
+    const request = normalizeClientProjectSnapshotRequest(input);
+    const raw = await this.projectContinuityRequest({ operation: 'snapshot', body: {
+      project_id: request.project_id ?? null, task_id: request.task_id ?? null,
+      task_after_seq: request.task_after_seq, limit: request.limit,
+    } });
+    return normalizeClientProjectSnapshot(raw, request);
+  }
+
+  async projectHistory(input) {
+    const request = normalizeClientProjectHistoryRequest(input);
+    const raw = await this.projectContinuityRequest({ operation: 'history', body: request });
+    return normalizeClientProjectHistory(raw, request);
   }
 
   async resumeDevosAdmission(expectedGenerationFloor) {

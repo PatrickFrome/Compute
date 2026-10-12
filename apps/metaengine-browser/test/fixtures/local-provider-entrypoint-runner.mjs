@@ -64,11 +64,13 @@ const realOnce = app.once.bind(app);
 app.on = (event, listener) => { trace('on', event); return realOn(event, listener); };
 app.once = (event, listener) => { trace('once', event); return realOnce(event, listener); };
 app.getPath = () => options.userData;
-app.getVersion = () => '0.7.0-dev.singleton-fixture';
+app.getVersion = () => options.packageVersion || '0.7.0-dev.singleton-fixture';
 app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
 app.isReady = () => ready;
+app.isPackaged = Boolean(options.firstRunAutoConnect || options.packaged);
+app.whenReady = () => ready ? Promise.resolve() : new Promise(resolve => app.once('ready', resolve));
 app.exit = code => { trace('exit', code); process.exit(code); };
 app.quit = () => {
   trace('quit-requested');
@@ -146,6 +148,24 @@ const mocks = new Map([
     'export async function runSelfUpdateSmoke({ app }) { globalThis.__traceEntrypoint("self-update-smoke"); app.exit(0); }',
   )],
 ]);
+if(options.firstRunAutoConnect){
+  globalThis.__completeFirstRunAutoConnect=()=>{
+    if(options.firstRunAutoConnect.outcome==='CONFIGURED')fs.writeFileSync(options.firstRunAutoConnect.ownerFile,options.firstRunAutoConnect.ownerJson);
+    return {state:options.firstRunAutoConnect.outcome,authority_effect:false};
+  };
+  mocks.set(new URL('local-restored-pg17-setup.mjs',src).href,dataModule([
+    'export async function autoConnectInstalledAttachedProvider() {',
+    ' globalThis.__traceEntrypoint("autoconnect-start");',
+    ' const result=globalThis.__completeFirstRunAutoConnect();',
+    ' if(result.state!=="CONFIGURED") return {state:"NO_DESCRIPTOR",authority_effect:false};',
+    ' globalThis.__traceEntrypoint("autoconnect-completed");',
+    ' return {state:"CONFIGURED",owner_profile_written:true,postgres_mode:"attached",automatic_cloud_fallback:false,authority_effect:false};',
+    '}',
+  ].join('\n')));
+  mocks.set(new URL('me2/me2-integration-entry.mjs',src).href,dataModule(
+    'globalThis.__traceEntrypoint("me2-import"); export function startMe2Integration() { globalThis.__traceEntrypoint("me2-start"); }',
+  ));
+}
 if (options.managedHost) {
   globalThis.__singletonTestRuntimePaths = options.managedHost;
   mocks.set(offlineVerifier, dataModule([
@@ -178,6 +198,10 @@ try {
     ready = true;
     app.emit('ready');
     app.emit('ready'); // A one-shot primary continuation must survive duplicate delivery.
+  }
+  if(options.firstRunAutoConnect){
+    await globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__?.catch(()=>{});
+    trace('deferred-provider-settled');
   }
 } catch (error) {
   trace('entry-failed', String(error?.message || error));

@@ -4,6 +4,7 @@ import {
   NATIVE_SUPERVISOR_BASE,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
 } from './native-supervisor-client.mjs';
+import { resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ROADMAP_RE=/^[a-z0-9][a-z0-9._:-]{2,159}$/;
@@ -20,6 +21,17 @@ function stable(value){if(Array.isArray(value))return value.map(stable);if(value
 function samePlan(left,right){try{return JSON.stringify(stable(left))===JSON.stringify(stable(right))}catch{return false}}
 function boundedDeadline(value,fallback){const out=Number(value);return Math.max(1000,Math.min(30000,Number.isFinite(out)?out:fallback))}
 function taskForPoint(inputs,point,generation){return(Array.isArray(inputs?.tasks)?inputs.tasks:[]).find(row=>String(row?.point_id||'').toLowerCase()===point&&Number(row?.task_spec?.meta_orchestrator?.plan_generation)===generation&&UUID_RE.test(String(row?.task_id||'')))||null}
+function providerBase(value){
+  const raw=String(value||'').trim();
+  if(!raw)throw new Error('meta_native_endpoint_invalid');
+  try{
+    const parsed=new URL(raw);
+    if(parsed.username||parsed.password)throw new Error('endpoint_credentials_denied');
+    // Keep Meta reads/admission on the same HTTPS-or-loopback transport policy
+    // as the native client, including the explicit LOCAL_POSTGRES default.
+    return resolveNativeSupervisorBase(raw);
+  }catch{throw new Error('meta_native_endpoint_invalid')}
+}
 
 export class MetaOrchestratorActivationOutcomeError extends Error{
   constructor(message,{effectState='AMBIGUOUS',automaticRetryAllowed=false,cause=null}={}){super(message,{cause});this.name='MetaOrchestratorActivationOutcomeError';this.effect_state=effectState;this.automatic_retry_allowed=automaticRetryAllowed;this.authority_effect=false}
@@ -55,9 +67,9 @@ export class MetaOrchestratorNativeProvider{
     // be able to freeze the sole supervisor heartbeat indefinitely.
     this.#effectFetch=createBoundedSupervisorFetch(fetchImpl,{deadlineMs:this.#effectDeadlineMs});
     this.#workspaceId=workspaceId(workspace_id);
-    this.#baseUrl=String(baseUrl||'').replace(/\/+$/,'');
     this.#runtimePath=String(runtimePath||'');
-    if(!this.#baseUrl.startsWith('https://')||!this.#runtimePath.startsWith('/'))throw new Error('meta_native_endpoint_invalid');
+    if(!this.#runtimePath.startsWith('/'))throw new Error('meta_native_endpoint_invalid');
+    this.#baseUrl=providerBase(baseUrl);
   }
 
   snapshot(){return Object.freeze({schema:'metaengine.meta-orchestrator.native-provider.v3',workspace_id:this.#workspaceId,last_read_at:this.#lastReadAt,last_activation:this.#lastActivation?structuredClone(this.#lastActivation):null,last_admission:this.#lastAdmission?structuredClone(this.#lastAdmission):null,last_frontier:this.#lastFrontier?structuredClone(this.#lastFrontier):null,read_deadline_ms:this.#readDeadlineMs,effect_deadline_ms:this.#effectDeadlineMs,effect_timeout_requires_authoritative_readback:true,atomic_frontier_admission:true,automatic_retry:false,second_polling_loop:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false})}

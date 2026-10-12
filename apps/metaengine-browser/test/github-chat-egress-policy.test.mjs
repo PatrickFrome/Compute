@@ -45,6 +45,30 @@ test('GitHub reply redacts credentials embedded in otherwise innocuous messages'
   }
 });
 
+test('private credentials, paths and arbitrary page contents cannot leave as JSON property names',()=>{
+  const privateNames=[
+    'ghp_abcdefghijabcdefghij','github_pat_exampleverylongsecrettoken',
+    'C:\\Users\\Owner\\AppData\\Local\\Vault\\secret.key','/home/owner/data/pgdata',
+    'postgres://service:secret@127.0.0.1:5432/metaengine',
+    'Private account balance: 123456', 'arbitrary_private_page_text',
+    'x'.repeat(500),
+  ];
+  for(const name of privateNames){
+    // Numbers, booleans and containers previously bypassed text-value filtering.
+    for(const value of [true,123,{state:'READY'},[{state:'READY'}]]){
+      const result=project({state:'READY',counts:{agents:4,[name]:JSON.parse(JSON.stringify(value))},[name]:value});
+      assert.equal(result.state,'READY');
+      assert.equal(result.counts.agents,4);
+      assert.equal(Object.hasOwn(result,name),false);
+      assert.equal(Object.hasOwn(result.counts,name),false);
+      assert.equal(JSON.stringify(result).includes(name),false);
+    }
+  }
+  const result=project({state:'READY',agent_count:6,unknown_numeric_column:314159});
+  assert.equal(result.agent_count,6);
+  assert.equal(Object.hasOwn(result,'unknown_numeric_column'),false);
+});
+
 test('generic Browser titles, arbitrary agent text and unreviewed JSON strings are never forwarded',()=>{
   const result=project({
     state:'READY',tabs:[{title:'A private account number',url:'https://example.org/account/1234'}],

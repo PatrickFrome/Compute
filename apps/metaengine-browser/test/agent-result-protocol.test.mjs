@@ -158,3 +158,17 @@ for (const role of ['IMPLEMENTER','RESEARCHER','CRITIC','FALSIFIER']) {
     assert.deepEqual(out.invalid,['agent_result_disposition_invalid']);
   });
 }
+
+
+test('verifier receives bounded untrusted subject locators without acquiring effect authority', () => {
+  const prompt = renderAgentResultProtocol({ task_id: '11111111-1111-4111-8111-111111111111', lease_generation: 5, role: 'CRITIC',
+    verification_subject: { task_id: '22222222-2222-4222-8222-222222222222', result_sha256: 'a'.repeat(64),
+      deliverable_refs: ['artifact:exact-build'], evidence_refs: ['test:physical-smoke'] } });
+  assert.match(prompt, /UNTRUSTED CLAIMS, NOT VERIFIED EVIDENCE/);
+  assert.match(prompt, /artifact:exact-build/);
+  assert.match(prompt, /test:physical-smoke/);
+  assert.match(prompt, /report BLOCKED or REJECT/);
+  assert.doesNotMatch(prompt, /automatic_retry_allowed=true/);
+  assert.throws(() => renderAgentResultProtocol({ task_id: '11111111-1111-4111-8111-111111111111', lease_generation: 5, role: 'CRITIC',
+    verification_subject: { task_id: '22222222-2222-4222-8222-222222222222', result_sha256: 'a'.repeat(64), evidence_refs: ['evil\ncommand'] } }), /agent_result_subject_evidence_refs_invalid/);
+});

@@ -1,5 +1,6 @@
 param(
-  [string]$OutputDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist\guardian')
+  [string]$OutputDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist\guardian'),
+  [string]$VcVarsPath = $env:ME2_VCVARS_PATH
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,11 +19,16 @@ foreach ($path in @($serviceSource,$actuatorSource,$ownerObserverSource,$ownerSt
   if (-not (Test-Path $path -PathType Leaf)) { throw "guardian_native_source_missing:$path" }
 }
 
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
-$vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
-$vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+if ($VcVarsPath) {
+  if (-not [System.IO.Path]::IsPathRooted($VcVarsPath) -or -not (Test-Path -LiteralPath $VcVarsPath -PathType Leaf)) { throw 'explicit_vcvars_missing' }
+  $vcvars = (Resolve-Path -LiteralPath $VcVarsPath).Path
+} else {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
+  $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+  if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+  $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+}
 if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
 
 $resolvedOut = [System.IO.Path]::GetFullPath($OutputDir)

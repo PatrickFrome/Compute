@@ -118,6 +118,24 @@ test('CLI derives private host paths from the exact config and exposes only the 
   }
 });
 
+test('attached CLI requires a direct-role receipt that preserves external PostgreSQL ownership', async t => {
+  const f = await fixture(t);
+  const attached = { ...f.config, postgres_mode: 'attached', api_role_mode: 'direct',
+    expected_cluster_system_identifier: '7512345678901234567', pg_data_directory: path.join(f.root, 'keeper-data') };
+  await fs.writeFile(f.configFile, JSON.stringify(attached));
+  const modes = { postgres_mode: 'attached', api_role_mode: 'direct', postgres_lifecycle_owned: false, attached_postmaster_preserved: true };
+  const result = await runRestoredClientProviderCli(argsFor(f), { provision: async () => ({ ...receipt(), ...modes }) });
+  for (const [key, value] of Object.entries(modes)) assert.equal(result[key], value);
+  for (const patch of [{}, { ...modes, api_role_mode: 'service_role' }, { ...modes, postgres_lifecycle_owned: true },
+    { ...modes, attached_postmaster_preserved: false }, { ...modes, postgres_mode: 'owned' }]) {
+    await assert.rejects(runRestoredClientProviderCli(argsFor(f), { provision: async () => ({ ...receipt(), ...patch }) }), /public_receipt_unconfirmed/);
+  }
+  await fs.writeFile(f.configFile, JSON.stringify({ ...attached, api_role_mode: 'service_role' }));
+  let invoked = false;
+  await assert.rejects(runRestoredClientProviderCli(argsFor(f), { provision: async () => { invoked = true; return receipt(); } }), /attached_direct_api_required/);
+  assert.equal(invoked, false);
+});
+
 test('config drift, unsafe file kinds and unconfirmed result cannot reach owner publication', async t => {
   const f = await fixture(t);
   let calls = 0;

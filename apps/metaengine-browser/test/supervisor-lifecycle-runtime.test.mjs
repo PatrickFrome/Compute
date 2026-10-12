@@ -206,6 +206,17 @@ test('supervisor wake uses one ChatGPT semantic submit and trusts its event-driv
     }
     if (command.action === 'TYPED_CLICK') {
       assert.equal(command.payload.chatgpt_submit, true);
+      // This is the actual send handler, not a source-order simulation.
+      // The intent must have completed fsync and exact disk readback already.
+      const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
+      const intent = durable.pending_wake?.transport_intents?.[0];
+      assert.equal(intent?.schema, 'metaengine.supervisor-wake.transport-intent.v1');
+      assert.equal(intent?.phase, 'WAKE');
+      assert.equal(intent?.conversation_url, CONVERSATION);
+      assert.equal(intent?.tab_id, 'tab1');
+      assert.equal(intent?.target_id, 'webcontents:1');
+      assert.equal(intent?.message_sha256, crypto.createHash('sha256').update(draft).digest('hex'));
+      assert.equal(intent?.automatic_retry_allowed, false);
       draft = '';
       return {
         effect_state: 'PROVEN_GENERATING',
@@ -345,4 +356,40 @@ test('process restart fences predecessor wake and backlog before emitting one fr
   assert.doesNotMatch(typed, new RegExp(oldWake));
 
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('admission loss after draft typing prevents the physical wake Send and cannot be retried blindly', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-admission-send-fence-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const statePath = path.join(dir, 'keepalive.json');
+  let admitted = true, draft = '', types = 0, sends = 0;
+  const runtime = new SupervisorLifecycleRuntime({
+    statePath,
+    getState: async () => ({ tabs: [{ tab_id: 'tab1', url: CONVERSATION }], fleet: { agents: [] } }),
+    canActuate: () => admitted,
+    executeCommand: async command => {
+      if (command.action === 'CAPTURE') return chatgptFrame('', { draft });
+      if (command.action === 'SEMANTIC_TYPE') {
+        types++;
+        draft = command.payload.text;
+        admitted = false; // Simulate exact admission revocation between TYPE and Send.
+        return { replace_verified: true, authority_effect: true };
+      }
+      if (command.action === 'TYPED_CLICK') {
+        sends++;
+        assert.fail('revoked admission cannot cross the Send boundary');
+      }
+      throw new Error('unexpected_action:' + command.action);
+    },
+  });
+  await runtime.start();
+  assert.equal(types, 1);
+  assert.equal(sends, 0);
+  const snapshot = runtime.snapshot().keepalive;
+  assert.equal(snapshot.pending_wake, null);
+  assert.equal(snapshot.active_wake, null);
+  assert.equal(snapshot.last_unsent_attempt_at != null, true);
+  assert.equal(snapshot.automatic_retry_allowed, undefined);
+  await runtime.cycle({ force: true });
+  assert.equal(sends, 0);
 });

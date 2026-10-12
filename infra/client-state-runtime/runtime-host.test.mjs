@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import test from 'node:test';
-import { runtimeProviderDescriptor, stageManagedDenoCache, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
+import { runtimeProviderDescriptor, stageManagedDenoCache, stageManagedDenoExecutable, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
+import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
 const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version: 1,
@@ -36,7 +39,8 @@ async function fixture(t, overrides = {}) {
     startupManifest: { source_manifest_sha256: 'd'.repeat(64) }, finished,
     stop: async reason => { calls += 1; const outcome = { reason, children_stopped: true }; finish(outcome); return outcome; } };
   return { root, config, configFile, runtime, verified, finish, stopCalls: () => calls,
-    hooks: { verifyBundle: async () => verified, stageDenoCache: async () => root, launchRuntime: async () => runtime } };
+    hooks: { verifyBundle: async () => verified, stageDenoCache: async () => root,
+      stageDenoExecutable: async () => path.join(root, 'private-deno.exe'), launchRuntime: async () => runtime } };
 }
 
 test('host rejects private-state overlap, extra config fields and unqualified providers', () => {
@@ -47,6 +51,41 @@ test('host rejects private-state overlap, extra config fields and unqualified pr
   assert.throws(() => validateRuntimeHostConfig({ ...good, state_directory: good.bundle_directory }), /private_state_boundary_invalid/);
   assert.throws(() => validateRuntimeHostConfig({ ...good, expected_bundle_sha256: 'bad' }), /bundle_pin_required/);
   assert.throws(() => runtimeProviderDescriptor({ instanceId: randomUUID(), edgeHealth: { runtime_ready: true } }), /provider_unattested/);
+});
+
+test('attached host mode permits an independent PGDATA and rejects ambiguous ownership', () => {
+  const root = path.resolve(os.tmpdir(), 'synthetic-attached-host-config');
+  const attached = { ...configValue(root), postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(root, 'keeper-data') };
+  assert.equal(validateRuntimeHostConfig(attached).postgres_mode, 'attached');
+  assert.equal(validateRuntimeHostConfig(attached).api_role_mode, 'direct');
+  for (const api_role_mode of ['service_role', undefined]) {
+    assert.throws(() => validateRuntimeHostConfig({ ...attached, api_role_mode }), /attached_direct_api_required|api_role_mode_invalid/);
+  }
+  const { api_role_mode, ...unselectedRole } = attached;
+  assert.throws(() => validateRuntimeHostConfig(unselectedRole), /attached_direct_api_required/);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, api_role_mode: 'superuser' }), /api_role_mode_invalid/);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, expected_cluster_system_identifier: undefined }), /cluster_identity_pin_required/);
+  assert.equal(validateRuntimeHostPhysicalBoundaries({
+    bundleDirectory: attached.bundle_directory, stateDirectory: attached.state_directory,
+    pgDataDirectory: attached.pg_data_directory, privateConfigFile: path.join(root, 'private.json'),
+    repositoryDirectory: path.join(root, 'checkout'), postgresMode: 'attached',
+  }), true);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, postgres_mode: 'unknown' }), /postgres_mode_invalid/);
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, pg_data_directory: attached.state_directory }), /private_state_boundary_invalid/);
+  const sourceDirectory = path.resolve(path.dirname(hostEntry), '../..');
+  assert.throws(() => validateRuntimeHostConfig({ ...attached, pg_data_directory: path.join(sourceDirectory, 'pgdata') }), /private_state_boundary_invalid/);
+  for (const pgDataDirectory of [path.join(root, 'checkout', 'pgdata'), root]) {
+    assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+      bundleDirectory: attached.bundle_directory, stateDirectory: attached.state_directory,
+      pgDataDirectory, privateConfigFile: path.join(root, 'private.json'),
+      repositoryDirectory: path.join(root, 'checkout'), postgresMode: 'attached',
+    }), /private_state_boundary_invalid/);
+  }
+  assert.throws(() => validateRuntimeHostPhysicalBoundaries({
+    bundleDirectory: attached.bundle_directory, stateDirectory: attached.state_directory,
+    pgDataDirectory: attached.pg_data_directory, privateConfigFile: path.join(root, 'private.json'),
+    repositoryDirectory: path.join(root, 'checkout'), postgresMode: 'unknown',
+  }), /postgres_mode_invalid/);
 });
 
 test('physical directory identity fences short-name aliases and private PGDATA overlap', () => {
@@ -94,6 +133,141 @@ test('host owns one lock, publishes public status and idempotently stops its run
   assert.equal(f.stopCalls(), 1);
   await assert.rejects(readFile(path.join(f.config.state_directory, 'runtime-host-lock.json')), { code: 'ENOENT' });
   assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).state, 'STOPPED');
+});
+
+test('host persists a finite health failure before terminal cleanup and retains it after STOPPED', async t => {
+  const f = await fixture(t);
+  let report;
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks,
+    launchRuntime: async (_config, hooks) => { report = hooks.report; return f.runtime; } });
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'health_http_failed',
+    component: 'api', consecutive_failures: 3, http_status: 503, authority_effect: false };
+  await report({ event: 'health_failure', health_failure: diagnostic });
+  const before = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(before.state, 'READY');
+  assert.equal(before.runtime_ready, true, 'diagnostics do not grant or remove readiness authority');
+  assert.deepEqual(before.last_health_failure, diagnostic);
+  f.finish({ reason: 'runtime_health_failed', children_stopped: true, last_health_failure: diagnostic });
+  await host.finished;
+  await report({ event: 'health_recovered' });
+  const after = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(after.state, 'STOPPED');
+  assert.equal(after.runtime_ready, false);
+  assert.deepEqual(after.last_health_failure, diagnostic);
+  assert.equal(JSON.stringify(after).includes('private-password'), false);
+});
+
+test('host clears a recovered health failure and refuses unvalidated private payloads', async t => {
+  const f = await fixture(t);
+  let report;
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks,
+    launchRuntime: async (_config, hooks) => { report = hooks.report; return f.runtime; } });
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'health_capability_unattested',
+    component: 'edge', consecutive_failures: 1, http_status: null, authority_effect: false };
+  await report({ event: 'health_failure', health_failure: diagnostic });
+  await report({ event: 'health_recovered' });
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).last_health_failure, null);
+  await report({ event: 'health_failure', health_failure: { ...diagnostic, stderr: 'synthetic-private-secret' } });
+  await report({ event: 'health_failure', health_failure: { ...diagnostic, code: 'synthetic-private-secret' } });
+  f.finish({ reason: 'runtime_health_failed', children_stopped: true,
+    last_health_failure: { ...diagnostic, url: 'synthetic-private-secret' } });
+  await host.finished;
+  const after = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(after.last_health_failure, null);
+  assert.equal(JSON.stringify(after).includes('synthetic-private-secret'), false);
+});
+
+test('host serializes overlapping health and terminal status writes', async t => {
+  const f = await fixture(t);
+  let report;
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks,
+    launchRuntime: async (_config, hooks) => { report = hooks.report; return f.runtime; } });
+  const diagnostic = { schema: 'metaengine.client-state.health-failure.v1', code: 'postgres_incarnation_mismatch',
+    component: 'postgres', consecutive_failures: 1, http_status: null, authority_effect: false };
+  const pendingReport = report({ event: 'health_failure', health_failure: diagnostic });
+  f.finish({ reason: 'runtime_health_failed', children_stopped: true, last_health_failure: diagnostic });
+  await Promise.all([pendingReport, host.finished]);
+  const status = JSON.parse(await readFile(host.statusFile, 'utf8'));
+  assert.equal(status.state, 'STOPPED');
+  assert.equal(status.instance_id, f.runtime.instanceId);
+  assert.deepEqual(status.last_health_failure, diagnostic);
+});
+
+test('attached host passes through mode and shutdown never claims the external PostgreSQL', async t => {
+  const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(os.tmpdir(), `compute-attached-data-${randomUUID()}`) });
+  t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));
+  await mkdir(f.config.state_directory, { recursive: true });
+  await writeFile(path.join(f.config.state_directory, 'PG_VERSION'), '17\n');
+  await writeFile(path.join(f.config.state_directory, 'client-vault.key'), 'b'.repeat(64) + '\n');
+  let launched;
+  const hooks = { ...f.hooks, launchRuntime: async config => { launched = config; return f.runtime; } };
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, hooks);
+  assert.equal(launched.postgresMode, 'attached');
+  assert.equal(launched.apiRoleMode, 'direct');
+  assert.equal(launched.expectedClusterSystemIdentifier, '7654321098765432100');
+  assert.equal(launched.denoPath, path.join(f.root, 'private-deno.exe'));
+  assert.notEqual(launched.denoPath, f.verified.paths.denoExecutable);
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).postgres_mode, 'attached');
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).api_role_mode, 'direct');
+  assert.equal(f.runtime.children.some(child => child.name === 'postgres'), false);
+  await host.stop();
+  await host.finished;
+  assert.equal(f.stopCalls(), 1);
+});
+
+test('real attached-host startup adopts only a physically absent predecessor and writes a fresh owner lock', async t => {
+  const net = await import('node:net');
+  const keeper = net.createServer(socket => socket.end());
+  await new Promise(resolve => keeper.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => keeper.close(resolve)));
+  const keeperPort = keeper.address().port;
+  const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct',
+    expected_cluster_system_identifier: '7654321098765432100',
+    pg_data_directory: path.join(os.tmpdir(), 'runtime-host-recovery-attached-' + randomUUID()),
+    database_url: 'postgresql://synthetic:private-password@127.0.0.1:' + keeperPort + '/fixture',
+    inspect_database_url: 'postgresql://synthetic:private-password@127.0.0.1:' + keeperPort + '/fixture' });
+  t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));
+  await mkdir(f.config.state_directory, { recursive: true });
+  const predecessorPid = 19551001;
+  const priorLock = JSON.stringify({ schema: 'compute.runtime-host-lock.v1',
+    pid: predecessorPid, owner_nonce: randomUUID() }) + '\n';
+  const priorStatus = JSON.stringify({ schema: 'metaengine.client-state.runtime-status.v1',
+    state: 'READY', runtime_ready: true, state_provider: 'LOCAL_POSTGRES',
+    hosted_supabase_required: false, automatic_cloud_fallback: false, authority_effect: false,
+    host_pid: predecessorPid, bundle_sha256: f.config.expected_bundle_sha256,
+    instance_id: randomUUID(), postgres_mode: 'attached', api_role_mode: 'direct',
+    endpoint: 'http://127.0.0.1:' + f.config.edge_port + '/a2-browser-native-supervisor-v1',
+    children: [{ name: 'api', pid: 19551002 }, { name: 'edge', pid: 19551003 }] }) + '\n';
+  const lockFile = path.join(f.config.state_directory, 'runtime-host-lock.json');
+  await writeFile(lockFile, priorLock);
+  await writeFile(path.join(f.config.state_directory, 'runtime-instance.json'), priorStatus);
+  const host = await startManagedRuntimeHost({ configFile: f.configFile }, f.hooks);
+  const newLock = JSON.parse(await readFile(lockFile, 'utf8'));
+  assert.equal(newLock.pid, process.pid);
+  assert.notEqual(newLock.owner_nonce, JSON.parse(priorLock).owner_nonce);
+  const archived = (await (await import('node:fs/promises')).readdir(f.config.state_directory))
+    .filter(name => /^runtime-host-lock\.orphan-[0-9a-f-]+\.json$/.test(name));
+  assert.equal(archived.length, 1);
+  assert.equal(await readFile(path.join(f.config.state_directory, archived[0]), 'utf8'), priorLock);
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).state, 'READY');
+  assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).postgres_mode, 'attached');
+  await host.stop();
+  await host.finished;
+  assert.equal(f.stopCalls(), 1);
+  await assert.rejects(readFile(lockFile), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(f.config.state_directory, archived[0]), 'utf8'), priorLock);
+  assert.equal(keeper.listening, true, 'attached PostgreSQL stand-in must not be stopped');
+});
+
+test('a leftover recovery gate blocks an otherwise unclaimed host without touching attached data', async t => {
+  const f = await fixture(t);
+  const gate = path.join(f.config.state_directory, 'runtime-host-recovery-gate.json');
+  await writeFile(gate, JSON.stringify({ prior: 'ambiguous-recovery' }));
+  await assert.rejects(startManagedRuntimeHost({ configFile: f.configFile }, f.hooks),
+    /runtime_host_recovery_gate_unresolved/);
+  assert.equal(await readFile(gate, 'utf8'), JSON.stringify({ prior: 'ambiguous-recovery' }));
+  await assert.rejects(readFile(path.join(f.config.state_directory, 'runtime-host-lock.json')), { code: 'ENOENT' });
+  assert.equal(f.stopCalls(), 0);
 });
 
 test('resource path mismatch refuses launch and an already cancelled startup releases ownership', async t => {
@@ -181,4 +355,67 @@ test('cache staging rejects changed source bytes and private-cache directory ali
   await rm(path.join(f.config.state_directory, 'deno-cache'), { recursive: true });
   await symlink(path.dirname(source), path.join(f.config.state_directory, 'deno-cache'), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(stageManagedDenoCache({ verified, stateDirectory: f.config.state_directory }), /path_invalid/);
+});
+
+async function denoCopyFixture(t) {
+  const f = await fixture(t);
+  const bytes = Buffer.from('synthetic pinned executable bytes');
+  const source = path.join(f.config.bundle_directory, 'runtime', 'deno', 'deno.exe');
+  await mkdir(path.dirname(source), { recursive: true });
+  await writeFile(source, bytes);
+  const verified = { manifest: { files: [{ component: 'deno', path: 'runtime/deno/deno.exe',
+    bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }] }, paths: { denoExecutable: source } };
+  return { ...f, bytes, source, options: { verified, stateDirectory: f.config.state_directory } };
+}
+
+test('Deno compatibility hardlinks remain private across successive executable staging', async t => {
+  const f = await denoCopyFixture(t);
+  const target = await stageManagedDenoExecutable(f.options);
+  const first = await lstat(target);
+  const source = await lstat(f.source);
+  assert.notEqual(first.ino, source.ino);
+  assert.equal(first.nlink, 1);
+  const compatibility = path.join(f.config.state_directory, 'deno-cache', 'node_compat_bin', 'node.exe');
+  await mkdir(path.dirname(compatibility), { recursive: true });
+  await link(target, compatibility);
+  assert.equal((await lstat(target)).nlink, 2, 'simulate the real Deno node compatibility hardlink');
+  assert.equal(await stageManagedDenoExecutable(f.options), target);
+  assert.equal((await lstat(target)).nlink, 1, 'new run gets an independent single-link private executable');
+  assert.equal((await lstat(f.source)).nlink, 1, 'sealed package never acquires a compatibility hardlink');
+  assert.notEqual((await lstat(target)).ino, (await lstat(compatibility)).ino);
+  assert.deepEqual(await readFile(compatibility), f.bytes);
+  assert.deepEqual(await readFile(f.source), f.bytes);
+});
+
+test('private Deno executable tampering and bundled executable aliases fail before launch', async t => {
+  const f = await denoCopyFixture(t);
+  const target = await stageManagedDenoExecutable(f.options);
+  await writeFile(target, 'changed private executable');
+  await assert.rejects(stageManagedDenoExecutable(f.options), /deno_executable_digest_mismatch/);
+  assert.equal(await readFile(target, 'utf8'), 'changed private executable', 'never silently repairs tampered executable');
+  await link(f.source, path.join(f.root, 'foreign-deno-link.exe'));
+  await assert.rejects(stageManagedDenoExecutable(f.options), /deno_executable_path_invalid/);
+});
+
+test('private Deno staging rejects directory aliases and changed bundled executable bytes', async t => {
+  const f = await denoCopyFixture(t);
+  await writeFile(f.source, 'changed bundled executable');
+  await assert.rejects(stageManagedDenoExecutable(f.options), /deno_executable_digest_mismatch/);
+  await writeFile(f.source, f.bytes);
+  await symlink(f.config.bundle_directory, path.join(f.config.state_directory, 'deno-runtime'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(stageManagedDenoExecutable(f.options), /path_invalid/);
+});
+
+test('private Deno executable inherits the protected state DACL instead of broader bundle grants', {
+  skip: process.platform !== 'win32', timeout: 180000,
+}, async t => {
+  const f = await denoCopyFixture(t);
+  await protectOwnerOnlyWindowsDirectory(f.config.state_directory);
+  await promisify(execFile)(path.win32.join(process.env.SystemRoot || process.env.SYSTEMROOT, 'System32', 'icacls.exe'),
+    [f.source, '/grant', '*S-1-1-0:(R)'], { windowsHide: true, shell: false, timeout: 120000, maxBuffer: 8192 });
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(f.source), /acl_not_confirmed_readback/);
+  const target = await stageManagedDenoExecutable(f.options);
+  assert.equal((await verifyOwnerOnlyWindowsStorage(target)).owner_dacl_verified, true);
+  assert.deepEqual(await readFile(target), f.bytes);
+  assert.equal((await lstat(f.source)).nlink, 1);
 });

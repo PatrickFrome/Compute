@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы (порт legacy 1:1) ──────────────────────────────────────────────────────
 type WorkGraphData = {
@@ -78,6 +79,7 @@ type RoadmapData = { ok: boolean; verdict: string; done: number; total: number; 
 export function SupervisorPage() {
   const { toast } = useToast();
   const snap = useMe2((s) => s.snap);
+  const [observed, setObserved] = useState(false);
 
   // ── данные (REST-опросы локальны странице — перф-паттерн legacy) ──
   const [wg, setWg] = useState<WorkGraphData | null>(null);
@@ -106,39 +108,40 @@ export function SupervisorPage() {
   // ── loaders (порт legacy) ──
   const loadWg = useCallback(async () => {
     const r = await me2Fetch<WorkGraphData>("/workgraph?XTransformPort=3041");
-    if (r?.ok) setWg(r);
+    setWg(r?.ok === true ? r : null);
+    setObserved(true);
   }, []);
   const loadHo = useCallback(async () => {
     const r = await me2Fetch<HandoffData>("/handoffs?XTransformPort=3041");
-    if (r?.ok) setHoData(r);
+    setHoData(r?.ok === true ? r : null);
   }, []);
   const loadGlm = useCallback(async () => {
     const r = await me2Fetch<GlmData>("/glm?XTransformPort=3041");
-    if (r?.ok) setGlmData(r);
+    setGlmData(r?.ok === true ? r : null);
   }, []);
   const loadRev = useCallback(async () => {
     const r = await me2Fetch<ReviewsData>("/reviews?XTransformPort=3041");
-    if (r?.ok) setRevData(r);
+    setRevData(r?.ok === true ? r : null);
   }, []);
   const loadAppr = useCallback(async () => {
     const r = await me2Fetch<ApprovalsData>("/approvals?XTransformPort=3041");
-    if (r?.ok) setApprData(r);
+    setApprData(r?.ok === true ? r : null);
   }, []);
   const loadGovernor = useCallback(async () => {
     const r = await me2Fetch<GovernorT>("/governor?XTransformPort=3041");
-    if (r?.ok) setGovernor(r);
+    setGovernor(r?.ok === true ? r : null);
   }, []);
   const loadDemand = useCallback(async () => {
     const r = await me2Fetch<DemandT>("/demand?XTransformPort=3041");
-    if (r?.ok) setDemand(r);
+    setDemand(r?.ok === true ? r : null);
   }, []);
   const loadBrain = useCallback(async () => {
     const r = await me2Fetch<BrainData>("/brain?XTransformPort=3041");
-    if (r?.ok) setBrain(r);
+    setBrain(r?.ok === true ? r : null);
   }, []);
   const loadRm = useCallback(async () => {
     const r = await me2Fetch<RoadmapData>("/roadmap?XTransformPort=3041");
-    if (r?.ok) setRm(r);
+    setRm(r?.ok === true ? r : null);
   }, []);
 
   // ── поллинги (монтируются условно со страницей — cleanup обязателен) ──
@@ -153,6 +156,9 @@ export function SupervisorPage() {
 
   // ── мутации: POST ?XTransformPort=3041 (порт legacy mcxOp L1918-1935) ──
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after?: () => Promise<void>) => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return null;
+    /*
     setMcxBusy(true);
     try {
       const res = await fetch(`/${path}?XTransformPort=3041`, {
@@ -169,6 +175,7 @@ export function SupervisorPage() {
       toast({ title: `${path} ✗`, description: "daemon недоступен", variant: "destructive" });
     } finally { setMcxBusy(false); }
     return null;
+    */
   }, [toast]);
 
   // R27 C1: цели (exact legacy payload формы: {op:"create", title, spec} — priority дефолтится daemon'ом)
@@ -217,13 +224,17 @@ export function SupervisorPage() {
 
   // R43 G10: автопилот спроса — toggle (exact legacy payload {op:"config", enabled}) + tick {op:"tick"}
   const demandToggle = useCallback(async (v: boolean) => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     setMcxBusy(true);
     try {
       const r = await fetch("/demand?XTransformPort=3041", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "config", enabled: v }) }).then((x) => x.json()) as { ok?: boolean; config?: { enabled: boolean; max: number } } | null;
       if (r?.ok) toast({ title: `автопилот спроса: ${r.config?.enabled ? "включен" : "выключен"} (max ${r.config?.max})` });
-    } catch { /* daemon недоступен */ }
+    } catch { }
     finally { setMcxBusy(false); }
     await loadDemand();
+    */
   }, [loadDemand, toast]);
   const demandTick = useCallback(async () => {
     await mcxOp("demand", { op: "tick" }, "тик автопилота выполнен — решение в /demand", loadDemand);
@@ -247,13 +258,19 @@ export function SupervisorPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-supervisor" data-panel-supervisor>
-      <PageHeader title="SUPERVISOR" sub="control-plane · цели · handoffs · governor" />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-3">
+      <PageHeader title="Supervisor" sub="Goals, handoffs and requests that need your attention."
+        actions={<button type="button" onClick={() => { void loadWg(); void loadHo(); void loadAppr(); }} className="rounded-lg px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">Refresh</button>} />
+      {!observed || (!wg && !hoData && !apprData) ? (
+        <div role="status" className="mb-3 rounded-xl bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
+          {!observed ? "Loading supervisor data…" : "Supervisor data is unavailable. Check the runtime connection in Settings."}
+        </div>
+      ) : null}
+      <div className="mc-scroll grid min-h-0 flex-1 auto-rows-max grid-cols-1 items-start gap-3 overflow-y-auto pr-1 xl:grid-cols-3">
         {/* ══ колонка 1: OBJECTIVES + WORKGRAPH ══ */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="sup-objectives" title="OBJECTIVES" icon={Target} tone="violet"
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="sup-objectives" title="Goals" icon={Target} tone="violet"
             right={
-              <span data-testid="wg-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+              <span data-testid="wg-chips" className="flex shrink-0 flex-wrap items-center gap-1 text-[11px]">
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`цели: active=${wg?.stats.objectives_active ?? 0}, achieved=${wg?.stats.objectives_achieved ?? 0}, failed=${wg?.stats.objectives_failed ?? 0}, parked=${wg?.stats.objectives_parked ?? 0}`}>цели {wg?.stats.objectives_total ?? "—"}</span>
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="задачи, привязанные к целям, и рёбра objective→task→agent">задачи {wg?.stats.tasks_linked ?? "—"} · рёбра {wg?.stats.edges ?? "—"}</span>
                 {(wg?.stats.attention_objectives ?? 0) > 0 && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 py-0.5 text-amber-300" title="цели со stalled/empty — ждут оператора (fails-closed: система не закрывает сама)">внимание {wg?.stats.attention_objectives}</span>}
@@ -265,42 +282,42 @@ export function SupervisorPage() {
               onSubmit={(e) => { e.preventDefault(); void createObjective(); }}
               className="mb-1.5 space-y-1"
             >
-              <Input value={objTitle} onChange={(e) => setObjTitle(e.target.value)} placeholder="новая цель: заголовок…" className="h-7 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Заголовок новой цели" />
+              <Input value={objTitle} onChange={(e) => setObjTitle(e.target.value)} placeholder="новая цель: заголовок…" className="h-7 border-zinc-800 bg-zinc-950/60 text-[11px]" aria-label="Заголовок новой цели" />
               <div className="flex gap-1.5">
-                <Input value={objSpec} onChange={(e) => setObjSpec(e.target.value)} placeholder="критерии успеха (spec)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Критерии успеха цели" />
-                <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]"><Plus className="mr-1 h-3 w-3" aria-hidden /> цель</Button>
+                <Input value={objSpec} onChange={(e) => setObjSpec(e.target.value)} placeholder="критерии успеха (spec)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 text-[11px]" aria-label="Критерии успеха цели" />
+                <Button type="submit" size="sm" variant="outline" disabled={mcxBusy || !wg || !objTitle.trim()} className="h-7 shrink-0 border-zinc-700 px-2 text-xs"><Plus className="mr-1 h-3 w-3" aria-hidden /> Add goal</Button>
               </div>
             </form>
             <div className="max-h-64 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Цели и их производные состояния">
               {(wg?.objectives ?? []).map((o) => (
                 <div key={o.id} role="listitem" className="rounded bg-zinc-900/50 px-1.5 py-1" title={`${o.spec ? `spec: ${o.spec}` : "без spec"} · priority ${o.priority} · ${o.id}`}>
                   <div className="flex items-center gap-1.5">
-                    <span className={`shrink-0 rounded px-1 text-[8px] ${o.status === "ACTIVE" ? "bg-emerald-950/60 text-emerald-300" : o.status === "ACHIEVED" ? "bg-lime-950/60 text-lime-300" : o.status === "FAILED" ? "bg-rose-950/60 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{o.status.toLowerCase()}</span>
-                    <span className={`shrink-0 rounded px-1 text-[8px] ${o.derived_state === "on_track" ? "bg-cyan-950/60 text-cyan-300" : o.derived_state === "stalled" || o.derived_state === "empty" ? "bg-amber-950/60 text-amber-300" : "bg-zinc-800 text-zinc-500"}`}>{o.derived_state}</span>
+                    <span className={`shrink-0 rounded px-1 text-xs ${o.status === "ACTIVE" ? "bg-emerald-950/60 text-emerald-300" : o.status === "ACHIEVED" ? "bg-lime-950/60 text-lime-300" : o.status === "FAILED" ? "bg-rose-950/60 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{o.status.toLowerCase()}</span>
+                    <span className={`shrink-0 rounded px-1 text-xs ${o.derived_state === "on_track" ? "bg-cyan-950/60 text-cyan-300" : o.derived_state === "stalled" || o.derived_state === "empty" ? "bg-amber-950/60 text-amber-300" : "bg-zinc-800 text-zinc-500"}`}>{o.derived_state}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-300">{o.title}</span>
-                    <span className="shrink-0 font-mono text-[9px] text-zinc-600" title={`задачи: всего ${o.counts.total}, активных ${o.counts.active}, готово ${o.counts.done}, упало ${o.counts.failed}`}>{o.counts.done}/{o.counts.total}</span>
+                    <span className="shrink-0 text-[11px] text-zinc-400" title={`задачи: всего ${o.counts.total}, активных ${o.counts.active}, готово ${o.counts.done}, упало ${o.counts.failed}`}>{o.counts.done}/{o.counts.total}</span>
                   </div>
-                  {o.attention && <div className="mt-0.5 font-mono text-[9px] text-amber-300/80">⚠ {o.attention}</div>}
+                  {o.attention && <div className="mt-0.5 text-[11px] text-amber-300/80">⚠ {o.attention}</div>}
                   {o.status === "ACTIVE" && (
                     <div className="mt-1 flex gap-1">
-                      <button type="button" onClick={() => void objStatus(o.id, "ACHIEVED", "цель закрыта как достигнутая")} disabled={mcxBusy} className="rounded border border-lime-900 px-1.5 py-0.5 font-mono text-[9px] text-lime-300 transition hover:bg-lime-950/40">достигнута</button>
-                      <button type="button" onClick={() => void objStatus(o.id, "PARKED", "цель отложена")} disabled={mcxBusy} className="rounded border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800">парк</button>
-                      <button type="button" onClick={() => void objStatus(o.id, "FAILED", "цель закрыта как провальная")} disabled={mcxBusy} className="rounded border border-rose-900 px-1.5 py-0.5 font-mono text-[9px] text-rose-300 transition hover:bg-rose-950/40">провал</button>
-                      <button type="button" onClick={() => void deleteObjective(o)} disabled={mcxBusy} aria-label={`Удалить цель ${o.title}`} className="ml-auto text-zinc-600 transition hover:text-rose-400">✕</button>
+                      <button type="button" onClick={() => void objStatus(o.id, "ACHIEVED", "цель закрыта как достигнутая")} disabled={mcxBusy} className="rounded border border-lime-900 px-1.5 py-0.5 text-[11px] text-lime-300 transition hover:bg-lime-950/40">достигнута</button>
+                      <button type="button" onClick={() => void objStatus(o.id, "PARKED", "цель отложена")} disabled={mcxBusy} className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-zinc-800">парк</button>
+                      <button type="button" onClick={() => void objStatus(o.id, "FAILED", "цель закрыта как провальная")} disabled={mcxBusy} className="rounded border border-rose-900 px-1.5 py-0.5 text-[11px] text-rose-300 transition hover:bg-rose-950/40">провал</button>
+                      <button type="button" onClick={() => void deleteObjective(o)} disabled={mcxBusy} aria-label={`Удалить цель ${o.title}`} className="ml-auto text-zinc-400 transition hover:text-rose-400">✕</button>
                     </div>
                   )}
                 </div>
               ))}
               {wg && wg.objectives.length === 0 && (
-                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">целей нет — создай первую (задачи привязываются через objective_id при постановке)</div>
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">целей нет — создай первую (задачи привязываются через objective_id при постановке)</div>
               )}
               {!wg && (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка work_graph…</div>
+                <div className="px-4 py-6 text-center text-sm text-zinc-400">{observed ? "Goal data is unavailable" : "Loading goals…"}</div>
               )}
             </div>
           </Sec>
 
-          <Sec id="sup-workgraph" title="WORKGRAPH · ПРОЕКЦИЯ" icon={Network} tone="cyan">
+          <Sec id="sup-workgraph" defaultOpen={false} title="Goal relationships" icon={Network} tone="cyan">
             <div className="flex flex-wrap gap-1" data-testid="wg-projection">
               <Chip label="задачи связаны" value={wg?.stats.tasks_linked ?? "—"} tone="cyan" title="READY/RUNNING задачи, привязанные к целям" />
               <Chip label="orphan" value={wg?.stats.tasks_orphan ?? "—"} tone={(wg?.stats.tasks_orphan ?? 0) > 0 ? "amber" : "zinc"} title="активные задачи вне целей (fails-closed видит их явно)" />
@@ -313,19 +330,19 @@ export function SupervisorPage() {
             </div>
             {(wg?.orphan_tasks.length ?? 0) > 0 && (
               <div className="mt-1.5 rounded border border-amber-900/50 bg-amber-950/20 px-1.5 py-1" title="незакреплённые за целями активные задачи — fails-closed видит их явно">
-                <div className="font-mono text-[9px] text-amber-300/90">orphan-задачи (вне целей):</div>
-                {wg?.orphan_tasks.slice(0, 5).map((t) => <div key={t.id} className="truncate font-mono text-[9px] text-zinc-500">· {t.title} [{t.status}]</div>)}
+                <div className="text-[11px] text-amber-300/90">orphan-задачи (вне целей):</div>
+                {wg?.orphan_tasks.slice(0, 5).map((t) => <div key={t.id} className="truncate text-[11px] text-zinc-500">· {t.title} [{t.status}]</div>)}
               </div>
             )}
-            {!wg && <div className="mt-1.5 rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">проекция загрузится с /workgraph…</div>}
+            {!wg && <div className="mt-1.5 rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center text-xs text-zinc-400">Goal relationships are unavailable</div>}
           </Sec>
         </div>
 
         {/* ══ колонка 2: HANDOFFS + LEGACY PROVIDER TELEMETRY·REVIEWS + APPROVALS ══ */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="sup-handoffs" title="HANDOFFS" icon={ArrowLeftRight} tone="violet"
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="sup-handoffs" title="Task handoffs" icon={ArrowLeftRight} tone="violet"
             right={
-              <span data-testid="ho-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+              <span data-testid="ho-chips" className="flex shrink-0 flex-wrap items-center gap-1 text-[11px]">
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`всего передач; за 24ч: ${hoData?.stats.last_24h ?? 0}`}>передач {hoData?.stats.total ?? "—"}</span>
                 {hoData?.stats.last && (
                   <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`последняя передача ${hoData.stats.last.id} в ${hhmmss(hoData.stats.last.created_at)}`}>last →{hoData.stats.last.to_role ?? "любой"}</span>
@@ -336,113 +353,113 @@ export function SupervisorPage() {
             <form onSubmit={(e) => { e.preventDefault(); void doHandoff(); }} className="mb-1.5 space-y-1">
               <div className="flex gap-1.5">
                 <Select value={hoTask || undefined} onValueChange={setHoTask}>
-                  <SelectTrigger className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[10px] text-zinc-300" aria-label="Задача для передачи">
+                  <SelectTrigger className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 text-xs text-zinc-300" aria-label="Задача для передачи">
                     <SelectValue placeholder="задача (READY/RUNNING/FAILED)…" />
                   </SelectTrigger>
-                  <SelectContent className="max-h-56 font-mono text-[10px]">
+                  <SelectContent className="max-h-56 text-xs">
                     {handoffTasks.map((t) => (
                       <SelectItem key={t.id} value={t.id} title={t.title}>{t.status.slice(0, 4)} · {t.title.slice(0, 44)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <Select value={hoRole} onValueChange={setHoRole}>
-                  <SelectTrigger className="h-7 w-[86px] shrink-0 border-zinc-800 bg-zinc-950/60 font-mono text-[10px] text-zinc-300" aria-label="Роль получателя">
+                  <SelectTrigger className="h-7 w-[86px] shrink-0 border-zinc-800 bg-zinc-950/60 text-xs text-zinc-300" aria-label="Роль получателя">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="font-mono text-[10px]">
+                  <SelectContent className="text-xs">
                     {["IMPLEMENTER", "DEBUGGER", "RESEARCHER", "OPERATOR"].map((r) => (
                       <SelectItem key={r} value={r}>{r}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <Input value={hoReason} onChange={(e) => setHoReason(e.target.value)} placeholder="причина передачи (обязательно)…" className="h-7 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Причина передачи задачи" />
-              <Textarea value={hoNext} onChange={(e) => setHoNext(e.target.value)} placeholder="protocol.next — что делать дальше (обязательно; получатель читает как бриф)…" rows={2} className="min-h-[38px] border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Что делать дальше (protocol.next)" />
+              <Input value={hoReason} onChange={(e) => setHoReason(e.target.value)} placeholder="причина передачи (обязательно)…" className="h-7 border-zinc-800 bg-zinc-950/60 text-[11px]" aria-label="Причина передачи задачи" />
+              <Textarea value={hoNext} onChange={(e) => setHoNext(e.target.value)} placeholder="protocol.next — что делать дальше (обязательно; получатель читает как бриф)…" rows={2} className="min-h-[38px] border-zinc-800 bg-zinc-950/60 text-[11px]" aria-label="Что делать дальше (protocol.next)" />
               <div className="flex gap-1.5">
-                <Input value={hoDone} onChange={(e) => setHoDone(e.target.value)} placeholder="protocol.done — что уже сделано (опц.)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Что уже сделано (protocol.done)" />
-                <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]"><ArrowLeftRight className="mr-1 h-3 w-3" aria-hidden /> передать</Button>
+                <Input value={hoDone} onChange={(e) => setHoDone(e.target.value)} placeholder="protocol.done — что уже сделано (опц.)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 text-[11px]" aria-label="Что уже сделано (protocol.done)" />
+                <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-xs"><ArrowLeftRight className="mr-1 h-3 w-3" aria-hidden /> передать</Button>
               </div>
             </form>
             <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние передачи задач" data-testid="handoffs-list">
               {(hoData?.handoffs ?? []).slice(0, 5).map((h) => (
                 <div key={h.id} role="listitem" className="rounded bg-zinc-900/50 px-1.5 py-1" title={`${h.id}: ${h.reason} · next: ${h.protocol_parsed.next} · by ${h.by} · ${h.created_at}`}>
-                  <div className="flex items-center gap-1.5 font-mono text-[9px]">
+                  <div className="flex items-center gap-1.5 text-[11px]">
                     <span className="shrink-0 text-violet-300" aria-hidden>⇄</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-400">{h.from_role ?? "?"} → {h.to_role ?? "любой"}: {h.reason}</span>
-                    <span className={`shrink-0 rounded px-1 text-[8px] ${h.to_status === "COMPLETED" ? "bg-emerald-950/60 text-emerald-300" : h.to_status === "HANDED_OFF" ? "bg-violet-950/60 text-violet-300" : "bg-amber-950/60 text-amber-300"}`} title="статус continuation-задачи">{(h.to_status ?? "?").toLowerCase()}</span>
-                    <span className="shrink-0 text-zinc-600">{hhmmss(h.created_at)}</span>
+                    <span className={`shrink-0 rounded px-1 text-xs ${h.to_status === "COMPLETED" ? "bg-emerald-950/60 text-emerald-300" : h.to_status === "HANDED_OFF" ? "bg-violet-950/60 text-violet-300" : "bg-amber-950/60 text-amber-300"}`} title="статус continuation-задачи">{(h.to_status ?? "?").toLowerCase()}</span>
+                    <span className="shrink-0 text-zinc-400">{hhmmss(h.created_at)}</span>
                   </div>
                   {h.protocol_parsed.next && (
-                    <div className="mt-0.5 truncate font-mono text-[9px] text-zinc-500" title={h.protocol_parsed.next}>next: {h.protocol_parsed.next}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-zinc-500" title={h.protocol_parsed.next}>next: {h.protocol_parsed.next}</div>
                   )}
                 </div>
               ))}
               {hoData && hoData.handoffs.length === 0 && (
-                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">передач ещё не было — выбери задачу, причину и protocol.next</div>
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">передач ещё не было — выбери задачу, причину и protocol.next</div>
               )}
               {!hoData && (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка передач…</div>
+                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center text-xs text-zinc-400">загрузка передач…</div>
               )}
             </div>
           </Sec>
 
-          <Sec id="sup-reviews" title="LEGACY PROVIDER · REVIEWS" icon={Cpu} tone="cyan"
+          <Sec id="sup-reviews" defaultOpen={false} title="Provider diagnostics and reviews" icon={Cpu} tone="cyan"
             right={
-              <span data-testid="glm-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+              <span data-testid="glm-chips" className="flex shrink-0 flex-wrap items-center gap-1 text-[11px]">
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`канонический тег: ${glmData?.agent_tag ?? "—"};probe'ов снято: ${glmData?.probes_total ?? 0}`}>canon {glmData?.canonical ?? "—"}</span>
                 <span className={`rounded border px-1 py-0.5 ${(glmData?.agents.drift ?? 0) === 0 ? "border-emerald-900 bg-emerald-950/40 text-emerald-300" : "border-rose-900 bg-rose-950/40 text-rose-300"}`} title={`агентов на каноне: ${glmData?.agents.on_canonical ?? 0}/${glmData?.agents.total ?? 0}; drift>0 = есть агенты на старых тегах`}>drift {glmData?.agents.drift ?? "—"}</span>
               </span>
             }
           >
             <div className="mb-1.5 flex gap-1.5">
-              <span className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">legacy · read-only</span>
+              <span className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[11px] text-zinc-500">legacy · read-only</span>
               <input
                 value={reviewTaskId}
                 onChange={(e) => setReviewTaskId(e.target.value)}
                 list="review-task-ids"
                 placeholder="task_id для ревью"
                 aria-label="Task ID для антифальшь-ревью"
-                className="h-6 w-40 border border-zinc-800 bg-zinc-950/70 px-1.5 font-mono text-[9px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-cyan-900"
+                className="h-6 w-40 border border-zinc-800 bg-zinc-950/70 px-1.5 text-[11px] text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-cyan-900"
               />
               <datalist id="review-task-ids">
                 {(snap?.tasks ?? []).slice(0, 40).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </datalist>
-              <button type="button" onClick={() => void runReview()} disabled={mcxBusy || !reviewTaskId.trim()} aria-label="Запустить антифальшь-ревью задачи" data-testid="reviews-run" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40 disabled:opacity-40">ревью</button>
-              <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить legacy provider telemetry и ревью" className="ml-auto text-zinc-600 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>
+              <button type="button" onClick={() => void runReview()} disabled={mcxBusy || !reviewTaskId.trim()} aria-label="Запустить антифальшь-ревью задачи" data-testid="reviews-run" className="rounded border border-cyan-900 px-1.5 py-0.5 text-[11px] text-cyan-300 transition hover:bg-cyan-950/40 disabled:opacity-40">ревью</button>
+              <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить legacy provider telemetry и ревью" className="ml-auto text-zinc-400 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>
             </div>
             {glmData?.last_probe && (
-              <div className="mb-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`probe: ${glmData.last_probe.at} · requested=${glmData.last_probe.requested_tag}`}>
+              <div className="mb-1.5 rounded bg-zinc-900/50 px-1.5 py-1 text-[11px]" title={`probe: ${glmData.last_probe.at} · requested=${glmData.last_probe.requested_tag}`}>
                 <span className={glmData.last_probe.ok ? "text-cyan-300" : "text-rose-300"}>legacy probe:</span> <span className="text-zinc-400">запрошен {glmData.last_probe.requested_tag} → бэкенд {glmData.last_probe.api_model ?? `ошибка: ${glmData.last_probe.error ?? "?"}`}</span>
               </div>
             )}
             <div className="mb-0.5 flex items-center gap-1.5" title="ME26: ревью COMPLETED-задач — сверка результата со спеком и телеметрией lease; suspect/empty уходят в память с высоким весом">
               <ScanEye className="h-3 w-3 text-cyan-400" aria-hidden />
-              <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-600">антифальшь-ревью</span>
-              <span className="font-mono text-[9px] text-zinc-500">{revData ? `real ${revData.stats.by_verdict.real ?? 0} · suspect ${revData.stats.by_verdict.suspect ?? 0} · empty ${revData.stats.by_verdict.empty ?? 0}` : ""}</span>
+              <span className="text-[11px] text-zinc-400">антифальшь-ревью</span>
+              <span className="text-[11px] text-zinc-500">{revData ? `real ${revData.stats.by_verdict.real ?? 0} · suspect ${revData.stats.by_verdict.suspect ?? 0} · empty ${revData.stats.by_verdict.empty ?? 0}` : ""}</span>
             </div>
             <div className="max-h-40 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние антифальшь-ревью" data-testid="reviews-list">
               {(revData?.reviews ?? []).slice(0, 4).map((r) => (
                 <div key={r.task_id} role="listitem" className="rounded bg-zinc-900/50 px-1.5 py-1" title={`${r.task_id} · ${r.review.checked_at} · телеметрия: шагов=${r.review.evidence.steps}, вызовов=${r.review.evidence.tool_calls}${r.review.evidence.reward_hack ? ", tier-1 reward-hack" : ""}`}>
-                  <div className="flex items-center gap-1.5 font-mono text-[9px]">
-                    <span className={`shrink-0 rounded px-1 text-[8px] ${r.review.verdict === "real" ? "bg-emerald-950/60 text-emerald-300" : r.review.verdict === "empty" ? "bg-zinc-800 text-zinc-400" : "bg-amber-950/60 text-amber-300"}`}>{r.review.verdict}</span>
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className={`shrink-0 rounded px-1 text-xs ${r.review.verdict === "real" ? "bg-emerald-950/60 text-emerald-300" : r.review.verdict === "empty" ? "bg-zinc-800 text-zinc-400" : "bg-amber-950/60 text-amber-300"}`}>{r.review.verdict}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-400">{r.title}</span>
-                    <span className="shrink-0 text-zinc-600">{hhmmss(r.review.checked_at)}</span>
+                    <span className="shrink-0 text-zinc-400">{hhmmss(r.review.checked_at)}</span>
                   </div>
-                  {r.review.reasons[0] && <div className="mt-0.5 truncate font-mono text-[9px] text-zinc-500" title={r.review.reasons.join("; ")}>· {r.review.reasons[0]}</div>}
+                  {r.review.reasons[0] && <div className="mt-0.5 truncate text-[11px] text-zinc-500" title={r.review.reasons.join("; ")}>· {r.review.reasons[0]}</div>}
                 </div>
               ))}
               {revData && revData.reviews.length === 0 && (
-                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">ревью ещё не было — появятся после выполнения задач (кнопка «запустить ревью» → POST /reviews/run {`{task_id}`})</div>
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">ревью ещё не было — появятся после выполнения задач (кнопка «запустить ревью» → POST /reviews/run {`{task_id}`})</div>
               )}
               {!revData && (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка ревью…</div>
+                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center text-xs text-zinc-400">загрузка ревью…</div>
               )}
             </div>
           </Sec>
 
-          <Sec id="sup-approvals" title="APPROVALS" icon={ShieldCheck} tone="amber"
+          <Sec id="sup-approvals" title="Approval requests" icon={ShieldCheck} tone="amber"
             right={
-              <span data-testid="appr-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+              <span data-testid="appr-chips" className="flex shrink-0 flex-wrap items-center gap-1 text-[11px]">
                 <span className={`rounded border px-1 py-0.5 ${(apprData?.stats.pending ?? 0) > 0 ? "border-amber-900 bg-amber-950/40 text-amber-300" : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title="заявок ждёт решения оператора">pending {apprData?.stats.pending ?? "—"}</span>
                 {(apprData?.stats.consumed ?? 0) > 0 && <span className="rounded border border-emerald-900 bg-emerald-950/40 px-1 py-0.5 text-emerald-300" title="согласий израсходовано — один approve = одно исполнение">used {apprData?.stats.consumed}</span>}
                 {(apprData?.stats.denied ?? 0) > 0 && <span className="rounded border border-rose-900 bg-rose-950/40 px-1 py-0.5 text-rose-300" title="заявок отклонено">denied {apprData?.stats.denied}</span>}
@@ -452,37 +469,37 @@ export function SupervisorPage() {
             <div className="mb-1.5 space-y-1" role="list" aria-label="Политики гейтов мутирующих операций" data-testid="appr-policies">
               {(apprData?.policies ?? []).map((p) => (
                 <div key={p.gate} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1" title={`гейт ${p.gate}: mode=${p.mode} (обновил ${p.updated_by})`}>
-                  <span className="font-mono text-[9px] text-zinc-300">{p.gate}</span>
-                  <span className={`rounded px-1 text-[8px] ${p.mode === "auto_approve" ? "bg-zinc-800 text-zinc-400" : "bg-amber-950/60 text-amber-300"}`}>{p.mode === "auto_approve" ? "auto" : "gate"}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-600" title={p.gate === "fence_clear" ? "снятие durable fence (ME19)" : p.gate === "rsi_adopt" ? "принятие RSI-предложения в skills/ (ME8)" : "authority-операции: selfupdate apply — смена живого кода"}>{p.gate === "fence_clear" ? "снятие fence" : p.gate === "rsi_adopt" ? "RSI adopt" : "selfupdate apply"}</span>
-                  <button type="button" onClick={() => void apprPolicy(p.gate, p.mode === "auto_approve" ? "require_approval" : "auto_approve")} disabled={mcxBusy} aria-label={`Переключить политику ${p.gate} на ${p.mode === "auto_approve" ? "require_approval" : "auto_approve"}`} className="rounded border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800">{p.mode === "auto_approve" ? "включить гейт" : "отключить"}</button>
+                  <span className="text-[11px] text-zinc-300">{p.gate}</span>
+                  <span className={`rounded px-1 text-xs ${p.mode === "auto_approve" ? "bg-zinc-800 text-zinc-400" : "bg-amber-950/60 text-amber-300"}`}>{p.mode === "auto_approve" ? "auto" : "gate"}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-zinc-400" title={p.gate === "fence_clear" ? "снятие durable fence (ME19)" : p.gate === "rsi_adopt" ? "принятие RSI-предложения в skills/ (ME8)" : "authority-операции: selfupdate apply — смена живого кода"}>{p.gate === "fence_clear" ? "снятие fence" : p.gate === "rsi_adopt" ? "RSI adopt" : "selfupdate apply"}</span>
+                  <button type="button" onClick={() => void apprPolicy(p.gate, p.mode === "auto_approve" ? "require_approval" : "auto_approve")} disabled={mcxBusy} aria-label={`Переключить политику ${p.gate} на ${p.mode === "auto_approve" ? "require_approval" : "auto_approve"}`} className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-zinc-800">{p.mode === "auto_approve" ? "включить гейт" : "отключить"}</button>
                 </div>
               ))}
-              {!apprData && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[10px] text-zinc-600">загрузка политик…</div>}
+              {!apprData && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-1.5 text-center text-xs text-zinc-400">Approval data is unavailable</div>}
             </div>
             <div className="max-h-32 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Заявки на согласование" data-testid="appr-pending">
               {(apprData?.pending ?? []).map((a) => (
                 <div key={a.id} role="listitem" className="rounded border border-amber-950/60 bg-amber-950/20 px-1.5 py-1">
-                  <div className="flex items-center gap-1.5 font-mono text-[9px]">
-                    <span className="shrink-0 rounded bg-amber-950/60 px-1 text-[8px] text-amber-300">{a.gate}</span>
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className="shrink-0 rounded bg-amber-950/60 px-1 text-xs text-amber-300">{a.gate}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-300" title={`${a.subject} · от ${a.requested_by}`}>{a.label}</span>
-                    <span className="shrink-0 text-zinc-600">{hhmmss(new Date(a.created_at).toISOString())}</span>
+                    <span className="shrink-0 text-zinc-400">{hhmmss(new Date(a.created_at).toISOString())}</span>
                   </div>
                   <div className="mt-0.5 flex gap-1">
-                    <button type="button" onClick={() => void apprOp({ op: "approve", id: a.id }, "согласие выдано: один approve = одно исполнение (токен TTL 15м)")} disabled={mcxBusy} aria-label={`Одобрить заявку ${a.gate}`} className="rounded border border-emerald-900 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 transition hover:bg-emerald-950/40">approve</button>
-                    <button type="button" onClick={() => void apprOp({ op: "deny", id: a.id }, "заявка отклонена — операция останется под гейтом")} disabled={mcxBusy} aria-label={`Отклонить заявку ${a.gate}`} className="rounded border border-rose-900 px-1.5 py-0.5 font-mono text-[9px] text-rose-300 transition hover:bg-rose-950/40">deny</button>
+                    <button type="button" onClick={() => void apprOp({ op: "approve", id: a.id }, "согласие выдано: один approve = одно исполнение (токен TTL 15м)")} disabled={mcxBusy} aria-label={`Одобрить заявку ${a.gate}`} className="rounded border border-emerald-900 px-1.5 py-0.5 text-[11px] text-emerald-300 transition hover:bg-emerald-950/40">approve</button>
+                    <button type="button" onClick={() => void apprOp({ op: "deny", id: a.id }, "заявка отклонена — операция останется под гейтом")} disabled={mcxBusy} aria-label={`Отклонить заявку ${a.gate}`} className="rounded border border-rose-900 px-1.5 py-0.5 text-[11px] text-rose-300 transition hover:bg-rose-950/40">deny</button>
                   </div>
                 </div>
               ))}
               {apprData && apprData.pending.length === 0 && (
-                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">нет заявок — гейты молчат, пока операции не пытаются пройти</div>
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">нет заявок — гейты молчат, пока операции не пытаются пройти</div>
               )}
             </div>
             {(apprData?.recent.length ?? 0) > 0 && (
               <div className="mt-1.5 space-y-0.5" role="list" aria-label="Недавние решения по гейтам" data-testid="appr-recent">
                 {apprData?.recent.slice(0, 3).map((r) => (
-                  <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/40 px-1.5 py-0.5 font-mono text-[9px]" title={`${r.gate}: ${r.label} · ${r.status}`}>
-                    <span className={`shrink-0 rounded px-1 text-[8px] ${r.status === "DENIED" ? "bg-rose-950/60 text-rose-300" : r.status === "EXPIRED" ? "bg-zinc-800 text-zinc-400" : "bg-emerald-950/60 text-emerald-300"}`}>{r.status.toLowerCase()}</span>
+                  <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/40 px-1.5 py-0.5 text-[11px]" title={`${r.gate}: ${r.label} · ${r.status}`}>
+                    <span className={`shrink-0 rounded px-1 text-xs ${r.status === "DENIED" ? "bg-rose-950/60 text-rose-300" : r.status === "EXPIRED" ? "bg-zinc-800 text-zinc-400" : "bg-emerald-950/60 text-emerald-300"}`}>{r.status.toLowerCase()}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-500">{r.label}</span>
                   </div>
                 ))}
@@ -492,11 +509,11 @@ export function SupervisorPage() {
         </div>
 
         {/* ══ колонка 3: GOVERNOR + АВТОПИЛОТ + BRAIN + ROADMAP ══ */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="sup-governor" title="GOVERNOR · G11" icon={Gauge}
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="sup-governor" defaultOpen={false} title="Execution limits" icon={Gauge}
             tone={(governor?.breaker.state ?? "CLOSED") === "CLOSED" ? "emerald" : (governor?.breaker.state ?? "") === "OPEN" ? "rose" : "amber"}
             right={
-              <span data-testid="governor-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+              <span data-testid="governor-chips" className="flex shrink-0 flex-wrap items-center gap-1 text-[11px]">
                 <span className={`rounded border px-1 py-0.5 ${governor ? (governor.breaker.state === "CLOSED" ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : governor.breaker.state === "HALF_OPEN" ? "border-amber-900/60 bg-amber-950/30 text-amber-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300 animate-pulse") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={governor ? `circuit breaker: ${governor.breaker.state}, срабатываний=${governor.breaker.trips}, cooldown=${Math.round(governor.breaker.cooldown_ms / 1000)}с, открыт: ${governor.breaker.opened_at ?? "—"}` : "состояние breaker"}>{governor ? governor.breaker.state : "—"}</span>
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="всего пропущено / отклонено Governor (breaker+bucket)">⌁ {governor ? `${governor.admitted_total}/${governor.rejected_total}` : "—"}</span>
               </span>
@@ -506,21 +523,21 @@ export function SupervisorPage() {
               <StateBadge
                 state={governor ? (governor.breaker.state === "CLOSED" ? "LIVE" : governor.breaker.state === "HALF_OPEN" ? "Recovering" : "Failed") : "Idle"}
               />
-              <span className="font-mono text-[9px] text-zinc-500" title="срабатываний breaker (3 исчерпанных 429/5xx за 120с → OPEN)">
+              <span className="text-[11px] text-zinc-500" title="срабатываний breaker (3 исчерпанных 429/5xx за 120с → OPEN)">
                 trips {governor?.breaker.trips ?? "—"} · cooldown {governor ? `${Math.round(governor.breaker.cooldown_ms / 1000)}с` : "—"}
               </span>
             </div>
             <div className="flex flex-wrap gap-1">
               {(governor?.lanes ?? []).map((l) => (
-                <span key={l.lane} className={`rounded border px-1 py-0.5 font-mono text-[9px] ${l.lane === "P0" ? "border-violet-900/60 bg-violet-950/30 text-violet-300" : l.lane === "P1" ? "border-zinc-700 bg-zinc-900/60 text-zinc-300" : "border-zinc-800 bg-zinc-900/40 text-zinc-500"}`} title={`полоса ${l.lane}: токенов ${l.tokens}/${l.capacity}, refill ${l.refill_per_min}/мин, прошло=${l.admitted}, откл. бакетом=${l.rejected_bucket}, ожидание сумм=${Math.round(l.waited_ms_total / 1000)}с`}>{l.lane} {l.tokens}/{l.capacity}·{l.refill_per_min}/м</span>
+                <span key={l.lane} className={`rounded border px-1 py-0.5 text-[11px] ${l.lane === "P0" ? "border-violet-900/60 bg-violet-950/30 text-violet-300" : l.lane === "P1" ? "border-zinc-700 bg-zinc-900/60 text-zinc-300" : "border-zinc-800 bg-zinc-900/40 text-zinc-500"}`} title={`полоса ${l.lane}: токенов ${l.tokens}/${l.capacity}, refill ${l.refill_per_min}/мин, прошло=${l.admitted}, откл. бакетом=${l.rejected_bucket}, ожидание сумм=${Math.round(l.waited_ms_total / 1000)}с`}>{l.lane} {l.tokens}/{l.capacity}·{l.refill_per_min}/м</span>
               ))}
-              {!governor && <span className="rounded-md border border-dashed border-zinc-800 px-2 py-1.5 font-mono text-[10px] text-zinc-600">загрузка /governor…</span>}
+              {!governor && <span className="rounded-md border border-dashed border-zinc-800 px-2 py-1.5 text-xs text-zinc-400">загрузка /governor…</span>}
             </div>
             {(governor?.recent.length ?? 0) > 0 && (
               <div className="mt-1.5 space-y-0.5" role="list" aria-label="Недавние решения governor">
                 {governor?.recent.slice(0, 4).map((r, i) => (
-                  <div key={`${r.ts}-${i}`} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/40 px-1.5 py-0.5 font-mono text-[9px]" title={`${r.kind}: ${r.detail}`}>
-                    <span className="shrink-0 text-zinc-600">{r.ts.slice(11, 19)}</span>
+                  <div key={`${r.ts}-${i}`} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/40 px-1.5 py-0.5 text-[11px]" title={`${r.kind}: ${r.detail}`}>
+                    <span className="shrink-0 text-zinc-400">{r.ts.slice(11, 19)}</span>
                     <span className="shrink-0 text-zinc-400">{r.lane}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-500">{r.detail}</span>
                   </div>
@@ -529,9 +546,9 @@ export function SupervisorPage() {
             )}
           </Sec>
 
-          <Sec id="sup-demand" title="АВТОПИЛОТ · G10" icon={Radar} tone={demand?.config.enabled ? "amber" : "zinc"}
+          <Sec id="sup-demand" defaultOpen={false} title="Fleet demand" icon={Radar} tone={demand?.config.enabled ? "amber" : "zinc"}
             right={
-              <span className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+              <span className="flex shrink-0 flex-wrap items-center gap-1 text-[11px]">
                 <span className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900/60 px-1.5 py-0.5">
                   <Switch checked={!!demand?.config.enabled} onCheckedChange={(v) => void demandToggle(v)} disabled={mcxBusy} aria-label="Переключить автопилот спроса" data-testid="demand-toggle" />
                   <span className={demand?.config.enabled ? "text-amber-300" : "text-zinc-500"}>{demand ? (demand.config.enabled ? "вкл" : "выкл") : "—"}</span>
@@ -550,22 +567,22 @@ export function SupervisorPage() {
               <Chip label="chats" value={demand?.snapshot.active_chats ?? "—"} tone="zinc" title="активных чатов" />
             </div>
             {demand?.last_decision && (
-              <p data-testid="demand-last" className={`mt-1.5 truncate rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px] ${demand.last_decision.action === "created" ? "text-emerald-300" : demand.last_decision.action === "suppressed" ? "text-amber-300" : "text-zinc-400"}`} title={demand.decisions.slice(0, 5).map((d) => `${d.ts.slice(11, 19)} ${d.action}${d.signal ? ` [${d.signal}]` : ""}: ${d.detail}`).join("\n")}>
+              <p data-testid="demand-last" className={`mt-1.5 truncate rounded bg-zinc-950/60 px-1.5 py-1 text-[11px] ${demand.last_decision.action === "created" ? "text-emerald-300" : demand.last_decision.action === "suppressed" ? "text-amber-300" : "text-zinc-400"}`} title={demand.decisions.slice(0, 5).map((d) => `${d.ts.slice(11, 19)} ${d.action}${d.signal ? ` [${d.signal}]` : ""}: ${d.detail}`).join("\n")}>
                 {demand.last_decision.ts.slice(11, 19)} {demand.last_decision.action}{demand.last_decision.signal ? ` · ${demand.last_decision.signal}` : ""}{demand.last_decision.role ? ` · ${demand.last_decision.role}` : ""} — {demand.last_decision.detail}
               </p>
             )}
-            {!demand && <div className="mt-1.5 rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка /demand…</div>}
+            {!demand && <div className="mt-1.5 rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center text-xs text-zinc-400">Demand data is unavailable</div>}
           </Sec>
 
-          <Sec id="sup-brain" title={`BRAIN${brain ? ` · мыслей ${brain.thoughts.length}` : ""}`} icon={Brain} tone="violet"
-            right={<span className="font-mono text-[9px] text-zinc-600" title="self-probe: латентность event-loop + БД">{brain ? `loop ${brain.probe.eventloop_ms}мс · db ${brain.probe.db_probe_ms}мс` : ""}</span>}
+          <Sec id="sup-brain" defaultOpen={false} title={`BRAIN${brain ? ` · мыслей ${brain.thoughts.length}` : ""}`} icon={Brain} tone="violet"
+            right={<span className="text-[11px] text-zinc-400" title="self-probe: латентность event-loop + БД">{brain ? `loop ${brain.probe.eventloop_ms}мс · db ${brain.probe.db_probe_ms}мс` : ""}</span>}
           >
             <form onSubmit={(e) => { e.preventDefault(); void thinkGoal(); }} className="mb-1.5 flex gap-1.5">
-              <Input value={brainGoal} onChange={(e) => setBrainGoal(e.target.value)} placeholder="цель для brain: план с учётом памяти…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Цель для brain" />
-              <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]">думать</Button>
+              <Input value={brainGoal} onChange={(e) => setBrainGoal(e.target.value)} placeholder="цель для brain: план с учётом памяти…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 text-[11px]" aria-label="Цель для brain" />
+              <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-xs">думать</Button>
             </form>
             {thought && (
-              <div className="mb-1.5 rounded border border-fuchsia-900/40 bg-fuchsia-950/20 p-1.5 font-mono text-[9px]" aria-live="polite">
+              <div className="mb-1.5 rounded border border-fuchsia-900/40 bg-fuchsia-950/20 p-1.5 text-[11px]" aria-live="polite">
                 <div className="mb-0.5 text-zinc-400" title={thought.goal}>{thought.summary}</div>
                 {thought.steps.slice(0, 4).map((s, i) => (
                   <div key={i} className="flex gap-1 text-zinc-500"><span className="shrink-0 text-fuchsia-400/70">{i + 1}.</span><span className="min-w-0 flex-1 truncate">{s}</span></div>
@@ -573,23 +590,23 @@ export function SupervisorPage() {
                 {thought.risks.length > 0 && (
                   <div className="mt-0.5 text-amber-300/80" title={thought.risks.join("; ")}>⚠ риски: {thought.risks.slice(0, 2).join(" · ")}</div>
                 )}
-                <div className="mt-0.5 text-zinc-600">{thought.ms}мс · памяти использовано: {thought.memory_used.length}</div>
+                <div className="mt-0.5 text-zinc-400">{thought.ms}мс · памяти использовано: {thought.memory_used.length}</div>
               </div>
             )}
             <div className="max-h-16 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
               {(brain?.thoughts ?? []).slice(0, 4).map((t) => (
-                <div key={t.key} className="truncate rounded bg-zinc-900/50 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500" title={t.content}>{t.content}</div>
+                <div key={t.key} className="truncate rounded bg-zinc-900/50 px-1.5 py-0.5 text-[11px] text-zinc-500" title={t.content}>{t.content}</div>
               ))}
-              {!brain && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка /brain…</div>}
+              {!brain && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center text-xs text-zinc-400">Planning data is unavailable</div>}
             </div>
           </Sec>
 
-          <Sec id="sup-roadmap" title={`РОАДМАП M1–M7${rm ? ` · ${rm.done}/${rm.total}` : ""}`} icon={ListChecks} tone="emerald"
+          <Sec id="sup-roadmap" title={`Runtime diagnostics${rm ? ` · ${rm.done}/${rm.total}` : ""}`} icon={ListChecks} tone="zinc" defaultOpen={false}
             right={
               <span className="flex shrink-0 items-center gap-1.5">
                 {rm && (
-                  <span className={`font-mono text-[10px] ${rm.done === rm.total ? "text-emerald-400" : "text-amber-400/90"}`} title="Вердикт вычисляется из живых подсистем (bus/codegraph/src-tauri/rerere/sandbox/worker/otel)">
-                    {rm.done === rm.total ? "ЗАКРЫТ" : "в работе"}
+                  <span className="text-xs text-zinc-400" title="These daemon diagnostics do not qualify the installed client for release.">
+                    Observed checks
                   </span>
                 )}
                 <button type="button" onClick={() => void loadRm()} disabled={mcxBusy} title="Перевычислить вердикт" aria-label="Перевычислить вердикт роадмапа" className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40">
@@ -598,36 +615,37 @@ export function SupervisorPage() {
               </span>
             }
           >
-            <div className="space-y-1.5" role="list" aria-label="Фазы роадмапа M1–M7">
+            <div className="space-y-1.5" role="list" aria-label="Runtime diagnostic checks">
+              <p className="mb-3 text-xs leading-relaxed text-zinc-400">These checks describe the daemon. Client readiness and release qualification require their own evidence.</p>
               {(rm?.milestones ?? []).map((m) => (
                 <div key={m.key} className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5" role="listitem">
                   <div className="flex items-center gap-2">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.status === "DONE" ? "bg-emerald-400" : m.status === "PARTIAL" ? "bg-amber-400" : "bg-rose-500"}`} aria-hidden />
-                    <span className="shrink-0 font-mono text-[10px] font-semibold text-zinc-300">{m.key}</span>
+                    <span className="shrink-0 text-xs font-semibold text-zinc-300">{m.key}</span>
                     <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400" title={m.title}>{m.title}</span>
-                    <span className={`shrink-0 font-mono text-[9px] uppercase ${m.status === "DONE" ? "text-emerald-500/90" : m.status === "PARTIAL" ? "text-amber-500/90" : "text-rose-400"}`}>
+                    <span className={`shrink-0 text-[11px] uppercase ${m.status === "DONE" ? "text-emerald-500/90" : m.status === "PARTIAL" ? "text-amber-500/90" : "text-rose-400"}`}>
                       {m.status}
                     </span>
                   </div>
-                  <div className="mt-0.5 pl-3.5 font-mono text-[9px] leading-relaxed text-zinc-600" title={m.evidence}>
+                  <div className="mt-0.5 pl-3.5 text-[11px] leading-relaxed text-zinc-400" title={m.evidence}>
                     {m.evidence}
                   </div>
                   {m.checks.length > 0 && (
                     <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 pl-3.5" title={`проверено: ${m.verifiedAt}`}>
                       {m.checks.map((c) => (
-                        <span key={c.name} className={`font-mono text-[9px] ${c.pass ? "text-emerald-500/80" : "text-rose-400/90"}`}>{c.pass ? "✓" : "✗"} {c.name}</span>
+                        <span key={c.name} className={`text-[11px] ${c.pass ? "text-emerald-500/80" : "text-rose-400/90"}`}>{c.pass ? "✓" : "✗"} {c.name}</span>
                       ))}
                     </div>
                   )}
-                  <div className="pl-3.5 font-mono text-[8px] text-zinc-700" title={`verifiedAt: ${m.verifiedAt}`}>verified {m.verifiedAt ? hhmmss(m.verifiedAt) : "—"}</div>
+                  <div className="pl-3.5 text-xs text-zinc-500" title={`verifiedAt: ${m.verifiedAt}`}>verified {m.verifiedAt ? hhmmss(m.verifiedAt) : "—"}</div>
                 </div>
               ))}
               {!rm && (
-                <div className="px-2 py-3 text-center font-mono text-[10px] text-zinc-600">загрузка вердикта…</div>
+                <div className="px-2 py-3 text-center text-xs text-zinc-400">Diagnostic data is unavailable</div>
               )}
               {rm?.closedAt && (
-                <div className="rounded-md border border-emerald-900/60 bg-emerald-950/30 px-2 py-1.5 text-center font-mono text-[10px] text-emerald-400">
-                  ✓ РОАДМАП ЗАКРЫТ · {new Date(rm.closedAt).toLocaleString("ru-RU")}
+                <div className="rounded-md border border-emerald-900/60 bg-emerald-950/30 px-2 py-1.5 text-center text-xs text-emerald-400">
+                  Last recorded completion · {new Date(rm.closedAt).toLocaleString("ru-RU")}
                 </div>
               )}
             </div>

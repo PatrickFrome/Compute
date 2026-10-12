@@ -104,7 +104,7 @@ test('emergency lane migration reclassifies the action and creates the real leas
 // Fix 3 — memory loop: plane advance + retrieval, cycle wiring, prompt block.
 // ---------------------------------------------------------------------------
 
-test('plane advanceTaskOutcome materializes episodic memory episodes and retrieval feeds prompts', async () => {
+test('plane keeps DevOS results pending independent verification and retrieves other advisory history', async () => {
   const { BrowserRealtimeProcessPlane } = await importAbsolute(path.join(SRC, 'browser-realtime-process-plane.mjs'));
   const { BrowserBrainCollaborationRuntimeV2 } = await importAbsolute(path.join(SRC, 'browser-brain-collaboration-runtime-v2.mjs'));
 
@@ -145,16 +145,20 @@ test('plane advanceTaskOutcome materializes episodic memory episodes and retriev
   };
   const first = plane.advanceTaskOutcome(outcome);
   assert.equal(first.advanced, true);
-  assert.equal(first.episode_materialized, true, 'RESULT_READY must materialize an episode');
+  assert.equal(first.episode_materialized, false, 'RESULT_READY is a proposal, not verified knowledge');
+  assert.equal(first.verification_pending, true);
+  assert.equal(first.status, 'BLOCKED');
   const memory = runtime.snapshot().episodic_memory;
-  assert.equal(memory.episode_count, 1, 'episode_count must grow from terminal advances');
+  assert.equal(memory.episode_count, 0);
 
   // Idempotence: replaying the same lease generation is a duplicate, not an error.
   const replay = plane.advanceTaskOutcome(outcome);
   assert.equal(replay.advanced, false);
   assert.equal(replay.duplicate, true);
 
-  // Retrieval: the episode is retrievable through the same surface the cycle uses.
+  // Other historical contexts remain available as advisory memory.
+  runtime.recordEpisode({ episode_id: 'episode:reviewed-telemetry', context_id: 'reviewed-team-history',
+    task_id: taskId, objective: 'Ship the fleet telemetry digest feature', outcome: 'COMPLETED' });
   const retrieval = plane.retrieveCollaborationMemory({ query: 'fleet telemetry digest', max_results: 5, token_budget: 900 });
   assert.ok(Array.isArray(retrieval?.results) && retrieval.results.length >= 1, 'retrieval must find the recorded episode');
   assert.equal(retrieval.results[0].episode.task_id, taskId);
@@ -163,7 +167,7 @@ test('plane advanceTaskOutcome materializes episodic memory episodes and retriev
   assert.deepEqual(plane.advanceTaskOutcome({}), { advanced: false, reason: 'TASK_ID_REQUIRED' });
 });
 
-test('devos cycle prompt carries the bounded team memory block and terminal outcomes advance memory', async () => {
+test('devos cycle prompt carries bounded advisory memory and result observations advance pending state', async () => {
   const { renderDevosTaskPrompt } = await importAbsolute(path.join(SRC, 'devos-native-task-cycle-core.mjs'));
   const lease = {
     task_id: '11111111-2222-4333-8444-555555555555',
@@ -176,7 +180,7 @@ test('devos cycle prompt carries the bounded team memory block and terminal outc
   const withoutMemory = renderDevosTaskPrompt(lease, {});
   assert.ok(!withoutMemory.includes('TEAM MEMORY'), 'no memory block without history');
   const withMemory = renderDevosTaskPrompt(lease, {
-    team_memory: 'TEAM MEMORY — recent verified episodes from this fleet (advisory context; verify before reuse):\n- [COMPLETED] Ship the fleet telemetry digest feature | facts: digest bounded at 2400 chars',
+    team_memory: 'TEAM MEMORY — advisory historical episodes (independent verification required before reuse):\n- [COMPLETED] Ship the fleet telemetry digest feature | reported facts: digest bounded at 2400 chars',
   });
   assert.match(withMemory, /TEAM MEMORY/);
   assert.match(withMemory, /Ship the fleet telemetry digest feature/);

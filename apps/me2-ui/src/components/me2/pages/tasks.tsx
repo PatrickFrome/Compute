@@ -2,7 +2,7 @@
 // ── METAENGINE TASKS — durable task graph + queue projection ──────────────────
 // Источник: docs/legacy-mission-control.tsx.txt (BranchGraph L409-684, вкладки L2636-2717,
 // очередь L2728-2760). Клик по ветви/задаче → Task Sheet
-// (глобальный оверлей стора). Стиль: zinc+emerald плотный, font-mono для данных.
+// (глобальный оверлей стора). Стиль: zinc+emerald плотный, для данных.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -134,7 +134,7 @@ function BranchGraph({ tasks, onOpen, selectedId, onSelect }: {
   return (
     <div className="relative">
       {tasks.length > WINDOW && (
-        <div className="flex items-center justify-between gap-2 px-1 pb-1 font-mono text-[9px] text-zinc-500">
+        <div className="flex items-center justify-between gap-2 px-1 pb-1 text-[11px] text-zinc-500">
           <span>{showAll ? `все ${tasks.length} ветвей` : `последние ${WINDOW} из ${tasks.length} · старшие скрыты`}</span>
           <button
             className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400 transition hover:border-zinc-500 hover:text-zinc-200"
@@ -245,17 +245,17 @@ function BranchGraph({ tasks, onOpen, selectedId, onSelect }: {
                   }}
                 >
                   <div className="font-sans text-[11px] font-semibold leading-snug text-zinc-100">{hover.t.title}</div>
-                  <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px]">
+                  <div className="mt-1 flex items-center gap-1.5 text-xs">
                     <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
                     <span style={{ color }}>{hover.t.status}</span>
                     <span className="text-zinc-500">· шаги {hover.t.steps}/{hover.t.max_steps}</span>
                     {kids > 0 && <span className="text-amber-400">· ↳ {kids} retry</span>}
                   </div>
-                  <div className="mt-0.5 font-mono text-[9px] text-zinc-500">
+                  <div className="mt-0.5 text-[11px] text-zinc-500">
                     {hover.t.id.slice(0, 18)} · создана {age(hover.t.created_at)} назад
                     {hover.t.parent_id ? <span className="text-amber-400/90"> · ветвь от {hover.t.parent_id.slice(0, 16)}</span> : null}
                   </div>
-                  {hover.t.error ? <div className="mt-1 max-w-[280px] truncate font-mono text-[9px] text-rose-400">⚠ {hover.t.error}</div> : null}
+                  {hover.t.error ? <div className="mt-1 max-w-[280px] truncate text-[11px] text-rose-400">⚠ {hover.t.error}</div> : null}
                   {(() => {
                     if (!hover.t.reflection) return null;
                     let r: Reflection;
@@ -266,32 +266,32 @@ function BranchGraph({ tasks, onOpen, selectedId, onSelect }: {
                       <>
                         {r.cause ? (
                           <div className="mt-1.5 rounded border border-amber-900/60 bg-amber-950/30 px-1.5 py-1">
-                            <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-400">
+                            <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-400">
                               <span>рефлексия</span>
                               <span className="rounded bg-amber-500/15 px-1 normal-case text-amber-300">{CAUSE_RU[r.cause] ?? r.cause}</span>
                             </div>
-                            <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-300">{r.what}</div>
+                            <div className="mt-0.5 text-[11px] leading-snug text-zinc-300">{r.what}</div>
                             {r.signals ? (
-                              <div className="mt-0.5 font-mono text-[8.5px] leading-snug text-amber-500/70">
+                              <div className="mt-0.5 text-[8.5px] leading-snug text-amber-500/70">
                                 вызовы {r.signals.tool_calls ?? 0} · уник. {r.signals.distinct ?? 0} · записей {r.signals.writes ?? 0}
                                 {(r.signals.loop_top ?? 0) > 0 || (r.signals.tool_errors ?? 0) > 0 || (r.signals.parse_fails ?? 0) > 0
                                   ? ` · аномалии: цикл×${r.signals.loop_top ?? 0} инстр-ошибки×${r.signals.tool_errors ?? 0} репарс×${r.signals.parse_fails ?? 0}`
                                   : null}
                               </div>
                             ) : null}
-                            <div className="mt-0.5 text-[9.5px] leading-snug text-emerald-300/90">↳ {r.hint}</div>
+                            <div className="mt-0.5 text-[11px] leading-snug text-emerald-300/90">↳ {r.hint}</div>
                           </div>
                         ) : null}
                         {r.llm?.lesson ? (
                           <div className="mt-1.5 rounded border border-violet-900/60 bg-violet-950/30 px-1.5 py-1">
-                            <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-violet-400">
+                            <div className="flex items-center gap-1 text-[11px] font-semibold text-violet-400">
                               <span>llm-рефлексия</span>
                               <span className="rounded bg-violet-500/15 px-1 normal-case text-violet-300">tier-2</span>
                               {r.llm.source === "auto_retry" ? <span className="rounded bg-fuchsia-500/15 px-1 normal-case text-fuchsia-300">авто</span> : null}
                               {r.llm.model ? <span className="normal-case text-violet-500/80">{r.llm.model}</span> : null}
                             </div>
-                            <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-200">{r.llm.lesson}</div>
-                            {r.llm.fix ? <div className="mt-0.5 text-[9.5px] leading-snug text-sky-300/90">→ {r.llm.fix}</div> : null}
+                            <div className="mt-0.5 text-[11px] leading-snug text-zinc-200">{r.llm.lesson}</div>
+                            {r.llm.fix ? <div className="mt-0.5 text-[11px] leading-snug text-sky-300/90">→ {r.llm.fix}</div> : null}
                           </div>
                         ) : null}
                       </>
@@ -309,7 +309,9 @@ function BranchGraph({ tasks, onOpen, selectedId, onSelect }: {
 
 // ── PAGE ────────────────────────────────────────────────────────────────────────
 export function TasksPage() {
+  // Task branches and the queue are a read-only projection of observed state.
   const snap = useMe2((s) => s.snap);
+  const connected = useMe2((s) => s.connected);
   const nowMs = useMe2((s) => s.nowMs);
   const openTask = useMe2((s) => s.openTask);
 
@@ -376,18 +378,23 @@ export function TasksPage() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-tasks" data-panel-tasks>
       <PageHeader
-        title="TASKS"
-        sub="ветки · очередь · durable outcomes"
+        title="Tasks"
+        sub="Follow task branches, progress and the execution queue."
+        actions={<span className="text-xs text-zinc-400">Read only</span>}
       />
-      <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
+      {!snap || !connected ? (
+        <div role="status" className="mb-3 rounded-xl bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
+          {!snap ? "Task data is unavailable. Check the connection in Settings." : "Connection interrupted. Showing the last observed task state."}
+        </div>
+      ) : null}
+      <div className="mc-scroll grid min-h-0 flex-1 auto-rows-max grid-cols-1 items-start gap-3 overflow-y-auto pr-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + task-фильтры; Browser живёт на COMMAND/BROWSER) ── */}
-        <div className="flex min-h-0 min-w-0 flex-col lg:flex-[2]">
+        <div className="flex min-w-0 flex-col [&>section]:shrink-0">
           <Sec
             id="tasks-branches"
-            title={`ВЕТКИ · ЗАДАЧИ (${branchData.length})`}
+            title={`Task branches${snap ? ` (${branchData.length})` : ""}`}
             icon={GitBranch}
             tone="violet"
-            right={<span className="font-mono text-[9px] text-zinc-600">git-graph</span>}
           >
             {/* вкладки в стиле браузера — контейнер relative: на узких экранах tab-полоса
                 скроллится, правый градиент (pointer-events:none — урок legacy №1) показывает это */}
@@ -405,15 +412,15 @@ export function TasksPage() {
                       role="tab"
                       aria-selected={active}
                       onClick={() => setBranchTab(tb.key)}
-                      className={`-mb-px flex shrink-0 items-center gap-1.5 rounded-t-lg border border-b-0 px-2.5 py-1.5 text-[10px] transition ${
+                      className={`-mb-px flex shrink-0 items-center gap-1.5 rounded-t-lg border border-b-0 px-2.5 py-1.5 text-xs transition ${
                         active
-                          ? "border-zinc-700 bg-zinc-900 text-zinc-100 shadow-[0_-2px_6px_rgba(0,0,0,0.35)]"
+                          ? "border-zinc-700 bg-zinc-900 text-zinc-100 "
                           : "border-transparent text-zinc-500 hover:bg-zinc-900/70 hover:text-zinc-300"
                       }`}
                     >
                       <span className={`h-1.5 w-1.5 rounded-full ${tb.dot}`} aria-hidden />
                       {tb.label}
-                      <span className="font-mono text-[9px] text-zinc-600">{branchCounts[tb.key]}</span>
+                      <span className="text-[11px] text-zinc-400">{snap ? branchCounts[tb.key] : "—"}</span>
                     </button>
                   );
                 })}
@@ -421,7 +428,10 @@ export function TasksPage() {
             </div>
             <div className="px-1 py-1">
               {branchTasks.length === 0 ? (
-                <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
+                <div className="px-4 py-8 text-center text-sm text-zinc-400">
+                  <p>{snap ? "No tasks in this view" : "Task branches are unavailable"}</p>
+                  <p className="mt-2 text-xs text-zinc-500">{snap ? "Run a task from the agent workspace to follow its progress here." : "The current task source is not available in this view. Projects and history remain on this computer."}</p>
+                </div>
               ) : (
                 <BranchGraph
                   tasks={branchTasks}
@@ -435,16 +445,15 @@ export function TasksPage() {
         </div>
 
         {/* ── право: ОЧЕРЕДЬ; evidence/metrics живут в OBSERVABILITY ── */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll lg:flex-[1]">
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
           <Sec
             id="tasks-queue"
-            title={`ОЧЕРЕДЬ ЗАДАЧ (${queueTasks.length})`}
+            title={`Execution queue${snap ? ` (${queueTasks.length})` : ""}`}
             icon={ListChecks}
             tone="emerald"
-            right={<span className="font-mono text-[9px] text-zinc-600">read-only projection</span>}
           >
             {queueTasks.length === 0 && (
-              <p className="p-4 text-center text-xs text-zinc-500">очередь пуста</p>
+              <p className="px-4 py-8 text-center text-sm text-zinc-400">{snap ? "No tasks waiting for execution" : "Queue data is unavailable"}</p>
             )}
             <div className="space-y-1.5">
               {queueTasks.map((t) => {
@@ -472,16 +481,16 @@ export function TasksPage() {
                     <div className="flex items-center gap-2">
                       <StatusBadge status={t.status} />
                       <span className="min-w-0 flex-1 truncate text-xs font-medium">{t.title}</span>
-                      <span className="shrink-0 font-mono text-[10px] text-zinc-500">{age(t.created_at)}</span>
+                      <span className="shrink-0 text-xs text-zinc-500">{age(t.created_at)}</span>
                     </div>
                     <div className="mt-1.5 flex items-center gap-2">
                       <Progress value={(t.steps / Math.max(1, t.max_steps)) * 100} className="h-1 flex-1 bg-zinc-800 [&>div]:bg-emerald-500" />
-                      <span className="font-mono text-[9px] text-zinc-500">{t.steps}/{t.max_steps} шаг.</span>
+                      <span className="text-[11px] text-zinc-500">{t.steps}/{t.max_steps} шаг.</span>
                     </div>
-                    <div className="mt-1 flex items-center gap-2 font-mono text-[9px] text-zinc-600">
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-400">
                       <span className="truncate">{t.id}</span>
-                      {t.role && <span className="shrink-0 rounded border border-zinc-700 px-1 text-[9px] text-zinc-500">{t.role}</span>}
-                      {eta && <span className="ml-auto shrink-0 text-amber-400/90" title="park-and-resume (R72): задача не убита — ждёт окна квоты">{eta}</span>}
+                      {t.role && <span className="shrink-0 rounded border border-zinc-700 px-1 text-[11px] text-zinc-500">{t.role}</span>}
+                      {eta && <span className="ml-auto shrink-0 text-amber-400/90" title="Task is waiting for the next permitted execution window">{eta}</span>}
                     </div>
                   </div>
                 );

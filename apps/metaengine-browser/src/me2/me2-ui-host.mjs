@@ -8,7 +8,7 @@
  *
  * Разрешение каталога UI (кандидаты): ME2_UI_DIR env → resources/me2-ui (упакованный) →
  * cwd/me2-ui → cwd/../me2-ui. Спавн: ME2_UI_BIN (bun) `run start` (production-сборка Next);
- * при ME2_UI_DEV=1 — `run dev` (только для разработки). Если ME2_UI_BIN не задан и bun
+ * при ME2_UI_DEV=1 — локальный Next CLI с явным loopback (только для разработки). Если ME2_UI_BIN не задан и bun
  * недоступен на машине (R77: установщик обязан работать без внешних зависимостей) —
  * честный фолбэк: Electron-бинарник в роли node (ELECTRON_RUN_AS_NODE=1) запускает
  * standalone server.js напрямую — Next standalone не требует bun. Отсутствие каталога
@@ -20,6 +20,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 export const ME2_UI_HOST_SCHEMA = 'metaengine.browser.me2.ui-host.v1';
 
@@ -115,15 +116,18 @@ export function resolveMe2UiLaunch({
       bin: execPath,
       args: ['server.js'],
       launch_mode: 'EMBEDDED_NODE_STANDALONE',
-      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' }),
+      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', HOSTNAME: '127.0.0.1' }),
     });
   }
   return Object.freeze({
     ...selected,
     bin: env.ME2_UI_BIN || 'bun',
-    args: dev ? ['run', 'dev'] : ['run', 'start'],
+    // Next dev reads --hostname rather than HOSTNAME. Invoke the local CLI
+    // directly; arguments appended to the historical "... | tee dev.log"
+    // package script would be passed to tee instead of Next.
+    args: dev ? [join(selected.dir, 'node_modules/next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', String(UI_PORT)] : ['run', 'start'],
     launch_mode: dev ? 'SOURCE_DEV' : 'PACKAGE_SCRIPT',
-    env_patch: Object.freeze({}),
+    env_patch: Object.freeze({ HOSTNAME: '127.0.0.1' }),
   });
 }
 
@@ -132,6 +136,7 @@ function spawnUi(launch) {
   const env = {
     ...process.env,
     ...launch.env_patch,
+    HOSTNAME: '127.0.0.1',
     PORT: String(UI_PORT),
     ME2_HOSTED_BY_BROWSER: '1',
     ME2_WATCHDOG: 'off',
@@ -141,6 +146,7 @@ function spawnUi(launch) {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
+    windowsHide: true,
   });
   const fwd = (stream, toErr) => {
     let buf = '';
@@ -196,15 +202,22 @@ function scheduleRestart() {
   }, delay);
 }
 
-export async function waitForMe2UiReady({ attempts = 60, intervalMs = 250, probe = me2UiHealthProbe } = {}) {
-  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 60));
-  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 250));
+// Cold Next.js startup can exceed 20 seconds on supported older Windows CPUs.
+// Keep readiness bounded while allowing its owned process to finish loading.
+export async function waitForMe2UiReady({ attempts = 120, intervalMs = 500, probe = me2UiHealthProbe,
+  wait = sleep, now = () => performance.now() } = {}) {
+  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 120));
+  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 500));
+  const deadline = now() + 60000;
   let last = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) return { ok: false, reason: 'readiness_timeout', attempt };
     if (child?.exitCode != null) return { ok: false, reason: `child_exit_${child.exitCode}`, attempt: attempt + 1 };
-    last = await probe(Math.min(1500, Math.max(250, delayMs * 4)));
+    last = await probe(Math.min(remainingMs, 1500, Math.max(250, delayMs * 4)));
+    if (now() >= deadline) return { ok: false, reason: 'readiness_timeout', attempt: attempt + 1 };
     if (last?.ok === true) return { ok: true, reason: 'READY', attempt: attempt + 1 };
-    if (attempt + 1 < maxAttempts) await sleep(delayMs);
+    if (attempt + 1 < maxAttempts) await wait(Math.min(delayMs, Math.max(0, deadline - now())));
   }
   return { ok: false, reason: String(last?.reason || 'readiness_timeout'), attempt: maxAttempts };
 }

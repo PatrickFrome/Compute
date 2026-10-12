@@ -181,6 +181,13 @@ export async function stopOwnedLocalRuntimeHost({ timeoutMs = STOP_TIMEOUT_MS } 
     cleanup_confirmed: confirmed, authority_effect: false });
 }
 
+export function ownedLocalRuntimeHostReady(summary) {
+  // HTTP health can finish after shutdown or an unexpected child exit. Bind
+  // final Browser admission to the exact still-owned process, without starting
+  // a replacement host or trusting the previous READY descriptor alone.
+  return Boolean(summary && ownedHost?.summary === summary && !ownedHost.exited && !ownedHost.stopping);
+}
+
 export function installLocalRuntimeHostShutdown(app) {
   if (!app || typeof app.on !== 'function' || typeof app.quit !== 'function') throw new Error('local_runtime_host_shutdown_app_invalid');
   if (shutdownApps.has(app)) return true;
@@ -292,6 +299,8 @@ export async function startConfiguredLocalRuntimeHost({
         child.once('error', onError);
         child.once('exit', onExit);
       });
+      if (host.exited) throw new Error('local_runtime_host_exited_before_ready');
+      if (host.stopping) throw new Error('local_runtime_host_stopped_before_ready');
       host.summary = Object.freeze({ schema: 'metaengine.browser.runtime-host.v1', state: 'READY',
         instance_id: descriptor.instance_id, endpoint: descriptor.endpoint,
         status_file: descriptor.status_file, pid: child.pid, runtime_owned: true,

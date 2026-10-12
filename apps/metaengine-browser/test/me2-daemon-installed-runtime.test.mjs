@@ -59,7 +59,7 @@ test('R85 packaged ME2 UI prefers installed resources and embedded Electron node
     bin: execPath,
     args: ['server.js'],
     launch_mode: 'EMBEDDED_NODE_STANDALONE',
-    env_patch: { ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' },
+    env_patch: { ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', HOSTNAME: '127.0.0.1' },
   });
 
   const missingPackagedLaunch = resolveMe2UiLaunch({

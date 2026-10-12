@@ -82,7 +82,8 @@ test('R97 renderer keeps only chat fleet + native site persistent; advanced surf
   assert.match(shell, /data-testid=\{actor\.actor_type === "SUPERVISOR" \? "chat-supervisor-row" : "chat-agent-row"\}/);
   assert.match(shell, /data-testid="native-chat-surface-slot"/);
   assert.match(shell, /data-testid="chat-actor-short-id"/);
-  assert.match(shell, /actor\.actor_id\.split\(":"\)\.at\(-1\)\?\.slice\(0, 18\)/);
+  assert.match(shell, /title=\{actor\.actor_id\}/);
+  assert.match(shell, /actor\.title \|\| actor\.model \|\| "ChatGPT session"/);
   assert.match(shell, /primaryChatFleetRoster/);
   assert.match(shell, /selectPrimaryChatActor/);
   assert.doesNotMatch(shell, /useAgentChatSessions/);
@@ -117,12 +118,12 @@ test('R97 Settings is the explicit directory for every hidden advanced surface',
   assert.match(settings, /setPage\(surface\.page\)/);
   assert.doesNotMatch(settings, /page: "(?:command|agents|compute)"/);
   assert.match(settings, /role="tablist"/);
-  assert.match(settings, /Open a tool here or find it with Ctrl\+K/);
+  assert.match(settings, /Find any view with Ctrl\+K/);
 });
 
 
 test('R97 command palette advertises search-only advanced navigation, never retired Alt routes', () => {
-  assert.match(palette, /Advanced surfaces · search/);
+  assert.match(palette, /heading="Workspace"/);
   assert.doesNotMatch(palette, /Pages · Alt\+1\.\.0/);
   assert.doesNotMatch(palette, />Alt\+\{p\.num\}</);
   assert.match(palette, /onSelect=\{\(\) => \{ setPage\(p\.key\); setOpen\(false\); \}\}/);

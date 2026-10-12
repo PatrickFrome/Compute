@@ -74,6 +74,27 @@ test('unified RSI runtime binds the full converged trust-root set with zero auth
   }
 });
 
+test('parallel runtime start binds once and remains replayable after restart', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-start-race-'));
+  try {
+    const ledgerPath = path.join(root, 'rsi.jsonl');
+    const runtime = new RsiRuntimeService({ source_sha: 'a'.repeat(40), ledgerPath });
+    const snapshots = await Promise.all(Array.from({ length: 8 }, () => runtime.start()));
+    assert.ok(snapshots.every(snapshot => snapshot.state === 'READY'));
+    assert.equal(runtime.snapshot().ledger.event_count, 1);
+    await runtime.start();
+    assert.equal(runtime.snapshot().ledger.event_count, 1);
+    const restart = new RsiRuntimeService({ source_sha: 'b'.repeat(40), ledgerPath });
+    await Promise.all([restart.start(), restart.start()]);
+    assert.equal(restart.snapshot().ledger.event_count, 2);
+    const rows = (await fs.readFile(ledgerPath, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.deepEqual(rows.map(row => row.seq), [1, 2]);
+    assert.equal(rows[1].previous_digest, rows[0].event_digest);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('runtime can qualify a candidate but only emit an external promotion nomination', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-candidate-'));
   try {

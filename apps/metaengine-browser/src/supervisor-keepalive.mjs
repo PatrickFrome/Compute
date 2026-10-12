@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
+import { interruptedSetupDigest } from './interrupted-setup-recovery.mjs';
+import { buildSupervisorWakeTransportIntent } from './supervisor-wake-transport-intent.mjs';
 
 export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
@@ -228,6 +230,7 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch, r
 export class SupervisorKeepalive {
   #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch; #processIncarnationId;
   #saveTail = Promise.resolve();
+  #transportIntentPersistenceFenced = false;
 
   constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), processIncarnationId = null, minWakeIntervalMs = 60000, maxCyclesPerEpoch = null } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('keepalive_persistence_required');
@@ -728,6 +731,23 @@ export class SupervisorKeepalive {
     return events;
   }
 
+  async ensureBootstrapWake() {
+    // Restart retires predecessor queue entries, but the research cadence is
+    // still durable. A clean unbound startup needs its own fresh intent rather
+    // than waiting for that cadence or reconstructing a predecessor wake.
+    if (this.#state.paused || this.#state.admission_state === 'CLOSED'
+      || this.#state.state !== 'RECOVERING' || this.#state.conversation_url
+      || this.#state.tab_id || this.#state.pending_wake || this.#state.active_wake
+      || this.#state.rollover_attempt || this.#state.parked_reason
+      || this.#state.queued_wakes.length !== 0) return false;
+    if (this.#state.last_unsent_attempt_at) {
+      const since = this.#clock() - new Date(this.#state.last_unsent_attempt_at).getTime();
+      if (Number.isFinite(since) && since < this.#minWakeIntervalMs) return false;
+    }
+    await this.enqueueWake('SUPERVISOR_RECOVERY_REQUIRED', { key: `startup-${this.#processIncarnationId}` });
+    return true;
+  }
+
   canWake() {
     if (this.#state.admission_state === 'CLOSED'
       || this.#state.paused
@@ -780,6 +800,51 @@ export class SupervisorKeepalive {
   async prepareWake(reason, metadata = {}) {
     await this.enqueueWake(reason, metadata);
     return this.prepareNextWake();
+  }
+
+  // Preserve the precise origin of a wake before the first physical Send.
+  // This is NOT send confirmation, model proof, nor permission to replay.
+  async recordWakeTransportIntent({ wake_id, phase, tab_id, frame, message } = {}) {
+    if (this.#transportIntentPersistenceFenced) throw new Error('keepalive_transport_intent_persistence_fenced');
+    const pending = this.#state.pending_wake;
+    if (!pending || pending.wake_id !== wake_id || pending.ambiguous_at
+      || pending.process_incarnation_id !== this.#processIncarnationId) {
+      throw new Error('keepalive_transport_intent_current_wake_required');
+    }
+    const intent = buildSupervisorWakeTransportIntent({
+      pending, phase, tab_id, frame, message,
+      processIncarnationId: this.#processIncarnationId,
+      recorded_at: iso(this.#clock),
+    });
+    const intents = Array.isArray(pending.transport_intents) ? pending.transport_intents : [];
+    // A completed intent publication grants only ONE attempt to cross Send.
+    // Never turn a repeated call into permission to dispatch a duplicate click.
+    if (intents.some(row => row.phase === phase)) {
+      throw new Error('keepalive_transport_intent_already_recorded');
+    }
+    if (intents.length >= 2 || (phase === 'ROOT_SEED' && (intents.length !== 0
+      || this.#state.conversation_url))
+      || (phase === 'WAKE' && !this.#state.conversation_url
+        && !intents.some(row => row.phase === 'ROOT_SEED'))) {
+      throw new Error('keepalive_transport_intent_sequence_invalid');
+    }
+    // A known supervisor must never switch its target during an in-flight
+    // wake. The new-conversation bootstrap is the only unbound exception.
+    if (phase === 'WAKE' && this.#state.conversation_url
+      && (intent.conversation_url !== this.#state.conversation_url
+        || (this.#state.tab_id && tab_id !== this.#state.tab_id))) {
+      throw new Error('keepalive_transport_intent_binding_mismatch');
+    }
+    pending.transport_intents = [...intents, intent];
+    try { await this.#persist(); }
+    catch (error) {
+      // The rename may have succeeded even though the caller lost its ACK.
+      // Fence this process incarnation; the next process will observe the
+      // pending wake as unknown rather than issuing a duplicate physical Send.
+      this.#transportIntentPersistenceFenced = true;
+      throw error;
+    }
+    return Object.freeze(clone(intent));
   }
 
   async confirmWakeSent(wakeId) {
@@ -887,6 +952,48 @@ export class SupervisorKeepalive {
     this.#state.last_completed_cycle_at = retiredAt;
     this.#state.state = this.#postWakeSettlementState('RECOVERING');
     await this.#persist();
+    return this.snapshot();
+  }
+
+  async archiveInterruptedBootstrapForNewEpoch({ recovery_id, archive_sha256, plan, expected_pending_wake } = {}) {
+    if (!/^recovery_[a-f0-9-]{36}$/i.test(String(recovery_id || '')) || !/^[a-f0-9]{64}$/.test(String(archive_sha256 || ''))) {
+      throw new Error('keepalive_operator_recovery_archive_binding_required');
+    }
+    const pending = this.#state.pending_wake;
+    if (!plan?.eligible || !pending?.ambiguous_at || this.#state.conversation_url || this.#state.active_wake || this.#state.rollover_attempt
+      || pending.automatic_retry_allowed !== false || !pending.process_boundary_fenced_at || !this.#state.predecessor_fenced_at
+      || !pending.process_incarnation_id || pending.process_incarnation_id === this.#state.process_incarnation_id
+      || interruptedSetupDigest(pending) !== interruptedSetupDigest(expected_pending_wake)
+      || plan.current_process_incarnation_id !== this.#state.process_incarnation_id
+      || plan.expected_admission_generation_floor !== this.#state.admission_generation_floor
+      || plan.next_supervisor_epoch !== this.#state.supervisor_epoch + 1) {
+      throw new Error('keepalive_operator_recovery_readback_changed');
+    }
+    const before = clone(this.#state);
+    const archivedAt = iso(this.#clock);
+    this.#state.ambiguous_history = [...this.#state.ambiguous_history, {
+      ...clone(pending), archived_at: archivedAt, retired_at: archivedAt,
+      retired_reason: 'OPERATOR_ARCHIVED_UNKNOWN_PREDECESSOR_BOOTSTRAP',
+      operator_recovery_id: recovery_id, operator_recovery_archive_sha256: archive_sha256,
+      previous_effect_outcome: 'UNKNOWN', prior_effect_replayed: false,
+      automatic_retry_allowed: false, authority_effect: false,
+    }].slice(-MAX_WAKE_HISTORY);
+    this.#state.pending_wake = null;
+    this.#state.active_wake = null;
+    this.#state.supervisor_epoch = plan.next_supervisor_epoch;
+    this.#state.cycle_seq = 0;
+    this.#state.conversation_url = null;
+    this.#state.tab_id = null;
+    this.#state.queued_wakes = [];
+    this.#state.previous_worker_generation = {};
+    this.#state.last_wake_at = null;
+    this.#state.last_wake_reason = null;
+    // The new epoch has no inherited research intent. Let the existing
+    // lifecycle enqueue a fresh bootstrap on its next admitted cycle instead
+    // of waiting up to researchMs on the archived epoch's scheduling timestamp.
+    this.#state.last_research_wake_at = null;
+    this.#state.state = this.#state.paused ? 'PAUSED' : this.#state.admission_state === 'CLOSED' ? 'PARKED' : 'RECOVERING';
+    try { await this.#persist(); } catch (error) { this.#state = before; throw error; }
     return this.snapshot();
   }
 

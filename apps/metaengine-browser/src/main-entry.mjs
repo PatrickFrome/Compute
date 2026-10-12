@@ -1,4 +1,5 @@
-import { app, BaseWindow, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BaseWindow, dialog } from 'electron';
+import { secondaryDiagnosticRefusal, SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE } from './secondary-diagnostic-refusal.mjs';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
@@ -10,6 +11,7 @@ import {
   activateExistingPrimaryWindow,
   beginBrowserStartupJournal,
   recordBrowserStartupEvent,
+  observePrimaryWindowStartup,
   waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
 } from './browser-startup-observability.mjs';
@@ -86,13 +88,22 @@ if (guard.installer_shutdown_control) {
       }));
       app.exit(0);
     }
+  } else if (versionProbe || profileProbe || clientGoalJournalProbe || instanceHoldProbe) {
+    // The old silent exit(0) allowed a new candidate's secondary probe to
+    // masquerade as a successfully qualified primary when an older installed
+    // Browser already owned the singleton. An explicit refusal is not a
+    // version, profile, or journal proof and grants no retry permission.
+    console.error(JSON.stringify(secondaryDiagnosticRefusal({
+      argv: process.argv, version: app.getVersion(),
+    })));
+    app.exit(SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE);
   } else {
-    // Probe/smoke and updater-successor launches preserve the existing
-    // fail-closed singleton behavior. They are not interactive user launches
-    // and must not manufacture a second process authority path.
+    // Smoke and updater-successor launches retain their existing fail-closed
+    // singleton behavior, without manufacturing another Browser runtime.
     app.exit(0);
   }
 } else {
+  const prepareAdmittedPrimary = async () => {
   let preparationFinished;
   const primaryPreparation = new Promise(resolve => { preparationFinished = resolve; });
   let runtimeController;
@@ -107,6 +118,32 @@ if (guard.installer_shutdown_control) {
     if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
   });
   try {
+  if (updatedLaunch && app.isPackaged === true) {
+    // An updater's durable PROBE_ONLY receipt describes an offline successor
+    // acknowledgement. Verify it while this process owns the singleton, before
+    // loading a provider that may be stopped or pinned to the prior package.
+    // --updated alone grants no exception: NORMAL/missing evidence continues
+    // through the same hard Owner admission below.
+    const offlineHandoff = await import('./self-update-handoff.mjs');
+    let expectedOfflineReceipt = null;
+    try { expectedOfflineReceipt = await offlineHandoff.readExpectedPreInstallReceipt(app); }
+    catch {
+      // Invalid receipt evidence cannot select an offline mode. The normal
+      // startup inspection retains its existing ambiguity/hold behavior.
+    }
+    if (expectedOfflineReceipt?.successor_startup === offlineHandoff.SUCCESSOR_STARTUP_PROBE_ONLY) {
+      const acknowledged = await offlineHandoff.persistUpdatedSuccessorReceipt(app, {
+        primaryInstance: true, appId: METAENGINE_BROWSER_APP_ID,
+      });
+      if (acknowledged?.successor_startup !== offlineHandoff.SUCCESSOR_STARTUP_PROBE_ONLY) {
+        throw new Error('self_update_offline_successor_receipt_unconfirmed');
+      }
+      console.log(JSON.stringify(acknowledged.row));
+      if (typeof app.releaseSingleInstanceLock === 'function') app.releaseSingleInstanceLock();
+      app.exit(0);
+      return;
+    }
+  }
   runtimeController = import('./local-runtime-host-controller.mjs');
   const { installLocalRuntimeHostShutdown } = await runtimeController;
   installLocalRuntimeHostShutdown(app);
@@ -123,12 +160,15 @@ if (guard.installer_shutdown_control) {
     let bootstrapState = providerBoot.persistentLocalProviderBootstrap.state;
     if (app.isPackaged && browserRuntimeNeeded && interactiveNormalLaunch
       && !bypassSingleInstance && bootstrapState === 'NO_OWNER_CONFIG') {
-      // First-run setup is an offline, consented LOCAL_POSTGRES surface. It
-      // cannot import Browser/main/HostResilience until a previously restored
-      // PostgreSQL 17 is independently qualified and owner-bound.
-      const { showInstalledRestoredProviderWizard } = await import('./local-restored-pg17-setup.mjs');
-      const setup = await showInstalledRestoredProviderWizard({ app, BrowserWindow, dialog, ipcMain });
-      if (setup.state === 'CONFIGURED') {
+      // Existing Keeper installations are attached from a protected,
+      // path-only descriptor. There is no interactive database wizard: a
+      // missing descriptor remains a hard admission failure below.
+      const { autoConnectInstalledAttachedProvider } = await import('./local-restored-pg17-setup.mjs');
+      const setup = await autoConnectInstalledAttachedProvider({
+        env: process.env, platform: process.platform, resourcesPath: process.resourcesPath,
+        appDataDirectory: process.env.APPDATA,
+      });
+      if (setup.state === 'CONFIGURED' && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
         const readyProvider = await providerBoot.bootstrapPersistentLocalProvider();
         bootstrapState = readyProvider.state;
       }
@@ -249,6 +289,7 @@ if (guard.installer_shutdown_control) {
           {
             launch_id: launchData?.launch_id ?? null,
             window_count: activation.window_count ?? 0,
+            window_id: activation.window_id ?? null,
             restored: activation.restored === true,
             visible: activation.visible === true,
             focused: activation.focused === true,
@@ -624,23 +665,29 @@ if (guard.installer_shutdown_control) {
         // A successful import is still not a usable Browser. Require independent
         // readback that a visible BaseWindow survived for a bounded stability
         // interval. CI consumes the same durable event on a normal no-flag boot.
-        void waitForStablePrimaryWindow(BaseWindow)
-          .then((windowReadback) => recordStartup(
+        const windowObserver = observePrimaryWindowStartup(BaseWindow, {
+          onReadback: (windowReadback) => recordStartup(
             windowReadback.ok ? 'PRIMARY_WINDOW_STABLE' : 'PRIMARY_WINDOW_STABLE_TIMEOUT',
             windowReadback.reason,
             {
               window_count: windowReadback.window_count ?? 0,
+              window_id: windowReadback.window_id ?? null,
               stable_ms: windowReadback.stable_ms ?? 0,
               visible: windowReadback.visible === true,
               focused: windowReadback.focused === true,
+              elapsed_ms: windowReadback.elapsed_ms ?? 0,
+              timeout_ms: windowReadback.timeout_ms ?? 0,
+              observation_phase: windowReadback.observation_phase,
             },
-          ))
-          .catch((error) => recordStartup(
+          ),
+          onError: (error) => recordStartup(
             'PRIMARY_WINDOW_OBSERVER_FAILED',
             'PRIMARY_WINDOW_READBACK_ERROR',
             {},
             error,
-          ));
+          ),
+        });
+        app.once('will-quit', () => windowObserver.stop());
       }
 
       if (resumeSuccessorQualification) {
@@ -736,4 +783,8 @@ if (guard.installer_shutdown_control) {
   }
   }
   } finally { preparationFinished(); }
+  };
+  const providerPreparation = prepareAdmittedPrimary();
+  globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__ = providerPreparation;
+  await providerPreparation;
 }

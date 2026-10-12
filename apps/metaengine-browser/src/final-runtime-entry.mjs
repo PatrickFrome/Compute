@@ -122,6 +122,7 @@ await import('./main-entry.mjs');
 // continuation. On the edge it asks the existing primary runtime to execute its
 // already-registered activate path; the HostResilience bootstrap barrier inside
 // main.mjs still fences actual window creation.
+function continueAfterPrimaryProviderPreparation() {
 const primaryInstance = typeof app.hasSingleInstanceLock !== 'function'
   || app.hasSingleInstanceLock() === true;
 if (primaryUiRecoveryEnabled && primaryInstance && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
@@ -194,4 +195,15 @@ if (primaryInstance && !probeStdoutReserved && primaryUiRecoveryEnabled && proce
       update_authority_effect: false,
       authority_effect: false,
     })));
+}
+}
+
+if (globalThis.__METAENGINE_PRIMARY_PROVIDER_SETUP_PENDING__ === true) {
+  // First-run UI must release top-level ESM so Electron can become ready.
+  // Runtime activation and ME2 remain behind the same provider admission.
+  void globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__?.then(
+    continueAfterPrimaryProviderPreparation, () => {},
+  );
+} else {
+  continueAfterPrimaryProviderPreparation();
 }

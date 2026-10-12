@@ -17,7 +17,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
 
   return (
     <header
-      className="flex h-[42px] shrink-0 items-center gap-2 border-b border-zinc-800/90 bg-[#0b0b0d] px-2"
+      className="flex h-[42px] shrink-0 items-center gap-3 border-b border-zinc-800/90 bg-[#0b0b0d] px-3"
       data-testid="topbar"
     >
       <button
@@ -25,9 +25,9 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
         onClick={() => setPage("browser")}
         data-testid="brand"
         className="flex h-8 shrink-0 items-center px-1.5 text-left hover:bg-zinc-900"
-        title="METAENGINE · Chat Fleet"
+        title="METAENGINE · Workspace"
       >
-        <span className="text-[13px] font-semibold tracking-[0.08em] text-zinc-100">METAENGINE</span>
+        <span className="text-[13px] font-semibold tracking-[0.025em] text-zinc-200">METAENGINE</span>
       </button>
 
       {mainWorkspace ? <button type="button" onClick={onOpenFleet} data-testid="fleet-picker-toggle"
@@ -42,7 +42,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
           data-testid="return-to-chat-fleet"
           title="Return to the single main workspace"
         >
-          Back to agents
+          Workspace
         </button>
       ) : null}
 
@@ -54,7 +54,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
         className="group mx-auto flex h-8 min-w-0 flex-1 max-w-[720px] items-center gap-2 border border-zinc-800 bg-zinc-900/55 px-2.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
       >
         <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-400">
-          Search tools and commands
+           Search workspace
         </span>
         <kbd className="hidden shrink-0 items-center gap-0.5 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 sm:flex">
           Ctrl K
@@ -72,7 +72,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
               ? "border-cyan-900/70 bg-cyan-950/20 text-cyan-300"
               : "border-zinc-800 bg-zinc-950 text-zinc-500 hover:text-zinc-200"
           }`}
-          title="Settings and advanced tools"
+           title="Connections, settings and workspace tools"
         >
           Settings
         </button>
@@ -91,10 +91,10 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
                 ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
                 : "border-zinc-800 bg-zinc-950 text-zinc-400"
           }`}
-          title={work ? `${work.detail} Continuous autonomy: ${capabilityLabel(work, 'continuous_autonomy')}` : "Native runtime status is unavailable. Open Settings for details."}
-          aria-label={`Execution status: ${work?.label || "Status unavailable"}. Open Settings.`}
+           title={work ? `${work.detail} Continuous autonomy: ${capabilityLabel(work, 'continuous_autonomy')}` : "Connection status is unavailable. Open Settings for details."}
+           aria-label={`Connection: ${connection?.admin_ready && connection?.local_runtime_ready ? "Connected" : "Pending"}. Execution: ${work?.label || "Unavailable"}. Open Settings.`}
         >
-          <span className="truncate">{work?.label || (runtime.state === "LOADING" ? "Starting" : "Status unavailable")}</span>
+          <span className="truncate">{work?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || work?.reason === "AGENT_ORIGIN_UNPROVEN" ? "Check sessions" : connection?.admin_ready && connection?.local_runtime_ready ? "Connected" : connection?.local_runtime_ready ? "Local runtime" : runtime.state === "LOADING" ? "Connecting…" : "Check connection"}</span>
         </button>
       </div>
     </header>

@@ -254,7 +254,8 @@ test('NSIS migration fallback is bounded and exact-path only', async () => {
   assert.doesNotMatch(ps1, /^\s*(?:&\s*)?taskkill(?:\.exe)?\b/im);
   assert.doesNotMatch(ps1, /Stop-Process\s+-Name/i);
 
-  assert.match(nsh, /!macro customInit/);
+  assert.match(nsh, /!macro customCheckAppRunning/);
+  assert.doesNotMatch(nsh, /!macro customInit\b/);
   assert.match(nsh, /\$INSTDIR\\\$\{APP_EXECUTABLE_FILENAME\}/);
   assert.match(nsh, /metaengine-installer-shutdown\.ps1/);
   assert.match(nsh, /ExecWait/);

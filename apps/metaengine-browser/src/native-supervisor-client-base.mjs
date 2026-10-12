@@ -38,6 +38,7 @@ import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-resul
 // METAENGINE_SUPERVISOR_BASE_URL env override). Re-exported here for backwards
 // compatibility with existing importers and tests.
 import { NATIVE_SUPERVISOR_BASE } from './native-supervisor-endpoints.mjs';
+import { localStateProviderConnectionReady } from './local-state-provider-policy.mjs';
 export { NATIVE_SUPERVISOR_BASE };
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
@@ -423,6 +424,7 @@ export class NativeSupervisorClient {
   #supervisorMode = 'CONTROL';
   #armed = true;
   #lifecycle = null;
+  #interruptedSetupRecoveryHold = false;
   #mesh = null;
   #selfUpdate = null;
   #continuityStatus = {
@@ -576,10 +578,13 @@ export class NativeSupervisorClient {
 
     const continuousServiceCanActuate = () => controlModeAllows(this.#supervisorMode)
       && armedAllows(this.#armed)
+      && this.#interruptedSetupRecoveryHold !== true
       && devosRuntimeControlAllowsContinuousService(this.#runtimeControl);
     const executeSupervisorCommand = async (command) => {
       const action = String(command?.action || '');
+      if (this.#interruptedSetupRecoveryHold && !READ_ONLY_ACTIONS.has(action)) throw new Error('interrupted_setup_recovery_fenced');
       if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
+        if (this.#interruptedSetupRecoveryHold) throw new Error('interrupted_setup_recovery_fenced');
         if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
         if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
         if (!devosRuntimeControlAllowsContinuousService(this.#runtimeControl)) throw new Error('continuous_service_admission_fenced');
@@ -727,7 +732,8 @@ export class NativeSupervisorClient {
         cycle_errors_terminal: false,
         runtime_control: structuredClone(this.#runtimeControl),
         authoritative_admission_required: true,
-        actuation_allowed: devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+        actuation_allowed: !this.#interruptedSetupRecoveryHold && devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+        interrupted_setup_recovery_fenced: this.#interruptedSetupRecoveryHold,
         authority_effect: false,
       },
       result_receipt_reconciliation: {
@@ -993,7 +999,8 @@ export class NativeSupervisorClient {
     const heartbeatFresh = Number.isFinite(heartbeatAtMs)
       && Date.now() - heartbeatAtMs <= Math.max(15_000, this.#intervalMs * 5);
     const hasDevice = Boolean(identity?.device_id);
-    const adminReady = this.#adminStatus?.admin_ready === true;
+    const localRuntimeReady = localStateProviderConnectionReady(this.#running);
+    const adminReady = localRuntimeReady && this.#adminStatus?.admin_ready === true;
     let cloudControlState = 'LOCAL_ONLY';
     if (!hasDevice) {
       cloudControlState = ['PENDING','PENDING_APPROVAL','RETRY_REQUIRED'].includes(String(this.#enrollmentStatus))
@@ -1007,7 +1014,7 @@ export class NativeSupervisorClient {
 
     return Object.freeze({
       schema: 'metaengine.client.connection-status.v1',
-      local_runtime_ready: this.#running === true,
+      local_runtime_ready: localRuntimeReady,
       secure_device_key_ready: Boolean(identity?.key_fingerprint_sha256),
       device_enrolled: hasDevice,
       device_id: hasDevice ? String(identity.device_id) : null,
@@ -1315,6 +1322,33 @@ export class NativeSupervisorClient {
     return true;
   }
 
+  async managedTaskProjectRequest({ method, path, body } = {}) {
+    if (method !== 'POST' || !['/v1/devos/project-admission', '/v1/devos/project-binding/reserve', '/v1/devos/project-binding/readback', '/v1/devos/project-repository/provision'].includes(path)) throw new Error('managed_project_transport_route_invalid');
+    const response = await this.#signedRequest(path, { method, payload: body });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) {
+      const code = typeof value?.error === 'string' && /^MANAGED_PROJECT_[A-Z0-9_]+$/.test(value.error) ? value.error : `MANAGED_PROJECT_HTTP_${response.status}`;
+      throw new Error(code);
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('managed_project_transport_response_invalid');
+    return value;
+  }
+
+  async projectContinuityRequest({ operation, body } = {}) {
+    if (!['register', 'snapshot', 'history', 'spawn', 'activity', 'policy', 'reconcile'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('project_continuity_transport_body_invalid');
+    const response = await this.#signedRequest(`/v1/devos/project/${operation}`, { method: 'POST', payload: structuredClone(body) });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(typeof value?.error === 'string' && /^PROJECT_CONTINUITY_[A-Z0-9_]+$/.test(value.error)
+        ? value.error : `PROJECT_CONTINUITY_HTTP_${response.status}`);
+      error.effect_outcome = response.status >= 500 ? 'UNKNOWN' : 'REJECTED';
+      throw error;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.authority_effect !== false) throw new Error('project_continuity_transport_response_invalid');
+    return value;
+  }
+
   async #signedRequest(path, { method = 'POST', payload = null, signal = null } = {}) {
     const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
@@ -1503,10 +1537,53 @@ export class NativeSupervisorClient {
   // admission hook while its bounded turn is active; the DB remains the sole
   // task/command lease authority.
   canStartMaintenance() {
-    return true;
+    return this.#interruptedSetupRecoveryHold !== true;
+  }
+
+  setInterruptedSetupRecoveryFence(fenced) {
+    if (typeof fenced !== 'boolean') throw new Error('interrupted_setup_recovery_fence_invalid');
+    this.#interruptedSetupRecoveryHold = fenced;
+  }
+
+  interruptedSetupRecoveryFenced() {
+    return this.#interruptedSetupRecoveryHold;
+  }
+
+  async withInterruptedSetupRecovery(operation, { retainFenceOnError = null } = {}) {
+    if (typeof operation !== 'function') throw new Error('interrupted_setup_recovery_operation_required');
+    if (retainFenceOnError != null && typeof retainFenceOnError !== 'function') throw new Error('interrupted_setup_recovery_error_policy_invalid');
+    if (this.#interruptedSetupRecoveryHold || this.#currentCommands.size > 0 || this.#legacyFastlaneBusy || this.canStartMaintenance() !== true) {
+      throw new Error('interrupted_setup_native_mutation_busy');
+    }
+    this.#interruptedSetupRecoveryHold = true;
+    let operationStarted = false;
+    try {
+      await this.#maintenancePromise;
+      // A remote lease may have arrived while the maintenance lane drained.
+      // It cannot execute a mutation under the hold; require it fully settled.
+      if (this.#currentCommands.size > 0) throw new Error('interrupted_setup_native_mutation_busy');
+      operationStarted = true;
+      const result = await operation();
+      this.#interruptedSetupRecoveryHold = false;
+      return result;
+    } catch (error) {
+      // This catch owns the acquired hold. A rejected concurrent caller never
+      // enters it and therefore cannot release another operation's fence.
+      if (!operationStarted) this.#interruptedSetupRecoveryHold = false;
+      else if (retainFenceOnError) {
+        try { this.#interruptedSetupRecoveryHold = retainFenceOnError() !== false; } catch { this.#interruptedSetupRecoveryHold = true; }
+      }
+      throw error;
+    }
+  }
+
+  async archiveInterruptedBootstrapForNewEpoch(binding) {
+    if (!this.#interruptedSetupRecoveryHold) throw new Error('interrupted_setup_native_hold_required');
+    return this.#lifecycle?.archiveInterruptedBootstrapForNewEpoch(binding);
   }
 
   #kickMaintenance() {
+    if (this.#interruptedSetupRecoveryHold) return this.#maintenancePromise;
     if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
     if (this.canStartMaintenance() !== true) return this.#maintenancePromise;
     const now = Date.now();
@@ -1832,6 +1909,9 @@ export class NativeSupervisorClient {
   }
 
   async #executeLocalOrRemote(command) {
+    if (this.#interruptedSetupRecoveryHold && !READ_ONLY_ACTIONS.has(String(command?.action || ''))) {
+      throw new Error('interrupted_setup_recovery_fenced');
+    }
     const action = String(command?.action || '').toUpperCase();
     // This is the only program-policy bypass. The command has already traversed
     // enrollment + device-signed lease transport before reaching this function.
@@ -1906,6 +1986,7 @@ export class NativeSupervisorClient {
       if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
       return this.#selfUpdate?.applyWhenSafe();
     }
+    if (this.#interruptedSetupRecoveryHold && !READ_ONLY_ACTIONS.has(action)) throw new Error('interrupted_setup_recovery_fenced');
     if (!controlModeAllows(this.#supervisorMode) && !READ_ONLY_ACTIONS.has(action)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
     if (!armedAllows(this.#armed) && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
     return this.#executeCommand(command);

@@ -40,6 +40,7 @@ function fmtBytes(n: number): string {
 
 export function MemoryPage() {
   const { toast } = useToast();
+  const [observed, setObserved] = useState(false);
 
   // ── MEMORY (legacy mem-блок L3141) ──
   const [mem, setMem] = useState<MemData | null>(null);
@@ -56,7 +57,10 @@ export function MemoryPage() {
     const revision = ++memoryReadRevision.current;
     try {
       const r = await me2Fetch<MemData>(`/memory?XTransformPort=3041&limit=8${q ? `&q=${encodeURIComponent(q)}` : ""}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`, { signal });
-      if (!signal?.aborted && revision === memoryReadRevision.current) setMem(r?.ok === true ? r : null);
+      if (!signal?.aborted && revision === memoryReadRevision.current) {
+        setMem(r?.ok === true ? r : null);
+        setObserved(true);
+      }
     } catch { /* daemon недоступен — панель просто без данных */ }
   }, [memQ, memKind]);
   const memOp = useCallback(async (body: Record<string, unknown>, okMsg: string) => {
@@ -191,14 +195,20 @@ export function MemoryPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-memory" data-panel-memory>
-      <PageHeader title="MEMORY" sub="ME4 память · token-economy · RSI" />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-2">
+      <PageHeader title="Memory" sub="Saved knowledge, recalled context and improvement drafts."
+        actions={<button type="button" onClick={() => { void loadMem(); void loadRsi(); void loadMemEcon(); void loadBlock(); void loadBrain(); }} className="rounded-lg px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">Refresh</button>} />
+      {!observed || !mem ? (
+        <div role="status" className="mb-3 rounded-xl bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
+          {!observed ? "Loading memory…" : "Memory data is unavailable. Check the runtime connection in Settings."}
+        </div>
+      ) : null}
+      <div className="mc-scroll grid min-h-0 flex-1 auto-rows-max grid-cols-1 items-start gap-3 overflow-y-auto pr-1 xl:grid-cols-2">
         {/* кол.1: MEMORY */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="memory-list" title="MEMORY" icon={Database} tone="teal"
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="memory-list" title="Saved knowledge" icon={Database} tone="teal"
             right={<>
               {mem && (
-                <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="SQLite WAL — переживает рестарт (исправление CAVEAT M13/R6)">
+                <span className="hidden text-xs text-zinc-500 sm:inline" title="Saved knowledge by record type">
                   epi {mem.status.by_kind.episodic ?? 0} · sem {mem.status.by_kind.semantic ?? 0} · proc {mem.status.by_kind.procedural ?? 0}
                 </span>
               )}
@@ -213,57 +223,57 @@ export function MemoryPage() {
               <form onSubmit={(e) => { e.preventDefault(); void memWrite(); }} className="space-y-1.5 rounded border border-zinc-800/70 bg-zinc-950/40 p-1.5">
                 <div className="flex gap-1.5">
                   <select value={wKind} onChange={(e) => setWKind(e.target.value)} aria-label="Тип записи"
-                    className="h-7 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-1 font-mono text-[10px] text-zinc-300 outline-none focus:border-teal-900">
+                    className="h-7 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-1 text-xs text-zinc-300 outline-none focus:border-teal-900">
                     {(["semantic", "episodic", "procedural"] as const).map((k) => <option key={k} value={k}>{k}</option>)}
                   </select>
                   <input value={wKey} onChange={(e) => setWKey(e.target.value)} placeholder="key (пусто → op:<ts>)" aria-label="Ключ записи"
-                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900" />
+                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-xs text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-teal-900" />
                   <input value={wImportance} onChange={(e) => setWImportance(e.target.value)} placeholder="0.8" aria-label="Важность (0..1)" title="importance 0..1"
-                    className="h-7 w-16 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[10px] text-zinc-300 outline-none focus:border-teal-900" />
+                    className="h-7 w-16 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-xs text-zinc-300 outline-none focus:border-teal-900" />
                 </div>
                 <div className="flex gap-1.5">
                   <input value={wContent} onChange={(e) => setWContent(e.target.value)} placeholder="записать факт/урок в память…" aria-label="Содержимое записи"
-                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900" />
-                  <button type="submit" disabled={memBusy || !mem} className="h-7 shrink-0 rounded border border-zinc-700 px-2 font-mono text-[10px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">+ зап</button>
+                    className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-xs text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-teal-900" />
+                  <button type="submit" disabled={memBusy || !mem} className="h-7 shrink-0 rounded border border-zinc-700 px-2 text-xs text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">+ зап</button>
                 </div>
               </form>
 
               {/* поиск + фильтр kind */}
               <div className="flex gap-1.5">
                 <input value={memQ} onChange={(e) => { setMemQ(e.target.value); void loadMem(e.target.value, memKind); }} placeholder="поиск по памяти (score: важность×свежесть×hits)…" aria-label="Поиск в памяти"
-                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900" />
+                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-[11px] text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-teal-900" />
                 <select value={memKind} onChange={(e) => { setMemKind(e.target.value); void loadMem(memQ, e.target.value); }} aria-label="Фильтр по типу памяти"
-                  className="h-7 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-1 font-mono text-[10px] text-zinc-300 outline-none focus:border-teal-900">
+                  className="h-7 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-1 text-xs text-zinc-300 outline-none focus:border-teal-900">
                   {MEM_KINDS.map((k) => <option key={k || "all"} value={k}>{k ? k.slice(0, 3) : "всё"}</option>)}
                 </select>
               </div>
 
               <div className="max-h-64 space-y-0.5 overflow-y-auto mc-scroll" role="list" aria-label="Записи памяти">
                 {(mem?.rows ?? []).map((r) => (
-                  <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]"
+                  <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 text-[11px]"
                     title={`${r.key} · важность ${r.importance} · hits ${r.hits}${r.tags ? ` · tags ${r.tags}` : ""}\n${r.content}`}>
-                    <span className={`shrink-0 rounded px-1 text-[8px] ${r.kind === "episodic" ? "bg-cyan-950/60 text-cyan-400" : r.kind === "semantic" ? "bg-violet-950/60 text-violet-300" : "bg-amber-950/60 text-amber-300"}`}>{r.kind.slice(0, 4)}</span>
-                    <span className="shrink-0 text-zinc-600" title={r.key}>{r.key}</span>
+                    <span className={`shrink-0 rounded px-1 text-xs ${r.kind === "episodic" ? "bg-cyan-950/60 text-cyan-400" : r.kind === "semantic" ? "bg-violet-950/60 text-violet-300" : "bg-amber-950/60 text-amber-300"}`}>{r.kind.slice(0, 4)}</span>
+                    <span className="shrink-0 text-zinc-400" title={r.key}>{r.key}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-400" title={r.content}>{r.content}</span>
-                    {typeof r.score === "number" && <span className="shrink-0 text-zinc-600" title="score: важность×свежесть×hits">{r.score.toFixed(2)}</span>}
+                    {typeof r.score === "number" && <span className="shrink-0 text-zinc-400" title="score: важность×свежесть×hits">{r.score.toFixed(2)}</span>}
                     <button type="button" onClick={() => void memOp({ op: "delete", id: r.id }, "запись удалена")} disabled={memBusy}
-                      aria-label={`Удалить запись ${r.key}`} className="shrink-0 text-zinc-600 transition hover:text-rose-400">✕</button>
+                      aria-label={`Удалить запись ${r.key}`} className="shrink-0 text-zinc-400 transition hover:text-rose-400">✕</button>
                   </div>
                 ))}
                 {mem && mem.rows.length === 0 && (
-                  <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">пусто — эпизоды появятся после выполнения задач</div>
+                  <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">пусто — эпизоды появятся после выполнения задач</div>
                 )}
-                {!mem && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">daemon недоступен…</div>}
+                {!mem && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">Runtime data is unavailable</div>}
               </div>
             </div>
           </Sec>
         </div>
 
         {/* кол.2: economy · rsi · recall/brain */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="memory-econ" title="TOKEN·ECONOMY" icon={Coins} tone="teal"
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="memory-econ" defaultOpen={false} title="Context delivery" icon={Coins} tone="teal"
             right={<>
-              {memEcon && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="E5: дельта-доставка памяти — критичные semantic-уроки (importance ≥ 0.85) всегда в блоке; эпизоды и неизменённые записи элиминируются по hash+TTL 30м">−{Math.round(memEcon.avg_saved_pct * 100)}% · {memEcon.deliveries} дост.</span>}
+              {memEcon && <span className="hidden text-xs text-zinc-500 sm:inline" title="Context delivery savings reported by this runtime">−{Math.round(memEcon.avg_saved_pct * 100)}% · {memEcon.deliveries} deliveries</span>}
             </>}>
             <div data-testid="mem-econ-chips" className="space-y-2">
               <div className="flex flex-wrap gap-1.5">
@@ -272,29 +282,29 @@ export function MemoryPage() {
                 <Chip label="saved_total" value={memEcon ? fmtBytes(memEcon.bytes_saved_total) : "—"} tone="emerald" title="суммарно сэкономлено байт (bytes_full − bytes_compact)" />
               </div>
               <div className="space-y-0.5">
-                <div className="text-[9px] uppercase tracking-wider text-zinc-600">по consumer'ам</div>
+                <div className="text-[11px] text-zinc-400">по consumer'ам</div>
                 {(memEcon?.by_consumer ?? []).map((c) => (
-                  <div key={c.consumer} className="flex items-center gap-2 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`${c.consumer} · доставок ${c.deliveries} · сэкономлено ${fmtBytes(c.bytes_saved)}`}>
+                  <div key={c.consumer} className="flex items-center gap-2 rounded bg-zinc-900/50 px-1.5 py-1 text-[11px]" title={`${c.consumer} · доставок ${c.deliveries} · сэкономлено ${fmtBytes(c.bytes_saved)}`}>
                     <span className="min-w-0 flex-1 truncate text-zinc-400">{c.consumer}</span>
-                    <span className="shrink-0 text-zinc-600">{c.deliveries} дост.</span>
+                    <span className="shrink-0 text-zinc-400">{c.deliveries} дост.</span>
                     <span className="shrink-0 text-emerald-400/90">−{Math.round(c.avg_saved_pct * 100)}%</span>
-                    <span className="w-14 shrink-0 text-right text-zinc-600">{fmtBytes(c.bytes_saved)}</span>
+                    <span className="w-14 shrink-0 text-right text-zinc-400">{fmtBytes(c.bytes_saved)}</span>
                   </div>
                 ))}
                 {memEcon && memEcon.by_consumer.length === 0 && (
-                  <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">нет доставок — brain-план или кнопка «доставка» запустят первую</div>
+                  <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">нет доставок — brain-план или кнопка «доставка» запустят первую</div>
                 )}
-                {!memEcon && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">daemon недоступен…</div>}
+                {!memEcon && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">Runtime data is unavailable</div>}
               </div>
               <button type="button" onClick={() => void econDeliver()} disabled={econBusy || !memEcon}
                 title="Выполнить экономную доставку памяти (POST /memory op:economy consumer:ui-demo)"
-                className="w-full rounded border border-zinc-700 px-2 py-1 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">доставка</button>
+                className="w-full rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">доставка</button>
             </div>
           </Sec>
 
           <Sec id="memory-rsi" title="Improvement drafts" icon={Radar} tone="violet"
             right={<>
-              {rsi && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="adopt/reject — только оператор (zero-authority, порт M14)">adopted {rsi.stats.adopted} · rollback {rsi.stats.rolled_back} · артефактов {rsi.artifacts}</span>}
+              {rsi && <span className="hidden text-xs text-zinc-500 sm:inline" title="Draft decisions remain advisory; activation requires separate evidence">adopted {rsi.stats.adopted} · rollback {rsi.stats.rolled_back} · artifacts {rsi.artifacts}</span>}
             </>}>
             <div data-testid="rsi-list" className="space-y-2">
               <div className="flex flex-wrap gap-1.5">
@@ -308,23 +318,23 @@ export function MemoryPage() {
 
               <div className="flex gap-1.5">
                 <input value={rsiHint} onChange={(e) => setRsiHint(e.target.value)} placeholder="hint для LLM-черновика (пусто → авто по урокам памяти)…" aria-label="Hint для предложения RSI"
-                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-violet-900" />
+                  className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 text-xs text-zinc-300 outline-none placeholder:text-zinc-500 focus:border-violet-900" />
                 <button type="button" onClick={() => void rsiPropose()} disabled={rsiBusy || !rsi}
                   title="evidence: уроки памяти + RH-вердикты → черновик улучшения (POST /rsi op:propose)"
-                  className="h-7 shrink-0 rounded border border-violet-800/50 px-2 font-mono text-[9px] text-violet-300/90 transition hover:bg-zinc-800 disabled:opacity-40">+ предложить улучшение</button>
+                  className="h-7 shrink-0 rounded border border-violet-800/50 px-2 text-[11px] text-violet-300/90 transition hover:bg-zinc-800 disabled:opacity-40">+ предложить улучшение</button>
               </div>
 
               <div className="max-h-56 space-y-0.5 overflow-y-auto mc-scroll" role="list" aria-label="Предложения RSI">
                 {(rsi?.proposals ?? []).slice(0, 6).map((p) => (
-                  <div key={p.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]"
+                  <div key={p.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 text-[11px]"
                     title={`${p.id} · источник ${p.source} · evidence ${p.evidence}${p.artifact ? ` · артефакт ${p.artifact}` : ""}\n${p.title}`}>
                     <StateBadge state={rsiState(p.status)} size="xs" />
                     <span className="min-w-0 flex-1 truncate text-zinc-400">{p.title}</span>
-                    <span className="shrink-0 text-zinc-600">{p.source}</span>
+                    <span className="shrink-0 text-zinc-400">{p.source}</span>
                     {p.status === "PROPOSED" && (
                       <>
                         <button type="button" onClick={() => void rsiAdopt(p.id)} disabled={rsiBusy} className="shrink-0 text-emerald-400/80 transition hover:text-emerald-300" aria-label={`Принять ${p.id}`}>✓</button>
-                        <button type="button" onClick={() => void rsiOp({ op: "reject", id: p.id }, "предложение отклонено")} disabled={rsiBusy} className="shrink-0 text-zinc-600 transition hover:text-rose-400" aria-label={`Отклонить ${p.id}`}>✕</button>
+                        <button type="button" onClick={() => void rsiOp({ op: "reject", id: p.id }, "предложение отклонено")} disabled={rsiBusy} className="shrink-0 text-zinc-400 transition hover:text-rose-400" aria-label={`Отклонить ${p.id}`}>✕</button>
                       </>
                     )}
                     {p.status === "ADOPTED" && (
@@ -333,17 +343,17 @@ export function MemoryPage() {
                   </div>
                 ))}
                 {rsi && rsi.proposals.length === 0 && (
-                  <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">предложений нет — сгенерируйте из уроков памяти</div>
+                  <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">предложений нет — сгенерируйте из уроков памяти</div>
                 )}
-                {!rsi && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">daemon недоступен…</div>}
+                {!rsi && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">Runtime data is unavailable</div>}
               </div>
             </div>
           </Sec>
 
-          <Sec id="memory-recall" title="RECALL · BRAIN" icon={Brain} tone="violet"
+          <Sec id="memory-recall" defaultOpen={false} title="Recalled context" icon={Brain} tone="violet"
             right={<>
               {brain && (
-                <span className="font-mono text-[10px] text-zinc-600" title="self-probe: латентность event-loop + БД (аналог wake-probe старой системы)">
+                <span className="text-xs text-zinc-400" title="self-probe: латентность event-loop + БД (аналог wake-probe старой системы)">
                   loop {brain.probe.eventloop_ms}мс · db {brain.probe.db_probe_ms}мс
                 </span>
               )}
@@ -353,17 +363,17 @@ export function MemoryPage() {
                 <Chip label="memory_rows" value={brain?.probe.memory_rows ?? "—"} tone="teal" title="строк в памяти daemon'а" />
                 <Chip label="used" value={memBlock ? memBlock.used.length : "—"} title="записей вошло в блок (n=8, бюджет символов)" />
               </div>
-              <div className="text-[9px] uppercase tracking-wider text-zinc-600" title="TEAM MEMORY — блок, уходящий в промпт агентам (порт #memoryBlockFor, бюджет символов)">
+              <div className="text-[11px] text-zinc-400" title="TEAM MEMORY — блок, уходящий в промпт агентам (порт #memoryBlockFor, бюджет символов)">
                 блок памяти в промптах агентов
               </div>
               <pre tabIndex={0} role="region" aria-label="Блок памяти (TEAM MEMORY)"
-                className="max-h-48 overflow-y-auto mc-scroll whitespace-pre-wrap rounded border border-zinc-800 bg-zinc-950/60 p-2 font-mono text-[10px] leading-relaxed text-zinc-400">
+                className="max-h-48 overflow-y-auto mc-scroll whitespace-pre-wrap rounded border border-zinc-800 bg-zinc-950/60 p-2 text-xs leading-relaxed text-zinc-400">
                 {memBlock?.block || "(блок пуст — память ещё не наполнена)"}
               </pre>
               {(brain?.thoughts.length ?? 0) > 0 && (
                 <div className="max-h-16 space-y-0.5 overflow-y-auto mc-scroll">
                   {(brain?.thoughts ?? []).slice(0, 4).map((t) => (
-                    <div key={t.key} className="truncate rounded bg-zinc-900/50 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500" title={t.content}>{t.content}</div>
+                    <div key={t.key} className="truncate rounded bg-zinc-900/50 px-1.5 py-0.5 text-[11px] text-zinc-500" title={t.content}>{t.content}</div>
                   ))}
                 </div>
               )}

@@ -1,6 +1,7 @@
 // R95E.1 pure evidence identity contracts shared by the renderer and Node tests.
 // Side-effect free: stale async responses and exact-task event joins can be
 // falsified without mounting React or Electron.
+import { taskEventRowsConflict } from './project-action-feed.mjs';
 
 /**
  * A fetched task-event response belongs to the current selection only when the
@@ -74,7 +75,7 @@ export function mergeExactTaskEvidenceEvents({
  *
  * @param {{
  *   request:{seq:number,taskId:string},
- *   current:{seq:number,taskId:string|null,streamTaskId:string|null,stream?:Array<any>},
+ *   current:{seq:number,taskId:string|null,streamTaskId:string|null,stream?:Array<any>,conflicted?:boolean},
  *   responseEvents?:Array<any>|null,
  *   limit?:number
  * }} input
@@ -95,8 +96,20 @@ export function resolveExactTaskStreamResponse({
       patch: Object.freeze({ streamState: 'DEGRADED' }),
     });
   }
+  if (current?.conflicted === true) {
+    return Object.freeze({ applied: true, conflict: true, patch: Object.freeze({ streamState: 'DEGRADED' }) });
+  }
 
   const taskId = String(request?.taskId ?? '');
+  const exactRows = rows => (Array.isArray(rows) ? rows : []).filter(event =>
+    String(event?.task_id ?? '') === taskId && Number.isSafeInteger(event?.seq));
+  const fetched = exactRows(responseEvents);
+  const live = exactRows(current?.stream);
+  // A durable sequence identifies immutable bytes. Contradictory rows cannot
+  // be repaired by choosing whichever transport happened to respond last.
+  if (taskEventRowsConflict(fetched, fetched) || taskEventRowsConflict(fetched, live)) {
+    return Object.freeze({ applied: true, conflict: true, patch: Object.freeze({ streamState: 'DEGRADED' }) });
+  }
   const bySeq = new Map();
 
   for (const event of responseEvents) {
@@ -106,8 +119,7 @@ export function resolveExactTaskStreamResponse({
     bySeq.set(seq, event);
   }
 
-  // Live exact events observed after the fetch began win over a fetched row
-  // with the same sequence number.
+  // Identical live rows observed after the fetch began can be deduplicated.
   for (const event of Array.isArray(current?.stream) ? current.stream : []) {
     if (String(event?.task_id ?? '') !== taskId) continue;
     const seq = Number(event?.seq);

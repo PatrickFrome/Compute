@@ -109,11 +109,15 @@ test('generic Browser command attribution cannot manufacture candidate or skill 
 
 test('Browser outcome bridge does not give RSI a Browser effect executor', () => {
   const start = main.indexOf('onRsiOutcomeReadback: async');
-  const end = main.indexOf('if (nativeSupervisor.snapshot()?.running !== true)', start);
-  assert.ok(start >= 0 && end > start, 'Browser RSI sidecar wiring missing');
+  // End at the callback itself. A later Supervisor startup statement can have
+  // unrelated host composition between it and this evidence-only callback.
+  const boundary = /\r?\n      },(?=\r?\n    \}\);)/.exec(main.slice(start));
+  assert.ok(start >= 0 && boundary, 'Browser RSI sidecar callback boundary missing');
+  const end = start + boundary.index + boundary[0].length;
   const bridge = main.slice(start, end);
   assert.doesNotMatch(bridge, /executeNativeSupervisorCommand|executeSemanticCommand|handleCommand\(/);
   assert.match(bridge, /rsiRuntime\.ingestBrowserOutcome/);
+  assert.match(bridge, /return true;\s*},$/);
   assert.match(runtime, /candidate_effect_executor_exposed: false/);
   assert.match(runtime, /physical_effect_replay_allowed: false/);
 });

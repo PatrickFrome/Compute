@@ -1,5 +1,6 @@
 import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
 import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
+import { normalizeClientProjectRegistration } from './client-project-continuity.mjs';
 
 const SCHEMA = 'metaengine.client.goal-journal.v1';
 const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
@@ -48,6 +49,13 @@ function normalizeEntry(value) {
   const usefulWorkProof = executionProof && clientUsefulWorkProofMatchesExecutionProof(value.useful_work_proof, executionProof)
     ? clone(value.useful_work_proof)
     : null;
+  const project = value.project == null ? null : normalizeClientProjectRegistration(value.project, id);
+  const knownAdmission = value.admitted_task_id == null ? null : requestId(value.admitted_task_id);
+  const admittedTask = value.receipt?.task_id || (progress?.found === true ? progress.task_id : null) || knownAdmission;
+  if (knownAdmission && admittedTask !== knownAdmission) throw new Error('client_goal_journal_admission_task_drift');
+  if (project && (!admittedTask || project.root_task_id !== admittedTask)) {
+    throw new Error('client_goal_journal_project_task_drift');
+  }
   return Object.freeze({
     schema: ENTRY_SCHEMA,
     request_id: id,
@@ -59,6 +67,9 @@ function normalizeEntry(value) {
     progress: progress ? Object.freeze(progress) : null,
     execution_proof: executionProof ? Object.freeze(executionProof) : null,
     useful_work_proof: usefulWorkProof ? Object.freeze(usefulWorkProof) : null,
+    project,
+    admitted_task_id: knownAdmission,
+    project_error: value.project_error == null ? null : String(value.project_error).slice(0, 240),
     last_error: value.last_error == null ? null : String(value.last_error).slice(0, 240),
     created_at: String(value.created_at || nowIso()),
     updated_at: String(value.updated_at || nowIso()),
@@ -91,6 +102,7 @@ export class ClientGoalJournal {
   #state = emptyState();
   #loaded = false;
   #writeTail = Promise.resolve();
+  #persistenceFenced = false;
 
   constructor({ loadState, saveState, maxEntries = 32 } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') {
@@ -140,6 +152,14 @@ export class ClientGoalJournal {
     return this.#state.entries.at(-1) || null;
   }
 
+  // If a durable write fails after an unknown filesystem effect, the old
+  // in-memory view may differ from disk. Never allow another write (including
+  // another SUBMITTING) from this incarnation; restart and reconcile by ID.
+  persistenceStatus() {
+    return Object.freeze({ schema: 'metaengine.client.goal-journal-persistence.v1',
+      fenced: this.#persistenceFenced, automatic_retry_allowed: false, authority_effect: false });
+  }
+
   get(rawRequestId) {
     const id = requestId(rawRequestId);
     return this.#state.entries.find((row) => row.request_id === id) || null;
@@ -147,6 +167,7 @@ export class ClientGoalJournal {
 
   #replace(id, change) {
     const write = this.#writeTail.then(async () => {
+      if (this.#persistenceFenced) throw new Error('client_goal_journal_persistence_reconciliation_required');
       if (!this.#loaded) await this.load();
       const existing = this.get(id);
       const next = change(existing);
@@ -157,7 +178,13 @@ export class ClientGoalJournal {
       while (entries.length > this.#maxEntries) entries.shift();
       const state = Object.freeze({ ...emptyState(), entries: Object.freeze(entries) });
       // Do not publish an in-memory state that failed to become durable.
-      await this.#saveState(clone(state));
+      try { await this.#saveState(clone(state)); }
+      catch (error) {
+        // The rename might have completed even when fsync/readback failed.
+        // A rejected write must not be followed by another state transition.
+        this.#persistenceFenced = true;
+        throw error;
+      }
       this.#state = state;
       return normalized;
     });
@@ -232,6 +259,28 @@ export class ClientGoalJournal {
         automatic_retry_allowed: false,
         authority_effect: false,
       };
+    });
+  }
+
+  async recordProject(registration) {
+    const id = requestId(registration?.request_id);
+    const project = normalizeClientProjectRegistration(registration, id);
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      const task = existing.receipt?.task_id || (existing.progress?.found === true ? existing.progress.task_id : null);
+      if (!task || project.root_task_id !== task) throw new Error('client_goal_journal_project_task_drift');
+      if (existing.project && (existing.project.project_id !== project.project_id || existing.project.root_task_id !== project.root_task_id)) {
+        throw new Error('client_goal_journal_project_collision');
+      }
+      return { ...existing, project: existing.project || project, admitted_task_id: task, project_error: null, updated_at: nowIso() };
+    });
+  }
+
+  async recordProjectError(rawRequestId, error) {
+    const id = requestId(rawRequestId);
+    return this.#replace(id, existing => {
+      if (!existing) throw new Error('client_goal_journal_request_missing');
+      return { ...existing, project_error: safeError(error), updated_at: nowIso() };
     });
   }
 

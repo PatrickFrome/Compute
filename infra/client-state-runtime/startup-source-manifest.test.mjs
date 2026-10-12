@@ -26,6 +26,12 @@ test('source closure includes side-effect, re-export and dynamic literal imports
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('runtime source closure explicitly includes PostgreSQL stderr classifier and refuses silent omission', async () => {
+  const closure=await sourceClosure([join(here,'launcher.mjs')],repositoryRoot);
+  assert.ok(closure.files.includes(join(here,'postgres-utility-diagnostic.mjs')));
+  assert.ok(closure.files.includes(join(here,'launcher.mjs')));
+});
+
 test('startup manifest hashes dependencies, binds instance and omits credential material', async () => {
   const config = { postgresMode: 'attached', databasePort: 15434, apiPort: 15432, edgePort: 15433,
     databaseUrl: 'postgres://user:never-report-password@127.0.0.1/db', apiKey: 'never-report-key' };
@@ -46,6 +52,20 @@ test('startup manifest hashes dependencies, binds instance and omits credential 
     await persistStartupManifest(path, manifest, repositoryRoot);
     assert.equal(JSON.parse(await readFile(path, 'utf8')).instance_id, manifest.instance_id);
     await assert.rejects(persistStartupManifest(path, manifest, repositoryRoot), { code: 'EEXIST' });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('literal migration resources belong to source closure and cannot escape the repository', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'compute-migration-closure-')));
+  try {
+    await writeFile(join(directory, 'migration.sql'), 'select 1;\n');
+    await writeFile(join(directory, 'entry.mjs'), "export const migration = new URL('./migration.sql', import.meta.url);\n");
+    const closure = await sourceClosure([join(directory, 'entry.mjs')], directory);
+    assert.deepEqual(closure.files, [join(directory, 'entry.mjs'), join(directory, 'migration.sql')].sort());
+    await writeFile(join(directory, 'entry.mjs'), "export const migration = new URL('../outside.sql', import.meta.url);\n");
+    await assert.rejects(sourceClosure([join(directory, 'entry.mjs')], directory), /source_outside_repository/);
+    await writeFile(join(directory, 'entry.mjs'), "export const migration = new URL('./missing.sql', import.meta.url);\n");
+    await assert.rejects(sourceClosure([join(directory, 'entry.mjs')], directory), { code: 'ENOENT' });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

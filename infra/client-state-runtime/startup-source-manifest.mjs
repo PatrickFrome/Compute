@@ -71,6 +71,15 @@ export async function sourceClosure(entries, repositoryRoot) {
       } else if (specifier.startsWith('npm:')) npm.add(specifier);
       else if (!specifier.startsWith('node:') && specifier !== 'postgres') throw manifestError('startup_manifest_import_unsupported');
     }
+    // Reviewed migration catalogs use literal resource URLs. SQL is hashed as
+    // data, never parsed as JavaScript or discovered through arbitrary folders.
+    for (const match of text.matchAll(/\bnew\s+URL\(\s*['"]([^'"\r\n]+\.sql)['"]\s*,\s*import\.meta\.url\s*\)/g)) {
+      if (!/^\.\.?\/[A-Za-z0-9_./-]+\.sql$/.test(match[1])) throw manifestError('startup_manifest_resource_url_invalid');
+      const resource = resolve(dirname(path), match[1]);
+      if (!within(repositoryRoot, resource)) throw manifestError('startup_manifest_source_outside_repository');
+      await regularFile(resource);
+      paths.add(resource);
+    }
   };
   for (const entry of entries) await visit(entry);
   return { files: [...paths].sort(), npm: [...npm].sort() };

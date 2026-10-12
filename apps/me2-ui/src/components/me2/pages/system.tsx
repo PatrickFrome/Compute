@@ -14,6 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { useClientRuntimeStatus, refreshClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 import { capabilityLabel } from "@/lib/client-readiness-labels";
+import { InterruptedSetupRecovery } from "@/components/me2/interrupted-setup-recovery";
+import { LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type TokensT = {
@@ -67,6 +69,26 @@ type GithubChatBridge = {
   connectGithubChat?: () => Promise<GithubChatStatusT>;
   disconnectGithubChat?: () => Promise<GithubChatStatusT>;
 };
+type GithubRepositoryStatus = {
+  schema: "metaengine.github-repository-connection.v1";
+  state: "CHECKING" | "CONNECTED" | "NOT_CONFIGURED" | "CREDENTIAL_UNAVAILABLE" | "AUTHENTICATION_REQUIRED" | "UNAVAILABLE" | "BLOCKED";
+  repository: string | null;
+  account_login: string | null;
+  account_id: number | null;
+  authenticated: boolean;
+  repository_access_verified: boolean;
+  can_push: boolean;
+  checked_at: string | null;
+  reason: string | null;
+  credential_source: "WINDOWS_GCM" | "SECURE_STORAGE" | null;
+  automatic_cloud_fallback: false;
+  authority_effect: false;
+};
+type GithubRepositoryBridge = {
+  githubRepositoryStatus?: () => Promise<GithubRepositoryStatus>;
+  connectGithubRepository?: () => Promise<GithubRepositoryStatus>;
+};
+const githubRepositoryBridge = () => (window as Window & { metaengineClient?: GithubRepositoryBridge }).metaengineClient;
 const githubChatBridge = () => (window as Window & { metaengineClient?: GithubChatBridge }).metaengineClient;
 const suState = (v: string): SysState =>
   v === "UP_TO_DATE" ? "Completed" : v === "DIVERGED" ? "Failed" : "Degraded";
@@ -81,7 +103,7 @@ const ADVANCED_SURFACES: ReadonlyArray<{ page: PageKey; label: string; descripti
 ];
 
 const SETTINGS_AREAS = [
-  { id: "tools", label: "Tools" }, { id: "runtime", label: "Runtime" },
+  { id: "tools", label: "Workspace" }, { id: "runtime", label: "Connections" },
   { id: "access", label: "Access" }, { id: "policy", label: "Policy" },
   { id: "recovery", label: "Recovery" },
 ] as const;
@@ -113,6 +135,23 @@ export function SystemPage() {
   const [guardianBusy, setGuardianBusy] = useState(false);
   const [githubChat, setGithubChat] = useState<GithubChatStatusT | null>(null);
   const [githubChatBusy, setGithubChatBusy] = useState(false);
+  const [githubRepository, setGithubRepository] = useState<GithubRepositoryStatus | null>(null);
+  const [githubRepositoryBusy, setGithubRepositoryBusy] = useState(false);
+  const loadGithubRepository = useCallback(async (reconnect = false) => {
+    const bridge = githubRepositoryBridge();
+    const read = reconnect ? bridge?.connectGithubRepository : bridge?.githubRepositoryStatus;
+    if (!read) { setGithubRepository(null); return false; }
+    setGithubRepositoryBusy(true);
+    try {
+      const next = await read();
+      if (next?.schema !== "metaengine.github-repository-connection.v1" || next.authority_effect !== false
+        || (next.state === "CONNECTED" && (!next.authenticated || !next.repository_access_verified || !next.account_login || !next.repository))) {
+        setGithubRepository(null); return false;
+      }
+      setGithubRepository(next); return true;
+    } catch { setGithubRepository(null); return false; }
+    finally { setGithubRepositoryBusy(false); }
+  }, []);
 
   // ── загрузчики ──
   const loadTokens = useCallback(async () => {
@@ -166,13 +205,13 @@ export function SystemPage() {
     setLoadState("LOADING");
     try {
       const loaders = area === "access" ? [loadTokens] : area === "policy" ? [loadPolicy]
-        : area === "recovery" ? [loadSu] : area === "runtime" ? [loadGuardian, loadGithubChat] : [];
+        : area === "recovery" ? [loadSu] : area === "runtime" ? [loadGuardian, loadGithubChat, loadGithubRepository] : [];
       const results = await Promise.all(loaders.map((load) => load()));
       if (activeArea.current === area) setLoadState(results.every(Boolean) ? "LIVE" : "UNAVAILABLE");
     } catch {
       if (activeArea.current === area) setLoadState("UNAVAILABLE");
     } finally { readsInFlight.current.delete(area); }
-  }, [area, loadGuardian, loadGithubChat, loadPolicy, loadSu, loadTokens]);
+  }, [area, loadGuardian, loadGithubChat, loadGithubRepository, loadPolicy, loadSu, loadTokens]);
   useEffect(() => {
     let current = true;
     const load = () => { if (current && document.visibilityState === "visible") void loadCurrent(); };
@@ -274,14 +313,18 @@ export function SystemPage() {
 
   // ── опасная зона ──
   const budgetFlushOp = useCallback(async () => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     if (!window.confirm("Сбросить очередь команд шины (BUDGET_FLUSH, полоса EMERGENCY)? Все отложенные команды будут сняты.")) return;
     await sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" });
+    */
   }, []);
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-system" data-panel-system>
-      <PageHeader title="Settings" sub="Tools and client configuration" />
-      <div role="tablist" aria-label="Settings areas" className="mb-4 flex shrink-0 flex-wrap gap-1 border-b border-zinc-800" data-testid="settings-areas">
+      <PageHeader title="Settings" sub="Connections, preferences and workspace tools" />
+      <div role="tablist" aria-label="Settings areas" className="mb-5 flex w-fit shrink-0 flex-wrap gap-1 rounded-xl bg-zinc-900/70 p-1" data-testid="settings-areas">
         {SETTINGS_AREAS.map((item, index) => <button key={item.id} type="button" role="tab" id={`settings-tab-${item.id}`}
           aria-selected={area === item.id} aria-controls={`settings-panel-${item.id}`} tabIndex={area === item.id ? 0 : -1}
           onClick={() => setArea(item.id)} onKeyDown={(event) => {
@@ -290,24 +333,24 @@ export function SystemPage() {
               : event.key === "Home" ? 0 : event.key === "End" ? SETTINGS_AREAS.length - 1 : null;
             if (next === null) return; event.preventDefault();
             const target = SETTINGS_AREAS[next]; setArea(target.id); document.getElementById(`settings-tab-${target.id}`)?.focus();
-          }} className={`min-h-9 border-b-2 px-4 text-[13px] ${area === item.id ? "border-cyan-400 text-zinc-100" : "border-transparent text-zinc-400 hover:text-zinc-100"}`}>{item.label}</button>)}
+          }} className={`min-h-9 px-4 text-[13px] ${area === item.id ? "bg-zinc-800 text-zinc-200" : "text-zinc-400 hover:text-zinc-200"}`}>{item.label}</button>)}
       </div>
       <div id={`settings-panel-${area}`} role="tabpanel" aria-labelledby={`settings-tab-${area}`} className="mc-scroll min-h-0 flex-1 overflow-y-auto">
       {area === "tools" ? <div className="mx-auto max-w-[960px]" data-testid="settings-advanced-surfaces">
         <div className="mb-1.5 flex items-center justify-between gap-2">
           <div>
-            <strong className="text-[14px] font-medium text-zinc-200">Development tools</strong>
-            <p className="mt-1 text-[12px] text-zinc-400">Open a tool here or find it with Ctrl+K.</p>
+            <strong className="text-[14px] font-medium text-zinc-200">Your workspace</strong>
+            <p className="mt-1 text-[13px] text-zinc-400">Projects, agent sessions and history. Find any view with Ctrl+K.</p>
           </div>
         </div>
-        <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {ADVANCED_SURFACES.map((surface) => (
             <button
               key={surface.page}
               type="button"
               onClick={() => setPage(surface.page)}
               data-testid={`settings-open-${surface.page}`}
-              className="flex w-full items-center justify-between gap-4 px-3 py-4 text-left hover:bg-zinc-900"
+              className="mc-soft-card flex w-full items-center justify-between gap-4 px-4 py-5 text-left hover:bg-zinc-900"
               title={surface.description}
             >
               <span><strong className="block text-[13px] font-medium text-zinc-200">{surface.label}</strong>
@@ -326,6 +369,21 @@ export function SystemPage() {
 
         {/* ── КОЛОНКА 1 ── */}
         <div className="flex min-w-0 flex-col gap-2">
+          {area === "runtime" ? <section className="mc-soft-card p-5" data-testid="github-repository-connection" aria-labelledby="github-repository-title">
+            <div className="flex items-center justify-between gap-3"><h2 id="github-repository-title" className="text-[14px] font-medium text-zinc-200">GitHub</h2>
+              <button type="button" onClick={() => void loadGithubRepository(true)} disabled={githubRepositoryBusy} className="min-h-8 px-3 text-[12px] text-zinc-300 disabled:opacity-40">{githubRepositoryBusy ? "Checking…" : "Check connection"}</button></div>
+            <p className="mt-2 text-[13px] leading-relaxed text-zinc-400">Connects automatically using your saved account on this computer.</p>
+            <p role="status" className={`mt-3 text-[13px] ${githubRepository?.state === "CONNECTED" ? "text-emerald-300" : "text-zinc-300"}`}>
+              {githubRepository?.state === "CONNECTED" ? `Connected as ${githubRepository.account_login}`
+                : githubRepository?.state === "CHECKING" || githubRepositoryBusy ? "Checking your account…"
+                : githubRepository?.state === "AUTHENTICATION_REQUIRED" ? "Sign in to GitHub again on this computer."
+                : githubRepository?.state === "CREDENTIAL_UNAVAILABLE" ? "No saved GitHub account was found."
+                : githubRepository?.state === "NOT_CONFIGURED" ? "Repository configuration is unavailable."
+                : githubRepository?.state === "BLOCKED" ? "Repository access could not be verified."
+                : "Connection could not be checked. Check your network and try again."}
+            </p>
+            {githubRepository?.repository ? <p className="mt-1 text-[12px] text-zinc-400">{githubRepository.repository}{githubRepository.state === "CONNECTED" ? ` · ${githubRepository.can_push ? "Read and write access" : "Read access"}` : ""}</p> : null}
+          </section> : null}
           {/* R47: VAULT·TOKENS */}
           {area === "access" ? <Sec id="sys-tokens" title="Access tokens" icon={KeyRound} tone="emerald"
             right={
@@ -488,14 +546,13 @@ export function SystemPage() {
 
         {/* ── КОЛОНКА 2 ── */}
         <div className="flex min-w-0 flex-col gap-2">
-          {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="github-chat-control" aria-labelledby="github-chat-control-title">
+          {area === "runtime" ? <section className="mc-soft-card p-5" data-testid="github-chat-control" aria-labelledby="github-chat-control-title">
             <div className="flex items-center justify-between gap-3">
-              <h2 id="github-chat-control-title" className="text-[13px] font-medium text-zinc-200">Управление из чата</h2>
+              <h2 id="github-chat-control-title" className="text-[14px] font-medium text-zinc-200">GitHub chat relay</h2>
               <button type="button" onClick={() => void loadGithubChat()} disabled={githubChatBusy}
                 className="h-7 border border-zinc-700 px-2 text-[12px] text-zinc-300 disabled:opacity-40">Обновить</button>
             </div>
-            <p className="mt-2 text-[12px] text-zinc-400">Чат и его агенты получают обзор клиента, окон и экрана, управление приложениями и постановку задач. Подключение действует до отзыва доступа.</p>
-            <p className="mt-1 text-[12px] text-zinc-500">Отзыв отключает канал управления. Ранее принятые автономные задачи продолжают свой обычный цикл.</p>
+            <p className="mt-2 text-[13px] leading-relaxed text-zinc-400">Optional control channel for a paired GitHub issue. Repository connection is shown above.</p>
             <p role="status" className={`mt-3 text-[13px] ${githubChat?.state === "ACTIVE" ? "text-emerald-300" : "text-amber-200"}`}>
               {githubChat?.state === "ACTIVE" ? "Подключено"
                 : githubChat?.state === "REVOKED" ? "Доступ отозван"
@@ -511,7 +568,7 @@ export function SystemPage() {
                 disabled={githubChatBusy || !githubChat || githubChat.state === "ACTIVE"}
                 onClick={() => void changeGithubChat("connect")}
                 className="min-h-8 border border-cyan-700 bg-cyan-950/30 px-3 text-[12px] text-cyan-200 disabled:opacity-40">
-                {githubChatBusy ? "Ожидание…" : "Подключить GitHub"}
+                {githubChatBusy ? "Ожидание…" : "Connect chat relay"}
               </button>
               <button type="button" data-testid="github-chat-disconnect"
                 disabled={githubChatBusy || !githubChat || githubChat.state === "NOT_PAIRED"}
@@ -520,7 +577,7 @@ export function SystemPage() {
             </div>
           </section> : null}
           {/* ME-МАТРИЦА */}
-          {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="native-work-readiness" aria-labelledby="native-work-readiness-title">
+          {area === "runtime" ? <section className="mc-soft-card p-5" data-testid="native-work-readiness" aria-labelledby="native-work-readiness-title">
             <div className="flex items-center justify-between gap-3">
               <h2 id="native-work-readiness-title" className="text-[13px] font-medium text-zinc-200">Execution readiness</h2>
               <button type="button" onClick={() => void refreshClientRuntimeStatus()} className="h-7 border border-zinc-700 px-2 text-[12px] text-zinc-300">Refresh status</button>
@@ -536,14 +593,14 @@ export function SystemPage() {
                   <dt className="text-zinc-500">{name}</dt><dd className="break-words">{capabilityLabel(workReadiness, key)}</dd>
                 </div>
               ))}
-              <dt className="text-zinc-500">Verified improvement</dt><dd>Awaiting evaluated evidence</dd>
               <dt className="text-zinc-500">Supervisor</dt><dd>{workReadiness?.supervisor_state || "Unavailable"}</dd>
               <dt className="text-zinc-500">Verified agents</dt><dd>{workReadiness?.proven_agent_count ?? "Unavailable"}</dd>
               <dt className="text-zinc-500">Ambiguous agents</dt><dd>{workReadiness?.ambiguous_agent_count ?? "Unavailable"}</dd>
               <dt className="text-zinc-500">Generation</dt><dd>{workReadiness ? `${workReadiness.generation_floor ?? "?"} / profile ${workReadiness.local_generation_floor ?? "?"}` : "Unavailable"}</dd>
             </dl>
+            {workReadiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || (workReadiness?.ambiguous_agent_count ?? 0) > 0 ? <InterruptedSetupRecovery /> : null}
           </section> : null}
-          {area === "runtime" ? <section className="border border-zinc-800 p-3" data-testid="guardian-runtime-status" aria-labelledby="guardian-runtime-title">
+          {area === "runtime" ? <section className="mc-soft-card p-5" data-testid="guardian-runtime-status" aria-labelledby="guardian-runtime-title">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 id="guardian-runtime-title" className="text-[13px] font-medium text-zinc-200">Machine Guardian</h2>

@@ -1,15 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchClientStateRuntime, normalizeLauncherConfig } from './launcher.mjs';
+import { launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
+import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-reconciliation.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
 const schema = 'compute.runtime-host-config.v1';
 const configKeys = ['schema', 'version', 'bundle_directory', 'expected_bundle_sha256', 'state_directory', 'pg_data_directory',
   'database_url', 'inspect_database_url', 'api_port', 'edge_port', 'startup_timeout_ms'];
+const postgresModes = new Set(['owned', 'attached']);
+const apiRoleModes = new Set(['service_role', 'direct']);
 const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
 const within = (root, target) => {
   const relative = path.relative(root, target);
@@ -25,15 +30,33 @@ function absoluteLocalPath(value) {
 }
 
 export function validateRuntimeHostConfig(value) {
-  if (!value || Array.isArray(value) || Object.keys(value).length !== configKeys.length || configKeys.some(key => !(key in value))
+  const hasPostgresMode = value && !Array.isArray(value) && Object.hasOwn(value, 'postgres_mode');
+  const hasApiRoleMode = value && !Array.isArray(value) && Object.hasOwn(value, 'api_role_mode');
+  const hasClusterPin = value && !Array.isArray(value) && Object.hasOwn(value, 'expected_cluster_system_identifier');
+  if (!value || Array.isArray(value) || Object.keys(value).length !== configKeys.length + (hasPostgresMode ? 1 : 0) + (hasApiRoleMode ? 1 : 0) + (hasClusterPin ? 1 : 0) || configKeys.some(key => !(key in value))
     || value.schema !== schema || value.version !== 1) throw failure('runtime_host_config_contract_invalid');
+  const postgresMode = hasPostgresMode ? value.postgres_mode : 'owned';
+  if (!postgresModes.has(postgresMode)) throw failure('runtime_host_postgres_mode_invalid');
+  if (hasApiRoleMode && !apiRoleModes.has(value.api_role_mode)) throw failure('runtime_host_api_role_mode_invalid');
+  if (postgresMode === 'attached' && value.api_role_mode !== 'direct') throw failure('runtime_host_attached_direct_api_required');
+  if ((postgresMode === 'attached' || hasClusterPin) && !/^[1-9][0-9]{0,19}$/.test(value.expected_cluster_system_identifier || '')) {
+    throw failure('runtime_host_cluster_identity_pin_required');
+  }
   if (!/^[a-f0-9]{64}$/.test(value.expected_bundle_sha256 || '')) throw failure('runtime_host_bundle_pin_required');
   const bundle = absoluteLocalPath(value.bundle_directory);
   const state = absoluteLocalPath(value.state_directory);
   const data = absoluteLocalPath(value.pg_data_directory);
+  const dataInsideState = within(state, data) && !within(data, state);
+  const stateDataOverlap = within(state, data) || within(data, state) || state === data;
+  const invalidOwnedBoundary = postgresMode === 'owned' && !dataInsideState;
+  const invalidAttachedBoundary = postgresMode === 'attached' && stateDataOverlap;
   if (within(bundle, state) || within(state, bundle) || within(repositoryRoot, state) || within(state, repositoryRoot)
-    || !within(state, data) || state === data) throw failure('runtime_host_private_state_boundary_invalid');
-  return Object.freeze({ ...value, bundle_directory: bundle, state_directory: state, pg_data_directory: data });
+    || invalidOwnedBoundary || invalidAttachedBoundary || within(bundle, data) || within(data, bundle)
+    || within(repositoryRoot, data) || within(data, repositoryRoot)) {
+    throw failure('runtime_host_private_state_boundary_invalid');
+  }
+  return Object.freeze({ ...value, ...(hasPostgresMode ? { postgres_mode: postgresMode } : {}),
+    bundle_directory: bundle, state_directory: state, pg_data_directory: data });
 }
 
 async function requireCanonicalPath(target, kind) {
@@ -60,12 +83,22 @@ async function requireCanonicalPath(target, kind) {
 // ensure private PGDATA/keys never overlap immutable package or source bytes.
 export function validateRuntimeHostPhysicalBoundaries({
   bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory,
+  postgresMode = 'owned',
 } = {}) {
   const values = [bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory];
   if (values.some(value => typeof value !== 'string' || !path.isAbsolute(value))) throw failure('runtime_host_path_invalid');
+  const mode = postgresMode;
+  if (!postgresModes.has(mode)) throw failure('runtime_host_postgres_mode_invalid');
+  const dataInsideState = within(stateDirectory, pgDataDirectory) && !within(pgDataDirectory, stateDirectory);
+  const stateDataOverlap = within(stateDirectory, pgDataDirectory) || within(pgDataDirectory, stateDirectory)
+    || stateDirectory === pgDataDirectory;
+  const invalidOwnedBoundary = mode === 'owned' && !dataInsideState;
+  const invalidAttachedBoundary = mode === 'attached' && stateDataOverlap;
   if (within(bundleDirectory, stateDirectory) || within(stateDirectory, bundleDirectory)
     || within(repositoryDirectory, stateDirectory) || within(stateDirectory, repositoryDirectory)
-    || !within(stateDirectory, pgDataDirectory) || stateDirectory === pgDataDirectory) {
+    || invalidOwnedBoundary || invalidAttachedBoundary || within(bundleDirectory, pgDataDirectory)
+    || within(pgDataDirectory, bundleDirectory) || within(repositoryDirectory, pgDataDirectory)
+    || within(pgDataDirectory, repositoryDirectory)) {
     throw failure('runtime_host_private_state_boundary_invalid');
   }
   if (within(bundleDirectory, privateConfigFile) || within(repositoryDirectory, privateConfigFile)) {
@@ -98,16 +131,29 @@ async function readConfig(configFile) {
   ].map(target => realpath(target)));
   validateRuntimeHostPhysicalBoundaries({
     bundleDirectory, stateDirectory, pgDataDirectory, privateConfigFile, repositoryDirectory,
+    postgresMode: config.postgres_mode || 'owned',
   });
   return config;
 }
 
-async function acquireOwnership(stateDirectory) {
+async function acquireOwnership(stateDirectory, config) {
+  // A crashed lock-reconciliation attempt may have quarantined the previous
+  // lock but not yet acquired the successor. Never bypass its durable gate.
+  try { await lstat(path.join(stateDirectory, 'runtime-host-recovery-gate.json')); throw failure('runtime_host_recovery_gate_unresolved'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
   const lockPath = path.join(stateDirectory, 'runtime-host-lock.json');
   const bytes = JSON.stringify({ schema: 'compute.runtime-host-lock.v1', pid: process.pid, owner_nonce: randomUUID() }) + '\n';
   let handle;
   try { handle = await open(lockPath, 'wx', 0o600); }
-  catch (error) { if (error.code === 'EEXIST') throw failure('runtime_host_owner_lock_exists'); throw failure('runtime_host_owner_lock_failed'); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw failure('runtime_host_owner_lock_failed');
+    if (config.postgres_mode !== 'attached') throw failure('runtime_host_owner_lock_exists');
+    // Never delete or overwrite a prior owner's lock. Only exact stale-lock,
+    // child-PID and port absence can quarantine an abandoned attached host.
+    await reconcileAbandonedAttachedRuntimeLock({config});
+    try { handle = await open(lockPath, 'wx', 0o600); }
+    catch { throw failure('runtime_host_owner_reacquisition_unconfirmed'); }
+  }
   try { await handle.writeFile(bytes); await handle.sync(); }
   catch { throw failure('runtime_host_owner_lock_write_failed'); }
   finally { await handle.close(); }
@@ -163,6 +209,66 @@ export async function stageManagedDenoCache({ verified, stateDirectory }) {
   return cacheDirectory;
 }
 
+async function denoExecutableIdentity(file, expected, singleLink) {
+  await requireCanonicalPath(path.dirname(file), 'directory');
+  const before = await lstat(file);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink < 1 || (singleLink && before.nlink !== 1)) {
+    throw failure('runtime_host_deno_executable_path_invalid');
+  }
+  const hash = createHash('sha256');
+  for await (const bytes of createReadStream(file)) hash.update(bytes);
+  const after = await lstat(file);
+  if (before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+    || after.isSymbolicLink() || !after.isFile() || (singleLink && after.nlink !== 1)
+    || after.size !== expected.bytes || hash.digest('hex') !== expected.sha256) {
+    throw failure('runtime_host_deno_executable_digest_mismatch');
+  }
+  return after;
+}
+
+// Deno creates DENO_DIR/node_compat_bin/node.exe as a hardlink to its running
+// executable. Running the sealed bundle's Deno would therefore change its link
+// count and invalidate the next bundle verification. Execute an independently
+// copied, pinned private binary; generated node compatibility links stay private.
+export async function stageManagedDenoExecutable({ verified, stateDirectory }) {
+  await requireCanonicalPath(stateDirectory, 'directory');
+  const source = verified?.paths?.denoExecutable;
+  const record = verified?.manifest?.files?.find(file => file.path === 'runtime/deno/deno.exe' && file.component === 'deno');
+  if (!record || !/^[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.bytes) || record.bytes < 1
+    || !path.isAbsolute(source || '') || within(stateDirectory, source)) throw failure('runtime_host_deno_executable_pin_required');
+  const sourceIdentity = await denoExecutableIdentity(source, record, true);
+  const root = path.join(stateDirectory, 'deno-runtime');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await requireCanonicalPath(root, 'directory');
+  const directory = path.join(root, record.sha256);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await requireCanonicalPath(directory, 'directory');
+  const target = path.join(directory, 'deno.exe');
+  try {
+    // A previous private copy may have its normal Deno compatibility hardlink.
+    // Verify it before replacement; changed private bytes are never repaired.
+    await denoExecutableIdentity(target, record, false);
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const temporary = path.join(directory, '.deno-' + randomUUID() + '.exe');
+  try {
+    // A newly created file inherits the protected state DACL. Native Windows
+    // CopyFile can retain the source descriptor, which belongs to the bundle.
+    await pipeline(createReadStream(source), createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+    const copyIdentity = await denoExecutableIdentity(temporary, record, true);
+    if (copyIdentity.ino === sourceIdentity.ino && copyIdentity.dev === sourceIdentity.dev) {
+      throw failure('runtime_host_deno_executable_copy_aliased');
+    }
+    await denoExecutableIdentity(source, record, true);
+    // Atomic replacement gives this run a single-link copy even when the
+    // previous private inode remains reachable from node_compat_bin/node.exe.
+    await rename(temporary, target);
+    await denoExecutableIdentity(target, record, true);
+    return target;
+  } finally {
+    try { await unlink(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+}
+
 export function runtimeProviderDescriptor(runtime) {
   if (!/^[a-f0-9-]{36}$/i.test(runtime?.instanceId || '') || runtime?.edgeHealth?.runtime_ready !== true
     || runtime.edgeHealth.state_provider !== 'LOCAL_POSTGRES' || runtime.edgeHealth.hosted_supabase_required !== false
@@ -190,7 +296,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     || canonical(await realpath(hooks.executablePath || process.execPath)) !== canonical(verified.paths.nodeExecutable)) {
     throw failure('runtime_host_execution_resource_mismatch');
   }
-  const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode: 'owned',
+  const postgresMode = config.postgres_mode || 'owned';
+  const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode,
+    apiRoleMode: config.api_role_mode || 'service_role',
+    expectedClusterSystemIdentifier: config.expected_cluster_system_identifier,
     databaseUrl: config.database_url, inspectDatabaseUrl: config.inspect_database_url,
     apiPort: config.api_port, edgePort: config.edge_port, startupTimeoutMs: config.startup_timeout_ms,
     pgDataDir: config.pg_data_directory, pgBinDir: verified.paths.postgresBinDirectory,
@@ -198,22 +307,50 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     expectedStartupFilesSha256: verified.manifest.reviewed_startup_files_sha256, includeRuntimeHost: true, signal,
     startupManifestPath: path.join(config.state_directory, `runtime-startup-${randomUUID()}.json`),
   });
-  const release = await acquireOwnership(config.state_directory);
+  const release = await acquireOwnership(config.state_directory, config);
   const baseStatus = { schema: 'metaengine.client-state.runtime-status.v1', state: 'STARTING', runtime_ready: false,
     state_provider: 'LOCAL_POSTGRES', hosted_supabase_required: false, automatic_cloud_fallback: false,
-    host_pid: process.pid, bundle_sha256: config.expected_bundle_sha256, process_code_attested: false, authority_effect: false };
+    host_pid: process.pid, bundle_sha256: config.expected_bundle_sha256, process_code_attested: false,
+    last_health_failure: null, authority_effect: false };
   let runtime;
   let terminalPromise;
   let stopPromise;
   let abortRequested = signal?.aborted === true;
   let lastStatus = baseStatus;
-  const persist = async status => { await writeStatus(config.state_directory, status); lastStatus = status; };
+  let lastHealthFailure = null;
+  let persistTail = Promise.resolve();
+  // Serialize health and lifecycle writes so a late diagnostic cannot replace
+  // the terminal state. Functional updates use the latest persisted metadata.
+  const persist = update => {
+    const pending = persistTail.then(async () => {
+      const status = typeof update === 'function' ? update(lastStatus) : update;
+      await writeStatus(config.state_directory, status);
+      lastStatus = status;
+    });
+    persistTail = pending.catch(() => {});
+    return pending;
+  };
+  const reportRuntimeHealth = async event => {
+    if (terminalPromise) return;
+    if (event?.event === 'health_failure') {
+      let diagnostic;
+      try { diagnostic = normalizeRuntimeHealthFailure(event.health_failure); } catch { return; }
+      lastHealthFailure = diagnostic;
+      await persist(previous => ({ ...previous, last_health_failure: diagnostic }));
+    } else if (event?.event === 'health_recovered') {
+      lastHealthFailure = null;
+      await persist(previous => ({ ...previous, last_health_failure: null }));
+    }
+  };
   const finalize = outcome => {
     if (!terminalPromise) terminalPromise = (async () => {
       const confirmed = outcome.children_stopped === true;
-      try { await persist({ ...lastStatus, state: confirmed ? 'STOPPED' : 'FAILED', runtime_ready: false,
+      if (outcome.last_health_failure) {
+        try { lastHealthFailure = normalizeRuntimeHealthFailure(outcome.last_health_failure); } catch { /* Never forward unvalidated diagnostics. */ }
+      }
+      try { await persist(previous => ({ ...previous, state: confirmed ? 'STOPPED' : 'FAILED', runtime_ready: false,
         reason: confirmed ? String(outcome.reason || 'runtime_ended') : 'runtime_host_cleanup_unconfirmed',
-        children_stopped: confirmed, stopped_at: new Date().toISOString() }); }
+        children_stopped: confirmed, last_health_failure: lastHealthFailure, stopped_at: new Date().toISOString() })); }
       finally { signal?.removeEventListener('abort', onAbort); if (confirmed) await release(); }
       return outcome;
     })();
@@ -234,13 +371,15 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     await persist(baseStatus);
     if (abortRequested) throw failure('runtime_host_startup_cancelled');
     const denoDir = await (hooks.stageDenoCache || stageManagedDenoCache)({ verified, stateDirectory: config.state_directory });
-    runtime = await (hooks.launchRuntime || launchClientStateRuntime)({ ...launcherConfig, denoDir });
+    const denoPath = await (hooks.stageDenoExecutable || stageManagedDenoExecutable)({ verified, stateDirectory: config.state_directory });
+    runtime = await (hooks.launchRuntime || launchClientStateRuntime)({ ...launcherConfig, denoDir, denoPath }, { report: reportRuntimeHealth });
     if (abortRequested) { await stop('startup_cancelled'); throw failure('runtime_host_startup_cancelled'); }
     const descriptor = Object.freeze({ ...runtimeProviderDescriptor(runtime), status_file: path.join(config.state_directory, 'runtime-instance.json') });
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     await persist({ ...baseStatus, state: 'READY', runtime_ready: true, checked_at: new Date().toISOString(),
+      last_health_failure: lastHealthFailure,
       instance_id: descriptor.instance_id, endpoint: descriptor.endpoint, capability_health: runtime.edgeHealth.capability_health,
-      postgres_mode: 'owned', children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
+      postgres_mode: postgresMode, api_role_mode: launcherConfig.apiRoleMode, children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
     const finished = runtime.finished.then(finalize, () => finalize({ reason: 'runtime_host_child_failed', children_stopped: false }));
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished };

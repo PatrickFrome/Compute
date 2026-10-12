@@ -21,6 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { mergeExactTaskEvidenceEvents } from "@/lib/r95e-evidence-contracts.mjs";
+import { captureEventLogWindow, eventLogWindow } from "@/lib/event-log-window";
+import { LEGACY_DAEMON_EFFECTS_UNAVAILABLE } from "@/lib/task-content-snapshot.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type Probe = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
@@ -95,7 +97,7 @@ function SecLabel({ icon: Icon, text, tone, title, children }: {
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className={`flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest ${tone}`} title={title}>
+      <span className={`flex shrink-0 items-center gap-1 text-[11px] font-semibold ${tone}`} title={title}>
         <Icon className="h-3 w-3" aria-hidden /> {text}
       </span>
       {children}
@@ -107,32 +109,29 @@ function SecLabel({ icon: Icon, text, tone, title, children }: {
 function EventLogPanel() {
   const events = useMe2((s) => s.events);
   const connected = useMe2((s) => s.connected);
-  const [liveTail, setLiveTail] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState("");
-  const [laneFilter, setLaneFilter] = useState("ALL");
-  const [viewPreset, setViewPreset] = useState<EventViewPresetKey>("attention");
-  const logRef = useRef<HTMLDivElement | null>(null);
-  const [frozenSeq, setFrozenSeq] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("me2.obs.events.view.v1");
-      if (saved === "compact" || saved === "full") setViewMode(saved);
-    } catch { /* private mode */ }
-  }, []);
-
-  useEffect(() => {
+  // The advanced panel mounts after client navigation; restore preferences once
+  // at that mount instead of rendering defaults and resetting state in effects.
+  const [viewPreset, setViewPreset] = useState<EventViewPresetKey>(() => {
     try {
       const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
-      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) {
-        setViewPreset(saved);
-        const preset = EVENT_VIEW_PRESETS.find((item) => item.key === saved);
-        if (preset) setLaneFilter(preset.lane);
-      }
+      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) return saved;
     } catch { /* private mode */ }
-  }, []);
+    return "attention";
+  });
+  const [laneFilter, setLaneFilter] = useState(() => EVENT_VIEW_PRESETS.find((item) => item.key === viewPreset)?.lane ?? "ALL");
+  const logRef = useRef<HTMLDivElement | null>(null);
+  const [pausedEvents, setPausedEvents] = useState<readonly Event[] | null>(null);
+  const { events: display, paused, newerBufferedCount } = eventLogWindow(events, pausedEvents);
+  const liveTail = !paused;
+  const [viewMode, setViewMode] = useState<"compact" | "full">(() => {
+    try {
+      const saved = localStorage.getItem("me2.obs.events.view.v1");
+      if (saved === "compact" || saved === "full") return saved;
+    } catch { /* private mode */ }
+    return "compact";
+  });
 
   const applyViewPreset = useCallback((key: Exclude<EventViewPresetKey, "custom">) => {
     const preset = EVENT_VIEW_PRESETS.find((item) => item.key === key);
@@ -153,21 +152,15 @@ function EventLogPanel() {
     try { localStorage.setItem("me2.obs.events.view.v1", mode); } catch { /* ignore */ }
   }, []);
 
-  // пауза хвоста: фиксируем водяной знак seq в обработчике (список честно заморожен, WS не рвём)
+  // Keep the inspection window stable even as the live transport rotates its buffer.
   const toggleTail = useCallback((on: boolean) => {
-    setLiveTail(on);
-    setFrozenSeq(on ? null : (events[0]?.seq ?? null));
+    setPausedEvents(on ? null : captureEventLogWindow(events));
   }, [events]);
 
   // автоскролл как legacy: лента prepend'ит сверху — scrollTop=0
   useEffect(() => {
-    if (autoScroll && logRef.current) logRef.current.scrollTop = 0;
-  }, [events, autoScroll]);
-
-  const display = useMemo(
-    () => (liveTail || frozenSeq == null ? events : events.filter((e) => e.seq >= frozenSeq)),
-    [events, liveTail, frozenSeq],
-  );
+    if (liveTail && autoScroll && logRef.current) logRef.current.scrollTop = 0;
+  }, [events, autoScroll, liveTail]);
 
   const filtered = useMemo(() => {
     let list = display;
@@ -207,8 +200,8 @@ function EventLogPanel() {
 
   return (
     <Sec
-      id="obs-event-log" title="EVENT LOG" icon={ScrollText}
-      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {grouped.length}/{filtered.length}</span>}
+      id="obs-event-log" title="Events" icon={ScrollText}
+      right={<span className="flex items-center gap-1.5 text-xs text-zinc-500"><Dot on={connected} pulse={liveTail} /> {paused ? "paused" : connected ? "live" : "offline"} · {grouped.length}/{filtered.length}</span>}
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 pb-2">
@@ -219,28 +212,28 @@ function EventLogPanel() {
                 type="button"
                 onClick={() => applyViewPreset(preset.key)}
                 aria-pressed={viewPreset === preset.key}
-                className={`border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide ${
+                className={`border px-1.5 py-0.5 text-[11px] ${
                   viewPreset === preset.key
                     ? "border-cyan-900/80 bg-cyan-950/30 text-cyan-300"
-                    : "border-transparent text-zinc-600 hover:border-zinc-800 hover:text-zinc-300"
+                    : "border-transparent text-zinc-400 hover:border-zinc-800 hover:text-zinc-300"
                 }`}
               >
                 {preset.label}
               </button>
             ))}
-            {viewPreset === "custom" ? <span className="px-1 font-mono text-[8px] uppercase text-zinc-600">custom</span> : null}
+            {viewPreset === "custom" ? <span className="px-1 text-xs uppercase text-zinc-400">custom</span> : null}
           </div>
           <Input
             value={filter} onChange={(e) => { setFilter(e.target.value); markCustomView(); }}
             placeholder="фильтр: тип или данные…"
-            className="h-7 min-w-28 flex-1 border-zinc-800 bg-zinc-900 font-mono text-[11px]"
+            className="h-7 min-w-28 flex-1 border-zinc-800 bg-zinc-900 text-[11px]"
           />
           <div className="flex items-center gap-1" role="group" aria-label="Фильтр по типу событий">
             {EVENT_FILTERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => { setLaneFilter(f.key); markCustomView(); }}
-                className={`rounded px-1.5 py-0.5 text-[10px] transition ${laneFilter === f.key ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"}`}
+                className={`rounded px-1.5 py-0.5 text-xs transition ${laneFilter === f.key ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"}`}
               >
                 {f.label}
               </button>
@@ -251,7 +244,7 @@ function EventLogPanel() {
               type="button"
               onClick={() => changeViewMode("compact")}
               aria-pressed={viewMode === "compact"}
-              className={`px-1.5 py-0.5 font-mono text-[9px] ${viewMode === "compact" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-600 hover:text-zinc-300"}`}
+              className={`px-1.5 py-0.5 text-[11px] ${viewMode === "compact" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-400 hover:text-zinc-300"}`}
             >
               compact
             </button>
@@ -259,33 +252,40 @@ function EventLogPanel() {
               type="button"
               onClick={() => changeViewMode("full")}
               aria-pressed={viewMode === "full"}
-              className={`px-1.5 py-0.5 font-mono text-[9px] ${viewMode === "full" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-600 hover:text-zinc-300"}`}
+              className={`px-1.5 py-0.5 text-[11px] ${viewMode === "full" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-400 hover:text-zinc-300"}`}
             >
               full
             </button>
           </div>
-          <label className="flex shrink-0 items-center gap-1 text-[10px] text-zinc-500" title="прилипание к свежим событиям (лента prepend'ит сверху); пауза честно замораживает список">
+          <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title="прилипание к свежим событиям (лента prepend'ит сверху); пауза честно замораживает список">
             {liveTail ? "live" : "пауза"}
             <Switch checked={liveTail} onCheckedChange={toggleTail} aria-label="Живой хвост событий" className="scale-75" />
           </label>
-          <label className="flex shrink-0 items-center gap-1 text-[10px] text-zinc-500">
+          {paused ? (
+            <button type="button" onClick={() => toggleTail(true)} data-testid="event-log-resume"
+              className="border border-amber-900/60 px-1.5 py-0.5 text-xs text-amber-200"
+              title="Вернуться к текущему буферу событий; счётчик включает только события, сохранённые в буфере">
+              Вернуться к live · {newerBufferedCount} новых в буфере
+            </button>
+          ) : null}
+          <label className="flex shrink-0 items-center gap-1 text-xs text-zinc-500">
             автоскролл
             <Switch checked={autoScroll} onCheckedChange={setAutoScroll} aria-label="Автоскролл лога" className="scale-75" />
           </label>
         </div>
         <div
           ref={logRef} data-testid="event-log"
-          className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-0.5 font-mono text-[10.5px] leading-relaxed [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent"
+          className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-0.5 text-[10.5px] leading-relaxed [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent"
         >
           {grouped.length === 0 && (
-            <p className="p-4 text-center text-zinc-500">{events.length ? "ничего не найдено по фильтру" : "ожидание событий…"}</p>
+            <p className="p-4 text-center text-zinc-500">{display.length ? "ничего не найдено по фильтру" : paused ? "пауза на пустом журнале" : "ожидание событий…"}</p>
           )}
           {grouped.map(({ event: e, count }) => (
             <div key={e.seq} className="flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
-              <span className="shrink-0 text-zinc-600">{e.seq}</span>
+              <span className="shrink-0 text-zinc-400">{e.seq}</span>
               <span className="shrink-0 text-zinc-500">{hhmmss(e.ts)}</span>
               <span className={`w-36 shrink-0 truncate font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`} title={e.type}>{e.type}</span>
-              {count > 1 ? <span className="shrink-0 border border-zinc-800 px-1 font-mono text-[8px] text-cyan-400">×{count}</span> : null}
+              {count > 1 ? <span className="shrink-0 border border-zinc-800 px-1 text-xs text-cyan-400">×{count}</span> : null}
               <span className="min-w-0 flex-1 truncate text-zinc-500" title={e.data}>{e.data}</span>
             </div>
           ))}
@@ -398,11 +398,11 @@ function EvidenceTimelinePanel({
   return (
     <Sec
       id="obs-evidence-timeline"
-      title="RUN·EVIDENCE"
+      title="Task evidence"
       icon={Activity}
       tone="cyan"
       right={(
-        <span className="font-mono text-[9px] text-zinc-500">
+        <span className="text-[11px] text-zinc-500">
           {inspectedTaskId ? `exact task binding · history ${streamState.toLowerCase()}` : "no task selected"}
         </span>
       )}
@@ -414,9 +414,9 @@ function EvidenceTimelinePanel({
         data-history-state={streamState}
         className="space-y-2"
       >
-        <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 font-mono text-[9px]">
+        <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 text-[11px]">
           <span
-            className={chain?.ok === true ? "text-emerald-400" : chain?.ok === false ? "text-rose-400" : "text-zinc-600"}
+            className={chain?.ok === true ? "text-emerald-400" : chain?.ok === false ? "text-rose-400" : "text-zinc-400"}
             title="Evidence-chain verification is global ambient evidence; it is not task-causal without an explicit task-bound chain receipt"
           >{chainLabel} ambient</span>
           <span className="text-zinc-800">·</span>
@@ -427,8 +427,8 @@ function EvidenceTimelinePanel({
 
         {!inspectedTaskId ? (
           <div className="rounded border border-dashed border-zinc-800 px-2 py-3 text-center">
-            <p className="text-[11px] text-zinc-500">Выберите задачу в COMMAND или PLAN, чтобы собрать её exact evidence timeline.</p>
-            <p className="mt-1 font-mono text-[9px] text-zinc-700">no heuristic joins · no inferred CI ownership · read only</p>
+            <p className="text-[13px] text-zinc-400">Select a task on the Tasks page to view its activity and results.</p>
+            <p className="mt-1 text-[11px] text-zinc-500">no heuristic joins · no inferred CI ownership · read only</p>
           </div>
         ) : (
           <>
@@ -437,7 +437,7 @@ function EvidenceTimelinePanel({
                 <div className="truncate text-[11px] font-medium text-zinc-200" title={task?.title ?? inspectedTaskId}>
                   {task?.title ?? inspectedTaskId}
                 </div>
-                <div className="mt-0.5 font-mono text-[9px] text-zinc-600">
+                <div className="mt-0.5 text-[11px] text-zinc-400">
                   task {inspectedTaskId.slice(0, 16)}{task?.agent_id ? ` · agent ${task.agent_id.slice(0, 12)}` : ""}{task?.status ? ` · ${task.status}` : ""}
                 </div>
               </div>
@@ -445,10 +445,10 @@ function EvidenceTimelinePanel({
                 type="button"
                 onClick={openExactTask}
                 data-testid="evidence-open-plan"
-                className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] uppercase text-cyan-300 transition hover:border-cyan-800 hover:bg-cyan-950/20"
-                title="Open exact task in PLAN"
+                className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] uppercase text-cyan-300 transition hover:border-cyan-800 hover:bg-cyan-950/20"
+                title="Open this task"
               >
-                plan →
+                Open task
               </button>
             </div>
 
@@ -457,21 +457,21 @@ function EvidenceTimelinePanel({
                 <div
                   key={row.key}
                   role="listitem"
-                  className="grid grid-cols-[42px_64px_minmax(0,1fr)] items-start gap-1.5 rounded px-1.5 py-1 font-mono text-[9px] hover:bg-zinc-900/60"
+                  className="grid grid-cols-[42px_64px_minmax(0,1fr)] items-start gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-zinc-900/60"
                   data-evidence-kind={row.kind}
                 >
-                  <span className="text-zinc-700">{row.at ? hhmmss(row.at) : "—"}</span>
+                  <span className="text-zinc-500">{row.at ? hhmmss(row.at) : "—"}</span>
                   <span className={row.bad ? "text-rose-400" : row.kind === "VERDICT" ? "text-violet-400" : row.kind === "TASK" ? "text-cyan-400" : "text-emerald-400/90"}>
                     {row.kind}
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-zinc-300" title={row.label}>{row.label}</span>
-                    <span className="block truncate text-zinc-600" title={row.detail}>{row.detail}</span>
+                    <span className="block truncate text-zinc-400" title={row.detail}>{row.detail}</span>
                   </span>
                 </div>
               ))}
               {rows.length === 0 ? (
-                <div className="rounded border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[9px] text-zinc-600">
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-2 text-center text-[11px] text-zinc-400">
                   exact task selected · evidence rows not observed yet
                 </div>
               ) : null}
@@ -479,7 +479,7 @@ function EvidenceTimelinePanel({
           </>
         )}
 
-        <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
+        <div className="text-xs leading-3 text-zinc-500" data-testid="evidence-binding-contract">
           causal rows require exact task_id equality; fetched task history is admitted only when streamTaskId matches the selected task and the bounded readback is generation-fenced; history state is explicit; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
         </div>
       </div>
@@ -491,6 +491,7 @@ function EvidenceTimelinePanel({
 // ── страница ────────────────────────────────────────────────────────────────────
 export function ObservabilityPage() {
   const snap = useMe2((s) => s.snap);
+  const connected = useMe2((s) => s.connected);
   const mirror = useMe2((s) => s.mirror);
   const nowMs = useMe2((s) => s.nowMs);
   const openTask = useMe2((s) => s.openTask);
@@ -512,34 +513,34 @@ export function ObservabilityPage() {
 
   // ── загрузчики (legacy 1:1: GET + ?XTransformPort=3041) ──
   const loadBench = useCallback(async () => {
-    const r = await me2Fetch<BenchT>("/bench?XTransformPort=3041"); if (r?.ok) setBench(r);
+    const r = await me2Fetch<BenchT>("/bench?XTransformPort=3041"); setBench(r?.ok === true ? r : null);
   }, []);
   const loadEval = useCallback(async () => {
-    const r = await me2Fetch<EvalT>("/eval?XTransformPort=3041"); if (r?.ok) setEvalData(r);
+    const r = await me2Fetch<EvalT>("/eval?XTransformPort=3041"); setEvalData(r?.ok === true ? r : null);
   }, []);
   const loadCi = useCallback(async () => {
-    const r = await me2Fetch<CiT>("/ci?XTransformPort=3041"); if (r?.ok) setCiData(r);
+    const r = await me2Fetch<CiT>("/ci?XTransformPort=3041"); setCiData(r?.ok === true ? r : null);
   }, []);
   const loadHooks = useCallback(async () => {
-    const r = await me2Fetch<HooksT>("/hooks?XTransformPort=3041"); if (r?.ok) setHooksData(r);
+    const r = await me2Fetch<HooksT>("/hooks?XTransformPort=3041"); setHooksData(r?.ok === true ? r : null);
   }, []);
   const loadHyg = useCallback(async () => {
-    const r = await me2Fetch<HygT>("/db/hygiene?XTransformPort=3041"); if (r?.ok) setHyg(r);
+    const r = await me2Fetch<HygT>("/db/hygiene?XTransformPort=3041"); setHyg(r?.ok === true ? r : null);
   }, []);
   const loadAutonomy = useCallback(async () => {
-    const r = await me2Fetch<AutonomyT>("/autonomy?XTransformPort=3041"); if (r?.ok) setAutonomy(r);
+    const r = await me2Fetch<AutonomyT>("/autonomy?XTransformPort=3041"); setAutonomy(r?.ok === true ? r : null);
   }, []);
   const loadOtelVd = useCallback(async () => {
     const [o, v] = await Promise.all([
       me2Fetch<OtelT>("/spans?XTransformPort=3041"),
       me2Fetch<VdT>("/verdicts?XTransformPort=3041"),
     ]);
-    if (o?.ok) setOtel(o);
-    if (v?.ok) setVd(v);
+    setOtel(o?.ok === true ? o : null);
+    setVd(v?.ok === true ? v : null);
   }, []);
   const loadEvChain = useCallback(async () => {
     const r = await me2Fetch<ChainVerifyT>("/evidence/verify?XTransformPort=3041&limit=300");
-    if (r) setEvChain(r);
+    setEvChain(r);
   }, []);
 
   // ── поллинги (mount + интервал; cleanup как legacy) ──
@@ -558,6 +559,9 @@ export function ObservabilityPage() {
   }, []);
 
   const runEval = useCallback(async () => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     setEvalBusy(true); // честный прогресс: запрос долгий (2-10с), не рвём его
     try {
       const r = await me2Fetch<{ verdict?: string; passed?: number; total?: number; duration_ms?: number; failed?: number; warned?: number }>(
@@ -573,9 +577,13 @@ export function ObservabilityPage() {
         await loadEval();
       } else toast({ title: "eval ✗", description: "daemon недоступен или прогон не вернул вердикт", variant: "destructive" });
     } finally { setEvalBusy(false); }
+    */
   }, [loadEval, toast]);
 
   const hygOp = useCallback(async (op: "checkpoint" | "vacuum") => {
+    toast({ title: "Action unavailable", description: LEGACY_DAEMON_EFFECTS_UNAVAILABLE, variant: "destructive" });
+    return;
+    /*
     if (op === "vacuum" && !window.confirm("VACUUM базы daemon? Операция блокирует БД на время пересборки (осмысленно при freelist ≥ 10%).")) return;
     setHygBusy(true);
     try {
@@ -587,6 +595,7 @@ export function ObservabilityPage() {
       else toast({ title: `db ${op} ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
       await loadHyg();
     } finally { setHygBusy(false); }
+    */
   }, [loadHyg, toast]);
 
   const verifyEvChain = useCallback(async (limit: number) => {
@@ -606,24 +615,30 @@ export function ObservabilityPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-observability" data-panel-log>
-      <PageHeader title="OBSERVABILITY" sub="журнал · шина · ingress · аудит · здоровье" />
-      <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
+      <PageHeader title="Evidence" sub="Task history, events and runtime diagnostics."
+        actions={<span className="text-xs text-zinc-400">{connected ? "Event stream connected" : "Event stream unavailable"}</span>} />
+      {!snap || !connected ? (
+        <div role="status" className="mb-3 rounded-xl bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
+          {!snap ? "Runtime data is unavailable. Diagnostic cards show only successful observations." : "Connection interrupted. Event history remains available; new events may be delayed."}
+        </div>
+      ) : null}
+      <div className="mc-scroll grid min-h-0 flex-1 auto-rows-max grid-cols-1 items-start gap-3 overflow-y-auto pr-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)]">
 
         {/* ── ЛЕВО: EXACT TASK EVIDENCE + EVENT LOG ── */}
-        <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-[2]" data-testid="panel-log">
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0" data-testid="panel-log">
           <div className="shrink-0">
             <EvidenceTimelinePanel verdicts={vd} chain={evChain} ci={ciData} otel={otel} />
           </div>
-          <div className="min-h-0 flex-1 [&>section]:h-full [&>section]:min-h-0">
+          <div className="h-96 min-h-0 [&>section]:h-full [&>section]:min-h-0">
             <EventLogPanel />
           </div>
         </div>
 
         {/* ── ЦЕНТР: BUS + INGRESS ── */}
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto lg:flex-[1.2] mc-scroll">
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
           <Sec
-            id="obs-bus" title="COMMAND BUS" icon={Zap}
-            right={<span className="font-mono text-[10px] text-zinc-500">бюджет {budget.used}/{budget.limit} / 60s</span>}
+            id="obs-bus" title="Commands" icon={Zap}
+            right={<span className="text-xs text-zinc-500">бюджет {budget.used}/{budget.limit} / 60s</span>}
           >
             <div className="space-y-1" data-testid="command-bus">
               {scheduled.length > 0 && (
@@ -631,11 +646,11 @@ export function ObservabilityPage() {
                   {scheduled.map((c) => (
                     <div key={c.id} className="flex items-center gap-2 rounded px-1 py-0.5">
                       <Clock className="h-3 w-3 shrink-0 text-lime-400" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-lime-200">{c.action}</span>
-                      <span className="font-mono text-[10px] text-lime-400/90">ETA {etaOf(c, nowMs)}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-lime-200">{c.action}</span>
+                      <span className="text-xs text-lime-400/90">ETA {etaOf(c, nowMs)}</span>
                       <button
                         aria-label={`Отменить ${c.action} по расписанию`}
-                        className="rounded p-0.5 text-zinc-600 transition hover:bg-rose-950 hover:text-rose-400"
+                        className="rounded p-0.5 text-zinc-400 transition hover:bg-rose-950 hover:text-rose-400"
                         onClick={() => void cancelCommand(c.id)}
                       >
                         <X className="h-3 w-3" />
@@ -646,22 +661,22 @@ export function ObservabilityPage() {
               )}
               {(snap?.commands ?? []).slice(0, 12).map((c) => (
                 <div key={c.id} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-900/60">
-                  <span className={`shrink-0 rounded border px-1 font-mono text-[9px] ${LANE_CHIP(c.lane)}`}>{c.lane}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={c.action}>{c.action}</span>
-                  {c.error && <span className="hidden min-w-0 max-w-36 flex-1 truncate text-right font-mono text-[9px] text-rose-300/80 md:inline" title={c.error}>{c.error}</span>}
-                  <span className="shrink-0 font-mono text-[9px] text-zinc-600">cost {c.cost}</span>
-                  <span className="shrink-0 font-mono text-[9px] text-zinc-600">{age(c.created_at)}</span>
+                  <span className={`shrink-0 rounded border px-1 text-[11px] ${LANE_CHIP(c.lane)}`}>{c.lane}</span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-300" title={c.action}>{c.action}</span>
+                  {c.error && <span className="hidden min-w-0 max-w-36 flex-1 truncate text-right text-[11px] text-rose-300/80 md:inline" title={c.error}>{c.error}</span>}
+                  <span className="shrink-0 text-[11px] text-zinc-400">cost {c.cost}</span>
+                  <span className="shrink-0 text-[11px] text-zinc-400">{age(c.created_at)}</span>
                   <StateBadge state={mapState(c.status)} size="xs" />
                 </div>
               ))}
-              {(snap?.commands ?? []).length === 0 && <p className="p-3 text-center text-xs text-zinc-500">шина пуста</p>}
+              {(snap?.commands ?? []).length === 0 && <p className="p-3 text-center text-xs text-zinc-500">{snap ? "No observed commands" : "Command data is unavailable"}</p>}
             </div>
           </Sec>
 
           {/* R67: CI-INGRESS (pull) */}
-          <Sec id="obs-ci" title="CI·INGRESS" icon={GitBranch} tone="teal"
+          <Sec id="obs-ci" defaultOpen={false} title="GitHub Actions" icon={GitBranch} tone="teal"
             right={ciData ? (
-              <span className={`rounded px-1.5 py-px font-mono text-[9px] ${ciData.verdict === "LIVE" ? "bg-emerald-500/15 text-emerald-400" : ciData.verdict === "ERROR" ? "bg-rose-500/15 text-rose-400" : ciData.verdict === "NO_TOKEN" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-500"}`}
+              <span className={`rounded px-1.5 py-px text-[11px] ${ciData.verdict === "LIVE" ? "bg-emerald-500/15 text-emerald-400" : ciData.verdict === "ERROR" ? "bg-rose-500/15 text-rose-400" : ciData.verdict === "NO_TOKEN" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-500"}`}
                 title={`verdict: ${ciData.verdict} · опросов: ${ciData.polls_total} · событий: ${ciData.events_emitted_total}`}>{ciData.verdict}</span>
             ) : undefined}
           >
@@ -676,27 +691,27 @@ export function ObservabilityPage() {
                   </div>
                   <div className="max-h-28 space-y-0.5 overflow-y-auto pr-1 mc-scroll" role="list" aria-label="Последние прогоны CI">
                     {ciData.runs.map((r) => (
-                      <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]"
+                      <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 text-[11px]"
                         title={`${r.name} · run ${r.id} · ${r.status}${r.conclusion ? " · " + r.conclusion : ""}${r.created_at ? " · " + r.created_at : ""}`}>
                         <span className="w-16 shrink-0 truncate text-zinc-400">{r.name}</span>
-                        <span className="shrink-0 text-zinc-600">{r.head_sha7}</span>
+                        <span className="shrink-0 text-zinc-400">{r.head_sha7}</span>
                         <StateBadge state={ciState(r)} size="xs" />
-                        <span className="ml-auto shrink-0 text-zinc-600">{r.created_at ? hhmmss(r.created_at) : "—"}</span>
+                        <span className="ml-auto shrink-0 text-zinc-400">{r.created_at ? hhmmss(r.created_at) : "—"}</span>
                       </div>
                     ))}
-                    {ciData.runs.length === 0 && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">прогонов нет</div>}
+                    {ciData.runs.length === 0 && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">прогонов нет</div>}
                   </div>
                 </>
               ) : (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка CI-статуса…</div>
+                 <div role="status" className="rounded-xl bg-zinc-900/60 px-3 py-3 text-[13px] text-zinc-400">CI status has not been received. Check the event connection and refresh.</div>
               )}
             </div>
           </Sec>
 
           {/* R68: WEBHOOKS-IN (push) */}
-          <Sec id="obs-hooks" title="WEBHOOKS·IN" icon={Webhook} tone="amber"
+          <Sec id="obs-hooks" defaultOpen={false} title="Incoming events" icon={Webhook} tone="amber"
             right={hooksData ? (
-              <span className={`rounded px-1.5 py-px font-mono text-[9px] ${hooksData.verdict === "LIVE" ? "bg-emerald-500/15 text-emerald-400" : hooksData.verdict === "NO_SECRET" ? "bg-rose-500/15 text-rose-400" : hooksData.verdict === "DEV_SECRET" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-500"}`}
+              <span className={`rounded px-1.5 py-px text-[11px] ${hooksData.verdict === "LIVE" ? "bg-emerald-500/15 text-emerald-400" : hooksData.verdict === "NO_SECRET" ? "bg-rose-500/15 text-rose-400" : hooksData.verdict === "DEV_SECRET" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-500"}`}
                 title={`verdict: ${hooksData.verdict} · секрет: ${hooksData.secret} · получено: ${hooksData.received_total} · верифицировано: ${hooksData.verified_total}`}>{hooksData.verdict}</span>
             ) : undefined}
           >
@@ -713,41 +728,41 @@ export function ObservabilityPage() {
                       title="GUID-окно дедупликации X-GitHub-Delivery: персистентная SQLite-таблица hook_deliveries (R69)" />
                   </div>
                   {hooksData.rejected_last_reason && (
-                    <p className="truncate rounded border border-rose-900/60 bg-rose-950/30 px-1.5 py-0.5 font-mono text-[9px] text-rose-300" role="status"
+                    <p className="truncate rounded border border-rose-900/60 bg-rose-950/30 px-1.5 py-0.5 text-[11px] text-rose-300" role="status"
                       title="последняя причина отказа push-доставки">last reject: {hooksData.rejected_last_reason}</p>
                   )}
                   <div className="max-h-28 space-y-0.5 overflow-y-auto pr-1 mc-scroll" role="list" aria-label="Последние доставки webhook">
                     {hooksData.deliveries.map((d, i) => (
-                      <div key={`${d.delivery}-${i}`} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]"
+                      <div key={`${d.delivery}-${i}`} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 text-[11px]"
                         title={`${d.event}${d.action ? " · " + d.action : ""} · delivery ${d.delivery} · ${d.at}`}>
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${d.emitted.length > 0 ? "bg-emerald-400" : "bg-zinc-600"}`} aria-hidden />
                         <span className="w-20 shrink-0 truncate text-zinc-400">{d.event}</span>
-                        <span className="shrink-0 text-zinc-600">{d.delivery}</span>
+                        <span className="shrink-0 text-zinc-400">{d.delivery}</span>
                         <span className="min-w-0 flex-1 truncate text-zinc-500">{d.emitted.join(", ") || "dedupe"}</span>
-                        <span className="shrink-0 text-zinc-600">{hhmmss(d.at)}</span>
+                        <span className="shrink-0 text-zinc-400">{hhmmss(d.at)}</span>
                       </div>
                     ))}
-                    {hooksData.deliveries.length === 0 && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">доставок нет (ping не приходил)</div>}
+                    {hooksData.deliveries.length === 0 && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center text-[11px] text-zinc-400">доставок нет (ping не приходил)</div>}
                   </div>
                 </>
               ) : (
-                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка статуса webhook…</div>
+                 <div role="status" className="rounded-xl bg-zinc-900/60 px-3 py-3 text-[13px] text-zinc-400">Incoming event status has not been received. Check the event connection and refresh.</div>
               )}
             </div>
           </Sec>
         </div>
 
         {/* ── ПРАВО: ЗЕРКАЛО + АУДИТ + ЗДОРОВЬЕ ── */}
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto lg:flex-[1.2] mc-scroll">
-          <Sec id="obs-mirror" title="SQL·ЗЕРКАЛО" icon={Database} tone="cyan">
+        <div className="flex min-w-0 flex-col gap-3 [&>section]:shrink-0">
+          <Sec id="obs-mirror" defaultOpen={false} title="History mirror" icon={Database} tone="cyan">
             <MirrorPanel />
           </Sec>
 
           {/* R33 E2: EVIDENCE·CHAIN */}
-          <Sec id="obs-evchain" title="EVIDENCE·CHAIN" icon={ShieldCheck} tone="emerald">
+          <Sec id="obs-evchain" defaultOpen={false} title="Audit integrity" icon={ShieldCheck} tone="emerald">
             <div className="space-y-1.5">
               <SecLabel icon={ShieldCheck} text="chain" tone="text-zinc-500" title="E2/ME32 (IETF draft-sharif-agent-audit-trail): sha256(prev|ts|type|actor|subject|data); verify пересчитывает хеши и связи">
-                <span data-testid="evchain-chips" className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+                <span data-testid="evchain-chips" className="flex flex-wrap items-center gap-1 text-[11px]">
                   <Chip label="mirror" value={mirror ? mirror.mode : "—"} tone={mirror?.mode === "LIVE" ? "emerald" : mirror?.mode === "OFF" ? "zinc" : "amber"}
                     title="канал SQL-зеркала (store, опрос каждые 10с)" />
                   <Chip label="outbox" value={mirror?.pending ?? "—"} tone={(mirror?.pending ?? 0) > 0 ? "amber" : "zinc"} />
@@ -762,13 +777,13 @@ export function ObservabilityPage() {
                 </span>
                 <span data-testid="evchain-actions" className="ml-auto flex shrink-0 items-center gap-1">
                   <button type="button" onClick={() => void verifyEvChain(300)} disabled={evChainBusy} aria-label="Проверить целостность hash-chain (300 событий)"
-                    className="rounded border border-emerald-900/60 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300/90 transition hover:bg-zinc-800 disabled:opacity-40">проверить</button>
+                    className="rounded border border-emerald-900/60 px-1.5 py-0.5 text-[11px] text-emerald-300/90 transition hover:bg-zinc-800 disabled:opacity-40">проверить</button>
                   <button type="button" onClick={() => void verifyEvChain(1000)} disabled={evChainBusy} aria-label="Проверить hash-chain глубже (1000 событий)"
-                    className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">1000</button>
+                    className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">1000</button>
                 </span>
               </SecLabel>
               {evChain && (
-                <p className="truncate font-mono text-[9px] text-zinc-600" title={evChain.reason ?? evChain.scheme}>
+                <p className="truncate text-[11px] text-zinc-400" title={evChain.reason ?? evChain.scheme}>
                   scheme {evChain.scheme.split(",")[0]}{evChain.reason ? ` · ${evChain.reason}` : ""} · query: /evidence/query?task_id=…
                 </p>
               )}
@@ -776,14 +791,14 @@ export function ObservabilityPage() {
           </Sec>
 
           {/* R25 B3: BENCH */}
-          <Sec id="obs-bench" title="BENCH" icon={Gauge} tone="teal"
-            right={<button type="button" onClick={() => void loadBench()} aria-label="Обновить перф-бейслайны" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800">обновить</button>}
+          <Sec id="obs-bench" defaultOpen={false} title="Performance" icon={Gauge} tone="teal"
+            right={<button type="button" onClick={() => void loadBench()} aria-label="Обновить перф-бейслайны" className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500 transition hover:bg-zinc-800">обновить</button>}
           >
             <div className="space-y-1.5" aria-label="Перф-бейслайны daemon и MCP-сервер">
               <div className="flex flex-wrap items-center gap-1.5">
                 <SecLabel icon={Gauge} text="p95" tone="text-zinc-500" title="ME20: пороги B3 — REST p95<50ms, act p95<2000ms, obsv<50MB, boot<5s; замер живого трафика" />
                 <StateBadge state={benchState(bench?.verdict ?? "WARMUP")} size="xs" />
-                <span data-testid="bench-chips" className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+                <span data-testid="bench-chips" className="flex flex-wrap items-center gap-1 text-[11px]">
                   <Chip label="boot" value={bench?.boot_ms != null ? `${bench.boot_ms}ms` : "—"} tone={(bench?.boot_ms ?? 0) > 5000 ? "rose" : "zinc"} title="BOOT_T0 → первый принятый REST-запрос" />
                   <Chip label="rss" value={bench ? `${bench.memory.rss_mb}MB` : "—"} />
                   <Chip label="heap" value={bench ? `${bench.memory.heap_mb}MB` : "—"} />
@@ -791,7 +806,7 @@ export function ObservabilityPage() {
                   <Chip label="sqlite" value={bench ? `${bench.memory.sqlite_mb}MB` : "—"} />
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-0.5 font-mono text-[9px] sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-0.5 text-[11px] sm:grid-cols-2">
                 {([
                   ["rest", bench?.probes.rest], ["rest_admin", bench?.probes.rest_admin], ["rest_browser", bench?.probes.rest_browser],
                   ["sense", bench?.probes.sense], ["sense_act", bench?.probes.sense_act],
@@ -806,21 +821,21 @@ export function ObservabilityPage() {
                 ))}
               </div>
               {bench?.verdict === "FAIL" && (
-                <p className="font-mono text-[9px] text-rose-300/90" role="status">пороги нарушены: {bench.fails.join(" · ")}</p>
+                <p className="text-[11px] text-rose-300/90" role="status">пороги нарушены: {bench.fails.join(" · ")}</p>
               )}
             </div>
           </Sec>
 
           {/* R26 B1: EVAL */}
-          <Sec id="obs-eval" title="EVAL" icon={ClipboardCheck}
+          <Sec id="obs-eval" defaultOpen={false} title="Daemon checks" icon={ClipboardCheck}
             right={
               <span className="flex items-center gap-1">
                 <button type="button" onClick={() => void runEval()} disabled={evalBusy} aria-label="Прогнать регресс-датасет"
                   title="POST /eval/run — золотой путь daemon; запрос долгий (2-10с), ждём честно"
-                  className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-50">
+                  className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-50">
                   {evalBusy ? "прогон…" : "прогнать"}
                 </button>
-                <button type="button" onClick={() => void loadEval()} aria-label="Обновить eval" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800"><RefreshCw className="h-3 w-3" aria-hidden /></button>
+                <button type="button" onClick={() => void loadEval()} aria-label="Обновить eval" className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500 transition hover:bg-zinc-800"><RefreshCw className="h-3 w-3" aria-hidden /></button>
               </span>
             }
           >
@@ -828,7 +843,7 @@ export function ObservabilityPage() {
               <div className="flex flex-wrap items-center gap-1.5">
                 <SecLabel icon={ClipboardCheck} text="v" tone="text-zinc-500" title="ME22 (B1): read-only чеки контрактов; автопрогон на каждой инкарнации, история в SQLite" />
                 <StateBadge state={evalState(evalData?.last?.verdict ?? "WARMUP")} size="xs" />
-                <span data-testid="eval-chips" className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+                <span data-testid="eval-chips" className="flex flex-wrap items-center gap-1 text-[11px]">
                   <Chip label="dataset" value={`v${evalData?.dataset_version ?? "—"}`} />
                   <Chip label="last" value={evalData?.last ? `${evalData.last.verdict} ${evalData.last.passed}/${evalData.last.total}` : "—"}
                     tone={evalData?.last ? (evalData.last.verdict === "PASS" ? "emerald" : evalData.last.failed ? "rose" : "amber") : "zinc"} />
@@ -838,41 +853,41 @@ export function ObservabilityPage() {
                   <Chip label="runs" value={evalData?.runs_total ?? "—"} />
                 </span>
               </div>
-              {evalBusy && <p className="font-mono text-[9px] text-amber-300/90" role="status">прогон идёт — датасет v{evalData?.dataset_version ?? "?"} целиком, обычно 2-10с…</p>}
+              {evalBusy && <p className="text-[11px] text-amber-300/90" role="status">прогон идёт — датасет v{evalData?.dataset_version ?? "?"} целиком, обычно 2-10с…</p>}
               {evalData?.last && evalData.last.verdict !== "PASS" && (
                 <ul className="space-y-0.5" role="status">
                   {(evalData.last.results ?? []).filter((r) => !r.ok).slice(0, 5).map((r) => (
-                    <li key={r.id} className={`font-mono text-[9px] ${r.critical ? "text-rose-300/90" : "text-amber-300/80"}`} title={`ожидание: ${r.expect}`}>
+                    <li key={r.id} className={`text-[11px] ${r.critical ? "text-rose-300/90" : "text-amber-300/80"}`} title={`ожидание: ${r.expect}`}>
                       {r.critical ? "✗" : "⚠"} {r.id}: {r.evidence}
                     </li>
                   ))}
                 </ul>
               )}
               {(evalData?.history ?? []).slice(0, 5).map((h) => (
-                <div key={h.run_id} className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-0.5 font-mono text-[9px]" title={`run ${h.run_id} · ${h.started_at}`}>
-                  <span className="shrink-0 text-zinc-600">{hhmmss(h.started_at)}</span>
+                <div key={h.run_id} className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-0.5 text-[11px]" title={`run ${h.run_id} · ${h.started_at}`}>
+                  <span className="shrink-0 text-zinc-400">{hhmmss(h.started_at)}</span>
                   <span className={`shrink-0 font-semibold ${h.verdict === "PASS" ? "text-emerald-400" : h.verdict === "FAIL" ? "text-rose-400" : "text-amber-400"}`}>{h.verdict}</span>
                   <span className="text-zinc-500">{h.passed}/{h.total}</span>
-                  <span className="ml-auto text-zinc-600">{h.duration_ms}ms</span>
+                  <span className="ml-auto text-zinc-400">{h.duration_ms}ms</span>
                 </div>
               ))}
             </div>
           </Sec>
 
           {/* R31 D4: DB·HYGIENE */}
-          <Sec id="obs-hygiene" title="DB·HYGIENE" icon={Database} tone="teal"
+          <Sec id="obs-hygiene" defaultOpen={false} title="Database maintenance" icon={Database} tone="teal"
             right={
               <span className="flex items-center gap-1" data-testid="hygiene-actions">
                 <button type="button" onClick={() => void hygOp("checkpoint")} disabled={hygBusy} aria-label="Выполнить WAL checkpoint (TRUNCATE)"
-                  className="rounded border border-teal-900/60 px-1.5 py-0.5 font-mono text-[9px] text-teal-300/90 transition hover:bg-zinc-800 disabled:opacity-40">checkpoint</button>
+                  className="rounded border border-teal-900/60 px-1.5 py-0.5 text-[11px] text-teal-300/90 transition hover:bg-zinc-800 disabled:opacity-40">checkpoint</button>
                 <button type="button" onClick={() => void hygOp("vacuum")} disabled={hygBusy} aria-label="Выполнить VACUUM базы данных"
-                  className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">vacuum</button>
-                <button type="button" onClick={() => void loadHyg()} aria-label="Обновить статус гигиены БД" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800"><RefreshCw className="h-3 w-3" aria-hidden /></button>
+                  className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">vacuum</button>
+                <button type="button" onClick={() => void loadHyg()} aria-label="Обновить статус гигиены БД" className="rounded border border-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500 transition hover:bg-zinc-800"><RefreshCw className="h-3 w-3" aria-hidden /></button>
               </span>
             }
           >
             <div className="space-y-1.5" aria-label="Гигиена базы данных daemon">
-              <div data-testid="hygiene-chips" className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+              <div data-testid="hygiene-chips" className="flex flex-wrap items-center gap-1 text-[11px]">
                 <Chip label="journal" value={hyg?.db.journal_mode ?? "—"} title={`journal_mode=${hyg?.db.journal_mode ?? "—"}, страниц=${hyg?.db.page_count ?? "—"}`} />
                 <Chip label="db" value={hyg ? `${hyg.db.file_mb}MB` : "—"} />
                 <Chip label="wal" value={hyg ? `${hyg.db.wal_mb}MB` : "—"} tone={hyg && hyg.db.wal_mb >= 50 ? "amber" : "zinc"} title="TRUNCATE-checkpoint обнуляет WAL" />
@@ -881,7 +896,7 @@ export function ObservabilityPage() {
                 <Chip label="idx" value={hyg?.indexes.length ?? "—"} title={`горячие индексы: ${hyg?.indexes.slice(0, 8).join(", ") ?? "—"}…`} />
               </div>
               {hyg?.last_runs[0] && (
-                <p className="truncate font-mono text-[9px] text-zinc-600" title={hyg.last_runs[0].detail}>
+                <p className="truncate text-[11px] text-zinc-400" title={hyg.last_runs[0].detail}>
                   last: {hyg.last_runs[0].op} {hyg.last_runs[0].ok ? "✓" : "✗"} {hyg.last_runs[0].duration_ms}ms · {hyg.last_runs[0].age_s}s назад{hyg.last_runs[0].detail ? ` · ${hyg.last_runs[0].detail}` : ""}
                 </p>
               )}
@@ -889,9 +904,9 @@ export function ObservabilityPage() {
           </Sec>
 
           {/* R38 H1: AUTONOMY·V4 */}
-          <Sec id="obs-autonomy" title="AUTONOMY·V4" icon={Activity} tone="violet">
+          <Sec id="obs-autonomy" defaultOpen={false} title="Autonomy diagnostics" icon={Activity} tone="violet">
             <div className="space-y-1.5" aria-label="Плоскость автономии v4">
-              <div data-testid="autonomy-chips" className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+              <div data-testid="autonomy-chips" className="flex flex-wrap items-center gap-1 text-[11px]">
                 <span className={`rounded border px-1 py-0.5 ${autonomy ? (autonomy.liveness.verdict === "LIVE" ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300 animate-pulse") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`}
                   title={autonomy ? (autonomy.liveness.stalled_reasons.join("; ") || `предикатов=${autonomy.liveness.checks.length}: ${autonomy.liveness.checks.map((c) => `${c.id}=${c.ok ? "✓" : "✗"}`).join(" ")}`) : "живость системы"}>
                   {autonomy ? autonomy.liveness.verdict : "—"}
@@ -914,21 +929,21 @@ export function ObservabilityPage() {
                 </span>
               </div>
               {autonomy && autonomy.liveness.stalled_reasons.length > 0 && (
-                <p className="truncate font-mono text-[9px] text-rose-300" role="alert" title={autonomy.liveness.stalled_reasons.join("; ")}>{autonomy.liveness.stalled_reasons.join(" · ")}</p>
+                <p className="truncate text-[11px] text-rose-300" role="alert" title={autonomy.liveness.stalled_reasons.join("; ")}>{autonomy.liveness.stalled_reasons.join(" · ")}</p>
               )}
             </div>
           </Sec>
 
           {/* SPANS·OTEL + VERDICTS (RH) */}
-          <Sec id="obs-otel" title="SPANS·OTEL + VERDICTS" icon={Radio} tone="cyan">
+          <Sec id="obs-otel" defaultOpen={false} title="Execution traces" icon={Radio} tone="cyan">
             <div className="space-y-1.5" aria-label="OTel-lite спаны и reward-hacking вердикты">
-              <div data-testid="otel-chips" className="flex flex-wrap items-center gap-1 font-mono text-[9px]">
+              <div data-testid="otel-chips" className="flex flex-wrap items-center gap-1 text-[11px]">
                 <Chip label="spans" value={otel ? `${otel.spans}/${otel.ringCap}` : "—"} title="OTel-lite: спаны команд шины и задач; OTLP-JSON на /spans/otlp" />
                 <Chip label="dropped" value={otel?.dropped ?? "—"} tone={(otel?.dropped ?? 0) > 0 ? "rose" : "zinc"} />
                 <Chip label="verdicts RH" value={vd?.count ?? "—"} tone={(vd?.count ?? 0) > 0 ? "rose" : "zinc"}
                   title="Reward-hacking вердикты (tier-1): finish без реальной работы. Подозрение не меняет статус задачи — решает оператор" />
               </div>
-              <div className="space-y-0.5 font-mono text-[9px]">
+              <div className="space-y-0.5 text-[11px]">
                 {(otel?.stats ?? []).slice(0, 5).map((s) => (
                   <div key={s.name} className={`flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-0.5 ${s.err ? "text-rose-300/90" : "text-zinc-500"}`} title={`${s.name}: max=${s.maxMs}ms`}>
                     <span className="min-w-0 flex-1 truncate text-zinc-400">{s.name}</span>
@@ -941,7 +956,7 @@ export function ObservabilityPage() {
                   <button key={v.seq} type="button" onClick={() => v.task_id && openTask(v.task_id)}
                     className={`flex w-full items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-0.5 text-left transition hover:bg-zinc-900/70 ${v.task_id ? "cursor-pointer" : "cursor-default"}`}
                     title={v.task_id ? `открыть задачу ${v.task_id}` : "вердикт без задачи"}>
-                    <span className="shrink-0 text-zinc-600">#{v.seq}</span>
+                    <span className="shrink-0 text-zinc-400">#{v.seq}</span>
                     <span className="min-w-0 flex-1 truncate text-rose-300/90">{v.task_id ?? "—"}</span>
                     <span className="min-w-0 flex-1 truncate text-zinc-500" title={(v.reasons ?? []).join(", ")}>{(v.reasons ?? []).join(", ") || "—"}</span>
                   </button>

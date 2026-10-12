@@ -322,6 +322,7 @@ export async function verifyOfflineRuntimeBundle({ bundleDirectory, expectedBund
       denoExecutable: join(root, OFFLINE_LAYOUT.executables.deno), postgresBinDirectory: join(root, OFFLINE_LAYOUT.executables.postgres_bin),
       denoDirectory: join(root, OFFLINE_LAYOUT.deno_dir), hostEntry: join(root, OFFLINE_LAYOUT.entry),
       firstRunInitdbEntry: join(root, 'source/infra/client-state-runtime/fresh-pg17-initdb.mjs'),
+      attachedOnboardingEntry: join(root, 'source/infra/client-state-runtime/attached-postgres-onboarding.mjs'),
       remoteSupportEntry: join(root, 'source/apps/metaengine-browser/src/remote-support-mcp.mjs'),
     },
   };

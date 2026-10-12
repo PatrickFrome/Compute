@@ -15,6 +15,15 @@ export function canonicalLocalStateSupervisorBase(value) {
   return `${parsed.origin}/a2-browser-native-supervisor-v1`;
 }
 
+// The scheduler can remain alive after its owned provider has stopped.
+// The controller updates this boot state on the exact child's exit.
+export function localStateProviderConnectionReady(running, env = process.env) {
+  if (running !== true) return false;
+  const provider = String(env.METAENGINE_STATE_PROVIDER || '').trim();
+  if (!provider) return true;
+  return provider === 'LOCAL_POSTGRES' && env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE === 'READY';
+}
+
 export function localStateProviderOwnerFile({ env = process.env, platform = process.platform } = {}) {
   const root = String(platform === 'win32' ? env.APPDATA || '' : env.XDG_CONFIG_HOME || '').trim();
   if (!root || !path.isAbsolute(root)) return null;

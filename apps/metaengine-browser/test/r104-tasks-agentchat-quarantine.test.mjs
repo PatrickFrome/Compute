@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { filterSupportedLegacyDaemonActionCatalog } from '../../me2-ui/src/lib/task-content-snapshot.mjs';
 
 const tasks = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
 const dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
@@ -34,11 +35,14 @@ test('R104 task product surfaces are observation-only until canonical DevOS muta
 });
 
 test('R104 command palette hard-fences retired daemon task mutations including generic catalog entries', () => {
-  for (const action of ['TASK_ENQUEUE','TASK_SCHEDULE','TASK_CANCEL','TASK_RETRY','TASK_ARCHIVE']) {
-    assert.match(palette, new RegExp(`"${action}"`));
-  }
-  assert.match(palette, /RETIRED_DAEMON_TASK_ACTIONS\.has\(meta\.action\)/);
-  assert.match(palette, /catalog\.filter\(\(row\) => !RETIRED_DAEMON_TASK_ACTIONS\.has\(row\.action\)\)/);
+  assert.match(palette, /filterSupportedLegacyDaemonActionCatalog\(catalog\)/);
+  assert.match(palette, /filterSupportedLegacyDaemonActionCatalog\(\[meta\]\)/);
+  const visible=filterSupportedLegacyDaemonActionCatalog([
+    ...['TASK_ENQUEUE','TASK_SCHEDULE','TASK_CANCEL','TASK_RETRY','TASK_ARCHIVE'].map((action) => ({ action })),
+    { action:'AGENT_SPAWN' }, { action:'FLEET_RECONCILE' }, { action:'BUDGET_ADJUST' },
+    { action:'PING' }, { action:'BROWSER_OPEN' },
+  ]);
+  assert.deepEqual(visible.map((row) => row.action), ['PING','BROWSER_OPEN']);
   assert.match(palette, /visibleCatalog\.map/);
   assert.doesNotMatch(palette, /setDialog\("newTask"\)|value="new новая задача"/);
 });

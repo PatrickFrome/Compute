@@ -20,7 +20,10 @@ function trackedFiles() {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
   });
-  return output.split('\0').filter(Boolean);
+  // Build output and installed dependencies are mutable during packaging. The
+  // persistence policy audits repository source, not generated copies of it.
+  const generatedDirectory = /(?:^|\/)(?:\.next|dist|me2-ui-dist|node_modules)\//;
+  return output.split('\0').filter(relativePath => relativePath && !generatedDirectory.test(relativePath));
 }
 
 async function inspectTrackedText(relativePath) {
@@ -32,22 +35,33 @@ async function inspectTrackedText(relativePath) {
   return bytes.toString('utf8');
 }
 
-test('repository persistence and coordination remain Supabase-only and single-project', async () => {
+test('repository persistence and coordination remain Supabase-only and single-project', async t => {
   const violations = [];
-  for (const relativePath of trackedFiles()) {
-    const text = await inspectTrackedText(relativePath);
-    if (text == null) continue;
-    const lower = text.toLowerCase();
-    if (
-      forbiddenWord.test(text)
-      || lower.includes(forbiddenSdk)
-      || lower.includes(forbiddenHost)
-      || text.includes(forbiddenEnv)
-      || text.includes(historicalSupabaseProject)
-    ) {
-      violations.push(relativePath);
+  const files = trackedFiles();
+  const workers = Math.min(16, files.length);
+  let nextFile = 0; let textFiles = 0;
+  // Bound concurrent filesystem work without reducing tracked-file coverage.
+  // Windows stat/read latency otherwise serializes the entire repository gate.
+  await Promise.all(Array.from({ length: workers }, async () => {
+    while (nextFile < files.length) {
+      const relativePath = files[nextFile++];
+      const text = await inspectTrackedText(relativePath);
+      if (text == null) continue;
+      textFiles++;
+      const lower = text.toLowerCase();
+      if (
+        forbiddenWord.test(text)
+        || lower.includes(forbiddenSdk)
+        || lower.includes(forbiddenHost)
+        || text.includes(forbiddenEnv)
+        || text.includes(historicalSupabaseProject)
+      ) {
+        violations.push(relativePath);
+      }
     }
-  }
+  }));
+  violations.sort();
+  t.diagnostic(`tracked_files=${files.length}; text_files=${textFiles}; workers=${workers}`);
 
   assert.deepEqual(
     violations,

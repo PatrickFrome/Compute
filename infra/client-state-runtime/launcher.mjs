@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
+import { classifyPostgresUtilityFailure } from './postgres-utility-diagnostic.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import net from 'node:net';
@@ -18,6 +19,37 @@ function runtimeError(code) {
   return error;
 }
 
+const HEALTH_FAILURE_SCHEMA = 'metaengine.client-state.health-failure.v1';
+const HEALTH_FAILURE_CODES = new Set([
+  'health_http_failed', 'health_response_invalid', 'health_not_ready', 'health_capability_unattested',
+  'health_timeout', 'health_connection_refused', 'health_network_failed', 'health_instance_mismatch',
+  'postgres_identity_mismatch', 'postgres_cluster_identity_mismatch', 'postgres_data_directory_mismatch',
+  'postgres_owned_pid_mismatch', 'postgres_incarnation_mismatch', 'postgres_identity_invalid',
+  'postgres_pid_file_invalid', 'postgres_inspection_failed', 'postgres_process_verification_failed',
+  'postgres_inspection_timeout', 'postgres_inspection_spawn_failed', 'postgres_inspection_query_failed',
+  'postgres_inspection_output_limit', 'postgres_inspection_stderr_limit',
+  'postgres_inspection_auth_failed', 'postgres_inspection_permission_denied',
+  'postgres_inspection_row_security_denied', 'postgres_inspection_connection_refused',
+  'postgres_inspection_server_unavailable', 'postgres_inspection_query_timeout',
+  'postgres_inspection_database_missing',
+]);
+
+// Public diagnostic data contains finite categories only. Never forward an
+// exception message, endpoint, response body, configuration or child stderr.
+export function normalizeRuntimeHealthFailure(value) {
+  const fields = ['schema', 'code', 'component', 'consecutive_failures', 'http_status', 'authority_effect'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.length || fields.some(name => !Object.hasOwn(value, name))
+    || value.schema !== HEALTH_FAILURE_SCHEMA || !HEALTH_FAILURE_CODES.has(value.code)
+    || !['api', 'edge', 'postgres'].includes(value.component)
+    || value.code.startsWith('postgres_') !== (value.component === 'postgres')
+    || !Number.isSafeInteger(value.consecutive_failures) || value.consecutive_failures < 1 || value.consecutive_failures > 3
+    || (value.http_status !== null && (!Number.isSafeInteger(value.http_status) || value.http_status < 100 || value.http_status > 599))
+    || (value.code === 'health_http_failed') !== (value.http_status !== null)
+    || value.authority_effect !== false) throw runtimeError('runtime_health_failure_contract_invalid');
+  return Object.freeze(Object.fromEntries(fields.map(name => [name, value[name]])));
+}
+
 function port(value, label) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1024 || parsed > 65535) throw runtimeError(`${label}_invalid`);
@@ -27,6 +59,9 @@ function port(value, label) {
 export function normalizeLauncherConfig(input) {
   if (input.mode !== 'local') throw runtimeError('explicit_local_mode_required');
   if (!['owned', 'attached'].includes(input.postgresMode)) throw runtimeError('explicit_postgres_mode_required');
+  const apiRoleMode = input.apiRoleMode ?? 'service_role';
+  if (!['service_role', 'direct'].includes(apiRoleMode)) throw runtimeError('api_role_mode_invalid');
+  if (input.expectedClusterSystemIdentifier !== undefined && !/^[1-9][0-9]{0,19}$/.test(input.expectedClusterSystemIdentifier)) throw runtimeError('cluster_identity_pin_invalid');
   let database;
   try { database = new URL(input.databaseUrl); } catch { throw runtimeError('local_database_url_invalid'); }
   if (!['postgres:', 'postgresql:'].includes(database.protocol) || database.hostname !== '127.0.0.1') {
@@ -56,6 +91,7 @@ export function normalizeLauncherConfig(input) {
   if (input.instanceId !== undefined && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.instanceId)) throw runtimeError('runtime_instance_id_invalid');
   return {
     ...input,
+    apiRoleMode,
     databaseUrl: database.href,
     database,
     inspectDatabase,
@@ -83,6 +119,8 @@ export function configFromEnvironment(env = process.env) {
   return normalizeLauncherConfig({
     mode: env.LOCAL_STATE_MODE,
     postgresMode: env.LOCAL_STATE_POSTGRES_MODE,
+    apiRoleMode: env.LOCAL_STATE_API_ROLE_MODE,
+    expectedClusterSystemIdentifier: env.LOCAL_STATE_EXPECTED_CLUSTER_SYSTEM_IDENTIFIER,
     databaseUrl: env.LOCAL_STATE_DATABASE_URL,
     inspectDatabaseUrl: env.LOCAL_STATE_INSPECT_DATABASE_URL,
     pgBinDir: env.LOCAL_STATE_PG_BIN_DIR,
@@ -125,30 +163,78 @@ function postgresEnvironment(config) {
   };
 }
 
-async function runBounded(command, args, { env = process.env, timeoutMs = 5000 } = {}) {
+async function runBounded(command, args, { env = process.env, timeoutMs = 5000, diagnosticOperation = null } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    let text = '';
+    let child;
+    try { child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch { reject(runtimeError('runtime_command_spawn_failed')); return; }
+    const chunks = [];
+    const stderrChunks = [];
+    let bytes = 0;
+    let stderrBytes = 0;
     let settled = false;
+    let timer;
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       error ? reject(error) : resolve(value);
     };
-    const timer = setTimeout(() => {
-      child.kill();
-      finish(runtimeError('runtime_command_timeout'));
-    }, timeoutMs);
-    child.stdout.on('data', chunk => { text += chunk; if (text.length > 65536) child.kill(); });
+    const terminate = code => {
+      finish(runtimeError(code));
+      try { child.kill(); } catch { /* Only this new child handle is owned. */ }
+    };
+    timer = setTimeout(() => terminate('runtime_command_timeout'), timeoutMs);
+    child.stdout.on('data', chunk => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > 65536) { terminate('runtime_command_output_limit'); return; }
+      chunks.push(buffer);
+    });
+    child.stdout.once('error', () => terminate('runtime_command_output_failed'));
+    child.stderr?.on('data', chunk => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      stderrBytes += buffer.length;
+      if (stderrBytes > 16384) { terminate('runtime_command_stderr_limit'); return; }
+      stderrChunks.push(buffer);
+    });
+    child.stderr?.once('error', () => terminate('runtime_command_stderr_limit'));
     child.once('error', () => finish(runtimeError('runtime_command_spawn_failed')));
-    child.once('exit', code => finish(code === 0 ? null : runtimeError('runtime_command_failed'), text.trim()));
+    // exit can precede the last stdout bytes. close confirms that the pipes
+    // have drained, so a successful psql cannot yield a truncated identity.
+    child.once('close', (code, signal) => {
+      if (code === 0 && !signal) {
+        finish(null, Buffer.concat(chunks).toString('utf8').trim());
+        return;
+      }
+      const error = runtimeError('runtime_command_failed');
+      // Only a finite safe code crosses the subprocess boundary; stderr bytes
+      // never become an exception message, receipt, or persisted diagnosis.
+      if (diagnosticOperation === 'inspection') error.diagnostic_code =
+        classifyPostgresUtilityFailure(Buffer.concat(stderrChunks), 'inspection').code;
+      finish(error);
+    });
   });
 }
 
 export async function inspectPostgres(config) {
-  const query = "SELECT json_build_object('data_directory',current_setting('data_directory'),'version',current_setting('server_version_num')::int,'address',host(inet_server_addr()),'port',inet_server_port(),'started_at',pg_postmaster_start_time())::text";
-  const output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-At', '-c', query], { env: postgresEnvironment(config) });
+  const query = "SELECT json_build_object('data_directory',current_setting('data_directory'),'version',current_setting('server_version_num')::int,'address',host(inet_server_addr()),'port',inet_server_port(),'started_at',pg_postmaster_start_time()" +
+    (config.expectedClusterSystemIdentifier ? ",'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system())" : '') + ")::text";
+  let output;
+  try {
+    output = await runBounded(path.join(config.pgBinDir, executable('psql')), ['-X', '--no-password', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-At', '-c', query], { env: postgresEnvironment(config), diagnosticOperation:'inspection' });
+  } catch (error) {
+    const categories = {
+      runtime_command_timeout: 'postgres_inspection_timeout',
+      runtime_command_spawn_failed: 'postgres_inspection_spawn_failed',
+      runtime_command_failed: error?.diagnostic_code || 'postgres_inspection_query_failed',
+      runtime_command_stderr_limit: 'postgres_inspection_stderr_limit',
+      runtime_command_output_limit: 'postgres_inspection_output_limit',
+    };
+    throw runtimeError(categories[error?.code] || 'postgres_inspection_failed');
+  }
   try { return JSON.parse(output); } catch { throw runtimeError('postgres_identity_invalid'); }
 }
 
@@ -156,6 +242,7 @@ export async function assertPostgresIdentity(record, config, ownedPid = null) {
   if (record?.version < 170000 || record?.version >= 180000 || record?.address !== '127.0.0.1' || record?.port !== config.databasePort || !record?.started_at) {
     throw runtimeError('postgres_identity_mismatch');
   }
+  if (config.expectedClusterSystemIdentifier && record.system_identifier !== config.expectedClusterSystemIdentifier) throw runtimeError('postgres_cluster_identity_mismatch');
   const actual = await realpath(record.data_directory);
   const expected = await realpath(config.pgDataDir);
   const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
@@ -179,6 +266,7 @@ export function runtimeEnvironment(config) {
     LOCAL_STATE_RUNTIME: 'LOCAL_POSTGRES',
     LOCAL_STATE_INSTANCE_ID: config.instanceId,
     LOCAL_STATE_DATABASE_URL: config.databaseUrl,
+    LOCAL_STATE_API_ROLE_MODE: config.apiRoleMode,
     LOCAL_STATE_API_KEY: config.apiKey,
     LOCAL_STATE_API_HOST: '127.0.0.1',
     LOCAL_STATE_API_PORT: String(config.apiPort),
@@ -197,6 +285,7 @@ export function runtimeEnvironment(config) {
 const allowedEnvironment = [
   'LOCAL_STATE_MODE', 'LOCAL_STATE_RUNTIME', 'LOCAL_STATE_INSTANCE_ID', 'LOCAL_STATE_EDGE_PORT', 'LOCAL_STATE_API_BASE_URL',
   'LOCAL_STATE_DATABASE_URL', 'LOCAL_STATE_API_KEY', 'LOCAL_STATE_API_PORT',
+  'LOCAL_STATE_API_ROLE_MODE',
   'SUPABASE_URL', 'SUPABASE_DB_URL', 'SUPABASE_DB_SESSION_URL',
   'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEYS', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY',
   'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSSLMODE',
@@ -219,6 +308,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   let postgresIdentity;
   let startupManifest;
   let postgresPreparation;
+  let lastHealthFailure = null;
 
   const stopChild = async child => {
     if (exits.has(child)) return;
@@ -271,7 +361,8 @@ export async function launchClientStateRuntime(input, hooks = {}) {
       catch { cleanupFailure = runtimeError('runtime_cleanup_unconfirmed'); }
     }
     report({ event: 'stopped', instance_id: config.instanceId, reason });
-    finish({ reason: cleanupFailure ? cleanupFailure.code : reason, children_stopped: !cleanupFailure });
+    finish({ reason: cleanupFailure ? cleanupFailure.code : reason, children_stopped: !cleanupFailure,
+      ...(lastHealthFailure ? { last_health_failure: lastHealthFailure } : {}) });
     if (cleanupFailure) throw cleanupFailure;
     return finished;
   };
@@ -309,13 +400,37 @@ export async function launchClientStateRuntime(input, hooks = {}) {
 
   async function health(which) {
     const endpoint = which === 'api' ? `http://127.0.0.1:${config.apiPort}/health` : `http://127.0.0.1:${config.edgePort}/a2-browser-native-supervisor-v1/health`;
-    const response = await fetch(endpoint, { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(3000) });
-    if (!response.ok) throw runtimeError(`${which}_health_failed`);
-    const body = await response.json();
-    if (body.instance_id !== config.instanceId) throw runtimeError(`${which}_instance_mismatch`);
-    if (body.ok !== true) throw runtimeError(`${which}_health_failed`);
+    let response;
+    try { response = await fetch(endpoint, { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(3000) }); }
+    catch (cause) {
+      const error = runtimeError(`${which}_health_failed`);
+      error.healthFailureCode = cause?.name === 'TimeoutError' || cause?.name === 'AbortError' ? 'health_timeout'
+        : cause?.cause?.code === 'ECONNREFUSED' || cause?.code === 'ECONNREFUSED' ? 'health_connection_refused' : 'health_network_failed';
+      throw error;
+    }
+    if (!response.ok) {
+      const error = runtimeError(`${which}_health_failed`);
+      error.healthFailureCode = 'health_http_failed'; error.healthHttpStatus = response.status;
+      // A failing peer can send an arbitrarily large body. Cancel it without
+      // buffering, parsing, logging, or delaying the fail-closed classification.
+      void response.body?.cancel().catch(() => {});
+      throw error;
+    }
+    let body;
+    try { body = await response.json(); }
+    catch (cause) {
+      const error = runtimeError(`${which}_health_failed`);
+      error.healthFailureCode = cause?.name === 'TimeoutError' || cause?.name === 'AbortError' ? 'health_timeout' : 'health_response_invalid';
+      throw error;
+    }
+    if (body?.instance_id !== config.instanceId) {
+      const error = runtimeError(`${which}_instance_mismatch`); error.healthFailureCode = 'health_instance_mismatch'; throw error;
+    }
+    if (body.ok !== true) {
+      const error = runtimeError(`${which}_health_failed`); error.healthFailureCode = 'health_not_ready'; throw error;
+    }
     if (which === 'edge' && (body.runtime_ready !== true || body.capability_health?.state !== 'ATTESTED')) {
-      throw runtimeError('edge_runtime_unattested');
+      const error = runtimeError('edge_runtime_unattested'); error.healthFailureCode = 'health_capability_unattested'; throw error;
     }
     return body;
   }
@@ -329,7 +444,9 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     const fixtureEntry = (command, fallback) => command ? command.args.find((arg) => path.isAbsolute(arg) && /\.(mjs|js|ts)$/.test(arg)) || fallback : fallback;
     const captureOptions = {
       repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry),
-        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs')] : [])],
+        path.join(here, 'local-runtime-migrations.mjs'),
+        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs'), path.join(here, 'attached-postgres-onboarding.mjs'),
+          path.join(projectRoot, 'apps/metaengine-browser/src/remote-support-mcp.mjs')] : [])],
       nodePath: config.nodePath, denoPath: config.denoPath, denoLockPath: config.denoLockPath,
       pgBinDir: hooks.inspectPostgres ? undefined : config.pgBinDir, env, fixture, policy: safeRuntimePolicy(config, { fixture }),
     };
@@ -376,16 +493,35 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     monitor = setInterval(async () => {
       if (stopping || probing) return;
       probing = true;
+      let component = 'api';
+      let postgresStage = 'inspection';
       try {
         await health('api');
+        component = 'edge';
         await health('edge');
+        component = 'postgres';
         const session = children.find(item => item.name === 'postgres')?.session;
-        if (session) await session.verify();
+        if (session) { postgresStage = 'process'; await session.verify(); }
+        postgresStage = 'inspection';
         const current = await assertPostgresIdentity(await inspector(config), config, ownedPostgresPid);
         if (current.pid !== postgresIdentity.pid || current.started_at !== postgresIdentity.started_at) throw runtimeError('postgres_incarnation_mismatch');
+        if (stopping) return;
         failedProbes = 0;
+        if (lastHealthFailure) {
+          lastHealthFailure = null;
+          await Promise.resolve().then(() => report({ event: 'health_recovered' })).catch(() => {});
+        }
       } catch (error) {
+        if (stopping) return;
         failedProbes += 1;
+        const code = component === 'postgres'
+          ? HEALTH_FAILURE_CODES.has(error?.code) && error.code.startsWith('postgres_') ? error.code
+            : postgresStage === 'process' ? 'postgres_process_verification_failed' : 'postgres_inspection_failed'
+          : String(error?.code || '') === `${component}_instance_mismatch` ? 'health_instance_mismatch'
+            : error.healthFailureCode || 'health_network_failed';
+        lastHealthFailure = normalizeRuntimeHealthFailure({ schema: HEALTH_FAILURE_SCHEMA, code, component,
+          consecutive_failures: Math.min(3, failedProbes), http_status: error.healthHttpStatus ?? null, authority_effect: false });
+        await Promise.resolve().then(() => report({ event: 'health_failure', health_failure: lastHealthFailure })).catch(() => {});
         if (String(error.code || '').includes('mismatch') || failedProbes >= 3) void stop('runtime_health_failed').catch(() => {});
       } finally { probing = false; }
     }, config.healthIntervalMs);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { buildSentinelWorkerFailureEvidence } from '../src/host-resilience-runtime.mjs';
+import { buildSentinelWorkerFailureEvidence } from './helpers/host-resilience-offline-fixture.mjs';
 
 const observedAt = Date.parse('2026-09-08T20:00:00.000Z');
 const sentinel = {

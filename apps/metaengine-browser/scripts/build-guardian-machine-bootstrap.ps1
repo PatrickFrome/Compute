@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory=$true)][string]$StagingDir,
-  [Parameter(Mandatory=$true)][string]$OutputDir
+  [Parameter(Mandatory=$true)][string]$OutputDir,
+  [string]$VcVarsPath = $env:ME2_VCVARS_PATH
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -27,10 +28,16 @@ $out = [System.IO.Path]::GetFullPath($OutputDir)
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('guardian-bootstrap-build-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp | Out-Null
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-if (-not $vsRoot) { throw 'bootstrap_cpp_toolchain_missing' }
-$vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+if ($VcVarsPath) {
+  if (-not [System.IO.Path]::IsPathRooted($VcVarsPath) -or -not (Test-Path -LiteralPath $VcVarsPath -PathType Leaf)) { throw 'bootstrap_explicit_vcvars_missing' }
+  $vcvars = (Resolve-Path -LiteralPath $VcVarsPath).Path
+} else {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+  if (-not $vsRoot) { throw 'bootstrap_cpp_toolchain_missing' }
+  $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+}
+if (-not (Test-Path -LiteralPath $vcvars -PathType Leaf)) { throw 'bootstrap_vcvars_missing' }
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 try {
   $header = @"

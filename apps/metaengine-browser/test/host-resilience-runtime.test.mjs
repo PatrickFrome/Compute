@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { HostResilienceRuntime } from '../src/host-resilience-runtime.mjs';
+import { HostResilienceRuntime } from './helpers/host-resilience-offline-fixture.mjs';
 
 function fakeElectron() {
   const monitor = new EventEmitter();

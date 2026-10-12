@@ -45,12 +45,18 @@ export class AgentToolbelt {
   #results = new Map();
   #counters = { requests_parsed: 0, requests_issued: 0, requests_unavailable: 0, results_terminal: 0, issue_errors: 0, route_unavailable_streak: 0 };
   #lastError = null;
+  #projectRuntime = null;
 
   constructor({ signedRequest, maxCommandsPerLease = MAX_COMMANDS_PER_LEASE } = {}) {
     if (typeof signedRequest !== 'function') throw new Error('agent_toolbelt_signed_request_required');
     if (!Number.isSafeInteger(maxCommandsPerLease) || maxCommandsPerLease < 1 || maxCommandsPerLease > 32) throw new Error('agent_toolbelt_budget_invalid');
     this.#signedRequest = signedRequest;
     this.#maxCommandsPerLease = maxCommandsPerLease;
+  }
+
+  bindProjectRuntime(runtime) {
+    if (runtime != null && typeof runtime.serveToolRequests !== 'function') throw new Error('agent_toolbelt_project_runtime_invalid');
+    this.#projectRuntime = runtime;
   }
 
   #leaseRows(key) {
@@ -84,6 +90,18 @@ export class AgentToolbelt {
       const action = String(request?.action || '').toUpperCase();
       if (!requestId || rows.has(requestId)) continue;
       if (!AGENT_TOOL_ACTIONS.includes(action)) { unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'ACTION_NOT_ALLOWED' }); continue; }
+      if (['PROJECT_SPAWN', 'PROJECT_HISTORY'].includes(action)) {
+        if (!this.#projectRuntime) { unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'PROJECT_RUNTIME_UNAVAILABLE' }); continue; }
+        try {
+          const results = await this.#projectRuntime.serveToolRequests({ lease, requests: [request] });
+          for (const result of results) {
+            const row = { ...result, action, for_agent: agentId, at: new Date().toISOString(), command_id: null };
+            rows.set(requestId, row); this.#rememberResult(row);
+            issued.push({ request_id: requestId, action, project_result: true });
+          }
+        } catch { unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'PROJECT_REQUEST_FENCED_OR_AMBIGUOUS' }); }
+        continue;
+      }
       const payload = { ...(request?.payload || {}) };
       if (!payload.tab_id && TAB_RE.test(tabId)) payload.tab_id = tabId;
       try {
@@ -194,6 +212,13 @@ export class AgentToolbelt {
       if (row.for_agent === id) out.push({ request_id: row.request_id, status: row.status, summary: row.summary });
     }
     return out;
+  }
+
+  resultsForLease(lease, { limit = 8 } = {}) {
+    const rows = this.#byLease.get(leaseKey(lease));
+    if (!rows) return [];
+    return [...rows.values()].filter(row => ['COMPLETED', 'FAILED', 'UNAVAILABLE'].includes(row.status))
+      .slice(0, limit).map(row => ({ request_id: row.request_id, status: row.status, summary: row.summary }));
   }
 
   snapshot() {

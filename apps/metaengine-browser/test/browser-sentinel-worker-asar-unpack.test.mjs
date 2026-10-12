@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { resolveSentinelWorkerScript } from '../src/host-resilience-runtime.mjs';
+import { resolveSentinelWorkerScript } from './helpers/host-resilience-offline-fixture.mjs';
 
 const WORKER_CLOSURE = [
   'browser-sentinel-worker.cjs',

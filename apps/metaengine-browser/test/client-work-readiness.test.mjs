@@ -38,6 +38,81 @@ test('positive readiness requires current admission and exact Agent origin; comp
   assert.equal(result.authority_effect, false);
 });
 
+test('open admission preserves unknown send and Agent bootstrap effects with specific inspection guidance', () => {
+  const value = input();
+  value.snapshot.lifecycle.keepalive.state = 'WAKE_AMBIGUOUS';
+  value.fleet.agents[0].lifecycle_state = 'PROVISIONING_AMBIGUOUS';
+  value.fleet.agents[0].ambiguous_reason = 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
+  const result = projectClientWorkReadiness(value);
+  assert.equal(result.state, 'BLOCKED');
+  assert.equal(result.reason, 'SUPERVISOR_RECOVERY_REQUIRED');
+  assert.equal(result.execution_ready, false);
+  assert.match(result.detail, /previous Supervisor send has an unknown result/);
+  assert.equal(result.recovery.required, true);
+  assert.equal(result.recovery.supervisor_reason, 'SUPERVISOR_SEND_EFFECT_UNKNOWN');
+  assert.equal(result.recovery.agent_readback_required_count, 1);
+  assert.deepEqual(result.recovery.agent_reasons, ['AGENT_BOOTSTRAP_EFFECT_UNKNOWN']);
+  assert.equal(result.recovery.next_step, 'INSPECT_EXISTING_CONVERSATIONS');
+  assert.equal(result.recovery.admission_resume_resolves_unknown_effect, false);
+  assert.equal(result.recovery.prior_effect_replayed, false);
+  assert.equal(result.recovery.automatic_retry_allowed, false);
+  assert.equal(result.recovery.authority_effect, false);
+  assert.equal(result.active_agent_count, 0);
+  assert.equal(result.proven_agent_count, 0);
+});
+
+test('recovery projection discloses no private conversation or persisted prompt', () => {
+  const value = input();
+  value.snapshot.lifecycle.keepalive.state = 'ROLLOVER_AMBIGUOUS';
+  value.snapshot.lifecycle.keepalive.pending_wake = { prompt: 'SENTINEL_PRIVATE_PROMPT' };
+  value.snapshot.lifecycle.keepalive.conversation_url = 'https://chatgpt.com/c/SENTINEL_PRIVATE_URL';
+  value.fleet.agents[0].lifecycle_state = 'PROVISIONING_AMBIGUOUS';
+  value.fleet.agents[0].ambiguous_reason = 'SENTINEL_PRIVATE_UNKNOWN_REASON';
+  const result = projectClientWorkReadiness(value);
+  assert.equal(result.recovery.supervisor_reason, 'SUPERVISOR_ROLLOVER_EFFECT_UNKNOWN');
+  assert.deepEqual(result.recovery.agent_reasons, ['AGENT_PROVISIONING_EFFECT_UNKNOWN']);
+  assert.doesNotMatch(JSON.stringify(result), /SENTINEL_PRIVATE/);
+  assert.equal(result.execution_ready, false);
+});
+
+test('an unbound fresh Supervisor reports session preparation without claiming readiness or unresolved recovery', () => {
+  const value = input();
+  Object.assign(value.snapshot.lifecycle.keepalive, { state: 'RECOVERING', tab_id: null, conversation_url: null,
+    pending_wake: null, active_wake: null, rollover_attempt: null, supervisor_epoch: 3, cycle_seq: 0,
+    ambiguous_history: [{ previous_effect_outcome: 'UNKNOWN', retired_reason: 'OPERATOR_ARCHIVED_UNKNOWN_PREDECESSOR_BOOTSTRAP' }] });
+  value.fleet.agents[0].lifecycle_state = 'BOUND_UNVERIFIED';
+  const result = projectClientWorkReadiness(value);
+  assert.equal(result.state, 'BLOCKED');
+  assert.equal(result.reason, 'SUPERVISOR_SESSION_STARTING');
+  assert.equal(result.label, 'Starting chats');
+  assert.match(result.detail, /fresh Supervisor conversation/);
+  assert.equal(result.execution_ready, false);
+  assert.equal(result.capabilities.chat_dispatch.ready, false);
+  assert.equal(result.capabilities.coding_execution.ready, false);
+  assert.equal(result.recovery.required, false);
+  assert.equal(result.recovery.next_step, null);
+  assert.equal(result.recovery.prior_effect_replayed, false);
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.equal(result.authority_effect, false);
+});
+
+for (const [name, mutate] of [
+  ['pending send', value => { value.snapshot.lifecycle.keepalive.pending_wake = { wake_id: 'wake_pending' }; }],
+  ['active wake', value => { value.snapshot.lifecycle.keepalive.active_wake = { wake_id: 'wake_active' }; }],
+  ['rollover attempt', value => { value.snapshot.lifecycle.keepalive.rollover_attempt = { attempt_id: 'rollover_pending' }; }],
+  ['previous target', value => { value.snapshot.lifecycle.keepalive.tab_id = 'tab_previous'; }],
+  ['previous conversation', value => { value.snapshot.lifecycle.keepalive.conversation_url = 'https://chatgpt.com/c/previous'; }],
+  ['ambiguous Agent', value => { value.fleet.agents[0].lifecycle_state = 'PROVISIONING_AMBIGUOUS'; }],
+]) test(`fresh session preparation label cannot hide ${name}`, () => {
+  const value = input();
+  Object.assign(value.snapshot.lifecycle.keepalive, { state: 'RECOVERING', tab_id: null, conversation_url: null });
+  mutate(value);
+  const result = projectClientWorkReadiness(value);
+  assert.equal(result.reason, 'SUPERVISOR_RECOVERY_REQUIRED');
+  assert.equal(result.label, 'Recovery required');
+  assert.equal(result.execution_ready, false);
+});
+
 for (const [name, mutate, reason, state] of [
   ['unarmed control', x => { x.snapshot.armed = false; }, 'NATIVE_CONTROL_NOT_ARMED', 'BLOCKED'],
   ['observe-only control', x => { x.snapshot.supervisor_mode = 'OBSERVE'; }, 'NATIVE_CONTROL_NOT_ARMED', 'BLOCKED'],

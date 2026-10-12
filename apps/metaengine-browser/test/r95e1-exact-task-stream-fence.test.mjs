@@ -140,7 +140,7 @@ test('R95E.2 closing Task Sheet preserves exact inspected history for OBSERVE', 
 });
 
 
-test('R96 release reducer rejects a delayed A response after B becomes current and preserves live B over fetched B', () => {
+test('R96 release reducer rejects a delayed A response after B becomes current and deduplicates identical B rows', () => {
   const delayedA = resolveExactTaskStreamResponse({
     request: { seq: 41, taskId: 'task-a' },
     current: {
@@ -167,7 +167,7 @@ test('R96 release reducer rejects a delayed A response after B becomes current a
       ],
     },
     responseEvents: [
-      { seq: 22, task_id: 'task-b', type: 'FETCH_B_DUP', data: 'older duplicate' },
+      { seq: 22, task_id: 'task-b', type: 'LIVE_B', data: 'live wins' },
       { seq: 20, task_id: 'task-b', type: 'FETCH_B_OLD', data: 'history' },
       { seq: 19, task_id: 'task-a', type: 'WRONG_FETCH', data: 'reject' },
       { seq: Number.NaN, task_id: 'task-b', type: 'BAD_SEQ', data: 'reject' },
@@ -178,6 +178,37 @@ test('R96 release reducer rejects a delayed A response after B becomes current a
   assert.equal(exactB.patch.streamState, 'EXACT');
   assert.deepEqual(exactB.patch.stream.map((row) => row.seq), [20, 22]);
   assert.equal(exactB.patch.stream[1].type, 'LIVE_B');
+});
+
+test('latest fetch cannot clear a sequence conflict observed while its request was pending', async () => {
+  const known = [{ seq: 1, task_id: 'task-a', data: 'known' }];
+  const current = { seq: 1, taskId: 'task-a', streamTaskId: 'task-a', stream: known, conflicted: false };
+  let finish;
+  const response = new Promise(resolve => { finish = resolve; });
+  const pending = response.then(responseEvents => resolveExactTaskStreamResponse({
+    request: { seq: 1, taskId: 'task-a' }, current, responseEvents,
+  }));
+  // The socket detects conflicting bytes but retains the original known row.
+  current.conflicted = true;
+  finish(known);
+  assert.deepEqual((await pending).patch, { streamState: 'DEGRADED' });
+  assert.deepEqual(current.stream, known);
+  // A later explicit latest-window resync can recover; stale replies cannot.
+  assert.equal(resolveExactTaskStreamResponse({
+    request: { seq: 2, taskId: 'task-a' },
+    current: { ...current, seq: 2, conflicted: false, stream: [] }, responseEvents: known,
+  }).patch.streamState, 'EXACT');
+});
+
+test('immutable sequence conflicts across REST and live rows or within a legacy page retain known history', () => {
+  const row = { seq: 7, task_id: 'task-a', data: 'known' };
+  const current = { seq: 2, taskId: 'task-a', streamTaskId: 'task-a', stream: [row] };
+  const request = { seq: 2, taskId: 'task-a' };
+  for (const responseEvents of [[{ ...row, data: 'changed' }], [row, { ...row, data: 'changed' }]]) {
+    assert.deepEqual(resolveExactTaskStreamResponse({ request, current, responseEvents }).patch, { streamState: 'DEGRADED' });
+  }
+  assert.deepEqual(current.stream, [row]);
+  assert.deepEqual(resolveExactTaskStreamResponse({ request, current: { ...current, seq: 3, conflicted: true }, responseEvents: [row] }), { applied: false, patch: null });
 });
 
 test('R96 release reducer surfaces bounded history failure as DEGRADED only for the exact current task', () => {

@@ -21,6 +21,7 @@ import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeS
 import { createWindowsLocalComputerExecutor } from './windows-local-computer-executor.mjs';
 import { startInstalledGithubChatRelay,revokeInstalledGithubChatPairing } from './github-chat-relay-bootstrap.mjs';
 import { showInstalledGithubChatSetup } from './github-chat-setup.mjs';
+import { installGithubRepositoryConnection } from './github-repository-connection.mjs';
 import { CHAT_COMMAND_ACTIONS } from './chat-command-policy.mjs';
 import { assertLegacyProviderCommandAllowed } from './legacy-provider-quarantine.mjs';
 import { assertActiveInferenceCommandPolicy } from './active-inference-command-policy.mjs';
@@ -49,6 +50,15 @@ import { normalizeDevelopmentPlaneProjection, projectWorkspaceWorkbench } from '
 import { projectDevOSDevelopmentSources } from './metaengine-devos-development-sources.mjs';
 import { projectMissionControl } from './metaengine-mission-control-projection.mjs';
 import { SupervisorLoopbackRpcServer } from './supervisor-loopback-rpc-server.mjs';
+import { createManagedTaskProjectHost } from './managed-task-project-host.mjs';
+import { InterruptedSetupRecovery } from './interrupted-setup-recovery.mjs';
+import { classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
+import { MANAGED_PROJECT_COMMAND_ACTIONS } from './managed-task-project-command-adapter.mjs';
+import { createManagedTaskProjectAuthorityResolver, createManagedTaskProjectBindingTransport, createManagedTaskProjectRepositoryProvisioner } from './managed-task-project-authority-resolver.mjs';
+import { prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile, assertManagedProjectPhysicalDirectory, assertManagedProjectPrivateReceipt } from './managed-task-project-storage.mjs';
+import { verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
+import { createManagedTaskProjectClientControl } from './managed-task-project-client-control.mjs';
+import { createAutonomousProjectHost } from './autonomous-project-host.mjs';
 import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervisorCommand } from './browser-cognitive-system-deltas.mjs';
 // Fallback Console (operator directive 2026-09-21): embedded reserve control
 // plane. Probes the pinned cloud edge + the local reserve edge, re-points the
@@ -68,9 +78,11 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
-import { ClientAdmissionRecoveryJournal } from './client-admission-recovery-journal.mjs';
+import { ensureClientGoalProject } from './client-goal-project-link.mjs';
+import { createClientAdmissionRecoveryJournalFileStore } from './client-admission-recovery-journal-file-store.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
+import { notifyPrimaryWindowShown } from './browser-startup-observability.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -100,12 +112,25 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+let managedTaskProjectHost = null;
+let interruptedSetupRecovery = null;
+let interruptedSetupRecoveryInit = null;
+let interruptedSetupPhysicalMutationsInFlight = 0;
+let autonomousProjectRuntime = null;
+let managedTaskProjectHostClosing = Promise.resolve();
+let managedTaskProjectHostDrainPending = false;
+let managedTaskProjectQuitReady = false;
 let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
 let clientGoalJournal = null;
 let clientAdmissionRecoveryJournal = null;
 let clientAdmissionRecoveryJournalLoadError = null;
+const managedTaskProjectClientControl = createManagedTaskProjectClientControl({
+  getObservation: () => nativeSupervisor?.snapshot()?.workspace_bindings || null,
+  getHostSnapshot: () => managedTaskProjectHost?.snapshot() || null,
+  executeCommand: executeNativeSupervisorCommand,
+});
 
 function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
@@ -319,10 +344,6 @@ function devosSessionLayoutStatePath() {
   return path.join(app.getPath('userData'), 'metaengine-devos-session-layout-registry-v1.json');
 }
 
-function clientAdmissionRecoveryJournalStatePath() {
-  return path.join(app.getPath('userData'), 'metaengine-client-admission-recovery-v1.json');
-}
-
 async function ensureClientGoalJournal() {
   if (clientGoalJournal) {
     await clientGoalJournal.load();
@@ -346,16 +367,9 @@ async function ensureClientAdmissionRecoveryJournal() {
       return null;
     }
   }
-  const target = clientAdmissionRecoveryJournalStatePath();
-  clientAdmissionRecoveryJournal = new ClientAdmissionRecoveryJournal({
-    loadState: async () => JSON.parse(await fs.readFile(target, 'utf8')),
-    saveState: async (snapshot) => {
-      const temp = target + '.tmp';
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(temp, JSON.stringify(snapshot, null, 2) + '\n', { mode: 0o600 });
-      await fs.rename(temp, target);
-    },
-  });
+  // Use the same fsync/readback/ambiguity fence as the user-goal journal.
+  // Admission must not be reopened on an unconfirmed local persistence effect.
+  clientAdmissionRecoveryJournal = createClientAdmissionRecoveryJournalFileStore(app.getPath('userData')).journal;
   try {
     await clientAdmissionRecoveryJournal.load();
     return clientAdmissionRecoveryJournal;
@@ -525,12 +539,15 @@ function primaryChatFleetRoster() {
   const actors = [];
   const usedTabs = new Set();
 
-  const liveChatTab = (rawTabId) => {
+  const liveChatTab = (rawTabId, expectedTargetId = null) => {
     const tabId = String(rawTabId || '');
     if (!tabId || usedTabs.has(tabId)) return null;
     const tab = registry.get(tabId);
     const view = views.get(tabId);
     if (!tab || !view || view.webContents.isDestroyed()) return null;
+    const binding = resolveExactWebContentsTabBinding(tabId);
+    if (!binding || binding.tab_id !== tabId || binding.web_contents_id !== Number(view.webContents.id)) return null;
+    if (expectedTargetId != null && String(expectedTargetId).toLowerCase() !== `webcontents:${binding.web_contents_id}`) return null;
     try {
       const url = new URL(String(tab.url || ''));
       if (!isAgentPlatformHost(url.hostname)) return null;
@@ -565,8 +582,8 @@ function primaryChatFleetRoster() {
   }
 
   for (const row of (fleetSnapshot?.agents || [])) {
-    if (!['ACTIVE','BOUND_UNVERIFIED','PROVISIONING'].includes(String(row?.lifecycle_state || '').toUpperCase())) continue;
-    const tab = liveChatTab(row?.tab_id);
+    if (!['ACTIVE','BOUND_UNVERIFIED','PROVISIONING','PROVISIONING_AMBIGUOUS'].includes(String(row?.lifecycle_state || '').toUpperCase())) continue;
+    const tab = liveChatTab(row?.tab_id, row?.target_id || '');
     if (!tab) continue;
     const agentId = String(row?.agent_id || '').trim().toLowerCase();
     if (!agentId) continue;
@@ -575,6 +592,8 @@ function primaryChatFleetRoster() {
       actor_type: 'AGENT',
       role: String(row?.role || 'AGENT').toUpperCase(),
       state: String(row?.lifecycle_state || 'UNKNOWN').toUpperCase(),
+      recovery_required: row?.lifecycle_state === 'PROVISIONING_AMBIGUOUS',
+      recovery_reason: row?.lifecycle_state === 'PROVISIONING_AMBIGUOUS' ? String(row?.ambiguous_reason || 'TRANSPORT_READBACK_REQUIRED').slice(0, 160) : null,
       tab_id: tab.tab_id,
       selected: tab.tab_id === selectedTabId,
       title: tab.title || String(row?.role || 'Agent'),
@@ -646,6 +665,7 @@ async function reconcileClientGoal(rawRequestId, expectedReceipt = null) {
   const raw = await nativeSupervisor.clientGoalProgress({ request_id: requestId });
   const progress = normalizeClientGoalProgressReadback(raw, requestId, expectedReceipt);
   await journal.recordProgress(progress);
+  await ensureClientGoalProject({ journal, supervisor: nativeSupervisor, request_id: requestId });
 
   // C4.4 proof is a read-only augmentation. Progress remains durable even if
   // the proof route is temporarily unavailable; no task/Browser effect is
@@ -678,6 +698,7 @@ async function submitClientGoal(rawInput) {
     const raw = await nativeSupervisor.clientGoalSubmit({ request_id: requestId, objective: intent.goal });
     const receipt = normalizeClientGoalSubmissionReadback(raw, intent.goal, requestId);
     await journal.recordSubmission(receipt);
+    await ensureClientGoalProject({ journal, supervisor: nativeSupervisor, request_id: requestId });
     await publishSnapshot().catch(() => {});
     return receipt;
   } catch (error) {
@@ -702,6 +723,12 @@ async function latestClientGoal() {
       await reconcileClientGoal(latest.request_id, latest.receipt || null);
       latest = journal.latest();
     } catch {}
+  }
+  // A crash after admission or registration can leave only the goal receipt.
+  // Recover project metadata even for terminal tasks, using the same ID.
+  if (!latest?.project) {
+    await ensureClientGoalProject({ journal, supervisor: nativeSupervisor, request_id: latest.request_id });
+    latest = journal.latest();
   }
   return latest ? structuredClone(latest) : null;
 }
@@ -873,8 +900,14 @@ function fallbackSelectedSurface() {
 }
 
 function nativeBrowserSurfaceAllowed() {
-  return primaryShellMode !== 'ME2_PRIMARY'
-    || (primaryShellPage === 'browser' && primaryShellOverlayActive !== true);
+  if (primaryShellMode !== 'ME2_PRIMARY') return true;
+  if (primaryShellPage !== 'browser' || primaryShellOverlayActive === true) return false;
+  // Background-created tabs can become TabRegistry's selected tab before the
+  // primary chat roster has any actor. They must not cover the shell's empty
+  // state. Display only the exact live actor that the roster also presents.
+  const roster = primaryChatFleetRoster();
+  return roster.actors.some((actor) => actor.selected === true
+    && actor.actor_id === roster.selected_actor_id && actor.exact_native_binding === true);
 }
 
 async function preparePrimaryShellTarget() {
@@ -1170,6 +1203,10 @@ function wireRemoteView(tab, view) {
 }
 
 async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
+  return runInterruptedSetupPhysicalMutation('NEW_TAB', () => createTabWithRecoveryAdmission(input, { select, load, awaitLoad, role, created_by_continuity_id }));
+}
+
+async function createTabWithRecoveryAdmission(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
   if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
@@ -1198,6 +1235,10 @@ async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load 
 }
 
 async function loadTab(tabId, input) {
+  return runInterruptedSetupPhysicalMutation('NAVIGATE', () => loadTabWithRecoveryAdmission(tabId, input));
+}
+
+async function loadTabWithRecoveryAdmission(tabId, input) {
   const view = views.get(String(tabId));
   if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
   const d = navigationDecision(input);
@@ -1223,6 +1264,10 @@ async function loadTab(tabId, input) {
 }
 
 async function closeTab(tabId) {
+  return runInterruptedSetupPhysicalMutation('CLOSE_TAB', () => closeTabWithRecoveryAdmission(tabId));
+}
+
+async function closeTabWithRecoveryAdmission(tabId) {
   const id = String(tabId);
   const view = views.get(id);
   if (view) {
@@ -1437,7 +1482,26 @@ async function runDevelopmentPlaneSmoke() {
   app.exit(invariant ? 0 : 1);
 }
 
+function assertInterruptedSetupCommandAllowed(action) {
+  if (nativeSupervisor?.interruptedSetupRecoveryFenced?.() === true
+    && classifyNativeSupervisorCommand({ action: String(action || '').toUpperCase() }).read_only !== true) {
+    throw new Error('interrupted_setup_recovery_fenced');
+  }
+}
+
+async function runInterruptedSetupPhysicalMutation(action, operation) {
+  assertInterruptedSetupCommandAllowed(action);
+  const mutates = classifyNativeSupervisorCommand({ action: String(action || '').toUpperCase() }).read_only !== true;
+  if (mutates) interruptedSetupPhysicalMutationsInFlight += 1;
+  try { return await operation(); }
+  finally { if (mutates) interruptedSetupPhysicalMutationsInFlight -= 1; }
+}
+
 async function handleCommand(command, payload = {}) {
+  return runInterruptedSetupPhysicalMutation(command, () => handleCommandWithRecoveryAdmission(command, payload));
+}
+
+async function handleCommandWithRecoveryAdmission(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
   if (command === 'SHELL_LAYOUT_SET') {
@@ -1683,6 +1747,7 @@ async function nativeSupervisorState() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     computer_authority: computerExecutor.snapshot(),
     loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
+    managed_task_projects: managedTaskProjectHost?.snapshot() || { schema: 'metaengine.devos.managed-task-project-host.v1', state: 'UNAVAILABLE', authority_effect: false },
     github_chat: githubChatState(),
     compute,
     guardian,
@@ -1705,11 +1770,23 @@ function systemDeltaPublisher() {
 }
 
 async function executeNativeSupervisorCommand(command) {
+  return runInterruptedSetupPhysicalMutation(command?.action, () => executeNativeSupervisorCommandWithRecoveryAdmission(command));
+}
+
+async function executeNativeSupervisorCommandWithRecoveryAdmission(command) {
   // T3-8: every supervisor command completion (ok or failed) is a system
   // delta on the cognitive bus — Mission Control live effects.
   const startedAt = Date.now();
   try {
-    const result = await executeNativeSupervisorCommandFenced(command);
+    if (String(command?.issued_by || '').startsWith('github-chat:')) {
+      if (!githubChatRelay) throw new Error('github_chat_command_grant_revoked');
+      await githubChatRelay.assertCommandGrant(command);
+    }
+    assertActiveInferenceCommandPolicy(command);
+    if (MANAGED_PROJECT_COMMAND_ACTIONS.includes(command?.action) && !managedTaskProjectHost) throw new Error('managed_project_host_unavailable');
+    const result = managedTaskProjectHost
+      ? await managedTaskProjectHost.executeCommand(command)
+      : await executeNativeSupervisorCommandFenced(command);
     try {
       publishSupervisorCommand(systemDeltaPublisher(), null, {
         command_id: command?.command_id,
@@ -1733,11 +1810,10 @@ async function executeNativeSupervisorCommand(command) {
 }
 
 async function executeNativeSupervisorCommandFenced(command) {
-  if (String(command?.issued_by || '').startsWith('github-chat:')) {
-    if (!githubChatRelay) throw new Error('github_chat_command_grant_revoked');
-    await githubChatRelay.assertCommandGrant(command);
-  }
-  assertActiveInferenceCommandPolicy(command);
+  return runInterruptedSetupPhysicalMutation(command?.action, () => executeNativeSupervisorCommandFencedWithRecoveryAdmission(command));
+}
+
+async function executeNativeSupervisorCommandFencedWithRecoveryAdmission(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
   // ChatGPT-only execution fence. Historical GLM/Z.ai tabs may still be read,
@@ -2006,6 +2082,22 @@ async function connectGithubChat() {
   return githubChatSetup;
 }
 
+function closeManagedTaskProjectHost() {
+  const host = managedTaskProjectHost;
+  const projectRuntime = autonomousProjectRuntime;
+  managedTaskProjectHost = null;
+  autonomousProjectRuntime = null;
+  nativeSupervisor?.bindDevosProjectRuntime(null);
+  if (host || projectRuntime) {
+    managedTaskProjectHostDrainPending = true;
+    managedTaskProjectHostClosing = (async () => {
+      try { await projectRuntime?.close(); }
+      finally { await host?.close(); }
+    })().finally(() => { managedTaskProjectHostDrainPending = false; });
+  }
+  return managedTaskProjectHostClosing;
+}
+
 async function initNativeSupervisor() {
   if (!nativeSupervisor) {
     const identity = ensureSupervisorIdentity();
@@ -2091,6 +2183,36 @@ async function initNativeSupervisor() {
       },
     });
   }
+  // Both remote leased commands and authenticated loopback commands enter the
+  // same host adapter. Its dependencies use this client's existing device
+  // signature rail; no DB credentials or configurable paths enter a renderer.
+  if (!managedTaskProjectHost) {
+    try {
+      await managedTaskProjectHostClosing;
+      const request = input => nativeSupervisor.managedTaskProjectRequest(input);
+      const bindings = createManagedTaskProjectBindingTransport({ request });
+      managedTaskProjectHost = await createManagedTaskProjectHost({
+        userDataPath: app.getPath('userData'), executeCommand: executeNativeSupervisorCommandFenced,
+        resolveProjectBinding: createManagedTaskProjectAuthorityResolver({ request }),
+        ...bindings, provisionRepository: createManagedTaskProjectRepositoryProvisioner({ request }),
+        openProject: async ({ path: projectPath }) => {
+          if (await shell.openPath(projectPath)) throw new Error('managed_project_open_failed');
+        },
+      });
+    } catch (error) { recordStartupSubsystemDegraded('MANAGED_TASK_PROJECTS', error); }
+  }
+  if (!autonomousProjectRuntime && managedTaskProjectHost) {
+    try {
+      autonomousProjectRuntime = await createAutonomousProjectHost({ userDataPath: app.getPath('userData'),
+        supervisor: nativeSupervisor, getManagedHost: () => managedTaskProjectHost });
+      nativeSupervisor.bindDevosProjectRuntime(autonomousProjectRuntime);
+    } catch (error) { recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error); }
+  }
+  try { await ensureInterruptedSetupRecovery(); }
+  catch (error) {
+    nativeSupervisor.setInterruptedSetupRecoveryFence(true);
+    recordStartupSubsystemDegraded('INTERRUPTED_SETUP_RECOVERY', error);
+  }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
   // Fallback Console (operator directive 2026-09-21): reserve control plane
   // embedded in the browser. The console stays LOCKED while the pinned cloud
@@ -2124,14 +2246,22 @@ async function initNativeSupervisor() {
   // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
   // path stays as the remote fallback (native-supervisor-runtime-transport).
   try {
+    const directory = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
+    const manifestPath = path.join(directory, 'supervisor-rpc.json');
+    const existingManifest = await fs.lstat(manifestPath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (existingManifest) await verifyManagedProjectPrivateFile(manifestPath);
     supervisorLoopbackRpc = new SupervisorLoopbackRpcServer({
       executeCommand: executeNativeSupervisorCommand,
+      manifestPath,
       snapshotProvider: () => nativeSupervisorState(),
       clientConnectionStatusProvider: () => readClientConnectionStatus(),
       clientWorkReadinessProvider: () => readClientWorkReadiness(),
     });
     await supervisorLoopbackRpc.start();
+    if (supervisorLoopbackRpc.snapshot().last_error) throw new Error('supervisor_loopback_private_manifest_write_failed');
+    await verifyManagedProjectPrivateFile(manifestPath);
   } catch (error) {
+    await supervisorLoopbackRpc?.stop().catch(() => {});
     supervisorLoopbackRpc = null;
     recordStartupSubsystemDegraded('SUPERVISOR_LOOPBACK_RPC', error);
   }
@@ -2147,6 +2277,7 @@ function destroyWindowContents() {
   detachShellBrainPort();
   supervisorLoopbackRpc?.stop().catch(() => {});
   supervisorLoopbackRpc = null;
+  void closeManagedTaskProjectHost().catch(() => {});
   nativeSupervisor?.stop();
   fallbackConsole?.stop();
   fallbackConsole = null;
@@ -2390,6 +2521,7 @@ async function createWindow() {
   layout();
   windowRef.show();
   windowRef.focus();
+  notifyPrimaryWindowShown(windowRef);
   console.log(JSON.stringify({
     schema: 'metaengine.browser-local-shell.v2',
     state: primaryShellMode === 'ME2_PRIMARY' ? 'ME2_PRIMARY_SHELL_VISIBLE' : 'FAIL_CLOSED_RECOVERY_VISIBLE',
@@ -2530,6 +2662,41 @@ ipcMain.handle('metaengine:client:latest-goal', async (event) => {
 ipcMain.handle('metaengine:client:goal-status', async (event, rawRequestId) => {
   assertShellSender(event);
   return refreshClientGoal(rawRequestId);
+});
+ipcMain.handle('metaengine:client:project-status', async (event, ...args) => {
+  assertShellSender(event);
+  if (args.length) throw new Error('managed_project_client_status_params_forbidden');
+  return managedTaskProjectClientControl.status();
+});
+ipcMain.handle('metaengine:client:project-create', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('managed_project_client_params_forbidden');
+  return managedTaskProjectClientControl.create(request);
+});
+ipcMain.handle('metaengine:client:project-open', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('managed_project_client_params_forbidden');
+  return managedTaskProjectClientControl.open(request);
+});
+ipcMain.handle('metaengine:client:project-snapshot', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('client_project_snapshot_params_forbidden');
+  if (!nativeSupervisor?.projectSnapshot) throw new Error('client_project_unavailable');
+  return nativeSupervisor.projectSnapshot(request);
+});
+ipcMain.handle('metaengine:client:project-history', async (event, request, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('client_project_history_params_forbidden');
+  if (!nativeSupervisor?.projectHistory) throw new Error('client_project_unavailable');
+  return nativeSupervisor.projectHistory(request);
+});
+ipcMain.handle('metaengine:client:project-overview', async (event, ...extra) => {
+  assertShellSender(event);
+  if (extra.length) throw new Error('client_project_overview_params_forbidden');
+  const latest = await latestClientGoal();
+  if (!latest?.project?.project_id) return null;
+  if (!nativeSupervisor?.projectSnapshot) throw new Error('client_project_unavailable');
+  return nativeSupervisor.projectSnapshot({ project_id: latest.project.project_id, task_after_seq: 0, limit: 128 });
 });
 function readClientConnectionStatus() {
   const status = nativeSupervisor?.connectionStatus?.() || Object.freeze({
@@ -2779,6 +2946,10 @@ ipcMain.handle('metaengine:client:resume-admission', async (event) => {
   return resumeClientAdmissionOnce();
 });
 
+const githubRepositoryConnection = installGithubRepositoryConnection({ app, ipcMain, safeStorage, assertShellSender,
+  changed: (status) => console.log(JSON.stringify({ ...status, event: 'GITHUB_REPOSITORY_CONNECTION' })),
+});
+
 ipcMain.handle('metaengine:client:github-chat-status', async (event) => {
   assertShellSender(event);
   if (event.senderFrame !== event.sender.mainFrame) throw new Error('github_chat_sender_frame_untrusted');
@@ -2844,6 +3015,50 @@ function readClientWorkReadiness() {
     },
   });
 }
+async function ensureInterruptedSetupRecovery() {
+  if (interruptedSetupRecovery) return interruptedSetupRecovery;
+  if (!interruptedSetupRecoveryInit) interruptedSetupRecoveryInit = (async () => {
+    if (!nativeSupervisor || !fleet) throw new Error('interrupted_setup_native_runtime_not_ready');
+    const privateRoot = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
+    const directory = path.join(privateRoot, 'interrupted-setup-recovery-v1');
+    const recovery = new InterruptedSetupRecovery({
+      directory,
+      verifyDirectory: async location => {
+        await assertManagedProjectPhysicalDirectory(location);
+        if (process.platform === 'win32') assertManagedProjectPrivateReceipt(await verifyOwnerOnlyWindowsStorage(location, { operation: 'VERIFY_DIRECTORY' }), 'VERIFY_DIRECTORY');
+      },
+      verifyFile: location => verifyManagedProjectPrivateFile(location),
+      getSnapshot: async () => ({
+        keepalive: nativeSupervisor.snapshot()?.lifecycle?.keepalive || null,
+        fleet: fleet.snapshot(),
+        tabs: registry.snapshot()?.tabs,
+      }),
+      applyFleet: binding => fleet.archiveInterruptedBootstrapAgents(binding),
+      applySupervisor: binding => nativeSupervisor.archiveInterruptedBootstrapForNewEpoch(binding),
+    });
+    const status = await recovery.init();
+    nativeSupervisor.setInterruptedSetupRecoveryFence(status.fenced);
+    interruptedSetupRecovery = recovery;
+    return recovery;
+  })().finally(() => { interruptedSetupRecoveryInit = null; });
+  return interruptedSetupRecoveryInit;
+}
+ipcMain.handle('metaengine:client:interrupted-setup-inspect', async (event) => {
+  assertShellSender(event);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error('interrupted_setup_main_frame_required');
+  return (await ensureInterruptedSetupRecovery()).inspect();
+});
+ipcMain.handle('metaengine:client:interrupted-setup-start-fresh', async (event, request) => {
+  assertShellSender(event);
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error('interrupted_setup_main_frame_required');
+  const recovery = await ensureInterruptedSetupRecovery();
+  if (interruptedSetupPhysicalMutationsInFlight > 0) throw new Error('interrupted_setup_physical_mutation_busy');
+  const receipt = await nativeSupervisor.withInterruptedSetupRecovery(() => recovery.execute(request), {
+    retainFenceOnError: () => recovery.status().fenced,
+  });
+  await publishSnapshot();
+  return receipt;
+});
 ipcMain.handle('metaengine:client:work-readiness', async (event) => {
   assertShellSender(event);
   return readClientWorkReadiness();
@@ -2957,11 +3172,21 @@ async function startBrowserRuntime() {
   }
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   githubChatRelay?.stop();
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;
+  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || managedTaskProjectHostDrainPending)) {
+    event.preventDefault();
+    nativeSupervisor?.stop();
+    const rpc = supervisorLoopbackRpc;
+    supervisorLoopbackRpc = null;
+    void Promise.allSettled([rpc?.stop(), closeManagedTaskProjectHost()]).then(() => {
+      managedTaskProjectQuitReady = true;
+      app.quit();
+    });
+  }
 });
 app.on('activate', () => {
   if (!app.isReady()) return;

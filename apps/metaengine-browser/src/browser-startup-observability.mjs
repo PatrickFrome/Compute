@@ -21,6 +21,7 @@ const SAFE_DETAIL_KEY = /^[a-z][a-z0-9_]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ADVISORY_ONLY_STATES = new Set(['SECOND_INSTANCE_RECEIVED']);
 let journalTail = Promise.resolve();
+const primaryWindowShownObservers = new Set();
 
 function assertApp(app) {
   if (!app || typeof app.getPath !== 'function' || typeof app.getVersion !== 'function') {
@@ -388,6 +389,7 @@ export function activateExistingPrimaryWindow(BaseWindow) {
     return Object.freeze({
       ok: true,
       reason: 'PRIMARY_WINDOW_ACTIVATED',
+      window_id: Number.isSafeInteger(target.id) ? target.id : null,
       window_count: windows.length,
       restored: wasMinimized,
       visible: typeof target.isVisible === 'function' ? target.isVisible() === true : null,
@@ -408,8 +410,10 @@ export async function waitForStablePrimaryWindow(BaseWindow, {
   timeout_ms = PRIMARY_WINDOW_OBSERVE_TIMEOUT_MS,
   stable_ms = PRIMARY_WINDOW_STABLE_MS,
   poll_ms = 100,
-  clock = () => Date.now(),
+  clock = () => performance.now(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  target_window = null,
+  signal = null,
 } = {}) {
   if (![timeout_ms, stable_ms, poll_ms].every((value) => Number.isFinite(value) && value > 0)) {
     return Object.freeze({ ok: false, reason: 'PRIMARY_WINDOW_OBSERVER_CONFIG_INVALID', authority_effect: false });
@@ -421,22 +425,39 @@ export async function waitForStablePrimaryWindow(BaseWindow, {
   let target = null;
   let stableSince = null;
 
-  while (Number(clock()) - startedAt <= timeout_ms) {
+  let elapsed = 0;
+  let windowCount = 0;
+  let observedWindow = target_window;
+  while (true) {
+    if (signal?.aborted === true) {
+      return Object.freeze({ ok: false, reason: 'PRIMARY_WINDOW_OBSERVER_CANCELLED', authority_effect: false });
+    }
+    const now = Number(clock());
+    elapsed = now - startedAt;
+    if (!Number.isFinite(now) || elapsed < 0) {
+      return Object.freeze({ ok: false, reason: 'PRIMARY_WINDOW_OBSERVER_CLOCK_INVALID', authority_effect: false });
+    }
+    if (elapsed > timeout_ms) break;
     let windows;
     try {
       windows = liveWindows(BaseWindow);
     } catch {
       windows = [];
     }
-    const visible = windows.find((win) => typeof win.isVisible !== 'function' || win.isVisible() === true) || null;
-    const now = Number(clock());
+    windowCount = windows.length;
+    observedWindow = target_window || (windows.length === 1 ? windows[0] : null);
+    const visible = windows.find((win) => (!target_window || win === target_window)
+      && (typeof win.isVisible !== 'function' || win.isVisible() === true)) || null;
     if (visible && visible === target) {
       if (stableSince != null && now - stableSince >= stable_ms) {
         return Object.freeze({
           ok: true,
           reason: 'PRIMARY_WINDOW_STABLE',
+          window_id: Number.isSafeInteger(visible.id) ? visible.id : null,
           window_count: windows.length,
           stable_ms: now - stableSince,
+          elapsed_ms: elapsed,
+          timeout_ms,
           visible: typeof visible.isVisible === 'function' ? visible.isVisible() === true : null,
           focused: typeof visible.isFocused === 'function' ? visible.isFocused() === true : null,
           authority_effect: false,
@@ -449,15 +470,94 @@ export async function waitForStablePrimaryWindow(BaseWindow, {
       target = null;
       stableSince = null;
     }
-    await sleep(poll_ms);
+    if (elapsed >= timeout_ms) break;
+    await sleep(Math.min(poll_ms, timeout_ms - elapsed));
   }
 
   return Object.freeze({
     ok: false,
     reason: 'PRIMARY_WINDOW_STABLE_TIMEOUT',
-    window_count: liveWindows(BaseWindow).length,
+    window_id: Number.isSafeInteger((target || observedWindow)?.id) ? (target || observedWindow).id : null,
+    window_count: windowCount,
+    elapsed_ms: elapsed,
+    timeout_ms,
     authority_effect: false,
   });
+}
+
+// This is diagnostic lifecycle evidence only. The listener independently
+// reads the exact live window; the notification itself never proves readiness.
+export function notifyPrimaryWindowShown(window) {
+  for (const observer of primaryWindowShownObservers) {
+    try { observer(window); } catch {}
+  }
+}
+
+export function observePrimaryWindowStartup(BaseWindow, {
+  onReadback,
+  onError = () => {},
+  ...options
+} = {}) {
+  if (typeof onReadback !== 'function' || typeof onError !== 'function') {
+    throw new Error('browser_primary_window_observer_callback_invalid');
+  }
+  const cancellation = new AbortController();
+  let stopped = false;
+  let running = false;
+  let pendingShownWindow = null;
+  const stop = () => {
+    stopped = true;
+    pendingShownWindow = null;
+    cancellation.abort();
+    primaryWindowShownObservers.delete(onShown);
+  };
+  const reportError = async (error) => {
+    try { if (!stopped) await onError(error); } catch {}
+  };
+  const run = async (initial, window = null) => {
+    running = true;
+    try {
+      const readback = await waitForStablePrimaryWindow(BaseWindow, {
+        ...options,
+        target_window: window,
+        signal: cancellation.signal,
+      });
+      if (stopped) return readback;
+      await onReadback(Object.freeze({
+        ...readback,
+        observation_phase: initial ? 'BOOTSTRAP' : 'WINDOW_SHOWN',
+      }));
+      if (readback.ok) stop();
+      return readback;
+    } catch (error) {
+      await reportError(error);
+      return null;
+    } finally {
+      running = false;
+      if (!stopped && pendingShownWindow) {
+        const shownWindow = pendingShownWindow;
+        pendingShownWindow = null;
+        void run(false, shownWindow);
+      }
+    }
+  };
+  const onShown = (window) => {
+    if (stopped) return;
+    try {
+      if (!liveWindows(BaseWindow).includes(window) || window.isVisible?.() !== true) return;
+    } catch { return; }
+    // A show near the first deadline must not lose its later stability proof.
+    // Only one bounded readback runs at a time; failed reads await another real
+    // show event instead of starting a timer that repeatedly retries startup.
+    pendingShownWindow = window;
+    if (!running) {
+      pendingShownWindow = null;
+      void run(false, window);
+    }
+  };
+  primaryWindowShownObservers.add(onShown);
+  const initial = run(true);
+  return Object.freeze({ initial, stop });
 }
 
 export function browserStartupObservabilityContract() {
@@ -476,6 +576,8 @@ export function browserStartupObservabilityContract() {
     hidden_window_must_be_shown: true,
     minimized_window_must_be_restored: true,
     normal_ui_boot_requires_stable_window_readback: true,
+    late_window_show_requires_independent_stability_readback: true,
+    initial_window_timeout_is_preserved: true,
     primary_activation_ack_timeout_ms: PRIMARY_ACTIVATION_ACK_TIMEOUT_MS,
     primary_activation_ack_poll_ms: PRIMARY_ACTIVATION_ACK_POLL_MS,
     startup_journal_max_events: BROWSER_STARTUP_JOURNAL_MAX_EVENTS,

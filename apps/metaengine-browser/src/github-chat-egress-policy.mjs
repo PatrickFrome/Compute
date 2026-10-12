@@ -12,6 +12,33 @@ const MAX_BYTES=36_000, MAX_NODES=2500, MAX_DEPTH=14, MAX_FIELDS=100, MAX_ARRAY=
 // a browser tab, filesystem, agent prompt, screenshot OCR or process output.
 const SAFE_TEXT_FIELDS=/^(?:schema|state|status|provider|profile|source|action|effect|reason|code|error_code|command_id|request_id|goal_id|task_id|client_id|relay_id|instance_id|device_id|point_id|source_head|package_version|version|build_id|sha256|png_sha256|bundle_sha256|digest|repository|mime_type|reconcile_with)$/i;
 const SAFE_ARRAY_TEXT_FIELDS=/^(?:actions|capabilities|scopes|permissions)$/i;
+// JSON property names are data too. Accept reviewed metadata names only;
+// private paths, tokens and page contents must not leave as object keys.
+const SAFE_FIELD_NAMES=new Set((
+  'result receipt artifact counts deep tabs agents events files self capabilities actions scopes permissions '+
+  'message title url instructions objective browser_text userMessage '+
+  'terminal ok available ready enabled connected active success supported accepted duplicate replayed found '+
+  'authority_effect page_data_authority automatic_retry_allowed scheduler_authority '+
+  'command_leasing command_leasing_authority browser_execution_authority execution_authority second_scheduler '+
+  'bytes width height queued running completed failed pending total count agent_count command_count '+
+  'task_count goal_count window_count display_count generation sequence revision elapsed_ms duration_ms '+
+  'timestamp created_at updated_at expires_at started_at stopped_at '+
+  'health runtime supervisor transport task_state_provider realtime_process_plane '+
+  'control_protocol_revision scope required_scope outcome target_identity_sha256 '+
+  'schema_version source_head_sha request_comment_id body_sha256 source_restore_receipt_sha256 '+
+  'source_dump_sha256 attested_instance_id cleanup_confirmed runtime_ready owner_profile_written '+
+  'existing_restored_database_selected source_restore_receipt_verified source_schema_exact '+
+  'private_vault_key_preserved database_initialized installed_normal_boot_verified '+
+  'password passwd pwd token secret credential credentials authorization auth argv arguments '+
+  'command_line command_args payload clipboard form_values cookie cookies set_cookie private '+
+  'api_key api_key_id service_role bearer oauth session_key pgpassword pgdata postgres_url '+
+  'database_url db_url connection_string vault ssh pem jwt environment env query_parameters '+
+  'raw_output raw_response page_text headers request_headers response_headers stdout stderr '+
+  'raw_config private_config private_config_file local_path png_path file_path full_path '+
+  'data_directory state_directory home_directory user_data access_key refresh_key'
+).split(' '));
+const safeFieldName=name=>name.length<=80&&!PRIVATE_TEXT.test(name)
+  &&(SAFE_FIELD_NAMES.has(name)||SAFE_TEXT_FIELDS.test(name)||SAFE_ARRAY_TEXT_FIELDS.test(name)||PATH_FIELD.test(name));
 const SAFE_TEXT_SHAPE=/^[A-Za-z0-9_:.\/ -]{1,180}$/;
 const fixedBlocked=reason=>Object.freeze({schema:'metaengine.github-chat-safe-egress.v1',
   state:'RESULT_UNAVAILABLE',reason,automatic_retry_allowed:false,authority_effect:false});
@@ -61,6 +88,12 @@ export function projectGithubChatReplyResult(result){
     const out={};
     for(const name of keys){
       if(['__proto__','constructor','prototype'].includes(name))continue;
+      if(!safeFieldName(name)){
+        // Omit the name entirely, while still enforcing graph/resource bounds
+        // on its value. Replacing only the value would disclose the key.
+        visit(value[name],'',depth+1,key);
+        continue;
+      }
       if(SENSITIVE_FIELD.test(name)){out[name]='[REDACTED]';continue;}
       out[name]=visit(value[name],name,depth+1,key);
     }

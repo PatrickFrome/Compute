@@ -53,18 +53,14 @@ export function KpiTile({ label, value, icon: Icon, tone = "zinc", hot }: {
   const tones: Record<string, string> = {
     zinc: "text-zinc-300", emerald: "text-emerald-400", amber: "text-amber-400", rose: "text-rose-400",
   };
-  const glow: Record<string, string> = {
-    zinc: "shadow-none", emerald: "shadow-[0_0_12px_-2px_rgba(52,211,153,0.35)]",
-    amber: "shadow-[0_0_12px_-2px_rgba(251,191,36,0.35)]", rose: "shadow-[0_0_12px_-2px_rgba(251,113,133,0.35)]",
-  };
   return (
     <div
-      className={`kpi-tile flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/70 px-2.5 py-1.5 ${hot ? `kpi-hot ${glow[tone]}` : ""}`}
+      className={`kpi-tile flex items-center gap-2 rounded-xl bg-zinc-900/70 px-3 py-2 ${hot ? "kpi-hot" : ""}`}
       title={label}
     >
       <Icon className={`h-3.5 w-3.5 ${tones[tone]}`} aria-hidden />
       <span className={`font-mono text-sm font-semibold tabular-nums ${tones[tone]}`}>{v}</span>
-      <span className="text-[9px] font-medium uppercase tracking-widest text-zinc-500">{label}</span>
+      <span className="text-[12px] text-zinc-400">{label}</span>
     </div>
   );
 }
@@ -110,9 +106,9 @@ export function StateBadge({ state, size = "sm" }: { state: SysState; size?: "xs
   const s = STATE_MAP[state] ?? STATE_MAP.Idle;
   const Icon = s.icon;
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded border font-semibold uppercase tracking-wider ${s.cls} ${size === "xs" ? "px-1 py-0 text-[8px]" : "px-1.5 py-0.5 text-[9px]"}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full font-medium ${s.cls} ${size === "xs" ? "px-2 py-0.5 text-[12px]" : "px-2.5 py-1 text-[12px]"}`}>
       <Icon className={`h-2.5 w-2.5 ${state === "WARMUP" || state === "Recovering" ? "animate-spin" : ""}`} aria-hidden />
-      {s.label}
+      {s.label.charAt(0) + s.label.slice(1).toLowerCase()}
     </span>
   );
 }
@@ -138,8 +134,8 @@ export function mapState(raw: string | null | undefined): SysState {
 // ── Legacy-бейдж статуса (точно как legacy — для задач/агентов/воркеров) ────────
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${STATUS_BADGE[status] ?? "bg-zinc-700 text-zinc-300"}`}>
-      {status}
+    <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-1 text-[12px] font-medium ${STATUS_BADGE[status] ?? "bg-zinc-700 text-zinc-300"}`}>
+      {status.toLowerCase().replaceAll("_", " ")}
     </span>
   );
 }
@@ -160,7 +156,7 @@ export function Chip({ label, value, tone = "zinc", title }: {
     fuchsia: "border-fuchsia-900/60 bg-fuchsia-950/30 text-fuchsia-300",
   };
   return (
-    <span title={title} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] ${tones[tone]}`}>
+    <span title={title} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] ${tones[tone]}`}>
       <span className="text-zinc-500">{label}</span>
       <b className="font-semibold">{value}</b>
     </span>
@@ -190,19 +186,19 @@ export function Sec({ id, title, right, children, defaultOpen = true, dense }: {
     });
   };
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden border border-zinc-800/90 bg-[#0b0b0d]" data-sec={id}>
-      <div className="flex w-full shrink-0 items-center border-b border-zinc-800/80 bg-zinc-950/55">
+    <section className="mc-soft-card flex min-h-0 shrink-0 flex-col overflow-hidden" data-sec={id}>
+      <div className={`flex w-full shrink-0 items-center ${open ? "border-b border-zinc-800/80" : ""}`}>
         <button
           type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`}
-          className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-zinc-900/60"
+          className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left hover:bg-zinc-900/60"
         >
-          <span className="text-[13px] font-medium text-zinc-200">{title}</span>
+          <span className="text-[14px] font-medium text-zinc-200">{title}</span>
           <span className="ml-auto text-[11px] text-zinc-400">{open ? "Hide" : "Show"}</span>
         </button>
         {right && <div className="flex shrink-0 items-center gap-1.5 pr-1">{right}</div>}
       </div>
       {open && (
-        <div id={`${id}-body`} className={`min-h-0 flex-1 overflow-y-auto mc-scroll ${dense ? "p-1.5" : "p-2.5"}`}>
+        <div id={`${id}-body`} className={`min-h-0 flex-1 overflow-y-auto mc-scroll ${dense ? "p-3" : "p-4"}`}>
           {children}
         </div>
       )}
@@ -213,9 +209,9 @@ export function Sec({ id, title, right, children, defaultOpen = true, dense }: {
 // ── PageHeader: заголовок страницы ──────────────────────────────────────────────
 export function PageHeader({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 px-1 pb-2">
-      <h2 className="text-[16px] font-medium text-zinc-100">{title}</h2>
-      {sub && <span className="text-[12px] text-zinc-400">{sub}</span>}
+    <div className="flex shrink-0 flex-wrap items-center gap-3 pb-5">
+      <div className="min-w-0"><h2 className="text-[22px] font-medium tracking-tight text-zinc-100">{title}</h2>
+      {sub && <p className="mt-1 max-w-[640px] text-[13px] leading-relaxed text-zinc-400">{sub}</p>}</div>
       <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>
     </div>
   );
