@@ -10,7 +10,7 @@ assert.equal(extracted.length,1);
 function harness(scenarios){
   const nodes=new Map();
   for(const id of ['create','read','assign','refresh','inspect','recover','audit-all',
-    'tabs','status','output','fleet-evidence','count','prompt']){
+    'tabs','status','output','fleet-evidence','count','prompt','model-probe','input-probe']){
     nodes.set(id,{disabled:false,value:id==='count'?'7':'',textContent:'',
       replaceChildren(){this.children=[];},append(x){(this.children??=[]).push(x);}});
   }
