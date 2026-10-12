@@ -37,6 +37,8 @@ export class DevFleetOperator {
   #state = { schema: SCHEMA, sessions: [], requests: [] };
   #busy = false;
   #initialized = false;
+  #restoring = false;
+  #restorePromise = Promise.resolve();
   #persistenceFenced = false;
   #saveTail = Promise.resolve();
   constructor({ adapter, store }) {
@@ -46,8 +48,11 @@ export class DevFleetOperator {
     this.#adapter = adapter;
     this.#store = store;
   }
-  async init() {
-    if (this.#initialized) return this.snapshot();
+  async init({deferRestore=false}={}) {
+    if (this.#initialized) {
+      if(!deferRestore)await this.#restorePromise;
+      return this.snapshot();
+    }
     const disk = await this.#store.load();
     if (disk != null) {
       if (disk.schema !== SCHEMA || !Array.isArray(disk.sessions) || !Array.isArray(disk.requests)
@@ -62,27 +67,39 @@ export class DevFleetOperator {
       this.#state = plain(disk);
     }
     this.#initialized = true;
-    // Restoring 13 ChatGPT WebContents one-by-one can postpone the entire
-    // authenticated operator RPC for several minutes. Each target owns its
-    // WebContents, so only the loading phase is parallelized. No Send or
-    // model-picker actions are permitted during bootstrap.
-    let next = 0;
+    this.#restoring = true;
+    // RESTORING never reaches the persistence store; it is a live-only truth.
+    // Write-ahead request receipts remain untouched, including AMBIGUOUS.
     const sessions = this.#state.sessions;
-    const restoreWorker = async () => {
-      while (next < sessions.length) {
-        const s = sessions[next++];
+    for (const tab of sessions) tab.state = 'RESTORING';
+    let next = 0;
+    const worker = async () => {
+      while(next<sessions.length) {
+        const tab=sessions[next++];
         try {
-          const created = await this.#adapter.create(s.tab_id, s.url);
-          if (created?.tab_id !== s.tab_id || !ownChatUrl(created?.url))
-            throw new Error('restore_readback_invalid');
-        } catch { s.state = 'RESTORE_BLOCKED'; }
+          const opened=await this.#adapter.create(tab.tab_id,tab.url);
+          if(opened?.tab_id!==tab.tab_id || !ownChatUrl(opened?.url))
+            throw Error('restore_readback_invalid');
+          tab.state='OPEN';
+        } catch {tab.state='RESTORE_BLOCKED';}
       }
     };
-    await Promise.all(Array.from({length:Math.min(4,sessions.length)},restoreWorker));
+    this.#restorePromise=Promise.all(Array.from(
+      {length:Math.min(4,sessions.length)},worker))
+      .finally(()=>{this.#restoring=false;});
+    if(!deferRestore)await this.#restorePromise;
     return this.snapshot();
   }
-  #requireInit() { if (!this.#initialized) throw new Error('operator_not_initialized'); }
-  isBusy() { return this.#busy || this.#persistenceFenced; }
+  async whenRestored() {
+    if(!this.#initialized)throw Error('operator_not_initialized');
+    await this.#restorePromise;
+    return this.snapshot();
+  }
+  #requireInit() {
+    if (!this.#initialized) throw new Error('operator_not_initialized');
+    if (this.#restoring) throw new Error('operator_restoring');
+  }
+  isBusy() { return this.#busy || this.#restoring || this.#persistenceFenced; }
   #find(tabId) {
     const validated = validateTab(tabId);
     const s = this.#state.sessions.find(x => x.tab_id === validated);
@@ -114,8 +131,10 @@ export class DevFleetOperator {
     try { return await fn(); } finally { this.#busy = false; }
   }
   snapshot() {
-    this.#requireInit();
+    if(!this.#initialized)throw Error('operator_not_initialized');
     return { schema: SCHEMA, client: 'METAENGINE_DEVFLEET_STANDALONE',
+      bootstrap_state:this.#restoring?'RESTORING':'READY',
+      restored_count:this.#state.sessions.filter(x=>x.state==='OPEN').length,
       session_count: this.#state.sessions.length, sessions: this.#state.sessions.map(s => ({
         tab_id: s.tab_id, url: s.url, state: s.state })),
       only_actions: ['create','read','assign','close'],
