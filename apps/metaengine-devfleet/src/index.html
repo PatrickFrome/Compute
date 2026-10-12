@@ -24,7 +24,8 @@ hr{width:100%;border:0;border-top:1px solid #334155}
   <div class="help">Отдельное приложение • ChatGPT • Без Supabase</div>
   <div class="row"><label>Чатов:</label><input id="count" type="number" min="1" max="8" value="7"><button id="create" class="primary">Создать</button></div>
   <div id="tabs" role="list" aria-label="DevFleet chats"></div>
-  <div class="row"><button id="read">Прочитать ответ</button><button id="refresh">Обновить</button></div>
+  <div class="row"><button id="read">Прочитать</button><button id="refresh">Обновить</button></div>
+  <div class="row"><button id="inspect">Проверить Chat</button><button id="recover">Перезагрузить ошибку</button></div>
   <textarea id="prompt" placeholder="Новое задание выбранному чату. У каждого запроса уникальный ID."></textarea>
   <button id="assign" class="primary">Отправить задание</button>
   <div id="status">Подключение локального управляющего интерфейса…</div>
@@ -36,7 +37,7 @@ hr{width:100%;border:0;border-top:1px solid #334155}
 const q=id=>document.getElementById(id);
 let selected=null,working=false,epoch=0;
 const showStatus=msg=>{q('status').textContent=String(msg).slice(0,450);};
-const setWorking=v=>{working=v;for(const id of ['create','read','assign','refresh'])q(id).disabled=v;};
+const setWorking=v=>{working=v;for(const id of ['create','read','assign','refresh','inspect','recover'])q(id).disabled=v;};
 const short=id=>id? id.slice(0,15)+'…':'—';
 function showOutput(value){q('output').textContent=String(value??'');}
 async function refresh() {
@@ -78,6 +79,19 @@ q('read').onclick=()=>run(async()=>{
   showStatus('Прочитано '+result.text.length+' символов · '+short(selected)+(result.has_more?' · есть продолжение':''));
 });
 q('refresh').onclick=()=>run(refresh);
+q('inspect').onclick=()=>run(async()=>{
+  if(!selected)throw Error('Выберите чат');
+  const r=await window.devfleet.inspect({tab_id:selected});
+  showStatus('Режим '+r.mode+' · '+(r.page_failure||'нет ошибки')+' · High '+r.high_label_visible);
+  showOutput(JSON.stringify(r,null,2));
+});
+q('recover').onclick=()=>run(async()=>{
+  if(!selected)throw Error('Выберите чат');
+  showStatus('Проверка ошибки и перезагрузка с ограничением повторов…');
+  const r=await window.devfleet.recover({tab_id:selected});
+  showStatus('Recovery: '+r.state+' · Режим '+r.mode+' · '+(r.page_failure||'ошибки нет'));
+  showOutput(JSON.stringify(r,null,2));
+});
 q('assign').onclick=()=>run(async()=>{
   if(!selected)throw Error('Выберите чат');
   const text=q('prompt').value.trim();

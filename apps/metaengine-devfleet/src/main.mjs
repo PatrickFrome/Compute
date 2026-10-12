@@ -73,6 +73,8 @@ function listenLocal() {
       'chat.create': p=>operator.create(p),
       'chat.read': p=>operator.read(p),
       'chat.assign': p=>operator.assign(p),
+      'chat.inspect': p=>operator.inspect(p),
+      'chat.recover': p=>operator.recover(p),
       'chat.list': ()=>operator.snapshot(),
     };
     if (!Object.hasOwn(routes,envelope.method))
@@ -125,6 +127,8 @@ async function start() {
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});
   ipcMain.handle('devfleet:read',async(e,p)=>{uiSender(e);return operator.read(p);});
+  ipcMain.handle('devfleet:inspect',async(e,p)=>{uiSender(e);return operator.inspect(p);});
+  ipcMain.handle('devfleet:recover',async(e,p)=>{uiSender(e);return operator.recover(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
   await listenLocal();

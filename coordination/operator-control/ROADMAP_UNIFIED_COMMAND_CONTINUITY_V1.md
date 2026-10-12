@@ -73,3 +73,76 @@ This is a living roadmap. Update this single file on every relevant architecture
 - **Discovered release-critical legacy drift:** `apps/metaengine-browser/src/native-supervisor-endpoints.mjs` still defines a hosted cloud-first default when `METAENGINE_STATE_PROVIDER` is absent; `bootstrapPersistentLocalProvider()` returns `NO_OWNER_CONFIG` when no owner file exists. Therefore merely shipping this P0 endpoint does NOT yet make the entire Browser strictly own-DB-only. This is a blocking migration requirement, not an accepted fallback.
 - **Mandatory before P1 promotion or installed release:** remove the hosted default/fallback and fail closed on missing/mismatched local owner configuration, while preserving offline diagnostic boot; prove no external Supabase request in a Windows dirty-profile/absent-owner negative test. Do not silently substitute a guessed localhost port or bypass owner identity proof.
 - This checkpoint is SOURCE-QUALIFIED only; no production DB migration, Windows Guardian mutation, installed update, or live agent effect was executed.
+
+## Binding cross-client requirement: Live Development Plane (adopted 2026-10-12)
+
+**User directive:** The zero-reinstall, in-app development principle piloted by the
+standalone **METAENGINE DevFleet** must also apply to the primary **METAENGINE Browser**
+client. Treat this as a mandatory architectural contract for both clients, not
+an optional developer convenience or a DevFleet-only feature.
+
+### Target: one persistent bootstrap, replaceable versioned feature plane
+
+Both applications must separate a small, stable, signed/verified **host bootstrap**
+(Electron/OS identity, session/profile isolation, local Owner and Guardian trust
+boundaries, capability admission, rollback) from **versioned runtime feature
+modules** (UI pages, typed agent orchestration adapters, observability views,
+research/dev utilities and other nonprivileged logic). A trusted local Dev
+Console must let an authorized operator inspect, stage, test, activate, observe
+and roll back a module **without reinstalling the EXE**. Reload only the
+affected UI/worker when safe; preserve unrelated GPT BrowserCells, logins,
+durable task/claim/effect IDs and in-flight sessions.
+
+For capabilities requiring Electron main process / native authority changes,
+allow a **controlled process restart against an already-installed, preverified
+runtime slot**. This still must not need a Windows installer when the stable
+bootstrap and ABI are unchanged. Changes to the bootstrap, privilege/OS
+capabilities, trust root or installer ownership remain exact, independently
+qualified release-and-update operations; never silently hot-patch them.
+
+### Same semantics for DevFleet and METAENGINE Browser
+
+- Common versioned module manifest: module ID, ABI/schema, source SHA, artifact
+  SHA-256, capability list, contract tests, approved activation identity,
+  parent generation, rollback slot and independent readback.
+- Staging and promotion require an authorized local operator and evidence;
+  an untrusted GPT chat, page DOM, model response or remote website may **not**
+  write/promote arbitrary JavaScript, bypass model/Chat mode gates, or obtain
+  shell, OS, DB or Guardian authority through this mechanism.
+- Module updates are atomic: candidate staging -> tests -> hash/ABI admission ->
+  generation-fenced activation -> live readback -> durable checkpoint; on failed
+  activation, revert to the last known-good slot; no blind retry after an
+  ambiguous externally observable effect.
+- **One own-PostgreSQL authority** for METAENGINE Browser. Feature module
+  activation evidence and history ultimately reside in that own DB. DevFleet
+  may begin with isolated, profile-private version records and must never
+  turn into a second Browser scheduler, task ledger or hosted/cloud database.
+- The **GPT Chat-only** constraint for DevFleet fleet sessions remains binding;
+  hot modules must not silently open Work, switch to Work, bypass High/model
+  verification or repeat an ambiguous Send. Such guards reside in the trusted
+  host, not overrideable UI decorations.
+- The Dev Console exposes typed controls and event/proof readback, not raw
+  unauthenticated shell, SQL, CDP, eval or process management.
+- Rollout order: **L0 DevFleet declarative/live UI & workflow modules** ->
+  **L1 sealed feature module interface + tests/rollback** ->
+  **L2 equivalent METAENGINE Browser feature plane** with native Supervisor,
+  Host/Guardian and own-DB proof -> **L3 resilient self-improvement promotions**.
+  Keep P0/P1 trusted-observation gates as prerequisites for an externally
+  controlled promotion path.
+
+### Acceptance gates
+
+1. Change a versioned DevFleet feature/module through its in-app console,
+   without uninstall/reinstall or clearing authenticated ChatGPT tabs;
+   verify source SHA + live UI/feature change + rollback.
+2. Terminate/restart DevFleet mid-promotion and prove exactly one active
+   version, no lost chat mappings and no duplicate message sends.
+3. Apply the same approach to a nonprivileged **METAENGINE Browser** module,
+   with exact own-PostgreSQL checkpoint, Owner/Guardian identity intact and
+   no second scheduler or effect executor. Run Windows packaged dirty-profile
+   and adversarial activation/rollback tests.
+4. Promote no module under unresolved effect ambiguity, unsigned/unverified
+   privilege boundary, nonlocal DB authority or missing independent evidence.
+
+**Status:** BINDING REQUIREMENT / DevFleet prototype in development /
+METAENGINE Browser implementation NOT YET CLAIMED.
