@@ -28,6 +28,42 @@ function fixture() {
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
+test('early restore exposes truthful RESTORING list while fencing all external effects',async()=>{
+ const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
+ const created=(await seed.create({request_id:'early-restore-cells-20261013',count:4})).sessions;
+ let unblock;const gate=new Promise(resolve=>{unblock=resolve;});
+ let active=0;
+ const adapter={...f.adapter,async create(tab_id,url){
+   active++;await gate;active--;
+   return {tab_id,url};
+ }};
+ const op=new DevFleetOperator({adapter,store:f.store});
+ const baseline=f.disk.requests.length;
+ const early=await op.init({deferRestore:true});
+ assert.equal(early.bootstrap_state,'RESTORING');
+ assert.equal(early.restored_count,0);
+ assert.equal(early.session_count,4);
+ assert(early.sessions.every(s=>s.state==='RESTORING'));
+ assert.equal(op.isBusy(),true);
+ assert.equal(active,4);
+ await assert.rejects(op.create({request_id:'early-restore-denied-20261013',count:1}),/operator_restoring/);
+ await assert.rejects(op.batchAssign({assignments:[{
+   request_id:'early-restore-task-20261013',tab_id:created[0].tab_id,text:'Must never send'
+ }]}),/operator_restoring/);
+ await assert.rejects(op.batchObserve({}),/operator_restoring/);
+ await assert.rejects(op.inputProbe({tab_id:created[0].tab_id}),/operator_restoring/);
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.length,baseline);
+ unblock();
+ const ready=await op.whenRestored();
+ assert.equal(ready.bootstrap_state,'READY');
+ assert.equal(ready.restored_count,4);
+ assert.equal(op.isBusy(),false);
+ assert(ready.sessions.every(s=>s.state==='OPEN'));
+ const repeat=await op.init();
+ assert.equal(repeat.bootstrap_state,'READY');
+ assert.equal(f.disk.requests.length,baseline);
+});
 test('restart restores owned WebContents at bounded concurrency, preserving blocked identities',async()=>{
  const f=fixture(),seed=new DevFleetOperator(f);await seed.init();
  const sessions=(await seed.create({request_id:'restore-bounded-create-20261012',count:8})).sessions;
