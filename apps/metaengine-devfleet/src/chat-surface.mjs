@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { WebContentsView, session } from 'electron';
 import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttributes, retryWaitMs } from './chat-fleet-preflight.mjs';
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
+import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -86,6 +87,7 @@ async function clickNode(view,backendNodeId) {
 export class ChatSurface {
   #window;
   #views = new Map();
+  #navigationGenerations = new Map();
   #selected = null;
   #partition;
   constructor(window) {
@@ -128,8 +130,13 @@ export class ChatSurface {
       spellcheck:true
     }});
     this.#views.set(tabId,view);
+    this.#navigationGenerations.set(tabId,0);
+    const advanceNavigation = () => this.#navigationGenerations.set(tabId,
+      (this.#navigationGenerations.get(tabId)||0)+1);
+    view.webContents.on('did-start-navigation',advanceNavigation);
+    view.webContents.on('render-process-gone',advanceNavigation);
     view.webContents.setWindowOpenHandler(({url})=>({action:'deny'}));
-    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);});
+    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#navigationGenerations.delete(tabId);});
     // Only ChatGPT receives DevFleet commands; authentication redirects are
     // allowed for user-driven login, but never selected as command surfaces.
     if (!this.#selected) this.select(tabId);
@@ -156,6 +163,27 @@ export class ChatSurface {
       total_chars:text.length,has_more:offset+maxChars<text.length,
       process_epoch:processEpoch,target_id:'webcontents:'+view.webContents.id,
       authority_effect:false};
+  }
+  async observe(tabId) {
+    const view = this.#views.get(tabId);
+    if (!view || view.webContents.isDestroyed()) throw new Error('observation_tab_not_live');
+    const initialUrl = view.webContents.getURL();
+    if (!chatUrl(initialUrl)) throw new Error('observation_origin_not_chatgpt');
+    const navigation_generation = this.#navigationGenerations.get(tabId);
+    const targetId = 'webcontents:' + view.webContents.id;
+    const nodes = await ax(view);
+    // A renderer reload, navigation, disappearing tab, or changed URL while
+    // sampling invalidates the entire revision, even for equal page text.
+    if (this.#views.get(tabId)!==view || view.webContents.isDestroyed() ||
+        view.webContents.getURL()!==initialUrl ||
+        this.#navigationGenerations.get(tabId)!==navigation_generation)
+      throw new Error('observation_target_changed');
+    if (nodes.length>25000)throw new Error('observation_tree_too_large');
+    const text = transcript(nodes);
+    return fingerprintAxSnapshot({
+      tab_id:tabId,process_epoch:processEpoch,target_id:targetId,
+      navigation_generation,url:initialUrl,text
+    });
   }
   async #mode(view) {
     const nodes = await ax(view);
@@ -350,6 +378,7 @@ export class ChatSurface {
     view.webContents.close();
     await destroyed;
     this.#views.delete(tabId);
+    this.#navigationGenerations.delete(tabId);
     if(selected && this.#views.size) {
       this.select(this.#views.keys().next().value);
     }
@@ -360,5 +389,6 @@ export class ChatSurface {
       try {view.webContents.close();}catch {}
     }
     this.#views.clear();
+    this.#navigationGenerations.clear();
   }
 }

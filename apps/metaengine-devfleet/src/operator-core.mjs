@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { runObservationBatch } from './fleet-observation-core.mjs';
 
 export const SCHEMA = 'metaengine.devfleet.operator.v1';
 const requestRe = /^[A-Za-z0-9._:-]{12,100}$/;
@@ -231,6 +232,16 @@ export class DevFleetOperator {
           || result.authority_effect!==false)
         throw new Error('chat_recovery_readback_invalid');
       return {schema:SCHEMA,...result,automatic_retry_allowed:false};
+    });
+  }
+  async batchObserve(params={}) {
+    this.#requireInit();
+    if (typeof this.#adapter.observe!=='function')
+      throw new Error('operator_observation_unavailable');
+    return runObservationBatch({
+      params,
+      ownedTabs:this.#state.sessions.filter(s=>s.state==='OPEN').map(s=>s.tab_id),
+      observe:tabId=>this.#adapter.observe(tabId)
     });
   }
   async modelProbe(params) {

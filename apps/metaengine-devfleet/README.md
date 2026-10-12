@@ -172,3 +172,42 @@ gates. Installed versions without this route return method_unknown.
 The independent read-only `scripts/fast-observe.mjs` can already batch
 parallel tab reads on compatible installed DevFleet builds, without granting
 any additional mutation authority.
+
+
+## Native batch observation candidate (source-only, 2026-10-12)
+
+`chat.batch_observe` is a new **read-only** authenticated loopback RPC, stacked
+on the guarded batch-dispatch branch. It observes all current OPEN owned tabs
+by default, or 1–16 explicitly identified tabs, at concurrency 1–4.
+Each tab is read once from its **own** WebContents' Chrome accessibility
+tree; the app does not select the tab, click, send, reload, open devtools or
+run page scripts. Each read has an 8-second per-tab deadline, and a failure
+returns `UNKNOWN` without retrying or contaminating other tabs.
+
+A result's SHA-256 `revision` binds (in a process-local namespace) the
+process epoch, native target ID, navigation generation, normalized allowed
+ChatGPT origin/path and a bounded transcript. A navigation or destroyed tab
+mid-read is refused. A reload changes the revision even when page text is
+equal. The native API returns hashes and lengths, not conversation text,
+cookies, raw DOM or bearer tokens. If the 180,000-character transcript cap
+is reached, the comparison is `TRUNCATED_UNVERIFIED`.
+
+Use the CLI after a **new qualified native install**; the existing installed
+v0.1.0-dev.6 does not gain this method from a source-only PR:
+
+```powershell
+node apps/metaengine-devfleet/scripts/devfleet-cli.mjs batch_observe
+node apps/metaengine-devfleet/scripts/devfleet-cli.mjs batch_observe --file .\\cursor-request.json
+```
+
+Optional request: `{"parallelism":3,"tab_ids":["tab_<uuid>"],"since":[{"tab_id":"tab_<uuid>","revision":"<64-hex-from-previous-result>"}]}`.
+Only a fresh native read can return `UNCHANGED`. A revision comparison is
+**not** independent evidence that an agent completed work, selected GPT-6 High,
+or produced a verified GitHub artifact. It must not authorize Send, promotion,
+task completion or a checkpoint. Page/model output remains untrusted.
+
+This implementation is an always-fresh bounded-AX baseline, **not** a
+claim that CDP `Accessibility.nodesUpdated` has been adopted or physically
+qualified. Event-driven caching and source-backed completion extraction
+require separate false-negative tests, renderer-restart/hidden-tab chaos,
+and physical Windows release qualification.

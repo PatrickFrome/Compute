@@ -10,6 +10,7 @@ function fixture() {
       return {tab_id,url:'https://chatgpt.com/c/abcd-1234',text:full.slice(offset,offset+max_chars),
         total_chars:full.length,has_more:offset+max_chars<full.length,authority_effect:false};
     },
+    async observe(tab_id){return {tab_id,revision:'e'.repeat(64),chars:24,complete:true,authority_effect:false};},
     async modelProbe(tab_id){return {tab_id,mode:'CHAT',model_selection_proven:modelProven,high_selection_proven:modelProven,authority_effect:false};},
     async inputProbe(tab_id){return {tab_id,mode:'CHAT',page_failure:null,unique_composer:true,unique_send:true,composer_nonempty:draftPresent,authority_effect:false};},
     async closeTab(tab_id){closes.push(tab_id);return {tab_id,closed:true,authority_effect:false};},
@@ -26,6 +27,21 @@ function fixture() {
   return {adapter,store,get creates(){return creates;},get sends(){return sends;},get closes(){return closes;},
     failWrite(x){failedWrites=x;},failSend(x){failSend=x;},setDraft(x){draftPresent=x;},setModelProven(x){modelProven=x;},get disk(){return persisted;}};
 }
+test('operator batches digest-only observation without issuing Send or new receipts',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'native-observe-chat-20261012',count:3})).sessions;
+ const before=f.disk.requests.length;
+ const first=await op.batchObserve({parallelism:3});
+ assert.equal(first.observed,3);assert.equal(first.unknown,0);
+ assert.equal(first.completion_proven,false);
+ assert.equal(f.sends.length,0);
+ assert.equal(f.disk.requests.length,before);
+ assert(!JSON.stringify(first).includes('GPT result'));
+ const second=await op.batchObserve({tab_ids:[tabs[0].tab_id],
+   since:[{tab_id:tabs[0].tab_id,revision:first.records[0].revision}]});
+ assert.equal(second.records[0].change,'UNCHANGED');
+ assert.equal(second.records.length,1);
+});
 test('batch sends on distinct verified Chat surfaces with durable receipts and no replay',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
  const tabs=(await op.create({request_id:'batch-created-chats-20261012',count:3})).sessions;

@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const [verb,...argv] = process.argv.slice(2);
-if (!['create','read','assign','list','inspect','recover','model_probe','input_probe','close','batch_assign'].includes(verb)) throw new Error('usage: devfleet-cli.mjs create|read|assign|list [--count N] [--tab ID] [--file FILE] [--id REQUEST_ID]');
+if (!['create','read','assign','list','inspect','recover','model_probe','input_probe','close','batch_assign','batch_observe'].includes(verb)) throw new Error('usage: devfleet-cli.mjs create|read|assign|list [--count N] [--tab ID] [--file FILE] [--id REQUEST_ID]');
 const flags={};
 for(let i=0;i<argv.length;i+=2) {
   if(i+1>=argv.length || !['--count','--tab','--file','--id','--offset','--max-chars'].includes(argv[i])
@@ -48,6 +48,20 @@ if(verb==='batch_assign'){
       Object.keys(data).some(key=>key!=='assignments'))
     throw new Error('batch_file_schema_invalid');
   params.assignments=data.assignments;
+}
+if(verb==='batch_observe'){
+  if(flags['--tab'] || flags['--id'] || flags['--count'] || flags['--offset'] || flags['--max-chars'])
+    throw Error('batch_observation_flags_invalid');
+  if(flags['--file']){
+    const stat=await fs.stat(flags['--file']);
+    if(!stat.isFile() || stat.size<2 || stat.size>12000)
+      throw Error('batch_observation_file_bounds_invalid');
+    const body=JSON.parse(await fs.readFile(flags['--file'],'utf8'));
+    if(!body || typeof body!=='object' || Array.isArray(body) ||
+        Object.keys(body).some(k=>!['tab_ids','since','parallelism'].includes(k)))
+      throw Error('batch_observation_file_schema_invalid');
+    Object.assign(params,body);
+  }
 }
 if(verb==='read'){
   if(flags['--offset'])params.offset=Number(flags['--offset']);
