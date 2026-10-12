@@ -194,6 +194,8 @@ function listenLocal() {
       'chat.read': p=>operator.read(p),
       'chat.assign': p=>operator.assign(p),
       'chat.inspect': p=>operator.inspect(p),
+      'chat.model_probe': p=>operator.modelProbe(p),
+      'chat.input_probe': p=>operator.inputProbe(p),
       'chat.recover': p=>operator.recover(p),
       'chat.list': ()=>operator.snapshot(),
     };
@@ -292,6 +294,8 @@ async function start() {
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});
   ipcMain.handle('devfleet:read',async(e,p)=>{uiSender(e);return operator.read(p);});
   ipcMain.handle('devfleet:inspect',async(e,p)=>{uiSender(e);return operator.inspect(p);});
+  ipcMain.handle('devfleet:model-probe',async(e,p)=>{uiSender(e);return operator.modelProbe(p);});
+  ipcMain.handle('devfleet:input-probe',async(e,p)=>{uiSender(e);return operator.inputProbe(p);});
   ipcMain.handle('devfleet:recover',async(e,p)=>{uiSender(e);return operator.recover(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});

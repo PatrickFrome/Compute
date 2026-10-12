@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { WebContentsView, session } from 'electron';
 import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttributes, retryWaitMs } from './chat-fleet-preflight.mjs';
+import { modelPickerCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -60,6 +61,7 @@ async function ax(view) {
 }
 async function focusAndType(view, backendNodeId, text) {
   const debug = view.webContents.debugger;
+  await debug.sendCommand('DOM.enable');
   await debug.sendCommand('DOM.focus', { backendNodeId });
   await debug.sendCommand('Input.dispatchKeyEvent', {type:'keyDown', key:'a', code:'KeyA',windowsVirtualKeyCode:65,modifiers:2});
   await debug.sendCommand('Input.dispatchKeyEvent', {type:'keyUp', key:'a', code:'KeyA',windowsVirtualKeyCode:65,modifiers:2});
@@ -215,6 +217,63 @@ export class ChatSurface {
     }
     return {tab_id:tabId,state:'BLOCKED',reload_count:5,...current};
   }
+  async modelProbe(tabId) {
+    const view=this.#views.get(tabId);
+    if(!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
+    this.select(tabId); // ensure the exact owned WebContents has a live layout
+    const url=view.webContents.getURL();
+    if(!chatUrl(url)) throw new Error('tab_origin_not_chatgpt');
+    const mode=await this.#mode(view);
+    if(mode.mode!=='CHAT'||mode.page_failure) throw new Error('model_probe_requires_healthy_chat');
+    const before=await ax(view);
+    const pickers=modelPickerCandidates(before);
+    const base=boundedModelControls(before);
+    const effort=visibleEffort(before);
+    const result={tab_id:tabId,mode:'CHAT',model_picker_count:pickers.length,
+      effort,initial_controls:base,picker_menu_controls:[],
+      gpt6_option_count:0,gpt6_selected:false,
+      model_selection_proven:false,high_selection_proven:effort.high_selection_proven,
+      authority_effect:false};
+    if(pickers.length!==1) {
+      result.status='MODEL_PICKER_NOT_UNIQUE';
+      return result;
+    }
+    const dbg=view.webContents.debugger;
+    try {
+      await dbg.sendCommand('DOM.enable');
+      await clickNode(view,pickers[0].backendDOMNodeId);
+      await sleep(500);
+      if(view.webContents.getURL()!==url) throw new Error('model_probe_target_navigated');
+      const opened=await ax(view);
+      const menu=boundedModelControls(opened);
+      result.picker_menu_controls=menu;
+      const selected=gpt6FromControls(menu);
+      result.gpt6_option_count=selected.gpt6_option_count;
+      result.gpt6_selected=selected.gpt6_selected;
+      result.model_selection_proven=selected.gpt6_selected;
+      result.status=selected.gpt6_selected?'GPT6_SELECTED_IN_MENU':'MODEL_MENU_INSPECTED_UNVERIFIED';
+    } catch(error) {
+      result.status='MODEL_MENU_PROBE_FAILED';
+      result.error_code=String(error?.message||'model_probe_failed').slice(0,85);
+    } finally {
+      try {
+        await dbg.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+        await dbg.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      } catch {}
+    }
+    return result;
+  }
+  async inputProbe(tabId) {
+    const view=this.#views.get(tabId);
+    if(!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
+    if(!chatUrl(view.webContents.getURL()))throw new Error('tab_origin_not_chatgpt');
+    const state=await this.#mode(view);
+    const controls=inspectSendSurface(await ax(view));
+    return {tab_id:tabId,mode:state.mode,page_failure:state.page_failure,
+      unique_composer:controls.unique_composer,unique_send:controls.unique_send,
+      composer_nonempty:Boolean(controls.existing_composer_value),
+      authority_effect:false};
+  }
   async send(tabId,text) {
     const view = this.#views.get(tabId);
     if (!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
@@ -224,18 +283,18 @@ export class ChatSurface {
     await this.#ensureChat(view);
     const before = await ax(view);
     if (singleButton(before,stopNames)) throw new Error('chatgpt_current_generation_active');
-    const composer = composerFrom(before);
+    const composer = composerControls(before)[0] || null;
     if (!composer) throw new Error('chatgpt_composer_not_unique_or_login_required');
     const beforeText = transcript(before);
     // The request-ID suffix makes the sent message unique within each chat.
     if (beforeText.includes(text)) throw new Error('request_already_in_transcript');
     await focusAndType(view,composer.backendDOMNodeId,text);
     const typed = await ax(view);
-    const typedComposer = composerFrom(typed);
+    const typedComposer = composerControls(typed)[0] || null;
     const typedValue = typedComposer ? val(typedComposer,'value') : '';
     if (typedValue !== text) throw new Error('composer_exact_draft_not_proven');
-    const send = singleButton(typed,buttonNames);
-    if (!send) throw new Error('send_button_not_unique');
+    const send = sendControls(typed)[0] || null;
+    if (!send || sendControls(typed).length!==1) throw new Error('send_button_not_unique');
     // Re-validate origin, process target, composer and immutable typed content
     // immediately before a SINGLE physical click. No Enter/click fallback.
     if (view.webContents.getURL() !== initialUrl || !this.#views.has(tabId))

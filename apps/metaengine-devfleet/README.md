@@ -119,3 +119,21 @@ High in every tab, and the installed native Host only hard-enforces Chat
 rather than GPT-6 High. Do not automatically dispatch roadmap work until
 each exact chat has model-setting proof; ordinary chat prompts never alter
 the ChatGPT model picker.
+
+### Native model/input preflight (0.1.0-dev.3 candidate)
+
+DevFleet v0.1.0-dev.3 adds bounded, authenticated native `chat.model_probe`
+and `chat.input_probe` operations. `model_probe` checks a CHAT-only target,
+opens only a unique ChatGPT model-picker control and observes bounded model
+menu option labels plus explicit selected flags; it closes the menu with
+Escape and does not send a message. Mere visible text `GPT-6` or
+`Высокий` is **not** an assertion that the selected model is GPT-6 High.
+The input probe returns only booleans for unique textbox/Send and an existing
+draft, never the draft text. The native Send control recognizer now uses
+Unicode-safe Russian/English names and enables DOM before attempting focus.
+
+These are native adapter additions that require one qualified bootstrap
+upgrade. The UI for them was independently hot-activated through Dev Console
+in generation 4 while retaining nine owned tabs and two historical ambiguous
+send receipts. Do not reuse either ambiguous task ID until exact prior
+conversation evidence has been reconciled; never send into Work.

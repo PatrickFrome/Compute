@@ -191,6 +191,26 @@ export class DevFleetOperator {
       return {schema:SCHEMA,...result,automatic_retry_allowed:false};
     });
   }
+  async modelProbe(params) {
+    this.#requireInit();
+    fields(params,['tab_id']);
+    const tab=this.#find(params.tab_id);
+    if(typeof this.#adapter.modelProbe !== 'function')throw new Error('model_probe_not_supported');
+    const result=await this.#adapter.modelProbe(tab.tab_id);
+    if(result?.tab_id!==tab.tab_id||result?.authority_effect!==false)
+      throw new Error('model_probe_unverified');
+    return {schema:SCHEMA,state:'MODEL_PROBED',...plain(result),authority_effect:false};
+  }
+  async inputProbe(params) {
+    this.#requireInit();
+    fields(params,['tab_id']);
+    const tab=this.#find(params.tab_id);
+    if(typeof this.#adapter.inputProbe !== 'function')throw new Error('input_probe_not_supported');
+    const result=await this.#adapter.inputProbe(tab.tab_id);
+    if(result?.tab_id!==tab.tab_id||result?.authority_effect!==false)
+      throw new Error('input_probe_unverified');
+    return {schema:SCHEMA,state:'INPUT_PROBED',...plain(result),authority_effect:false};
+  }
   async assign(params) {
     this.#requireInit();
     fields(params, ['request_id','tab_id','text']);
