@@ -244,3 +244,44 @@ or UI should call `batch_observe` before comparing revisions, and must use
 real source/CI/artifact readback before advancing tasks. No Send or page scripts
 are part of either endpoint. Live Electron/ChatGPT events have **not** yet
 been physically qualified on this source candidate.
+
+
+## Native candidate qualification — 2026-10-12 (unsigned, NOT installed)
+
+The isolated Windows candidate is `0.1.0-dev.7.1196.1` from
+`work/devfleet-native-qualification-v1` (built source commit
+`af299d565fb75d60447252b22dba4550ebb07e6e`; later repository-only
+scripts/docs are excluded from the bundled ASAR). No change was made to
+the existing installed `0.1.0-dev.6`, its sessions or main METAENGINE.
+
+Physical Windows qualifications:
+
+- Node v24.19.0: **48/48 PASS**, including per-tab deadline cancellation.
+- Source Electron `--devfleet-live-ui-smoke`: PASS; a UI stage, activation,
+  rollback and BrowserCell retention were reported.
+- Synthetic offscreen Electron CDP test: AX role/name change was read back,
+  `Accessibility.loadComplete=true` after reload, but
+  `Accessibility.nodesUpdated=false`. Treat live-text event delivery as
+  **UNPROVEN**. The 2-second expiry remains a required fallback.
+- `scripts/verify-package.mjs`: byte-for-byte match between current source
+  and eight shipped `app.asar` native/UI modules; PASS.
+- Electron-builder 26.15.7 / Electron 44.0.0 NSIS x64: SUCCESS.
+- Installer SHA-256:
+  `104858efefb3c9d0e8aca96fb4e6ad36a359e4dd86641502ce3b8b54549784b1`;
+  size **119,659,526 bytes**.
+- `app.asar` SHA-256:
+  `cc0f5c8da6ed5d8b8f916fc8f813fe97ce7791d12af83c676055195472750aba`.
+- Windows Authenticode for the installer: **NotSigned**, despite signing
+  progress lines in the electron-builder log. Do not claim code signing.
+- Running the unpacked GUI EXE in temporary `--devfleet-live-ui-smoke` mode
+  exited 0 but produced no attached stdout, so count this as *launch only*,
+  not a verifiable PASS of the smoke payload.
+
+Installer location on authorized PC (not a public download):
+`C:\Users\User\Desktop\metaen\devfleet-qualification-worktree\apps\metaengine-devfleet\dist\METAENGINE-DevFleet-Setup-0.1.0-dev.7.1196.1-x64.exe`.
+
+**Remaining release gates:** unambiguous installed/packaged smoke receipts,
+signature/trusted provenance policy, upgrade session preservation, physical
+native `chat.batch_observe` and `chat.batch_poll` with authenticated
+ChatGPT and hot/hidden-tab renderer chaos. No promotion, auto-installation,
+main-branch merge or inference of model/task completion from AX hints.
