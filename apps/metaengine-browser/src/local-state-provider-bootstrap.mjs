@@ -30,10 +30,22 @@ export async function bootstrapPersistentLocalProvider({
   fetchImpl = globalThis.fetch,
   ownerFile = localStateProviderOwnerFile({ env, platform }),
 } = {}) {
-  if (!ownerFile) return Object.freeze({ state: 'NO_OWNER_CONFIG', persistent: false, authority_effect: false });
+  if (!ownerFile) {
+    failClosed(env, 'NO_OWNER_CONFIG');
+    delete env.METAENGINE_SUPERVISOR_BASE_URL;
+    delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+    delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
+    return Object.freeze({ state: 'NO_OWNER_CONFIG', persistent: false, authority_effect: false });
+  }
   let exists;
   try { exists = await fs.lstat(ownerFile); } catch (error) {
-    if (error?.code === 'ENOENT') return Object.freeze({ state: 'NO_OWNER_CONFIG', persistent: false, authority_effect: false });
+    if (error?.code === 'ENOENT') {
+      failClosed(env, 'NO_OWNER_CONFIG');
+      delete env.METAENGINE_SUPERVISOR_BASE_URL;
+      delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+      delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
+      return Object.freeze({ state: 'NO_OWNER_CONFIG', persistent: false, authority_effect: false });
+    }
     failClosed(env, 'OWNER_CONFIG_UNREADABLE');
     throw new Error('local_state_provider_owner_config_unreadable');
   }
