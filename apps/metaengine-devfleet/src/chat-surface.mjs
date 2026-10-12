@@ -220,6 +220,7 @@ export class ChatSurface {
   async modelProbe(tabId) {
     const view=this.#views.get(tabId);
     if(!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
+    this.select(tabId); // ensure the exact owned WebContents has a live layout
     const url=view.webContents.getURL();
     if(!chatUrl(url)) throw new Error('tab_origin_not_chatgpt');
     const mode=await this.#mode(view);

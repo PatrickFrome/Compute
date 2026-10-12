@@ -10,6 +10,8 @@ test('visible Russian High is recognized in bounded control, but not proof of se
  const nodes=[ax('button','Высокий',123),ax('button','Отправить',222),ax('textbox','Спросить ChatGPT',333)];
  const e=visibleEffort(nodes);assert.equal(e.high_label_visible,true);
  assert.equal(e.high_selection_proven,false);
+ assert.equal(visibleEffort([ax('staticText','High',127)]).high_label_visible,true);
+ assert.equal(visibleEffort([ax('staticText','High',127)]).high_selection_proven,false);
  assert.equal(sendControls(nodes).length,1);
  assert.equal(composerControls(nodes).length,1);
  const surface=inspectSendSurface(nodes);assert.equal(surface.unique_composer,true);
@@ -25,6 +27,10 @@ test('GPT-6 visible as an option does not imply selected model',()=>{
  assert.equal(gpt6FromControls(menu).gpt6_selected,false);
  const selected=boundedModelControls([ax('menuitem','GPT-6',101,{checked:true})]);
  assert.equal(gpt6FromControls(selected).gpt6_selected,true);
+});
+test('native Russian ChatGPT model-picker label is allowed, not arbitrary Work',()=>{
+ assert.equal(modelPickerCandidates([ax('button','Выбрать модель ChatGPT',77)]).length,1);
+ assert.equal(modelPickerCandidates([ax('button','Переключить режим, текущий режим: ChatGPT',78)]).length,0);
 });
 test('multiple model pickers or composer candidates fail closed',()=>{
  const nodes=[ax('button','ChatGPT',1),ax('button','ChatGPT',2)];

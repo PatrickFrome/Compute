@@ -5,7 +5,7 @@ const toRole=n=>String(n?.role?.value||'').toLowerCase();
 const prop=(n,name)=>n?.properties?.find?.(x=>x.name===name)?.value?.value;
 const high=/^(?:High|\u0412\u044b\u0441\u043e\u043a\u0438\u0439)$/iu;
 const gpt6=/^GPT[\s-]?6(?:\.0)?(?:\s+(?:Thinking|Instant))?$/i;
-const modelTop=/^ChatGPT(?:\s+(?:GPT[\s-]?\d(?:\.\d+)?))?$/i;
+const modelTop=/^(?:ChatGPT(?:\s+(?:GPT[\s-]?\d(?:\.\d+)?))?|\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043c\u043e\u0434\u0435\u043b\u044c ChatGPT|Choose ChatGPT model|Select model)$/iu;
 const likely=/GPT(?:[\s-]?\d)?|ChatGPT|High|Thinking|Instant|Medium|Extra High|\u0412\u044b\u0441\u043e\u043a|\u041c\u043e\u0434\u0435\u043b|\u0434\u0443\u043c\u0430\u0442|\u0420\u0430\u0437\u043c\u044b\u0448\u043b/i;
 const uiRoles=new Set(['button','menuitem','radio','radiobutton','tab','combobox','option','checkbox','statictext']);
 const controlRoles=new Set(['button','menuitem','radio','radiobutton','tab','combobox','option','checkbox']);
@@ -28,9 +28,10 @@ export function boundedModelControls(nodes) {
 export function visibleEffort(nodes) {
  const candidates=(nodes||[]).filter(n=>!n.ignored && controlRoles.has(toRole(n))
    && high.test(toName(n)) && Number.isSafeInteger(n.backendDOMNodeId));
+ const staticLabels=(nodes||[]).filter(n=>!n.ignored&&toRole(n)==='statictext'&&high.test(toName(n)));
  return {high_control_count:candidates.length,
-   high_label_visible:candidates.length===1,
-   // Label alone is never sufficient to attest selected effort.
+   high_label_visible:candidates.length===1||(candidates.length===0&&staticLabels.length===1),
+   // A page label by itself cannot prove that the High effort is selected.
    high_selection_proven:candidates.length===1 && selectedFlag(candidates[0])};
 }
 export function gpt6FromControls(controls) {
