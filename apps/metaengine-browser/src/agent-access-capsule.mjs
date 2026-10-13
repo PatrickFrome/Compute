@@ -17,8 +17,6 @@
 // file is loaded once per shell boot, so prompts stay deterministic within a
 // lease (effect-journal prompt-hash fence).
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { NATIVE_SUPERVISOR_BASE } from './native-supervisor-endpoints.mjs';
 import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
 
