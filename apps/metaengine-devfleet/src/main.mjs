@@ -194,16 +194,23 @@ function listenLocal() {
       };
       const devRoutes={
         'dev.status':()=>liveUiSlots.status(),
-        'dev.overview':async()=>{
+        'dev.overview':async p=>{
+          if(Object.keys(p).some(key=>key!=='depth') ||
+            !['FAST','DIGEST'].includes(p.depth||'FAST'))
+            throw Error('dev_overview_depth_invalid');
           const snapshot=operator.snapshot();
-          const observation=operator.isBusy()
-            ?{state:'BUSY',completion_proven:false}
-            :await operator.batchObserve({parallelism:4});
+          const live= snapshot.bootstrap_state==='READY' && !operator.isBusy();
+          const observation=!live ?{state:'BUSY_OR_RESTORING',completion_proven:false}
+            :p.depth==='DIGEST'
+              ?await operator.batchObserve({parallelism:4})
+              :snapshot.session_count?await operator.batchPoll({tab_ids:snapshot.sessions
+                  .filter(x=>x.state==='OPEN').map(x=>x.tab_id)})
+                :{records:[],hints_only:true,completion_proven:false};
           return {schema:'metaengine.devfleet.operator-overview.v1',
-            fleet:snapshot,observation,
-            receipt_summary:operator.receiptSummary(),
-            policy:liveContracts.status(),
-            source:await sourceWorkspace.status(),
+            depth:p.depth||'FAST',fleet:snapshot,observation,
+            receipt_summary:live?operator.receiptSummary()
+              :{state:'RESTORING_OR_BUSY',completion_proven:false},
+            policy:liveContracts.status(),source:await sourceWorkspace.status(),
             effects_executed:false};
         },
         'dev.stage':()=>{requiresIdle();return liveUiSlots.stage();},
@@ -226,7 +233,7 @@ function listenLocal() {
       };
       if(!Object.hasOwn(devRoutes,envelope.method))
         return respond(400,{ok:false,error:'developer_method_unknown'});
-      const noParams=new Set(['dev.status','dev.overview','dev.stage','dev.activate',
+      const noParams=new Set(['dev.status','dev.stage','dev.activate',
         'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status']);
       if(noParams.has(envelope.method)&&Object.keys(params).length)
         return respond(400,{ok:false,error:'developer_params_denied'});
