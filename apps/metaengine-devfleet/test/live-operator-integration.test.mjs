@@ -83,3 +83,19 @@ test('hot policy disarms physical Sends and admission is CAS-versioned',async()=
  ]}),/batch_size_invalid/);
  assert.equal(f.sends,0);
 });
+
+test('hot code and contract maintenance use the single physical-Send exclusion lock',async()=>{
+ const f=make(),pol=new LiveOperatorContracts({store:f.pstore});await pol.init();
+ const op=new DevFleetOperator({adapter:f.adapter,store:f.store,contracts:pol});await op.init();
+ const [tab]=(await op.create({request_id:'hot-maintenance-create-001',count:1})).sessions;
+ let held=false;
+ await op.withMaintenanceLock(async()=>{
+   held=op.isBusy();
+   await assert.rejects(op.assign({
+     request_id:'hot-maintenance-send-001',tab_id:tab.tab_id,text:'Forbidden while editing'
+   }),/effect_in_progress/);
+ });
+ assert.equal(held,true);
+ assert.equal(op.isBusy(),false);
+ assert.equal(f.sends,0);
+});
