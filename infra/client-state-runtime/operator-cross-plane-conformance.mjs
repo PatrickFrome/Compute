@@ -63,10 +63,10 @@ export function conformOperatorReadbacks({
   if (runIdentity.source !== 'OWN_POSTGRES_READBACK' || runIdentity.proven !== true ||
       !safeOwner(runIdentity.owner_id) || !safeOwner(runIdentity.run_id) ||
       runIdentity.project_id !== owner.project_id ||
-      !safeSeq(runIdentity.owner_epoch) || !safeSeq(runIdentity.event_seq) ||
-      !fresh(runIdentity.observed_at, nowMs)) {
+      !safeSeq(runIdentity.owner_epoch) || !safeSeq(runIdentity.event_seq)) {
     return fallback('UNKNOWN', 'RUN_READBACK_UNVERIFIED');
   }
+  if (!fresh(runIdentity.observed_at, nowMs)) return fallback('STALE', 'RUN_READBACK_STALE');
   // Current W3 does not carry these two fields. Do NOT manufacture a source
   // binding or proof from HTTP 200, local git HEAD, or the client clock.
   if (!SHA40.test(runIdentity.source_sha || '') || !SHA256.test(runIdentity.proof_sha256 || '')) {
@@ -74,9 +74,12 @@ export function conformOperatorReadbacks({
   }
   if (fleet.source !== 'LOCAL_TASK_LEDGER' || continuity.source !== 'LOCAL_CHECKPOINT_LEDGER' ||
       source.source !== 'EXACT_GIT_READBACK' ||
-      [fleet, continuity, source].some(v => v.proven !== true ||
-        !fresh(v.observed_at, nowMs) || !fresh(v.heartbeat_at, nowMs))) {
+      [fleet, continuity, source].some(v => v.proven !== true)) {
     return fallback('UNKNOWN', 'PLANE_PROVENANCE_UNVERIFIED');
+  }
+  if ([fleet, continuity, source].some(v =>
+      !fresh(v.observed_at, nowMs) || !fresh(v.heartbeat_at, nowMs))) {
+    return fallback('STALE', 'PLANE_READBACK_STALE');
   }
   const ownerIds = [runIdentity.owner_id, fleet.owner_id, continuity.owner_id, source.owner_id];
   if (ownerIds.some(id => id !== owner.owner_id)) return fallback('AMBIGUOUS', 'OWNER_CONFLICT');
