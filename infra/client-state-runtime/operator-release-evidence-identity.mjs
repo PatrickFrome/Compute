@@ -71,27 +71,23 @@ export function verifyReleaseEvidenceIdentity(witnesses = {}, { nowMs = Date.now
         else observations[label][key] = value;
       }
     }
-    const expected = observations.expected;
-    if (expected) {
-      for (const label of ['source', 'build', 'package', 'runtime']) {
-        const entry = observations[label];
-        const field = label === 'source' ? 'git_sha' : 'source_sha';
-        if (entry?.[field] && expected.git_sha && entry[field] !== expected.git_sha) blocked.push('SOURCE_GIT_SHA_MISMATCH');
-      }
-      for (const label of ['owner', 'runtime']) {
-        const entry = observations[label];
-        if (entry?.owner_id && expected.owner_id && entry.owner_id !== expected.owner_id) blocked.push('OWNER_ID_MISMATCH');
-        if (entry?.process_incarnation && expected.process_incarnation && entry.process_incarnation !== expected.process_incarnation)
-          blocked.push('OWNER_INCARNATION_MISMATCH');
-      }
-      if (expected.observed_at) {
-        const observedMs = Date.parse(expected.observed_at);
-        if (observedMs > nowMs + MAX_SKEW_MS || nowMs - observedMs > maxAgeMs) blocked.push('OBSERVATION_OUTSIDE_FRESHNESS_WINDOW');
-        for (const [label, entry] of Object.entries(observations)) {
-          if (label !== 'expected' && entry.observed_at && entry.observed_at !== expected.observed_at)
-            blocked.push('OBSERVED_AT_MISMATCH');
-        }
-      }
+    // Compare present independent witnesses even when the expected anchor is
+    // missing. A missing anchor never hides an already observable conflict.
+    const sources = [observations.expected?.git_sha, observations.source?.git_sha,
+      observations.build?.source_sha, observations.package?.source_sha,
+      observations.runtime?.source_sha].filter(Boolean);
+    if (new Set(sources).size > 1) blocked.push('SOURCE_GIT_SHA_MISMATCH');
+    for (const field of ['owner_id', 'process_incarnation']) {
+      const values = [observations.expected?.[field], observations.owner?.[field],
+        observations.runtime?.[field]].filter(Boolean);
+      if (new Set(values).size > 1) blocked.push(field === 'owner_id' ? 'OWNER_ID_MISMATCH' : 'OWNER_INCARNATION_MISMATCH');
+    }
+    const observedTimes = Object.values(observations).map(x => x.observed_at).filter(Boolean);
+    if (new Set(observedTimes).size > 1) blocked.push('OBSERVED_AT_MISMATCH');
+    for (const value of observedTimes) {
+      const observedMs = Date.parse(value);
+      if (observedMs > nowMs + MAX_SKEW_MS || nowMs - observedMs > maxAgeMs)
+        blocked.push('OBSERVATION_OUTSIDE_FRESHNESS_WINDOW');
     }
     const digestValues = [observations.build?.artifact_sha256, observations.package?.artifact_sha256,
       observations.runtime?.artifact_sha256, observations.artifact?.sha256].filter(Boolean);
@@ -112,7 +108,9 @@ export async function hashRegularReleaseArtifact(filePath) {
   const before = await lstat(path);
   if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_ARTIFACT_BYTES)
     throw new Error('ARTIFACT_NOT_REGULAR_OR_OVERSIZE');
-  if ((await realpath(path)).toLowerCase() !== path.toLowerCase()) throw new Error('ARTIFACT_PATH_ALIAS');
+  // Windows realpath may rewrite drive/8.3 names even for an ordinary file;
+  // use open-handle + path inode fences there instead of string equality.
+  if (process.platform !== 'win32' && (await realpath(path)) !== path) throw new Error('ARTIFACT_PATH_ALIAS');
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
   const same = (a, b) => a.dev === b.dev && a.ino === b.ino && a.size === b.size &&
     a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
@@ -139,6 +137,10 @@ export async function verifyReleaseEvidenceFile({ artifactPath, witnesses } = {}
   if (artifactPath === undefined || artifactPath === null) return result('UNKNOWN', ['MISSING_ARTIFACT_PATH']);
   try {
     const sha256 = await hashRegularReleaseArtifact(artifactPath);
-    return verifyReleaseEvidenceIdentity({ ...witnesses, artifact: { ...witnesses?.artifact, sha256 } }, policy);
+    // Never overwrite the independently supplied package/artifact witness.
+    // The byte digest must ALSO agree with it, not silently replace it.
+    if (witnesses?.artifact?.sha256 && witnesses.artifact.sha256 !== sha256)
+      return result('BLOCKED', ['ARTIFACT_DIGEST_MISMATCH']);
+    return verifyReleaseEvidenceIdentity(witnesses, policy);
   } catch { return result('BLOCKED', ['ARTIFACT_READBACK_FAILED']); }
 }

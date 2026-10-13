@@ -114,13 +114,28 @@ test('real local bytes are hashed and checked against the claimed SHA; no shell 
     assert.equal(await hashRegularReleaseArtifact(path), digest);
     const f = fixture();
     for (const entry of [f.build, f.package, f.runtime]) entry.artifact_sha256 = digest;
-    f.artifact.sha256 = '0'.repeat(64); // must NOT be trusted over bytes.
+    f.artifact.sha256 = digest;
     assert.equal((await verifyReleaseEvidenceFile({ artifactPath: path, witnesses: f }, policy)).state, 'MATCH');
+    f.artifact.sha256 = '0'.repeat(64); // contradictory manifest cannot be overwritten.
+    assert.equal((await verifyReleaseEvidenceFile({ artifactPath: path, witnesses: f }, policy)).state, 'BLOCKED');
+    f.artifact.sha256 = digest;
     await writeFile(path, Buffer.from('tampered bytes'));
     assert.deepEqual((await verifyReleaseEvidenceFile({ artifactPath: path, witnesses: f }, policy)).reasons, ['ARTIFACT_DIGEST_MISMATCH']);
-    const alias = join(dir, 'alias.bin'); await symlink(path, alias);
-    assert.equal((await verifyReleaseEvidenceFile({ artifactPath: alias, witnesses: f }, policy)).state, 'BLOCKED');
+    const alias = join(dir, 'alias.bin');
+    try {
+      await symlink(path, alias);
+      assert.equal((await verifyReleaseEvidenceFile({ artifactPath: alias, witnesses: f }, policy)).state, 'BLOCKED');
+    } catch (error) {
+      if (process.platform !== 'win32' || error.code !== 'EPERM') throw error;
+    }
     assert.equal((await verifyReleaseEvidenceFile({ witnesses: f }, policy)).state, 'UNKNOWN');
     assert.equal((await verifyReleaseEvidenceFile({ artifactPath: 'relative.bin', witnesses: f }, policy)).state, 'BLOCKED');
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('present conflicting witnesses fail closed even without expected anchor', () => {
+  const f = fixture(); delete f.expected; f.runtime.source_sha = 'c'.repeat(40);
+  assert.equal(verify(f, policy).state, 'BLOCKED');
+  const g = fixture(); delete g.expected; g.owner.process_incarnation = 'different-birth';
+  assert.equal(verify(g, policy).state, 'BLOCKED');
 });
