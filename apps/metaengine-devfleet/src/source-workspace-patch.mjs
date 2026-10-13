@@ -7,7 +7,6 @@ const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const shaRe=/^[a-f0-9]{64}$/;
 const reqRe=/^[A-Za-z0-9._:-]{12,100}$/;
 const maxFile=262144;
-const clone=x=>JSON.parse(JSON.stringify(x));
 function checkedPath(relative) {
   if(typeof relative!=='string'||relative.length>160||
     !/^(?:src|test|scripts)\/[A-Za-z0-9._/-]+\.(?:mjs|js|cjs|html|json)$/.test(relative) ||
@@ -29,9 +28,18 @@ export class DevFleetSourceWorkspace {
     if(typeof workspace!=='string'||!path.isAbsolute(workspace))
       throw Error('source_patch_workspace_unpinned');
     const root=await fs.realpath(workspace);
-    if(root!==path.resolve(workspace)) throw Error('source_patch_workspace_alias_denied');
-    const folder=path.dirname(path.join(root,...sub.split('/')));
-    if(await fs.realpath(folder)!==folder)throw Error('source_patch_link_denied');
+    // Compare filesystem identities instead of Windows path spellings.
+    const rootEntry=await fs.lstat(path.resolve(workspace));
+    if(!rootEntry.isDirectory()||rootEntry.isSymbolicLink())
+      throw Error('source_patch_workspace_alias_denied');
+    const folders=sub.split('/').slice(0,-1);
+    let current=root;
+    for(const part of folders) {
+      current=path.join(current,part);
+      const st=await fs.lstat(current);
+      if(!st.isDirectory()||st.isSymbolicLink())
+        throw Error('source_patch_link_denied');
+    }
     const target=path.join(root,...sub.split('/'));
     const st=await fs.lstat(target);
     if(!st.isFile()||st.isSymbolicLink()||st.size>maxFile)
