@@ -4,7 +4,7 @@ import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttrib
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
-import {receiptMarker,postedMessageObserved} from './send-receipt-core.mjs';
+import {receiptMarker,postedMessageObserved,postedUserTurnObserved} from './send-receipt-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -61,6 +61,31 @@ async function ax(view) {
   await debug.sendCommand('Accessibility.enable');
   const result = await debug.sendCommand('Accessibility.getFullAXTree');
   return Array.isArray(result?.nodes) ? result.nodes : [];
+}
+// CDP user-turn scope is critical: a flattened AX transcript can echo an
+// unsent marker, an assistant quotation, or other untrusted page text.
+async function scopedUserMessageHtml(view) {
+  const dbg=view.webContents.debugger;
+  if(!dbg.isAttached())dbg.attach('1.3');
+  await dbg.sendCommand('DOM.enable');
+  const doc=await dbg.sendCommand('DOM.getDocument',{depth:1,pierce:false});
+  const rootId=doc?.root?.nodeId;
+  if(!Number.isSafeInteger(rootId)||rootId<1)throw Error('user_turn_document_unverified');
+  const result=await dbg.sendCommand('DOM.querySelectorAll',{
+    nodeId:rootId,selector:'[data-message-author-role="user"]'
+  });
+  const ids=result?.nodeIds;
+  if(!Array.isArray(ids)||ids.length>256||
+     ids.some(id=>!Number.isSafeInteger(id)||id<1))
+    throw Error('user_turn_scope_unverified');
+  const html=[];
+  for(const nodeId of ids) {
+    const turn=await dbg.sendCommand('DOM.getOuterHTML',{nodeId});
+    if(typeof turn?.outerHTML!=='string'||turn.outerHTML.length>65536)
+      throw Error('user_turn_html_unverified');
+    html.push(turn.outerHTML);
+  }
+  return html;
 }
 async function focusAndType(view, backendNodeId, text) {
   const debug = view.webContents.debugger;
@@ -411,8 +436,20 @@ export class ChatSurface {
         composer_value:currentComposer?val(currentComposer,'value'):null,
         transcript:transcript(nodes),request_id:marker
       })) {
-        return {state:'PROVEN_SENT',tab_id:tabId,url,
-          target_id:'webcontents:'+view.webContents.id,prompt_sha256:sha(text)};
+        // The AX marker is only a cheap hint. Never settle a receipt on it.
+        const generation=this.#navigationGenerations.get(tabId);
+        let scoped=[];
+        try{scoped=await scopedUserMessageHtml(view);}catch{ /* fail closed */ }
+        if(this.#views.get(tabId)===view&&!view.webContents.isDestroyed()&&
+          view.webContents.getURL()===url&&
+          this.#navigationGenerations.get(tabId)===generation&&
+          postedUserTurnObserved({url,request_id:marker,
+            composer_observed:!!currentComposer,
+            composer_value:currentComposer?val(currentComposer,'value'):null,
+            user_turn_html:scoped})) {
+          return {state:'PROVEN_SENT',tab_id:tabId,url,
+            target_id:'webcontents:'+view.webContents.id,prompt_sha256:sha(text)};
+        }
       }
     }
     throw new Error('send_outcome_requires_manual_readback');
@@ -424,7 +461,7 @@ export class ChatSurface {
       throw Error('receipt_request_id_invalid');
     this.select(tabId);
     const url=view.webContents.getURL();
-    if(!chatUrl(url)||!/^https:\/\/chatgpt\.com\/c\//.test(url))
+    if(!chatUrl(url,true))
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
     const epoch=this.#navigationGenerations.get(tabId);
@@ -434,10 +471,16 @@ export class ChatSurface {
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
     const composer=composerFrom(nodes);
-    const posted=postedMessageObserved({
+    let scoped=[];
+    if(composer&&val(composer,'value')==='') {
+      try{scoped=await scopedUserMessageHtml(view);}catch{ /* fail closed */ }
+    }
+    const stable=!view.webContents.isDestroyed()&&this.#views.get(tabId)===view&&
+      this.#navigationGenerations.get(tabId)===epoch&&view.webContents.getURL()===url;
+    const posted=stable&&postedUserTurnObserved({
       url,composer_observed:!!composer,
       composer_value:composer?val(composer,'value'):null,
-      transcript:transcript(nodes),request_id:requestId
+      user_turn_html:scoped,request_id:requestId
     });
     return {state:posted?'PROVEN_SENT':'UNVERIFIED',tab_id:tabId,
       request_id:requestId,url,
