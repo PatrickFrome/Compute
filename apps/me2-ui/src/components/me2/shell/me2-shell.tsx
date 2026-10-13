@@ -18,6 +18,7 @@ const TasksPage = lazy(() => import("@/components/me2/pages/tasks").then((m) => 
 const SupervisorPage = lazy(() => import("@/components/me2/pages/supervisor").then((m) => ({ default: m.SupervisorPage })));
 const MemoryPage = lazy(() => import("@/components/me2/pages/memory").then((m) => ({ default: m.MemoryPage })));
 const ObservabilityPage = lazy(() => import("@/components/me2/pages/observability").then((m) => ({ default: m.ObservabilityPage })));
+const OperatorObservatoryPage = lazy(() => import("@/components/me2/pages/operator-observatory").then((m) => ({ default: m.OperatorObservatoryPage })));
 const SystemPage = lazy(() => import("@/components/me2/pages/system").then((m) => ({ default: m.SystemPage })));
 
 type PrimaryChatActor = {
@@ -519,6 +520,7 @@ function PageOutlet({ page }: { page: PageKey }) {
     case "supervisor": return <SupervisorPage />;
     case "memory": return <MemoryPage />;
     case "observability": return <ObservabilityPage />;
+    case "operator": return <OperatorObservatoryPage />;
     case "system": return <SystemPage />;
     default: return null;
   }
