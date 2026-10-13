@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 
 const script=new URL('../scripts/devfleet-admin-mcp.mjs',import.meta.url);
 test('stable MCP admin handshake exposes one fast overview and a bounded live-control tool',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'devfleet-admin-mcp-'));
- const child=spawn(process.execPath,[script.pathname],{
+ const child=spawn(process.execPath,[fileURLToPath(script)],{
    env:{...process.env,APPDATA:dir},stdio:['pipe','pipe','pipe'],
    windowsHide:true
  });
