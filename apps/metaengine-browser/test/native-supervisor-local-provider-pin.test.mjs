@@ -50,9 +50,7 @@ test('actual local profile setter cannot switch to cloud, another port or anothe
   assert.equal(unchanged.base, local);
 });
 
-test('without a local provider marker legacy cloud and reserve swaps remain available', async () => {
+test('without a trusted Owner, even an explicit loopback setter is fenced (no hosted or reserve swap)', async () => {
   const result = await inspect({}, `m.setNativeSupervisorBase(${JSON.stringify(local)});`);
-  assert.equal(result.ok, true);
-  assert.equal(result.base, local);
-  assert.equal(result.provider, null);
+  assert.deepEqual(result, {ok:false,error:'native_supervisor_local_provider_endpoint_pinned'});
 });
