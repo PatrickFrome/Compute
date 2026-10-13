@@ -17,6 +17,7 @@ const PAGE_META: Record<string, { hint: string }> = {
   supervisor: { hint: "Coordination and readiness" },
   memory: { hint: "Learning history and knowledge" },
   observability: { hint: "Events and result evidence" },
+  operator: { hint: "Read-only unified Operator truth, monotonic run/event cursor" },
   system: { hint: "Client settings" },
 };
 

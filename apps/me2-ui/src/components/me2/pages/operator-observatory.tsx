@@ -1,0 +1,234 @@
+"use client";
+
+// W6/P4: seven read-only perspectives over ONE canonical operator context.
+// This view deliberately does not use the ME2 daemon snapshot, agent roster,
+// local HTTP /health, legacy task bus, arbitrary fetch URLs or client readiness.
+// Only a trusted, authenticated native Operator bridge may supply context.
+// Without that bridge, every facet and the event cursor remain UNKNOWN.
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  OBSERVATORY_VIEWS, emptyOperatorObservatory, reduceOperatorObservatory,
+} from "@/lib/operator-observatory.mjs";
+
+type ViewName = keyof typeof OBSERVATORY_VIEWS;
+type OperatorBridge = {
+  // Future W3 native preload/gateway integration: no key/token in the renderer.
+  readContext?: () => Promise<unknown>;
+};
+
+function operatorBridge(): OperatorBridge | null {
+  return (window as Window & { metaengineOperator?: OperatorBridge }).metaengineOperator ?? null;
+}
+
+const STATE_TONES: Record<string, string> = {
+  READY: "border-emerald-800 bg-emerald-950/30 text-emerald-200",
+  AVAILABLE: "border-cyan-900 bg-cyan-950/30 text-cyan-200",
+  AMBIGUOUS: "border-rose-800 bg-rose-950/40 text-rose-200",
+  STALE: "border-amber-800 bg-amber-950/30 text-amber-200",
+  UNVERIFIED: "border-amber-800 bg-amber-950/30 text-amber-200",
+  UNKNOWN: "border-zinc-700 bg-zinc-900 text-zinc-300",
+  OFFLINE: "border-rose-900 bg-rose-950/30 text-rose-300",
+};
+const STATE_HINTS: Record<string, string> = {
+  READY: "Upstream trusted readback reported READY; this is not an effect grant.",
+  AVAILABLE: "Observed availability only. Does not establish execution activity.",
+  UNKNOWN: "No trusted witness is connected. Not an offline or active claim.",
+  UNVERIFIED: "Missing, malformed or untrusted evidence; positive claims suppressed.",
+  STALE: "Observation is outside the configured freshness window.",
+  AMBIGUOUS: "Conflicting identity, proof or monotonic event history. Reconciliation required.",
+  DEGRADED: "Reported degraded by the source readback.",
+  BLOCKED: "Reported blocked by the source readback.",
+  OFFLINE: "Reported offline by the source readback.",
+};
+
+export function OperatorObservatoryPage() {
+  const [view, setView] = useState<ViewName>("Now");
+  const [projection, setProjection] = useState<ReturnType<typeof reduceOperatorObservatory> | ReturnType<typeof emptyOperatorObservatory>>(() => emptyOperatorObservatory());
+  const [connection, setConnection] = useState<"UNBOUND" | "READING" | "OBSERVED" | "UNAVAILABLE">("UNBOUND");
+  const previous = useRef<ReturnType<typeof reduceOperatorObservatory> | null>(null);
+  const flight = useRef(false);
+  const mounted = useRef(false);
+  const fenced = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (flight.current || fenced.current) return;
+    const bridge = operatorBridge();
+    if (!bridge?.readContext) {
+      previous.current = null;
+      if (mounted.current) {
+        setProjection(emptyOperatorObservatory("TRUSTED_OPERATOR_BRIDGE_ABSENT"));
+        setConnection("UNAVAILABLE");
+      }
+      return;
+    }
+    flight.current = true;
+    if (mounted.current) setConnection("READING");
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      // Bounded wait, read-only. Timeout never triggers a write, effect or
+      // replay. The bridge owns authentication and source-bound readback.
+      const result = await Promise.race([
+        bridge.readContext(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("operator_read_timeout")), 2500);
+        }),
+      ]);
+      if (!mounted.current) return;
+      const next = reduceOperatorObservatory(result, { previous: previous.current });
+      setProjection(next);
+      setConnection(next.state === "OBSERVED" ? "OBSERVED" : "UNAVAILABLE");
+      if (next.state === "AMBIGUOUS") fenced.current = true;
+      // Retain the last cursor through transport outages. Otherwise a
+      // regression could be silently accepted on the next successful poll.
+      if (next.state === "OBSERVED") previous.current = next;
+    } catch {
+      if (mounted.current) {
+        setProjection(emptyOperatorObservatory("READBACK_FAILED_OR_TIMED_OUT"));
+        setConnection("UNAVAILABLE");
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      flight.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    const ticker = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 10000);
+    return () => {
+      mounted.current = false;
+      window.clearInterval(ticker);
+    };
+  }, [refresh]);
+
+  const names = OBSERVATORY_VIEWS[view];
+  const cursor = projection.cursor_state === "VERIFIED_CURSOR"
+    ? String(projection.event_seq)
+    : projection.cursor_state;
+  const displayRun = projection.run_id ?? "UNKNOWN";
+
+  return (
+    <section className="mx-auto flex max-w-6xl flex-col gap-5 pb-12" data-testid="operator-observatory"
+      aria-label="Causal Observatory" data-authority-effect="false">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-zinc-800 pb-4">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-400">Unified Command / P4</p>
+          <h1 className="mt-1 text-2xl font-semibold text-zinc-100">Causal Observatory</h1>
+          <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-zinc-400">
+            Seven projections of one authenticated Operator context. A connected HTTP endpoint,
+            open tab or available database never proves an active mission, agent or supervisor.
+          </p>
+        </div>
+        <button type="button" onClick={() => void refresh()} disabled={connection === "READING" || fenced.current}
+          data-testid="operator-observatory-refresh"
+          className="min-h-9 border border-zinc-700 bg-zinc-900 px-4 text-[12px] text-zinc-200 hover:border-zinc-500 disabled:opacity-50">
+          {connection === "READING" ? "Reading…" : fenced.current ? "Reconciliation required" : "Refresh readback"}
+        </button>
+      </header>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4" aria-label="Canonical context identity">
+        <div className="border border-zinc-800 bg-zinc-900/40 p-3" data-testid="operator-context-run">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Run</div>
+          <div className="mt-1 break-all font-mono text-[12px] text-zinc-200">{displayRun}</div>
+        </div>
+        <div className="border border-zinc-800 bg-zinc-900/40 p-3" data-testid="operator-context-cursor">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Event cursor</div>
+          <div className="mt-1 font-mono text-[12px] text-zinc-200">{cursor}</div>
+        </div>
+        <div className="border border-zinc-800 bg-zinc-900/40 p-3" data-testid="operator-context-truth">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Readback</div>
+          <div className="mt-1 text-[12px] text-zinc-200">{projection.state}</div>
+        </div>
+        <div className="border border-zinc-800 bg-zinc-900/40 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Observed at</div>
+          <div className="mt-1 break-all font-mono text-[11px] text-zinc-200">
+            {projection.generated_at ?? "UNKNOWN"}
+          </div>
+        </div>
+      </div>
+
+      {projection.state !== "OBSERVED" || projection.cursor_state !== "VERIFIED_CURSOR" ? (
+        <p role="status" className="border-l-2 border-amber-600 bg-amber-950/20 px-3 py-2 text-[12px] text-amber-200"
+          data-testid="operator-context-warning">
+          {projection.state === "AMBIGUOUS"
+            ? "AMBIGUOUS: run/cursor/proof conflict; observations are fenced until explicit reconciliation."
+            : projection.state === "STALE"
+              ? "STALE: do not use this observation as a current-state assertion."
+              : projection.state === "OBSERVED"
+                ? "Event provenance is UNKNOWN: the canonical context has no verified run, cursor and proof identity."
+                : "UNKNOWN / UNVERIFIED: trusted context is unavailable or failed validation. No activity is inferred."}
+        </p>
+      ) : null}
+
+      <nav aria-label="Observatory views" className="flex flex-wrap gap-1 border-b border-zinc-800 pb-2">
+        {(Object.keys(OBSERVATORY_VIEWS) as ViewName[]).map(name => (
+          <button type="button" key={name} onClick={() => setView(name)} aria-current={view === name ? "page" : undefined}
+            data-testid={`operator-view-${name.toLowerCase()}`}
+            className={`min-h-9 px-3 text-[12px] transition-colors ${view === name
+              ? "border-b-2 border-cyan-400 bg-cyan-950/20 font-medium text-cyan-200"
+              : "border-b-2 border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"}`}>
+            {name}
+          </button>
+        ))}
+      </nav>
+      <div>
+        <h2 className="text-lg font-medium text-zinc-100">{view}</h2>
+        <p className="mt-1 text-[12px] text-zinc-500">
+          {view === "Now" ? "All seven source planes, not a synthesized liveness badge." :
+           view === "Missions" ? "Mission records await own-ledger readback; no task counts are inferred." :
+           view === "Fleet" ? "Lease, supervisor and Host provenance only; no roster-derived ACTIVE state." :
+           view === "Brain" ? "No dedicated Brain witness in Operator Context v1; Brain activity is UNKNOWN." :
+           view === "Develop" ? "Source and Client witnesses; a commit or passing CI is not installed execution proof." :
+           view === "System" ? "Own PostgreSQL and Host/Client/Supervisor facets; database AVAILABLE is not system READY." :
+           "Proof provenance and event cursor; no unsourced event content."}
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="operator-planes">
+        {names.map((name: string) => {
+          const facet = projection.planes[name] ?? { state: "UNKNOWN", fresh: false, proof: "NONE", observed_at: null };
+          return <details key={name} className="group border border-zinc-800 bg-[#111114] p-4"
+            data-testid={`operator-plane-${name}`}>
+            <summary className="cursor-pointer list-none">
+              <span className="flex items-center justify-between gap-2">
+                <strong className="capitalize text-[14px] font-medium text-zinc-100">{name}</strong>
+                <span className={`border px-2 py-1 font-mono text-[10px] ${STATE_TONES[facet.state] ?? STATE_TONES.UNKNOWN}`}>
+                  {facet.state}
+                </span>
+              </span>
+              <span className="mt-3 block text-[11px] leading-relaxed text-zinc-400">
+                {STATE_HINTS[facet.state] ?? "Nonpositive upstream state; inspect verified source evidence."}
+              </span>
+            </summary>
+            <dl className="mt-4 grid grid-cols-[80px_1fr] gap-2 border-t border-zinc-800 pt-3 text-[11px]">
+              <dt className="text-zinc-500">Proof</dt><dd className="break-all font-mono text-zinc-300">{facet.proof}</dd>
+              <dt className="text-zinc-500">Fresh</dt><dd className="text-zinc-300">{facet.fresh === true ? "YES" : "NO"}</dd>
+              <dt className="text-zinc-500">Observed</dt>
+              <dd className="break-all font-mono text-zinc-300">{facet.observed_at ?? "UNKNOWN"}</dd>
+            </dl>
+          </details>;
+        })}
+      </div>
+      <section className="border border-zinc-800 bg-zinc-900/30 p-4" aria-label="Evidence identity"
+        data-testid="operator-evidence">
+        <h3 className="text-[13px] font-medium text-zinc-200">Causal evidence identity</h3>
+        <dl className="mt-3 grid grid-cols-[110px_1fr] gap-2 text-[11px]">
+          <dt className="text-zinc-500">Run</dt><dd className="break-all font-mono">{displayRun}</dd>
+          <dt className="text-zinc-500">Event sequence</dt><dd className="font-mono">{cursor}</dd>
+          <dt className="text-zinc-500">Proof fingerprint</dt>
+          <dd className="break-all font-mono">{projection.proof_identity ?? "UNKNOWN"}</dd>
+          <dt className="text-zinc-500">Authority</dt>
+          <dd className="font-mono">READ_ONLY / authority_effect=false / no automatic retry</dd>
+        </dl>
+        <p className="mt-4 text-[11px] leading-relaxed text-zinc-500">
+          Operator v1 does not expose bounded task, Brain, artifact or per-event drill-down yet.
+          Missing records remain UNKNOWN until a trusted own-PostgreSQL ledger adapter and
+          monotonic event API are independently qualified.
+        </p>
+      </section>
+    </section>
+  );
+}
