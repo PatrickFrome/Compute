@@ -5,10 +5,16 @@ import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './lo
 test('migration plan pins all managed-project and continuity RPCs with dependencies', async () => {
   const plan = await loadLocalRuntimeMigrationPlan();
   assert.match(plan.source_manifest_sha256, /^[a-f0-9]{64}$/);
-  assert.equal(plan.migrations.length, 5);
-  assert.equal(plan.migrations.slice(-2).flatMap(row => row.signatures.filter(value => value.startsWith('public.'))).length, 10);
-  assert.equal(plan.migrations.at(-1).relations.length, 4);
-  assert.equal(plan.migrations.at(-1).triggers.length, 3);
+  assert.equal(plan.migrations.length, 7);
+  const project = plan.migrations.find(row => row.source === '20261010100000_project_continuity_history_v1.sql');
+  const w5 = plan.migrations.at(-1);
+  assert(project);
+  assert.equal(project.signatures.filter(value => value.startsWith('public.')).length, 7);
+  assert.equal(project.relations.length, 4);
+  assert.equal(project.triggers.length, 3);
+  assert.equal(w5.source, 'fleet-coordination-claim-guard-v1.sql');
+  assert.deepEqual(w5.signatures, ['destruktion_meta.fleet_coordination_claim_gate_v1()']);
+  assert.equal(w5.triggers[0].name, 'zz_fleet_coordination_claim_gate_v1');
   assert.deepEqual(await loadLocalRuntimeMigrationPlan(), plan);
 });
 

@@ -42,6 +42,12 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
   // Marker is absent on v1 installations: apply replacement only in a new migration.
   { path: '20261012130000_project_verifier_reference_transport_v1.sql', signature: 'destruktion_meta.project_verifier_reference_transport_h205f22()',
     source_url: new URL('../../supabase/migrations/20261012130000_project_verifier_reference_transport_v1.sql', import.meta.url) },
+  // P3 opt-in fleet DAG: qualified only for self-owned local PostgreSQL;
+  // the existing devos lease inserts into the same canonical claim table.
+  { path: 'fleet-coordination-claim-guard-v1.sql', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()',
+    source_url: new URL('./fleet-coordination-claim-guard-v1.sql', import.meta.url),
+    triggers: Object.freeze([{ relation: 'destruktion_meta.devos_fleet_claim_h205f22',
+      name: 'zz_fleet_coordination_claim_gate_v1', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()' }]) },
 ]);
 
 const REQUIRED_COLUMNS = {
