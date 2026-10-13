@@ -18,7 +18,7 @@ import { taskContentSnapshotForDisplay } from "@/lib/task-content-snapshot.mjs";
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
   | "browser" | "code" | "tasks"
-  | "supervisor" | "memory" | "observability" | "system";
+  | "supervisor" | "memory" | "observability" | "operator" | "system";
 
 // R97 native swarm convergence: COMMAND/AGENTS/COMPUTE were daemon/API-agent
 // surfaces. They are intentionally absent from production navigation.
@@ -29,6 +29,7 @@ export const PAGES: { key: PageKey; label: string; num: string }[] = [
   { key: "supervisor", label: "SUPERVISOR", num: "4" },
   { key: "memory", label: "MEMORY", num: "5" },
   { key: "observability", label: "OBSERV", num: "6" },
+  { key: "operator", label: "CAUSAL", num: "8" },
   { key: "system", label: "SYSTEM", num: "7" },
 ];
 
@@ -47,7 +48,7 @@ export const WORKFLOW_STAGES: Array<{
   { key: "plan", label: "PLAN", primaryPage: "tasks", pages: ["tasks"], hint: "tasks, dependencies, execution plan" },
   { key: "build", label: "BUILD", primaryPage: "code", pages: ["code"], hint: "code, diffs, tests, terminal" },
   { key: "fleet", label: "SUPERVISE", primaryPage: "supervisor", pages: ["supervisor"], hint: "objectives, coordination, recovery and approvals" },
-  { key: "observe", label: "OBSERVE", primaryPage: "observability", pages: ["observability", "memory"], hint: "events, traces, memory and outcomes" },
+  { key: "observe", label: "OBSERVE", primaryPage: "observability", pages: ["observability", "operator", "memory"], hint: "events, traces, memory and canonical operator truth" },
   { key: "system", label: "SYSTEM", primaryPage: "system", pages: ["system"], hint: "runtime, releases and settings" },
 ];
 
