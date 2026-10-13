@@ -89,14 +89,26 @@ test('matching progress keeps valid proof', async () => {
   assert.equal(journal.latest().execution_proof.user_goal_to_result_readback, true);
 });
 
-test('failed durable write cannot change the published journal state', async () => {
+test('failed durable write preserves published state and fences this process until restart readback', async () => {
   const { journal, store, progress } = await seeded();
   store.fail = true;
   await assert.rejects(() => journal.recordProgress({ ...progress, lease_generation: 3 }), /disk_write_failed/);
   assert.equal(journal.latest().progress.lease_generation, 2);
+  assert.equal(journal.persistenceStatus().fenced, true);
   store.fail = false;
-  await journal.recordProgress({ ...progress, lease_generation: 3 });
-  assert.equal(journal.latest().execution_proof, null);
+  // A failed fsync/rename may have committed even when save rejected.
+  // Never retry this incarnation before reopening the durable state.
+  await assert.rejects(() => journal.recordProgress({ ...progress, lease_generation: 3 }),
+    /client_goal_journal_persistence_reconciliation_required/);
+  assert.equal(journal.latest().progress.lease_generation, 2);
+  const recovered = new ClientGoalJournal({
+    loadState: () => store.loadState(), saveState: s => store.saveState(s),
+  });
+  await recovered.load();
+  assert.equal(recovered.persistenceStatus().fenced, false);
+  await recovered.recordProgress({ ...progress, lease_generation: 3 });
+  assert.equal(recovered.latest().execution_proof, null);
+  assert.equal(store.read().entries[0].progress.lease_generation, 3);
 });
 
 test('concurrent progress write and late proof serialize against the latest durable binding', async () => {
@@ -124,14 +136,23 @@ test('concurrent progress write and late proof serialize against the latest dura
   assert.equal(journal.latest().execution_proof, null);
 });
 
-test('failed correlation barrier does not publish a request that was never saved', async () => {
+test('failed correlation barrier stays unpublished and requires durable restart reconciliation', async () => {
   const store = storage();
   store.fail = true;
   const journal = new ClientGoalJournal({ loadState: () => store.loadState(), saveState: s => store.saveState(s) });
   await journal.load();
   await assert.rejects(() => journal.begin({ request_id: requestId, goal: 'Ship exact proof' }), /disk_write_failed/);
   assert.equal(journal.get(requestId), null);
+  assert.equal(journal.persistenceStatus().fenced, true);
   store.fail = false;
-  await journal.begin({ request_id: requestId, goal: 'Ship exact proof' });
+  await assert.rejects(() => journal.begin({ request_id: requestId, goal: 'Ship exact proof' }),
+    /client_goal_journal_persistence_reconciliation_required/);
+  const restored = new ClientGoalJournal({
+    loadState: () => store.loadState(), saveState: s => store.saveState(s),
+  });
+  await restored.load();
+  assert.equal(restored.get(requestId), null);
+  await restored.begin({ request_id: requestId, goal: 'Ship exact proof' });
   assert.equal(store.read().entries[0].request_id, requestId);
+  assert.equal(journal.get(requestId), null);
 });
