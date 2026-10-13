@@ -87,7 +87,7 @@ test('unattested local environment cannot turn the capsule into a live superviso
   assert.match(capsule.databases[0].scope, /own PostgreSQL via attested local Owner/);
   assert.equal(capsule.context_sources.some(row => /infra\/pigsty/.test(row.pointer)), false);
   const rendered = renderAgentAccessCapsuleBlock(capsule);
-  assert.doesNotMatch(rendered, /supabase\\.co|private-test-key|postgresql:\/\//);
+  assert.doesNotMatch(rendered, /supabase\.co|private-test-key|postgresql:\/\//);
   assert.match(rendered, /no Supervisor endpoint or command authority/);
 });
 
@@ -104,7 +104,7 @@ test('hosted endpoint parameter cannot become a default local Supervisor authori
     'http://127.0.0.1:3031/a2-browser-native-supervisor-v1']) {
     const capsule = defaultAgentAccessCapsule({ env:{}, activeBase:base });
     assert.equal(capsule.infrastructure[0].url, '');
-    assert.doesNotMatch(renderAgentAccessCapsuleBlock(capsule), /selected\\.example|127\\.0\\.0\\.1:3031/);
+    assert.doesNotMatch(renderAgentAccessCapsuleBlock(capsule), /selected\.example|127\.0\.0\.1:3031/);
   }
 });
 
@@ -117,9 +117,9 @@ test('historical operator override files cannot smuggle cloud endpoints into pro
     }));
     const loaded = loadAgentAccessCapsule({storage_dir:dir});
     assert.equal(loaded.infrastructure[0].url, '');
-    assert.doesNotMatch(renderAgentAccessCapsuleBlock(loaded), /hosted\\.invalid/);
+    assert.doesNotMatch(renderAgentAccessCapsuleBlock(loaded), /hosted\.invalid/);
     assert.equal(ensureAgentAccessCapsuleFile(dir), null);
-    assert.match(fs.readFileSync(file,'utf8'), /hosted\\.invalid/);
+    assert.match(fs.readFileSync(file,'utf8'), /hosted\.invalid/);
     fs.writeFileSync(file, '{not json');
     assert.equal(loadAgentAccessCapsule({storage_dir:dir}).infrastructure[0].url,'');
     assert.equal(fs.readFileSync(file,'utf8'), '{not json');
