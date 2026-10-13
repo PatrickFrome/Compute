@@ -19,7 +19,7 @@ const owner = (patch = {}) => ({
 const project = (patch = {}) => ({
   project_id: uuid(1), workspace_id: uuid(2), device_id: uuid(3),
   client_id: 'native-owner-one', admin_grant_epoch: 7,
-  total_tasks: 1, last_seq: 2, policy_generation: 1, ...patch,
+  total_tasks: 1, last_seq: 2, policy_generation: 1, observed_at: stamp(-50), ...patch,
 });
 const task = (patch = {}) => ({
   task_seq: 1, task_id: uuid(4), task_state: 'RUNNING',
@@ -78,7 +78,7 @@ test('missing, stale, forged, conflicting Owner/generation never issues SQL', as
   for (const identity of [
     null, owner({ verified: false }), owner({ source: 'MODEL_CLAIM' }),
     owner({ owner_id: 'other-owner' }), owner({ admin_grant_epoch: -1 }),
-    owner({ event_after_seq: -1 }), owner({ process_incarnation: '' }),
+    owner({ event_after_seq: -1 }), owner({ event_after_seq: '' }), owner({ process_incarnation: '' }),
     owner({ heartbeat_at: stamp(-60_000) }), owner({ observed_at: stamp(6_000) }),
     owner({ project_id: "'; DROP TABLE projects; --" }),
   ]) {
@@ -97,6 +97,8 @@ test('wrong Owner/epoch, duplicate project, missing or malformed readback is UNK
     { projects: [project({ admin_grant_epoch: 8 })] },
     { projects: [project({ client_id: 'other-owner' })] },
     { projects: [project({ last_seq: NaN })] },
+    { projects: [project({ observed_at: null })] },
+    { projects: [project({ observed_at: stamp(-60000) })] },
     { tasks: [] }, { tasks: null }, { events: null },
   ]) {
     const result = await read(db(data));
