@@ -59,6 +59,32 @@ function reducePlane(name, value, nowMs, maxAgeMs) {
     state: value.state, source: SOURCES[name], observed_at: new Date(observed).toISOString(),
     age_ms: Math.max(0, age), proof: 'TRUSTED_READBACK', fresh: true,
   };
+  // Only explicit scalar allowlists reach GPT/UI; never raw ledger rows or event content.
+  if (name === 'fleet') {
+    output.details = {
+      project_id: /^[a-f\d-]{36}$/i.test(value.project_id || '') ? value.project_id : null,
+      task_count: nonNegativeInt(value.task_count),
+      claim_count: nonNegativeInt(value.claim_count),
+      lease_generation: nonNegativeInt(value.lease_generation),
+      owner_generation: nonNegativeInt(value.owner_generation),
+      complete: value.truncated === false,
+    };
+  }
+  if (name === 'continuity') {
+    const c = value.cursor;
+    const ok = c && /^[a-f\d-]{36}$/i.test(c.project_id || '')
+      && [c.after_seq, c.next_seq, c.through_seq].every(x => nonNegativeInt(x) !== null)
+      && c.after_seq <= c.next_seq && c.next_seq <= c.through_seq
+      && c.has_more === (c.next_seq < c.through_seq)
+      && value.event_seq === c.next_seq;
+    output.details = ok ? {
+      project_id: c.project_id,
+      after_seq: c.after_seq, next_seq: c.next_seq,
+      through_seq: c.through_seq, has_more: c.has_more,
+      owner_generation: nonNegativeInt(value.owner_generation),
+    } : null;
+    if (!ok) return { ...unknown, state: 'UNVERIFIED' };
+  }
   if (name === 'database') {
     output.details = {
       catalog_rpc_available: nonNegativeInt(value.rpc_available),
@@ -84,6 +110,12 @@ export function buildUnifiedOperatorContext({ observations = {}, nowMs = Date.no
     .map(name => observations[name].owner_id));
   if (ownerIds.size > 1) for (const name of OPERATOR_PLANES) {
     if (name !== 'database' && planes[name].fresh)
+      planes[name] = { state: 'AMBIGUOUS', source: SOURCES[name], observed_at: null, proof: 'NONE', fresh: false };
+  }
+  // A single owner with mismatched generations is still a split-brain snapshot.
+  if (planes.fleet.fresh && planes.continuity.fresh
+    && observations.fleet.owner_generation !== observations.continuity.owner_generation) {
+    for (const name of ['fleet', 'continuity'])
       planes[name] = { state: 'AMBIGUOUS', source: SOURCES[name], observed_at: null, proof: 'NONE', fresh: false };
   }
   const missing = OPERATOR_PLANES.filter(name => planes[name].state !== 'READY');

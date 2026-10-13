@@ -62,3 +62,37 @@ The launcher passes `LOCAL_STATE_DATABASE_URL`, `LOCAL_STATE_API_KEY`, `LOCAL_ST
 `npm run test:project-continuity` also uses only `LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR` and its own disposable PostgreSQL 17 cluster. It applies the checked-in task/claim/event/goal definitions, enqueue/lease/complete functions and project continuity migration, then exercises the signed-device route boundary with a synthetic post-authentication identity. It verifies project registration without changing the root task digest, recursive children and grandchildren, preserved budget waits and later admission, exact replay after the original lease closed, task lookup outside a paginated task list, an independent digest-bound critic for each result, guarded parent completion, a bounded device-scoped reconciliation sweep, filtered history pagination, concurrent commit-ordered cursors, rollback without a history gap, RPC grants and device revocation. `CODER` and `INTEGRATOR` proposals map to the existing fleet roles `IMPLEMENTER` and `SYNTHESIZER`. Logical READY tasks are demand for the existing fleet governor; this API allocates no physical leases and introduces no scheduler. Model text and history events keep `verified_evidence=false`; a verified database receipt reference is a separate integrity flag. The test proves database coordination with synthetic origin/result receipts, not real agent competence, remote signature verification or an installed-client useful coding task.
 
 The source-controlled `inspectLocalApiSchemaCatalog({sql})` in db-api-core.mjs queries the local PostgreSQL catalogs under an explicitly privileged local connection. It compares the currently permitted Native Supervisor RPC names, the five allowlisted public tables and their required columns, plus `service_role` and `pgcrypto`. It never runs DDL or DML or returns private connection strings. An empty new PG17 cluster returns `BASELINE_SCHEMA_MISSING`; the physical Windows cold-restart test proves this. Even a matching catalog returns **only** `CATALOG_PRESENT_UNATTESTED` with `runtime_ready=false` and `initialization_authorized=false`: role grants, RLS, migration source hashes, function bodies and the native Supervisor's real health checks must be proved separately before the installed client may publish an owner READY profile. Never use this inventory as permission to restore, migrate or overwrite a user-owned cluster.
+
+
+### W2/P0 owner-scoped PostgreSQL ledger observer (source-qualified)
+
+The existing authenticated loopback `GET /operator/v1/context` now has an optional
+**in-process only** `operatorOwnerReadback` callback. There is no HTTP Owner
+argument, query parameter, new route, process start, scheduler or mutation.
+The callback must provide a fresh, exact trusted Owner identity with
+`workspace_id`, `project_id`, `device_id`, `client_id`,
+`admin_grant_epoch`, `owner_generation`, `process_incarnation` and
+`event_after_seq`. A structural `verified` field is a contract from the
+trusted adapter, **not** cryptographic attestation: the production Owner
+adapter must independently prove this before supplying it.
+
+When an Owner adapter is present, the API makes three hard-coded, parameterized
+`SELECT` statements inside one PostgreSQL `REPEATABLE READ READ ONLY`
+transaction, scoped to that exact project/Owner and the existing
+`destruktion_meta.project_run/project_task/devos_fleet_task/devos_fleet_claim/
+project_event` tables. Data comes only from the self-operated PostgreSQL pool.
+Task/claim rows are capped at 65 (64 usable), event pages return up to 64
+plus a sentinel; cursor `after_seq -> next_seq -> through_seq` is monotonic.
+The reducer rejects duplicate active claims, mismatched agent/lease generation,
+Owner/epoch mismatches, event-sequence gaps and over-limit task witnesses.
+Only safe counts, project ID, generation and cursor metadata leave the endpoint:
+no objectives, SQL connection strings, event content, arbitrary paths or secrets.
+
+**Qualification limitation:** the standalone runtime does not automatically
+wire an Owner callback. The protected endpoint therefore still returns
+`UNKNOWN` for Fleet and Continuity without trusted Owner evidence. Existing
+self-hosted database role/RLS grants may prevent reading the private ledger
+relations; permission errors remain `UNKNOWN`, and no grant/migration is
+automatically installed. This cannot be represented as installed Owner/Fleet
+readiness. Tests are hermetic, not a physical own-Postgres/Windows/Guardian E2E.
+There is no implicit Supabase or hosted-provider fallback.
