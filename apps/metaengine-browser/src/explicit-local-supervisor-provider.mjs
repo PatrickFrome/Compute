@@ -20,6 +20,11 @@ export function localSupervisorProviderProfile(env = process.env) {
 }
 
 export function explicitLocalSupervisorBase({ env = process.env, activeBase = NATIVE_SUPERVISOR_BASE } = {}) {
+  // A missing or failed Host Owner bootstrap is an observational UNKNOWN,
+  // not a malformed caller input that should crash a read-only page/sentinel.
+  // Never turn this into a hosted/alternate Supervisor fallback.
+  const boot = String(env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE || '').trim();
+  if (boot === 'BLOCKED' || boot === 'OFFLINE_DIAGNOSTIC') return null;
   const profile = localSupervisorProviderProfile(env);
   return profile?.base_url === activeBase ? profile.base_url : null;
 }
