@@ -395,7 +395,8 @@ export class DevFleetOperator {
           'send_outcome_requires_manual_readback','send_outcome_ambiguous',
           'chatgpt_current_generation_active','send_button_geometry_unverified',
           'send_button_outside_viewport','request_already_in_transcript',
-          'chatgpt_origin_changed_after_send','chatgpt_composer_not_unique_or_login_required'
+          'chatgpt_origin_changed_after_send','chatgpt_composer_not_unique_or_login_required',
+          'chatgpt_target_changed_after_send','send_receipt_marker_missing'
         ]);
         log.receipt = { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
           tab_id: tab.tab_id, error_code: allowed.has(raw)?raw:'send_error_unknown',
@@ -446,7 +447,9 @@ export class DevFleetOperator {
         try {
           const receipt = await this.#assignLocked(row);
           receipts.push(receipt);
-          if (receipt.state === 'AMBIGUOUS') halted = true;
+          // A send with unknown outcome fences ONLY its own tab. Other
+          // distinct owned tabs and request IDs are independent effects.
+          // Never retry the AMBIGUOUS tab; keep the batch moving.
         } catch (error) {
           const reason = String(error?.message || 'operator_batch_refused');
           receipts.push({state:'REFUSED',request_id:row.request_id,tab_id:row.tab_id,
@@ -456,7 +459,8 @@ export class DevFleetOperator {
             halted = true;
         }
       }
-      return {schema:SCHEMA,state:halted?'HALTED':'COMPLETED',receipts,
+      return {schema:SCHEMA,state:halted?'HALTED':
+        receipts.some(x=>x.state==='AMBIGUOUS')?'PARTIAL_AMBIGUOUS':'COMPLETED',receipts,
         sent:receipts.filter(x=>x.state==='SENT').length,
         ambiguous:receipts.filter(x=>x.state==='AMBIGUOUS').length,
         mutation_attempted:receipts.some(x=>['SENT','AMBIGUOUS'].includes(x.state)),
