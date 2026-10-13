@@ -2,13 +2,44 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
 
-test('migration plan pins all managed-project and continuity RPCs with dependencies', async () => {
+test('migration plan pins the six deployed sources and recognizes only the opt-in own-PG fleet guard', async () => {
   const plan = await loadLocalRuntimeMigrationPlan();
   assert.match(plan.source_manifest_sha256, /^[a-f0-9]{64}$/);
-  assert.equal(plan.migrations.length, 5);
-  assert.equal(plan.migrations.slice(-2).flatMap(row => row.signatures.filter(value => value.startsWith('public.'))).length, 10);
-  assert.equal(plan.migrations.at(-1).relations.length, 4);
-  assert.equal(plan.migrations.at(-1).triggers.length, 3);
+  const mandatorySources = [
+    '20260901034000_meta_orchestrator_controller_lease_v1.sql',
+    '20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql',
+    '20260902183500_devos_live_ambiguity_reconciliation_v3.sql',
+    '20261009194157_managed_project_admission_v1.sql',
+    '20261010100000_project_continuity_history_v1.sql',
+    '20261012130000_project_verifier_reference_transport_v1.sql',
+  ];
+  const sources = plan.migrations.map(row => row.source);
+  assert.deepEqual(sources.slice(0, mandatorySources.length), mandatorySources);
+  assert.equal(new Set(sources).size, sources.length, 'duplicate migration paths are forbidden');
+  const project = plan.migrations.find(row => row.source === '20261010100000_project_continuity_history_v1.sql');
+  assert(project);
+  assert.equal(project.signatures.filter(value => value.startsWith('public.')).length, 7);
+  assert.equal(project.relations.length, 4);
+  assert.equal(project.triggers.length, 3);
+  const verifier = plan.migrations.find(row => row.source === mandatorySources.at(-1));
+  assert(verifier);
+  assert.deepEqual(verifier.signatures,
+    ['destruktion_meta.project_verifier_reference_transport_h205f22()']);
+  const extras = plan.migrations.slice(mandatorySources.length);
+  // The W5 DAG guard is an optional source-only integration lane and must
+  // never be admitted as an arbitrary migration or silently become installed.
+  assert(extras.length <= 1, 'unrecognized extra migration requires an explicit contract');
+  if (extras.length === 1) {
+    const [guard] = extras;
+    assert.equal(guard.source, 'fleet-coordination-claim-guard-v1.sql');
+    assert.deepEqual(guard.signatures, ['destruktion_meta.fleet_coordination_claim_gate_v1()']);
+    assert.equal(guard.triggers.length, 1);
+    assert.equal(guard.triggers[0].name, 'zz_fleet_coordination_claim_gate_v1');
+  }
+  for (const row of plan.migrations) {
+    assert.match(row.source_sha256, /^[a-f0-9]{64}$/);
+    assert(row.signatures.length >= 1);
+  }
   assert.deepEqual(await loadLocalRuntimeMigrationPlan(), plan);
 });
 
