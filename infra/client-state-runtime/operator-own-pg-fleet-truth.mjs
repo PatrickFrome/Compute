@@ -21,7 +21,7 @@ const observation = (source, state, owner, nowMs, extra = {}) => ({
 // The +1 sentinel makes truncation visible rather than claiming a complete snapshot.
 export const OPERATOR_OWN_PG_PROJECT_SQL = [
   'SELECT project_id, workspace_id, device_id, client_id, admin_grant_epoch,',
-  'total_tasks, last_seq, policy_generation',
+  'total_tasks, last_seq, policy_generation, pg_catalog.clock_timestamp() AS observed_at',
   'FROM destruktion_meta.project_run_h205f22',
   'WHERE project_id=$1::uuid AND workspace_id=$2::uuid AND device_id=$3::uuid',
   'AND client_id=$4::text AND admin_grant_epoch=$5::bigint LIMIT 2',
@@ -54,7 +54,7 @@ export function qualifyOperatorOwner(owner, nowMs = Date.now()) {
     || owner.owner_id !== owner.client_id || !safeInt(owner.admin_grant_epoch) || owner.admin_grant_epoch < 1
     || !safeInt(owner.owner_generation) || owner.owner_generation < 1
     || !OWNER.test(owner.process_incarnation || '')
-    || !safeInt(owner.event_after_seq || 0)
+    || !safeInt(owner.event_after_seq === undefined ? 0 : owner.event_after_seq)
     || !Number.isSafeInteger(nowMs)) return false;
   const observed = toMs(owner.observed_at), heartbeat = toMs(owner.heartbeat_at);
   return Number.isFinite(observed) && Number.isFinite(heartbeat)
@@ -86,7 +86,10 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
     || !safeInt(project.policy_generation)
     || project.policy_generation < 1 || project.total_tasks < 1) return bad('UNKNOWN');
 
-  const afterSeq = owner.event_after_seq || 0;
+  const dbObservedMs = toMs(project.observed_at);
+  if (!Number.isFinite(dbObservedMs) || dbObservedMs > nowMs + CLOCK_SKEW
+    || nowMs - dbObservedMs > MAX_AGE) return bad('UNKNOWN');
+  const afterSeq = owner.event_after_seq ?? 0;
   if (afterSeq > project.last_seq) return bad('UNKNOWN');
   const [tasks, events] = await Promise.all([
     tx.unsafe(OPERATOR_OWN_PG_TASK_CLAIM_SQL, [owner.project_id]),
@@ -153,12 +156,12 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
     through_seq: project.last_seq, has_more: nextSeq < project.last_seq };
 
   return {
-    fleet: observation('LOCAL_TASK_LEDGER', state, owner, nowMs, {
+    fleet: observation('LOCAL_TASK_LEDGER', state, owner, dbObservedMs, {
       lease_generation: maxLeaseGeneration, owner_generation: owner.owner_generation,
       project_id: owner.project_id, task_count: grouped.size, claim_count: claimCount,
       truncated: grouped.size !== project.total_tasks,
     }),
-    continuity: observation('LOCAL_CHECKPOINT_LEDGER', 'AVAILABLE', owner, nowMs, {
+    continuity: observation('LOCAL_CHECKPOINT_LEDGER', 'AVAILABLE', owner, dbObservedMs, {
       owner_generation: owner.owner_generation, event_seq: nextSeq, cursor,
     }),
     reason: null,
