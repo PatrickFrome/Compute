@@ -1,0 +1,33 @@
+name: METAENGINE W11 Release Evidence Identity
+
+on:
+  push:
+    branches:
+      - work/metaengine-w11-evidence-identity-20261014
+  pull_request:
+    paths:
+      - infra/client-state-runtime/operator-release-evidence-identity.mjs
+      - infra/client-state-runtime/operator-release-evidence-identity.test.mjs
+      - infra/client-state-runtime/package.json
+      - .github/workflows/metaengine-w11-evidence-identity.yml
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-identity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: node --check infra/client-state-runtime/operator-release-evidence-identity.mjs
+      - name: Adversarial digest/incarnation/freshness suite (no network)
+        run: node --test infra/client-state-runtime/operator-release-evidence-identity.test.mjs
