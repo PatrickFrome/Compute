@@ -94,6 +94,9 @@ blocked('no owner policy source blocks evaluation', x => { x.transport = {}; }, 
 blocked('hosted default added again blocks evaluation', x => {
   x.transport.supervisorSource += "\nNATIVE_SUPERVISOR_DEFAULT_BASE = 'https://hosted.invalid';";
 }, 'HOSTED_SUPERVISOR_FALLBACK_DETECTED');
+blocked('plain HTTP hosted endpoint is blocked too', x => {
+  x.transport.supervisorSource += "\nconst fallback = 'http://remote.invalid';";
+}, 'HOSTED_SUPERVISOR_FALLBACK_DETECTED');
 blocked('old hosted bootstrap assignment blocks evaluation', x => {
   x.transport.bootstrapSource += "\nMETAENGINE_FALLBACK_SUPERVISOR_BASE_URL = 'https://hosted.invalid';";
 }, 'HOSTED_BOOTSTRAP_FALLBACK_DETECTED');
