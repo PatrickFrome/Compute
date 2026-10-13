@@ -22,7 +22,12 @@ const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_EN
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';
 const locks = Object.freeze(['package.json', 'package-lock.json', 'deno.lock']);
-const migrationResources = new Set(LOCAL_RUNTIME_MIGRATIONS.map(migration => `supabase/migrations/${migration.path}`));
+// Historical migration sources retain their legacy repository path; the W5
+// claim guard is a reviewed own-local-PostgreSQL source in this runtime tree.
+// Pin the exception explicitly rather than widening the reviewed source scope.
+const migrationResources = new Set(LOCAL_RUNTIME_MIGRATIONS.map(migration =>
+  migration.path === 'fleet-coordination-claim-guard-v1.sql'
+    ? runtimeRoot + migration.path : `supabase/migrations/${migration.path}`));
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const slash = value => value.split(sep).join('/');
 const digestPattern = /^[a-f0-9]{64}$/;
