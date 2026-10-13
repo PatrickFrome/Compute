@@ -1,34 +1,84 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test, after } from 'node:test';
-import { explicitLocalSupervisorBase, localSupervisorHealthAttested, localSupervisorProviderProfile } from '../src/explicit-local-supervisor-provider.mjs';
-import { NATIVE_SUPERVISOR_DEFAULT_BASE, setNativeSupervisorBase } from '../src/native-supervisor-endpoints.mjs';
-import { inspectSignedNativeSupervisorStateRequest, installSignedSupervisorHeartbeatQualificationHook } from '../src/self-update-signed-heartbeat.mjs';
-import { persistPreInstallReceipt, persistUpdatedSuccessorReceipt } from '../src/self-update-handoff.mjs';
-import { acceptedSignedSupervisorHeartbeatSnapshot } from '../src/self-update-successor-qualification.mjs';
 
-const local = 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
-const instanceId = '28da46b7-6e1d-4c6a-b638-f4dc4bd8ee59';
-const oldBase = process.env.METAENGINE_SUPERVISOR_BASE_URL;
-const oldInstance = process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
-const oldProvider = process.env.METAENGINE_STATE_PROVIDER;
-after(() => {
-  if (oldBase === undefined) delete process.env.METAENGINE_SUPERVISOR_BASE_URL;
-  else process.env.METAENGINE_SUPERVISOR_BASE_URL = oldBase;
-  if (oldInstance === undefined) delete process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
-  else process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID = oldInstance;
-  if (oldProvider === undefined) delete process.env.METAENGINE_STATE_PROVIDER;
-  else process.env.METAENGINE_STATE_PROVIDER = oldProvider;
-  setNativeSupervisorBase(NATIVE_SUPERVISOR_DEFAULT_BASE);
+// This is an isolated, source-backed Owner integration fixture. Pinned
+// local selection happens BEFORE loading any Supervisor/native modules.
+// Reassigning process.env after an ESM module has pinned its endpoint
+// cannot grant authority, and former tests inadvertently assumed it could.
+const saved = new Map();
+for (const key of ['APPDATA','XDG_CONFIG_HOME','METAENGINE_STATE_PROVIDER',
+  'METAENGINE_SUPERVISOR_BASE_URL','METAENGINE_LOCAL_STATE_INSTANCE_ID',
+  'METAENGINE_LOCAL_PROVIDER_BOOT_STATE','METAENGINE_LOCAL_PROVIDER_BOOT_REASON']) {
+  saved.set(key, process.env[key]);
+}
+const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'meta-local-heartbeat-owner-'));
+const instanceId='28da46b7-6e1d-4c6a-b638-f4dc4bd8ee59';
+const mount='/a2-browser-native-supervisor-v1';
+const server=createServer((req,res)=>{
+  if(req.method!=='GET'||req.url!==mount+'/health'){
+    res.writeHead(404);res.end();return;
+  }
+  res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});
+  res.end(JSON.stringify({ok:true,instance_id:instanceId,
+    state_provider:'LOCAL_POSTGRES',hosted_supabase_required:false,runtime_ready:true,
+    capability_health:{state:'ATTESTED',authority_effect:false}}));
 });
+await new Promise((resolve,reject)=>{
+  server.once('error',reject);
+  server.listen(0,'127.0.0.1',resolve);
+});
+const local='http://127.0.0.1:'+server.address().port+mount;
+const ownerDir=path.join(tmp,'@metaengine','browser-shell');
+const identityFile=path.join(tmp,'local-runtime-identity.json');
+await fs.mkdir(ownerDir,{recursive:true});
+await fs.writeFile(identityFile,JSON.stringify({
+  schema:'metaengine.client-state.runtime-status.v1',state:'READY',
+  runtime_ready:true,state_provider:'LOCAL_POSTGRES',hosted_supabase_required:false,
+  automatic_cloud_fallback:false,authority_effect:false,
+  instance_id:instanceId,endpoint:local,
+  capability_health:{state:'ATTESTED',authority_effect:false}
+}));
+await fs.writeFile(path.join(ownerDir,'metaengine-state-provider-v1.json'),JSON.stringify({
+  schema:'metaengine.browser.local-state-provider-config.v1',version:1,
+  profile:'CLIENT_LOCAL_POSTGRES_V1',provider:'LOCAL_POSTGRES',base_url:local,
+  runtime_identity_file:identityFile,authority_effect:false
+}));
+process.env.APPDATA=tmp;
+process.env.XDG_CONFIG_HOME=tmp;
+for(const key of ['METAENGINE_STATE_PROVIDER','METAENGINE_SUPERVISOR_BASE_URL',
+  'METAENGINE_LOCAL_STATE_INSTANCE_ID','METAENGINE_LOCAL_PROVIDER_BOOT_STATE',
+  'METAENGINE_LOCAL_PROVIDER_BOOT_REASON']) delete process.env[key];
 
-function selectLocal() {
-  process.env.METAENGINE_STATE_PROVIDER = 'LOCAL_POSTGRES';
-  process.env.METAENGINE_SUPERVISOR_BASE_URL = local;
-  process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID = instanceId;
+const {explicitLocalSupervisorBase,localSupervisorHealthAttested,localSupervisorProviderProfile}
+  =await import('../src/explicit-local-supervisor-provider.mjs');
+const {NATIVE_SUPERVISOR_DEFAULT_BASE,setNativeSupervisorBase}
+  =await import('../src/native-supervisor-endpoints.mjs');
+const {inspectSignedNativeSupervisorStateRequest,installSignedSupervisorHeartbeatQualificationHook}
+  =await import('../src/self-update-signed-heartbeat.mjs');
+const {persistPreInstallReceipt,persistUpdatedSuccessorReceipt}
+  =await import('../src/self-update-handoff.mjs');
+const {acceptedSignedSupervisorHeartbeatSnapshot}
+  =await import('../src/self-update-successor-qualification.mjs');
+assert.equal(process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE,'READY');
+
+after(async()=>{
+  await new Promise(resolve=>server.close(resolve));
+  await fs.rm(tmp,{recursive:true,force:true});
+  for(const [key,value] of saved){
+    if(value===undefined)delete process.env[key];
+    else process.env[key]=value;
+  }
+});
+function selectLocal(){
+  process.env.METAENGINE_STATE_PROVIDER='LOCAL_POSTGRES';
+  process.env.METAENGINE_SUPERVISOR_BASE_URL=local;
+  process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID=instanceId;
+  process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE='READY';
   setNativeSupervisorBase(local);
 }
 
@@ -79,7 +129,7 @@ test('explicit local recognition requires the selected canonical endpoint; cloud
   assert.equal(explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), local);
   assert.equal(explicitLocalSupervisorBase({ env: { METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), null);
   for (const base of [NATIVE_SUPERVISOR_DEFAULT_BASE, 'http://127.0.0.1:15433/wrong', 'http://user:secret@127.0.0.1:15433/a2-browser-native-supervisor-v1']) {
-    assert.throws(() => explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: base }, activeBase: base }), /local_supervisor_base_invalid/);
+    assert.throws(() => explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: base }, activeBase: base }), /local_supervisor_base_(?:invalid|required)/);
   }
   assert.equal(explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: NATIVE_SUPERVISOR_DEFAULT_BASE }), null);
 });
@@ -103,7 +153,7 @@ test('local heartbeat qualification accepts only the selected exact paths and ke
   assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/heartbeat`, init).valid, true);
   for (const url of [
     `${NATIVE_SUPERVISOR_DEFAULT_BASE}/v1/state`, `${local}/v1/state?token=1`,
-    `${local}/v1/state/extra`, `${local}/v1/state#fragment`, local.replace('15433', '15434') + '/v1/state',
+    `${local}/v1/state/extra`, `${local}/v1/state#fragment`, local.replace(':'+server.address().port, ':'+(server.address().port===65535?65534:server.address().port+1)) + '/v1/state',
     local.replace('127.0.0.1', 'other.example') + '/v1/state',
   ]) assert.equal(inspectSignedNativeSupervisorStateRequest(url, init).valid, false);
   assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, { ...init, body: `${init.body} ` }).reason, 'body_hash_mismatch');
