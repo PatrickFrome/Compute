@@ -395,7 +395,7 @@ export class ChatSurface {
     // text as a contiguous substring caused false AMBIGUOUS receipts.
     // Require unique durable request marker, conversation URL and cleared
     // composer; a marker still sitting in the draft NEVER proves delivery.
-    const marker=/\\[DevFleet request: ([A-Za-z0-9._:-]{12,100})\\]$/.exec(text);
+    const marker=/\[DevFleet request: ([A-Za-z0-9._:-]{12,100})\]$/.exec(text);
     if (!marker) throw new Error('send_receipt_marker_missing');
     for (let i=0;i<70;i++) {
       await sleep(400);
