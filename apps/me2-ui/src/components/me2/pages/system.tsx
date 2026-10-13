@@ -100,6 +100,7 @@ const ADVANCED_SURFACES: ReadonlyArray<{ page: PageKey; label: string; descripti
   { page: "supervisor", label: "Supervisor", description: "Coordination, readiness and recovery" },
   { page: "memory", label: "Memory", description: "Learning history and knowledge" },
   { page: "observability", label: "Evidence", description: "Events, results and runtime health" },
+  { page: "operator", label: "Causal Observatory", description: "Now/Missions/Fleet/Brain/Develop/System/Evidence from one trusted snapshot" },
 ];
 
 const SETTINGS_AREAS = [
