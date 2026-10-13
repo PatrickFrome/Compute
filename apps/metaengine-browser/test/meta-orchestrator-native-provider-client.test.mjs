@@ -75,7 +75,7 @@ after(async()=>{
 test('local Owner fixture is confined to ephemeral loopback and forbids hosted transport',()=>{
   assert.match(LOCAL_BASE,/^http:\/\/127\.0\.0\.1:\d+\/a2-browser-native-supervisor-v1$/);
   assert.throws(()=>new MetaOrchestratorNativeProvider({
-    identity:identity(),workspace_id:workspace,baseUrl:LOCAL_BASE,
+    identity:identity(),workspace_id:workspace,baseUrl:'https://provider.test',
     runtimePath:NATIVE_RUNTIME_PATH,fetchImpl:async()=>{throw Error('must_not_fetch')}
   }),/meta_native_endpoint_invalid/);
 });
