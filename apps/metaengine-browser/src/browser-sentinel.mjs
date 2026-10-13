@@ -82,7 +82,12 @@ export function sentinelEnvironment(source, { statePath, token, parentPid }) {
   for (const [key, value] of Object.entries(source || {})) {
     if (allow.has(String(key).toUpperCase()) && value != null) env[key] = String(value);
   }
-  const provider = localSupervisorProviderProfile(source);
+  // A blocked/missing bootstrap intentionally keeps LOCAL_POSTGRES as a
+  // fail-closed marker but has NO attested instance or transport. Never let
+  // that incomplete marker crash passive Sentinel startup or propagate a
+  // purported Supervisor address to a detached worker.
+  const ready = String(source?.METAENGINE_LOCAL_PROVIDER_BOOT_STATE || '').trim() === 'READY';
+  const provider = ready ? localSupervisorProviderProfile(source) : null;
   if (provider) {
     env.METAENGINE_STATE_PROVIDER = provider.provider;
     env.METAENGINE_SUPERVISOR_BASE_URL = provider.base_url;
