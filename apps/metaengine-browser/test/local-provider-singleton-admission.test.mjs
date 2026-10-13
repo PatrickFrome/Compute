@@ -325,13 +325,15 @@ for (const entry of entries) {
     assert.equal(f.requests.length, 0);
   });
 
-  test(entry + ': no owner configuration preserves legacy primary startup without a provider health request', async t => {
+  test(entry + ': no owner never selects hosted transport or starts a provider health request', async t => {
     const f = await fixture(t);
     await fs.rm(f.ownerFile);
     const result = await launch(f, { entry });
     assert.equal(result.code, 0, result.stderr);
     assert.equal(event(result, 'host-import')?.[1], 'NO_OWNER_CONFIG');
-    assert.equal(event(result, 'runtime-import')?.[2], null);
+    // Fail-closed bootstrap exposes the LOCAL_POSTGRES marker with no usable
+    // endpoint. The legacy null/HOSTED transport assertion is now forbidden.
+    assert.equal(event(result, 'runtime-import')?.[2], 'LOCAL_POSTGRES');
     assert.equal(event(result, 'fetch'), undefined);
     assert.equal(f.requests.length, 0);
   });
