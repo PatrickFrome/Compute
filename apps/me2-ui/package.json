@@ -11,7 +11,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "pack": "node scripts/pack-me2-ui.mjs"
+    "pack": "node scripts/pack-me2-ui.mjs",
+    "test:operator-observatory": "node --test src/lib/operator-observatory.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
