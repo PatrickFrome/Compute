@@ -31,6 +31,8 @@ const unknownPlane = () => ({ state: 'UNKNOWN', fresh: false, proof: 'NONE', obs
 
 function safePlane(input, nowMs, maxAgeMs, snapshotStale) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return unknownPlane();
+  if (input.state === 'UNKNOWN' && input.proof === 'NONE' && input.fresh === false
+    && (input.observed_at === null || input.observed_at === undefined)) return unknownPlane();
   const observed = safeDate(input.observed_at);
   const stamp = observed === null ? null : new Date(observed).toISOString();
   const state = VALID_STATES.has(input.state) ? input.state : 'UNVERIFIED';
