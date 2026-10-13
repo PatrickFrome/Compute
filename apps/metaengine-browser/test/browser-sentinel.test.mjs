@@ -157,3 +157,39 @@ test('sentinel worker source requires exact durable worker pid before heartbeat 
   assert.match(source, /if \(!validBinding\(current\)\) return false/);
   assert.doesNotMatch(source, /automatic_retry_allowed:\s*true[\s\S]{0,120}SEND|SEND[\s\S]{0,120}automatic_retry_allowed:\s*true/i);
 });
+
+
+test('a blocked Owner marker never leaks an unattested local endpoint into a detached Sentinel', async () => {
+  const keys = ['METAENGINE_STATE_PROVIDER','METAENGINE_LOCAL_PROVIDER_BOOT_STATE',
+    'METAENGINE_SUPERVISOR_BASE_URL','METAENGINE_LOCAL_STATE_INSTANCE_ID'];
+  const saved = new Map(keys.map(key => [key,process.env[key]]));
+  const {dir,statePath} = await tempState();
+  const calls=[];
+  let sentinel=null;
+  try {
+    process.env.METAENGINE_STATE_PROVIDER='LOCAL_POSTGRES';
+    process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE='BLOCKED';
+    process.env.METAENGINE_SUPERVISOR_BASE_URL='http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
+    process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID='not-attested';
+    sentinel = new BrowserSentinelHost({
+      statePath,workerScript:path.join(dir,'worker.cjs'),
+      executable:'C:\\Program Files\\METAENGINE\\Browser.exe',spawnImpl:fakeSpawn(calls)
+    });
+    const state=await sentinel.start();
+    assert.equal(state.lifecycle,'ARMED');
+    assert.equal(calls.length,1);
+    const childEnv=calls[0].options.env;
+    assert.equal(childEnv.METAENGINE_STATE_PROVIDER,undefined);
+    assert.equal(childEnv.METAENGINE_SUPERVISOR_BASE_URL,undefined);
+    assert.equal(childEnv.METAENGINE_LOCAL_STATE_INSTANCE_ID,undefined);
+    assert.equal(childEnv.ELECTRON_RUN_AS_NODE,'1');
+    assert.equal(childEnv.METAENGINE_SENTINEL_PARENT_PID,String(process.pid));
+  } finally {
+    try { sentinel?.close?.(); } catch {}
+    await fs.rm(dir,{recursive:true,force:true});
+    for(const [key,value] of saved){
+      if(value===undefined)delete process.env[key];
+      else process.env[key]=value;
+    }
+  }
+});
