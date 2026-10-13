@@ -6,6 +6,7 @@
   "electronVersion": "44.0.0",
   "directories": { "output": "dist" },
   "files": ["src/**/*", "package.json"],
+  "extraResources": [{"from":"scripts/devfleet-admin-mcp.mjs","to":"devfleet-admin-mcp.mjs"}],
   "publish": null,
   "win": {
     "target": [{"target":"nsis","arch":["x64"]}],
