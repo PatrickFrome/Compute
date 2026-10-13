@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DevFleetOperator, SCHEMA } from './operator-core.mjs';
 import { ChatSurface } from './chat-surface.mjs';
 import { LiveUiSlots } from './live-ui-slots.mjs';
+import { LiveOperatorContracts } from './live-operator-contracts.mjs';
+import { DevFleetSourceWorkspace } from './source-workspace-patch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'METAENGINE DevFleet';
@@ -31,7 +33,7 @@ app.setName(APP_NAME);
 app.setPath('userData', dataDir);
 app.commandLine.appendSwitch('disable-features','Translate');
 let mainWindow, surface, operator, httpServer, rpcToken, rpcManifest;
-let liveUiSlots, devConsoleWindow, developerToken, developerManifest;
+let liveUiSlots, liveContracts, sourceWorkspace, devConsoleWindow, developerToken, developerManifest;
 let shuttingDown = false;
 function safeError(error) {
   const msg = String(error?.message || 'operation_refused');
@@ -48,6 +50,14 @@ const disk = {
     catch(error) {if(error.code==='ENOENT') return null;throw error;}
   },
   save(data) {return atomicPrivateWrite(path.join(dataDir,'operator-state.json'),JSON.stringify(data,null,2)+'\n');}
+};
+const livePolicyDisk = {
+  async load() {
+    try {return JSON.parse(await fs.readFile(path.join(dataDir,'live-operator-contracts.json'),'utf8'));}
+    catch(error){if(error.code==='ENOENT')return null;throw error;}
+  },
+  save(data){return atomicPrivateWrite(path.join(dataDir,'live-operator-contracts.json'),
+    JSON.stringify(data,null,2)+'\n');}
 };
 function uiSender(event) {
   const w=BrowserWindow.fromWebContents(event.sender);
@@ -165,7 +175,7 @@ function listenLocal() {
     if (req.headers['content-type']?.split(';')[0].trim()!=='application/json')
       return respond(415,{ok:false,error:'json_required'});
     let raw='';
-    try {for await(const piece of req) {raw+=piece;if(raw.length>64000)throw Error('body_too_large');}}
+    try {for await(const piece of req) {raw+=piece;if(raw.length>(devAuthorized?350000:64000))throw Error('body_too_large');}}
     catch {return respond(413,{ok:false,error:'body_limit_exceeded'});}
     let envelope;
     try {envelope=JSON.parse(raw);}
@@ -176,25 +186,52 @@ function listenLocal() {
     if (typeof envelope.method === 'string' && envelope.method.startsWith('dev.')) {
       if (!devAuthorized || !liveUiSlots?.configured)
         return respond(403,{ok:false,error:'developer_workspace_authorization_required'});
-      if (!envelope.params || typeof envelope.params!=='object'
-        || Array.isArray(envelope.params) || Object.keys(envelope.params).length)
-        return respond(400,{ok:false,error:'developer_params_denied'});
+      const params=envelope.params||{};
+      if(typeof params!=='object'||Array.isArray(params))
+        return respond(400,{ok:false,error:'developer_params_invalid'});
+      const requiresIdle=()=>{
+        if(operator?.isBusy())throw Error('devconsole_operator_busy');
+      };
       const devRoutes={
         'dev.status':()=>liveUiSlots.status(),
-        'dev.stage':()=>{
-          if (operator?.isBusy())throw new Error('devconsole_operator_busy');
-          return liveUiSlots.stage();
+        'dev.overview':async()=>{
+          const snapshot=operator.snapshot();
+          const observation=operator.isBusy()
+            ?{state:'BUSY',completion_proven:false}
+            :await operator.batchObserve({parallelism:4});
+          return {schema:'metaengine.devfleet.operator-overview.v1',
+            fleet:snapshot,observation,
+            receipt_summary:operator.receiptSummary(),
+            policy:liveContracts.status(),
+            source:await sourceWorkspace.status(),
+            effects_executed:false};
         },
-        'dev.activate':()=>liveUiSlots.activate(applyLiveUi),
-        'dev.rollback':()=>liveUiSlots.rollback(applyLiveUi),
-        'dev.reconcile':()=>liveUiSlots.reconcile(async file=>{
+        'dev.stage':()=>{requiresIdle();return liveUiSlots.stage();},
+        'dev.activate':()=>{requiresIdle();return liveUiSlots.activate(applyLiveUi);},
+        'dev.rollback':()=>{requiresIdle();return liveUiSlots.rollback(applyLiveUi);},
+        'dev.reconcile':()=>{requiresIdle();return liveUiSlots.reconcile(async file=>{
           await applyLiveUi(file);return mainWindow.webContents.getURL();
-        }),
+        });},
+        'dev.contract.status':()=>liveContracts.status(),
+        'dev.contract.stage':p=>{requiresIdle();return liveContracts.stage(p);},
+        'dev.contract.activate':p=>{requiresIdle();return liveContracts.activate(p);},
+        'dev.contract.rollback':p=>{requiresIdle();return liveContracts.rollback(p);},
+        'dev.contract.reconcile':p=>{requiresIdle();return liveContracts.reconcile(p);},
+        'dev.source.status':()=>sourceWorkspace.status(),
+        'dev.source.inspect':p=>sourceWorkspace.inspect(p),
+        'dev.source.patch':p=>{requiresIdle();return sourceWorkspace.patch(p);},
+        'dev.source.reconcile':p=>{requiresIdle();return sourceWorkspace.reconcile(p);},
+        'dev.receipt.status':()=>operator.receiptSummary(),
+        'dev.receipt.reconcile':p=>operator.reconcileReceipt(p),
       };
       if(!Object.hasOwn(devRoutes,envelope.method))
         return respond(400,{ok:false,error:'developer_method_unknown'});
+      const noParams=new Set(['dev.status','dev.overview','dev.stage','dev.activate',
+        'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status']);
+      if(noParams.has(envelope.method)&&Object.keys(params).length)
+        return respond(400,{ok:false,error:'developer_params_denied'});
       try {
-        const result=await devRoutes[envelope.method]();
+        const result=await devRoutes[envelope.method](params);
         return respond(200,{ok:true,schema:'metaengine.devfleet.developer-rpc.v1',result});
       } catch(error) {
         return respond(409,{ok:false,error:safeError(error),automatic_retry_allowed:false});
@@ -303,8 +340,13 @@ async function start() {
   });
   mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   await mainWindow.loadFile(activeUiFile);
+  liveContracts=new LiveOperatorContracts({store:livePolicyDisk});
+  await liveContracts.init();
+  sourceWorkspace=new DevFleetSourceWorkspace({
+    getWorkspace:()=>liveUiSlots?.status()?.workspace||null
+  });
   surface=new ChatSurface(mainWindow);
-  operator=new DevFleetOperator({adapter:surface,store:disk});
+  operator=new DevFleetOperator({adapter:surface,store:disk,contracts:liveContracts});
   await operator.init({deferRestore:true});
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});
