@@ -64,7 +64,7 @@ test('expired snapshot and individually stale facet fail closed', () => {
   assert.equal(old.state, 'STALE');
   assert.equal(old.planes.database.state, 'STALE');
   const future = reduce(base({ planes: { database: {
-    state: 'AVAILABLE', fresh: true, proof: 'TRUSTED_READBACK', observed_at: stamp(6000),
+    state: 'AVAILABLE', source: 'LOCAL_POSTGRES', fresh: true, proof: 'TRUSTED_READBACK', observed_at: stamp(6000),
   } } }));
   assert.equal(future.planes.database.state, 'STALE');
 });
@@ -109,4 +109,12 @@ test('unconnected reader yields explicit UNKNOWN; bounded clock arguments are va
   assert.equal(reduce(null).state, 'UNVERIFIED');
   assert.throws(() => reduceOperatorObservatory(base(), { nowMs: NaN }), /clock_invalid/);
   assert.throws(() => reduceOperatorObservatory(base(), { nowMs: now, maxAgeMs: 0 }), /age_invalid/);
+});
+
+test('cross-plane source forgery cannot promote positive status', () => {
+  const result = reduce(base({ planes: {
+    fleet: { state: 'READY', source: 'LOCAL_POSTGRES', fresh: true,
+      proof: 'TRUSTED_READBACK', observed_at: stamp(-40) },
+  } }));
+  assert.equal(result.planes.fleet.state, 'UNVERIFIED');
 });
