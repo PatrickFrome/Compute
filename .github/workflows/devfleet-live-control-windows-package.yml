@@ -1,0 +1,45 @@
+name: DevFleet Live Control Windows Package
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-devfleet/**'
+      - '.github/workflows/devfleet-live-control-windows-package.yml'
+  push:
+    branches:
+      - 'work/devfleet-live-control-mcp-v1-20261013'
+permissions:
+  contents: read
+jobs:
+  windows-nsis-package:
+    runs-on: windows-2025
+    defaults:
+      run:
+        working-directory: apps/metaengine-devfleet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Reproduce locked dependencies
+        run: npm ci
+      - name: Full DevFleet source tests
+        run: npm test
+      - name: Build isolated x64 NSIS candidate
+        run: npm run package:win
+      - name: Verify packaged stable MCP bootstrap and SHA-256
+        shell: pwsh
+        run: |
+          $bridge = 'dist/win-unpacked/resources/devfleet-admin-mcp.mjs'
+          if (-not (Test-Path $bridge -PathType Leaf)) { throw 'packaged_admin_mcp_missing' }
+          $installers = @(Get-ChildItem -Path dist -Filter 'METAENGINE-DevFleet-Setup-0.1.0-dev.13.20261013.1-x64.exe' -File)
+          if ($installers.Count -ne 1) { throw 'exact_installer_identity_missing' }
+          $hash = (Get-FileHash -Algorithm SHA256 $installers[0].FullName).Hash.ToLowerInvariant()
+          if ($hash -notmatch '^[a-f0-9]{64}$') { throw 'installer_hash_invalid' }
+          Write-Output "METAENGINE_DEVFLEET_EXACT_SHA256=$hash"
+          Write-Output "METAENGINE_DEVFLEET_EXACT_BYTES=$($installers[0].Length)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devfleet-live-control-windows-exe-${{ github.sha }}
+          path: apps/metaengine-devfleet/dist/METAENGINE-DevFleet-Setup-0.1.0-dev.13.20261013.1-x64.exe
+          if-no-files-found: error
+          retention-days: 7
