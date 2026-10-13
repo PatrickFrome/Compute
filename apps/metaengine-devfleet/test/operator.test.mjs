@@ -266,18 +266,34 @@ test('batch dispatch accepts owner-authorized model label gaps and replaces draf
  assert.equal(again.receipts[0].state,'SENT');
  assert.equal(f.sends.length,1);
 });
-test('unknown first Send blocks later batch effects even after restart',async()=>{
+test('unknown Send fences its tab but unrelated batch lanes still advance, no retries after restart',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
- const tabs=(await op.create({request_id:'batch-unknown-chats-20261012',count:2})).sessions;
+ const tabs=(await op.create({request_id:'batch-unknown-chats-20261012',count:3})).sessions;
  const assignments=tabs.map((x,i)=>({tab_id:x.tab_id,request_id:'batch-unknown-task-20261012-'+i,text:'Task '+i}));
- f.failSend(true);
- const a=await op.batchAssign({assignments});
- assert.equal(a.state,'HALTED');assert.equal(a.ambiguous,1);
- assert.equal(a.receipts[1].state,'NOT_ATTEMPTED');assert.equal(f.sends.length,1);
- const resumed=new DevFleetOperator(f);await resumed.init();
+ let n=0;
+ const wrapped={...f.adapter,async send(tab,text){
+   n++;
+   if(n===1)throw Error('post_click_network_unknown');
+   return f.adapter.send(tab,text);
+ }};
+ const operator=new DevFleetOperator({adapter:wrapped,store:f.store});await operator.init();
+ const a=await operator.batchAssign({assignments});
+ assert.equal(a.state,'PARTIAL_AMBIGUOUS');
+ assert.equal(a.ambiguous,1);
+ assert.equal(a.sent,2);
+ assert.deepEqual(a.receipts.map(x=>x.state),['AMBIGUOUS','SENT','SENT']);
+ assert.equal(n,3);
+ const replay=await operator.batchAssign({assignments});
+ assert.deepEqual(replay.receipts,a.receipts);
+ assert.equal(n,3);
+ const resumed=new DevFleetOperator({adapter:wrapped,store:f.store});await resumed.init();
  const b=await resumed.batchAssign({assignments});
- assert.equal(b.state,'HALTED');assert.equal(b.receipts[0].state,'AMBIGUOUS');
- assert.equal(f.sends.length,1);
+ assert.equal(b.receipts[0].state,'AMBIGUOUS');
+ assert.equal(n,3);
+ await assert.rejects(resumed.assign({
+   tab_id:tabs[0].tab_id,request_id:'unknown-tab-new-intent-20261013',text:'Must be fenced'
+ }),/reconciliation_required/);
+ assert.equal(n,3);
 });
 test('bad batch identity never reaches probe, receipt ledger or Send',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
