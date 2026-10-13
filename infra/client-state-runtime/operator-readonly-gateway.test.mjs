@@ -47,12 +47,12 @@ const identity = (override = {}) => ({
 });
 const projection = (override = {}) => ({
   source: 'OWN_POSTGRES_READBACK', proven: true,
-  project_id: projectId, run_id: runId,
+  owner_id: ownerId, owner_epoch: 3, project_id: projectId, run_id: runId,
   observed_at: now(), state: 'RUNNING', event_seq: 17, ...override,
 });
 const events = (override = {}) => ({
   source: 'OWN_POSTGRES_READBACK', proven: true,
-  project_id: projectId, run_id: runId, observed_at: now(),
+  owner_id: ownerId, owner_epoch: 3, project_id: projectId, run_id: runId, observed_at: now(),
   watermark_event_seq: 18,
   events: [{ event_seq: 16, kind: 'TASK_COMPLETED', task_id: 'task-1',
     occurred_at: now(), proof_sha256: digest },
@@ -220,6 +220,7 @@ test('malformed, reversed, unproved, cross-run and empty-gap event snapshots fai
       events({ events: [events().events[0], events().events[0]] }),
       events({ events: [{ ...events().events[0], proof_sha256: 'bad' }] }),
       events({ run_id: 'different' }),
+      events({ owner_epoch: 4 }),
       events({ source: 'CLOUD' }),
       events({ watermark_event_seq: 17 }),
       events({ events: [] }),
@@ -247,6 +248,8 @@ test('stale, mismatched owner, optimistic status and unqualified projection fail
     status = projection({ state: 'READY', event_seq: 19 });
     assert.equal((await f.get(url)).status, 503);
     status = projection({ project_id: 'other-project' });
+    assert.equal((await f.get(url)).status, 503);
+    status = projection({ owner_epoch: 4 });
     assert.equal((await f.get(url)).status, 503);
   } finally { await f.stop(); }
 });

@@ -109,7 +109,7 @@ function readIdentity(raw, now, ownerId) {
     !isFresh(raw.observed_at, now)) {
     throw new GatewayError(503, 'run_identity_unverified');
   }
-  return { project_id: raw.project_id, run_id: raw.run_id,
+  return { owner_id: ownerId, project_id: raw.project_id, run_id: raw.run_id,
     owner_epoch: raw.owner_epoch, cursor: String(raw.event_seq),
     source: 'OWN_POSTGRES_READBACK', proof: 'TRUSTED_READBACK', fresh: true,
     observed_at: canonicalTime(raw.observed_at) };
@@ -117,6 +117,7 @@ function readIdentity(raw, now, ownerId) {
 function validateProjection(raw, identity, now, requiredFields) {
   if (!raw || raw.source !== 'OWN_POSTGRES_READBACK' || raw.proven !== true ||
     raw.project_id !== identity.project_id || raw.run_id !== identity.run_id ||
+    raw.owner_id !== identity.owner_id || raw.owner_epoch !== identity.owner_epoch ||
     !isFresh(raw.observed_at, now) || !STATES.has(raw.state) ||
     !validSeq(raw.event_seq) || raw.event_seq > Number(identity.cursor)) {
     throw new GatewayError(503, 'operator_projection_unverified');
@@ -171,6 +172,7 @@ function send(response, status, body) {
 function validateEventBatch(raw, identity, after, limit, now) {
   if (!raw || raw.proven !== true || raw.source !== 'OWN_POSTGRES_READBACK' ||
     raw.project_id !== identity.project_id || raw.run_id !== identity.run_id ||
+    raw.owner_id !== identity.owner_id || raw.owner_epoch !== identity.owner_epoch ||
     !isFresh(raw.observed_at, now) || !Array.isArray(raw.events) ||
     raw.events.length > limit || raw.events.length > MAX_EVENTS ||
     !validSeq(raw.watermark_event_seq) ||
