@@ -5,6 +5,7 @@
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OWNER = /^[a-zA-Z0-9_.:-]{1,128}$/;
 const MAX_ROWS = 64;
+const TASK_STATES = new Set(['PENDING', 'QUEUED', 'ADMITTED', 'READY', 'LEASED', 'RUNNING', 'COMPLETED', 'FAILED', 'BLOCKED', 'AMBIGUOUS', 'FENCED']);
 const MAX_AGE = 30_000;
 const CLOCK_SKEW = 5_000;
 const toMs = value => value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
@@ -91,10 +92,10 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
     || nowMs - dbObservedMs > MAX_AGE) return bad('UNKNOWN');
   const afterSeq = owner.event_after_seq ?? 0;
   if (afterSeq > project.last_seq) return bad('UNKNOWN');
-  const [tasks, events] = await Promise.all([
-    tx.unsafe(OPERATOR_OWN_PG_TASK_CLAIM_SQL, [owner.project_id]),
-    tx.unsafe(OPERATOR_OWN_PG_EVENT_SQL, [owner.project_id, afterSeq, project.last_seq]),
-  ]);
+  // One SQL connection, one snapshot. Avoid concurrent commands within the transaction.
+  const tasks = await tx.unsafe(OPERATOR_OWN_PG_TASK_CLAIM_SQL, [owner.project_id]);
+  if (!Array.isArray(tasks) || tasks.length > MAX_ROWS) return bad('UNKNOWN');
+  const events = await tx.unsafe(OPERATOR_OWN_PG_EVENT_SQL, [owner.project_id, afterSeq, project.last_seq]);
   if (!Array.isArray(tasks) || !Array.isArray(events)) return bad('UNKNOWN');
   if (tasks.length > MAX_ROWS || events.length > MAX_ROWS + 1) return bad('UNKNOWN');
   const eventPage = events.slice(0, MAX_ROWS);
@@ -104,7 +105,7 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
   const fail = next => { if (state !== 'AMBIGUOUS') state = next; };
   for (const row of tasks) {
     if (!UUID.test(row.task_id || '') || !safeInt(row.task_seq) || row.task_seq < 1
-      || !safeInt(row.lease_generation) || !OWNER.test(row.task_state || '')) return bad('UNKNOWN');
+      || !safeInt(row.lease_generation) || !TASK_STATES.has(row.task_state)) return bad('UNKNOWN');
     const key = row.task_id.toLowerCase();
     const previous = grouped.get(key);
     if (previous && (previous.task_seq !== row.task_seq
