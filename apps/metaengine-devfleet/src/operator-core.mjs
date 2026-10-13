@@ -34,6 +34,7 @@ function recordFor(requestId, operation, fingerprint) {
 export class DevFleetOperator {
   #adapter;
   #store;
+  #contracts;
   #state = { schema: SCHEMA, sessions: [], requests: [] };
   #busy = false;
   #initialized = false;
@@ -41,12 +42,13 @@ export class DevFleetOperator {
   #restorePromise = Promise.resolve();
   #persistenceFenced = false;
   #saveTail = Promise.resolve();
-  constructor({ adapter, store }) {
+  constructor({ adapter, store, contracts=null }) {
     if (!adapter || !['create','read','send'].every(k => typeof adapter[k] === 'function')
       || !store || typeof store.load !== 'function' || typeof store.save !== 'function')
       throw new Error('operator_dependencies_invalid');
     this.#adapter = adapter;
     this.#store = store;
+    this.#contracts = contracts;
   }
   async init({deferRestore=false}={}) {
     if (this.#initialized) {
@@ -103,6 +105,37 @@ export class DevFleetOperator {
     if (this.#restoring) throw new Error('operator_restoring');
   }
   isBusy() { return this.#busy || this.#restoring || this.#persistenceFenced; }
+  async withMaintenanceLock(fn) {
+    this.#requireInit();
+    if(typeof fn!=='function')throw Error('operator_maintenance_callback_invalid');
+    return this.#exclusive(fn);
+  }
+  #policy() {
+    if (!this.#contracts) return {
+      dispatch_enabled:true,max_batch_items:8,max_prompt_chars:12000,
+      max_observe_parallelism:4,existing_draft:'REPLACE_ONLY_AFTER_EXACT_READBACK',
+      require_verified_model:false
+    };
+    if(this.#contracts.status().state==='RECONCILIATION_REQUIRED')
+      throw Error('operator_policy_reconciliation_required');
+    return this.#contracts.contract;
+  }
+  receiptSummary() {
+    this.#requireInit();
+    const counts={SENT:0,AMBIGUOUS:0};
+    const blocked_tabs=[];
+    for(const r of this.#state.requests) {
+      if(r.operation!=='assign')continue;
+      if(r.state==='SENT')counts.SENT++;
+      if(r.state==='AMBIGUOUS'){
+        counts.AMBIGUOUS++;
+        if(r.tab_id&&!blocked_tabs.includes(r.tab_id))blocked_tabs.push(r.tab_id);
+      }
+    }
+    return {schema:SCHEMA,counts,blocked_tabs,
+      read_only:true,completion_proven:false,automatic_retry_allowed:false,
+      authority_effect:false};
+  }
   #find(tabId) {
     const validated = validateTab(tabId);
     const s = this.#state.sessions.find(x => x.tab_id === validated);
@@ -144,6 +177,8 @@ export class DevFleetOperator {
       restored_count:this.#state.sessions.filter(x=>x.state==='OPEN').length,
       session_count: this.#state.sessions.length, sessions: this.#state.sessions.map(s => ({
         tab_id: s.tab_id, url: s.url, state: s.state })),
+      receipt_summary: {sent:this.#state.requests.filter(x=>x.operation==='assign'&&x.state==='SENT').length,
+        ambiguous:this.#state.requests.filter(x=>x.operation==='assign'&&x.state==='AMBIGUOUS').length},
       only_actions: ['create','read','assign','close'],
       primary_browser_shared_profile: false,
       hosted_database: false,
@@ -315,6 +350,9 @@ export class DevFleetOperator {
     this.#requireInit();
     if (typeof this.#adapter.observe!=='function')
       throw new Error('operator_observation_unavailable');
+    const policy=this.#policy();
+    if(params.parallelism!==undefined && params.parallelism>policy.max_observe_parallelism)
+      throw Error('operator_observe_policy_budget');
     return runObservationBatch({
       params,
       ownedTabs:this.#state.sessions.filter(s=>s.state==='OPEN').map(s=>s.tab_id),
@@ -347,7 +385,10 @@ export class DevFleetOperator {
     const id = validateId(params.request_id);
     const tab = this.#find(params.tab_id);
     const prompt = params.text;
-    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 12000)
+    const policy=this.#policy();
+    if(!policy.dispatch_enabled)throw Error('operator_policy_disarmed');
+    if (typeof prompt !== 'string' || !prompt.trim() ||
+        prompt.length > policy.max_prompt_chars)
       throw new Error('operator_prompt_invalid');
     const fingerprint = sha(tab.tab_id + '\0' + prompt);
     const prior = this.#prior(id,'assign',fingerprint);
@@ -372,6 +413,18 @@ export class DevFleetOperator {
         ||pre?.mode!=='CHAT'||pre?.page_failure
         ||pre?.unique_composer!==true)
         throw new Error('operator_chat_input_not_ready');
+      if(policy.existing_draft==='DENY_EXISTING_DRAFT' && pre.composer_nonempty===true)
+        throw Error('operator_existing_draft_fenced');
+      if(policy.require_verified_model) {
+        if(typeof this.#adapter.modelProbe!=='function')
+          throw Error('operator_model_proof_unavailable');
+        const model=await this.#adapter.modelProbe(tab.tab_id);
+        if(model?.tab_id!==tab.tab_id||model?.mode!=='CHAT'||
+           model?.authority_effect!==false||
+           model?.model_selection_proven!==true||
+           model?.high_selection_proven!==true)
+          throw Error('operator_model_not_proven');
+      }
       const log = { ...recordFor(id,'assign',fingerprint), tab_id: tab.tab_id };
       this.#state.requests.push(log);
       await this.#save(); // never repeat a send after an uncertain OS/network outcome
@@ -416,11 +469,54 @@ export class DevFleetOperator {
     return this.#exclusive(() => this.#assignLocked(params));
   }
 
+  async reconcileReceipt(params) {
+    this.#requireInit();
+    fields(params,['request_id','tab_id']);
+    const id=validateId(params.request_id);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
+    if(typeof this.#adapter.probePosted!=='function')
+      throw Error('operator_receipt_readback_unavailable');
+    return this.#exclusive(async()=>{
+      const log=this.#state.requests.find(r=>r.operation==='assign'&&r.request_id===id);
+      if(!log||log.tab_id!==tab.tab_id)throw Error('operator_receipt_request_unmatched');
+      if(log.state==='SENT')return plain(log.receipt);
+      if(log.state!=='AMBIGUOUS')throw Error('operator_receipt_state_invalid');
+      let proof;
+      try {proof=await this.#adapter.probePosted(tab.tab_id,id);}
+      catch {return {schema:SCHEMA,state:'AMBIGUOUS',request_id:id,tab_id:tab.tab_id,
+        reconciliation:'READBACK_UNAVAILABLE',automatic_retry_allowed:false};}
+      if(proof?.state!=='PROVEN_SENT'||proof?.request_id!==id||
+         proof?.tab_id!==tab.tab_id||proof?.authority_effect!==false||
+         !ownChatUrl(proof.url)) {
+        return {schema:SCHEMA,state:'AMBIGUOUS',request_id:id,tab_id:tab.tab_id,
+          reconciliation:'NOT_PROVEN',automatic_retry_allowed:false};
+      }
+      const priorReceipt=log.receipt;
+      const oldState=log.state;
+      log.state='SENT';
+      log.receipt={schema:SCHEMA,state:'SENT',request_id:id,tab_id:tab.tab_id,
+        conversation_url:ownChatUrl(proof.url),
+        verified_target:proof.target_id||null,
+        proof_sha256:sha([id,tab.tab_id,proof.url,proof.target_id].join(':')),
+        reconciliation:'POSTED_MESSAGE_NATIVE_READBACK',
+        automatic_retry_allowed:false};
+      try {await this.#save();}
+      catch {
+        log.state=oldState;log.receipt=priorReceipt;
+        return {schema:SCHEMA,state:'AMBIGUOUS',request_id:id,tab_id:tab.tab_id,
+          reconciliation:'PERSISTENCE_UNPROVEN',automatic_retry_allowed:false};
+      }
+      return plain(log.receipt);
+    });
+  }
+
   async batchAssign(params) {
     this.#requireInit();
     fields(params,['assignments']);
     const items = params.assignments;
-    if (!Array.isArray(items) || items.length < 1 || items.length > 8)
+    const policy=this.#policy();
+    if(!policy.dispatch_enabled)throw Error('operator_policy_disarmed');
+    if (!Array.isArray(items) || items.length < 1 || items.length > policy.max_batch_items)
       throw new Error('operator_batch_size_invalid');
     const ids = new Set(), tabs = new Set();
     let totalChars = 0;
@@ -428,7 +524,7 @@ export class DevFleetOperator {
       fields(row,['request_id','tab_id','text']);
       const id = validateId(row.request_id);
       const tab = this.#find(row.tab_id);
-      if (typeof row.text !== 'string' || !row.text.trim() || row.text.length > 12000)
+      if (typeof row.text !== 'string' || !row.text.trim() || row.text.length > policy.max_prompt_chars)
         throw new Error('operator_prompt_invalid');
       if (ids.has(id) || tabs.has(tab.tab_id))
         throw new Error('operator_batch_duplicate_id_or_tab');

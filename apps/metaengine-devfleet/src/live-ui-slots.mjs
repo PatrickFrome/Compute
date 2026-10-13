@@ -109,7 +109,11 @@ export class LiveUiSlots {
     if(this.#busy||this.#blocked||this.#data.pending) throw new Error('live_ui_busy_or_blocked');
     if(typeof workspace!=='string'||!path.isAbsolute(workspace))throw new Error('live_ui_workspace_invalid');
     const root=await fs.realpath(workspace);
-    if(root!==path.resolve(workspace)) throw new Error('live_ui_workspace_link_denied');
+    // Windows realpath may normalize short names, drive casing and device
+    // aliases. Refuse actual filesystem links, not differing path strings.
+    const rootEntry=await fs.lstat(path.resolve(workspace));
+    if(!rootEntry.isDirectory() || rootEntry.isSymbolicLink())
+      throw new Error('live_ui_workspace_link_denied');
     const pkgFile=path.join(root,'package.json');
     const pkg=JSON.parse(await fs.readFile(pkgFile,'utf8'));
     if(pkg.name!=='metaengine-devfleet') throw new Error('live_ui_package_identity_invalid');

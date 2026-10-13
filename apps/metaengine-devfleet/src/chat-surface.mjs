@@ -417,6 +417,32 @@ export class ChatSurface {
     }
     throw new Error('send_outcome_requires_manual_readback');
   }
+  async probePosted(tabId,requestId) {
+    const view=this.#views.get(tabId);
+    if(!view || view.webContents.isDestroyed())throw Error('receipt_tab_not_live');
+    if(typeof requestId!=='string'||!/^[A-Za-z0-9._:-]{12,100}$/.test(requestId))
+      throw Error('receipt_request_id_invalid');
+    this.select(tabId);
+    const url=view.webContents.getURL();
+    if(!chatUrl(url)||!/^https:\/\/chatgpt\.com\/c\//.test(url))
+      return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
+        authority_effect:false};
+    const epoch=this.#navigationGenerations.get(tabId);
+    const nodes=await ax(view);
+    if(view.webContents.isDestroyed()||this.#views.get(tabId)!==view||
+      this.#navigationGenerations.get(tabId)!==epoch||view.webContents.getURL()!==url)
+      return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
+        authority_effect:false};
+    const composer=composerFrom(nodes);
+    const posted=postedMessageObserved({
+      url,composer_observed:!!composer,
+      composer_value:composer?val(composer,'value'):null,
+      transcript:transcript(nodes),request_id:requestId
+    });
+    return {state:posted?'PROVEN_SENT':'UNVERIFIED',tab_id:tabId,
+      request_id:requestId,url,
+      target_id:'webcontents:'+view.webContents.id,authority_effect:false};
+  }
   async closeTab(tabId) {
     const view=this.#views.get(tabId);
     if(!view || view.webContents.isDestroyed())throw new Error('tab_not_live');

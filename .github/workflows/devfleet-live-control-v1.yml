@@ -1,0 +1,40 @@
+name: DevFleet Live Control MCP V1
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-devfleet/**'
+      - '.github/workflows/devfleet-live-control-v1.yml'
+  push:
+    branches:
+      - 'work/devfleet-live-control-mcp-v1-20261013'
+    paths:
+      - 'apps/metaengine-devfleet/**'
+      - '.github/workflows/devfleet-live-control-v1.yml'
+permissions:
+  contents: read
+jobs:
+  live-control-contracts:
+    name: live-control-contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    defaults:
+      run:
+        working-directory: apps/metaengine-devfleet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Parse trusted native and tool boundary
+        run: |
+          node --check src/main.mjs
+          node --check src/operator-core.mjs
+          node --check src/chat-surface.mjs
+          node --check src/live-operator-contracts.mjs
+          node --check src/source-workspace-patch.mjs
+          node --check scripts/devfleet-admin-mcp.mjs
+      - name: Full standalone DevFleet Node tests
+        run: npm test

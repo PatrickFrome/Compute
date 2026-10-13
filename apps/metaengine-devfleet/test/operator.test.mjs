@@ -407,7 +407,9 @@ test('default identity is standalone: no Supabase SDK, production Browser, Guard
   assert.equal(builder.appId,'com.metaengine.devfleet.standalone');
   assert.equal(builder.productName,'METAENGINE DevFleet');
   assert.deepEqual(builder.files,['src/**/*','package.json']);
-  assert.equal(builder.extraResources,undefined);
+  assert.deepEqual(builder.extraResources,[
+    {from:'scripts/devfleet-admin-mcp.mjs',to:'devfleet-admin-mcp.mjs'}
+  ]);
   assert.equal(pkg.dependencies,undefined);
   const source=await fs.readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
   assert.match(source,/METAENGINE DevFleet/);
