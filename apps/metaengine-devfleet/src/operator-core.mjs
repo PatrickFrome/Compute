@@ -105,6 +105,11 @@ export class DevFleetOperator {
     if (this.#restoring) throw new Error('operator_restoring');
   }
   isBusy() { return this.#busy || this.#restoring || this.#persistenceFenced; }
+  async withMaintenanceLock(fn) {
+    this.#requireInit();
+    if(typeof fn!=='function')throw Error('operator_maintenance_callback_invalid');
+    return this.#exclusive(fn);
+  }
   #policy() {
     if (!this.#contracts) return {
       dispatch_enabled:true,max_batch_items:8,max_prompt_chars:12000,
