@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { startOperatorReadOnlyGateway, OPERATOR_GATEWAY_SCHEMA } from './operator-readonly-gateway.mjs';
 
 const key = 'k'.repeat(64);
@@ -80,7 +80,14 @@ test('same owner-key authentication, Host/Origin/method/body/query fences and un
     assert.equal((await fetch(f.runtime.address + '/operator/v1/context')).status, 401);
     assert.equal((await f.get('/operator/v1/context', { headers: { authorization: 'Bearer bad' } })).status, 401);
     assert.equal((await f.get('/operator/v1/context', { headers: { origin: 'https://chat.openai.com' } })).status, 403);
-    assert.equal((await f.get('/operator/v1/context', { headers: { host: 'localhost:' + f.runtime.server.address().port } })).status, 403);
+    // fetch() normalizes Host; use raw node:http to exercise a spoofed Host header.
+    const badHostStatus = await new Promise((resolve, reject) => {
+      const request = httpRequest(f.runtime.address + '/operator/v1/context', {
+        headers: { apikey: key, host: 'localhost:' + f.runtime.server.address().port },
+      }, response => { response.resume(); resolve(response.statusCode); });
+      request.on('error', reject); request.end();
+    });
+    assert.equal(badHostStatus, 403);
     assert.equal((await f.get('/operator/v1/context', { method: 'POST' })).status, 405);
     assert.equal((await f.get('/operator/v1/context?run_id=bad')).status, 400);
     assert.equal((await f.get('/operator/v1/context?x=1&x=2')).status, 400);
@@ -109,6 +116,18 @@ test('context is real P0 upstream projection with redaction; missing run identit
     assert.doesNotMatch(JSON.stringify(result), /must-never-leak|context-private-value/);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal((await f.get('/operator/v1/run_status?run_id=run-0001')).status, 503);
+  } finally { await f.stop(); }
+});
+
+test('forged READY without a trusted plane proof is UNVERIFIED', async () => {
+  const f = await fixture();
+  try {
+    f.context.planes.host = { state: 'READY', fresh: true, proof: 'NONE', observed_at: now(),
+      private_key: 'should-not-leak' };
+    const body = await (await f.get('/operator/v1/context')).json();
+    assert.equal(body.context.planes.host.state, 'UNVERIFIED');
+    assert.equal(body.context.operational_state, 'NOT_PROVEN');
+    assert.doesNotMatch(JSON.stringify(body), /should-not-leak/);
   } finally { await f.stop(); }
 });
 

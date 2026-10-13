@@ -65,8 +65,9 @@ function projectPlane(plane) {
   if (!plane || typeof plane !== 'object') return { state: 'UNKNOWN', proof: 'NONE', fresh: false };
   const state = ['READY', 'AVAILABLE', 'DEGRADED', 'BLOCKED', 'OFFLINE', 'AMBIGUOUS',
     'UNKNOWN', 'UNVERIFIED', 'STALE'].includes(plane.state) ? plane.state : 'UNVERIFIED';
-  const safe = { state, fresh: plane.fresh === true, proof: plane.proof === 'TRUSTED_READBACK'
-    ? 'TRUSTED_READBACK' : 'NONE' };
+  const verified = plane.fresh === true && plane.proof === 'TRUSTED_READBACK';
+  const safe = { state: state === 'READY' && !verified ? 'UNVERIFIED' : state,
+    fresh: verified, proof: verified ? 'TRUSTED_READBACK' : 'NONE' };
   if (canonicalTime(plane.observed_at)) safe.observed_at = canonicalTime(plane.observed_at);
   if (Number.isSafeInteger(plane.age_ms) && plane.age_ms >= 0) safe.age_ms = plane.age_ms;
   if (plane.details && typeof plane.details === 'object') {
@@ -120,7 +121,7 @@ function validateProjection(raw, identity, now, requiredFields) {
     !validSeq(raw.event_seq) || raw.event_seq > Number(identity.cursor)) {
     throw new GatewayError(503, 'operator_projection_unverified');
   }
-  for (const field of requiredFields) if (!validId(raw[field])) {
+  for (const field of [...requiredFields, ...(raw.task_id == null ? [] : ['task_id'])]) if (!validId(raw[field])) {
     throw new GatewayError(503, 'operator_projection_unverified');
   }
   return { state: raw.state, event_seq: raw.event_seq,
