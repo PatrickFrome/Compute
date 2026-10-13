@@ -120,9 +120,19 @@ export class HostResilienceRuntime {
   }
 
   async #verifyLoginStart({ force = false } = {}) {
-    const localProfile = localSupervisorProviderProfile(process.env);
-    const persistentQualified = localProfile != null && persistentLocalProviderBootstrap.persistent === true && persistentLocalProviderBootstrap.state === 'READY' && persistentLocalProviderBootstrap.base_url === localProfile.base_url && persistentLocalProviderBootstrap.instance_id === localProfile.instance_id;
-    if (localProfile && !persistentQualified) {
+    // A selected LOCAL_POSTGRES marker with a BLOCKED or absent Owner is a
+    // fail-closed configuration hold, not a reason to call the pinned
+    // endpoint resolver with a missing instance (or to register an executable
+    // at login before trusted provider provenance exists).
+    const localSelected = String(process.env.METAENGINE_STATE_PROVIDER || '').trim() === 'LOCAL_POSTGRES';
+    const bootReady = persistentLocalProviderBootstrap.persistent === true
+      && persistentLocalProviderBootstrap.state === 'READY';
+    const localProfile = localSelected && !bootReady
+      ? null : localSupervisorProviderProfile(process.env);
+    const persistentQualified = localProfile != null && bootReady
+      && persistentLocalProviderBootstrap.base_url === localProfile.base_url
+      && persistentLocalProviderBootstrap.instance_id === localProfile.instance_id;
+    if ((localSelected && !bootReady) || (localProfile && !persistentQualified)) {
       this.#state.login_start_required = false;
       this.#state.login_start_verified = false;
       this.#state.login_start_policy_hold = false;
