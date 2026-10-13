@@ -55,7 +55,7 @@ test('per-role, resource, and total slot caps restrict admissions',()=>{
   assert.equal(large.state,'FENCED');
 });
 test('source claim guard is attached to existing PG lease transaction, not second queue',()=>{
-  const sql=readFileSync(new URL('../../infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql',import.meta.url),'utf8');
+  const sql=readFileSync(new URL('../../../infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql',import.meta.url),'utf8');
   assert.match(sql,/before insert on destruktion_meta\.devos_fleet_claim_h205f22/i);
   assert.match(sql,/pg_advisory_xact_lock/i);
   assert.match(sql,/project_completion_ready_h205f22/i);
