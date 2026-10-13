@@ -127,6 +127,7 @@ test('lease missing or expired never promotes fleet', async () => {
     { tasks: [task({ claim_id: null })] },
     { tasks: [task({ claim_expires_at: stamp(-1), lease_expires_at: stamp(-1) })] },
     { tasks: [task({ lease_generation: -1 })] },
+    { tasks: [task({ task_state: 'INVENTED_STATE' })] },
     { tasks: [task({ task_state: 'COMPLETED' })] },
   ]) {
     const result = await read(db(data));
