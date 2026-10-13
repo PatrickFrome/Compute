@@ -77,7 +77,7 @@ begin
       or v_dependency = new.task_id::text then
       raise exception 'fleet_coordination_dependency_identity_invalid' using errcode='55000';
     end if;
-    if (select count(*) from jsonb_array_elements_text(v_dependencies) d where d=v_dependency)<>1 then
+    if (select count(*) from jsonb_array_elements_text(v_dependencies) as dep(value) where dep.value=v_dependency)<>1 then
       raise exception 'fleet_coordination_duplicate_dependency' using errcode='55000';
     end if;
     select * into v_dep from destruktion_meta.devos_fleet_task_h205f22
