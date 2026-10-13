@@ -51,11 +51,15 @@ test('normalize drops junk, clips fields and freezes the capsule', () => {
 test('default capsule maps the fabric without any raw secrets', () => {
   const capsule = defaultAgentAccessCapsule();
   assert.ok(capsule);
-  assert.ok(capsule.infrastructure.some((r) => r.url.includes('supabase.co')));
+  assert.equal(capsule.infrastructure[0].url, '');
+  assert.match(capsule.infrastructure[0].name, /OWNER_UNKNOWN/);
+  assert.ok(!capsule.infrastructure.some(r => /supabase\.co|postgresql:|3031/.test(r.url)));
+  assert.ok(!capsule.infrastructure.some(r => /reserve|cloud/i.test(r.name)));
   assert.ok(capsule.databases.some((r) => r.tables.includes('devos_fleet_task_h205f22')));
   const rendered = renderAgentAccessCapsuleBlock(capsule);
   assert.match(rendered, /AGENT ACCESS CAPSULE v1/);
-  assert.match(rendered, /credentials: .*safeStorage/);
+  assert.match(rendered, /credentials: Local Owner/);
+  assert.doesNotMatch(rendered, /supabase\.co|postgresql:|127\.0\.0\.1:3031/);
   assert.match(rendered, /TOOL_REQUEST_V1/);
   // zero-authority guarantee: no JWT-looking blobs, no private key material
   assert.ok(!/[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(rendered), 'no JWT literals');
@@ -71,70 +75,64 @@ test('render is deterministic and bounded (prompt-hash stability)', () => {
   assert.equal(renderAgentAccessCapsuleBlock('junk'), '');
 });
 
-test('local capsule binds the active supervisor without cloud, reserve or database credentials', () => {
+test('unattested local environment cannot turn the capsule into a live supervisor URL', () => {
   const base = 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
-  const env = { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: '11111111-2222-4333-8444-555555555555', METAENGINE_SUPERVISOR_BASE_URL: base, SUPABASE_SERVICE_ROLE_KEY: 'private-test-key' };
+  const env = { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES',
+    METAENGINE_LOCAL_STATE_INSTANCE_ID: '11111111-2222-4333-8444-555555555555',
+    METAENGINE_SUPERVISOR_BASE_URL: base, SUPABASE_SERVICE_ROLE_KEY: 'private-test-key' };
   const capsule = defaultAgentAccessCapsule({ env, activeBase: base });
-  assert.equal(capsule.infrastructure[0].url, base);
-  assert.equal(capsule.infrastructure[0].location, 'loopback');
-  assert.equal(capsule.infrastructure.some((row) => /reserve/.test(row.name)), false);
-  const wire = renderAgentAccessCapsuleBlock(capsule);
-  assert.doesNotMatch(wire, /supabase\.co|private-test-key|postgresql:\/\//);
-  assert.match(wire, /client Postgres via signed supervisor only/);
-  assert.match(capsule.databases[2].note, /durable last_batch and cursor/);
-  assert.equal(capsule.context_sources[0].pointer, 'infra/client-state-runtime');
-  assert.equal(capsule.context_sources.some(row => row.pointer.includes('infra/pigsty')), false);
+  assert.equal(capsule.infrastructure[0].url, '');
+  assert.match(capsule.infrastructure[0].name, /OWNER_UNKNOWN/);
+  assert.equal(capsule.infrastructure.some(row => /reserve|cloud/i.test(row.name)), false);
+  assert.match(capsule.databases[0].scope, /own PostgreSQL via attested local Owner/);
+  assert.equal(capsule.context_sources.some(row => /infra\/pigsty/.test(row.pointer)), false);
+  const rendered = renderAgentAccessCapsuleBlock(capsule);
+  assert.doesNotMatch(rendered, /supabase\.co|private-test-key|postgresql:\/\//);
+  assert.match(rendered, /no Supervisor endpoint or command authority/);
 });
 
-test('local profile never reads or rewrites the historical operator capsule', () => {
-  const base = 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1';
-  const opts = { env: { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: '11111111-2222-4333-8444-555555555555', METAENGINE_SUPERVISOR_BASE_URL: base }, activeBase: base };
+test('historical operator capsule is neither read nor rewritten, including an untrusted local claim', () => {
   const unexpected = () => { throw new Error('historical capsule must remain untouched'); };
-  const loaded = loadAgentAccessCapsule({ ...opts, storage_dir: '/unused', read_file: unexpected, exists: unexpected });
-  assert.equal(loaded.infrastructure[0].url, base);
-  assert.equal(ensureAgentAccessCapsuleFile('/unused', { ...opts, exists: unexpected, mkdir: unexpected, write_file: unexpected }), null);
+  const capsule = loadAgentAccessCapsule({ storage_dir:'/unused', read_file:unexpected, exists:unexpected });
+  assert.equal(capsule.infrastructure[0].url, '');
+  assert.equal(ensureAgentAccessCapsuleFile('/unused',
+    { exists:unexpected, mkdir:unexpected, write_file:unexpected }), null);
 });
 
-test('hosted default briefing uses the selected endpoint rather than a stale project', () => {
-  const base = 'https://selected.example/functions/v1/a2-browser-native-supervisor-v1';
-  assert.equal(defaultAgentAccessCapsule({ env: {}, activeBase: base }).infrastructure[0].url, base);
+test('hosted endpoint parameter cannot become a default local Supervisor authority', () => {
+  for (const base of ['https://selected.example/functions/v1/a2-browser-native-supervisor-v1',
+    'http://127.0.0.1:3031/a2-browser-native-supervisor-v1']) {
+    const capsule = defaultAgentAccessCapsule({ env:{}, activeBase:base });
+    assert.equal(capsule.infrastructure[0].url, '');
+    assert.doesNotMatch(renderAgentAccessCapsuleBlock(capsule), /selected\.example|127\.0\.0\.1:3031/);
+  }
 });
 
-test('loader prefers the operator override file; malformed override degrades to null', () => {
+test('historical operator override files cannot smuggle cloud endpoints into prompts', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2-capsule-'));
   try {
-    assert.equal(loadAgentAccessCapsule({ storage_dir: dir }), null); // no file yet
-    assert.equal(loadAgentAccessCapsule({ storage_dir: null }), null);
-    fs.writeFileSync(path.join(dir, 'agent-access-capsule.json'), JSON.stringify({
-      infrastructure: [{ name: 'operator edge', location: 'corp', url: 'https://operator.internal/edge' }],
+    const file = path.join(dir, 'agent-access-capsule.json');
+    fs.writeFileSync(file, JSON.stringify({
+      infrastructure:[{name:'operator cloud',location:'remote',url:'https://hosted.invalid/command'}],
     }));
-    const loaded = loadAgentAccessCapsule({ storage_dir: dir });
-    assert.equal(loaded.infrastructure[0].name, 'operator edge');
-    const malformed = fs.mkdtempSync(path.join(os.tmpdir(), 'a2-capsule-bad-'));
-    try {
-      fs.writeFileSync(path.join(malformed, 'agent-access-capsule.json'), '{not json');
-      assert.equal(loadAgentAccessCapsule({ storage_dir: malformed }), null);
-    } finally {
-      fs.rmSync(malformed, { recursive: true, force: true });
-    }
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+    const loaded = loadAgentAccessCapsule({storage_dir:dir});
+    assert.equal(loaded.infrastructure[0].url, '');
+    assert.doesNotMatch(renderAgentAccessCapsuleBlock(loaded), /hosted\.invalid/);
+    assert.equal(ensureAgentAccessCapsuleFile(dir), null);
+    assert.match(fs.readFileSync(file,'utf8'), /hosted\.invalid/);
+    fs.writeFileSync(file, '{not json');
+    assert.equal(loadAgentAccessCapsule({storage_dir:dir}).infrastructure[0].url,'');
+    assert.equal(fs.readFileSync(file,'utf8'), '{not json');
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
 
-test('ensure writes the default exactly once and never clobbers operator edits', () => {
+test('no local Owner never causes new capsule file to be created', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2-capsule-ensure-'));
   try {
-    const p1 = ensureAgentAccessCapsuleFile(dir);
-    assert.equal(p1, path.join(dir, 'agent-access-capsule.json'));
-    assert.ok(fs.existsSync(p1));
-    fs.writeFileSync(p1, '{"infrastructure":[{"name":"operator edit"}]}');
-    ensureAgentAccessCapsuleFile(dir);
-    assert.equal(JSON.parse(fs.readFileSync(p1, 'utf8')).infrastructure[0].name, 'operator edit');
+    assert.equal(ensureAgentAccessCapsuleFile(dir), null);
+    assert.equal(fs.existsSync(path.join(dir, 'agent-access-capsule.json')), false);
     assert.equal(ensureAgentAccessCapsuleFile(null), null);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
 
 test('task prompt carries the capsule between team memory and briefing; absent capsule keeps prompts byte-identical', () => {
