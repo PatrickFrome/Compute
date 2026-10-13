@@ -374,42 +374,40 @@ export class ChatSurface {
     const typedComposer = composerControls(typed)[0] || null;
     const typedValue = typedComposer ? val(typedComposer,'value') : '';
     if (typedValue !== text) throw new Error('composer_exact_draft_not_proven');
-    const sends = sendControls(typed);
-    if (sends.length>1) throw new Error('send_button_not_unique');
-    // Verify stable target and Chat—not Work—immediately before the single
-    // physical submit. The owner authorizes replacing the composer, NOT
-    // dispatching to an uncertain page or repeating AMBIGUOUS outcomes.
-    if (view.webContents.getURL() !== initialUrl || !this.#views.has(tabId))
+    // A submit control may change its accessible name, disappear, or be
+    // overlaid by the ChatGPT UI. The exact, already verified composer is
+    // the sole submit target. Only ONE Enter is ever sent; no fallback click.
+    if (view.webContents.getURL() !== initialUrl || this.#views.get(tabId)!==view)
       throw new Error('chatgpt_target_changed_before_send');
     const finalMode = await this.#mode(view);
     if (finalMode.mode !== 'CHAT' || finalMode.page_failure)
       throw new Error('chat_only_send_gate_refused');
-    // Some ChatGPT UI revisions expose a Send control only with a tooltip
-    // or an unnamed icon. After exact typed-value and CHAT checks, submit
-    // with one Enter if no named Send button exists. This is mutually exclusive
-    // with the button click. Unknown outcome remains AMBIGUOUS, never retried.
+    if (singleButton(typed,stopNames))
+      throw new Error('chatgpt_current_generation_active');
     const dbg=view.webContents.debugger;
-    if (sends.length===1) {
-      await clickNode(view,sends[0].backendDOMNodeId);
-    } else {
-      if (singleButton(typed,stopNames))
-        throw new Error('chatgpt_current_generation_active');
-      await dbg.sendCommand('DOM.enable');
-      await dbg.sendCommand('DOM.focus',{backendNodeId:typedComposer.backendDOMNodeId});
-      await dbg.sendCommand('Input.dispatchKeyEvent',{
-        type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-      await dbg.sendCommand('Input.dispatchKeyEvent',{
-        type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-    }
-    for (let i=0;i<35;i++) {
-      await sleep(350);
-      const url = view.webContents.getURL();
+    await dbg.sendCommand('DOM.enable');
+    await dbg.sendCommand('DOM.focus',{backendNodeId:typedComposer.backendDOMNodeId});
+    await dbg.sendCommand('Input.dispatchKeyEvent',{
+      type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await dbg.sendCommand('Input.dispatchKeyEvent',{
+      type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    // The prompt can span numerous AX paragraphs. Comparing the entire
+    // text as a contiguous substring caused false AMBIGUOUS receipts.
+    // Require unique durable request marker, conversation URL and cleared
+    // composer; a marker still sitting in the draft NEVER proves delivery.
+    const marker=/\\[DevFleet request: ([A-Za-z0-9._:-]{12,100})\\]$/.exec(text);
+    if (!marker) throw new Error('send_receipt_marker_missing');
+    for (let i=0;i<70;i++) {
+      await sleep(400);
+      const url=view.webContents.getURL();
       if (!chatUrl(url)) throw new Error('chatgpt_origin_changed_after_send');
-      const nodes = await ax(view);
-      const currentText = transcript(nodes);
-      const currentComposer = composerFrom(nodes);
-      if (chatUrl(url,true) && currentText.includes(text) &&
-          (!currentComposer || val(currentComposer,'value').length === 0)) {
+      if(this.#views.get(tabId)!==view || view.webContents.isDestroyed())
+        throw new Error('chatgpt_target_changed_after_send');
+      const nodes=await ax(view);
+      const currentComposer=composerFrom(nodes);
+      if(chatUrl(url,true) &&
+          (!currentComposer || val(currentComposer,'value').length===0) &&
+          transcript(nodes).includes(marker[1])) {
         return {state:'PROVEN_SENT',tab_id:tabId,url,
           target_id:'webcontents:'+view.webContents.id,prompt_sha256:sha(text)};
       }
