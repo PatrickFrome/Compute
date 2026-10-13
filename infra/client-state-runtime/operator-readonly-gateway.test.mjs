@@ -16,7 +16,7 @@ async function fixture(options = {}) {
     schema: 'metaengine.operator.context.v1', storage: 'OWN_POSTGRES_ONLY',
     scope: 'READ_ONLY', authority_effect: false, scheduler_authority: false,
     cloud_database_dependency: false, remote_fallback_allowed: false,
-    generated_at: now(), planes: { database: { state: 'AVAILABLE', fresh: true,
+    generated_at: now(), planes: { database: { state: 'AVAILABLE', source: 'LOCAL_POSTGRES', fresh: true,
       proof: 'TRUSTED_READBACK', observed_at: now(),
       details: { catalog_rpc_expected: 50, secret: 'must-never-leak' } } },
     sensitive_token: 'context-private-value',
@@ -265,5 +265,25 @@ test('no read-only adapter accidentally advances execution or claims a complete 
       assert.equal(value.state, 'UNKNOWN');
       assert.equal(value.authority_effect, false);
     }
+  } finally { await f.stop(); }
+});
+
+test('P0 nested stale or source-confused plane cannot be laundered by fresh context envelope', async () => {
+  const f = await fixture();
+  try {
+    f.context.planes.database.state = 'READY';
+    f.context.planes.database.observed_at = new Date(Date.now() - 60000).toISOString();
+    let result = await (await f.get('/operator/v1/context')).json();
+    assert.equal(result.context.planes.database.state, 'STALE');
+    assert.equal(result.context.planes.database.fresh, false);
+    assert.equal(result.context.operational_state, 'NOT_PROVEN');
+    f.context.planes.database.observed_at = now();
+    f.context.planes.database.source = 'MODEL_CLAIM';
+    result = await (await f.get('/operator/v1/context')).json();
+    assert.equal(result.context.planes.database.state, 'UNVERIFIED');
+    f.context.planes.database.source = 'LOCAL_POSTGRES';
+    f.context.planes.database.proof = 'NONE';
+    result = await (await f.get('/operator/v1/context')).json();
+    assert.equal(result.context.planes.database.state, 'UNVERIFIED');
   } finally { await f.stop(); }
 });

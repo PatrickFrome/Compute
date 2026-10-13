@@ -13,6 +13,13 @@ const MAX_AGE_MS = 30_000;
 const MAX_FUTURE_MS = 5_000;
 const MAX_RESPONSE_BYTES = 32 * 1024;
 const MAX_EVENTS = 64;
+// A fresh envelope does not prove the individual planes are fresh.
+const PLANE_SOURCES = Object.freeze({
+  database: 'LOCAL_POSTGRES', client: 'NATIVE_BROWSER_READBACK',
+  supervisor: 'SIGNED_SUPERVISOR_READBACK', fleet: 'LOCAL_TASK_LEDGER',
+  host: 'TRUSTED_HOST_READBACK', source: 'EXACT_GIT_READBACK',
+  continuity: 'LOCAL_CHECKPOINT_LEDGER',
+});
 const validId = value => typeof value === 'string' && IDENTIFIER.test(value);
 const validSeq = value => Number.isSafeInteger(value) && value >= 0;
 const canonicalTime = value => {
@@ -61,14 +68,20 @@ function unknown(operation, now, state = 'UNKNOWN') {
   return { ...gatewayEnvelope(operation, now), state, proof: 'NONE', fresh: false,
     project_id: null, run_id: null, cursor: null };
 }
-function projectPlane(plane) {
+function projectPlane(plane, name, now) {
   if (!plane || typeof plane !== 'object') return { state: 'UNKNOWN', proof: 'NONE', fresh: false };
   const state = ['READY', 'AVAILABLE', 'DEGRADED', 'BLOCKED', 'OFFLINE', 'AMBIGUOUS',
     'UNKNOWN', 'UNVERIFIED', 'STALE'].includes(plane.state) ? plane.state : 'UNVERIFIED';
-  const verified = plane.fresh === true && plane.proof === 'TRUSTED_READBACK';
-  const safe = { state: state === 'READY' && !verified ? 'UNVERIFIED' : state,
-    fresh: verified, proof: verified ? 'TRUSTED_READBACK' : 'NONE' };
-  if (canonicalTime(plane.observed_at)) safe.observed_at = canonicalTime(plane.observed_at);
+  const observed = canonicalTime(plane.observed_at);
+  const sourceOk = plane.source === PLANE_SOURCES[name];
+  const freshWitness = Boolean(sourceOk && observed && isFresh(observed, now) &&
+    plane.fresh === true && plane.proof === 'TRUSTED_READBACK');
+  const asserted = ['READY', 'AVAILABLE', 'DEGRADED', 'BLOCKED', 'OFFLINE'].includes(state);
+  const safe = { state: asserted && !freshWitness
+    ? (observed && !isFresh(observed, now) ? 'STALE' : 'UNVERIFIED') : state,
+    fresh: asserted && freshWitness,
+    proof: asserted && freshWitness ? 'TRUSTED_READBACK' : 'NONE' };
+  if (observed) safe.observed_at = observed;
   if (Number.isSafeInteger(plane.age_ms) && plane.age_ms >= 0) safe.age_ms = plane.age_ms;
   if (plane.details && typeof plane.details === 'object') {
     const details = {};
@@ -94,11 +107,11 @@ function validateContext(value, now) {
   }
   const planes = {};
   for (const name of ['database', 'client', 'supervisor', 'fleet', 'host', 'source', 'continuity']) {
-    planes[name] = projectPlane(value.planes[name]);
+    planes[name] = projectPlane(value.planes[name], name, now);
   }
   return { schema: 'metaengine.operator.context.v1', generated_at: canonicalTime(value.generated_at),
     storage: 'OWN_POSTGRES_ONLY', scope: 'READ_ONLY', authority_effect: false,
-    operational_state: Object.values(planes).every(plane => plane.state === 'READY')
+    operational_state: Object.values(planes).every(plane => plane.state === 'READY' && plane.fresh)
       ? 'ALL_PLANES_REPORTED_READY' : 'NOT_PROVEN', planes };
 }
 function readIdentity(raw, now, ownerId) {
