@@ -180,9 +180,14 @@ test('stale source/heartbeat cannot elevate context or W6 to ACTIVE/HEALTHY', as
   const staleSource = { ...x.observations.source, heartbeat_at: at(-60000) };
   const got = conform({ ...x, http_status: 200,
     observations: { ...x.observations, source: staleSource } });
+  assert.equal(got.state, 'STALE');
+  assert.equal(got.reason, 'PLANE_READBACK_STALE');
   assert.equal(got.identity, null);
   assert.equal(got.context.planes.source.state, 'UNKNOWN');
   assert.notEqual(got.observatory.state, 'OBSERVED');
+  const staleRun = conform({ ...x, runIdentity: { ...x.runIdentity, observed_at: at(-60000) } });
+  assert.equal(staleRun.state, 'STALE');
+  assert.equal(staleRun.reason, 'RUN_READBACK_STALE');
 });
 
 test('bounded public projections redact opaque secrets and payloads', async () => {
