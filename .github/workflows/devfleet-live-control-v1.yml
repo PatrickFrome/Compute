@@ -25,6 +25,15 @@ jobs:
         working-directory: apps/metaengine-devfleet
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact immutable checkout SHA
+        shell: pwsh
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "source_sha_mismatch" }
+          Write-Host "METAENGINE_DEVFLEET_SOURCE_SHA=$actual"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
