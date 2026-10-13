@@ -4,6 +4,7 @@ import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttrib
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
+import {receiptMarker,postedMessageObserved} from './send-receipt-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -395,7 +396,7 @@ export class ChatSurface {
     // text as a contiguous substring caused false AMBIGUOUS receipts.
     // Require unique durable request marker, conversation URL and cleared
     // composer; a marker still sitting in the draft NEVER proves delivery.
-    const marker=/\[DevFleet request: ([A-Za-z0-9._:-]{12,100})\]$/.exec(text);
+    const marker=receiptMarker(text);
     if (!marker) throw new Error('send_receipt_marker_missing');
     for (let i=0;i<70;i++) {
       await sleep(400);
@@ -405,9 +406,11 @@ export class ChatSurface {
         throw new Error('chatgpt_target_changed_after_send');
       const nodes=await ax(view);
       const currentComposer=composerFrom(nodes);
-      if(chatUrl(url,true) &&
-          (!currentComposer || val(currentComposer,'value').length===0) &&
-          transcript(nodes).includes(marker[1])) {
+      if(postedMessageObserved({
+        url,composer_observed:!!currentComposer,
+        composer_value:currentComposer?val(currentComposer,'value'):null,
+        transcript:transcript(nodes),request_id:marker
+      })) {
         return {state:'PROVEN_SENT',tab_id:tabId,url,
           target_id:'webcontents:'+view.webContents.id,prompt_sha256:sha(text)};
       }
