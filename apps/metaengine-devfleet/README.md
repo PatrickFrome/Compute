@@ -304,3 +304,80 @@ signature/trusted provenance policy, upgrade session preservation, physical
 native `chat.batch_observe` and `chat.batch_poll` with authenticated
 ChatGPT and hot/hidden-tab renderer chaos. No promotion, auto-installation,
 main-branch merge or inference of model/task completion from AX hints.
+
+
+## Live Operator MCP v1 — source candidate (2026-10-13)
+
+The separate DevFleet application is an independent, persistent developer client.
+This candidate introduces a stable native administrative protocol intended to
+avoid repetitive NSIS upgrades for **UI, bounded contracts and pinned source
+workspace edits**. The administrative bridge is packaged as
+`resources/devfleet-admin-mcp.mjs` in the next qualified Windows build.
+It is **not** in the older installed binary until that candidate is proven
+and separately installed by the owner. Native Electron/preload/OS-authority
+changes continue to require a qualified binary upgrade.
+
+**One-time trust bootstrap:** open DevFleet > Live Development Console and
+locally pin an exact trusted `apps/metaengine-devfleet` source folder.
+This stores a dedicated private `developer-rpc.json` bearer. It is
+separate from the ordinary `operator-rpc.json` capability and must not be
+shared with chats or checked into Git. A local MCP host can launch the
+packaged Node bridge from `resources/devfleet-admin-mcp.mjs` as a stdio
+MCP process. After this one-time MCP connection, it exposes two stable
+tools:
+
+- `devfleet_overview`: rapid read-only fleet snapshot, native event hints,
+  receipt counts, contract generation and source workspace status.
+  It never claims that an open ChatGPT tab equals a working agent.
+- `devfleet_admin`: a generic `{method,params}` method that remains stable
+  as new server-side developer methods are added. No raw shell, JavaScript,
+  arbitrary CDP or SQL endpoint exists.
+
+Example administrative operations (the MCP host handles bearer credentials):
+
+```json
+{"method":"dev.overview","params":{"depth":"DIGEST"}}
+{"method":"dev.contract.status","params":{}}
+{"method":"dev.contract.stage","params":{"expected_generation":0,"contract":{
+  "schema":"metaengine.devfleet.operator-contract.v1",
+  "dispatch_enabled":true,"max_batch_items":4,"max_prompt_chars":8000,
+  "max_observe_parallelism":4,
+  "existing_draft":"DENY_EXISTING_DRAFT","require_verified_model":true
+}}}
+{"method":"dev.contract.activate","params":{"expected_generation":0,"expected_sha256":"<the returned staged_sha256>"}}
+{"method":"dev.source.inspect","params":{"path":"src/index.html"}}
+{"method":"dev.source.patch","params":{
+  "request_id":"devfleet-source-unique-20261013-001",
+  "path":"src/index.html","expected_sha256":"<current file SHA-256>",
+  "content":"<complete replacement source bytes>"
+}}
+{"method":"dev.receipt.reconcile","params":{
+  "request_id":"<existing exact Send request ID>","tab_id":"<owned tab ID>"
+}}
+```
+
+`dev.contract.rollback` uses a precise generation CAS; transitions are
+write-ahead persisted and a crashed transition fences future dispatch.
+`dev.contract.reconcile` conservatively disables dispatch rather than
+manufacturing a successful activation. Source patches require exact
+source hashes, paths beneath the manually pinned worktree and an append-only
+bounded request ledger. They do **not** silently load revised privileged
+main-process code. For UI edits, `dev.stage` and `dev.activate`
+continue to use the verified immutable HTML slots.
+
+Receipt reconciliation observes the exact owned conversation and clears an
+`AMBIGUOUS` tab fence only after positive native sent-message readback and
+durable receipt write. Absence of the marker is **not** proof that nothing
+was sent. The previous ambiguous record/request ID is retained; no repeat
+Send is attempted.
+
+The physical Send and all source/policy maintenance share one operator lock.
+The faster `FAST` overview defaults to O(1) native hints; `DIGEST`
+explicitly requests bounded parallel AX observation (not task-completion
+proof). No Supabase, cloud fallback, main Browser/Guardian/production
+PostgreSQL authority, or automatic agent retry is added.
+
+**Qualification gates:** exact-head Linux/Windows Node suite, pinned source
+path adversarial tests, Windows NSIS package and MCP resource readback,
+then independent installed profile/authenticated ChatGPT send and
+reconciliation canaries. A green source CI alone is not a production release.
