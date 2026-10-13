@@ -203,8 +203,9 @@ function listenLocal() {
           const observation=!live ?{state:'BUSY_OR_RESTORING',completion_proven:false}
             :p.depth==='DIGEST'
               ?await operator.batchObserve({parallelism:4})
-              :snapshot.session_count?await operator.batchPoll({tab_ids:snapshot.sessions
-                  .filter(x=>x.state==='OPEN').map(x=>x.tab_id)})
+              :snapshot.sessions.some(x=>x.state==='OPEN')
+                ?await operator.batchPoll({tab_ids:snapshot.sessions
+                    .filter(x=>x.state==='OPEN').map(x=>x.tab_id)})
                 :{records:[],hints_only:true,completion_proven:false};
           return {schema:'metaengine.devfleet.operator-overview.v1',
             depth:p.depth||'FAST',fleet:snapshot,observation,
