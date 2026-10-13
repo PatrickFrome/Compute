@@ -54,9 +54,9 @@ export class DevFleetSourceWorkspace {
       content:bytes.toString('utf8'),bytes:bytes.byteLength,
       live_runtime_reloaded:false,authority_effect:false};
   }
-  async #ledger(root) {
+  async #ledger(root,{create=true}={}) {
     const ledger=path.join(root,'.devfleet-source-patches');
-    await fs.mkdir(ledger,{recursive:true,mode:0o700});
+    if(create)await fs.mkdir(ledger,{recursive:true,mode:0o700});
     const current=path.join(ledger,'state.json');
     let raw;
     try{raw=JSON.parse(await fs.readFile(current,'utf8'));}
@@ -75,7 +75,7 @@ export class DevFleetSourceWorkspace {
     if(!workspace)return {schema:SOURCE_PATCH_SCHEMA,workspace_attached:false,
       state:'UNAVAILABLE',authority_effect:false};
     const root=await fs.realpath(workspace);
-    const {raw}=await this.#ledger(root);
+    const {raw}=await this.#ledger(root,{create:false});
     return {schema:SOURCE_PATCH_SCHEMA,workspace_attached:true,
       state:raw.pending?'RECONCILIATION_REQUIRED':'READY',
       pending:raw.pending?{request_id:raw.pending.request_id,
