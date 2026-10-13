@@ -38,9 +38,9 @@ export function auditNoHostedFallback({ supervisorSource, bootstrapSource } = {}
     if (!requiredSupervisor.every(snippet => supervisorSource.includes(snippet)) ||
         !requiredBootstrap.every(snippet => bootstrapSource.includes(snippet)))
       reasons.push('LOCAL_OWNER_TRANSPORT_CONTRACT_MISSING');
-    if (/https:\/\/|https:\s*['"`]|supabase\.co|process\.env\.SUPABASE_|NATIVE_SUPERVISOR_DEFAULT_BASE\s*=\s*['"`]/i.test(supervisorSource))
+    if (/https?:\/\/|https:\s*['"`]|supabase\.co|process\.env\.SUPABASE_|NATIVE_SUPERVISOR_DEFAULT_BASE\s*=\s*['"`]/i.test(supervisorSource))
       reasons.push('HOSTED_SUPERVISOR_FALLBACK_DETECTED');
-    if (/https:\/\/|supabase\.co|process\.env\.SUPABASE_|METAENGINE_FALLBACK_SUPERVISOR_BASE_URL\s*=/i.test(bootstrapSource))
+    if (/https?:\/\/|supabase\.co|process\.env\.SUPABASE_|METAENGINE_FALLBACK_SUPERVISOR_BASE_URL\s*=/i.test(bootstrapSource))
       reasons.push('HOSTED_BOOTSTRAP_FALLBACK_DETECTED');
   }
   return Object.freeze({ status: reasons.length ? 'BLOCKED' : 'SOURCE_CONTRACT_PASS', reasons, authority_effect: false,
