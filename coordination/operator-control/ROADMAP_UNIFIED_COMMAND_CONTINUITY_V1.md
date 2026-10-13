@@ -73,6 +73,13 @@ This is a living roadmap. Update this single file on every relevant architecture
 - **Discovered release-critical legacy drift:** `apps/metaengine-browser/src/native-supervisor-endpoints.mjs` still defines a hosted cloud-first default when `METAENGINE_STATE_PROVIDER` is absent; `bootstrapPersistentLocalProvider()` returns `NO_OWNER_CONFIG` when no owner file exists. Therefore merely shipping this P0 endpoint does NOT yet make the entire Browser strictly own-DB-only. This is a blocking migration requirement, not an accepted fallback.
 - **Mandatory before P1 promotion or installed release:** remove the hosted default/fallback and fail closed on missing/mismatched local owner configuration, while preserving offline diagnostic boot; prove no external Supabase request in a Windows dirty-profile/absent-owner negative test. Do not silently substitute a guessed localhost port or bypass owner identity proof.
 - This checkpoint is SOURCE-QUALIFIED only; no production DB migration, Windows Guardian mutation, installed update, or live agent effect was executed.
+## W1/P0 independent Host Truth adapter checkpoint — 2026-10-13
+
+- Branch `work/roadmap-host-truth-w1-20261013-003` forks the exact draft PR #1191 head `fff5c2147d83445457f47e9e3503e2bab0161292` (main remains untouched).
+- Implemented source-only read-only in-process Owner/Guardian adapter in `infra/client-state-runtime/operator-trusted-host-readback.mjs`. It verifies Owner/device/generation binding, kernel-sourced PID and process creation time for both Owner and Browser, and the existing Guardian four-channel heartbeat fence with per-channel sequence floors; it double-samples OS identity to catch PID reuse. Raw identities, private paths and credentials are not projected. Unknown/absent sources yield UNKNOWN; mismatched PID incarnation yields AMBIGUOUS. The Host facet can reach only AVAILABLE, never READY.
+- Existing endpoint retains its authenticated loopback read-only optional callback seam. The standalone CLI is intentionally **not wired** to pretend Host evidence. Live Owner/Guardian IPC, actual kernel inventory provider and installed readiness remain unproven; a production trusted reader must be explicitly wired and physically qualified before this is treated as live Host truth.
+- Focused falsification suites and exact commit receipts are recorded in the dedicated W1 draft PR. No Supabase, no database migrations, no live Host/Browser/Guardian modifications, no main merge.
+
 
 ## Implementation checkpoint — 2026-10-12 / P0 slice 2, Truth Plane hardening (partial)
 

@@ -6,11 +6,14 @@ import { OPERATOR_HOST_EVIDENCE_SCHEMA } from './operator-host-incarnation-core.
 const now = Date.parse('2026-10-12T12:00:00Z');
 const at = delta => new Date(now + delta).toISOString();
 const key = 'browser-incarnation-A-123';
+const owner = { pid: 9876, created_at: at(-65_000), process_incarnation_id: 'owner-9876-incarnation-a', owner_id: 'host-owner-9876', device_id: 'host-device-9876', generation: 2, observed_at: at(-250) };
 const browser = { pid: 4242, created_at: at(-60_000), process_incarnation_id: key };
 const guardian = () => ({
   schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
   state: 'READY', ready: true, guardian_service_ready: true,
   owner_binding_proven: true, device_binding_proven: true,
+  owner_id: owner.owner_id, device_id: owner.device_id, owner_generation: owner.generation,
+  owner_pid: owner.pid, owner_created_at: owner.created_at, owner_process_incarnation_id: owner.process_incarnation_id,
   stale: false, observed_at: at(-250),
   automatic_retry_allowed: false, authority_effect: false,
 });
@@ -20,8 +23,11 @@ const signals = () => Object.fromEntries(
 const evidence = () => ({
   schema: OPERATOR_HOST_EVIDENCE_SCHEMA,
   source: 'TRUSTED_HOST_READBACK', authority_effect: false,
-  observed_at: at(-100),
+  observed_at: at(-100), guardian_health_observed_at: at(-100),
   browser: { ...browser },
+  owner: { ...owner },
+  owner_runtime_probe: { source: 'OS_PROCESS_INVENTORY', pid: owner.pid, created_at: owner.created_at,
+    process_incarnation_id: owner.process_incarnation_id, state: 'PRESENT', observed_at: at(-120) },
   guardian: guardian(),
   runtime_probe: { source: 'OS_PROCESS_INVENTORY', ...browser, state: 'PRESENT', observed_at: at(-120) },
   heartbeat_fence: { valid: true, reason: 'EXACT_SPLIT_HEARTBEATS_FENCED',

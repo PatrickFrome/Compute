@@ -12,6 +12,14 @@ P0 Host slice: the Host facet accepts an **optional in-process** `hostObservatio
 
 The route shares the current `127.0.0.1` restriction, Host/Origin validation, `apikey` authentication, request admission, statement timeouts and direct/service-role transaction behavior. Query parameters are forbidden and non-GET methods are rejected. This is a local primitive, **not** a remotely reachable GPT/MCP endpoint; P1 will add a separately authenticated own-host Gateway. The response has `authority_effect=false`, `automatic_retry_allowed=false` and `remote_fallback_allowed=false`.
 
+## W1/P0 Owner/Guardian provenance adapter (2026-10-13, source only)
+
+`operator-trusted-host-readback.mjs` provides `createTrustedHostObservationReadback` for a **trusted in-process Host owner**, and is compatible with the existing `startDbApi({ hostObservationReadback })` seam. It is **not** enabled by the standalone `db-api.mjs` CLI: until a real authenticated Host owner supplies the native callbacks, the Host facet remains `UNKNOWN`. Never wire the adapter to HTTP, a model message, a persisted browser status blob, or arbitrary environment variables.
+
+The five constructor callbacks are `readOwner`, `readGuardianStatus`, `readGuardianHealth`, `readOsProcess(pid)`, and optional `now`. `readGuardianStatus` MUST use Guardian's **read-only observe/status** capability (never ensure/activate); its response must carry a bound owner_id/device_id/generation and exact owner PID, creation time and incarnation. `readGuardianHealth` MUST provide an actual Guardian-local child/release/split-heartbeat snapshot, including durable per-channel sequence floors. `readOsProcess` MUST return independently observed kernel process identity, PID and creation time, for both Owner and Browser: PID alive checks and lock files do not qualify. The adapter evaluates the existing Guardian split-heartbeat fence, samples both OS processes twice to expose PID reuse, and feeds the bounded no-authority Host reducer. Mismatched birth timestamps/owner binding fail closed; missing sources remain UNKNOWN. Even a fresh exact-bound process is at most AVAILABLE, not product READY. Untrusted/raw Owner and Guardian metadata never reaches the response.
+
+Source-only tests cannot attest a real Windows Owner, process inventory permissions, Guardian IPC binding, physical heartbeat quality, or installed Browser readiness. Those remain explicit live release gates. No hosted provider or database migration is part of this slice.
+
 ## Interface
 
 Authenticated `GET /health` returns `mode: LOCAL_POSTGRES`, the launcher instance ID, the availability of all currently allowlisted RPC names and five table endpoints, and the actual `devos_runtime_capabilities_v1` attestation from the database. Missing objects or unreadable tables fail readiness.
