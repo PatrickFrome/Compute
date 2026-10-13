@@ -1,5 +1,6 @@
 import { createMetaDevosSuperstep } from './meta-devos-superstep.mjs';
 import { createWorkspaceObservationRoutes } from './workspace-observation-routes.mjs';
+import { planFleetDagAdmission } from './fleet-coordination-dag.mjs';
 
 const AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -224,6 +225,8 @@ function ambiguityRpcResponse(error){
 }
 function transportAdmissionFence(error){
   const message=String(error?.message||error||'').toLowerCase();
+  const graphFence=message.match(/fleet_coordination_[a-z0-9_]+/);
+  if(graphFence)return Object.freeze({reason:graphFence[0],fenced:true,automatic_retry_allowed:false,authority_effect:false});
   for(const reason of TRANSPORT_ADMISSION_FENCES){
     if(message.includes(reason))return Object.freeze({reason,fenced:true,automatic_retry_allowed:false,authority_effect:false});
   }
@@ -297,6 +300,12 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
       const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
       const rawBacklog=backlogOf(snapshot);
+      // Existing leased executor, no parallel poller. Opt-in graph tasks must
+      // have bounded, source-backed dependency and slot evidence before lease.
+      const fleetDagAdmission=planFleetDagAdmission(snapshot);
+      const schedulerBacklog=fleetDagAdmission
+        ? {...rawBacklog,ready:fleetDagAdmission.ready,by_role:fleetDagAdmission.by_role}
+        : rawBacklog;
       // D-C2 (2026-09-19 operator directive: commands must work multiply and
       // simultaneously): lease ONE task per idle agent candidate instead of
       // stopping at the first success. The browser dispatches the batch
@@ -309,13 +318,13 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       // another same-role agent cannot lease it either), and candidates whose
       // role has nothing left to pay are skipped without spending an RPC.
       let lease=null,leases=[],leaseAttempts=0,leaseFence=null,backpressure=null;
-      const remainingByRole={...(rawBacklog?.by_role||{})};
+      const remainingByRole={...(schedulerBacklog?.by_role||{})};
       const exhaustedRoles=new Set();
       // Closed-loop audit fix (fleet scale): lease ceiling raised 8 -> 16 and
       // the candidate scan widened to the full idle roster (bounded 32) — the
       // browser-side dispatch concurrency now scales with its live fleet.
-      const leaseCeiling=Math.max(1,Math.min(16,Number(rawBacklog?.ready||0)||0));
-      const candidates=fairIdleLeaseCandidates(snapshot,agents,rawBacklog);
+      const leaseCeiling=Math.max(0,Math.min(16,Number(schedulerBacklog?.ready||0)||0,fleetDagAdmission?.remaining_slots??16));
+      const candidates=leaseCeiling>0?fairIdleLeaseCandidates(snapshot,agents,schedulerBacklog):[];
       for(const agent of candidates.slice(0,32)){
         if((Number(remainingByRole[agent.role]||0)||0)<1||exhaustedRoles.has(agent.role))continue;
         leaseAttempts+=1;
@@ -344,7 +353,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
         const planSnapshot=await rpc('meta_orchestrator_plan_snapshot_v1',{p_workspace_id:workspaceId,p_roadmap_id:metaRoadmapId});
         workGraph=projectDevosWorkGraph({planSnapshot,metaOrchestrator,backlog,running:runningRows,leases,planes:body?.planes});
       }catch{workGraph=null;}
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'OPEN',runtime_control:runtimeControl,admission_fenced:false,meta_orchestrator:metaOrchestrator,reconcile,backlog,work_graph:workGraph,lease,leases,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningRows,scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'OPEN',runtime_control:runtimeControl,admission_fenced:false,meta_orchestrator:metaOrchestrator,reconcile,backlog,work_graph:workGraph,lease,leases,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningRows,scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',fleet_dag_admission:fleetDagAdmission,lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
