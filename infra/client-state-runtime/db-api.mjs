@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import postgres from 'postgres';
 import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
 import { OPERATOR_DB_IDENTITY_SQL, qualifyLocalPostgresEvidence } from './operator-truth-readback.mjs';
+import { qualifyOperatorOwner, readOwnPostgresOperatorTruth } from './operator-own-pg-fleet-truth.mjs';
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -56,8 +57,9 @@ function driverValues(sql, values) {
   });
 }
 
-export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql, hostObservationReadback = null } = {}) {
+export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql, hostObservationReadback = null, operatorOwnerReadback = null } = {}) {
   if (hostObservationReadback !== null && typeof hostObservationReadback !== 'function') throw new Error('operator_host_readback_invalid');
+  if (operatorOwnerReadback !== null && typeof operatorOwnerReadback !== 'function') throw new Error('operator_owner_readback_invalid');
   if (!['service_role', 'direct'].includes(roleMode)) throw new Error('local_state_api_role_mode_invalid');
   if (host !== '127.0.0.1') throw new Error('local_state_loopback_host_required');
   if (typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(apiKey)) throw new Error('local_state_random_api_key_required');
@@ -78,7 +80,8 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
   let signatures;
   let tableAccess;
   let activeRequests = 0;
-  const transaction = (run) => sql.begin(async (tx) => {
+  const transaction = (run, { readOnly = false } = {}) => sql.begin(async (tx) => {
+    if (readOnly) await tx.unsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     if (roleMode === 'service_role') await tx.unsafe("SET LOCAL ROLE service_role");
     await tx.unsafe("SET LOCAL search_path = pg_catalog, public, extensions");
     await tx.unsafe("SET LOCAL statement_timeout = '10s'");
@@ -165,9 +168,35 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
           } catch { hostObservation = null; }
           finally { clearTimeout(timer); }
         }
+        // The service key authenticates this route but does NOT prove the Owner.
+        // Owner evidence can only enter from a trusted in-process adapter.
+        let owner = null;
+        if (operatorOwnerReadback) {
+          let timer;
+          try {
+            owner = await Promise.race([
+              Promise.resolve().then(() => operatorOwnerReadback()),
+              new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); }),
+            ]);
+          } catch { owner = null; }
+          finally { clearTimeout(timer); }
+        }
         const nowMs = Date.now();
+        // Never run the ledger SELECTs without a fresh, exact Owner/generation.
+        // Missing SELECT grants, schema, or SQL readback leave both planes UNKNOWN.
+        let ledger = null;
+        if (qualifyOperatorOwner(owner, nowMs)) {
+          try {
+            ledger = await transaction(
+              tx => readOwnPostgresOperatorTruth({ tx, owner, nowMs }),
+              { readOnly: true },
+            );
+          } catch { ledger = null; }
+        }
         return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
           ...(hostObservation ? { host: hostObservation } : {}),
+          ...(ledger?.fleet ? { fleet: ledger.fleet } : {}),
+          ...(ledger?.continuity ? { continuity: ledger.continuity } : {}),
           database: qualifyLocalPostgresEvidence({
             clockRows, capabilityRows: rows, nowMs,
             rpcAvailable: RPC_ALLOWLIST.length - missing.length,
