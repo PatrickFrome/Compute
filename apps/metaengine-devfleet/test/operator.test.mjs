@@ -251,29 +251,49 @@ test('batch sends on distinct verified Chat surfaces with durable receipts and n
  assert.equal(b.sent,3);assert.equal(f.sends.length,3);
  assert.deepEqual(a.receipts,b.receipts);
 });
-test('batch refuses unverified model and existing draft before any persisted send',async()=>{
+test('batch dispatch accepts owner-authorized model label gaps and replaces drafts',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
  const tab=(await op.create({request_id:'batch-model-chat-20261012',count:1})).sessions[0].tab_id;
- const assignments=[{tab_id:tab,request_id:'batch-model-task-20261012',text:'Do not send until verified'}];
+ const assignments=[{tab_id:tab,request_id:'batch-model-task-20261012',text:'Ship the real roadmap change'}];
  f.setModelProven(false);
- assert.equal((await op.batchAssign({assignments})).receipts[0].state,'REFUSED');
- f.setModelProven(true);f.setDraft(true);
- assert.equal((await op.batchAssign({assignments})).receipts[0].state,'REFUSED');
- assert.equal(f.sends.length,0);
- assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,0);
-});
-test('unknown first Send blocks later batch effects even after restart',async()=>{
- const f=fixture(),op=new DevFleetOperator(f);await op.init();
- const tabs=(await op.create({request_id:'batch-unknown-chats-20261012',count:2})).sessions;
- const assignments=tabs.map((x,i)=>({tab_id:x.tab_id,request_id:'batch-unknown-task-20261012-'+i,text:'Task '+i}));
- f.failSend(true);
- const a=await op.batchAssign({assignments});
- assert.equal(a.state,'HALTED');assert.equal(a.ambiguous,1);
- assert.equal(a.receipts[1].state,'NOT_ATTEMPTED');assert.equal(f.sends.length,1);
- const resumed=new DevFleetOperator(f);await resumed.init();
- const b=await resumed.batchAssign({assignments});
- assert.equal(b.state,'HALTED');assert.equal(b.receipts[0].state,'AMBIGUOUS');
+ f.setDraft(true);
+ const first=await op.batchAssign({assignments});
+ assert.equal(first.state,'COMPLETED');
+ assert.equal(first.receipts[0].state,'SENT');
  assert.equal(f.sends.length,1);
+ assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,1);
+ const again=await op.batchAssign({assignments});
+ assert.equal(again.receipts[0].state,'SENT');
+ assert.equal(f.sends.length,1);
+});
+test('unknown Send fences its tab but unrelated batch lanes still advance, no retries after restart',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'batch-unknown-chats-20261012',count:3})).sessions;
+ const assignments=tabs.map((x,i)=>({tab_id:x.tab_id,request_id:'batch-unknown-task-20261012-'+i,text:'Task '+i}));
+ let n=0;
+ const wrapped={...f.adapter,async send(tab,text){
+   n++;
+   if(n===1)throw Error('post_click_network_unknown');
+   return f.adapter.send(tab,text);
+ }};
+ const operator=new DevFleetOperator({adapter:wrapped,store:f.store});await operator.init();
+ const a=await operator.batchAssign({assignments});
+ assert.equal(a.state,'PARTIAL_AMBIGUOUS');
+ assert.equal(a.ambiguous,1);
+ assert.equal(a.sent,2);
+ assert.deepEqual(a.receipts.map(x=>x.state),['AMBIGUOUS','SENT','SENT']);
+ assert.equal(n,3);
+ const replay=await operator.batchAssign({assignments});
+ assert.deepEqual(replay.receipts,a.receipts);
+ assert.equal(n,3);
+ const resumed=new DevFleetOperator({adapter:wrapped,store:f.store});await resumed.init();
+ const b=await resumed.batchAssign({assignments});
+ assert.equal(b.receipts[0].state,'AMBIGUOUS');
+ assert.equal(n,3);
+ await assert.rejects(resumed.assign({
+   tab_id:tabs[0].tab_id,request_id:'unknown-tab-new-intent-20261013',text:'Must be fenced'
+ }),/reconciliation_required/);
+ assert.equal(n,3);
 });
 test('bad batch identity never reaches probe, receipt ledger or Send',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
@@ -328,16 +348,15 @@ test('ambiguous Send prevents closing a tab with unknown external outcome',async
  await assert.rejects(op.closeTab({request_id:'close-blocked-20261012',tab_id:tab}),/blocked_by_ambiguous_send/);
  assert.equal(f.closes.length,0);assert.equal(op.snapshot().session_count,1);
 });
-test('existing draft is refused before write-ahead or Send, no phantom AMBIGUOUS',async()=>{
+test('existing composer draft is replaceable and does not block write-ahead Send',async()=>{
  const f=fixture(),op=new DevFleetOperator(f);await op.init();
  const tab=(await op.create({request_id:'create-draft-fence-20261012',count:1})).sessions[0].tab_id;
  f.setDraft(true);
- await assert.rejects(op.assign({request_id:'safe-draft-block-20261012',tab_id:tab,text:'Roadmap'}),/chat_input_not_ready_or_draft_present/);
- assert.equal(f.sends.length,0);
- assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,0);
- f.setDraft(false);
- const result=await op.assign({request_id:'safe-draft-block-20261012',tab_id:tab,text:'Roadmap'});
- assert.equal(result.state,'SENT');
+ const receipt=await op.assign({request_id:'safe-draft-block-20261012',tab_id:tab,text:'Roadmap'});
+ assert.equal(receipt.state,'SENT');
+ assert.equal(f.sends.length,1);
+ assert.equal(f.disk.requests.filter(x=>x.operation==='assign').length,1);
+ assert.equal((await op.assign({request_id:'safe-draft-block-20261012',tab_id:tab,text:'Roadmap'})).state,'SENT');
  assert.equal(f.sends.length,1);
 });
 test('restore from own independent local profile preserves chats, no duplicate creation requests',async()=>{

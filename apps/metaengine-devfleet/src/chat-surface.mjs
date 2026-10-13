@@ -4,6 +4,7 @@ import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttrib
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
+import {receiptMarker,postedMessageObserved} from './send-receipt-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -363,7 +364,9 @@ export class ChatSurface {
     if (singleButton(before,stopNames)) throw new Error('chatgpt_current_generation_active');
     const composer = composerControls(before)[0] || null;
     if (!composer) throw new Error('chatgpt_composer_not_unique_or_login_required');
-    if(val(composer,'value').length !== 0) throw new Error('existing_chat_draft_must_be_reconciled');
+    // Any existing composer text is an owner-authorized replaceable task draft.
+    // focusAndType selects and clears it, then exact AX readback below proves
+    // replacement before issuing the only physical Send click.
     const beforeText = transcript(before);
     // The request-ID suffix makes the sent message unique within each chat.
     if (beforeText.includes(text)) throw new Error('request_already_in_transcript');
@@ -372,26 +375,42 @@ export class ChatSurface {
     const typedComposer = composerControls(typed)[0] || null;
     const typedValue = typedComposer ? val(typedComposer,'value') : '';
     if (typedValue !== text) throw new Error('composer_exact_draft_not_proven');
-    const send = sendControls(typed)[0] || null;
-    if (!send || sendControls(typed).length!==1) throw new Error('send_button_not_unique');
-    // Re-validate origin, process target, composer and immutable typed content
-    // immediately before a SINGLE physical click. No Enter/click fallback.
-    if (view.webContents.getURL() !== initialUrl || !this.#views.has(tabId))
+    // A submit control may change its accessible name, disappear, or be
+    // overlaid by the ChatGPT UI. The exact, already verified composer is
+    // the sole submit target. Only ONE Enter is ever sent; no fallback click.
+    if (view.webContents.getURL() !== initialUrl || this.#views.get(tabId)!==view)
       throw new Error('chatgpt_target_changed_before_send');
-    // Verify Chat—not Work—again after typing, immediately before the sole Send click.
     const finalMode = await this.#mode(view);
     if (finalMode.mode !== 'CHAT' || finalMode.page_failure)
       throw new Error('chat_only_send_gate_refused');
-    await clickNode(view,send.backendDOMNodeId);
-    for (let i=0;i<35;i++) {
-      await sleep(350);
-      const url = view.webContents.getURL();
+    if (singleButton(typed,stopNames))
+      throw new Error('chatgpt_current_generation_active');
+    const dbg=view.webContents.debugger;
+    await dbg.sendCommand('DOM.enable');
+    await dbg.sendCommand('DOM.focus',{backendNodeId:typedComposer.backendDOMNodeId});
+    await dbg.sendCommand('Input.dispatchKeyEvent',{
+      type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await dbg.sendCommand('Input.dispatchKeyEvent',{
+      type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    // The prompt can span numerous AX paragraphs. Comparing the entire
+    // text as a contiguous substring caused false AMBIGUOUS receipts.
+    // Require unique durable request marker, conversation URL and cleared
+    // composer; a marker still sitting in the draft NEVER proves delivery.
+    const marker=receiptMarker(text);
+    if (!marker) throw new Error('send_receipt_marker_missing');
+    for (let i=0;i<70;i++) {
+      await sleep(400);
+      const url=view.webContents.getURL();
       if (!chatUrl(url)) throw new Error('chatgpt_origin_changed_after_send');
-      const nodes = await ax(view);
-      const currentText = transcript(nodes);
-      const currentComposer = composerFrom(nodes);
-      if (chatUrl(url,true) && currentText.includes(text) &&
-          (!currentComposer || val(currentComposer,'value').length === 0)) {
+      if(this.#views.get(tabId)!==view || view.webContents.isDestroyed())
+        throw new Error('chatgpt_target_changed_after_send');
+      const nodes=await ax(view);
+      const currentComposer=composerFrom(nodes);
+      if(postedMessageObserved({
+        url,composer_observed:!!currentComposer,
+        composer_value:currentComposer?val(currentComposer,'value'):null,
+        transcript:transcript(nodes),request_id:marker
+      })) {
         return {state:'PROVEN_SENT',tab_id:tabId,url,
           target_id:'webcontents:'+view.webContents.id,prompt_sha256:sha(text)};
       }

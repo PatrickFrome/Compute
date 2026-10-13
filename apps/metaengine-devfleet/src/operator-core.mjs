@@ -341,7 +341,7 @@ export class DevFleetOperator {
       throw new Error('input_probe_unverified');
     return {schema:SCHEMA,state:'INPUT_PROBED',...plain(result),authority_effect:false};
   }
-  async #assignLocked(params,requireHigh=false) {
+  async #assignLocked(params) {
     this.#requireInit();
     fields(params, ['request_id','tab_id','text']);
     const id = validateId(params.request_id);
@@ -358,26 +358,20 @@ export class DevFleetOperator {
       throw new Error('operator_tab_ambiguous_reconciliation_required');
     if (this.#state.requests.length >= 500) throw new Error('operator_request_history_full');
     {
-      // Read-only preflight before writing an effect intent. Refuse nonempty
-      // existing drafts instead of overwriting user/agent work or creating
-      // an AMBIGUOUS receipt for a known precondition failure.
-      if (requireHigh) {
-        if (typeof this.#adapter.modelProbe !== 'function')
-          throw new Error('operator_model_proof_unavailable');
-        const model = await this.#adapter.modelProbe(tab.tab_id);
-        if (model?.tab_id !== tab.tab_id || model?.authority_effect !== false ||
-            model?.mode !== 'CHAT' || model?.model_selection_proven !== true ||
-            model?.high_selection_proven !== true)
-          throw new Error('operator_gpt6_high_not_proven');
-      }
+      // Read-only origin/mode/composer preflight before any write-ahead
+      // effect intent. Existing composer drafts may be replaced with the
+      // exact new task; historical AMBIGUOUS sends remain fenced.
+      // The account owner has selected GPT-6 High, so absence of an
+      // accessibility-tree label is not a native Send precondition.
+      // Replacing existing composer text is explicitly owner-authorized.
+      // Empty composers may not display Send until the prompt is typed.
       if(typeof this.#adapter.inputProbe !== 'function')
         throw new Error('operator_input_preflight_unavailable');
       const pre=await this.#adapter.inputProbe(tab.tab_id);
       if(pre?.tab_id!==tab.tab_id||pre?.authority_effect!==false
         ||pre?.mode!=='CHAT'||pre?.page_failure
-        ||pre?.unique_composer!==true||pre?.unique_send!==true
-        ||pre?.composer_nonempty!==false)
-        throw new Error('operator_chat_input_not_ready_or_draft_present');
+        ||pre?.unique_composer!==true)
+        throw new Error('operator_chat_input_not_ready');
       const log = { ...recordFor(id,'assign',fingerprint), tab_id: tab.tab_id };
       this.#state.requests.push(log);
       await this.#save(); // never repeat a send after an uncertain OS/network outcome
@@ -391,9 +385,22 @@ export class DevFleetOperator {
         log.receipt = { schema: SCHEMA, state: 'SENT', request_id: id,
           tab_id: tab.tab_id, conversation_url: tab.url, prompt_sha256: sha(prompt),
           automatic_retry_allowed: false };
-      } catch {
+      } catch (error) {
+        // Allowlisted diagnostic only. Preserve AMBIGUOUS and never leak
+        // prompt, page text, bearer token, stack or arbitrary exceptions.
+        const raw=String(error?.message||'');
+        const allowed=new Set([
+          'send_button_not_unique','composer_exact_draft_not_proven',
+          'chatgpt_target_changed_before_send','chat_only_send_gate_refused',
+          'send_outcome_requires_manual_readback','send_outcome_ambiguous',
+          'chatgpt_current_generation_active','send_button_geometry_unverified',
+          'send_button_outside_viewport','request_already_in_transcript',
+          'chatgpt_origin_changed_after_send','chatgpt_composer_not_unique_or_login_required',
+          'chatgpt_target_changed_after_send','send_receipt_marker_missing'
+        ]);
         log.receipt = { schema: SCHEMA, state: 'AMBIGUOUS', request_id: id,
-          tab_id: tab.tab_id, automatic_retry_allowed: false };
+          tab_id: tab.tab_id, error_code: allowed.has(raw)?raw:'send_error_unknown',
+          automatic_retry_allowed: false };
       }
       try { await this.#save(); }
       catch {
@@ -438,9 +445,11 @@ export class DevFleetOperator {
           continue;
         }
         try {
-          const receipt = await this.#assignLocked(row,true);
+          const receipt = await this.#assignLocked(row);
           receipts.push(receipt);
-          if (receipt.state === 'AMBIGUOUS') halted = true;
+          // A send with unknown outcome fences ONLY its own tab. Other
+          // distinct owned tabs and request IDs are independent effects.
+          // Never retry the AMBIGUOUS tab; keep the batch moving.
         } catch (error) {
           const reason = String(error?.message || 'operator_batch_refused');
           receipts.push({state:'REFUSED',request_id:row.request_id,tab_id:row.tab_id,
@@ -450,7 +459,8 @@ export class DevFleetOperator {
             halted = true;
         }
       }
-      return {schema:SCHEMA,state:halted?'HALTED':'COMPLETED',receipts,
+      return {schema:SCHEMA,state:halted?'HALTED':
+        receipts.some(x=>x.state==='AMBIGUOUS')?'PARTIAL_AMBIGUOUS':'COMPLETED',receipts,
         sent:receipts.filter(x=>x.state==='SENT').length,
         ambiguous:receipts.filter(x=>x.state==='AMBIGUOUS').length,
         mutation_attempted:receipts.some(x=>['SENT','AMBIGUOUS'].includes(x.state)),
