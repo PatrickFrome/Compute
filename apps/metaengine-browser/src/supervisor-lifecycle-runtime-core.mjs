@@ -166,9 +166,12 @@ export class SupervisorLifecycleRuntime {
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
   #requireAuthoritativeAdmission = false;
   #processIncarnationId = null;
+  #continuityLease = null; #continuityReady = true; #continuityError = null;
 
-  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null, requireAuthoritativeAdmission = false, processIncarnationId = null } = {}) {
+  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null, requireAuthoritativeAdmission = false, processIncarnationId = null, continuityLease = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof canActuate !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
+    if (continuityLease && ['acquireBoot','renew','reserveWake','markAmbiguous','reconcile','settleWake','snapshot'].some(name => typeof continuityLease[name] !== 'function')) throw new Error('supervisor_continuity_lease_adapter_invalid');
+    this.#continuityLease = continuityLease; this.#continuityReady = !continuityLease;
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
@@ -191,6 +194,13 @@ export class SupervisorLifecycleRuntime {
       ...(this.#processIncarnationId ? { processIncarnationId: this.#processIncarnationId } : {}),
     });
     await this.#keepalive.init();
+    if (this.#continuityLease) {
+      try {
+        const boot = await this.#continuityLease.acquireBoot();
+        this.#continuityReady = !!boot && boot.reconciliation_required !== true;
+        this.#continuityError = this.#continuityReady ? null : 'BOOT_LEASE_FENCED_OR_WAKE_UNRESOLVED';
+      } catch { this.#continuityReady = false; this.#continuityError = 'OWN_POSTGRES_LEASE_READBACK_UNAVAILABLE'; }
+    }
     if (this.#requireAuthoritativeAdmission || this.#runtimeControl.authoritative === true) {
       await this.#applyRuntimeControlToKeepalive();
     }
@@ -272,6 +282,14 @@ export class SupervisorLifecycleRuntime {
       schema: 'metaengine.supervisor-lifecycle-runtime.v4',
       keepalive: this.#keepalive?.snapshot() || null,
       supervisor_generation: this.#lastSupervisorGeneration,
+      continuity_lease: {
+        enabled: !!this.#continuityLease, ready: this.#continuityReady,
+        reason: this.#continuityError,
+        lease_generation: this.#continuityLease?.snapshot()?.lease_generation ?? null,
+        event_seq: this.#continuityLease?.snapshot()?.event_seq ?? null,
+        reconciliation_required: this.#continuityLease?.snapshot()?.reconciliation_required ?? null,
+        authority_effect: false, automatic_retry_allowed: false,
+      },
       supervisor_session: this.#sessionMonitor?.snapshot() || null,
       continuous_service: {
         enabled: this.#requireAuthoritativeAdmission
@@ -314,7 +332,7 @@ export class SupervisorLifecycleRuntime {
       wake_send_failure_count: this.#wakeSendFailureCount,
       worker_signals: structuredClone(this.#lastWorkerSignals),
       quiescent: this.isQuiescent(),
-      actuation_enabled: this.#canActuate() === true
+      actuation_enabled: this.#continuityReady && this.#canActuate() === true
         && (!this.#requireAuthoritativeAdmission || devosRuntimeControlAllowsContinuousService(this.#runtimeControl)),
       last_error: this.#lastError,
       authority_effect: false,
@@ -472,11 +490,33 @@ export class SupervisorLifecycleRuntime {
       if (requireWakeIntent) throw new Error('supervisor_wake_transport_intent_current_wake_required');
       return false;
     }
+    // Own PostgreSQL CAS is an additional fence under the SAME executor.
+    // A predecessor's unresolved wake cannot become a second physical Send.
+    if (this.#continuityLease) {
+      if (!this.#continuityReady) throw new Error('supervisor_continuity_lease_fenced');
+      const durable = this.#continuityLease.snapshot();
+      if (durable?.pending_wake_id !== marker) {
+        if (durable?.pending_wake_id) throw new Error('supervisor_predecessor_wake_reconciliation_required');
+        const reserved = await this.#continuityLease.reserveWake({ wake_id: marker,
+          supervisor_epoch: wake.supervisor_epoch, cycle_seq: wake.cycle_seq });
+        if (reserved?.pending_wake_id !== marker) throw new Error('supervisor_wake_lease_cas_not_proven');
+      }
+    }
     // Must complete durable write/readback before any actual page send effect.
     await this.#keepalive.recordWakeTransportIntent({
       wake_id: marker, phase, tab_id: tabId, frame, message,
     });
     return true;
+  }
+
+  async #assertContinuitySendFence(wakeId) {
+    if (!this.#continuityLease) return;
+    const fresh = await this.#continuityLease.renew();
+    if (!fresh || fresh.pending_wake_id !== wakeId
+      || fresh.pending_wake_status !== 'PREPARED') {
+      this.#continuityReady = false;
+      throw new Error('supervisor_continuity_send_lease_fenced');
+    }
   }
 
   async #typeAndSend(tabId, message, positiveMarker, { requireWakeIntent = false } = {}) {
@@ -555,6 +595,7 @@ export class SupervisorLifecycleRuntime {
         executeCommand: this.#execute, tab_id: tabId, frame: before, text: message,
         beforeSend: async () => {
           if (this.#canActuate() !== true) throw new Error('supervisor_admission_closed_at_send_boundary');
+          if (requireWakeIntent) await this.#assertContinuitySendFence(positiveMarker);
           if (requireWakeIntent) {
             const pending = this.#keepalive.snapshot().pending_wake;
             if (pending?.wake_id !== positiveMarker || pending.ambiguous_at
@@ -611,6 +652,7 @@ export class SupervisorLifecycleRuntime {
         executeCommand: this.#execute, tab_id: tabId, frame: await this.#capture(tabId), text: GLM_SUPERVISOR_CONVERSATION_SEED,
         beforeSend: async () => {
           if (this.#canActuate() !== true) throw new Error('supervisor_admission_closed_at_send_boundary');
+          if (requireWakeIntent) await this.#assertContinuitySendFence(positiveMarker);
           if (requireWakeIntent) {
             const pending = this.#keepalive.snapshot().pending_wake;
             if (pending?.wake_id !== positiveMarker || pending.ambiguous_at
@@ -656,6 +698,32 @@ export class SupervisorLifecycleRuntime {
     'SEMANTIC_SUBMIT_SUPPRESSED',
   ]);
 
+  async #markWakeAmbiguous(wakeId, reason, options) {
+    // Mark PostgreSQL first so a crash after this point still preserves the
+    // unknown Send outcome. Local keepalive retains its own durable fence.
+    if (this.#continuityLease) {
+      const lease = this.#continuityLease.snapshot();
+      if (lease?.pending_wake_id === wakeId) await this.#continuityLease.markAmbiguous(wakeId);
+    }
+    return this.#keepalive.markWakeAmbiguous(wakeId, reason, options);
+  }
+
+  async reconcileSupervisorWakeReceipt(receipt) {
+    if (!this.#continuityLease || !this.#keepalive) throw new Error('supervisor_continuity_reconciliation_unavailable');
+    const settled = await this.#continuityLease.reconcile(receipt);
+    if (!['CONFIRMED_SENT','PROVEN_NOT_SENT'].includes(settled.state)) return settled;
+    const keepalive = this.#keepalive.snapshot();
+    if (keepalive.pending_wake?.wake_id === receipt.wake_id && keepalive.state === 'WAKE_AMBIGUOUS') {
+      await this.#keepalive.resolveAmbiguous({ observed_sent: settled.state === 'CONFIRMED_SENT' });
+    } else if (!(settled.state === 'CONFIRMED_SENT' && keepalive.active_wake?.wake_id === receipt.wake_id)) {
+      this.#continuityReady = false;
+      return { state: 'LOCAL_KEEPALIVE_SETTLEMENT_REQUIRED', automatic_retry_allowed: false, authority_effect: false };
+    }
+    const released = await this.#continuityLease.settleWake({ wake_id: receipt.wake_id, receipt_sha256: settled.receipt_sha256 });
+    this.#continuityReady = !!released && released.reconciliation_required !== true;
+    return { ...settled, local_keepalive_settled: this.#continuityReady, authority_effect: false };
+  }
+
   async #sendWake(prepared) {
     if (this.#canActuate() !== true) return false;
     let clicked = false;
@@ -663,6 +731,11 @@ export class SupervisorLifecycleRuntime {
       const sent = await this.#typeAndSend(prepared.tab_id, prepared.message, prepared.pending.wake_id, { requireWakeIntent: true });
       clicked = sent.clicked === true;
       if (sent.ok) {
+        // The page can demonstrate activity, but only a trusted native receipt
+        // reconciles the durable effect. Retain the same wake as AMBIGUOUS in PG.
+        if (this.#continuityLease?.snapshot()?.pending_wake_id === prepared.pending.wake_id) {
+          await this.#continuityLease.markAmbiguous(prepared.pending.wake_id);
+        }
         await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
         this.#activateRequest(prepared.pending, prepared.tab_id, false);
         // D-K3: a confirmed send closes the failure streak; the last error
@@ -671,7 +744,7 @@ export class SupervisorLifecycleRuntime {
         this.#composerBlockingFailureCount = 0;
         return true;
       }
-      await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'SEND_WITHOUT_POSITIVE_READBACK');
+      await this.#markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'SEND_WITHOUT_POSITIVE_READBACK');
       if (!clicked) {
         await this.#keepalive.resolveAmbiguous({ observed_sent: false });
         this.#wakeSendFailureCount += 1;
@@ -680,7 +753,7 @@ export class SupervisorLifecycleRuntime {
         this.#recordComposerBlockingFailure(String(sent.reason || ''));
       }
     } catch (e) {
-      await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, clicked ? 'SEND_PATH_AMBIGUOUS' : 'NO_SEND_EFFECT').catch(() => {});
+      await this.#markWakeAmbiguous(prepared.pending.wake_id, clicked ? 'SEND_PATH_AMBIGUOUS' : 'NO_SEND_EFFECT').catch(() => {});
       if (!clicked) await this.#keepalive.resolveAmbiguous({ observed_sent: false }).catch(() => {});
       this.#lastError = String(e?.message || e).slice(0, 240);
       // D-K3: durable pre-effect failure trace. The wake was provably not
@@ -785,14 +858,14 @@ export class SupervisorLifecycleRuntime {
       const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id, { requireWakeIntent: true });
       if (!sent.ok) {
         if (sent.clicked === true) {
-          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', { continuation_tab_id: tab.tab_id });
+          await this.#markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', { continuation_tab_id: tab.tab_id });
           this.#lastRecovery = {
             action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
             reason: sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', confirmed: false, ambiguous: true,
             automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
           };
         } else {
-          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_PRE_EFFECT_ABORT', { continuation_tab_id: tab.tab_id });
+          await this.#markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_PRE_EFFECT_ABORT', { continuation_tab_id: tab.tab_id });
           await this.#keepalive.resolveAmbiguous({ observed_sent: false });
           await this.#keepalive.resume();
           if (createdHere) await this.#closeFailedBootstrapTab(tab.tab_id);
@@ -805,7 +878,7 @@ export class SupervisorLifecycleRuntime {
       const url = String(observed?.url || '');
       // A page marker without a trusted submit effect is not positive proof.
       if (!CHAT_RE.test(url) || !(generating(observed) || sent.event_driven_readback === true)) {
-        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', { continuation_tab_id: tab.tab_id });
+        await this.#markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', { continuation_tab_id: tab.tab_id });
         this.#lastRecovery = {
           action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
           reason: 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', confirmed: false, ambiguous: true,
@@ -829,7 +902,7 @@ export class SupervisorLifecycleRuntime {
       return true;
     } catch (e) {
       if (prepared?.pending?.wake_id) {
-        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_SEND_PATH_AMBIGUOUS', { continuation_tab_id: tab?.tab_id || null }).catch(() => {});
+        await this.#markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_SEND_PATH_AMBIGUOUS', { continuation_tab_id: tab?.tab_id || null }).catch(() => {});
         this.#lastRecovery = {
           action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: null,
           reason: 'BOOTSTRAP_SEND_PATH_AMBIGUOUS', confirmed: false, ambiguous: true,
@@ -1351,6 +1424,16 @@ export class SupervisorLifecycleRuntime {
     const now = Date.now();
     if (!force && now - this.#lastRun < this.#monitorMs) return this.snapshot();
     this.#lastRun = now;
+    // Every cycle requires fresh DB lease readback; a lost or contested lease
+    // stops the existing executor rather than creating a new scheduler.
+    if (this.#continuityLease) {
+      try {
+        const current = await this.#continuityLease.renew();
+        this.#continuityReady = !!current && !current.reconciliation_required;
+        this.#continuityError = this.#continuityReady ? null : 'LEASE_LOST_OR_WAKE_RECONCILIATION_REQUIRED';
+      } catch { this.#continuityReady = false; this.#continuityError = 'OWN_POSTGRES_LEASE_READBACK_UNAVAILABLE'; }
+      if (!this.#continuityReady) return this.snapshot();
+    }
     try {
       if (this.#requireAuthoritativeAdmission && this.#runtimeControl.authoritative !== true) return this.snapshot();
       const admissionOpen = !this.#requireAuthoritativeAdmission
