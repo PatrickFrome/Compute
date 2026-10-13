@@ -44,7 +44,7 @@ const STATE_HINTS: Record<string, string> = {
 
 export function OperatorObservatoryPage() {
   const [view, setView] = useState<ViewName>("Now");
-  const [projection, setProjection] = useState(() => emptyOperatorObservatory());
+  const [projection, setProjection] = useState<ReturnType<typeof reduceOperatorObservatory> | ReturnType<typeof emptyOperatorObservatory>>(() => emptyOperatorObservatory());
   const [connection, setConnection] = useState<"UNBOUND" | "READING" | "OBSERVED" | "UNAVAILABLE">("UNBOUND");
   const previous = useRef<ReturnType<typeof reduceOperatorObservatory> | null>(null);
   const flight = useRef(false);
