@@ -22,7 +22,7 @@ test('hot contract stages, switches, rolls back, and restarts without EXE change
   assert.equal(p.contract.max_batch_items,8);
   const s=await p.stage({expected_generation:0,contract:tightened()});
   assert.equal(s.state,'STAGED');assert.equal(p.contract.dispatch_enabled,true);
-  await assert.rejects(p.activate({expected_generation:0,expected_sha256:'0'.repeat(64)}),/sha_mismatch/);
+  assert.throws(()=>p.activate({expected_generation:0,expected_sha256:'0'.repeat(64)}),/sha_mismatch/);
   const live=await p.activate({expected_generation:0,expected_sha256:s.staged_sha256});
   assert.equal(live.generation,1);assert.equal(live.dispatch_enabled,false);
   assert.equal(p.contract.max_batch_items,2);
