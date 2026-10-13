@@ -9,7 +9,8 @@ const MAX_AGE = 30_000;
 const CLOCK_SKEW = 5_000;
 const toMs = value => value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
 const safeInt = value => Number.isSafeInteger(value) && value >= 0;
-const bad = state => ({ fleet: null, continuity: null, reason: state });
+const bad = (state, owner, nowMs) => state === 'AMBIGUOUS' && owner
+  ? failures(state, owner, nowMs) : { fleet: null, continuity: null, reason: state };
 const observation = (source, state, owner, nowMs, extra = {}) => ({
   source, state, proven: true, owner_id: owner.owner_id,
   heartbeat_at: new Date(toMs(owner.heartbeat_at)).toISOString(),
@@ -92,7 +93,8 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
     tx.unsafe(OPERATOR_OWN_PG_EVENT_SQL, [owner.project_id, afterSeq, project.last_seq]),
   ]);
   if (!Array.isArray(tasks) || !Array.isArray(events)) return bad('UNKNOWN');
-  if (tasks.length > MAX_ROWS || events.length > MAX_ROWS) return bad('UNKNOWN');
+  if (tasks.length > MAX_ROWS || events.length > MAX_ROWS + 1) return bad('UNKNOWN');
+  const eventPage = events.slice(0, MAX_ROWS);
 
   const grouped = new Map();
   let state = 'AVAILABLE', claimCount = 0, maxLeaseGeneration = 0;
@@ -104,7 +106,7 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
     const previous = grouped.get(key);
     if (previous && (previous.task_seq !== row.task_seq
       || previous.lease_generation !== row.lease_generation
-      || previous.task_state !== row.task_state)) return bad('AMBIGUOUS');
+      || previous.task_state !== row.task_state)) return bad('AMBIGUOUS', owner, nowMs);
     const group = previous || { task_seq: row.task_seq, lease_generation: row.lease_generation,
       task_state: row.task_state, rows: [] };
     group.rows.push(row); grouped.set(key, group);
@@ -112,7 +114,7 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
   }
   const sequences = new Set([...grouped.values()].map(x => x.task_seq));
   if (sequences.size !== grouped.size || [...sequences].some(s => s > project.total_tasks))
-    return bad('AMBIGUOUS');
+    return bad('AMBIGUOUS', owner, nowMs);
   if (grouped.size === 0 || grouped.size > project.total_tasks) return bad('UNKNOWN');
   for (const task of grouped.values()) {
     const active = task.rows.filter(row => row.claim_id !== null && row.claim_id !== undefined);
@@ -120,7 +122,7 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
     if (active.length > 1) { fail('AMBIGUOUS'); continue; }
     const leased = task.task_state === 'LEASED' || task.task_state === 'RUNNING';
     if (!leased && active.length) { fail('AMBIGUOUS'); continue; }
-    if (leased && !active.length) { fail('UNKNOWN'); continue; }
+    if (leased && !active.length) return bad('UNKNOWN');
     if (leased) {
       const c = active[0], expires = toMs(c.claim_expires_at);
       const taskExpires = toMs(c.lease_expires_at);
@@ -131,7 +133,7 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
         || c.claim_agent_generation !== c.lease_agent_generation_epoch
         || !Number.isFinite(expires) || !Number.isFinite(taskExpires)
         || expires !== taskExpires) { fail('AMBIGUOUS'); continue; }
-      if (expires <= nowMs) fail('STALE');
+      if (expires <= nowMs) return bad('UNKNOWN');
     }
     if (['AMBIGUOUS', 'FENCED', 'BLOCKED', 'FAILED'].includes(task.task_state) && state === 'AVAILABLE')
       state = 'DEGRADED';
@@ -139,14 +141,14 @@ export async function readOwnPostgresOperatorTruth({ tx, owner, nowMs = Date.now
   if (state === 'AVAILABLE' && grouped.size !== project.total_tasks) state = 'DEGRADED';
 
   let nextSeq = afterSeq;
-  for (const event of events) {
+  for (const event of eventPage) {
     if (!safeInt(event.seq) || event.seq !== nextSeq + 1 || event.seq > project.last_seq
       || !/^[A-Z][A-Z0-9_]{0,95}$/.test(event.event_type || '')
       || (event.task_id !== null && event.task_id !== undefined && !UUID.test(event.task_id)))
-      return bad('AMBIGUOUS');
+      return bad('AMBIGUOUS', owner, nowMs);
     nextSeq = event.seq;
   }
-  if (nextSeq < project.last_seq && events.length === 0) return bad('AMBIGUOUS');
+  if (nextSeq < project.last_seq && eventPage.length === 0) return bad('AMBIGUOUS', owner, nowMs);
   const cursor = { project_id: owner.project_id, after_seq: afterSeq, next_seq: nextSeq,
     through_seq: project.last_seq, has_more: nextSeq < project.last_seq };
 
