@@ -184,14 +184,17 @@ test('unattested health or HTTP redirect cannot pass boot preflight', async t =>
   assert(f.requests.every(url => url === '/a2-browser-native-supervisor-v1/health'));
 });
 
-test('no owner file preserves legacy startup resolution and no readiness probe is sent', async t => {
+test('no owner file never resolves a hosted runtime and no readiness probe is sent', async t => {
   const f = await fixture(t);
   await fs.rm(f.ownerFile);
   const result = await probe(f);
   assert.equal(result.ok, true);
-  assert.equal(result.provider, null);
-  assert.match(result.base, /^https:\/\/jhriwwsryeqsvvvufkok\.supabase\.co\//);
+  assert.equal(result.provider, 'LOCAL_POSTGRES');
+  assert.equal(result.base, null);
+  assert.equal(result.instance, undefined);
   assert.equal(result.boot.state, 'NO_OWNER_CONFIG');
+  assert.equal(result.boot.persistent, false);
+  assert.equal(result.boot.authority_effect, false);
   assert.equal(f.requests.length, 0);
 });
 
