@@ -38,7 +38,7 @@ function fakeDatabase({ denied = false, duplicate = false } = {}) {
       if (denied) throw new Error('permission denied for relation private_ledger');
       return [{ project_id: uuid(1), workspace_id: uuid(2), device_id: uuid(3),
         client_id: 'native-owner-one', admin_grant_epoch: 7, total_tasks: 1,
-        last_seq: 1, policy_generation: 1 }];
+        last_seq: 1, policy_generation: 1, observed_at: new Date() }];
     }
     if (text === OPERATOR_OWN_PG_TASK_CLAIM_SQL) return duplicate ? [task, { ...task, claim_id: 102 }] : [task];
     if (text === OPERATOR_OWN_PG_EVENT_SQL) return [{ seq: 1, event_type: 'TASK_PROGRESS',
