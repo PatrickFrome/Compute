@@ -187,14 +187,19 @@ test('HTTP Host observer seam requires authentication and never claims product r
   const atMs = Date.now();
   const timestamp = delay => new Date(atMs + delay).toISOString();
   const browser = { pid: 3321, created_at: timestamp(-20_000), process_incarnation_id: 'http-host-incarnation-3321' };
+  const owner = { pid: 771, created_at: timestamp(-30_000), process_incarnation_id: 'http-owner-incarnation-771', owner_id: 'owner-http-771', device_id: 'device-http-771', generation: 1, observed_at: timestamp(-150) };
   const observation = {
     schema: 'metaengine.operator.host-incarnation.evidence.v1',
-    source: 'TRUSTED_HOST_READBACK', observed_at: timestamp(-100), authority_effect: false,
+    source: 'TRUSTED_HOST_READBACK', observed_at: timestamp(-100), guardian_health_observed_at: timestamp(-100), authority_effect: false,
     browser,
+    owner,
+    owner_runtime_probe: { source: 'OS_PROCESS_INVENTORY', pid: owner.pid, created_at: owner.created_at, process_incarnation_id: owner.process_incarnation_id, state: 'PRESENT', observed_at: timestamp(-120) },
     guardian: {
       schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
       state: 'READY', ready: true, guardian_service_ready: true,
       owner_binding_proven: true, device_binding_proven: true, stale: false,
+      owner_id: owner.owner_id, device_id: owner.device_id, owner_generation: owner.generation,
+      owner_pid: owner.pid, owner_created_at: owner.created_at, owner_process_incarnation_id: owner.process_incarnation_id,
       observed_at: timestamp(-150), automatic_retry_allowed: false, authority_effect: false,
     },
     runtime_probe: { source: 'OS_PROCESS_INVENTORY', ...browser, state: 'PRESENT', observed_at: timestamp(-120) },
