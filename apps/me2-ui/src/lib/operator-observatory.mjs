@@ -18,6 +18,12 @@ const VALID_STATES = new Set([
   'OFFLINE', 'DEGRADED', 'AVAILABLE', 'READY',
 ]);
 const POSITIVE_STATES = new Set(['AVAILABLE', 'READY']);
+const SOURCES = Object.freeze({
+  database: 'LOCAL_POSTGRES', client: 'NATIVE_BROWSER_READBACK',
+  supervisor: 'SIGNED_SUPERVISOR_READBACK', fleet: 'LOCAL_TASK_LEDGER',
+  host: 'TRUSTED_HOST_READBACK', source: 'EXACT_GIT_READBACK',
+  continuity: 'LOCAL_CHECKPOINT_LEDGER',
+});
 const RUN_ID = /^[a-zA-Z0-9_.:-]{1,128}$/;
 const PROOF_ID = /^[a-fA-F0-9]{64}$/;
 const MAX_SKEW_MS = 5000;
@@ -29,10 +35,12 @@ const safeDate = value => {
 const validCursor = x => Number.isSafeInteger(x) && x >= 0;
 const unknownPlane = () => ({ state: 'UNKNOWN', fresh: false, proof: 'NONE', observed_at: null });
 
-function safePlane(input, nowMs, maxAgeMs, snapshotStale) {
+function safePlane(name, input, nowMs, maxAgeMs, snapshotStale) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return unknownPlane();
   if (input.state === 'UNKNOWN' && input.proof === 'NONE' && input.fresh === false
     && (input.observed_at === null || input.observed_at === undefined)) return unknownPlane();
+  // Do not let a positive result from one plane masquerade as another.
+  if (input.source !== SOURCES[name]) return { ...unknownPlane(), state: 'UNVERIFIED' };
   const observed = safeDate(input.observed_at);
   const stamp = observed === null ? null : new Date(observed).toISOString();
   const state = VALID_STATES.has(input.state) ? input.state : 'UNVERIFIED';
@@ -108,7 +116,7 @@ export function reduceOperatorObservatory(context, { previous = null, nowMs = Da
     return fenced('AMBIGUOUS', 'CURSOR_PROOF_CONFLICT');
 
   const planes = Object.fromEntries(OBSERVATORY_PLANES.map(name => [
-    name, safePlane(context.planes?.[name], nowMs, maxAgeMs, snapshotStale),
+    name, safePlane(name, context.planes?.[name], nowMs, maxAgeMs, snapshotStale),
   ]));
   const cursor_state = run_id === null || event_seq === null || proof_identity === null
     ? 'UNKNOWN' : snapshotStale ? 'STALE' : 'VERIFIED_CURSOR';
