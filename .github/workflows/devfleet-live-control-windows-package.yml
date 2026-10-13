@@ -17,6 +17,15 @@ jobs:
         working-directory: apps/metaengine-devfleet
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact immutable checkout SHA
+        shell: pwsh
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "source_sha_mismatch" }
+          Write-Host "METAENGINE_DEVFLEET_SOURCE_SHA=$actual"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -31,7 +40,7 @@ jobs:
         run: |
           $bridge = 'dist/win-unpacked/resources/devfleet-admin-mcp.mjs'
           if (-not (Test-Path $bridge -PathType Leaf)) { throw 'packaged_admin_mcp_missing' }
-          $installers = @(Get-ChildItem -Path dist -Filter 'METAENGINE-DevFleet-Setup-0.1.0-dev.13.20261013.1-x64.exe' -File)
+          $installers = @(Get-ChildItem -Path dist -Filter 'METAENGINE-DevFleet-Setup-0.1.0-dev.14.20261013.1-x64.exe' -File)
           if ($installers.Count -ne 1) { throw 'exact_installer_identity_missing' }
           $hash = (Get-FileHash -Algorithm SHA256 $installers[0].FullName).Hash.ToLowerInvariant()
           if ($hash -notmatch '^[a-f0-9]{64}$') { throw 'installer_hash_invalid' }
@@ -39,7 +48,7 @@ jobs:
           Write-Output "METAENGINE_DEVFLEET_EXACT_BYTES=$($installers[0].Length)"
       - uses: actions/upload-artifact@v4
         with:
-          name: devfleet-live-control-windows-exe-${{ github.sha }}
-          path: apps/metaengine-devfleet/dist/METAENGINE-DevFleet-Setup-0.1.0-dev.13.20261013.1-x64.exe
+          name: devfleet-live-control-windows-exe-${{ github.event.pull_request.head.sha || github.sha }}
+          path: apps/metaengine-devfleet/dist/METAENGINE-DevFleet-Setup-0.1.0-dev.14.20261013.1-x64.exe
           if-no-files-found: error
           retention-days: 7
