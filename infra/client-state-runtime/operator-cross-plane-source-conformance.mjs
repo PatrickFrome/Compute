@@ -66,19 +66,24 @@ export function inspectW3SourceConformance({
   const run = gatewayResponse.run;
   if (!run || run.source !== 'OWN_POSTGRES_READBACK' ||
       run.proof !== 'TRUSTED_READBACK' || run.fresh !== true ||
-      !id(run.run_id) || run.owner_id !== owner.owner_id ||
-      run.project_id !== owner.project_id ||
+      !id(run.run_id) || !id(run.owner_id) || !id(run.project_id) ||
       !seq(run.owner_epoch) || run.owner_epoch < 1 ||
       parseCursor(run.cursor) === null) {
     return unknown('W3_RUN_IDENTITY_UNVERIFIED');
   }
+  if (run.owner_id !== owner.owner_id || run.project_id !== owner.project_id) {
+    return conflict('W3_OWNER_PROJECT_CONFLICT', { resync: 'EXTERNAL_OWNER_REBIND_REQUIRED' });
+  }
   if (!fresh(run.observed_at, nowMs)) return stale('W3_RUN_IDENTITY_STALE');
 
   if (!continuity || continuity.source !== 'LOCAL_CHECKPOINT_LEDGER' ||
-      continuity.proven !== true || continuity.owner_id !== owner.owner_id ||
-      continuity.owner_generation !== owner.owner_generation ||
-      !continuity.cursor || continuity.cursor.project_id !== owner.project_id) {
+      continuity.proven !== true || !continuity.cursor) {
     return unknown('OWN_PG_CONTINUITY_ABSENT');
+  }
+  if (continuity.owner_id !== owner.owner_id ||
+      continuity.owner_generation !== owner.owner_generation ||
+      continuity.cursor.project_id !== owner.project_id) {
+    return conflict('OWN_PG_CONTINUITY_OWNER_CONFLICT');
   }
   if (!fresh(continuity.observed_at, nowMs) ||
       !fresh(continuity.heartbeat_at, nowMs)) return stale('OWN_PG_CONTINUITY_STALE');
@@ -100,6 +105,33 @@ export function inspectW3SourceConformance({
   if (resetRequested) return unknown('RESET_REQUIRES_INDEPENDENT_REBIND', {
     resync: 'EXTERNAL_OWNER_REBIND_REQUIRED',
   });
+
+  // A previous local projection may only *block* inconsistent history, not
+  // make the new response trusted. Check rollback even when Source is absent.
+  if (previous !== null) {
+    if (!previous || typeof previous !== 'object' || !id(previous.run_id) ||
+        !id(previous.owner_id) || !seq(previous.owner_epoch) ||
+        !seq(previous.event_seq) || !sourceSha(previous.source_sha)) {
+      return unknown('PREVIOUS_CURSOR_BINDING_UNVERIFIED');
+    }
+    if (previous.run_id !== run.run_id || previous.owner_id !== owner.owner_id ||
+        previous.owner_epoch !== run.owner_epoch) {
+      return conflict('PREVIOUS_OWNER_RUN_SOURCE_REBIND_REQUIRED', {
+        resync: 'EXTERNAL_OWNER_REBIND_REQUIRED',
+      });
+    }
+    if (watermark < previous.event_seq) {
+      return conflict('EVENT_CURSOR_ROLLBACK', {
+        cursor: 'REGRESSION', resync: 'EXTERNAL_OWNER_REBIND_REQUIRED',
+      });
+    }
+    if (sourceSha(run.source_sha) &&
+        sourceSha(previous.source_sha) !== sourceSha(run.source_sha)) {
+      return conflict('PREVIOUS_OWNER_RUN_SOURCE_REBIND_REQUIRED', {
+        resync: 'EXTERNAL_OWNER_REBIND_REQUIRED',
+      });
+    }
+  }
 
   if (!sourceWitness) return unknown('W3_SOURCE_WITNESS_ABSENT');
   if (sourceWitness.source !== 'EXACT_GIT_READBACK' ||
@@ -132,25 +164,6 @@ export function inspectW3SourceConformance({
     return conflict('W3_SOURCE_SHA_CONFLICT');
   }
 
-  if (previous !== null) {
-    if (!previous || typeof previous !== 'object' || !id(previous.run_id) ||
-        !id(previous.owner_id) || !seq(previous.owner_epoch) ||
-        !seq(previous.event_seq) || !sourceSha(previous.source_sha)) {
-      return unknown('PREVIOUS_CURSOR_BINDING_UNVERIFIED');
-    }
-    if (previous.run_id !== run.run_id || previous.owner_id !== owner.owner_id ||
-        previous.owner_epoch !== run.owner_epoch ||
-        sourceSha(previous.source_sha) !== runSha) {
-      return conflict('PREVIOUS_OWNER_RUN_SOURCE_REBIND_REQUIRED', {
-        resync: 'EXTERNAL_OWNER_REBIND_REQUIRED',
-      });
-    }
-    if (watermark < previous.event_seq) {
-      return conflict('EVENT_CURSOR_ROLLBACK', {
-        cursor: 'REGRESSION', resync: 'EXTERNAL_OWNER_REBIND_REQUIRED',
-      });
-    }
-  }
 
   // An untrusted supplied "witness" cannot assert real source provenance.
   // The shape is useful for CI falsification and future integration only.
