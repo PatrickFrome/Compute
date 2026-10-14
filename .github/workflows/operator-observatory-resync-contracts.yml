@@ -1,0 +1,36 @@
+name: operator-observatory-resync-contracts
+on:
+  pull_request:
+    paths:
+      - 'apps/me2-ui/src/lib/operator-observatory*.mjs'
+      - 'apps/me2-ui/src/components/me2/pages/operator-observatory.tsx'
+      - 'apps/me2-ui/package.json'
+      - '.github/workflows/operator-observatory-resync-contracts.yml'
+  push:
+    branches:
+      - 'work/metaengine-wave2-w6-resync-20261014'
+    paths:
+      - 'apps/me2-ui/src/lib/operator-observatory*.mjs'
+      - 'apps/me2-ui/src/components/me2/pages/operator-observatory.tsx'
+      - 'apps/me2-ui/package.json'
+      - '.github/workflows/operator-observatory-resync-contracts.yml'
+permissions:
+  contents: read
+jobs:
+  operator-observatory-resync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check pure observer source
+        run: |
+          node --check apps/me2-ui/src/lib/operator-observatory.mjs
+          node --check apps/me2-ui/src/lib/operator-observatory-resync.mjs
+      - name: Run bounded observer and resync falsification
+        run: |
+          node --test apps/me2-ui/src/lib/operator-observatory.test.mjs apps/me2-ui/src/lib/operator-observatory-resync.test.mjs
