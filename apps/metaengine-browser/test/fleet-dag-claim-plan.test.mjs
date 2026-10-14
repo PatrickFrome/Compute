@@ -164,6 +164,66 @@ test('role-only blocked sibling prevents physical lease in existing cycle',async
   assert.equal(body.lease_attempts,0);
   assert.equal(leases,0);
 });
+test('valid DAG lease still flows exactly once through existing executor RPC',async()=>{
+  const calls=[];
+  const handler=createDevosSupervisorRoutes({
+    workspaceId,readRuntimeControl:async()=>control,
+    rpc:async(name)=>{
+      calls.push(name);
+      if(name==='devos_fleet_snapshot_v1')return snap([graph(1)]);
+      if(name==='devos_fleet_reconcile_v1')return {authority_effect:false};
+      if(name==='devos_fleet_lease_v1')return {leased:true,task_id:id(1),
+        agent_id:candidate(1).agent_id,role:'IMPLEMENTER',authority_effect:false};
+      throw Error('unavailable: '+name);
+    },
+  });
+  const r=await handler({req:{method:'POST'},path:'/v1/devos/cycle',
+    clientId:'device',body:{fleet:{agents:[candidate(1)]}}});
+  const body=await r.json();
+  assert.equal(calls.filter(x=>x==='devos_fleet_lease_v1').length,1);
+  assert.equal(body.leases.length,1);
+  assert.equal(body.fleet_dag_admission.ready,1);
+  assert.equal(body.lease_attempts,1);
+  assert.equal(body.automatic_retry_allowed,false);
+  assert.equal(body.second_scheduler_loop,false);
+});
+test('null native Owner callback cannot be substituted with an OPEN DB response',async()=>{
+  let leases=0;
+  const handler=createDevosSupervisorRoutes({
+    workspaceId,readRuntimeControl:async()=>null,
+    rpc:async name=>{
+      if(name==='devos_environment_state_v1')return control;
+      if(name==='devos_fleet_snapshot_v1')return snap([graph(1)]);
+      if(name==='devos_fleet_reconcile_v1')return {authority_effect:false};
+      if(name==='devos_fleet_lease_v1')leases++;
+      throw Error('unavailable: '+name);
+    },
+  });
+  const r=await handler({req:{method:'POST'},path:'/v1/devos/cycle',
+    clientId:'device',body:{fleet:{agents:[candidate(1)]}}});
+  const body=await r.json();
+  assert.equal(body.fleet_dag_admission.state,'FENCED');
+  assert.equal(body.lease_attempts,0);
+  assert.equal(leases,0);
+});
+test('generation-floor rollover fences a claim even when service is still OPEN',async()=>{
+  let reads=0,leases=0;
+  const handler=createDevosSupervisorRoutes({
+    workspaceId,readRuntimeControl:async()=>++reads===1?control:{...control,generation_floor:9},
+    rpc:async name=>{
+      if(name==='devos_fleet_snapshot_v1')return snap([graph(1)]);
+      if(name==='devos_fleet_reconcile_v1')return {authority_effect:false};
+      if(name==='devos_fleet_lease_v1')leases++;
+      throw Error('unavailable: '+name);
+    },
+  });
+  const r=await handler({req:{method:'POST'},path:'/v1/devos/cycle',
+    clientId:'device',body:{fleet:{agents:[candidate(1)]}}});
+  const body=await r.json();
+  assert.equal(body.lease_fenced,true);
+  assert.equal(body.lease_attempts,0);
+  assert.equal(leases,0);
+});
 test('canonical own-PG transaction remains sole claim writer',()=>{
   const sql=readFileSync(new URL('../../../infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql',import.meta.url),'utf8');
   const source=readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/fleet-dag-claim-plan.mjs',import.meta.url),'utf8');
