@@ -184,13 +184,13 @@ test('unattested health or HTTP redirect cannot pass boot preflight', async t =>
   assert(f.requests.every(url => url === '/a2-browser-native-supervisor-v1/health'));
 });
 
-test('no owner file preserves legacy startup resolution and no readiness probe is sent', async t => {
+test('no owner file retains local-only UNKNOWN and no readiness probe is sent', async t => {
   const f = await fixture(t);
   await fs.rm(f.ownerFile);
   const result = await probe(f);
   assert.equal(result.ok, true);
-  assert.equal(result.provider, null);
-  assert.match(result.base, /^https:\/\/jhriwwsryeqsvvvufkok\.supabase\.co\//);
+  assert.equal(result.provider, 'LOCAL_POSTGRES');
+  assert.equal(result.base, null);
   assert.equal(result.boot.state, 'NO_OWNER_CONFIG');
   assert.equal(f.requests.length, 0);
 });
@@ -243,4 +243,49 @@ test('packaged owner admission precedes HostResilience and main imports', async 
   assert.doesNotMatch(entry, /showInstalledRestoredProviderWizard/);
   assert.match(entry, /if \(setup\.state === 'CONFIGURED' && globalThis\.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true\)/);
   assert.match(entry, /bootstrapState = readyProvider\.state/);
+});
+
+// Physical attested Owner fixture: preserves positive signed-request/device
+// assertions without allowing tests to attach to any installed local runtime.
+test('attested local Owner binds signed heartbeat, device proof and Sentinel to immutable native instance', async t => {
+  const f = await fixture(t);
+  const action = `
+    const { createHash } = await import('node:crypto');
+    const hb = await import(${JSON.stringify(heartbeatUrl)});
+    const sentinel = await import(${JSON.stringify(new URL('../src/browser-sentinel.mjs', import.meta.url).href)});
+    const body = JSON.stringify({ state: { shell_version: 'hermetic-fixture-only' } });
+    const signed = { method: 'POST', body, headers: {
+      'x-a2-chat-bridge-client': '11111111-1111-4111-8111-111111111111',
+      'x-a2-device-id': '22222222-2222-4222-8222-222222222222',
+      'x-a2-device-profile': 'A2_DEVICE_HTTP_SIGNATURE_V1',
+      'x-a2-device-timestamp': '2026-10-15T00:00:00Z',
+      'x-a2-device-nonce': 'abcdefghijklmnopQRSTUVWX12345678',
+      'x-a2-device-body-sha256': createHash('sha256').update(body).digest('hex'),
+      'x-a2-device-signature': 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-',
+    } };
+    const base = process.env.METAENGINE_SUPERVISOR_BASE_URL;
+    const check = (url, init = signed) => hb.inspectSignedNativeSupervisorStateRequest(url, init);
+    const accepted = check(base + '/v1/state');
+    if (!accepted.valid || accepted.provider_base !== base) throw Error('local_signed_heartbeat_not_accepted');
+    if (!check(base + '/v1/heartbeat').valid) throw Error('local_signed_heartbeat_path_denied');
+    if (check(base + '/v1/state?token=1').reason !== 'endpoint_mismatch') throw Error('query_not_denied');
+    if (check('https://cloud.example/hosted/v1/state').reason !== 'endpoint_mismatch') throw Error('hosted_not_denied');
+    if (check(base + '/v1/state', { ...signed, body: body + ' ' }).reason !== 'body_hash_mismatch') throw Error('body_digest_not_revalidated');
+    if (check(base + '/v1/state', { ...signed, headers: { ...signed.headers, 'x-a2-device-signature': '' } }).reason !== 'signature_missing') throw Error('device_signature_not_checked');
+    const env = sentinel.sentinelEnvironment({ ...process.env, PGPASSWORD: 'secret', SUPABASE_ACCESS_TOKEN: 'secret' },
+      { statePath: 'fixture-state', token: 'fixture-token', parentPid: 1234 });
+    if (env.METAENGINE_SUPERVISOR_BASE_URL !== base || env.METAENGINE_LOCAL_STATE_INSTANCE_ID !== process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID || env.PGPASSWORD || env.SUPABASE_ACCESS_TOKEN) throw Error('sentinel_owner_or_secret_binding_failed');
+    const old = process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+    process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID = ${JSON.stringify(secondId)};
+    if (check(base + '/v1/state').reason !== 'endpoint_mismatch') throw Error('native_instance_drift_was_accepted');
+    try { sentinel.sentinelEnvironment(process.env, {statePath:'fixture-state',token:'fixture-token',parentPid:1234}); throw Error('drifted_sentinel_owner_was_accepted'); }
+    catch (e) { if (e.message !== 'browser_sentinel_local_owner_unattested') throw e; }
+    process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID = old;
+    if (!check(base + '/v1/state').valid) throw Error('identity_restore_not_accepted');
+  `;
+  const result = await probe(f, { action });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.base, f.base);
+  assert.equal(result.instance, firstId);
+  assert.deepEqual(f.requests, ['/a2-browser-native-supervisor-v1/health']);
 });
