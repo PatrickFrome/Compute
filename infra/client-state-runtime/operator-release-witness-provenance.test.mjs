@@ -191,3 +191,11 @@ test('non-data getter, malformed issuer and bad clock fail closed without leakin
   assert.equal(inspect({witnesses:witnesses()},{nowMs:Infinity}).state,'BLOCKED');
   noAuthority(r);
 });
+
+test('partial native witness stays UNKNOWN unless present source, owner or incarnation contradicts', () => {
+  assert.equal(call({hostObservation:{browser:{process_incarnation_id:'browser-process-456'}}}).state,'UNKNOWN');
+  const mismatch=call({hostObservation:{browser:{process_incarnation_id:'reused-process'}}});
+  assert.equal(mismatch.state,'BLOCKED');
+  assert.ok(mismatch.reasons.includes('RUNTIME_INCARNATION_MISMATCH'));
+  assert.equal(call({hostObservation:{source:'FORGED_READBACK'}}).state,'BLOCKED');
+});

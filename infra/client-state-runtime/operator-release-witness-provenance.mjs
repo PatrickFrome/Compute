@@ -3,7 +3,7 @@
 // signature verification, native readback, or process-code attestation.
 // This module deliberately has no success/authentication capability.
 import { verifyReleaseEvidenceIdentity } from './operator-release-evidence-identity.mjs';
-import { reduceHostProcessObservation } from './operator-host-incarnation-core.mjs';
+import { reduceHostProcessObservation, OPERATOR_HOST_SOURCE, OPERATOR_HOST_EVIDENCE_SCHEMA } from './operator-host-incarnation-core.mjs';
 import { PROOF_SCHEMA as EXISTING_RELEASE_ATTESTATION_SCHEMA } from '../../scripts/release-attestation-verification.mjs';
 
 export const RELEASE_WITNESS_PROVENANCE_SCHEMA = 'metaengine.operator.release-witness-provenance.v1';
@@ -115,6 +115,28 @@ export function inspectReleaseWitnessProvenance(
 
     if (hostObservation == null) {
       missing.add('TRUSTED_HOST_READBACK_ABSENT');
+    } else if (!object(hostObservation)) {
+      blocked.add('HOST_READBACK_MALFORMED');
+    } else if (['schema','source','owner','browser','guardian','runtime_probe',
+      'owner_runtime_probe','heartbeat_fence','guardian_health_observed_at','observed_at']
+      .some(key => field(hostObservation, key) == null)) {
+      // Absence of an OS/Guardian callback is UNKNOWN, not a forged-negative.
+      // Present mismatching data cannot hide behind an incomplete witness.
+      missing.add('TRUSTED_HOST_READBACK_INCOMPLETE');
+      const schema = field(hostObservation, 'schema');
+      const source = field(hostObservation, 'source');
+      if (schema != null && schema !== OPERATOR_HOST_EVIDENCE_SCHEMA)
+        blocked.add('HOST_READBACK_SCHEMA_MISMATCH');
+      if (source != null && source !== OPERATOR_HOST_SOURCE)
+        blocked.add('HOST_READBACK_SOURCE_MISMATCH');
+      const browserIncarnation = field(field(hostObservation, 'browser'), 'process_incarnation_id');
+      const expectedIncarnation = field(field(witnesses, 'runtime'), 'process_incarnation');
+      if (browserIncarnation != null && expectedIncarnation != null && browserIncarnation !== expectedIncarnation)
+        blocked.add('RUNTIME_INCARNATION_MISMATCH');
+      const hostOwnerId = field(field(hostObservation, 'owner'), 'owner_id');
+      const expectedOwnerId = field(field(witnesses, 'expected'), 'owner_id');
+      if (hostOwnerId != null && expectedOwnerId != null && hostOwnerId !== expectedOwnerId)
+        blocked.add('HOST_OWNER_MISMATCH');
     } else {
       // Reuse the existing Guardian/OS PID+birth/heartbeat fence, not a new
       // process authority. Its acceptance of JSON never proves who produced it.
