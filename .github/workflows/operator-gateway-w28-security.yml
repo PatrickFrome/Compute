@@ -1,0 +1,48 @@
+name: Operator Gateway W28 Security (hermetic)
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-readonly-gateway.mjs'
+      - 'infra/client-state-runtime/operator-gateway-security-*.mjs'
+      - 'infra/client-state-runtime/package.json'
+      - '.github/workflows/operator-gateway-w28-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gateway-security:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate (no retained credentials)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact source SHA
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Setup Node without services or package installation
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Syntax and read-only Gateway falsification
+        shell: bash
+        run: |
+          node --check infra/client-state-runtime/operator-readonly-gateway.mjs
+          node --check infra/client-state-runtime/operator-gateway-security-fence.mjs
+          node --check infra/client-state-runtime/operator-gateway-security-w28.test.mjs
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/operator-gateway-security-fence.test.mjs \
+            infra/client-state-runtime/operator-gateway-security-w28.test.mjs \
+            infra/client-state-runtime/operator-readonly-gateway.test.mjs
