@@ -27,6 +27,11 @@ function validateLocalBase(raw) {
   return `${parsed.origin}${LOCAL_PATH}`;
 }
 
+// Syntax-only validation. This does not pin a transport or attest an Owner.
+export function validateNativeSupervisorLocalBase(raw) {
+  return validateLocalBase(raw);
+}
+
 function attestedLocalBase() {
   const raw = String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim();
   const instance = String(process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID || '').trim();
@@ -40,6 +45,9 @@ function attestedLocalBase() {
 
 const pinnedLocalProviderBase = selectedProvider === 'LOCAL_POSTGRES' ?
   attestedLocalBase() : null;
+// Capture instance identity at module load, never on a later mutable env read.
+export const NATIVE_SUPERVISOR_PINNED_INSTANCE_ID = pinnedLocalProviderBase
+  ? String(process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID).trim().toLowerCase() : null;
 
 // Dynamic ESM binding is retained for old importers. It is null until a
 // trusted local Owner bootstrap succeeds; it never resolves to Supabase.
