@@ -2,7 +2,8 @@
 import {createHash} from 'node:crypto';
 
 export const CODING_QUEUE_SCHEMA = 'metaengine.devfleet.coding-queue.v1';
-export const HOT_SLOTS = 4;
+// Slot target is an operator-owned, durable configuration — not a hardcoded constant.
+export const DEFAULT_HOT_TARGET = 4;
 export const QUEUE_LIMIT = 32;
 export const QUEUE_CHAR_LIMIT = 64000;
 const idPattern = /^[a-zA-Z0-9._:-]{12,100}$/;
@@ -84,7 +85,7 @@ export function cancelQueuedTask(queue, task_id) {
 // Projects alternate deterministically, retaining FIFO within each project.
 // last_project survives explicit waves and restart. This is a proposal only.
 export function chooseFairCodingWave(queue, count) {
-  if(!Number.isSafeInteger(count)||count<0||count>HOT_SLOTS)
+  if(!Number.isSafeInteger(count)||count<0)
     throw Error('coding_queue_admission_budget_invalid');
   const projects=new Map();
   for(const item of queue.items)if(item.state==='QUEUED'){
@@ -102,16 +103,19 @@ export function chooseFairCodingWave(queue, count) {
   }
   return {task_ids:picks,last_project:cursor};
 }
-export function codingQueueSummary(queue, sessionCount, sessionIds=[]) {
+export function codingQueueSummary(queue, sessionCount, sessionIds=[],hotTarget=DEFAULT_HOT_TARGET) {
   if(!Number.isSafeInteger(sessionCount) || sessionCount<0)
     throw Error('coding_queue_session_count_invalid');
+  if(!Number.isSafeInteger(hotTarget)||hotTarget<1)
+    throw Error('coding_queue_hot_target_invalid');
   const hold=queue.items.filter(x=>['RESERVED','CREATION_UNKNOWN','INTERRUPTED_UNKNOWN'].includes(x.state) &&
     (!x.tab_id || !sessionIds.includes(x.tab_id))).length;
   const used=sessionCount+hold;
   const counts={};
   for(const item of queue.items)counts[item.state]=(counts[item.state]||0)+1;
-  return {schema:CODING_QUEUE_SCHEMA,hot_limit:HOT_SLOTS,
-    occupied_or_reserved:used,free_hot_slots:Math.max(0,HOT_SLOTS-used),
+  return {schema:CODING_QUEUE_SCHEMA,hot_limit:hotTarget,
+    slot_limit_source:'DURABLE_OPERATOR_CONFIGURATION',
+    occupied_or_reserved:used,free_hot_slots:Math.max(0,hotTarget-used),
     counts,last_project:queue.last_project,
     items:queue.items.map(x=>({task_id:x.task_id,request_id:x.request_id,
       project_id:x.project_id,state:x.state,tab_id:x.tab_id})),

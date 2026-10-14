@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyCodingQueue,readCodingQueue,enqueueCodingTask,cancelQueuedTask,
- chooseFairCodingWave,codingQueueSummary,HOT_SLOTS,QUEUE_LIMIT} from '../src/coding-task-queue-core.mjs';
+ chooseFairCodingWave,codingQueueSummary,QUEUE_LIMIT} from '../src/coding-task-queue-core.mjs';
 const task=(project,id)=>({project_id:project,task_id:'task-20261014-'+id,
  request_id:'send-20261014-'+id,text:'Build hermetic source tests for '+id,
  kind:'SOURCE_CODING',scope:'SOURCE_ONLY',draft_pr_only:true});
@@ -36,7 +36,7 @@ test('queue bounded by 32 tasks, no silent eviction of old identities',()=>{
  assert.equal(q.items.length,32);
  assert.throws(()=>add(q,'group-alpha','overflow'),/capacity_exceeded/);
  assert.equal(codingQueueSummary(q,0).items.length,32);
- assert.equal(HOT_SLOTS,4);
+ assert.equal(codingQueueSummary(q,0).hot_limit,4);
  assert.equal(JSON.stringify(codingQueueSummary(q,0)).includes('Build hermetic'),false);
 });
 test('cancel only unreserved, cannot resurrect or replay task id',()=>{
@@ -55,7 +55,7 @@ test('missing/corrupted persisted queue fails closed',()=>{
  assert.throws(()=>readCodingQueue({...q,items:[{...q.items[0],text:''}]}),/state_invalid/);
  assert.throws(()=>readCodingQueue({...q,items:[{...q.items[0],text:'Tampered prompt'}]}),/state_invalid/);
  assert.throws(()=>readCodingQueue({...q,last_project:'?'}),/state_invalid/);
- assert.throws(()=>chooseFairCodingWave(q,5),/budget_invalid/);
+ assert.equal(chooseFairCodingWave(q,5).task_ids.length,1);
 });
 test('fenced, orphaned CREATE reservation consumes hot budget after restart',()=>{
  let q=add(emptyCodingQueue(),'group-alpha','x0');

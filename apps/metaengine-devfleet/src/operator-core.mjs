@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { runObservationBatch } from './fleet-observation-core.mjs';
 import {emptyCodingQueue,readCodingQueue,enqueueCodingTask,cancelQueuedTask,
-  chooseFairCodingWave,codingQueueSummary,HOT_SLOTS} from './coding-task-queue-core.mjs';
+  chooseFairCodingWave,codingQueueSummary,DEFAULT_HOT_TARGET} from './coding-task-queue-core.mjs';
 
 export const SCHEMA = 'metaengine.devfleet.operator.v1';
 const requestRe = /^[A-Za-z0-9._:-]{12,100}$/;
@@ -37,7 +37,8 @@ export class DevFleetOperator {
   #adapter;
   #store;
   #contracts;
-  #state = { schema: SCHEMA, sessions: [], requests: [], coding_queue:emptyCodingQueue() };
+  #state = { schema: SCHEMA, sessions: [], requests: [],
+    hot_slots_target:DEFAULT_HOT_TARGET,coding_queue:emptyCodingQueue() };
   #busy = false;
   #initialized = false;
   #restoring = false;
@@ -61,7 +62,7 @@ export class DevFleetOperator {
     const disk = await this.#store.load();
     if (disk != null) {
       if (disk.schema !== SCHEMA || !Array.isArray(disk.sessions) || !Array.isArray(disk.requests)
-        || disk.sessions.length > 16 || disk.requests.length > 500)
+        || disk.requests.length > 500)
         throw new Error('operator_state_invalid');
       const seen = new Set();
       for (const s of disk.sessions) {
@@ -69,7 +70,10 @@ export class DevFleetOperator {
         if (seen.has(s.tab_id) || !ownChatUrl(s.url)) throw new Error('operator_state_session_invalid');
         seen.add(s.tab_id);
       }
-      this.#state = plain({...disk,coding_queue:readCodingQueue(disk.coding_queue)});
+      const target=disk.hot_slots_target===undefined?DEFAULT_HOT_TARGET:disk.hot_slots_target;
+      if(!Number.isSafeInteger(target)||target<1)throw Error('operator_hot_slots_invalid');
+      this.#state = plain({...disk,hot_slots_target:target,
+        coding_queue:readCodingQueue(disk.coding_queue)});
     }
     // Process reincarnation has destroyed all prior WebContents. Never
     // resurrect a tab whose last durable action was physical retirement:
@@ -217,7 +221,8 @@ export class DevFleetOperator {
       receipt_summary: {sent:this.#state.requests.filter(x=>x.operation==='assign'&&x.state==='SENT').length,
         ambiguous:this.#state.requests.filter(x=>x.operation==='assign'&&x.state==='AMBIGUOUS').length},
       pipeline:{active_slots:this.#state.sessions.filter(s=>s.state==='OPEN').length,
-        capacity:16,free_slots:16-this.#state.sessions.length,
+        capacity:this.#state.hot_slots_target,
+        free_slots:Math.max(0,this.#state.hot_slots_target-this.#state.sessions.length),
         total_rotations:this.#state.requests.filter(r=>r.operation==='rotate').length,
         historical_ambiguous:this.#state.requests.filter(r=>
           r.operation==='assign'&&r.state==='AMBIGUOUS').length,
@@ -227,7 +232,7 @@ export class DevFleetOperator {
         const {schema,hot_limit,occupied_or_reserved,free_hot_slots,counts,
           auto_admission,authority_effect}=codingQueueSummary(
             this.#state.coding_queue,this.#state.sessions.length,
-            this.#state.sessions.map(x=>x.tab_id));
+            this.#state.sessions.map(x=>x.tab_id),this.#state.hot_slots_target);
         return {schema,hot_limit,occupied_or_reserved,free_hot_slots,counts,
           auto_admission,authority_effect,read_only:true,
           prompts_exposed:false,automatic_retry_allowed:false};
@@ -242,11 +247,13 @@ export class DevFleetOperator {
     fields(params, ['request_id','count']);
     const id = validateId(params.request_id);
     const count = Number(params.count);
-    if (!Number.isSafeInteger(count) || count < 1 || count > 8) throw new Error('operator_count_invalid');
+    if (!Number.isSafeInteger(count) || count < 1 || count > this.#policy().max_batch_items)
+      throw new Error('operator_count_invalid');
     const fingerprint = sha('create:' + count);
     const prior = this.#prior(id,'create',fingerprint);
     if (prior) return prior;
-    if (this.#state.sessions.length + count > 16) throw new Error('operator_capacity_exceeded');
+    // Explicit owner chat.create is not capped by the advisory coding hot target.
+    // Per-call policy and real OS/WebContents outcomes remain effect fences.
     return this.#exclusive(async () => {
       if (this.#state.requests.length >= 500) throw new Error('operator_request_history_full');
       const log = recordFor(id, 'create', fingerprint);
@@ -281,8 +288,25 @@ export class DevFleetOperator {
   queueStatus() {
     this.#requireInit();
     return {...codingQueueSummary(this.#state.coding_queue,
-      this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id)),
+      this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id),
+      this.#state.hot_slots_target),
       read_only:true,automatic_retry_allowed:false};
+  }
+  // Owner-authorized durable target, not a fixed number baked into the binary.
+  async configureCodingSlots(params) {
+    this.#requireInit();fields(params,['hot_slots']);
+    const target=params.hot_slots;
+    if(!Number.isSafeInteger(target)||target<1)throw Error('coding_queue_hot_target_invalid');
+    return this.#exclusive(async()=>{
+      if(this.#state.hot_slots_target!==target){
+        this.#state.hot_slots_target=target;
+        await this.#save();
+      }
+      return {schema:'metaengine.devfleet.coding-capacity.v1',
+        state:'CONFIGURED',hot_slots:target,
+        occupied_or_reserved:this.queueStatus().occupied_or_reserved,
+        automatic_retry_allowed:false,authority_effect:false};
+    });
   }
   async enqueueCoding(params) {
     this.#requireInit();
@@ -320,13 +344,13 @@ export class DevFleetOperator {
     this.#requireInit();fields(params,['max_items']);
     const policy=this.#policy();
     if(!policy.dispatch_enabled)throw Error('operator_policy_disarmed');
-    const requested=params.max_items===undefined?HOT_SLOTS:params.max_items;
-    if(!Number.isSafeInteger(requested)||requested<1||requested>HOT_SLOTS)
+    const requested=params.max_items===undefined?this.#state.hot_slots_target:params.max_items;
+    if(!Number.isSafeInteger(requested)||requested<1)
       throw Error('coding_queue_admission_budget_invalid');
     return this.#exclusive(async()=>{
       const queue=this.#state.coding_queue;
       const free=this.queueStatus().free_hot_slots;
-      const slots=Math.min(requested,HOT_SLOTS,policy.max_batch_items,free);
+      const slots=Math.min(requested,policy.max_batch_items,free);
       const selection=chooseFairCodingWave(queue,slots);
       const results=[];
       for(const taskId of selection.task_ids) {
@@ -373,7 +397,7 @@ export class DevFleetOperator {
           state:item.state,automatic_retry_allowed:false});
       }
       return {schema:'metaengine.devfleet.coding-admission.v1',
-        state:'WAVE_COMPLETED',results,hot_limit:HOT_SLOTS,
+        state:'WAVE_COMPLETED',results,hot_limit:this.#state.hot_slots_target,
         free_hot_slots:this.queueStatus().free_hot_slots,
         explicit_owner_command:true,automatic_retry_allowed:false};
     });
