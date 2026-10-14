@@ -113,7 +113,7 @@ test('native CDP adapter issues observational commands only; redacts network and
  assert.equal(control.d.listenerCount('message'),0);
  assert.deepEqual(control.called.map(x=>x.command),
    ['Network.enable','DOM.enable','DOM.getDocument',
-    'DOM.querySelectorAll','DOM.querySelectorAll','DOM.querySelectorAll']);
+    'DOM.querySelectorAll','DOM.querySelectorAll','DOM.querySelectorAll','Network.disable']);
  assert.equal(control.called.some(x=>/Runtime|Input|Page|Fetch/i.test(x.command)),false);
 });
 test('PID reuse / renderer generation / navigation change during native CDP fail closed',async()=>{
