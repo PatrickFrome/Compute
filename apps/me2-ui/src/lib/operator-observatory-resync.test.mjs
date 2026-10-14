@@ -25,6 +25,15 @@ const context = (patch = {}) => ({
     database: { state: 'AVAILABLE', source: 'LOCAL_POSTGRES', fresh: true,
       proof: 'TRUSTED_READBACK', observed_at: time(-120) },
     fleet: { state: 'UNKNOWN', proof: 'NONE', fresh: false, observed_at: null },
+    source: { state: 'AVAILABLE', source: 'EXACT_GIT_READBACK',
+      proof: 'TRUSTED_READBACK', fresh: true, proven: true,
+      observed_at: time(-120), owner_id: patch.owner_id ?? 'owner:1',
+      owner_epoch: patch.owner_epoch ?? 7, source_sha: patch.source_sha ?? A40 },
+    continuity: { state: 'AVAILABLE', source: 'LOCAL_CHECKPOINT_LEDGER',
+      proof: 'TRUSTED_READBACK', fresh: true, proven: true,
+      observed_at: time(-120), owner_id: patch.owner_id ?? 'owner:1',
+      owner_epoch: patch.owner_epoch ?? 7, event_seq: patch.event_seq ?? 10,
+      proof_identity: patch.proof_identity ?? A64 },
   }, ...patch,
 });
 const read = (previous, value, intent = 'POLL', timeNow = now) =>
@@ -218,4 +227,24 @@ test('invalid clock/intent rejected, and malformed claims do not grant tracking'
   assert.equal(read(empty(), context({ storage: 'HOSTED' })).mode, 'UNKNOWN');
   assert.equal(read(empty(), context({ source_sha: 'x' })).mode, 'UNKNOWN');
   assert.equal(read(empty(), context({ owner_epoch: -1 })).mode, 'UNKNOWN');
+});
+
+test('missing or forged Source and Continuity readback never establishes tracking', () => {
+  const genuine = context();
+  const samples = [
+    { source: undefined },
+    { continuity: undefined },
+    { source: { ...genuine.planes.source, source_sha: B40 } },
+    { continuity: { ...genuine.planes.continuity, event_seq: 11 } },
+    { continuity: { ...genuine.planes.continuity, proof_identity: B64 } },
+    { source: { ...genuine.planes.source, owner_epoch: 8 } },
+    { source: { ...genuine.planes.source, proven: false } },
+    { continuity: { ...genuine.planes.continuity, proof: 'MODEL_CLAIM' } },
+    { source: { ...genuine.planes.source, observed_at: time(-40000) } },
+  ];
+  for (const p of samples) {
+    const next = read(empty(), context({ planes: { ...genuine.planes, ...p } }));
+    assert.equal(next.mode, 'UNKNOWN');
+    allHidden(next);
+  }
 });
