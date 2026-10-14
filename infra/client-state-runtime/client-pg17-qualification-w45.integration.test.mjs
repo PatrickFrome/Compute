@@ -117,6 +117,11 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
         await admin.unsafe('REVOKE ALL ON public.w45_share_probe FROM PUBLIC');
         await admin.unsafe('GRANT SELECT ON public.w45_share_probe TO ' + role);
         await assert.rejects(reader.begin(async tx => {
+          await tx.unsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+          await tx.unsafe('SELECT id FROM public.w45_share_probe FOR SHARE');
+        }), e => isCode(e, '42501'), 'row locks need UPDATE privilege as well as SELECT');
+        await admin.unsafe('GRANT UPDATE(id) ON public.w45_share_probe TO ' + role);
+        await assert.rejects(reader.begin(async tx => {
           await tx.unsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
           await tx.unsafe('SELECT id FROM public.w45_share_probe FOR SHARE');
         }), e => isCode(e, '25006'));
