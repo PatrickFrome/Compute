@@ -48,11 +48,9 @@ test('unbound reader, initial loading, timeout, failure and stale snapshot never
     // Even a forged previous TRACKING frame cannot survive an explicit transport loss.
     const state = project(frame(), 'Now', { delivery, firstTruthMs: 200 });
     assert.equal(state.phase, phase);
-    assert.equal(state.source_bound, delivery === 'LOADING');
-    if (delivery !== 'LOADING') {
-      assert.equal(state.facets.every(x => x.state === 'UNKNOWN'), true);
-      assert.equal(state.first_truth_ms, null);
-    }
+    assert.equal(state.source_bound, false);
+    assert.equal(state.facets.every(x => x.state === 'UNKNOWN'), true);
+    assert.equal(state.first_truth_ms, null);
   }
   const stale = project(frame({ mode: 'STALE' }), 'Now');
   assert.equal(stale.phase, 'STALE');
