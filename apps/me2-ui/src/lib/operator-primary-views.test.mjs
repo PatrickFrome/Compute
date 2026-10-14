@@ -93,6 +93,26 @@ test('no private input fields or raw error text enter the UI projection', () => 
   assert.equal(project(payload, 'Missions').missing_detail.includes('UNKNOWN, not zero'), true);
   assert.equal(project(payload, 'Fleet').missing_detail.includes('UNKNOWN, not zero'), true);
 });
+test('forged positive plane, effectful projection and malformed identity fail closed', () => {
+  const original = frame();
+  for (const witness of [
+    { state: 'READY', proof: 'NONE', fresh: true, observed_at: stamp },
+    { state: 'AVAILABLE', proof: 'TRUSTED_READBACK', fresh: false, observed_at: stamp },
+  ]) {
+    const trial = frame({ projection: { ...original.projection,
+      planes: { ...original.projection.planes, database: witness } } });
+    const result = project(trial, 'Now');
+    assert.equal(result.facets[0].state, 'UNVERIFIED');
+    assert.equal(result.facets[0].fresh, false);
+  }
+  for (const malformed of [
+    { ...identity, owner_epoch: -1 }, { ...identity, source_sha: 'junk' },
+    { ...identity, run_id: '<private-token>' }, { ...identity, proof_identity: 'bad' },
+  ]) assert.equal(project(frame({ identity: malformed }), 'Now').source_bound, false);
+  const effectful = frame({ projection: { ...original.projection,
+    authority_effect: true, automatic_retry_allowed: false } });
+  assert.equal(project(effectful, 'Now').source_bound, false);
+});
 test('TTFT is from the first bound read only and rejects fake and unbounded duration', () => {
   for (const ms of [-1, 1.2, Infinity, 300_001, '100', null]) {
     assert.equal(project(frame(), 'Now', { firstTruthMs: ms }).first_truth_ms, null);
