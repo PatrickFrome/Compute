@@ -1,6 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {DevFleetOperator,SCHEMA} from '../src/operator-core.mjs';
+
+test('explicit UNKNOWN abandonment admits only one hash-bound distinct task; original never retries',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tab_id=(await op.create({request_id:'abandon-create-20261014',count:1})).sessions[0].tab_id;
+ const old={tab_id,request_id:'abandon-original-20261014',text:'Old independent assignment'};
+ f.failSend(true);assert.equal((await op.assign(old)).state,'AMBIGUOUS');
+ const next={tab_id,request_id:'abandon-distinct-20261014',text:'Different scoped successor'};
+ const p={request_id:old.request_id,tab_id,acknowledge_unknown_delivery:true,
+  replacement_request_id:next.request_id,
+  replacement_prompt_sha256:crypto.createHash('sha256').update(next.text).digest('hex')};
+ assert.equal((await op.abandonReceipt(p)).delivery_state,'UNKNOWN');
+ assert.equal((await op.assign(old)).state,'AMBIGUOUS');
+ assert.equal(f.sends.length,1);
+ await assert.rejects(op.assign({...next,request_id:'abandon-wrong-new-20261014'}),/distinct_replacement/);
+ await assert.rejects(op.assign({...next,text:'Conflicting scope'}),/distinct_replacement/);
+ f.failSend(false);assert.equal((await op.assign(next)).state,'SENT');
+ assert.equal(f.sends.length,2);
+ assert.equal(f.disk.requests.find(r=>r.request_id===old.request_id).receipt.state,'AMBIGUOUS');
+ const reboot=new DevFleetOperator(f);await reboot.init();
+ assert.equal((await reboot.assign(old)).state,'AMBIGUOUS');
+ assert.equal((await reboot.assign(next)).state,'SENT');
+ assert.equal(f.sends.length,2);
+ assert.equal(reboot.receiptSummary().counts.ABANDONED_UNKNOWN,1);
+});
+test('abandonment refuses active generation, absent acknowledgment, collision and failed durability',async()=>{
+ const f=fixture(),op=new DevFleetOperator(f);await op.init();
+ const tab_id=(await op.create({request_id:'abandon-adverse-create-20261014',count:1})).sessions[0].tab_id;
+ f.failSend(true);const old={tab_id,request_id:'abandon-adverse-original-20261014',text:'Original'};
+ await op.assign(old);
+ const p={tab_id,request_id:old.request_id,acknowledge_unknown_delivery:true,
+  replacement_request_id:'abandon-adverse-next-20261014',replacement_prompt_sha256:'a'.repeat(64)};
+ await assert.rejects(op.abandonReceipt({...p,acknowledge_unknown_delivery:false}),/parameters_invalid/);
+ await assert.rejects(op.abandonReceipt({...p,replacement_request_id:old.request_id}),/parameters_invalid/);
+ const probe=f.adapter.inputProbe;
+ f.adapter.inputProbe=async id=>({...await probe(id),generation_active:true});
+ await assert.rejects(op.abandonReceipt(p),/chat_not_idle/);
+ assert.equal(f.disk.requests.find(r=>r.request_id===old.request_id).state,'AMBIGUOUS');
+ f.adapter.inputProbe=probe;f.failWrite(true);
+ await assert.rejects(op.abandonReceipt(p),/disk_write_failed/);
+ assert.equal(f.disk.requests.find(r=>r.request_id===old.request_id).state,'AMBIGUOUS');
+ await assert.rejects(op.assign({tab_id,request_id:p.replacement_request_id,text:'Next'}),/persistence_reconciliation/);
+ assert.equal(f.sends.length,1);
+});
 function fixture() {
   let persisted=null, creates=0, sends=[], closes=[], failedWrites=false, failSend=false, draftPresent=false, modelProven=true;
   const adapter={
@@ -13,7 +57,7 @@ function fixture() {
     async observe(tab_id){return {tab_id,revision:'e'.repeat(64),chars:24,complete:true,authority_effect:false};},
     pollHint(tab_id){return {tab_id,hint:'DIRTY_HINT',age_ms:null,authority_effect:false};},
     async modelProbe(tab_id){return {tab_id,mode:'CHAT',model_selection_proven:modelProven,high_selection_proven:modelProven,authority_effect:false};},
-    async inputProbe(tab_id){return {tab_id,mode:'CHAT',page_failure:null,unique_composer:true,unique_send:true,composer_nonempty:draftPresent,authority_effect:false};},
+    async inputProbe(tab_id){return {tab_id,mode:'CHAT',page_failure:null,unique_composer:true,unique_send:true,composer_nonempty:draftPresent,generation_active:false,authority_effect:false};},
     async closeTab(tab_id){closes.push(tab_id);return {tab_id,closed:true,authority_effect:false};},
     async send(tab_id,text){
       sends.push({tab_id,text});
