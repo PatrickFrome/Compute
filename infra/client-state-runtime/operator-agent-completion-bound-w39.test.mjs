@@ -76,7 +76,7 @@ function scenario(now = NOW) {
   const calls = [];
   const api = {
     expected: expected(), owner: owner(now), observed_at_ms: now,
-    withReadOnlyTransaction: async cb => cb({ unsafe: async (sql, params) => {
+    withOwnerReadbackTransaction: async cb => cb({ unsafe: async (sql, params) => {
       calls.push({sql, params});
       if (sql === W39_PROJECT_SQL) return [{snapshot: data.project}];
       if (sql === W39_FLEET_SQL) return [{snapshot: data.fleet}];
@@ -134,6 +134,7 @@ const negatives = [
   ['stale critic accepted digest', s => {s.data.critics[0].accepted_subject_sha256 = 'e'.repeat(64);}],
   ['critic is implementer', s => {s.data.critics[0].lease_agent_id = 'agent_aaaaaaaa';}],
   ['false critic SQL proof', s => {s.data.critics[0].bound_accept = false;}],
+  ['critic disposition reject despite proof flag', s => {s.data.critics[0].disposition = 'REJECT';}],
   ['false subject SQL proof', s => {s.data.tasks[0].bound_ready = false;}],
   ['false completion guard', s => {s.data.tasks[0].completion_ready = false;}],
   ['duplicate CRITIC receipts', s => {s.data.critics.push({...critic(),task_id:DEVICE});}],
@@ -181,9 +182,9 @@ test('out-of-order or incomplete CI checks cannot qualify', async () => {
   assert.equal(r.reason,'GITHUB_CHECK_NOT_EXACT_GREEN');
 });
 test('missing read-only transaction capability and SQL failure are UNKNOWN', async () => {
-  const s=scenario(); s.api.withReadOnlyTransaction = null;
+  const s=scenario(); s.api.withOwnerReadbackTransaction = null;
   assert.equal((await read(s.api)).reason,'READERS_UNBOUND');
-  s.api.withReadOnlyTransaction = async () => {throw Error('SECRET=NEVER_LEAK');};
+  s.api.withOwnerReadbackTransaction = async () => {throw Error('SECRET=NEVER_LEAK');};
   assert.equal((await read(s.api)).reason,'SOURCE_READBACK_FAILED');
   assert.doesNotMatch(JSON.stringify(await read(s.api)),/SECRET/);
 });
@@ -195,5 +196,8 @@ test('selectors contain no dynamic URL, SQL, page/model action or effect authori
   assert.equal(s.calls.some(x=>x.pr||x.checks),false);
   for (const sql of [W39_PROJECT_SQL,W39_FLEET_SQL,W39_WORKSPACE_SQL,W39_TASK_SQL,W39_CRITIC_SQL])
     assert.match(sql,/^SELECT /);
+  assert.match(W39_PROJECT_SQL,/NULL::uuid/); // project_snapshot accepts either task OR project, not both
+  assert.match(W39_TASK_SQL,/result_sha256'=t.result_sha256/);
+  assert.match(W39_CRITIC_SQL,/result_sha256'=v.result_sha256/);
   assert.doesNotMatch([W39_PROJECT_SQL,W39_FLEET_SQL,W39_WORKSPACE_SQL,W39_TASK_SQL,W39_CRITIC_SQL].join('\n'),/INSERT |UPDATE |DELETE |DROP |COPY |CREATE |ALTER |SELECT \*|https?:\/\//i);
 });
