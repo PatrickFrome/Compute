@@ -1,4 +1,4 @@
-import { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_RUNTIME_PATH, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
+import { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_PINNED_INSTANCE_ID, NATIVE_SUPERVISOR_RUNTIME_PATH, validateNativeSupervisorLocalBase } from './native-supervisor-endpoints.mjs';
 import { localStateProviderHealthAttested } from './local-state-provider-policy.mjs';
 
 export function localSupervisorProviderProfile(env = process.env) {
@@ -12,7 +12,7 @@ export function localSupervisorProviderProfile(env = process.env) {
   let resolved;
   let parsed;
   try {
-    resolved = resolveNativeSupervisorBase(raw);
+    resolved = validateNativeSupervisorLocalBase(raw);
     parsed = new URL(raw);
   } catch { throw new Error('local_supervisor_base_invalid'); }
   if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || !parsed.port || Number(parsed.port) < 1024 || parsed.username || parsed.password || parsed.pathname.replace(/\/+$/, '') !== NATIVE_SUPERVISOR_RUNTIME_PATH) throw new Error('local_supervisor_base_invalid');
@@ -24,9 +24,14 @@ export function explicitLocalSupervisorBase({ env = process.env, activeBase = NA
   // not a malformed caller input that should crash a read-only page/sentinel.
   // Never turn this into a hosted/alternate Supervisor fallback.
   const boot = String(env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE || '').trim();
-  if (boot === 'BLOCKED' || boot === 'OFFLINE_DIAGNOSTIC') return null;
+  if (boot !== 'READY') return null;
   const profile = localSupervisorProviderProfile(env);
-  return profile?.base_url === activeBase ? profile.base_url : null;
+  if (!NATIVE_SUPERVISOR_BASE) return null;
+  // Caller-supplied env/activeBase cannot stand in for the module's native
+  // Owner-bound pin established at bootstrap (including after process reuse).
+  return profile?.base_url === activeBase && profile.base_url === NATIVE_SUPERVISOR_BASE
+    && profile.instance_id.toLowerCase() === NATIVE_SUPERVISOR_PINNED_INSTANCE_ID
+    ? profile.base_url : null;
 }
 
 export function localSupervisorHealthAttested(body, instanceId) {

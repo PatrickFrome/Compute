@@ -15,6 +15,7 @@ const instanceId = '28da46b7-6e1d-4c6a-b638-f4dc4bd8ee59';
 const oldBase = process.env.METAENGINE_SUPERVISOR_BASE_URL;
 const oldInstance = process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
 const oldProvider = process.env.METAENGINE_STATE_PROVIDER;
+const oldBoot = process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE;
 after(() => {
   if (oldBase === undefined) delete process.env.METAENGINE_SUPERVISOR_BASE_URL;
   else process.env.METAENGINE_SUPERVISOR_BASE_URL = oldBase;
@@ -22,14 +23,18 @@ after(() => {
   else process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID = oldInstance;
   if (oldProvider === undefined) delete process.env.METAENGINE_STATE_PROVIDER;
   else process.env.METAENGINE_STATE_PROVIDER = oldProvider;
-  setNativeSupervisorBase(NATIVE_SUPERVISOR_DEFAULT_BASE);
+  if (oldBoot === undefined) delete process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE;
+  else process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = oldBoot;
+  assert.equal(NATIVE_SUPERVISOR_DEFAULT_BASE, null);
 });
 
 function selectLocal() {
   process.env.METAENGINE_STATE_PROVIDER = 'LOCAL_POSTGRES';
   process.env.METAENGINE_SUPERVISOR_BASE_URL = local;
   process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID = instanceId;
-  setNativeSupervisorBase(local);
+  process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'READY';
+  // Post-import env writes never confer native Owner identity.
+  assert.throws(() => setNativeSupervisorBase(local), /native_supervisor_local_provider_endpoint_pinned/);
 }
 
 function signed(version) {
@@ -76,10 +81,10 @@ function health(overrides = {}) {
 test('explicit local recognition requires the selected canonical endpoint; cloud default never becomes local', () => {
   const providerEnv = { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: instanceId };
   assert.equal(explicitLocalSupervisorBase({ env: {}, activeBase: local }), null);
-  assert.equal(explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), local);
+  assert.equal(explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), null);
   assert.equal(explicitLocalSupervisorBase({ env: { METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), null);
-  for (const base of [NATIVE_SUPERVISOR_DEFAULT_BASE, 'http://127.0.0.1:15433/wrong', 'http://user:secret@127.0.0.1:15433/a2-browser-native-supervisor-v1']) {
-    assert.throws(() => explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: base }, activeBase: base }), /local_supervisor_base_invalid/);
+  for (const base of ['https://untrusted.invalid/a2-browser-native-supervisor-v1', 'http://127.0.0.1:15433/wrong', 'http://user:secret@127.0.0.1:15433/a2-browser-native-supervisor-v1']) {
+    assert.throws(() => explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY', METAENGINE_SUPERVISOR_BASE_URL: base }, activeBase: base }), /local_supervisor_base_invalid/);
   }
   assert.equal(explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: NATIVE_SUPERVISOR_DEFAULT_BASE }), null);
 });
@@ -87,27 +92,28 @@ test('explicit local recognition requires the selected canonical endpoint; cloud
 test('provider marker, endpoint and instance use the same whitespace normalization as startup', () => {
   const env = { METAENGINE_STATE_PROVIDER: ' LOCAL_POSTGRES ', METAENGINE_SUPERVISOR_BASE_URL: ` ${local}/ `, METAENGINE_LOCAL_STATE_INSTANCE_ID: ` ${instanceId} ` };
   assert.deepEqual(localSupervisorProviderProfile(env), { provider: 'LOCAL_POSTGRES', base_url: local, instance_id: instanceId });
-  assert.equal(explicitLocalSupervisorBase({ env, activeBase: local }), local);
+  assert.equal(explicitLocalSupervisorBase({ env, activeBase: local }), null);
 });
 
 test('main gates cloud sentinel creation on explicit local selection and reports cloud unconfigured', async () => {
   const source = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
-  assert.match(source, /if \(!fallbackConsole && !explicitLocalSupervisorBase\(\)\)\s*\{/);
-  assert.match(source, /cloud_health: localProvider \? 'NOT_CONFIGURED'/);
+  assert.doesNotMatch(source, /createSupabaseHealthSentinel|createFallbackConsoleRuntime/);
+  assert.match(source, /FALLBACK_CONSOLE_(?:PROBE|DRILL)/);
 });
 
-test('local heartbeat qualification accepts only the selected exact paths and keeps device proof checks', () => {
+test('unbound local heartbeat cannot accept signed state or hosted paths', () => {
   selectLocal();
   const init = signed('0.7.0-dev.37628000001.2');
-  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, init).valid, true);
-  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/heartbeat`, init).valid, true);
+  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, init).reason, 'endpoint_mismatch');
+  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/heartbeat`, init).reason, 'endpoint_mismatch');
   for (const url of [
     `${NATIVE_SUPERVISOR_DEFAULT_BASE}/v1/state`, `${local}/v1/state?token=1`,
     `${local}/v1/state/extra`, `${local}/v1/state#fragment`, local.replace('15433', '15434') + '/v1/state',
     local.replace('127.0.0.1', 'other.example') + '/v1/state',
   ]) assert.equal(inspectSignedNativeSupervisorStateRequest(url, init).valid, false);
-  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, { ...init, body: `${init.body} ` }).reason, 'body_hash_mismatch');
-  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, { ...init, headers: { ...init.headers, 'x-a2-device-signature': '' } }).reason, 'signature_missing');
+  // Without trusted local bootstrap, request matching must fail before device evidence.
+  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, { ...init, body: `${init.body} ` }).reason, 'endpoint_mismatch');
+  assert.equal(inspectSignedNativeSupervisorStateRequest(`${local}/v1/state`, { ...init, headers: { ...init.headers, 'x-a2-device-signature': '' } }).reason, 'endpoint_mismatch');
 });
 
 test('health proof rejects a different runtime, unattested source or authority-contaminated response', () => {
@@ -119,7 +125,7 @@ test('health proof rejects a different runtime, unattested source or authority-c
   ]) assert.equal(localSupervisorHealthAttested(health(override), instanceId), false);
 });
 
-test('a local accepted signed heartbeat records successor health only after matching runtime attestation', async t => {
+test('signed heartbeat cannot produce accepted successor from an unbound local Owner', async t => {
   selectLocal();
   const { app, target } = await appFixture(t);
   const calls = [];
@@ -128,10 +134,9 @@ test('a local accepted signed heartbeat records successor health only after matc
     return url.endsWith('/health') ? Response.json(health()) : new Response('', { status: 202 });
   } });
   await wrapped(`${local}/v1/state`, signed(target));
-  assert.equal(acceptedSignedSupervisorHeartbeatSnapshot()?.version, target);
-  assert.equal(acceptedSignedSupervisorHeartbeatSnapshot()?.sentinel_worker_healthy, true);
+  assert.equal(acceptedSignedSupervisorHeartbeatSnapshot()?.version, undefined);
   await wrapped(`${local}/v1/heartbeat`, signed(target));
-  assert.equal(calls.filter(url => url.endsWith('/health')).length, 1);
+  assert.equal(calls.filter(url => url.endsWith('/health')).length, 0);
   assert(calls.every(url => url.startsWith(local)));
 });
 
