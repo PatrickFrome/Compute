@@ -163,6 +163,7 @@ test('existing leased operator rejects forged positive hydration and cannot send
  const store={load:async()=>null,save:async()=>{}};
  const op=new DevFleetOperator({adapter,store});await op.init();
  const owned=(await op.create({request_id:'hydration-create-001',count:1})).sessions[0].tab_id;
+ probe=()=>reduce({...evidence,identity:{...identity,tab_id:owned}});
  await assert.rejects(op.inspectHydration({tab_id:'tab_99999999-9999-4999-8999-999999999999'}),
    /operator_tab_not_owned/);
  const result=await op.inspectHydration({tab_id:owned});
