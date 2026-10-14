@@ -6,6 +6,7 @@ import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
 import {receiptMarker,postedMessageObserved,postedUserTurnObserved,userTurnReceiptDiagnostic} from './send-receipt-core.mjs';
 import {composerDomText} from './composer-dom-core.mjs';
+import {classifyConversationSurface,classifyPostSendNavigation} from './conversation-readiness-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -245,9 +246,29 @@ export class ChatSurface {
     if (!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
     const url = view.webContents.getURL();
     if (!chatUrl(url)) throw new Error('tab_origin_not_chatgpt');
-    const nodes = await ax(view);
+    // Restored hidden WebContents can expose only ChatGPT sidebar. Wake the
+    // exact owned cell and wait for a mounted conversation control; never
+    // present bare /c/ navigation as proof the renderer body is available.
+    this.select(tabId);
+    const originalEpoch=this.#navigationGenerations.get(tabId);
+    let nodes=[],surface={state:'UNKNOWN',reason:'NOT_SAMPLED'};
+    for(let attempt=0;attempt<5;attempt++) {
+      nodes=await ax(view);
+      surface=classifyConversationSurface({url:view.webContents.getURL(),
+        composer_count:composerControls(nodes).length,
+        generation_active:!!singleButton(nodes,stopNames)});
+      if(surface.state!=='UNKNOWN')break;
+      if(attempt<4)await sleep(250);
+      if(view.webContents.isDestroyed()||this.#views.get(tabId)!==view||
+         view.webContents.getURL()!==url||
+         this.#navigationGenerations.get(tabId)!==originalEpoch) {
+        surface={state:'UNKNOWN',reason:'TARGET_CHANGED'};
+        nodes=[];break;
+      }
+    }
     const text = transcript(nodes);
     return {tab_id:tabId,url,text:text.slice(offset,offset+maxChars),
+      conversation_surface:surface.state,surface_reason:surface.reason,
       total_chars:text.length,has_more:offset+maxChars<text.length,
       process_epoch:processEpoch,target_id:'webcontents:'+view.webContents.id,
       authority_effect:false};
@@ -489,7 +510,13 @@ export class ChatSurface {
     for (let i=0;i<70;i++) {
       await sleep(400);
       const url=view.webContents.getURL();
-      if (!chatUrl(url)) throw new Error('chatgpt_origin_changed_after_send');
+      const navigation=classifyPostSendNavigation(url);
+      if(navigation==='UNTRUSTED')throw new Error('chatgpt_origin_changed_after_send');
+      if(navigation==='SAME_ORIGIN_TRANSITION') {
+        // React router transition after the *only* Send is not a failure
+        // warranting a second click. Retain AMBIGUOUS until physical proof.
+        continue;
+      }
       if(this.#views.get(tabId)!==view || view.webContents.isDestroyed())
         throw new Error('chatgpt_target_changed_after_send');
       const {nodes,composer:currentComposer,value:currentValue}=await readyComposer(view);
@@ -523,7 +550,17 @@ export class ChatSurface {
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
     const epoch=this.#navigationGenerations.get(tabId);
-    const {nodes,composer,value}=await readyComposer(view);
+    let nodes=[],composer=null,value=null;
+    // Selected WebContents may be mounted lazily after restore. This bounded
+    // wait only reads/focuses the composer; it never clicks Send or reloads.
+    for(let attempt=0;attempt<5;attempt++) {
+      ({nodes,composer,value}=await readyComposer(view));
+      if(composer&&value!==null)break;
+      if(attempt<4)await sleep(300);
+      if(view.webContents.isDestroyed()||this.#views.get(tabId)!==view||
+         view.webContents.getURL()!==url||
+         this.#navigationGenerations.get(tabId)!==epoch)break;
+    }
     if(view.webContents.isDestroyed()||this.#views.get(tabId)!==view||
       this.#navigationGenerations.get(tabId)!==epoch||view.webContents.getURL()!==url)
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
