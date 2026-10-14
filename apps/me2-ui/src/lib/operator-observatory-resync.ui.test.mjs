@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const ui = readFileSync(fileURLToPath(new URL('../components/me2/pages/operator-observatory.tsx', import.meta.url)), 'utf8');
 
 test('all seven views use one reducer checkpoint and never independent side-channel state', () => {
-  assert.match(ui, /const checkpoint = useRef<[^>]+>\(emptyOperatorObservatoryResync\(\)\)/);
+  assert.match(ui, /const checkpoint = useRef<[^\n]+>\(emptyOperatorObservatoryResync\(\)\)/);
   assert.match(ui, /const projection = resync\.projection;/);
   assert.match(ui, /OBSERVATORY_VIEWS\[view\]/);
   assert.match(ui, /const names = OBSERVATORY_VIEWS\[view\]/);
