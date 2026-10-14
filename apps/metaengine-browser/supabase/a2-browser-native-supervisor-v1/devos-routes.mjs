@@ -310,7 +310,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
         ? (typeof readRuntimeControl==='function' ? runtimeControl
           : await readDevosRuntimeControl({rpc,workspaceId})) : null;
       const fleetDagAdmission=optInDag
-        ? planFleetDagClaims({snapshot,runtimeControl:dagRuntimeControl}) : null;
+        ? planFleetDagClaims({snapshot,runtimeControl:dagRuntimeControl,workspaceId}) : null;
       const schedulerBacklog=fleetDagAdmission
         ? {...rawBacklog,ready:fleetDagAdmission.ready,by_role:fleetDagAdmission.by_role}
         : rawBacklog;
