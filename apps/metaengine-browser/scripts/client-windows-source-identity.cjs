@@ -9,6 +9,7 @@ const {
   validateBuildIdentityV3,
   validateDependencyResolutionProof,
 } = require('./build-identity.cjs');
+const { assertRuntimeLockClosure } = require('./client-package-convergence-w40.cjs');
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const PINNED_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -16,7 +17,7 @@ const SCHEMA = 'metaengine.client.windows-single-installer-source-proof.v1';
 function fail(code) { throw new Error(`client_windows_${code}`); }
 
 function assertWindowsSourceIdentity({ manifest, identity, dependency, installerPath,
-  expectedInstallerSha256, expectedInstallerBytes } = {}) {
+  expectedInstallerSha256, expectedInstallerBytes, packageLockBytes, expectedSourceHead } = {}) {
   // A signed assertion supplied by the candidate itself is never proof.
   const build = validateBuildIdentityV3(identity);
   const installed = validateDependencyResolutionProof(dependency);
@@ -55,12 +56,17 @@ function assertWindowsSourceIdentity({ manifest, identity, dependency, installer
     if (installedDependency.version !== expectedVersion) fail('direct_dependency_version_mismatch');
   }
 
+  // The committed lockfile bytes and independently pinned exact CI head must agree.
+  // A self-rehashed npm ls tree cannot excuse a missing required transitive package.
+  const closure = assertRuntimeLockClosure({ manifest, identity: build, installed,
+    packageLockBytes, expectedSourceHead });
+
   if (!installerPath || typeof installerPath !== 'string') fail('installer_path_missing');
   const expectedName = `METAENGINE-Browser-Test-Setup-${version}-x64.exe`;
   if (path.basename(installerPath) !== expectedName) fail('installer_name_mismatch');
   const parent = path.dirname(path.resolve(installerPath));
-  const matching = fs.readdirSync(parent).filter((item) =>
-    /^METAENGINE-Browser-Test-Setup-.*-x64\.exe$/i.test(item));
+  // Any additional EXE in the output is ambiguous, even with a different name.
+  const matching = fs.readdirSync(parent).filter((item) => /\.exe$/i.test(item));
   if (matching.length !== 1 || matching[0] !== expectedName) fail('installer_cardinality_invalid');
   const file = fs.lstatSync(installerPath);
   if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1 || file.size < 1) fail('installer_file_invalid');
@@ -76,6 +82,8 @@ function assertWindowsSourceIdentity({ manifest, identity, dependency, installer
     installer_bytes: file.size,
     dependency_resolution_sha256: installed.dependency_resolution_sha256,
     direct_dependencies_verified: direct.size,
+    required_runtime_resolutions_verified: closure.required_runtime_resolutions,
+    package_lock_sha256: closure.lock_sha256,
     source_identity_verified: true,
     signed_attestation_verified: false, // requires separate independent Sigstore verifier
     installed_runtime_verified: false,
@@ -85,7 +93,9 @@ function assertWindowsSourceIdentity({ manifest, identity, dependency, installer
 }
 
 function assertUnsignedCandidateProvenance(provenance) {
-  if (!provenance || provenance.signed !== false || provenance.promotion_authorized !== false) {
+  if (!provenance || provenance.signed !== false || provenance.promotion_authorized !== false
+      || provenance.signed_attestation_verified === true || provenance.installed_runtime_verified === true
+      || provenance.physical_package_build_allowed === true || provenance.authority_effect === true) {
     fail('untrusted_signature_or_promotion_claim');
   }
   return true;
