@@ -361,9 +361,13 @@ export class ChatSurface {
     if (!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
     if (!chatUrl(view.webContents.getURL())) throw new Error('tab_origin_not_chatgpt');
     const result = await this.#mode(view);
+    let surface;
+    try{surface=await this.surfaceProbe(tabId);}
+    catch{surface={state:'UNKNOWN',reason:'CDP_NATIVE_PROBE_FAILED',
+      send_authorized:false,completion_proven:false,authority_effect:false};}
     return {tab_id:tabId,mode:result.mode,page_failure:result.page_failure,
       high_label_visible:result.high_label_visible,gpt6_label_visible:result.gpt6_label_visible,
-      mode_nodes:result.mode_nodes,authority_effect:false};
+      mode_nodes:result.mode_nodes,surface_probe:surface,authority_effect:false};
   }
   async recover(tabId) {
     const view = this.#views.get(tabId);
