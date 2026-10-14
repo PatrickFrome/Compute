@@ -40,6 +40,7 @@ function hasSourceBoundCursor(context, projection, identity) {
       && (plane.state === 'AVAILABLE' || plane.state === 'READY');
   };
   const bound = value => value?.proven === true
+    && value.run_id === identity.run_id
     && value.owner_id === identity.owner_id
     && value.owner_epoch === identity.owner_epoch;
   return trusted('source') && trusted('continuity')
