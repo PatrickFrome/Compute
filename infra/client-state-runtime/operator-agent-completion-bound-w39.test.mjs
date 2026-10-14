@@ -157,6 +157,10 @@ const negatives = [
 for (const [name, mutate] of negatives) test('fail closed without GitHub: '+name, async () => {
   const s = scenario(); mutate(s);
   const result = await read(s.api);
+  if (name === 'post RESULT_READY expiry') {
+    assert.equal(result.state, 'EXPIRED');
+    assert.equal(result.reason, 'RESULT_READY_EXPIRED');
+  }
   assert.equal(result.source_evidence_qualified,false,name);
   assert.equal(result.successful_completion,false,name);
   assert.equal(result.authority_effect,false,name);
