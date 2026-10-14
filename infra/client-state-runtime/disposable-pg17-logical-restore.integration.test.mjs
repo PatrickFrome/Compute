@@ -12,6 +12,8 @@ import {startOwnedWindowsPostgres} from './owned-postgres-process.mjs';
 import {classifyPostgresUtilityFailure} from './postgres-utility-diagnostic.mjs';
 import {buildBackupEffectIntent,crossBackupEffectBarrier,readBackupEffectFence} from './pg17-backup-effect-barrier.mjs';
 import {executeDisposableOneShotPg17Dump} from './pg17-one-shot-disposable-dump-executor.mjs';
+import {sealClientBackupRestoreStagingW47,readClientBackupRestoreStagingW47}
+  from './client-backup-restore-staging-w47.mjs';
 
 const exec=promisify(execFile);
 const bin=process.env.LOCAL_STATE_TEST_PG_BIN_DIR;
@@ -98,8 +100,17 @@ test('real PostgreSQL17 custom dump -> separate postmaster restore -> exact data
     "CREATE TABLE public.metaengine_disposable_restore_probe(id integer PRIMARY KEY, body text NOT NULL);"+
     "INSERT INTO public.metaengine_disposable_restore_probe VALUES (1,'first'),(2,'unicode-'||chr(1105)),(3,'last');",
   ],sourceEnv,'source_seed');
+  await command('psql',['-X','--no-password','-v','ON_ERROR_STOP=1',
+    '-c','CREATE ROLE w47_fixture_no_select NOLOGIN'],sourceEnv,'negative_role_seed');
+  assert.equal(await selectScalar("SELECT has_table_privilege('w47_fixture_no_select','public.metaengine_disposable_restore_probe','SELECT')::text",sourceEnv),
+    'false','generated restricted role must not have source SELECT');
   const fingerprint=await selectScalar(tableFingerprint,sourceEnv);
   assert.match(fingerprint,/^3:[a-f0-9]{32}$/);
+  // A separate generated-only rollback witness, preserved byte-for-byte.
+  const rollbackPath=path.join(root,'rollback-preserved.bin');
+  await fs.writeFile(rollbackPath,'GENERATED-PG17-FIXTURE-ROLLBACK:'+fingerprint,
+    {flag:'wx',mode:0o600});
+  const rollbackSha256=await hash(rollbackPath);
   const archive=path.join(root,'postgresql-17-snapshot.dump');
   // Source/Owner identities below are isolated test-fixture pins, NOT an
   // installed Owner or its private Keeper authority.
@@ -119,6 +130,8 @@ test('real PostgreSQL17 custom dump -> separate postmaster restore -> exact data
   assert.equal(archiveProof.upgrade_authorized,false);
   await assert.rejects(crossBackupEffectBarrier({journalDirectory:root,intent}),
     /backup_effect_(?:archive_existing|write_ambiguous)/);
+  assert.equal(await selectScalar(tableFingerprint,sourceEnv),fingerprint,
+    'source generated fixture must be unchanged across backup');
   const before=(await fs.stat(archive)).size;
   assert(before>1024,'real custom-format dump must not be empty');
   const digestBefore=await hash(archive);
@@ -149,6 +162,42 @@ test('real PostgreSQL17 custom dump -> separate postmaster restore -> exact data
   assert.equal(restored,fingerprint,'restored row count and contents must match source readback');
   assert.equal(await hash(archive),digestBefore);
   assert.equal((await fs.stat(archive)).size,before);
+  const [sourceRole,targetRole,sourceVersion,targetVersion]=await Promise.all([
+    selectScalar("SELECT current_user || ':' || has_database_privilege(current_user,current_database(),'CONNECT')::text || ':' || has_table_privilege(current_user,'public.metaengine_disposable_restore_probe','SELECT')::text",sourceEnv),
+    selectScalar("SELECT current_user || ':' || has_database_privilege(current_user,current_database(),'CONNECT')::text || ':' || has_database_privilege(current_user,current_database(),'CREATE')::text",destinationEnv),
+    selectScalar('SHOW server_version_num',sourceEnv),
+    selectScalar('SHOW server_version_num',destinationEnv),
+  ]);
+  assert.equal(sourceRole,'postgres:true:true','source SELECT/CONNECT grants measured in PG');
+  assert.equal(targetRole,'postgres:true:true','restore CREATE/CONNECT grants measured in PG');
+  const staging=await sealClientBackupRestoreStagingW47({
+    journalDirectory:root,intent,archiveReceipt:archiveProof,
+    tocReadback:listed.stdout,rollbackSha256,
+    sourceReadback:{
+      source_head:intent.source_head,owner_pid:intent.owner_pid,
+      keeper_pid:intent.keeper_pid,owner_sha256:intent.owner_sha256,
+      postmaster_sha256:intent.keeper_postmaster_sha256,
+      pg_system_identifier:sourceIdentity,pg_started_at:archiveProof.source_pg_started_at,
+      pg_version:Number(sourceVersion),fingerprint,
+    },
+    restoredReadback:{pg_system_identifier:destinationIdentity,
+      pg_version:Number(targetVersion),pg_pid:destination.pid,fingerprint:restored},
+    roleReadback:{
+      source_role:sourceRole.split(':')[0],restore_role:targetRole.split(':')[0],
+      source_connect:sourceRole.split(':')[1]==='true',
+      source_select:sourceRole.split(':')[2]==='true',
+      restore_connect:targetRole.split(':')[1]==='true',
+      restore_create:targetRole.split(':')[2]==='true',
+    },
+  });
+  assert.equal(staging.archive_verified,true,'actual archive bytes and independent TOC');
+  assert.equal(staging.restore_data_compared,true,'two real PG17 SQL readbacks matched');
+  assert.equal(staging.rollback_preserved,true,'immutable fixture rollback witness');
+  assert.equal(staging.state,'ACL_REVIEW_REQUIRED','Windows DACL not attested from POSIX mode');
+  assert.equal(staging.upgrade_authorized,false);
+  assert.equal((await readClientBackupRestoreStagingW47({
+    journalDirectory:root,intentId:intent.intent_id,
+  })).state,'STAGING_SEALED');
   const receipt=Object.freeze({
     schema:'metaengine.disposable-pg17.restore-physical-fixture.v1',
     archive_sha256:digestBefore,archive_bytes:before,
