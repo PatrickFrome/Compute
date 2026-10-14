@@ -214,7 +214,9 @@ export class DevFleetOperator {
         historical_ambiguous:this.#state.requests.filter(r=>
           r.operation==='assign'&&r.state==='AMBIGUOUS').length,
         effects_require_new_request_id:true},
-      coding_queue:this.queueStatus(),
+      coding_queue:{...codingQueueSummary(this.#state.coding_queue,
+        this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id)),
+        read_only:true,automatic_retry_allowed:false},
       only_actions: ['create','read','assign','close'],
       primary_browser_shared_profile: false,
       hosted_database: false,
