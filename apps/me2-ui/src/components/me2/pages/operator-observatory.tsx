@@ -235,6 +235,10 @@ export function OperatorObservatoryPage() {
         <dl className="mt-3 grid grid-cols-[110px_1fr] gap-2 text-[11px]">
           <dt className="text-zinc-500">Run</dt><dd className="break-all font-mono">{displayRun}</dd>
           <dt className="text-zinc-500">Event sequence</dt><dd className="font-mono">{cursor}</dd>
+          <dt className="text-zinc-500">Owner epoch</dt>
+          <dd className="font-mono" data-testid="operator-owner-epoch">{resync.identity?.owner_epoch ?? "UNKNOWN"}</dd>
+          <dt className="text-zinc-500">Source SHA</dt>
+          <dd className="break-all font-mono" data-testid="operator-source-sha">{resync.identity?.source_sha ?? "UNKNOWN"}</dd>
           <dt className="text-zinc-500">Proof fingerprint</dt>
           <dd className="break-all font-mono">{projection.proof_identity ?? "UNKNOWN"}</dd>
           <dt className="text-zinc-500">Authority</dt>
