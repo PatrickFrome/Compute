@@ -16,6 +16,11 @@ test('empty paragraph is empty, deliberate blank paragraphs and Unicode stay exa
   assert.equal(composerDomText(root([element('P',[element('BR')]),element('P',[element('BR')])]),17),'\n');
   assert.equal(composerDomText(root([element('P',[text('Код & <текст> 👩‍💻')])]),17),'Код & <текст> 👩‍💻');
 });
+test('CSS placeholder pseudo-content cannot enter authored composer text',()=>{
+  const p={...element('P',[element('BR')]),pseudoElements:[{nodeValue:'Ask anything'}]};
+  assert.equal(composerDomText(root([p]),17),'');
+  assert.equal(composerDomText({...root([text('real task')]),pseudoElements:[{nodeValue:'fake task'}]},17),'real task');
+});
 test('wrong node, attribute marker, truncation, scripts and missing evidence fail closed',()=>{
   const n=root([text('task')]);
   assert.equal(composerDomText(n,18),null);

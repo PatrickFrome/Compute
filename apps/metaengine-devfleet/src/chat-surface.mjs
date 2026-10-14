@@ -63,7 +63,7 @@ async function ax(view) {
   const result = await debug.sendCommand('Accessibility.getFullAXTree');
   return Array.isArray(result?.nodes) ? result.nodes : [];
 }
-async function composerValue(view, node) {
+async function composerValue(view, node, diagnostic = null) {
   if (!node || !Number.isSafeInteger(node.backendDOMNodeId)) return null;
   const dbg = view.webContents.debugger;
   await dbg.sendCommand('DOM.enable');
@@ -71,6 +71,16 @@ async function composerValue(view, node) {
     backendNodeId:node.backendDOMNodeId,depth:-1,pierce:false
   });
   const dom = composerDomText(result?.node,node.backendDOMNodeId);
+  if(diagnostic) {
+    const n=result?.node,attrs=n?.attributes||[];
+    const attr=k=>{const i=attrs.indexOf(k);return i>=0?attrs[i+1]:null;};
+    Object.assign(diagnostic,{tag:n?.nodeName||null,id:attr('id'),
+      editable:attr('contenteditable'),backend_matches:n?.backendNodeId===node.backendDOMNodeId,
+      child_count:n?.childNodeCount??null,children:(n?.children||[]).slice(0,8).map(c=>({
+        tag:c.nodeName,type:c.nodeType,child_count:c.childNodeCount??null,
+        children:c.children?.length??null,pseudo_count:c.pseudoElements?.length||0})),
+      state:dom===null?'UNKNOWN':'PROVEN'});
+  }
   if (dom !== null) return dom;
   // Native input value is authoritative for a textarea; contenteditable AX
   // values can flatten/lag paragraphs and MUST use the exact DOM node above.
@@ -395,11 +405,13 @@ export class ChatSurface {
     const nodes=await ax(view);
     const controls=inspectSendSurface(nodes);
     const composer=composerFrom(nodes);
-    const value=composer ? await composerValue(view,composer) : null;
+    const diagnostic={state:'ABSENT'};
+    const value=composer ? await composerValue(view,composer,diagnostic) : null;
     return {tab_id:tabId,mode:state.mode,page_failure:state.page_failure,
       unique_composer:controls.unique_composer && value !== null,unique_send:controls.unique_send,
       composer_nonempty:value !== null && value.length > 0,
       generation_active:nodes.some(n=>!n.ignored && roleOf(n)==='button' && stopNames.test(val(n,'name').trim())),
+      composer_readback:diagnostic,
       authority_effect:false};
   }
   async send(tabId,text) {

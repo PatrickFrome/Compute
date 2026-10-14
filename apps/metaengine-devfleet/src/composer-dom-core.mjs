@@ -18,7 +18,8 @@ export function composerDomText(node, backendNodeId) {
   let count = 0;
   function walk(n, depth = 0) {
     if (++count > 4096 || depth > 32 || !n || n.shadowRoots?.length ||
-        n.contentDocument || n.pseudoElements?.length) throw Error('incomplete_composer');
+        n.contentDocument) throw Error('incomplete_composer');
+    // CSS placeholder pseudo-elements are not authored DOM children.
     if (n.nodeType === 3) {
       if (typeof n.nodeValue !== 'string') throw Error('incomplete_composer');
       return n.nodeValue;
