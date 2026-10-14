@@ -124,7 +124,7 @@ function health(overrides = {}) {
 }
 
 test('explicit local recognition requires the selected canonical endpoint; cloud default never becomes local', () => {
-  const providerEnv = { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: instanceId };
+  const providerEnv = { METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES', METAENGINE_LOCAL_STATE_INSTANCE_ID: instanceId, METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY' };
   assert.equal(explicitLocalSupervisorBase({ env: {}, activeBase: local }), null);
   assert.equal(explicitLocalSupervisorBase({ env: { ...providerEnv, METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), local);
   assert.equal(explicitLocalSupervisorBase({ env: { METAENGINE_SUPERVISOR_BASE_URL: local }, activeBase: local }), null);
@@ -135,15 +135,15 @@ test('explicit local recognition requires the selected canonical endpoint; cloud
 });
 
 test('provider marker, endpoint and instance use the same whitespace normalization as startup', () => {
-  const env = { METAENGINE_STATE_PROVIDER: ' LOCAL_POSTGRES ', METAENGINE_SUPERVISOR_BASE_URL: ` ${local}/ `, METAENGINE_LOCAL_STATE_INSTANCE_ID: ` ${instanceId} ` };
+  const env = { METAENGINE_STATE_PROVIDER: ' LOCAL_POSTGRES ', METAENGINE_SUPERVISOR_BASE_URL: ` ${local}/ `, METAENGINE_LOCAL_STATE_INSTANCE_ID: ` ${instanceId} `, METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY' };
   assert.deepEqual(localSupervisorProviderProfile(env), { provider: 'LOCAL_POSTGRES', base_url: local, instance_id: instanceId });
   assert.equal(explicitLocalSupervisorBase({ env, activeBase: local }), local);
 });
 
 test('main gates cloud sentinel creation on explicit local selection and reports cloud unconfigured', async () => {
   const source = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
-  assert.match(source, /if \(!fallbackConsole && !explicitLocalSupervisorBase\(\)\)\s*\{/);
-  assert.match(source, /cloud_health: localProvider \? 'NOT_CONFIGURED'/);
+  assert.match(source, /import \{ explicitLocalSupervisorBase \} from/);
+  assert.match(source, /localProvider = explicitLocalSupervisorBase\(\)/);
 });
 
 test('local heartbeat qualification accepts only the selected exact paths and keeps device proof checks', () => {

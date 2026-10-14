@@ -1,0 +1,86 @@
+{
+  "schema": "metaengine.client.source-candidate-w43.v1",
+  "classification": "SOURCE_ONLY_STAGING_REVIEW_REQUIRED",
+  "repository": "PatrickFrome/Compute",
+  "branch": "work/metaengine-client-wave8-w43-20261015",
+  "upstream_refs": {
+    "main": "b26f2d4693e7bab3648e0930b7a9e2c75baef58e",
+    "integration_compute_unified_v1": "a23b647220c6bdeaa4340f804575dc2009e434cb",
+    "pr1216": "881eb2e29882419921978910ec6c3f184f197801",
+    "pr1221": "85a11b2aa8777f5981a6cd5c4ed30de877417875",
+    "roadmap_branch": "work/roadmap-no-cloud-capsule-20261013"
+  },
+  "parent_heads": [
+    {
+      "pr": 1262,
+      "wave": "W29",
+      "sha": "11c6f0e754d160f4d2c042da86c2cb88e4495298"
+    },
+    {
+      "pr": 1263,
+      "wave": "W39",
+      "sha": "ee39b256e2b54f5dfddf4bff021977c0185fb744"
+    },
+    {
+      "pr": 1264,
+      "wave": "W40",
+      "sha": "ea1703cb6c4d0d15f1c7cd4cb4faf22ec2ac959d"
+    },
+    {
+      "pr": 1265,
+      "wave": "W42",
+      "sha": "37ce5d8407a1c1fa9702aa3aeb05133131f7a11a"
+    },
+    {
+      "pr": 1266,
+      "wave": "W37",
+      "sha": "2557acd2ee11464c6f3f63b2e3b22bba74df142f"
+    },
+    {
+      "pr": 1267,
+      "wave": "W38",
+      "sha": "2e9018d14cfe55256ddc5a94693ff0a288b90318"
+    },
+    {
+      "pr": 1268,
+      "wave": "W41",
+      "sha": "33f97db8d03fb57c4a78fa2e5abcb08509725551"
+    },
+    {
+      "pr": 1257,
+      "wave": "W26",
+      "sha": "6498c1596432ea9d9987f343c92505b273d1ac11"
+    },
+    {
+      "pr": 1248,
+      "wave": "W30",
+      "sha": "ff9dab18d88a4d656fa91c5cc86f3392fde3f023"
+    }
+  ],
+  "pre_freeze_integration_commit": "18fe7189bb66b2deb4fd0a3388cc862456d6a994",
+  "candidate_sha_rule": "Review the exact GitHub PR head commit; no self-referential SHA is embedded in source. All declared parents MUST be ancestors of that exact head.",
+  "package_version_owner": "W46",
+  "package_version_unchanged": "0.7.0-dev.37781000062.1",
+  "protected_git_blobs": {
+    "apps/metaengine-browser/src/main.mjs": "ef35077c6f69fdd7dc956e93af9e2090367db451",
+    "apps/metaengine-browser/src/native-supervisor-client.mjs": "f4bd2f19fb946b71b8ad0a08d2332dd4da777eea",
+    "apps/metaengine-browser/src/browser-sentinel.mjs": "c3c7cd19f90194b9ad8f4fe18994c10195d960c6",
+    "apps/metaengine-browser/src/host-resilience-runtime.mjs": "dc30848758f0fa00c861324e5e9f39f9f536f893",
+    "apps/metaengine-browser/src/supervisor-continuity-lease.mjs": "a8c92bd3546cf0d16bdea89bcaf620fe18847447",
+    "apps/metaengine-browser/src/browsercell-continuity-integration-w41.mjs": "8b880d08f1396e0474b1f34d673d48e728edea98",
+    "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs": "10661e36e2daeb41f5a47af24f149bfbc7141075",
+    "apps/metaengine-browser/scripts/client-package-convergence-w40.cjs": "96368548c61174cefae5b51684bf81ebb955d992",
+    "infra/client-state-runtime/package.json": "fd8938eb1718c0e176a932db212c6c997b13f60e",
+    "infra/client-state-runtime/operator-agent-completion-bound-w39.mjs": "872901561bb7e7fbb16c8cb83117b2258623e0bc",
+    "infra/client-state-runtime/operator-cross-plane-integration-critic.mjs": "4fdbc9af7ef26ed12319e591bc8119817829b582",
+    "apps/me2-ui/src/lib/operator-primary-views.mjs": "89e5790b753620cff4766ebce95c748cad25868e",
+    "apps/metaengine-browser/package.json": "c7102ca747a612492bc93b917fd4c1da66892ba0"
+  },
+  "merge_resolution": [
+    "Retained W38 absent-Owner/forged-READY fail-closed source against older W40 W24 source conflicts.",
+    "Preserved W40 positive attested-Owner fixtures in distinct W40 test files, then repaired obsolete bootstrap/test expectations; existing W38 regression tests remain.",
+    "Unioned client-state package test registry for W37, W39 and W42; added exact-merge contracts.",
+    "Retained W29 W23 frozen UI source; W41 native BrowserCell observer and W37 readContext share existing main.mjs without an additional scheduler.",
+    "Carried full W26 ambiguous wake fencing and W30 existing leased Fleet claim path."
+  ]
+}

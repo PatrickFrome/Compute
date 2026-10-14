@@ -46,6 +46,8 @@ async function ownerFixture(t) {
 
 async function inspect(extraEnv={},action='',owner=null) {
   const env={...process.env};
+  // An absent Owner fixture must not read the machine's installed profile.
+  if (!owner) { env.APPDATA=path.join(os.tmpdir(), `meta-w43-unbound-${process.pid}-${Date.now()}`); env.XDG_CONFIG_HOME=env.APPDATA; }
   for(const key of Object.keys(env)){
     if(/^METAENGINE_(STATE_PROVIDER|SUPERVISOR_BASE_URL|LOCAL_STATE_INSTANCE_ID|LOCAL_PROVIDER_)/.test(key))
       delete env[key];

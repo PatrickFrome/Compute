@@ -1,0 +1,109 @@
+name: METAENGINE Client W43 Frozen Source Candidate
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/**'
+      - 'infra/client-state-runtime/**'
+      - 'coordination/operator-control/client-source-candidate-w43.manifest.json'
+      - '.github/workflows/client-source-candidate-w43.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source-convergence:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - name: Independently assert checkout identity and no sparse checkout
+        shell: bash
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test "$(git config --bool core.sparseCheckout || echo false)" = false
+          test -z "$(git status --porcelain)"
+      - name: Install own-PG Node reader only (no live PostgreSQL)
+        shell: bash
+        run: npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
+      - name: Nine-parent integrated source ledger and existing independent critic
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/client-source-candidate-w43.test.mjs \
+            infra/client-state-runtime/operator-context-convergence-w37.test.mjs \
+            infra/client-state-runtime/operator-agent-completion-evidence.test.mjs \
+            infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs \
+            infra/client-state-runtime/operator-cross-plane-integration-critic.test.mjs \
+            infra/client-state-runtime/client-source-convergence-falsifier-w42.test.mjs
+      - name: Native/BrowserCell/AMBIGUOUS/DAG/packaging adversarial compatibility
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/client-local-contracts-w38.test.mjs \
+            apps/metaengine-browser/test/explicit-local-supervisor-provider.test.mjs \
+            apps/metaengine-browser/test/explicit-local-supervisor-provider-w40.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-local-provider-pin-w40.test.mjs \
+            apps/metaengine-browser/test/browsercell-cdp-continuity-readback.test.mjs \
+            apps/metaengine-browser/test/browsercell-continuity-integration-w41.test.mjs \
+            apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs \
+            apps/metaengine-browser/test/supervisor-continuity-lease.test.mjs \
+            apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs \
+            apps/metaengine-browser/test/fleet-dag-cancellation-proof.test.mjs \
+            apps/metaengine-browser/test/client-package-convergence-w40.test.mjs \
+            apps/metaengine-browser/test/client-windows-source-identity.test.mjs \
+            apps/metaengine-browser/test/package-identity-candidates.test.mjs \
+            apps/metaengine-browser/test/package-build-reservation.test.mjs \
+            apps/metaengine-browser/test/installer-provenance-v3.test.mjs
+
+  frozen-me2-seven-views:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.3.3'
+      - name: Exact checkout and immutable version
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$ME2_BUILD_SHA"
+          node -e "const f=require('./apps/metaengine-browser/package.json');if(f.version!=='0.7.0-dev.37781000062.1')process.exit(1)"
+      - name: Frozen UI dependency lock, seven views, typecheck, production build and pack
+        working-directory: apps/me2-ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun run test:operator-observatory
+          bun run test:operator-primary
+          bun run typecheck
+          bun run build
+          bun run pack
+          node -e "const m=require('./me2-ui-dist/me2-ui-manifest.json');if(m.schema!=='me2.ui-bundle-manifest.v1'||m.git_sha!==process.env.ME2_BUILD_SHA)process.exit(1)"
