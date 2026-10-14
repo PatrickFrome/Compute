@@ -1,0 +1,68 @@
+name: METAENGINE Client W41 BrowserCell Native Continuity Integration
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/browsercell-continuity-integration-w41.mjs'
+      - 'apps/metaengine-browser/src/browsercell-cdp-continuity-readback.mjs'
+      - 'apps/metaengine-browser/src/browser-realtime-process-plane.mjs'
+      - 'apps/metaengine-browser/src/browser-realtime-semantic-plane.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/test/browsercell-continuity-integration-w41.test.mjs'
+      - '.github/workflows/client-w41-browsercell-continuity-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-hermetic-source-readback:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout pinned source without credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Source identity and no dirty tree
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --check
+          git diff --exit-code
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Actual native/Brain/CDP classes and adversarial source contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in src/browsercell-continuity-integration-w41.mjs src/browsercell-cdp-continuity-readback.mjs src/browser-realtime-process-plane.mjs src/browser-realtime-semantic-plane.mjs src/native-supervisor-client.mjs src/main.mjs test/browsercell-continuity-integration-w41.test.mjs; do
+            node --check "$file"
+          done
+          node --test \
+            test/browsercell-continuity-integration-w41.test.mjs \
+            test/browsercell-cdp-continuity-readback.test.mjs \
+            test/browser-realtime-process-plane.test.mjs \
+            test/browser-persistent-cdp-semantic-plane.test.mjs \
+            test/browser-brain-runtime-binding-memory.test.mjs
+      - name: No writes to pinned checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code

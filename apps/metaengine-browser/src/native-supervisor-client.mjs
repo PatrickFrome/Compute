@@ -6,6 +6,8 @@ import {
   createBoundedSupervisorFetch,
 } from './native-supervisor-client-core.mjs';
 import { BrowserRealtimeProcessPlane } from './browser-realtime-process-plane.mjs';
+import { BrowserCellContinuityIntegrationW41 } from './browsercell-continuity-integration-w41.mjs';
+import { nativeBrowserCdpPool } from './browser-persistent-cdp-session.mjs';
 import {
   BROWSER_COGNITIVE_BATCH_SCHEMA,
   BrowserCognitiveDeltaTransport,
@@ -443,6 +445,8 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #quitDurabilityPromise = null;
   #selfUpdateDurabilityReadyRef = () => false;
   #resolveBrowserCell = null;
+  #resolveContinuityView = null;
+  #continuityReadback = null;
 
   constructor(options = {}) {
     const rawFetch = options.fetchImpl ?? globalThis.fetch;
@@ -561,6 +565,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       throw new Error('native_supervisor_browser_cell_resolver_invalid');
     }
     this.#resolveBrowserCell = options.resolveBrowserCell || null;
+    if (options.resolveContinuityView != null && typeof options.resolveContinuityView !== 'function') {
+      throw new Error('native_supervisor_continuity_view_resolver_invalid');
+    }
+    this.#resolveContinuityView = options.resolveContinuityView || null;
     this.#cognitiveTransport = createNativeSupervisorCognitiveTransport({
       identity: this.#workspaceIdentity,
       fetchImpl: this.#workspaceFetch,
@@ -781,7 +789,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         resolveBrowserCell: this.#resolveBrowserCell,
         sampleMs: 250,
         eventLimit: 512,
-        onChange: () => {
+        onChange: (event, nativeSource) => {
+          // In-process only: the native object never enters a transported event.
+          try { this.#continuityReadback?.observe(event, nativeSource); } catch {}
           // The source planes already bound resource cadence and semantic burst
           // coalescing. The cognitive route is an observation-only replacement for
           // per-event full snapshots. Unsupported or ambiguous delivery immediately
@@ -791,6 +801,16 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         },
       });
       this.#processPlaneSet?.(plane);
+      // Only one already-live Brain, process census, exact tab index and CDP
+      // pool. No extra observer, CDP attach, registry, scheduler or poll timer.
+      this.#continuityReadback = this.#resolveContinuityView && this.#resolveBrowserCell
+        ? new BrowserCellContinuityIntegrationW41({
+            views: { get: (tabId) => this.#resolveContinuityView(tabId) },
+            cells: { get: (tabId) => this.#resolveBrowserCell(tabId) },
+            processPlane: plane,
+            cdpPool: nativeBrowserCdpPool,
+          })
+        : null;
       // Tier 2 break repair #4 (results→artifacts): every terminal DevOS task
       // outcome now records an immutable artifact reference through the
       // collaboration fabric riding this plane (journal + durable persistence
@@ -968,6 +988,16 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       throw new Error('native_supervisor_resume_receipt_invalid');
     }
     return Object.freeze(structuredClone(body));
+  }
+
+  browserCellContinuityReadback(tabId) {
+    // Local observation capability only, never an executor or Send permit.
+    return this.#continuityReadback?.read(tabId) || Object.freeze({
+      schema: 'metaengine.client.browsercell-cdp-continuity.v1',
+      tab_id: null, state: 'UNKNOWN', reason: 'NATIVE_INTEGRATION_UNAVAILABLE',
+      healthy: false, send_allowed: false, execution_authority: false,
+      lease_authority: false, automatic_retry_allowed: false, authority_effect: false,
+    });
   }
 
   runtimeBinding(tabId, options = {}) {
