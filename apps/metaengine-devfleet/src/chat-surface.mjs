@@ -529,8 +529,11 @@ export class ChatSurface {
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
     let scoped=[],scopeState='SKIPPED';
-    if(composer&&value==='') {
-      try{scoped=await scopedUserMessageHtml(view);scopeState='READ';}
+    if((composer&&value==='')||options?.diagnostic===true) {
+      // Read-only evidence sampling; without verified composer this never
+      // changes the fail-closed postedUserTurnObserved receipt predicate.
+      try{scoped=await scopedUserMessageHtml(view);
+        scopeState=(composer&&value==='')?'READ':'DIAGNOSTIC_READ';}
       catch{scopeState='READ_FAILED'; /* fail closed, do not reveal exception/page */ }
     }
     const stable=!view.webContents.isDestroyed()&&this.#views.get(tabId)===view&&

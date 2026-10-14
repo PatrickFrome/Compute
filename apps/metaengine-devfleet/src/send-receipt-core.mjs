@@ -73,8 +73,8 @@ export function userTurnReceiptDiagnostic(input) {
   if(u.protocol!=='https:'||!['chatgpt.com','www.chatgpt.com'].includes(u.hostname)||
      u.search||u.hash||!/^\/c\/[A-Za-z0-9-]+\/?$/.test(u.pathname))
     return unknown('CONVERSATION_URL_INVALID');
-  if(composer_observed!==true)return unknown('COMPOSER_NOT_PROVEN');
-  if(composer_value!=='' )return unknown(composer_value===null?'COMPOSER_UNKNOWN':'COMPOSER_NOT_EMPTY');
+  // Inspect bounded USER turns even without a mounted composer, for diagnosis
+  // only. The production predicate still requires an exact empty editor.
   if(!Array.isArray(user_turn_html)||user_turn_html.length>256)
     return unknown('USER_TURN_SCOPE_INVALID');
   const marker='[DevFleet request: '+request_id+']';
@@ -90,6 +90,11 @@ export function userTurnReceiptDiagnostic(input) {
       .replace(/&#93;|&rbrack;/gi,']');
     if(text.includes(marker))hits++;
   }
+  if(composer_observed!==true)
+    return unknown('COMPOSER_NOT_PROVEN',user_turn_html.length,hits);
+  if(composer_value!=='')
+    return unknown(composer_value===null?'COMPOSER_UNKNOWN':'COMPOSER_NOT_EMPTY',
+      user_turn_html.length,hits);
   const exact=postedUserTurnObserved(input);
   if(exact&&hits===1)return {
     state:'PROVEN_SENT',reason:'EXACT_USER_TURN',user_turn_count:user_turn_html.length,

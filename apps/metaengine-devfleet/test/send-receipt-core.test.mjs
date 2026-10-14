@@ -70,6 +70,7 @@ test('bounded receipt diagnostic reasons never leak text or invent physical proo
  const cases=[
   [valid,'EXACT_USER_TURN','PROVEN_SENT'],
   [{...valid,composer_value:null},'COMPOSER_UNKNOWN','UNVERIFIED'],
+  [{...valid,composer_observed:false},'COMPOSER_NOT_PROVEN','UNVERIFIED'],
   [{...valid,composer_value:'secret draft'},'COMPOSER_NOT_EMPTY','UNVERIFIED'],
   [{...valid,user_turn_html:[]},'MARKER_MISSING','UNVERIFIED'],
   [{...valid,user_turn_html:[...valid.user_turn_html,...valid.user_turn_html]},'MARKER_DUPLICATED','UNVERIFIED'],
@@ -82,6 +83,8 @@ test('bounded receipt diagnostic reasons never leak text or invent physical proo
   assert.equal(observed.state,state);
   assert.equal(observed.text_exposed,false);
   assert.equal(observed.authority_effect,false);
+  if(input.composer_observed===false || input.composer_value===null)
+    assert.equal(observed.marker_matches,1);
   assert.equal(JSON.stringify(observed).includes('secret draft'),false);
   assert.equal(JSON.stringify(observed).includes('<div'),false);
  }
