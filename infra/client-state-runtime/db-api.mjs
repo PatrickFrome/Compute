@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
 import { OPERATOR_DB_IDENTITY_SQL, qualifyLocalPostgresEvidence } from './operator-truth-readback.mjs';
 import { qualifyOperatorOwner, readOwnPostgresOperatorTruth } from './operator-own-pg-fleet-truth.mjs';
+import { admitOwnPg17LedgerReadback } from './operator-pg17-restart-admission.mjs';
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -185,12 +186,20 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         // Never run the ledger SELECTs without a fresh, exact Owner/generation.
         // Missing SELECT grants, schema, or SQL readback leave both planes UNKNOWN.
         let ledger = null;
+        let postmasterChanged = false;
         if (qualifyOperatorOwner(owner, nowMs)) {
           try {
-            ledger = await transaction(
-              tx => readOwnPostgresOperatorTruth({ tx, owner, nowMs }),
-              { readOnly: true },
-            );
+            ledger = await transaction(async tx => {
+              // A pool may reconnect to a NEW postmaster after the capability
+              // query. Schema, role grants, PG17 and restart identity must be
+              // rechecked in THIS ledger transaction before any lease/event read.
+              const admission = await admitOwnPg17LedgerReadback({ tx, priorClockRows: clockRows, nowMs });
+              if (!admission.admitted) {
+                if (admission.reason === 'POSTMASTER_CHANGED') postmasterChanged = true;
+                return null;
+              }
+              return readOwnPostgresOperatorTruth({ tx, owner, nowMs });
+            }, { readOnly: true });
           } catch { ledger = null; }
         }
         return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
@@ -198,7 +207,9 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
           ...(ledger?.fleet ? { fleet: ledger.fleet } : {}),
           ...(ledger?.continuity ? { continuity: ledger.continuity } : {}),
           database: qualifyLocalPostgresEvidence({
-            clockRows, capabilityRows: rows, nowMs,
+            // Never combine pre-restart catalog evidence with post-restart
+            // ledger evidence or report the old postmaster as still available.
+            clockRows: postmasterChanged ? [] : clockRows, capabilityRows: rows, nowMs,
             rpcAvailable: RPC_ALLOWLIST.length - missing.length,
             rpcExpected: RPC_ALLOWLIST.length,
             tablesAvailable: Object.keys(TABLE_ALLOWLIST).length - unavailable.length,
