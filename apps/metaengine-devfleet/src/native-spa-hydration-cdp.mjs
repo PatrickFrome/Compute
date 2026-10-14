@@ -98,5 +98,8 @@ export async function collectNativeSpaHydration(ctx) {
   }catch{return unknownHydration('CDP_READBACK_FAILED');}
   finally{
     if(subscriber&&dbg)try{dbg.removeListener('message',subscriber);}catch{}
+    // Stop this bounded observation domain after the window closes. Never
+    // disable on an unsuccessful enable (we do not own such a domain).
+    if(net.sampled&&dbg)try{await limited(dbg.sendCommand('Network.disable'),750);}catch{}
   }
 }
