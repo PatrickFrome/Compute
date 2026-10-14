@@ -176,13 +176,13 @@ test('oversize, redirects, network failures and competing reads stay bounded and
 test('source IPC/preload contract: primary-only one-method bridge; no renderer URL/key authority', async () => {
   const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
   const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
-  assert.match(preload, /contextBridge\\.exposeInMainWorld\\('metaengineOperator'/);
-  assert.match(preload, /if \\(isPrimaryMe2PresentationDocument\\(\\)\\)/);
-  assert.match(preload, /readContext: async \\(\\) =>/);
-  assert.match(preload, /ipcRenderer\\.invoke\\('metaengine:operator:read-context'\\)/);
-  assert.match(main, /assertOperatorContextSender\\(event\\)/);
-  assert.match(main, /event\\.senderFrame !== shellView\\.webContents\\.mainFrame/);
-  assert.match(main, /actual\\.origin !== pinned\\.origin/);
-  assert.match(main, /args\\.length !== 0/);
+  assert.match(preload, /contextBridge\.exposeInMainWorld\('metaengineOperator'/);
+  assert.match(preload, /if \(isPrimaryMe2PresentationDocument\(\)\)/);
+  assert.match(preload, /readContext: async \(\) =>/);
+  assert.match(preload, /ipcRenderer\.invoke\('metaengine:operator:read-context'\)/);
+  assert.match(main, /assertOperatorContextSender\(event\)/);
+  assert.match(main, /event\.senderFrame !== shellView\.webContents\.mainFrame/);
+  assert.match(main, /actual\.origin !== pinned\.origin/);
+  assert.match(main, /args\.length !== 0/);
   assert.doesNotMatch(preload, /LOCAL_STATE_API_KEY|METAENGINE_OPERATOR_GATEWAY_BASE_URL/);
 });
