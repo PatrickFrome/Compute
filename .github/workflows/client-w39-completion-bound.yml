@@ -1,0 +1,46 @@
+name: Client W39 Bound Agent Completion Source
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-agent-completion-bound-w39.mjs'
+      - 'infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs'
+      - '.github/workflows/client-w39-completion-bound.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-bound-evidence:
+    name: W39 own-PG/critic/GitHub / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Assert exact checked-out source identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "exact_source_sha=$EXPECTED_SHA"
+      - name: Syntax and hermetic source E2E
+        shell: bash
+        run: |
+          node --check infra/client-state-runtime/operator-agent-completion-evidence.mjs
+          node --check infra/client-state-runtime/operator-agent-completion-bound-w39.mjs
+          node --check infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs
+          node --test infra/client-state-runtime/operator-agent-completion-evidence.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs
+      - name: Diff whitespace
+        shell: bash
+        run: git diff --check HEAD^ HEAD
