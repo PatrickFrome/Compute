@@ -151,7 +151,10 @@ test('rollback preservation digest and archive root cannot be redirected',async 
   const x=await fixture(t);
   assert.equal((await seal({...x,rollbackSha256:'0'.repeat(64)})).reason,
     'ARCHIVE_OR_ROLLBACK_DRIFT');
-  assert.equal((await seal({...x,journalDirectory:process.cwd()})).reason,'ARCHIVE_DESTINATION_MISMATCH');
+  // Linux refuses the non-temp root immediately; Windows may pass root
+  // canonicalization then reject its archive-path mismatch. Both fail closed.
+  assert.match((await seal({...x,journalDirectory:process.cwd()})).reason,
+    /^(ROOT_UNTRUSTED|ARCHIVE_DESTINATION_MISMATCH)$/);
 });
 test('rollback file mutation invalidates stage even with intact archive',async t=>{
   const x=await fixture(t);
