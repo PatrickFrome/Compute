@@ -234,6 +234,10 @@ function listenLocal() {
         'dev.pipeline.rotate_batch':p=>operator.batchRotate(p),
         'dev.pipeline.retire':p=>operator.retireFailed(p),
         'dev.pipeline.retire_batch':p=>operator.retireBatch(p),
+        'dev.pipeline.queue_status':()=>operator.queueStatus(),
+        'dev.pipeline.enqueue':p=>operator.enqueueCoding(p),
+        'dev.pipeline.cancel':p=>operator.cancelCoding(p),
+        'dev.pipeline.admit':p=>operator.admitCoding(p),
         'dev.receipt.status':()=>operator.receiptSummary(),
         'dev.surface.inspect':p=>operator.inspectSurface(p),
         'dev.receipt.inspect':p=>operator.inspectReceipt(p),
@@ -243,7 +247,8 @@ function listenLocal() {
       if(!Object.hasOwn(devRoutes,envelope.method))
         return respond(400,{ok:false,error:'developer_method_unknown'});
       const noParams=new Set(['dev.status','dev.stage','dev.activate',
-        'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status']);
+        'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status',
+        'dev.pipeline.queue_status']);
       if(noParams.has(envelope.method)&&Object.keys(params).length)
         return respond(400,{ok:false,error:'developer_params_denied'});
       try {
