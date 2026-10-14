@@ -1,7 +1,11 @@
 // W39: observational assembly on top of W31's completion guard and the existing
 // own-PG project/DevOS ledger. Never call from a renderer, worker or model.
-// withReadOnlyTransaction must be the existing trusted Owner's REPEATABLE READ,
-// READ ONLY transaction callback; SQL grants and physical Owner are separate gates.
+// withOwnerReadbackTransaction must be the existing trusted Owner's
+// consistent PostgreSQL transaction callback (not a caller SQL API).
+// Project snapshot's device-grant function uses SELECT ... FOR SHARE, so
+// PostgreSQL SET TRANSACTION READ ONLY would reject that fixed function.
+// The adapter itself issues only fixed SELECTs, with no mutation route.
+// Native Owner, SELECT/EXECUTE grants and real PG17 remain release gates.
 import { qualifyOperatorOwner } from './operator-own-pg-fleet-truth.mjs';
 import { readClientAgentCompletion } from './operator-agent-completion-evidence.mjs';
 
@@ -46,13 +50,13 @@ export const W39_TASK_SQL = [
   'pg_catalog.clock_timestamp() AS observed_at,',
   '(SELECT e.created_at FROM destruktion_meta.project_event_h205f22 e',
   " WHERE e.project_id=x.project_id AND e.task_id=t.task_id AND e.attempt=t.lease_generation AND e.event_type='TASK_STATE_CHANGED'",
-  " AND e.content->>'state'='RESULT_READY' ORDER BY e.seq DESC LIMIT 1) AS ready_at,",
+  " AND e.content->>'state'='RESULT_READY' AND e.content->>'result_sha256'=t.result_sha256 ORDER BY e.seq DESC LIMIT 1) AS ready_at,",
   '(SELECT e.seq FROM destruktion_meta.project_event_h205f22 e',
   " WHERE e.project_id=x.project_id AND e.task_id=t.task_id AND e.attempt=t.lease_generation AND e.event_type='TASK_STATE_CHANGED'",
-  " AND e.content->>'state'='RESULT_READY' ORDER BY e.seq DESC LIMIT 1) AS ready_seq,",
+  " AND e.content->>'state'='RESULT_READY' AND e.content->>'result_sha256'=t.result_sha256 ORDER BY e.seq DESC LIMIT 1) AS ready_seq,",
   '(SELECT e.seq FROM destruktion_meta.project_event_h205f22 e',
   " WHERE e.project_id=x.project_id AND e.task_id=t.task_id AND e.attempt=t.lease_generation AND e.event_type='TASK_STATE_CHANGED'",
-  " AND e.content->>'state'='COMPLETED' ORDER BY e.seq DESC LIMIT 1) AS completed_seq",
+  " AND e.content->>'state'='COMPLETED' AND e.content->>'result_sha256'=t.result_sha256 ORDER BY e.seq DESC LIMIT 1) AS completed_seq",
   'FROM destruktion_meta.project_task_h205f22 x',
   'JOIN destruktion_meta.project_run_h205f22 r ON r.project_id=x.project_id',
   'JOIN destruktion_meta.devos_fleet_task_h205f22 t ON t.task_id=x.task_id',
@@ -68,7 +72,7 @@ export const W39_CRITIC_SQL = [
   'destruktion_meta.project_result_bound_h205f22(v.task_id,\'ACCEPT\') AS bound_accept,',
   '(SELECT e.seq FROM destruktion_meta.project_event_h205f22 e',
   " WHERE e.project_id=x.project_id AND e.task_id=v.task_id AND e.attempt=v.lease_generation AND e.event_type='TASK_STATE_CHANGED'",
-  " AND e.content->>'state'='COMPLETED' ORDER BY e.seq DESC LIMIT 1) AS critic_seq",
+  " AND e.content->>'state'='COMPLETED' AND e.content->>'result_sha256'=v.result_sha256 ORDER BY e.seq DESC LIMIT 1) AS critic_seq",
   'FROM destruktion_meta.project_task_h205f22 x',
   'JOIN destruktion_meta.devos_fleet_task_h205f22 v ON v.task_id=x.task_id',
   "WHERE x.project_id=$1::uuid AND x.parent_task_id=$2::uuid AND v.role IN ('CRITIC','FALSIFIER')",
@@ -139,7 +143,8 @@ function boundTask({ expected: b, owner, project, fleet, workspaces, tasks, crit
   const critic = critics.find(c => c.role === 'CRITIC');
   if (!critic || critics.some(c => !['CRITIC','FALSIFIER'].includes(c.role))
       || new Set(critics.map(c => c.role)).size !== critics.length
-      || critics.some(c => c.state !== 'COMPLETED' || c.bound_accept !== true
+      || critics.some(c => c.state !== 'COMPLETED' || c.disposition !== 'ACCEPT'
+        || !goodInt(c.lease_generation) || c.bound_accept !== true
         || lower(c.subject_task_id) !== lower(b.task_id)
         || lower(c.subject_sha256) !== claim || lower(c.accepted_subject_sha256) !== claim
         || c.lease_agent_id === b.agent_id || !AGENT.test(c.lease_agent_id)
@@ -171,7 +176,7 @@ function boundTask({ expected: b, owner, project, fleet, workspaces, tasks, crit
 }
 
 export async function readBoundClientAgentCompletion({
-  expected, owner, withReadOnlyTransaction, readGitHubPull, readGitHubChecks,
+  expected, owner, withOwnerReadbackTransaction, readGitHubPull, readGitHubChecks,
   observed_at_ms = Date.now(),
 } = {}) {
   const b = expected;
@@ -186,11 +191,11 @@ export async function readBoundClientAgentCompletion({
       || lower(owner.project_id) !== lower(b.run_id)
       || owner.admin_grant_epoch !== b.owner_epoch)
     return fenced('TRUSTED_OWNER_MISSING');
-  if (typeof withReadOnlyTransaction !== 'function'
+  if (typeof withOwnerReadbackTransaction !== 'function'
       || typeof readGitHubPull !== 'function' || typeof readGitHubChecks !== 'function')
     return fenced('READERS_UNBOUND');
   try {
-    const task = await withReadOnlyTransaction(async tx => {
+    const task = await withOwnerReadbackTransaction(async tx => {
       if (typeof tx?.unsafe !== 'function') throw new Error('tx_missing');
       const selectors = [owner.workspace_id, b.task_id, owner.device_id,
         owner.client_id, owner.admin_grant_epoch];
