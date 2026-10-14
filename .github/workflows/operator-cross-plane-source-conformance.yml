@@ -1,0 +1,59 @@
+name: W10 Cross-Plane Source Conformance
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-cross-plane-source-conformance.mjs'
+      - 'infra/client-state-runtime/operator-cross-plane-source-conformance.test.mjs'
+      - 'infra/client-state-runtime/package.json'
+      - '.github/workflows/operator-cross-plane-source-conformance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: w10-cross-source-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-conformance:
+    name: source-contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - name: Checkout exact candidate, no persisted token
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact head identity
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Syntax-check bounded read-only conformance
+        shell: bash
+        run: |
+          node --check infra/client-state-runtime/operator-cross-plane-source-conformance.mjs
+          node --check infra/client-state-runtime/operator-cross-plane-source-conformance.test.mjs
+
+      - name: Execute source/watermark/reset falsification
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/operator-cross-plane-source-conformance.test.mjs \
+            infra/client-state-runtime/operator-cross-plane-conformance.test.mjs \
+            apps/me2-ui/src/lib/operator-observatory.test.mjs
