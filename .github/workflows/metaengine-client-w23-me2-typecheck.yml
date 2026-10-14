@@ -1,0 +1,57 @@
+name: METAENGINE Client W23 ME2 TypeScript and package
+
+on:
+  pull_request:
+    paths:
+      - 'apps/me2-ui/**'
+      - '.github/workflows/metaengine-client-w23-me2-typecheck.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  seven-view-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout exact W23 candidate (read-only)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Setup pinned Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.3.3'
+      - name: Confirm source identity
+        run: test "$(git rev-parse HEAD)" = "$ME2_BUILD_SHA"
+      - name: Frozen ME2 UI dependencies
+        working-directory: apps/me2-ui
+        run: bun install --frozen-lockfile
+      - name: Exactly scoped Observatory seven-view falsification suite
+        working-directory: apps/me2-ui
+        run: bun run test:operator-observatory
+      - name: Full strict ME2 TypeScript typecheck
+        working-directory: apps/me2-ui
+        run: bun run typecheck
+      - name: Next production package build
+        working-directory: apps/me2-ui
+        run: bun run build
+      - name: Pack standalone ME2 UI contract
+        working-directory: apps/me2-ui
+        run: bun run pack
+      - name: Verify exact source-bound package manifest
+        working-directory: apps/me2-ui
+        run: |
+          test -f me2-ui-dist/server.js
+          test -f me2-ui-dist/.next/BUILD_ID
+          test -d me2-ui-dist/.next/static
+          test -f me2-ui-dist/me2-ui-manifest.json
+          node -e "const m=require('./me2-ui-dist/me2-ui-manifest.json'); if(m.schema!=='me2.ui-bundle-manifest.v1'||m.git_sha!==process.env.ME2_BUILD_SHA) process.exit(1)"
