@@ -114,6 +114,7 @@ export function falsifyFleetDagCancellationProof({ snapshot, runtimeControl, lea
     if (count > FLEET_DAG_LIMITS.resources[resource]) fail('RESOURCE_CAPACITY_EXCEEDED');
 
   let returned = 0;
+  const returnedTaskIds = new Set();
   for (const claim of snapshot.active_claims) {
     if (upper(claim?.state) === 'ACTIVE') continue; // timestamps do not release
     if (!RELEASED.has(upper(claim?.state))) continue;
@@ -122,6 +123,13 @@ export function falsifyFleetDagCancellationProof({ snapshot, runtimeControl, lea
       fail('RELEASE_WITHOUT_TERMINAL_TASK');
       continue;
     }
+    // A task can release at most one physical slot even if a stale ledger
+    // repeats a terminal receipt (possibly under another generation).
+    if (returnedTaskIds.has(uid(claim.task_id))) {
+      fail('DUPLICATE_SLOT_RETURN');
+      continue;
+    }
+    returnedTaskIds.add(uid(claim.task_id));
     if (!positive(claim.lease_generation) || task.lease_generation !== claim.lease_generation
         || activeTaskIds.has(uid(claim.task_id))) {
       fail('RELEASE_GENERATION_CONFLICT');
