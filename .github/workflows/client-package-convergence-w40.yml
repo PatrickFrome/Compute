@@ -1,0 +1,63 @@
+name: METAENGINE Client W40 Package Source Convergence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/client-package-convergence-w40.yml'
+      - 'apps/metaengine-browser/scripts/client-package-convergence-w40.cjs'
+      - 'apps/metaengine-browser/scripts/client-windows-source-identity.cjs'
+      - 'apps/metaengine-browser/scripts/package-build-reservation.mjs'
+      - 'apps/metaengine-browser/test/client-package-convergence-w40.test.mjs'
+      - 'apps/metaengine-browser/test/client-windows-source-identity.test.mjs'
+      - 'apps/metaengine-browser/test/package-identity-candidates.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  source-package-contract:
+    name: source-package-contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - name: Checkout exact PR head (not synthetic merge)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Assert exact source head
+        shell: bash
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git status --porcelain)"
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+      - name: Read-only package source and adversarial contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/scripts/client-package-convergence-w40.cjs
+          node --check apps/metaengine-browser/scripts/client-windows-source-identity.cjs
+          node --check apps/metaengine-browser/scripts/package-build-reservation.mjs
+          node --test \
+            apps/metaengine-browser/test/client-package-convergence-w40.test.mjs \
+            apps/metaengine-browser/test/client-windows-source-identity.test.mjs \
+            apps/metaengine-browser/test/package-identity-candidates.test.mjs \
+            apps/metaengine-browser/test/package-build-reservation.test.mjs \
+            apps/metaengine-browser/test/installer-provenance-v3.test.mjs
+      - name: Enforce source-only immutable tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^ HEAD
+          test -z "$(git status --porcelain)"

@@ -631,6 +631,8 @@ async function writeProvenance(options) {
         installerPath,
         expectedInstallerSha256: installerSha256,
         expectedInstallerBytes: stats.size,
+        packageLockBytes: readFileSync(resolve(String(options['package-lock']))),
+        expectedSourceHead: sourceHead,
       });
     } catch (error) {
       throw new ProvenanceError('windows_source_identity_invalid', {
@@ -960,6 +962,8 @@ async function verifyInstaller(options) {
           installerPath,
           expectedInstallerSha256: actualSha256,
           expectedInstallerBytes: stats.size,
+          packageLockBytes: readFileSync(packageLockPath),
+          expectedSourceHead: options['expect-head'],
         });
       } catch (error) {
         throw new ProvenanceError('windows_source_identity_invalid', {

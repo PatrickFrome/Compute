@@ -44,6 +44,12 @@ function fixture() {
     dependency_resolution_sha256: sha256String(canonicalJson(payload)),
     authority_effect: false,
   };
+  const lock = { name: manifest.name, version: VERSION, lockfileVersion: 3, packages: {
+    '': { name: manifest.name, version: VERSION, dependencies: manifest.dependencies },
+    'node_modules/electron-updater': { version: '6.8.9' },
+    'node_modules/socket.io-client': { version: '4.8.1' },
+  } };
+  const packageLockBytes = Buffer.from(JSON.stringify(lock));
   const identity = createBuildIdentityV3({
     repository: 'PatrickFrome/Compute', repository_id: '1341371143',
     source_head: SHA, workflow: 'browser-windows-package-smoke.yml',
@@ -51,7 +57,7 @@ function fixture() {
     platform: 'win32', arch: 'x64',
     builder_config_sha256: 'b'.repeat(64),
     dependency_resolution_sha256: dependency.dependency_resolution_sha256,
-    package_lock_sha256: 'c'.repeat(64),
+    package_lock_sha256: digest(packageLockBytes),
     npm_version: '11.9.0', bun_version: '1.3.3',
     me2_ui_bun_lock_sha256: 'd'.repeat(64),
     electron_builder_version: '26.15.7', node_version: process.version,
@@ -59,6 +65,7 @@ function fixture() {
   const input = {
     manifest, dependency, identity, installerPath,
     expectedInstallerSha256: digest(bytes), expectedInstallerBytes: bytes.length,
+    packageLockBytes, expectedSourceHead: SHA,
   };
   return { dir, input };
 }
