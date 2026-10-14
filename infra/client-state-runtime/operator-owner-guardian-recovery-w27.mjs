@@ -22,7 +22,10 @@ const sameOwner = (a,b) => sameBirth(a,b) && a.owner_id === b.owner_id
   && a.process_incarnation_id === b.process_incarnation_id;
 const boundedTime = (t,now) => t !== null && t <= now + MAX_SKEW_MS && t > 0;
 const snapshot = (state, reason, other = {}) => Object.freeze({
-  schema: OWNER_GUARDIAN_RECOVERY_SCHEMA, source: 'TRUSTED_NATIVE_READBACK',
+  schema: OWNER_GUARDIAN_RECOVERY_SCHEMA, source: 'OWNER_GUARDIAN_PROVENANCE_REDUCER',
+  // Shape-checked readbacks are not cryptographic attestation. The trusted
+  // native caller must recheck kernel truth and its generation CAS independently.
+  native_attestation_verified: false,
   state, reason, authority_effect: false, automatic_retry_allowed: false,
   restart_authorized: false, lease_release_authorized: false,
   task_effect_replayed: false, ...other,
