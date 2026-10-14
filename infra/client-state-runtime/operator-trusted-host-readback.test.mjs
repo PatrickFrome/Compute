@@ -95,3 +95,19 @@ test('stale Guardian health readback cannot borrow fresh heartbeat',async()=>{
   const h=HEALTH();h.observed_at=at(-12000);
   assert.equal((await view({readGuardianHealth:async()=>h})).state,'STALE');
 });
+
+test('contradictory OS presence passes fail closed instead of borrowing a PRESENT sample',async()=>{
+  for(const selected of [9001,4554]){
+    for(const direction of ['ABSENT_TO_PRESENT','PRESENT_TO_ABSENT']){
+      let calls=0;
+      const v=await view({readOsProcess:async pid=>{
+        if(pid===selected)calls++;
+        return {...OS(pid),state:pid!==selected?'PRESENT':
+          direction==='ABSENT_TO_PRESENT'
+            ? (calls===1?'ABSENT':'PRESENT')
+            : (calls===1?'PRESENT':'ABSENT')};
+      }});
+      assert.equal(v.state,'UNKNOWN',selected+':'+direction);
+    }
+  }
+});
