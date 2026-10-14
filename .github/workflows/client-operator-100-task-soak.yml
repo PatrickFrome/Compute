@@ -1,0 +1,81 @@
+name: Client Operator 100-task Soak (W34)
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-client-100-task-soak*'
+      - '.github/workflows/client-operator-100-task-soak.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-operator-soak-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hermetic:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact source SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove source identity
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: W34 hermetic Client workload and adversarial budget/cursor tests
+        working-directory: infra/client-state-runtime
+        run: node --test operator-client-100-task-soak.test.mjs
+
+  disposable-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17.11@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+        env:
+          POSTGRES_PASSWORD: checkpoint-fixture-only
+          POSTGRES_DB: checkpoint_fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d checkpoint_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      LOCAL_STATE_TEST_ADMIN_DATABASE_URL: postgres://postgres:checkpoint-fixture-only@127.0.0.1:5432/checkpoint_fixture
+    steps:
+      - name: Checkout exact source SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove source identity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Frozen own PG driver, no scripts
+        working-directory: infra/client-state-runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Read-only Gateway 100-task benchmark on disposable own PG17
+        working-directory: infra/client-state-runtime
+        run: node --test operator-client-100-task-soak.pg17.integration.test.mjs
