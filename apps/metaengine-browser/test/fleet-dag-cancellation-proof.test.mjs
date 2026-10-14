@@ -86,6 +86,35 @@ test('slot return only after terminal task and exact reconciled generation from 
   has(altered,'SLOT_RETURN_PROOF_UNKNOWN');
   assert.equal(altered.returned_slots,0);
 });
+test('duplicate terminal receipt never returns two slots or authorizes another effect',()=>{
+  const running=inflight(25,'IMPLEMENTER','HOST',2);
+  const done={...running,state:'FENCED'};
+  const released=claim(running,'FENCED',{reconciliation:{
+    source:'OWN_POSTGRES',verified:true,authority_effect:false,
+    task_id:running.task_id,lease_generation:2,effect_state:'NO_UNKNOWN_EFFECT',
+  }});
+  const projection=check(snap([],[released,{...released}],[done]));
+  has(projection,'DUPLICATE_SLOT_RETURN');
+  assert.equal(projection.returned_slots,1);
+  assert.equal(projection.admission_authorized,false);
+});
+test('role cap and global cap refuse overcommitted task/claim readbacks',()=>{
+  const critics=Array.from({length:5},(_,i)=>{
+    const t=inflight(i+30,'CRITIC','BROWSER',1);
+    t.lease_agent_id='agent_critic_'+i;
+    return t;
+  });
+  const role=check(snap(critics,critics.map(t=>claim(t))));
+  has(role,'ROLE_CAPACITY_EXCEEDED');
+  const workers=Array.from({length:17},(_,i)=>{
+    const t=inflight(i+40,'IMPLEMENTER','COMPUTE',1);
+    t.lease_agent_id='agent_impl_'+i;
+    return t;
+  });
+  const global=check(snap(workers,workers.map(t=>claim(t))));
+  has(global,'GLOBAL_CAPACITY_EXCEEDED');
+  assert.equal(global.automatic_retry_allowed,false);
+});
 test('unreconciled expiry, cancellation, and uncertain effect never return slots',()=>{
   const running=inflight(6);
   const terminal={...running,state:'AMBIGUOUS'};
