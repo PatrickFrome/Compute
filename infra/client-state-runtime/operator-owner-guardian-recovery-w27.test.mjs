@@ -25,6 +25,8 @@ test('double kernel absence and stale matching native Owner/Guardian yields only
   const r=check(E());
   assert.equal(r.schema,OWNER_GUARDIAN_RECOVERY_SCHEMA);
   assert.equal(r.state,'RECONCILIATION_REQUIRED');
+  assert.equal(r.native_attestation_verified,false);
+  assert.equal(r.source,'OWNER_GUARDIAN_PROVENANCE_REDUCER');
   assert.equal(r.next_step,'EXISTING_SUPERVISOR_NATIVE_RECHECK_AND_GENERATION_CAS');
   assert.match(r.owner_fingerprint_sha256,/^[a-f0-9]{64}$/);
   for(const flag of ['authority_effect','automatic_retry_allowed','restart_authorized',
