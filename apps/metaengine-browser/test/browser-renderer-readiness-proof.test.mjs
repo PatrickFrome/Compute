@@ -106,6 +106,19 @@ test('new PID or creation time invalidates prior renderer even if PID is recycle
   }
 });
 
+test('lost incarnation stays RECOVERING; new exact native incarnation and fresh frame prove recovery', () => {
+  const nextIdentity = { ...id, pid: 4101, process_creation_time_ms: 19_600, navigation_generation: 4 };
+  const nextSample = { ...sample(), ...nextIdentity, observed_at_ms: 19_700 };
+  const nextFrame = { ...frame(), ...nextIdentity, observed_at_ms: 19_800 };
+  assert.equal(judge({ sample: nextSample, surface: nextFrame }).state, 'RECOVERING');
+  assert.equal(classify({
+    expected: nextIdentity, sample: nextSample, surface: frame(), now_ms: NOW,
+  }).state, 'UNKNOWN');
+  assert.equal(classify({
+    expected: nextIdentity, sample: nextSample, surface: nextFrame, now_ms: NOW,
+  }).state, 'READY');
+});
+
 test('owner epoch/source SHA/WebContents binding conflicts fail closed', () => {
   for (const conflict of [
     { owner_incarnation: 'different-epoch' },
