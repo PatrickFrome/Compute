@@ -28,6 +28,7 @@ test('explicit admission uses operator Send preflight, four slots max, project f
  assert.deepEqual(wave.results.map(x=>x.task_id),['coding-task-000','coding-task-001','coding-task-002','coding-task-003']);
  assert.equal(wave.results.every(x=>x.state==='SENT'),true);
  assert.equal(op.queueStatus().free_hot_slots,0);
+ assert.equal('items' in op.snapshot().coding_queue,false); // chat.list lacks task identity
  assert.equal(f.actions.creates.length,4);assert.equal(f.actions.sends.length,4);
  const noCapacity=await op.admitCoding({max_items:4});
  assert.equal(noCapacity.results.length,0);assert.equal(f.actions.sends.length,4);
