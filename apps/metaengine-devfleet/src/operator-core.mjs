@@ -285,6 +285,8 @@ export class DevFleetOperator {
     }
     return { schema: SCHEMA, state: 'READ', tab_id: tab.tab_id, url: tab.url,
       text: data.text, offset, total_chars: data.total_chars,
+      conversation_surface: data.conversation_surface||'UNKNOWN',
+      surface_reason:data.surface_reason||'UNVERIFIED',
       has_more: Boolean(data.has_more), page_content_untrusted: true,
       automatic_retry_allowed: false, authority_effect: false };
   }
