@@ -346,3 +346,67 @@ test('installer provenance v3 rejects electron-builder version drift at provenan
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('W24 V3 producer rejects an internally rehashed but incomplete direct-runtime dependency proof', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    const { dependency_resolution_sha256: oldDigest, authority_effect: oldAuthority, ...payload } = f.dependency;
+    payload.tree = { ...payload.tree, dependencies: {
+      'electron-updater': payload.tree.dependencies['electron-updater'],
+    } };
+    payload.dependency_count = 1;
+    const dependency = {
+      ...payload,
+      dependency_resolution_sha256: sha256String(canonicalJson(payload)),
+      authority_effect: false,
+    };
+    writeFileSync(f.dependencyPath, JSON.stringify(dependency, null, 2) + '\n');
+    const identity = createBuildIdentityV3({
+      ...f.identity,
+      dependency_resolution_sha256: dependency.dependency_resolution_sha256,
+    });
+    writeFileSync(f.buildIdentityPath, JSON.stringify(identity, null, 2) + '\n');
+
+    await assert.rejects(
+      () => writeProvenance(writeOptions(f)),
+      (error) => error?.code === 'windows_source_identity_invalid'
+        && /client_windows_direct_dependency_missing/.test(String(error?.details?.message || '')),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W24 V3 consumer rejects forged signed evidence without independent SLSA verification', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    await writeProvenance(writeOptions(f));
+    const provenance = JSON.parse(readFileSync(f.provenancePath, 'utf8'));
+    provenance.signed = true;
+    writeFileSync(f.provenancePath, JSON.stringify(provenance, null, 2) + '\n');
+    await assert.rejects(
+      () => verifyInstaller({ dir, 'expect-head': HEAD, config: f.configPath }),
+      (error) => error?.code === 'candidate_untrusted_signature_claim',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W24 V3 consumer rejects an ambiguous directory containing two NSIS setup EXEs', async () => {
+  const dir = workspace();
+  try {
+    const f = createFixture(dir);
+    await writeProvenance(writeOptions(f));
+    writeFileSync(join(dir, 'METAENGINE-Browser-Test-Setup-0.7.0-dev.42.1-x64.exe'), 'MZ-another');
+    await assert.rejects(
+      () => verifyInstaller({ dir, 'expect-head': HEAD, config: f.configPath }),
+      (error) => error?.code === 'windows_source_identity_invalid'
+        && /client_windows_installer_cardinality_invalid/.test(String(error?.details?.message || '')),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

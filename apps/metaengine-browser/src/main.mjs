@@ -2143,6 +2143,8 @@ async function initNativeSupervisor() {
       // R84: one canonical logical BrowserCell allocation lives inside the
       // existing TabRegistry. The realtime Brain consumes this metadata on the
       // same process/semantic event path; no URL/title inference or second map.
+      // Exact native view object, observation-only; no alternate tab registry.
+      resolveContinuityView: (tabId) => views.get(String(tabId)) || null,
       resolveBrowserCell: (tabId) => {
         const tab = registry.get(String(tabId));
         if (!tab?.browser_cell_id || !Number.isSafeInteger(Number(tab.browser_cell_generation))) return null;

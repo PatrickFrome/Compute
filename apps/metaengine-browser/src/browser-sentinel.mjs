@@ -3,7 +3,7 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { localSupervisorProviderProfile } from './explicit-local-supervisor-provider.mjs';
+import { explicitLocalSupervisorBase, localSupervisorProviderProfile } from './explicit-local-supervisor-provider.mjs';
 
 const require = createRequire(import.meta.url);
 const { durableWriteJson, durableWriteJsonSync } = require('./durable-json-file.cjs');
@@ -82,7 +82,17 @@ export function sentinelEnvironment(source, { statePath, token, parentPid }) {
   for (const [key, value] of Object.entries(source || {})) {
     if (allow.has(String(key).toUpperCase()) && value != null) env[key] = String(value);
   }
-  const provider = localSupervisorProviderProfile(source);
+  // A detached worker must never inherit a guessed local endpoint or a
+  // provider marker left by an absent/blocked Owner. Keep diagnostics offline.
+  const boot = String(source?.METAENGINE_LOCAL_PROVIDER_BOOT_STATE || '').trim();
+  const inactiveOwner = ['NO_OWNER_CONFIG', 'BLOCKED', 'OFFLINE_DIAGNOSTIC'].includes(boot);
+  if (!inactiveOwner && boot !== 'READY' && String(source?.METAENGINE_STATE_PROVIDER || '').trim())
+    throw new Error('browser_sentinel_local_owner_unattested');
+  const provider = boot === 'READY' ? localSupervisorProviderProfile(source) : null;
+  // A syntactically valid caller-supplied READY marker is insufficient. The
+  // native module must already be pinned by the real Owner bootstrap.
+  if (provider && explicitLocalSupervisorBase({ env: source, activeBase: provider.base_url }) !== provider.base_url)
+    throw new Error('browser_sentinel_local_owner_unattested');
   if (provider) {
     env.METAENGINE_STATE_PROVIDER = provider.provider;
     env.METAENGINE_SUPERVISOR_BASE_URL = provider.base_url;

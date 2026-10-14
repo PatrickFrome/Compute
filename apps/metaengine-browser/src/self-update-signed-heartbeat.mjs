@@ -46,7 +46,7 @@ export function inspectSignedNativeSupervisorStateRequest(input, init = {}) {
   const localBase = explicitLocalSupervisorBase();
   const endpointMatches = localBase
     ? [`${localBase}/v1/state`, `${localBase}/v1/heartbeat`].includes(`${url.origin}${url.pathname}`)
-    : url.protocol === 'https:' && url.hostname.toLowerCase() === NATIVE_SUPERVISOR_HOST && (!url.port || url.port === '443') && SIGNED_HEARTBEAT_ELIGIBLE_PATHS.has(url.pathname);
+    : false; // No hosted heartbeat acceptance when own Owner is absent.
   if (!endpointMatches || url.username || url.password || url.search || url.hash) {
     return Object.freeze({ valid: false, reason: 'endpoint_mismatch' });
   }

@@ -120,9 +120,13 @@ export class HostResilienceRuntime {
   }
 
   async #verifyLoginStart({ force = false } = {}) {
-    const localProfile = localSupervisorProviderProfile(process.env);
-    const persistentQualified = localProfile != null && persistentLocalProviderBootstrap.persistent === true && persistentLocalProviderBootstrap.state === 'READY' && persistentLocalProviderBootstrap.base_url === localProfile.base_url && persistentLocalProviderBootstrap.instance_id === localProfile.instance_id;
-    if (localProfile && !persistentQualified) {
+    // A selected local provider without the native Owner is not eligible for
+    // login-start registration, even when its endpoint cannot be resolved.
+    const localSelected = String(process.env.METAENGINE_STATE_PROVIDER || '').trim() === 'LOCAL_POSTGRES';
+    const ownerReady = persistentLocalProviderBootstrap.persistent === true && persistentLocalProviderBootstrap.state === 'READY';
+    const localProfile = ownerReady ? localSupervisorProviderProfile(process.env) : null;
+    const persistentQualified = localProfile != null && ownerReady && persistentLocalProviderBootstrap.base_url === localProfile.base_url && persistentLocalProviderBootstrap.instance_id === localProfile.instance_id;
+    if (localSelected && !persistentQualified) {
       this.#state.login_start_required = false;
       this.#state.login_start_verified = false;
       this.#state.login_start_policy_hold = false;
