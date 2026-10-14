@@ -32,6 +32,7 @@ function serialOwnPgModel() {
   const operation = q => q.includes('INSERT INTO public.metaengine_supervisor_continuity_lease_v1') ? 'boot'
     : q.includes('expires_at = clock_timestamp() +') ? 'renew'
     : q.includes("pending_wake_status='PREPARED'") ? 'reserve'
+    : q.includes('SELECT owner_id, run_id, process_incarnation_id') ? 'readback'
     : q.includes('pending_wake_status=$6') ? 'reconcile'
     : q.includes("pending_wake_status='AMBIGUOUS'") ? 'ambiguous'
     : q.includes('pending_wake_id=NULL') ? 'settle' : null;
@@ -64,10 +65,15 @@ function serialOwnPgModel() {
                   pending_wake_process_incarnation_id: null,
                   pending_wake_lease_generation: null, last_receipt_sha256: null,
                 };
-              } else if (row.process_incarnation_id !== args[2]) {
+              } else {
+                const expired = Date.parse(row.expires_at) <= now;
+                if (row.process_incarnation_id !== args[2] || expired) row.lease_generation++;
                 row.process_incarnation_id = args[2];
-                row.lease_generation++;
-                if (row.pending_wake_id !== null) row.pending_wake_status = 'AMBIGUOUS';
+                // Every new boot fences a PREPARED effect, including same-ID
+                // restart or a lost ACK after the reservation committed.
+                if (row.pending_wake_id !== null && row.pending_wake_status === 'PREPARED') {
+                  row.pending_wake_status = 'AMBIGUOUS';
+                }
               }
               row.expires_at = new Date(now + args[3]).toISOString();
             } else {
@@ -75,6 +81,10 @@ function serialOwnPgModel() {
               if (!row || row.process_incarnation_id !== args[2]
                 || row.lease_generation !== args[3] || Date.parse(row.expires_at) <= now) return [];
               switch (op) {
+                case 'readback':
+                  if (row.pending_wake_id !== args[4] || row.pending_wake_status !== args[5]
+                    || row.last_receipt_sha256 !== args[6] || row.event_seq !== args[7]) return [];
+                  return [structuredClone(row)];
                 case 'renew':
                   row.expires_at = new Date(now + args[4]).toISOString();
                   break;
@@ -353,4 +363,140 @@ test('supervisor-continuity-pg17-chaos: own-PG schema is CAS-keyed and source is
   // Static catalog contract only. No physical PG17 test or implicit connection.
   assert.match(schema, /CREATE TABLE IF NOT EXISTS public\.metaengine_supervisor_continuity_lease_v1/);
   assert.match(schema, /pending_wake_status IN \('PREPARED','AMBIGUOUS','CONFIRMED_SENT','PROVEN_NOT_SENT'\)/);
+});
+
+
+test('supervisor-boot-wake: expired same-incarnation ID increments generation and fences PREPARED send', async () => {
+  const pg = serialOwnPgModel();
+  const first = pg.make('reused_incarnation');
+  assert.equal((await first.acquireBoot()).lease_generation, 1);
+  await first.reserveWake({ wake_id: WAKE_A, supervisor_epoch: 11, cycle_seq: 12 });
+  pg.advance(TTL + 1);
+  // A stale identity must never renew generation 1 after lease expiry.
+  const reboot = pg.make('reused_incarnation');
+  const boot = await reboot.acquireBoot();
+  assert.equal(boot.lease_generation, 2);
+  assert.equal(boot.pending_wake_status, 'AMBIGUOUS');
+  assert.equal(boot.pending_wake_lease_generation, 1);
+  assert.equal(boot.reconciliation_required, true);
+  assert.equal(boot.automatic_retry_allowed, false);
+  assert.equal(await reboot.reserveWake({ wake_id: WAKE_B, supervisor_epoch: 12, cycle_seq: 1 }), null);
+  await assert.rejects(first.renew(), /not_held/);
+  assert.equal(pg.events.filter(e => e.op === 'reserve' && e.didWrite).length, 1);
+});
+
+test('supervisor-boot-wake: boot re-entry after committed reserve ACK loss seals PREPARED as AMBIGUOUS', async () => {
+  const pg = serialOwnPgModel();
+  const runtime = pg.make('incarnation_one');
+  await runtime.acquireBoot();
+  pg.dropCommittedAck('reserve');
+  await assert.rejects(runtime.reserveWake({
+    wake_id: WAKE_A, supervisor_epoch: 9, cycle_seq: 17,
+  }), /ack_lost_after_commit_reserve/);
+  assert.equal(pg.row().pending_wake_status, 'PREPARED');
+  const reread = await runtime.acquireBoot();
+  assert.equal(reread.pending_wake_status, 'AMBIGUOUS');
+  assert.equal(reread.lease_generation, 1);
+  assert.equal(await runtime.reserveWake({
+    wake_id: WAKE_B, supervisor_epoch: 10, cycle_seq: 18,
+  }), null);
+  assert.equal(pg.events.filter(e => e.op === 'reserve' && e.didWrite).length, 1);
+});
+
+test('supervisor-boot-wake: lost reconciliation ACK is resumed by exact trusted readback after restart', async () => {
+  const pg = serialOwnPgModel();
+  const predecessor = await prepare(pg, 4, 24);
+  await predecessor.markAmbiguous(WAKE_A);
+  pg.advance(TTL + 1);
+  const firstRecovery = pg.make('incarnation_recovery_one');
+  await firstRecovery.acquireBoot();
+  const proof = receipt(firstRecovery.snapshot());
+  pg.dropCommittedAck('reconcile');
+  await assert.rejects(firstRecovery.reconcile(proof), /ack_lost_after_commit_reconcile/);
+  assert.equal(pg.row().pending_wake_status, 'CONFIRMED_SENT');
+  const committedCursor = pg.row().event_seq;
+  const committedWrites = pg.events.filter(e => e.op === 'reconcile' && e.didWrite).length;
+
+  pg.advance(TTL + 1);
+  let checks = 0;
+  const successor = pg.make('incarnation_recovery_two', {
+    verifyNativeReceipt: async () => { checks++; return true; },
+  });
+  const boot = await successor.acquireBoot();
+  assert.equal(boot.reconciliation_required, true);
+  assert.equal(boot.pending_wake_status, 'CONFIRMED_SENT');
+  assert.equal(boot.last_receipt_sha256, DIGEST);
+  for (const forged of [
+    { receipt_sha256: 'a'.repeat(64) }, { effect_state: 'NOT_SENT' },
+    { event_seq: committedCursor + 1 }, { lease_generation: proof.lease_generation + 1 },
+    { supervisor_epoch: proof.supervisor_epoch + 1 }, { cycle_seq: proof.cycle_seq + 1 },
+    { process_incarnation_id: 'incarnation_recovery_two' }, { trusted_native_readback: false },
+  ]) {
+    assert.equal((await successor.reconcile({ ...proof, ...forged })).state, 'UNRESOLVED');
+  }
+  assert.equal(checks, 0, 'bad receipt cannot reach independently trusted verifier');
+  const replay = await successor.reconcile(proof);
+  assert.equal(replay.state, 'CONFIRMED_SENT');
+  assert.equal(replay.readback_recorded, true);
+  assert.equal(replay.automatic_retry_allowed, false);
+  assert.equal(replay.authority_effect, false);
+  assert.equal(checks, 1);
+  assert.equal(pg.row().event_seq, committedCursor);
+  assert.equal(pg.events.filter(e => e.op === 'reconcile' && e.didWrite).length, committedWrites);
+  assert.equal(await successor.reserveWake({ wake_id: WAKE_B, supervisor_epoch: 5, cycle_seq: 1 }), null);
+  const settled = await successor.settleWake({ wake_id: WAKE_A, receipt_sha256: DIGEST });
+  assert.equal(settled.reconciliation_required, false);
+  assert.equal(settled.pending_wake_id, null);
+});
+
+test('supervisor-boot-wake: recorded receipt still fails closed without independent native verification', async () => {
+  const pg = serialOwnPgModel();
+  const predecessor = await prepare(pg, 8, 90);
+  await predecessor.markAmbiguous(WAKE_A);
+  pg.advance(TTL + 1);
+  const initial = pg.make('incarnation_initial');
+  await initial.acquireBoot();
+  const proof = receipt(initial.snapshot(), { effect_state: 'NOT_SENT' });
+  assert.equal((await initial.reconcile(proof)).state, 'PROVEN_NOT_SENT');
+  pg.advance(TTL + 1);
+  const noVerifier = pg.make('incarnation_no_verifier', { verifyNativeReceipt: null });
+  await noVerifier.acquireBoot();
+  assert.equal((await noVerifier.reconcile(proof)).state, 'UNRESOLVED');
+  const forgedVerifier = pg.make('incarnation_no_verifier', {
+    verifyNativeReceipt: async () => false,
+  });
+  await forgedVerifier.acquireBoot();
+  assert.equal((await forgedVerifier.reconcile(proof)).state, 'UNRESOLVED');
+  assert.equal(pg.row().pending_wake_status, 'PROVEN_NOT_SENT');
+});
+
+
+test('supervisor-boot-wake: readback expiry during native verification cannot settle a stale generation', async () => {
+  const pg = serialOwnPgModel();
+  const predecessor = await prepare(pg, 2, 4);
+  await predecessor.markAmbiguous(WAKE_A);
+  pg.advance(TTL + 1);
+  const initial = pg.make('incarnation_verified');
+  await initial.acquireBoot();
+  const proof = receipt(initial.snapshot());
+  assert.equal((await initial.reconcile(proof)).state, 'CONFIRMED_SENT');
+  pg.advance(TTL + 1);
+  const successor = pg.make('incarnation_reverify', {
+    verifyNativeReceipt: async () => { pg.advance(TTL + 1); return true; },
+  });
+  await successor.acquireBoot();
+  const result = await successor.reconcile(proof);
+  assert.equal(result.state, 'UNRESOLVED');
+  assert.equal(result.authority_effect, false);
+  assert.equal(pg.row().pending_wake_status, 'CONFIRMED_SENT');
+  await assert.rejects(successor.settleWake({ wake_id: WAKE_A, receipt_sha256: DIGEST }), /not_held/);
+});
+
+test('supervisor-boot-wake: source binds boot expiry CAS and immutable receipt readback', async () => {
+  const source = await readFile(fileURLToPath(new URL('../src/supervisor-continuity-lease.mjs', import.meta.url)), 'utf8');
+  assert.match(source, /lease_generation = CASE WHEN prior\.process_incarnation_id = EXCLUDED\.process_incarnation_id\s+AND prior\.expires_at > clock_timestamp\(\)/);
+  assert.match(source, /pending_wake_status = CASE WHEN prior\.pending_wake_id IS NOT NULL\s+AND prior\.pending_wake_status = 'PREPARED' THEN 'AMBIGUOUS'/);
+  assert.match(source, /SELECT \$\{PROJECTION\} FROM public\.metaengine_supervisor_continuity_lease_v1/);
+  assert.match(source, /AND pending_wake_id=\$5 AND pending_wake_status=\$6\s+AND last_receipt_sha256=\$7 AND event_seq=\$8/);
+  assert.doesNotMatch(source, /\b(?:supabase|https?:\/\/|fetch\(|second_scheduler)\b/i);
 });
