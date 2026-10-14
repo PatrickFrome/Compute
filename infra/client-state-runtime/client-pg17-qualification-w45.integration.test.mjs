@@ -53,8 +53,8 @@ async function launch() {
   const endpoint = await docker('port', id, '5432/tcp');
   const found = endpoint.match(/127\.0\.0\.1:(\d+)/);
   assert(found, 'refuse non-loopback/implicit port');
-  const port = Number(found[1]);
-  const open = () => postgres({ host: '127.0.0.1', port, username: 'w45_test_owner',
+  const endpointState = { port: Number(found[1]) };
+  const open = () => postgres({ host: '127.0.0.1', port: endpointState.port, username: 'w45_test_owner',
     password, database: 'w45_test_db', max: 16, connect_timeout: 1,
     prepare: false, onnotice: () => {}, idle_timeout: 2 });
   const ready = async db => {
@@ -71,7 +71,8 @@ async function launch() {
     }
     throw Error('DISPOSABLE_PG17_READY_UNKNOWN');
   };
-  return { id, password, port, open, ready };
+  return { id, password, get port() { return endpointState.port; },
+    set port(value) { endpointState.port = value; }, open, ready };
 }
 test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTHETIC_STAGING)',
   { skip: !enabled && !required ? 'PG17_DOCKER_UNAVAILABLE: UNKNOWN (not PASS)' : false,
@@ -97,7 +98,9 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
   try {
     await c.ready(admin);
     await t.test('PG17 source DDL grants, deny by default and READ ONLY FOR SHARE falsification', async () => {
-      await admin.unsafe(schema);
+      await admin.begin(async tx => {
+        await tx.unsafe(schema.replace(/^BEGIN;\s*/i, '').replace(/\s*COMMIT;\s*$/i, ''));
+      });
       await admin.unsafe('CREATE ROLE ' + role + " LOGIN PASSWORD '" + readerPassword + "'");
       await admin.unsafe('CREATE ROLE ' + writer + " LOGIN PASSWORD '" + writerPassword + "'");
       await admin.unsafe('GRANT SELECT ON public.metaengine_supervisor_continuity_lease_v1 TO ' + role);
@@ -105,7 +108,7 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       reader = login(role, readerPassword);
       const w = login(writer, writerPassword);
       try {
-        assert.deepEqual(await reader.unsafe('SELECT owner_id FROM public.metaengine_supervisor_continuity_lease_v1'), []);
+        assert.deepEqual([...(await reader.unsafe('SELECT owner_id FROM public.metaengine_supervisor_continuity_lease_v1'))], []);
         await assert.rejects(reader.unsafe("INSERT INTO public.metaengine_supervisor_continuity_lease_v1(owner_id,run_id,process_incarnation_id,lease_generation,expires_at) VALUES('x','y','z',1,now())"), e => isCode(e, '42501'));
         // W39's fixed project snapshot calls SELECT FOR SHARE in its grant helper.
         // This is real PG17 behavior, not a claim that an Owner READ ONLY transaction works.
@@ -119,7 +122,7 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
         }), e => isCode(e, '25006'));
         await reader.begin(async tx => {
           await tx.unsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-          assert.deepEqual(await tx.unsafe('SELECT id FROM public.w45_share_probe FOR SHARE'), [{ id: 1 }]);
+          assert.deepEqual([...(await tx.unsafe('SELECT id FROM public.w45_share_probe FOR SHARE'))], [{ id: 1 }]);
         });
         // Synthetic RLS fixture: verify engine enforcement, not live Owner policy.
         await admin.unsafe("CREATE TABLE public.w45_rls_probe(owner_id text, value int)");
@@ -127,7 +130,7 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
         await admin.unsafe('ALTER TABLE public.w45_rls_probe ENABLE ROW LEVEL SECURITY');
         await admin.unsafe('CREATE POLICY w45_only_a ON public.w45_rls_probe FOR SELECT TO ' + role + " USING (owner_id='owner_A')");
         await admin.unsafe('GRANT SELECT ON public.w45_rls_probe TO ' + role);
-        assert.deepEqual(await reader.unsafe('SELECT value FROM public.w45_rls_probe'), [{ value: 1 }]);
+        assert.deepEqual([...(await reader.unsafe('SELECT value FROM public.w45_rls_probe'))], [{ value: 1 }]);
         await assert.rejects(reader.unsafe('DELETE FROM public.w45_rls_probe'), e => isCode(e, '42501'));
         await admin.unsafe("CREATE FUNCTION public.w45_exec_probe() RETURNS text LANGUAGE sql AS 'SELECT ''synthetic''::text'");
         await admin.unsafe('REVOKE ALL ON FUNCTION public.w45_exec_probe() FROM PUBLIC');
@@ -188,6 +191,9 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       await reader?.end({ timeout: 2 }); reader = null;
       await admin.end({ timeout: 2 });
       await docker('restart', c.id);
+      const rebound = (await docker('port', c.id, '5432/tcp')).match(/127\.0\.0\.1:(\d+)/);
+      assert(rebound, 'refuse missing/rebound non-loopback port');
+      c.port = Number(rebound[1]);
       admin = c.open();
       await c.ready(admin);
       const [after] = await admin.unsafe('SELECT * FROM public.metaengine_supervisor_continuity_lease_v1 WHERE owner_id=$1 AND run_id=$2', [owner, run]);
@@ -198,7 +204,8 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       assert.equal(after.pending_wake_id, prior.pending_wake_id);
     });
     await t.test('real claim SQL advisory CAS, slot return and stop boundary (fixture graph)', async () => {
-      await admin.unsafe('CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN');
+      for (const name of ['anon', 'authenticated', 'service_role'])
+        await admin.unsafe('CREATE ROLE ' + name + ' NOLOGIN');
       await admin.unsafe('CREATE SCHEMA destruktion_meta');
       await admin.unsafe('CREATE TABLE destruktion_meta.devos_fleet_task_h205f22(task_id uuid primary key,workspace_id uuid,role text,task_spec jsonb,state text,lease_generation bigint,lease_agent_id text,authority_effect boolean DEFAULT false,result_sha256 text)');
       await admin.unsafe('CREATE TABLE destruktion_meta.project_task_h205f22(task_id uuid primary key,project_id uuid)');
