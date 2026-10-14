@@ -45,6 +45,9 @@ const {
   loadPackageLockMaterialProof,
 } = require('./package-lock-material.cjs');
 
+const { assertWindowsSourceIdentity, assertUnsignedCandidateProvenance } =
+  require('./client-windows-source-identity.cjs');
+
 const PROVENANCE_SCHEMA_V1 = 'metaengine.browser.installer-provenance.v1';
 const PROVENANCE_SCHEMA_V2 = 'metaengine.browser.installer-provenance.v2';
 const PROVENANCE_SCHEMA_V3 = 'metaengine.browser.installer-provenance.v3';
@@ -617,6 +620,25 @@ async function writeProvenance(options) {
     }
   }
 
+  // V3 source acceptance checks the real Windows EXE subject, not just a
+  // self-consistent digest of an incomplete npm ls tree.
+  if (buildIdentity?.schema === BUILD_IDENTITY_SCHEMA_V3) {
+    try {
+      assertWindowsSourceIdentity({
+        manifest: JSON.parse(readFileSync(resolve(String(options['package-json'])), 'utf8')),
+        identity: buildIdentity,
+        dependency: dependencyResolution,
+        installerPath,
+        expectedInstallerSha256: installerSha256,
+        expectedInstallerBytes: stats.size,
+      });
+    } catch (error) {
+      throw new ProvenanceError('windows_source_identity_invalid', {
+        message: String(error?.message || error).slice(0, 240),
+      });
+    }
+  }
+
   const provenance = {
     schema: buildIdentity
       ? (buildIdentity.schema === BUILD_IDENTITY_SCHEMA_V3 ? PROVENANCE_SCHEMA_V3 : PROVENANCE_SCHEMA_V2)
@@ -670,6 +692,14 @@ function readProvenance(provenancePath) {
       provenance: provenancePath,
       schema: parsed ? parsed.schema : null,
     });
+  }
+  // This locally generated record can NEVER independently claim it was
+  // signed or authorized for promotion. Sigstore proof is verified in the
+  // separate, trusted SLSA job on eligible physical push candidates.
+  try {
+    assertUnsignedCandidateProvenance(parsed);
+  } catch {
+    throw new ProvenanceError('candidate_untrusted_signature_claim');
   }
   for (const field of ['installer_name', 'installer_sha256', 'installer_bytes']) {
     if (typeof parsed[field] !== 'string' && typeof parsed[field] !== 'number') {
@@ -920,6 +950,20 @@ async function verifyInstaller(options) {
           material_sha256: material.package_lock_sha256,
           identity_sha256: externalIdentity.package_lock_sha256 || null,
           provenance_sha256: provenance.package_lock_sha256 || null,
+        });
+      }
+      try {
+        assertWindowsSourceIdentity({
+          manifest: JSON.parse(readFileSync(packageJsonPath, 'utf8')),
+          identity: externalIdentity,
+          dependency: dependencyProof,
+          installerPath,
+          expectedInstallerSha256: actualSha256,
+          expectedInstallerBytes: stats.size,
+        });
+      } catch (error) {
+        throw new ProvenanceError('windows_source_identity_invalid', {
+          message: String(error?.message || error).slice(0, 240),
         });
       }
       packageLockVerified = true;
