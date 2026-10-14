@@ -1,0 +1,34 @@
+name: Operator PG17 ACL Falsification (W12)
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-pg17-acl-falsification*'
+      - '.github/workflows/operator-pg17-acl-falsification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-backed-node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Hermetic ACL and W2 reducer contracts (no database/network bootstrap)
+        working-directory: infra/client-state-runtime
+        run: |
+          node --check operator-pg17-acl-falsification.mjs
+          node --check operator-pg17-acl-falsification.test.mjs
+          node --test operator-pg17-acl-falsification.test.mjs operator-own-pg-fleet-truth.test.mjs
+      - name: Explicit PG17 evidence qualifier
+        shell: bash
+        run: |
+          echo 'physical_pg17=UNKNOWN (not started: no disposable PG17 physical test in this job)'
+          echo 'source_qualification_only=true'
