@@ -1,0 +1,45 @@
+name: Client W31 Agent Completion Evidence
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-agent-completion-evidence.mjs'
+      - 'infra/client-state-runtime/operator-agent-completion-evidence.test.mjs'
+      - '.github/workflows/client-w31-agent-completion-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-evidence:
+    name: Node24 evidence / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          printf 'source_sha=%s\n' "$EXPECTED_SHA"
+      - name: Syntax and focused hermetic adversarial suite
+        shell: bash
+        run: |
+          node --check infra/client-state-runtime/operator-agent-completion-evidence.mjs
+          node --check infra/client-state-runtime/operator-agent-completion-evidence.test.mjs
+          node --test infra/client-state-runtime/operator-agent-completion-evidence.test.mjs
+      - name: Diff whitespace gate
+        shell: bash
+        run: git diff --check HEAD^ HEAD
