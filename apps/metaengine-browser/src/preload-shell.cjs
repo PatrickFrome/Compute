@@ -309,6 +309,26 @@ const startFreshSetup = request => {
 };
 
 if (isPrimaryMe2PresentationDocument()) {
+  // W22: only the packaged primary ME2 document receives this native
+  // one-method read-only bridge. No URL, token, query or owner claim from UI.
+  contextBridge.exposeInMainWorld('metaengineOperator', Object.freeze({
+    readContext: async () => {
+      const context = await ipcRenderer.invoke('metaengine:operator:read-context');
+      // W6 catches an unavailable readback and renders all facets UNKNOWN,
+      // rather than interpreting an unattested native diagnostic as observation.
+      if (context?.schema === 'metaengine.operator.native-context.v1'
+        && context.state === 'UNKNOWN') throw new Error('operator_context_unknown');
+      if (context?.schema !== 'metaengine.operator.context.v1'
+        || context.scope !== 'READ_ONLY' || context.storage !== 'OWN_POSTGRES_ONLY'
+        || context.authority_effect !== false) throw new Error('operator_context_invalid');
+      return context;
+    },
+    scope: 'READ_ONLY',
+    remote_fallback_allowed: false,
+    scheduler_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  }));
   // R84 capability fence: the Browser-owned loopback ME2 renderer is not given
   // the legacy generic shell command bridge. Client V1 adds a separate narrow
   // typed product-control bridge below: user intent -> dedicated IPC -> Native
