@@ -21,10 +21,19 @@ const gatewayBody = () => ({
   run: { state: 'UNKNOWN', proof: 'NONE', run_id: null, cursor: null },
   raw_payload: 'do-not-expose',
 });
+const birth = new Date(Date.now() - 60000).toISOString();
 const binding = (gateway_base_url) => ({
   provider: 'LOCAL_POSTGRES', boot_state: 'READY',
   owner_binding_source: 'NATIVE_IN_PROCESS_OWNER', owner_id: owner,
   api_key: apiKey, gateway_base_url,
+  // Hermetic fixture only: these fields model generation/birth, not actual
+  // Host OS attestation or installed Client readiness.
+  owner_epoch: 3, owner_generation: 21, owner_pid: 31415,
+  owner_created_at: birth,
+  process_incarnation_id: 'native-incarnation-21',
+  source_sha: 'a'.repeat(40),
+  postgres_started_at: birth,
+  owner_observed_at: now(),
 });
 async function fixture() {
   let body = gatewayBody(), count = 0, status = 200, headers = null;

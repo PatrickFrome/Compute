@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
 import { OPERATOR_DB_IDENTITY_SQL, qualifyLocalPostgresEvidence } from './operator-truth-readback.mjs';
 import { qualifyOperatorOwner, readOwnPostgresOperatorTruth } from './operator-own-pg-fleet-truth.mjs';
+import { admitOwnPg17LedgerReadback } from './operator-pg17-restart-admission.mjs';
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -185,20 +186,53 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         // Never run the ledger SELECTs without a fresh, exact Owner/generation.
         // Missing SELECT grants, schema, or SQL readback leave both planes UNKNOWN.
         let ledger = null;
+        let postmasterChanged = false;
         if (qualifyOperatorOwner(owner, nowMs)) {
           try {
-            ledger = await transaction(
-              tx => readOwnPostgresOperatorTruth({ tx, owner, nowMs }),
-              { readOnly: true },
-            );
+            ledger = await transaction(async tx => {
+              // A pool may reconnect to a NEW postmaster after the capability
+              // query. Schema, role grants, PG17 and restart identity must be
+              // rechecked in THIS ledger transaction before any lease/event read.
+              const admission = await admitOwnPg17LedgerReadback({ tx, priorClockRows: clockRows, nowMs });
+              if (!admission.admitted) {
+                if (admission.reason === 'POSTMASTER_CHANGED') postmasterChanged = true;
+                return null;
+              }
+              return readOwnPostgresOperatorTruth({ tx, owner, nowMs });
+            }, { readOnly: true });
           } catch { ledger = null; }
+        }
+        // W37: the capability/PG17 transaction fences postmaster changes, but
+        // the independently observed Owner may reincarnate DURING that async
+        // transaction. Before emitting positive lease/cursor data, re-read the
+        // in-process Owner generation. A caller's "verified" field alone does
+        // not attest native birth or authorize effects.
+        if (ledger) {
+          let ownerAfter = null;
+          let timer;
+          try {
+            ownerAfter = await Promise.race([
+              Promise.resolve().then(() => operatorOwnerReadback()),
+              new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); }),
+            ]);
+          } catch { ownerAfter = null; }
+          finally { clearTimeout(timer); }
+          const ownerKeys = ['project_id', 'workspace_id', 'device_id', 'owner_id',
+            'client_id', 'admin_grant_epoch', 'owner_generation',
+            'process_incarnation', 'event_after_seq'];
+          if (!qualifyOperatorOwner(ownerAfter, Date.now()) ||
+            !ownerKeys.every(key => (owner[key] ?? null) === (ownerAfter[key] ?? null))) {
+            ledger = null; // Owner changed or became UNKNOWN: no stale lease truth.
+          }
         }
         return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
           ...(hostObservation ? { host: hostObservation } : {}),
           ...(ledger?.fleet ? { fleet: ledger.fleet } : {}),
           ...(ledger?.continuity ? { continuity: ledger.continuity } : {}),
           database: qualifyLocalPostgresEvidence({
-            clockRows, capabilityRows: rows, nowMs,
+            // Never combine pre-restart catalog evidence with post-restart
+            // ledger evidence or report the old postmaster as still available.
+            clockRows: postmasterChanged ? [] : clockRows, capabilityRows: rows, nowMs,
             rpcAvailable: RPC_ALLOWLIST.length - missing.length,
             rpcExpected: RPC_ALLOWLIST.length,
             tablesAvailable: Object.keys(TABLE_ALLOWLIST).length - unavailable.length,

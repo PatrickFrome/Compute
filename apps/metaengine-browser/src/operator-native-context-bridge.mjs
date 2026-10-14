@@ -41,14 +41,29 @@ function canonicalGatewayUrl(value) {
     return u.origin;
   } catch { return null; }
 }
-function ownerBinding(raw) {
-  // The factory caller must be a trusted native Owner adapter, not renderer IPC.
+function ownerBinding(raw, at) {
+  // This shape is required in addition to the trusted *in-process* native
+  // adapter. A mock callback or a caller-supplied "verified" flag is NOT
+  // authentic OS provenance and can never establish installed health.
   if (!raw || raw.provider !== 'LOCAL_POSTGRES' || raw.boot_state !== 'READY' ||
     raw.owner_binding_source !== 'NATIVE_IN_PROCESS_OWNER' ||
     !OWNER_ID.test(raw.owner_id || '') ||
-    typeof raw.api_key !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(raw.api_key)) return null;
+    typeof raw.api_key !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(raw.api_key) ||
+    !Number.isSafeInteger(raw.owner_epoch) || raw.owner_epoch < 1 ||
+    !Number.isSafeInteger(raw.owner_generation) || raw.owner_generation < 1 ||
+    !Number.isSafeInteger(raw.owner_pid) || raw.owner_pid < 1 ||
+    !(/^[A-Za-z0-9_.:-]{8,128}$/).test(raw.process_incarnation_id || '') ||
+    !/^[a-f0-9]{40}$/i.test(raw.source_sha || '') ||
+    !timestamp(raw.owner_created_at) || !timestamp(raw.postgres_started_at) ||
+    !fresh(raw.owner_observed_at, at)) return null;
   const base = canonicalGatewayUrl(raw.gateway_base_url);
-  return base ? { base, ownerId: raw.owner_id, apiKey: raw.api_key } : null;
+  return base ? Object.freeze({ base, ownerId: raw.owner_id, apiKey: raw.api_key,
+    epoch: raw.owner_epoch, generation: raw.owner_generation, pid: raw.owner_pid,
+    birth: timestamp(raw.owner_created_at), incarnation: raw.process_incarnation_id,
+    postgresBirth: timestamp(raw.postgres_started_at), sourceSha: raw.source_sha.toLowerCase() }) : null;
+}
+function sameBinding(a, b) {
+  return Boolean(a && b && Object.keys(a).every(key => a[key] === b[key]));
 }
 const timestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value))
   ? new Date(Date.parse(value)).toISOString() : null;
@@ -69,7 +84,7 @@ function projectPlane(plane, name, now) {
   return { source: SOURCES[name], state: plane.state,
     fresh: trusted, proof: trusted ? 'TRUSTED_READBACK' : 'NONE', observed_at };
 }
-function projectContext(raw, ownerId, now) {
+function projectContext(raw, ownerId, ownerEpoch, now) {
   if (!raw || raw.schema !== GATEWAY_SCHEMA || raw.version !== 1 ||
     raw.operation !== 'context' || raw.storage !== 'OWN_POSTGRES_ONLY' ||
     raw.scope !== 'READ_ONLY' || raw.authority_effect !== false ||
@@ -87,7 +102,7 @@ function projectContext(raw, ownerId, now) {
   // manufacture event_seq=0, proof hashes, or run identity.
   if (raw.run?.state === 'AVAILABLE') {
     const run = raw.run;
-    if (run.owner_id !== ownerId || !OWNER_ID.test(run.run_id || '') ||
+    if (run.owner_id !== ownerId || run.owner_epoch !== ownerEpoch || !OWNER_ID.test(run.run_id || '') ||
       !OWNER_ID.test(run.project_id || '') ||
       !Number.isSafeInteger(run.owner_epoch) || run.owner_epoch < 0 ||
       typeof run.cursor !== 'string' || !DECIMAL.test(run.cursor) ||
@@ -135,7 +150,10 @@ export function createOperatorNativeContextReader({ getTrustedBinding = () => nu
       catch { return unknownNativeOperatorContext('OWNER_UNBOUND'); }
       if (trusted?.boot_state !== 'READY' || trusted?.provider !== 'LOCAL_POSTGRES')
         return unknownNativeOperatorContext('OWNER_NOT_READY');
-      const binding = ownerBinding(trusted);
+      const startedAt = now();
+      if (!Number.isSafeInteger(startedAt) || startedAt < 0)
+        return unknownNativeOperatorContext('GATEWAY_INVALID');
+      const binding = ownerBinding(trusted, startedAt);
       if (!binding) return unknownNativeOperatorContext('GATEWAY_INVALID');
       const target = `${binding.base}/operator/v1/context`;
       try {
@@ -148,7 +166,16 @@ export function createOperatorNativeContextReader({ getTrustedBinding = () => nu
         const raw = await boundedJson(response);
         const at = now();
         if (!Number.isSafeInteger(at) || at < 0) return unknownNativeOperatorContext('GATEWAY_RESPONSE_INVALID');
-        const context = projectContext(raw, binding.ownerId, at);
+        // An Owner/Gateway/PG restart may occur while the authenticated GET
+        // is in flight. Re-read the native binding AFTER the network response.
+        // Never accept the earlier snapshot on a new epoch, PID/birth, source
+        // SHA, PostgreSQL incarnation, endpoint or credential.
+        let confirmed;
+        try { confirmed = ownerBinding(await getTrustedBinding(), at); }
+        catch { return unknownNativeOperatorContext('OWNER_NOT_READY'); }
+        if (!sameBinding(binding, confirmed))
+          return unknownNativeOperatorContext('OWNER_NOT_READY');
+        const context = projectContext(raw, binding.ownerId, binding.epoch, at);
         return context || unknownNativeOperatorContext('GATEWAY_RESPONSE_INVALID');
       } catch { return unknownNativeOperatorContext('GATEWAY_UNAVAILABLE'); }
     })().finally(() => { inFlight = null; });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { startDbApi } from './db-api.mjs';
 import { RPC_ALLOWLIST } from './db-api-core.mjs';
+import { OPERATOR_PG17_RESTART_ADMISSION_SQL } from './operator-pg17-restart-admission.mjs';
 import {
   OPERATOR_OWN_PG_PROJECT_SQL, OPERATOR_OWN_PG_TASK_CLAIM_SQL, OPERATOR_OWN_PG_EVENT_SQL,
 } from './operator-own-pg-fleet-truth.mjs';
@@ -16,7 +17,8 @@ const owner = () => ({
   event_after_seq: 0,
 });
 const signature = name => ({ name, defaults: 0, returnsSet: false, returnComposite: false, args: [] });
-function fakeDatabase({ denied = false, duplicate = false } = {}) {
+function fakeDatabase({ denied = false, duplicate = false, restarted = false, missingSchema = false,
+  wrongVersion = false, wrongTransaction = false, deniedCatalog = false, cursorGap = false } = {}) {
   const calls = [];
   const now = Date.now();
   const task = {
@@ -30,6 +32,14 @@ function fakeDatabase({ denied = false, duplicate = false } = {}) {
   const tx = { unsafe: async (text, values = []) => {
     calls.push({ text, values });
     if (text.includes('FROM pg_catalog.pg_proc')) return RPC_ALLOWLIST.map(signature);
+    if (text === OPERATOR_PG17_RESTART_ADMISSION_SQL) {
+      if (deniedCatalog) throw new Error('postgres://secret:password@127.0.0.1/private');
+      return [{ observed_at: new Date(), started_at: new Date(now - (restarted ? 50000 : 60000)),
+        database_name: 'own_pg_test', server_version_num: wrongVersion ? 160008 : 170006,
+        transaction_read_only: wrongTransaction ? 'off' : 'on',
+        transaction_isolation: wrongTransaction ? 'read committed' : 'repeatable read',
+        readable_relations: missingSchema ? 4 : 5 }];
+    }
     if (text.includes('pg_postmaster_start_time')) return [{
       observed_at: new Date(), started_at: new Date(now - 60000), database_name: 'own_pg_test',
     }];
@@ -41,7 +51,7 @@ function fakeDatabase({ denied = false, duplicate = false } = {}) {
         last_seq: 1, policy_generation: 1, observed_at: new Date() }];
     }
     if (text === OPERATOR_OWN_PG_TASK_CLAIM_SQL) return duplicate ? [task, { ...task, claim_id: 102 }] : [task];
-    if (text === OPERATOR_OWN_PG_EVENT_SQL) return [{ seq: 1, event_type: 'TASK_PROGRESS',
+    if (text === OPERATOR_OWN_PG_EVENT_SQL) return [{ seq: cursorGap ? 2 : 1, event_type: 'TASK_PROGRESS',
       task_id: uuid(4), content: { token: 'MUST_NEVER_LEAK' } }];
     return [];
   } };
@@ -67,7 +77,7 @@ test('only authenticated local HTTP and internal Owner readback may inspect Post
     const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: key } });
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(reads, 1);
+    assert.equal(reads, 2, 'W37 must independently recheck the native Owner after SQL readback');
     assert.equal(body.planes.fleet.state, 'AVAILABLE');
     assert.equal(body.planes.fleet.details.claim_count, 1);
     assert.equal(body.planes.continuity.details.next_seq, 1);
@@ -111,5 +121,52 @@ test('HTTP snapshot never accepts duplicate live claim rows as a valid lease', a
     const body = await response.json();
     assert.equal(body.planes.fleet.state, 'AMBIGUOUS');
     assert.notEqual(body.operational_state, 'ALL_PLANES_REPORTED_READY');
+  } finally { await runtime.close(); }
+});
+
+test('W25 PostgreSQL 17 restart, schema admission, grants and isolation fail closed at HTTP', async () => {
+  for (const scenario of [
+    { restarted: true, expectedDatabase: 'UNVERIFIED' },
+    { missingSchema: true }, { wrongVersion: true },
+    { wrongTransaction: true }, { deniedCatalog: true },
+  ]) {
+    const fake = fakeDatabase(scenario);
+    const key = 'p'.repeat(64);
+    const runtime = await startDbApi({ apiKey: key, sql: fake.sql, port: 0, operatorOwnerReadback: owner });
+    try {
+      const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: key } });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.planes.fleet.state, 'UNKNOWN');
+      assert.equal(body.planes.continuity.state, 'UNKNOWN');
+      if (scenario.expectedDatabase) assert.equal(body.planes.database.state, scenario.expectedDatabase);
+      assert.equal(body.authority_effect, false);
+      assert.equal(body.remote_fallback_allowed, false);
+      assert.equal(fake.calls.filter(c => c.text === OPERATOR_OWN_PG_PROJECT_SQL).length, 0,
+        'failed admission must not query any lease or event');
+      assert.doesNotMatch(JSON.stringify(body), /secret|password|private/i);
+    } finally { await runtime.close(); }
+  }
+});
+
+test('W25 event cursor corruption cannot gain continuity availability after restart fence', async () => {
+  const fake = fakeDatabase({ cursorGap: true });
+  const key = 'c'.repeat(64);
+  const runtime = await startDbApi({ apiKey: key, sql: fake.sql, port: 0, operatorOwnerReadback: owner });
+  try {
+    const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: key } });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    // Evidence reduction can classify a poisoned fleet/continuity facet
+    // AMBIGUOUS or UNVERIFIED depending on cross-plane corroboration;
+    // neither classification can be positive or authorize any effect.
+    for (const name of ['fleet', 'continuity']) {
+      assert.match(body.planes[name].state, /^(AMBIGUOUS|UNVERIFIED)$/);
+      assert.notEqual(body.planes[name].state, 'AVAILABLE');
+    }
+    assert.equal(body.authority_effect, false);
+    assert.ok(fake.calls.some(c => c.text === OPERATOR_PG17_RESTART_ADMISSION_SQL));
+    assert.deepEqual(fake.calls.filter(c => c.text === OPERATOR_OWN_PG_EVENT_SQL)
+      .map(c => c.values), [[uuid(1), 0, 1]]);
   } finally { await runtime.close(); }
 });
