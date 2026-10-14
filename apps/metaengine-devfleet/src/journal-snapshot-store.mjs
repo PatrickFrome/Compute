@@ -44,7 +44,8 @@ export function createJournalSnapshotStore({file,atomicWrite,io=fs}){
    try{names=await io.readdir(path.dirname(file));}
    catch(error){if(error?.code==='ENOENT')names=[];else throw error;}
    const prefix=path.basename(file)+'.snapshot-v1-';
-   const snapshots=names.filter(name=>name.startsWith(prefix));
+   const snapshots=names.filter(name=>name.startsWith(prefix) &&
+     !/^\d{8}\.json\.tmp-[0-9a-f-]{36}$/.test(name.slice(prefix.length)));
    if(snapshots.length>MAX_SNAPSHOTS ||
        snapshots.some(name=>!/^\d{8}\.json$/.test(name.slice(prefix.length))))
      throw Error('journal_snapshot_catalog_invalid');
@@ -88,13 +89,24 @@ export function createJournalSnapshotStore({file,atomicWrite,io=fs}){
    const entry={...body,entry_sha256:digest(body)};
    const destination=path.join(path.dirname(file),snapshotName(file,next));
    const bytes=JSON.stringify(entry)+'\n';
+   const staging=destination+'.tmp-'+crypto.randomUUID();
    let handle;
    try{
-     handle=await io.open(destination,'wx',0o600);
+     // Staging is never mistaken for a committed generation after power loss.
+     handle=await io.open(staging,'wx',0o600);
      await handle.writeFile(bytes,'utf8');
      await handle.sync();
+     await handle.close();handle=null;
+     // NTFS hard-link create is atomic and exclusive. Unlike rename, it
+     // cannot overwrite another process incarnation's same-seq commit.
+     try{await io.link(staging,destination);}
+     catch(error){
+       let actual=null;try{actual=await io.readFile(destination,'utf8');}catch{}
+       if(actual!==bytes)throw error;
+     }
    }finally{
-     if(handle)await handle.close();
+     if(handle)await handle.close().catch(()=>{});
+     await io.rm(staging,{force:true}).catch(()=>{});
    }
    // An interrupted/partial append must fail closed, never authorize effects.
    const observed=await io.readFile(destination,'utf8');
