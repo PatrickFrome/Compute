@@ -214,9 +214,16 @@ export class DevFleetOperator {
         historical_ambiguous:this.#state.requests.filter(r=>
           r.operation==='assign'&&r.state==='AMBIGUOUS').length,
         effects_require_new_request_id:true},
-      coding_queue:{...codingQueueSummary(this.#state.coding_queue,
-        this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id)),
-        read_only:true,automatic_retry_allowed:false},
+      // Chat capability sees totals only; per-task IDs stay in developer RPC.
+      coding_queue:(()=>{
+        const {schema,hot_limit,occupied_or_reserved,free_hot_slots,counts,
+          auto_admission,authority_effect}=codingQueueSummary(
+            this.#state.coding_queue,this.#state.sessions.length,
+            this.#state.sessions.map(x=>x.tab_id));
+        return {schema,hot_limit,occupied_or_reserved,free_hot_slots,counts,
+          auto_admission,authority_effect,read_only:true,
+          prompts_exposed:false,automatic_retry_allowed:false};
+      })(),
       only_actions: ['create','read','assign','close'],
       primary_browser_shared_profile: false,
       hosted_database: false,
