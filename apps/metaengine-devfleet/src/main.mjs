@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DevFleetOperator, SCHEMA } from './operator-core.mjs';
+import {atomicPrivateWrite} from './atomic-private-write.mjs';
 import { ChatSurface } from './chat-surface.mjs';
 import { LiveUiSlots } from './live-ui-slots.mjs';
 import { LiveOperatorContracts } from './live-operator-contracts.mjs';
@@ -40,11 +41,8 @@ function safeError(error) {
   const msg = String(error?.message || 'operation_refused');
   return /^[a-zA-Z0-9_:-]{1,100}$/.test(msg) ? msg : 'operation_refused';
 }
-async function atomicPrivateWrite(file,content) {
-  const tmp = file + '.tmp-' + crypto.randomUUID();
-  await fs.writeFile(tmp,content,{encoding:'utf8',mode:0o600,flag:'wx'});
-  try { await fs.rename(tmp,file); } catch(error) { await fs.rm(tmp,{force:true}).catch(()=>{}); throw error; }
-}
+// Journal persistence uses bounded same-payload Win32 atomic rename recovery.
+// The operator's write-ahead effect fence still rejects unreconciled failures.
 const disk = {
   async load() {
     try {return JSON.parse(await fs.readFile(path.join(dataDir,'operator-state.json'),'utf8'));}

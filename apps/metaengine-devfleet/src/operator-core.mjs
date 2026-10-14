@@ -203,6 +203,8 @@ export class DevFleetOperator {
     if(!this.#initialized)throw Error('operator_not_initialized');
     return { schema: SCHEMA, client: 'METAENGINE_DEVFLEET_STANDALONE',
       bootstrap_state:this.#restoring?'RESTORING':'READY',
+      operator_liveness:this.#persistenceFenced?'DURABILITY_FENCED':
+        this.#busy?'EFFECT_IN_PROGRESS':this.#restoring?'RESTORING':'READY',
       restored_count:this.#state.sessions.filter(x=>x.state==='OPEN').length,
       session_count: this.#state.sessions.length, sessions: this.#state.sessions.map(s => ({
         tab_id: s.tab_id, url: s.url, state: s.state })),
