@@ -7,9 +7,12 @@
 // Without that bridge, every facet and the event cursor remain UNKNOWN.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OBSERVATORY_VIEWS } from "@/lib/operator-observatory.mjs";
+import { projectPrimaryOperatorView, type PrimaryDelivery } from "@/lib/operator-primary-views.mjs";
 import {
-  OBSERVATORY_VIEWS, emptyOperatorObservatory, reduceOperatorObservatory,
-} from "@/lib/operator-observatory.mjs";
+  advanceOperatorObservatoryResync, emptyOperatorObservatoryResync,
+  expireOperatorObservatoryResync,
+} from "@/lib/operator-observatory-resync.mjs";
 
 type ViewName = keyof typeof OBSERVATORY_VIEWS;
 type OperatorBridge = {
@@ -42,32 +45,53 @@ const STATE_HINTS: Record<string, string> = {
   OFFLINE: "Reported offline by the source readback.",
 };
 
+type ObservatoryFrame = ReturnType<typeof advanceOperatorObservatoryResync>;
+
 export function OperatorObservatoryPage() {
   const [view, setView] = useState<ViewName>("Now");
-  const [projection, setProjection] = useState<ReturnType<typeof reduceOperatorObservatory> | ReturnType<typeof emptyOperatorObservatory>>(() => emptyOperatorObservatory());
+  // Do not infer the initial UNKNOWN/null-only shape as the permanent state:
+  // a real readback may carry a run, cursor, identity and all seven planes.
+  const [resync, setResync] = useState<ObservatoryFrame>(() => emptyOperatorObservatoryResync());
   const [connection, setConnection] = useState<"UNBOUND" | "READING" | "OBSERVED" | "UNAVAILABLE">("UNBOUND");
-  const previous = useRef<ReturnType<typeof reduceOperatorObservatory> | null>(null);
+  const [delivery, setDelivery] = useState<PrimaryDelivery>("LOADING");
+  const [firstTruthMs, setFirstTruthMs] = useState<number | null>(null);
+  const firstReadStart = useRef<number | null>(null);
+  // A single shared checkpoint governs all seven panels. Keep it across
+  // transport failures, remount-free navigation and expired readbacks.
+  const checkpoint = useRef<ObservatoryFrame>(emptyOperatorObservatoryResync());
   const flight = useRef(false);
   const mounted = useRef(false);
-  const fenced = useRef(false);
 
-  const refresh = useCallback(async () => {
-    if (flight.current || fenced.current) return;
+  const update = useCallback((next: ObservatoryFrame) => {
+    checkpoint.current = next;
+    if (mounted.current) {
+      setResync(next);
+      setConnection(next.mode === "TRACKING" ? "OBSERVED" : "UNAVAILABLE");
+      if (next.mode === "TRACKING" && firstReadStart.current !== null) {
+        const elapsed = Math.max(0, Math.round(performance.now() - firstReadStart.current));
+        setFirstTruthMs(previous => previous ?? elapsed);
+      }
+    }
+  }, []);
+
+  const refresh = useCallback(async (explicitResync = false) => {
+    if (flight.current || (checkpoint.current.requires_explicit_resync && !explicitResync)) return;
     const bridge = operatorBridge();
     if (!bridge?.readContext) {
-      previous.current = null;
-      if (mounted.current) {
-        setProjection(emptyOperatorObservatory("TRUSTED_OPERATOR_BRIDGE_ABSENT"));
-        setConnection("UNAVAILABLE");
-      }
+      update(advanceOperatorObservatoryResync(checkpoint.current, null));
+      if (mounted.current) setDelivery("UNBOUND");
       return;
     }
     flight.current = true;
-    if (mounted.current) setConnection("READING");
+    if (mounted.current) {
+      setConnection("READING");
+      setDelivery(checkpoint.current.mode === "TRACKING" ? "READING" : "LOADING");
+    }
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      // Bounded wait, read-only. Timeout never triggers a write, effect or
-      // replay. The bridge owns authentication and source-bound readback.
+      // One read of the canonical in-process Owner context, no HTTP from the
+      // renderer, no effect authority, no automatic resync/retry. A manual
+      // resync still requires a source-bound witness in that same context.
       const result = await Promise.race([
         bridge.readContext(),
         new Promise<never>((_, reject) => {
@@ -75,35 +99,48 @@ export function OperatorObservatoryPage() {
         }),
       ]);
       if (!mounted.current) return;
-      const next = reduceOperatorObservatory(result, { previous: previous.current });
-      setProjection(next);
-      setConnection(next.state === "OBSERVED" ? "OBSERVED" : "UNAVAILABLE");
-      if (next.state === "AMBIGUOUS") fenced.current = true;
-      // Retain the last cursor through transport outages. Otherwise a
-      // regression could be silently accepted on the next successful poll.
-      if (next.state === "OBSERVED") previous.current = next;
-    } catch {
+      update(advanceOperatorObservatoryResync(checkpoint.current, result, {
+        intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
+      }));
+      setDelivery("IDLE");
+    } catch (error) {
       if (mounted.current) {
-        setProjection(emptyOperatorObservatory("READBACK_FAILED_OR_TIMED_OUT"));
-        setConnection("UNAVAILABLE");
+        update(advanceOperatorObservatoryResync(checkpoint.current, null, {
+          intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
+        }));
+        // Do not render the exception message: it may contain native secrets.
+        setDelivery(error instanceof Error && error.message === "operator_read_timeout"
+          ? "TIMED_OUT" : "FAILED");
       }
     } finally {
       if (timer) clearTimeout(timer);
       flight.current = false;
     }
-  }, []);
+  }, [update]);
+
+  const projection = resync.projection;
+  // Primary views use exactly the same redacted frame as the other four.
+  // No legacy workbench, daemon, HTTP or roster fallback when proof is absent.
+  const primary = view === "Now" || view === "Missions" || view === "Fleet"
+    ? projectPrimaryOperatorView(resync, view, { delivery, firstTruthMs }) : null;
 
   useEffect(() => {
     mounted.current = true;
+    firstReadStart.current ??= performance.now();
     void refresh();
     const ticker = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 10000);
+      // Expire visual truth on the clock EVEN if the window is hidden, the
+      // trusted bridge is stalled or the network was lost. No cached ACTIVE.
+      const current = expireOperatorObservatoryResync(checkpoint.current);
+      if (current !== checkpoint.current) update(current);
+      if (document.visibilityState === "visible"
+        && !checkpoint.current.requires_explicit_resync) void refresh();
+    }, 5000);
     return () => {
       mounted.current = false;
       window.clearInterval(ticker);
     };
-  }, [refresh]);
+  }, [refresh, update]);
 
   const names = OBSERVATORY_VIEWS[view];
   const cursor = projection.cursor_state === "VERIFIED_CURSOR"
@@ -123,11 +160,20 @@ export function OperatorObservatoryPage() {
             open tab or available database never proves an active mission, agent or supervisor.
           </p>
         </div>
-        <button type="button" onClick={() => void refresh()} disabled={connection === "READING" || fenced.current}
-          data-testid="operator-observatory-refresh"
-          className="min-h-9 border border-zinc-700 bg-zinc-900 px-4 text-[12px] text-zinc-200 hover:border-zinc-500 disabled:opacity-50">
-          {connection === "READING" ? "Reading…" : fenced.current ? "Reconciliation required" : "Refresh readback"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void refresh()} disabled={connection === "READING" || resync.requires_explicit_resync}
+            data-testid="operator-observatory-refresh"
+            className="min-h-9 border border-zinc-700 bg-zinc-900 px-4 text-[12px] text-zinc-200 hover:border-zinc-500 disabled:opacity-50">
+            {connection === "READING" ? "Reading…" : resync.requires_explicit_resync ? "Reconciliation required" : "Refresh readback"}
+          </button>
+          {resync.requires_explicit_resync ? (
+            <button type="button" onClick={() => void refresh(true)} disabled={connection === "READING"}
+              data-testid="operator-observatory-explicit-resync"
+              className="min-h-9 border border-amber-800 bg-amber-950/40 px-4 text-[12px] text-amber-200 disabled:opacity-50">
+              {connection === "READING" ? "Checking proof…" : "Explicitly re-read & resynchronize"}
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4" aria-label="Canonical context identity">
@@ -141,7 +187,7 @@ export function OperatorObservatoryPage() {
         </div>
         <div className="border border-zinc-800 bg-zinc-900/40 p-3" data-testid="operator-context-truth">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Readback</div>
-          <div className="mt-1 text-[12px] text-zinc-200">{projection.state}</div>
+          <div className="mt-1 text-[12px] text-zinc-200">{resync.mode} · {projection.state}</div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/40 p-3">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Observed at</div>
@@ -151,16 +197,14 @@ export function OperatorObservatoryPage() {
         </div>
       </div>
 
-      {projection.state !== "OBSERVED" || projection.cursor_state !== "VERIFIED_CURSOR" ? (
+      {resync.mode !== "TRACKING" || projection.cursor_state !== "VERIFIED_CURSOR" ? (
         <p role="status" className="border-l-2 border-amber-600 bg-amber-950/20 px-3 py-2 text-[12px] text-amber-200"
           data-testid="operator-context-warning">
-          {projection.state === "AMBIGUOUS"
-            ? "AMBIGUOUS: run/cursor/proof conflict; observations are fenced until explicit reconciliation."
-            : projection.state === "STALE"
-              ? "STALE: do not use this observation as a current-state assertion."
-              : projection.state === "OBSERVED"
-                ? "Event provenance is UNKNOWN: the canonical context has no verified run, cursor and proof identity."
-                : "UNKNOWN / UNVERIFIED: trusted context is unavailable or failed validation. No activity is inferred."}
+          {resync.requires_explicit_resync
+            ? "AMBIGUOUS: cursor gap/rollback, source or Owner rollover. Manual re-read requires one fresh source-bound resync witness; clicking alone cannot clear this fence."
+            : resync.mode === "STALE"
+              ? "STALE: source snapshot expired; prior event watermark is preserved without current activity claims."
+              : "UNKNOWN: canonical Owner/source/proof readback is missing or unverified. No activity is inferred."}
         </p>
       ) : null}
 
@@ -187,6 +231,36 @@ export function OperatorObservatoryPage() {
            "Proof provenance and event cursor; no unsourced event content."}
         </p>
       </div>
+      {primary ? (
+        <section className="border border-cyan-900/40 bg-cyan-950/10 p-4" data-testid="operator-primary-summary"
+          aria-label={primary.title} aria-live="polite">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-[14px] font-medium text-zinc-100">{primary.title}</h3>
+            <span data-testid="operator-primary-phase" className="border border-zinc-700 px-2 py-1 font-mono text-[11px] text-cyan-200">
+              {primary.phase}
+            </span>
+          </div>
+          <p className="mt-2 text-[12px] text-zinc-300" role="status" data-testid="operator-primary-boundary">
+            {primary.hint}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="operator-primary-readback">
+            {primary.facets.map(facet => (
+              <div key={facet.name} className="border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                <span className="text-[11px] capitalize text-zinc-400">{facet.name}</span>
+                <strong className={`ml-2 font-mono text-[11px] ${facet.state === "UNKNOWN" ? "text-zinc-400" : "text-zinc-100"}`}>
+                  {facet.state}
+                </strong>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 border-l-2 border-zinc-600 pl-3 text-[12px] text-zinc-400"
+            data-testid="operator-primary-missing">{primary.missing_detail}</p>
+          <p className="mt-2 text-[11px] text-zinc-500" data-testid="operator-primary-ttft">
+            First source-bound cursor: {primary.first_truth_ms === null
+              ? "UNKNOWN" : `${primary.first_truth_ms} ms`} (UI elapsed; not execution readiness).
+          </p>
+        </section>
+      ) : null}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="operator-planes">
         {names.map((name: string) => {
           const facet = projection.planes[name] ?? { state: "UNKNOWN", fresh: false, proof: "NONE", observed_at: null };
@@ -218,13 +292,17 @@ export function OperatorObservatoryPage() {
         <dl className="mt-3 grid grid-cols-[110px_1fr] gap-2 text-[11px]">
           <dt className="text-zinc-500">Run</dt><dd className="break-all font-mono">{displayRun}</dd>
           <dt className="text-zinc-500">Event sequence</dt><dd className="font-mono">{cursor}</dd>
+          <dt className="text-zinc-500">Owner epoch</dt>
+          <dd className="font-mono" data-testid="operator-owner-epoch">{resync.identity?.owner_epoch ?? "UNKNOWN"}</dd>
+          <dt className="text-zinc-500">Source SHA</dt>
+          <dd className="break-all font-mono" data-testid="operator-source-sha">{resync.identity?.source_sha ?? "UNKNOWN"}</dd>
           <dt className="text-zinc-500">Proof fingerprint</dt>
           <dd className="break-all font-mono">{projection.proof_identity ?? "UNKNOWN"}</dd>
           <dt className="text-zinc-500">Authority</dt>
           <dd className="font-mono">READ_ONLY / authority_effect=false / no automatic retry</dd>
         </dl>
         <p className="mt-4 text-[11px] leading-relaxed text-zinc-500">
-          Operator v1 does not expose bounded task, Brain, artifact or per-event drill-down yet.
+          Source-only resync checks do not attest native Owner/Guardian. Operator v1 does not expose bounded task, Brain, artifact or per-event drill-down yet.
           Missing records remain UNKNOWN until a trusted own-PostgreSQL ledger adapter and
           monotonic event API are independently qualified.
         </p>
