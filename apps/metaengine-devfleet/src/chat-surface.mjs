@@ -8,6 +8,7 @@ import {receiptMarker,postedMessageObserved,postedUserTurnObserved,userTurnRecei
 import {composerDomText} from './composer-dom-core.mjs';
 import {classifyConversationSurface,classifyPostSendNavigation} from './conversation-readiness-core.mjs';
 import {summarizeNativePageMount} from './native-page-mount-proof.mjs';
+import {collectNativeSpaHydration} from './native-spa-hydration-cdp.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -166,6 +167,7 @@ export class ChatSurface {
   #window;
   #views = new Map();
   #navigationGenerations = new Map();
+  #rendererGenerations = new Map();
   #eventHints = new AxEventHints();
   #selected = null;
   #partition;
@@ -210,6 +212,7 @@ export class ChatSurface {
     }});
     this.#views.set(tabId,view);
     this.#navigationGenerations.set(tabId,0);
+    this.#rendererGenerations.set(tabId,0);
     this.#eventHints.register(tabId,'webcontents:'+view.webContents.id);
     const advanceNavigation = () => {
       this.#navigationGenerations.set(tabId,
@@ -218,7 +221,10 @@ export class ChatSurface {
     };
     view.webContents.on('did-start-navigation',advanceNavigation);
     view.webContents.on('did-navigate-in-page',advanceNavigation);
-    view.webContents.on('render-process-gone',advanceNavigation);
+    view.webContents.on('render-process-gone',()=>{
+      this.#rendererGenerations.set(tabId,(this.#rendererGenerations.get(tabId)||0)+1);
+      advanceNavigation();
+    });
     // Subscribe to exact native-target CDP signals; never evaluate page JS.
     view.webContents.debugger.on('message',(_event,method)=>{
       if(method==='Accessibility.nodesUpdated' || method==='Accessibility.loadComplete')
@@ -226,7 +232,7 @@ export class ChatSurface {
     });
     view.webContents.debugger.on('detach',()=>this.#eventHints.invalidate(tabId));
     view.webContents.setWindowOpenHandler(({url})=>({action:'deny'}));
-    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#navigationGenerations.delete(tabId);this.#eventHints.unregister(tabId);});
+    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#navigationGenerations.delete(tabId);this.#rendererGenerations.delete(tabId);this.#eventHints.unregister(tabId);});
     // Only ChatGPT receives DevFleet commands; authentication redirects are
     // allowed for user-driven login, but never selected as command surfaces.
     if (!this.#selected) this.select(tabId);
@@ -446,6 +452,18 @@ export class ChatSurface {
     }
     return result;
   }
+  async hydrationProbe(tabId) {
+    const view=this.#views.get(tabId);
+    if(!view||view.webContents.isDestroyed())
+      throw Error('hydration_probe_tab_not_live');
+    // Native identity callbacks revalidate after each async CDP boundary.
+    // Never select/reload the target or read/return prompt/page text.
+    return collectNativeSpaHydration({tab_id:tabId,
+      process_epoch:processEpoch,webContents:view.webContents,
+      isCurrent:()=>this.#views.get(tabId)===view,
+      rendererGeneration:()=>this.#rendererGenerations.get(tabId),
+      navigationGeneration:()=>this.#navigationGenerations.get(tabId)});
+  }
   async surfaceProbe(tabId) {
     const view=this.#views.get(tabId);
     if(!view || view.webContents.isDestroyed())throw Error('surface_probe_tab_not_live');
@@ -645,6 +663,7 @@ export class ChatSurface {
     await destroyed;
     this.#views.delete(tabId);
     this.#navigationGenerations.delete(tabId);
+    this.#rendererGenerations.delete(tabId);
     this.#eventHints.unregister(tabId);
     if(selected && this.#views.size) {
       this.select(this.#views.keys().next().value);
@@ -658,5 +677,6 @@ export class ChatSurface {
     for(const tabId of this.#views.keys())this.#eventHints.unregister(tabId);
     this.#views.clear();
     this.#navigationGenerations.clear();
+    this.#rendererGenerations.clear();
   }
 }
