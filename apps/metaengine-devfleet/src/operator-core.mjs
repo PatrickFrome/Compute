@@ -480,6 +480,17 @@ export class DevFleetOperator {
   }
 
   // Bounded read-only proof inspection. This does NOT advance or clear ledger state.
+  async inspectSurface(params) {
+    this.#requireInit();
+    fields(params,['tab_id']);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
+    if(typeof this.#adapter.surfaceProbe!=='function')throw Error('surface_probe_unavailable');
+    const result=await this.#adapter.surfaceProbe(tab.tab_id);
+    if(result?.tab_id!==tab.tab_id||result.authority_effect!==false||
+       result.effect_authority!==false||result.send_authorized!==false)
+      throw Error('surface_probe_invalid');
+    return result;
+  }
   async inspectReceipt(params) {
     this.#requireInit();
     fields(params,['request_id','tab_id']);
