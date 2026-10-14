@@ -53,6 +53,7 @@ test('missing/corrupted persisted queue fails closed',()=>{
  assert.throws(()=>readCodingQueue({...q,schema:'other'}),/state_invalid/);
  assert.throws(()=>readCodingQueue({...q,items:[q.items[0],q.items[0]]}),/state_invalid/);
  assert.throws(()=>readCodingQueue({...q,items:[{...q.items[0],text:''}]}),/state_invalid/);
+ assert.throws(()=>readCodingQueue({...q,items:[{...q.items[0],text:'Tampered prompt'}]}),/state_invalid/);
  assert.throws(()=>readCodingQueue({...q,last_project:'?'}),/state_invalid/);
  assert.throws(()=>chooseFairCodingWave(q,5),/budget_invalid/);
 });
