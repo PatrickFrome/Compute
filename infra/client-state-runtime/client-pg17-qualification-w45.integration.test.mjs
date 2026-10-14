@@ -99,7 +99,7 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
     await c.ready(admin);
     await t.test('PG17 source DDL grants, deny by default and READ ONLY FOR SHARE falsification', async () => {
       await admin.begin(async tx => {
-        await tx.unsafe(schema.replace(/^BEGIN;\s*/i, '').replace(/\s*COMMIT;\s*$/i, ''));
+        await tx.unsafe(schema.replace(/^BEGIN;\s*/mi, '').replace(/^\s*COMMIT;\s*$/mi, ''));
       });
       await admin.unsafe('CREATE ROLE ' + role + " LOGIN PASSWORD '" + readerPassword + "'");
       await admin.unsafe('CREATE ROLE ' + writer + " LOGIN PASSWORD '" + writerPassword + "'");
