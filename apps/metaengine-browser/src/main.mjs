@@ -68,6 +68,7 @@ import { createSupabaseHealthSentinel } from './supabase-health-sentinel.mjs';
 import { createFallbackConsoleRuntime } from './fallback-console-runtime.mjs';
 import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
 import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
+import { createOperatorNativeContextReader } from './operator-native-context-bridge.mjs';
 import {
   normalizeClientAgentId,
   normalizeClientAgentSelectionReadback,
@@ -439,6 +440,27 @@ async function saveOwnerSafetyGateState(state) {
 
 function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
+}
+
+// This source slice registers the typed IPC but intentionally leaves the trusted
+// Owner -> local Gateway credential readback unbound until native Owner proof is
+// independently integrated. No env-derived key, guessed port or hosted fallback.
+const operatorContextReader = createOperatorNativeContextReader();
+function assertOperatorContextSender(event) {
+  assertShellSender(event);
+  if (event.senderFrame !== shellView.webContents.mainFrame ||
+    primaryShellMode !== 'ME2_PRIMARY' || !primaryShellUrl) {
+    throw new Error('operator_context_primary_frame_required');
+  }
+  let actual, pinned;
+  try {
+    actual = new URL(shellView.webContents.getURL());
+    pinned = new URL(primaryShellUrl);
+  } catch { throw new Error('operator_context_primary_url_invalid'); }
+  if (actual.protocol !== 'http:' || actual.hostname !== '127.0.0.1' ||
+    actual.origin !== pinned.origin || actual.pathname !== pinned.pathname) {
+    throw new Error('operator_context_primary_origin_mismatch');
+  }
 }
 
 function startupDegradedSnapshot() {
@@ -2543,6 +2565,11 @@ async function createWindow() {
   });
 }
 
+ipcMain.handle('metaengine:operator:read-context', async (event, ...args) => {
+  assertOperatorContextSender(event);
+  if (args.length !== 0) throw new Error('operator_context_arguments_forbidden');
+  return operatorContextReader.readContext();
+});
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
   assertShellSender(event);
