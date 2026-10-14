@@ -247,7 +247,8 @@ function listenLocal() {
       if(!Object.hasOwn(devRoutes,envelope.method))
         return respond(400,{ok:false,error:'developer_method_unknown'});
       const noParams=new Set(['dev.status','dev.stage','dev.activate',
-        'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status']);
+        'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status',
+        'dev.pipeline.queue_status']);
       if(noParams.has(envelope.method)&&Object.keys(params).length)
         return respond(400,{ok:false,error:'developer_params_denied'});
       try {
