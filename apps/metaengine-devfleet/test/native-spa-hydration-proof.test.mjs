@@ -172,3 +172,25 @@ test('existing leased operator rejects forged positive hydration and cannot send
  await assert.rejects(op.inspectHydration({tab_id:owned}),/hydration_probe_invalid/);
  assert.equal(sends,0);
 });
+
+test('overlapping native probes on one WebContents cannot share Network event authority',async()=>{
+ const {ctx,control}=fixture();
+ let release;
+ const held=new Promise(resolve=>{release=resolve;});
+ const original=control.d.sendCommand;
+ control.d.sendCommand=async (method,args)=>{
+   if(method==='DOM.getDocument')await held;
+   return original(method,args);
+ };
+ const first=collectNativeSpaHydration(ctx);
+ // A second inspector cannot disable or observe the first inspector's domain.
+ const second=await collectNativeSpaHydration(ctx);
+ assert.equal(second.reason,'CONCURRENT_NATIVE_PROBE');
+ assert.equal(second.network,null);
+ release();
+ const primary=await first;
+ assert.equal(primary.network.coverage,'WINDOW_ONLY');
+ assert.equal(control.d.listenerCount('message'),0);
+ assert.equal(control.called.filter(x=>x.command==='Network.enable').length,1);
+ assert.equal(control.called.filter(x=>x.command==='Network.disable').length,1);
+});
