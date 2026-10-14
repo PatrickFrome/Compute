@@ -9,7 +9,7 @@ import { falsifyFleetDagCancellationProof } from './fleet-dag-cancellation-proof
 const upper = v => String(v ?? '').toUpperCase();
 const taskId = v => String(v ?? '').toLowerCase();
 
-export function planFleetDagClaims({ snapshot, runtimeControl } = {}) {
+export function planFleetDagClaims({ snapshot, runtimeControl, workspaceId } = {}) {
   const dag = planFleetDagAdmission(snapshot);
   if (dag === null) return null; // preserve the existing untagged lease path
   const proof = falsifyFleetDagCancellationProof({ snapshot, runtimeControl });
@@ -24,6 +24,14 @@ export function planFleetDagClaims({ snapshot, runtimeControl } = {}) {
     scheduler_authority: false, authority_effect: false,
     automatic_retry_allowed: false, second_scheduler_loop: false,
   });
+  // In the live route the Owner and the sole leased executor must speak for
+  // exactly the same workspace and admission generation. Unit-only uses may
+  // omit workspaceId but do not thereby claim Owner qualification.
+  if (workspaceId !== undefined &&
+      (runtimeControl?.workspace_id !== workspaceId ||
+       !Number.isSafeInteger(runtimeControl?.generation_floor) ||
+       runtimeControl.generation_floor < 0))
+    return fence('OWNER_WORKSPACE_OR_GENERATION_UNKNOWN');
   // Proof is independent and never grants authority. Absence/contradiction
   // of the owner runtime, claim generations, budget or slot-return receipts
   // forbids an optimistic role-only lease.
