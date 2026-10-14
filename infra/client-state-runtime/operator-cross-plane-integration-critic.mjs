@@ -1,3 +1,5 @@
+import { OBSERVATORY_VIEWS, reduceOperatorObservatory } from '../../apps/me2-ui/src/lib/operator-observatory.mjs';
+
 // W36: independent cross-plane SOURCE conformance critic for METAENGINE Client.
 // Pure data analysis only. Caller-provided "verified", HEALTHY, CI and artifact
 // receipts are not cryptographic provenance and cannot authorize promotion.
@@ -8,6 +10,10 @@ const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const FACETS = Object.freeze(['refs', 'owner', 'postgres', 'context', 'ui', 'package', 'ci', 'promotion', 'rollback']);
 const PLANES = Object.freeze(['database', 'client', 'supervisor', 'fleet', 'host', 'source', 'continuity']);
 const VIEWS = Object.freeze(['Now', 'Missions', 'Fleet', 'Brain', 'Develop', 'System', 'Evidence']);
+const SOURCES = Object.freeze({ database: 'LOCAL_POSTGRES', client: 'NATIVE_BROWSER_READBACK',
+  supervisor: 'SIGNED_SUPERVISOR_READBACK', fleet: 'LOCAL_TASK_LEDGER',
+  host: 'TRUSTED_HOST_READBACK', source: 'EXACT_GIT_READBACK',
+  continuity: 'LOCAL_CHECKPOINT_LEDGER' });
 const REQUIRED_CI = Object.freeze([
   'Client State Runtime Contracts',
   'Browser Windows Package Smoke',
@@ -88,26 +94,37 @@ export function auditClientCrossPlaneIntegration(input = {}, { nowMs = Date.now(
     && context.authority_effect === false && context.scheduler_authority === false
     && context.automatic_retry_allowed === false && context.remote_fallback_allowed === false
     && context.cloud_database_dependency === false
-    && context.run_id === runId && context.owner_epoch === ownerEpoch
+    && context.run_id === runId && context.owner_id === ownerId && context.owner_epoch === ownerEpoch
     && context.event_seq === cursor && context.source_sha === sha
     && DIGEST.test(context.proof_identity ?? '') && fresh(context.generated_at, nowMs)
     && PLANES.every(k => nonempty(context.planes?.[k])
+      && context.planes[k].source === SOURCES[k]
       && context.planes[k].state === 'READY' && context.planes[k].proof === 'TRUSTED_READBACK'
       && context.planes[k].fresh === true && fresh(context.planes[k].observed_at, nowMs));
   verdict('context', contextOk, 'CANONICAL_CONTEXT_NOT_FULLY_PROVEN');
 
+  // Derive the only permitted seven-view projection from the actual W6 reducer.
+  // A self-reported UI array, trusted flag or source claim cannot substitute for
+  // agreement with the one canonical context at the same observation clock.
+  const derivedUi = contextOk ? reduceOperatorObservatory(context, { nowMs }) : null;
   const ui = input?.ui;
   const uiOk = nonempty(ui) && ui.schema === 'metaengine.operator.observatory.v1'
     && ui.run_id === runId && ui.event_seq === cursor
     && ui.proof_identity === context?.proof_identity
     && ui.source_sha === sha && ui.owner_epoch === ownerEpoch
     && ui.cursor_state === 'VERIFIED_CURSOR' && ui.state === 'OBSERVED'
+    && ui.cursor_state === derivedUi?.cursor_state && ui.state === derivedUi?.state
+    && ui.generated_at === derivedUi?.generated_at
     && ui.authority_effect === false && ui.automatic_retry_allowed === false
     && fresh(ui.generated_at, nowMs)
-    && VIEWS.every(v => own(ui.views, v) && Array.isArray(ui.views[v]))
-    && PLANES.every(k => ui.planes?.[k]?.state === context?.planes?.[k]?.state
-      && ui.planes?.[k]?.fresh === context?.planes?.[k]?.fresh
-      && ui.planes?.[k]?.proof === context?.planes?.[k]?.proof);
+    && nonempty(ui.views) && Object.keys(ui.views).length === VIEWS.length
+    && VIEWS.every(v => own(ui.views, v) && Array.isArray(ui.views[v])
+      && ui.views[v].length === OBSERVATORY_VIEWS[v].length
+      && ui.views[v].every((plane, i) => plane === OBSERVATORY_VIEWS[v][i]))
+    && PLANES.every(k => ui.planes?.[k]?.state === derivedUi?.planes?.[k]?.state
+      && ui.planes?.[k]?.fresh === derivedUi?.planes?.[k]?.fresh
+      && ui.planes?.[k]?.proof === derivedUi?.planes?.[k]?.proof
+      && ui.planes?.[k]?.observed_at === derivedUi?.planes?.[k]?.observed_at);
   verdict('ui', uiOk, 'SEVEN_VIEW_CURSOR_SOURCE_OR_HEALTH_DRIFT');
 
   const bundle = input?.package;

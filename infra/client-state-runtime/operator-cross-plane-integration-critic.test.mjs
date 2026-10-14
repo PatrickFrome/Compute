@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { auditClientCrossPlaneIntegration } from './operator-cross-plane-integration-critic.mjs';
 import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
-import { reduceOperatorObservatory } from '../../apps/me2-ui/src/lib/operator-observatory.mjs';
+import { OBSERVATORY_VIEWS, reduceOperatorObservatory } from '../../apps/me2-ui/src/lib/operator-observatory.mjs';
 
 const NOW = Date.parse('2026-10-14T17:00:00Z');
 const DATE = new Date(NOW - 1000).toISOString();
@@ -30,7 +30,7 @@ function fixture() {
     schema: 'metaengine.operator.context.v1', scope: 'READ_ONLY', storage: 'OWN_POSTGRES_ONLY',
     authority_effect: false, scheduler_authority: false, automatic_retry_allowed: false,
     remote_fallback_allowed: false, cloud_database_dependency: false,
-    generated_at: DATE, run_id: expected.run_id, event_seq: expected.event_seq,
+    generated_at: DATE, run_id: expected.run_id, owner_id: expected.owner_id, event_seq: expected.event_seq,
     source_sha: B, owner_epoch: 4, proof_identity: PROOF, planes: snapshotPlanes,
   };
   return {
@@ -57,7 +57,7 @@ function fixture() {
       source_sha: B, owner_epoch: 4, run_id: 'run:2', event_seq: 41,
       proof_identity: PROOF, cursor_state: 'VERIFIED_CURSOR', generated_at: DATE,
       planes: structuredClone(snapshotPlanes),
-      views: Object.fromEntries(views.map(name => [name, planes.slice()])),
+      views: structuredClone(OBSERVATORY_VIEWS),
       authority_effect: false, automatic_retry_allowed: false,
     },
     package: {
