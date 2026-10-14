@@ -199,7 +199,13 @@ test('W2 active-lease conflict, cursor rollback and owner epoch mismatch fail cl
   assert.equal((await check(fake())).state, 'SOURCE_CONFORMANT');
   const conflict = await read({ tx: db([task, { ...task, claim_id: 11 }]), owner, nowMs });
   assert.equal(conflict.fleet.state, 'AMBIGUOUS');
-  assert.notEqual(conflict.continuity.state, 'AVAILABLE');
+  // The event-ledger cursor may be independently AVAILABLE; it cannot override
+  // an AMBIGUOUS fleet lease or grant operator/effect readiness.
+  const { buildUnifiedOperatorContext } = await import('./operator-unified-snapshot-core.mjs');
+  const context = buildUnifiedOperatorContext({ nowMs, observations: conflict });
+  assert.equal(context.planes.fleet.state, 'AMBIGUOUS');
+  assert.equal(context.operational_state, 'NOT_PROVEN');
+  assert.equal(context.authority_effect, false);
   const rollback = await read({ tx: db([task]), owner: { ...owner, event_after_seq: 3 }, nowMs });
   assert.equal(rollback.fleet, null);
   assert.equal(rollback.continuity, null);
