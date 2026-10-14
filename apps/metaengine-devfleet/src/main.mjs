@@ -230,6 +230,8 @@ function listenLocal() {
         'dev.source.inspect':p=>sourceWorkspace.inspect(p),
         'dev.source.patch':p=>operator.withMaintenanceLock(()=>sourceWorkspace.patch(p)),
         'dev.source.reconcile':p=>operator.withMaintenanceLock(()=>sourceWorkspace.reconcile(p)),
+        'dev.pipeline.rotate':p=>operator.rotateFailed(p),
+        'dev.pipeline.rotate_batch':p=>operator.batchRotate(p),
         'dev.receipt.status':()=>operator.receiptSummary(),
         'dev.surface.inspect':p=>operator.inspectSurface(p),
         'dev.receipt.inspect':p=>operator.inspectReceipt(p),

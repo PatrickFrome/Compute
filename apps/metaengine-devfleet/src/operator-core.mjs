@@ -68,7 +68,26 @@ export class DevFleetOperator {
       }
       this.#state = plain(disk);
     }
+    // Process reincarnation has destroyed all prior WebContents. Never
+    // resurrect a tab whose last durable action was physical retirement:
+    // the old external Send outcome remains UNKNOWN in the request ledger.
+    const interrupted=this.#state.sessions.filter(s=>
+      s.state==='RETIRING'||s.state==='RETIRE_UNKNOWN');
+    if(interrupted.length){
+      const ids=new Set(interrupted.map(s=>s.tab_id));
+      this.#state.sessions=this.#state.sessions.filter(s=>!ids.has(s.tab_id));
+      for(const r of this.#state.requests){
+        if(r.operation==='rotate'&&ids.has(r.tab_id)&&
+           ['RETIRING','RETIRE_UNKNOWN'].includes(r.state)){
+          r.state='ROTATION_INTERRUPTED_UNKNOWN';
+          r.receipt={...(r.receipt||{}),schema:SCHEMA,
+            state:'ROTATION_INTERRUPTED_UNKNOWN',request_id:r.request_id,
+            old_delivery_state:'UNKNOWN',automatic_retry_allowed:false};
+        }
+      }
+    }
     this.#initialized = true;
+    if(interrupted.length) await this.#save();
     this.#restoring = true;
     // RESTORING never reaches the persistence store; it is a live-only truth.
     // Write-ahead request receipts remain untouched, including AMBIGUOUS.
@@ -124,13 +143,15 @@ export class DevFleetOperator {
     this.#requireInit();
     const counts={SENT:0,AMBIGUOUS:0};
     const blocked_tabs=[];
+    const liveTabs=new Set(this.#state.sessions.filter(s=>s.state==='OPEN')
+      .map(s=>s.tab_id));
     for(const r of this.#state.requests) {
       if(r.operation!=='assign')continue;
       if(r.state==='SENT')counts.SENT++;
       if(r.state==='ABANDONED_UNKNOWN')counts.ABANDONED_UNKNOWN=(counts.ABANDONED_UNKNOWN||0)+1;
       if(r.state==='AMBIGUOUS'){
         counts.AMBIGUOUS++;
-        if(r.tab_id&&!blocked_tabs.includes(r.tab_id))blocked_tabs.push(r.tab_id);
+        if(r.tab_id&&liveTabs.has(r.tab_id)&&!blocked_tabs.includes(r.tab_id))blocked_tabs.push(r.tab_id);
       }
     }
     return {schema:SCHEMA,counts,blocked_tabs,
@@ -180,6 +201,12 @@ export class DevFleetOperator {
         tab_id: s.tab_id, url: s.url, state: s.state })),
       receipt_summary: {sent:this.#state.requests.filter(x=>x.operation==='assign'&&x.state==='SENT').length,
         ambiguous:this.#state.requests.filter(x=>x.operation==='assign'&&x.state==='AMBIGUOUS').length},
+      pipeline:{active_slots:this.#state.sessions.filter(s=>s.state==='OPEN').length,
+        capacity:16,free_slots:16-this.#state.sessions.length,
+        total_rotations:this.#state.requests.filter(r=>r.operation==='rotate').length,
+        historical_ambiguous:this.#state.requests.filter(r=>
+          r.operation==='assign'&&r.state==='AMBIGUOUS').length,
+        effects_require_new_request_id:true},
       only_actions: ['create','read','assign','close'],
       primary_browser_shared_profile: false,
       hosted_database: false,
@@ -225,6 +252,164 @@ export class DevFleetOperator {
       return plain(log.receipt);
     });
   }
+  async batchRotate(params) {
+    this.#requireInit();
+    fields(params,['rotations']);
+    const items=params.rotations;
+    const budget=Math.min(4,this.#policy().max_batch_items);
+    if(!Array.isArray(items)||items.length<1||items.length>budget)
+      throw Error('pipeline_rotation_batch_budget_exceeded');
+    const tabs=new Set(),requestIds=new Set();
+    let chars=0;
+    for(const row of items){
+      fields(row,['request_id','tab_id','replacement_request_id','text',
+        'acknowledge_unknown_delivery']);
+      const id=validateId(row.request_id),replacement=validateId(row.replacement_request_id);
+      const tab=validateTab(row.tab_id);
+      if(id===replacement||requestIds.has(id)||requestIds.has(replacement)||tabs.has(tab)
+        ||row.acknowledge_unknown_delivery!==true)
+        throw Error('pipeline_rotation_batch_identity_conflict');
+      if(typeof row.text!=='string'||!row.text.trim()||
+        row.text.length>this.#policy().max_prompt_chars)
+        throw Error('pipeline_rotation_prompt_invalid');
+      chars+=row.text.length;
+      requestIds.add(id);requestIds.add(replacement);tabs.add(tab);
+    }
+    if(chars>32000)throw Error('pipeline_rotation_batch_char_budget_exceeded');
+    const results=[];
+    // Existing exclusive operator remains the ONLY effect authority.
+    // A failed lane does not abort others unless the durable store fenced.
+    for(const row of items){
+      if(this.#persistenceFenced){
+        results.push({request_id:row.request_id,state:'NOT_ATTEMPTED',
+          reason:'DURABILITY_FENCED',automatic_retry_allowed:false});
+        continue;
+      }
+      try{results.push(await this.rotateFailed(row));}
+      catch(error){
+        const known=new Set(['operator_rotation_tab_not_available',
+          'operator_rotation_replacement_collision','operator_rotation_close_unavailable',
+          'operator_request_history_full','operator_tab_not_owned',
+          'operator_policy_disarmed','operator_policy_reconciliation_required']);
+        const why=known.has(error?.message)?error.message:'LANE_FAILED';
+        results.push({request_id:row.request_id,state:'NOT_ATTEMPTED',reason:why,
+          automatic_retry_allowed:false});
+      }
+    }
+    return {schema:'metaengine.devfleet.pipeline-batch.v1',
+      state:'BATCH_COMPLETED',results,capacity:budget,
+      original_ambiguous_delivery_preserved:true,
+      automatic_retry_allowed:false};
+  }
+
+  // One owner-authorized replacement wave under the existing operator lock.
+  // An ambiguous original is retired WITH its old receipt still in the ledger;
+  // every replacement has a fresh tab and a different request identity.
+  async rotateFailed(params) {
+    this.#requireInit();
+    fields(params,['request_id','tab_id','replacement_request_id','text','acknowledge_unknown_delivery']);
+    const id=validateId(params.request_id);
+    const tabId=validateTab(params.tab_id);
+    const replacementId=validateId(params.replacement_request_id);
+    if(id===replacementId||params.acknowledge_unknown_delivery!==true)
+      throw Error('operator_rotation_acknowledgment_required');
+    const prompt=params.text;
+    const policy=this.#policy();
+    if(!policy.dispatch_enabled||typeof prompt!=='string'||!prompt.trim()||
+        prompt.length>policy.max_prompt_chars)throw Error('operator_rotation_prompt_invalid');
+    const fingerprint=sha(['rotation',tabId,replacementId,sha(prompt)].join(':'));
+    const prior=this.#prior(id,'rotate',fingerprint);
+    if(prior)return prior;
+    if(this.#state.requests.some(r=>r.request_id===replacementId))
+      throw Error('operator_rotation_replacement_collision');
+    const tab=this.#find(tabId);
+    if(tab.state!=='OPEN'&&tab.state!=='RESTORE_BLOCKED')
+      throw Error('operator_rotation_tab_not_available');
+    if(typeof this.#adapter.closeTab!=='function')
+      throw Error('operator_rotation_close_unavailable');
+    return this.#exclusive(async()=>{
+      if(this.#state.requests.length>494)throw Error('operator_request_history_full');
+      const unresolved=this.#state.requests.filter(r=>
+        r.operation==='assign'&&r.tab_id===tabId&&r.state==='AMBIGUOUS')
+        .map(r=>r.request_id);
+      // Explicit owner acknowledgement is the authority for disposing a bad
+      // chat. It does NOT assert an unknown task was delivered or not delivered.
+      const replacementTabId='tab_'+crypto.randomUUID();
+      const log={...recordFor(id,'rotate',fingerprint),tab_id:tabId,
+        replacement_tab_id:replacementTabId,replacement_request_id:replacementId,
+        replacement_prompt_sha256:sha(prompt),unresolved_request_ids:unresolved};
+      log.state='RETIRING';
+      log.receipt={schema:SCHEMA,state:'RETIRING',request_id:id,tab_id:tabId,
+        replacement_request_id:replacementId,original_delivery_state:'UNKNOWN',
+        automatic_retry_allowed:false};
+      const previousState=tab.state;
+      tab.state='RETIRING';
+      this.#state.requests.push(log);
+      try{await this.#save();}catch(e){
+        tab.state=previousState;
+        this.#state.requests.pop();
+        throw e;
+      }
+      // A crash now leaves RETIRING in durable state; it will not authorize
+      // another send on the old tab. No blind replay on this operation ID.
+      try {
+        const close=await this.#adapter.closeTab(tabId);
+        if(close?.tab_id!==tabId||close?.closed!==true||
+           close?.authority_effect!==false)throw Error('physical_close_unverified');
+      } catch {
+        tab.state='RETIRE_UNKNOWN';
+        log.state='RETIRE_UNKNOWN';
+        log.receipt={...log.receipt,state:'RETIRE_UNKNOWN'};
+        await this.#save().catch(()=>{});
+        return plain(log.receipt);
+      }
+      this.#state.sessions=this.#state.sessions.filter(s=>s.tab_id!==tabId);
+      log.state='OLD_CHAT_CLOSED';
+      log.receipt={...log.receipt,state:'OLD_CHAT_CLOSED'};
+      await this.#save();
+      // Independently durable creation; only after old cell freed its slot.
+      log.state='CREATING_NEW_CHAT';
+      log.receipt={...log.receipt,state:'CREATING_NEW_CHAT'};
+      await this.#save();
+      try{
+        const opened=await this.#adapter.create(replacementTabId,'https://chatgpt.com/');
+        const url=ownChatUrl(opened?.url);
+        if(opened?.tab_id!==replacementTabId||!url)
+          throw Error('new_chat_identity_unverified');
+        this.#state.sessions.push({tab_id:replacementTabId,url,state:'OPEN'});
+      }catch{
+        log.state='NEW_CHAT_UNKNOWN';
+        log.receipt={...log.receipt,state:'NEW_CHAT_UNKNOWN'};
+        await this.#save().catch(()=>{});
+        return plain(log.receipt);
+      }
+      log.state='NEW_CHAT_OPEN';
+      log.receipt={...log.receipt,state:'NEW_CHAT_OPEN',new_tab_id:replacementTabId};
+      await this.#save();
+      // A failed composer preflight is before Send and can be waited on.
+      // After an actual attempted Send, #assignLocked returns AMBIGUOUS;
+      // never invoke it again with that identity.
+      let assignment=null;
+      for(let attempt=0;attempt<4;attempt++){
+        try{
+          assignment=await this.#assignLocked({
+            request_id:replacementId,tab_id:replacementTabId,text:prompt});
+          break;
+        }catch(error){
+          if(error?.message!=='operator_chat_input_not_ready'||attempt===3)break;
+          await new Promise(resolve=>setTimeout(resolve,450));
+        }
+      }
+      log.state='ROTATION_FINISHED';
+      log.receipt={...log.receipt,state:'ROTATION_FINISHED',
+        delivery_state:assignment?.state==='SENT'?'PROVEN_SENT':'UNKNOWN',
+        assignment_state:assignment?.state||'NOT_ATTEMPTED',
+        original_delivery_state:'UNKNOWN'};
+      await this.#save();
+      return plain(log.receipt);
+    });
+  }
+
   async closeTab(params) {
     this.#requireInit();
     fields(params, ['request_id','tab_id']);
@@ -386,16 +571,17 @@ export class DevFleetOperator {
     this.#requireInit();
     fields(params, ['request_id','tab_id','text']);
     const id = validateId(params.request_id);
-    const tab = this.#find(params.tab_id);
+    const tabId=validateTab(params.tab_id);
     const prompt = params.text;
     const policy=this.#policy();
     if(!policy.dispatch_enabled)throw Error('operator_policy_disarmed');
     if (typeof prompt !== 'string' || !prompt.trim() ||
         prompt.length > policy.max_prompt_chars)
       throw new Error('operator_prompt_invalid');
-    const fingerprint = sha(tab.tab_id + '\0' + prompt);
+    const fingerprint = sha(tabId + '\0' + prompt);
     const prior = this.#prior(id,'assign',fingerprint);
-    if (prior) return prior;
+    if (prior) return prior; // durable idempotency even after retired tab is gone
+    const tab=this.#find(tabId);
     this.#requireOpen(tab);
     for(const old of this.#state.requests.filter(r=>r.operation==='assign' &&
         r.state==='ABANDONED_UNKNOWN' && r.tab_id===tab.tab_id && !r.replacement_admitted)) {
