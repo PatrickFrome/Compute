@@ -37,6 +37,8 @@ export function readCodingQueue(value) {
         !/^tab_[a-f0-9-]{36}$/i.test(item.tab_id))) ||
       ids.has(item.task_id) || requestIds.has(item.request_id))
       throw Error('coding_queue_state_invalid');
+    if(item.fingerprint!==fingerprint([item.task_id,item.request_id,
+      item.project_id,item.text]))throw Error('coding_queue_state_invalid');
     ids.add(item.task_id);requestIds.add(item.request_id);total+=item.text.length;
   }
   if(total>QUEUE_CHAR_LIMIT)throw Error('coding_queue_state_invalid');
