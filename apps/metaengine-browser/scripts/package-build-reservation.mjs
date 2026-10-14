@@ -48,7 +48,7 @@ export function deriveDistinctCandidatePackageVersion({ packageVersion, sourceHe
   if (!Number.isSafeInteger(slot) || slot < 0 || slot >= MAX_PACKAGE_IDENTITY_CANDIDATES) {
     throw new Error('package_build_reservation_candidate_slot_invalid');
   }
-  const payload = `metaengine.package-candidate.v1\\n${version}\\n${head}\\n${slot}\\n`;
+  const payload = `metaengine.package-candidate.v1\n${version}\n${head}\n${slot}\n`;
   const digest = createHash('sha256').update(payload, 'utf8').digest('hex');
   // 12 decimal digits in a distinct development namespace; no clock, run ID,
   // randomness, automatic retry or truncation of the trusted source witness.
