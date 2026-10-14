@@ -70,7 +70,7 @@ test('physical close uncertainty fences only failed lane; never creates replacem
  assert.equal(f.disk.requests.filter(x=>x.operation==='assign'&&x.state==='AMBIGUOUS').length,1);
  const reboot=new DevFleetOperator(f);await reboot.init();
  assert.equal(reboot.snapshot().session_count,0);
- assert.equal(reboot.snapshot().pipeline.free_slots,16);
+ assert.equal(reboot.snapshot().pipeline.free_slots,reboot.snapshot().pipeline.capacity);
  assert.equal((await reboot.rotateFailed(args)).state,'ROTATION_INTERRUPTED_UNKNOWN');
  assert.equal(f.sends.length,1);
 });
@@ -153,7 +153,7 @@ test('retiring an AMBIGUOUS lane releases RAM slot without replacing or resendin
  assert.equal(r.state,'RETIRED');assert.equal(r.released_slot,true);
  assert.equal(r.original_delivery_state,'UNKNOWN');
  assert.equal(op.snapshot().session_count,0);
- assert.equal(op.snapshot().pipeline.free_slots,16);
+ assert.equal(op.snapshot().pipeline.free_slots,op.snapshot().pipeline.capacity);
  assert.equal(op.receiptSummary().counts.AMBIGUOUS,1);
  assert.deepEqual(op.receiptSummary().blocked_tabs,[]);
  assert.equal(f.sends.length,1);

@@ -230,6 +230,7 @@ function listenLocal() {
         'dev.pipeline.retire':p=>operator.retireFailed(p),
         'dev.pipeline.retire_batch':p=>operator.retireBatch(p),
         'dev.pipeline.queue_status':()=>operator.queueStatus(),
+        'dev.pipeline.configure':p=>operator.configureCodingSlots(p),
         'dev.pipeline.enqueue':p=>operator.enqueueCoding(p),
         'dev.pipeline.cancel':p=>operator.cancelCoding(p),
         'dev.pipeline.admit':p=>operator.admitCoding(p),

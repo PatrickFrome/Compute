@@ -201,7 +201,8 @@ export class ChatSurface {
   }
   async create(tabId,requestedUrl=CHAT_ROOT) {
     if (this.#views.has(tabId)) throw new Error('tab_already_live');
-    if (this.#views.size >= 16) throw new Error('tab_capacity_exceeded');
+    // Physical creation is owner-budgeted by the durable hot-target policy.
+    // Do not impose a separate fixed WebContents ceiling here.
     if (!chatUrl(requestedUrl)) throw new Error('tab_origin_not_allowed');
     const view = new WebContentsView({webPreferences:{
       partition:'persist:metaengine-devfleet-auth-v1',

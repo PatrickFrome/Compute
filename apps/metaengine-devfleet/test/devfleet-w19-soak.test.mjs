@@ -151,7 +151,7 @@ test('W19 / 100 distinct coding admissions / 4 hot slots / bounded and fair wave
     const s=operator.snapshot();
     assert.equal(s.session_count,HOT);
     assert.equal(s.pipeline.active_slots,HOT);
-    assert.equal(s.pipeline.capacity,16, 'underlying operator cap is not W19 pool budget');
+    assert.equal(s.pipeline.capacity,4, 'initial target is configurable; W19 harness uses four slots');
     assert.equal(f.live.size,HOT);
     assert.ok(f.peakHot <= HOT);
     assert.ok(Math.max(...producerAdmissions)-Math.min(...producerAdmissions)<=1,
@@ -262,7 +262,7 @@ test('W19 / crash exactly after native close cannot replay old effect', async()=
   operator=new DevFleetOperator(f);
   await operator.init();
   assert.equal(operator.snapshot().session_count,0);
-  assert.equal(operator.snapshot().pipeline.free_slots,16);
+  assert.equal(operator.snapshot().pipeline.free_slots,operator.snapshot().pipeline.capacity);
   assert.equal((await operator.rotateFailed(command)).state,
     'ROTATION_INTERRUPTED_UNKNOWN');
   assert.equal((await operator.assign(old)).state,'AMBIGUOUS');
