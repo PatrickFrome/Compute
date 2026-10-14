@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "pack": "node scripts/pack-me2-ui.mjs",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test:operator-observatory": "node --test src/lib/operator-observatory.test.mjs src/lib/operator-observatory-resync.test.mjs src/lib/operator-observatory-resync.ui.test.mjs",
     "test:operator-observatory-resync": "node --test src/lib/operator-observatory-resync.test.mjs src/lib/operator-observatory-resync.ui.test.mjs"
   },

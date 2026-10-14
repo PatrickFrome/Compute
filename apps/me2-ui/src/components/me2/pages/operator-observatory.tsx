@@ -44,17 +44,21 @@ const STATE_HINTS: Record<string, string> = {
   OFFLINE: "Reported offline by the source readback.",
 };
 
+type ObservatoryFrame = ReturnType<typeof advanceOperatorObservatoryResync>;
+
 export function OperatorObservatoryPage() {
   const [view, setView] = useState<ViewName>("Now");
-  const [resync, setResync] = useState(() => emptyOperatorObservatoryResync());
+  // Do not infer the initial UNKNOWN/null-only shape as the permanent state:
+  // a real readback may carry a run, cursor, identity and all seven planes.
+  const [resync, setResync] = useState<ObservatoryFrame>(() => emptyOperatorObservatoryResync());
   const [connection, setConnection] = useState<"UNBOUND" | "READING" | "OBSERVED" | "UNAVAILABLE">("UNBOUND");
   // A single shared checkpoint governs all seven panels. Keep it across
   // transport failures, remount-free navigation and expired readbacks.
-  const checkpoint = useRef<ReturnType<typeof advanceOperatorObservatoryResync>>(emptyOperatorObservatoryResync());
+  const checkpoint = useRef<ObservatoryFrame>(emptyOperatorObservatoryResync());
   const flight = useRef(false);
   const mounted = useRef(false);
 
-  const update = useCallback((next: ReturnType<typeof advanceOperatorObservatoryResync>) => {
+  const update = useCallback((next: ObservatoryFrame) => {
     checkpoint.current = next;
     if (mounted.current) {
       setResync(next);
