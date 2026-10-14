@@ -29,17 +29,18 @@ const fenced = reason => Object.freeze({
 // project_task, devos_fleet_task, project_event, devos_fleet_claim, and
 // project_result_bound_h205f22 / project_completion_ready_h205f22.
 // Each string is fixed; no caller-provided SQL, identifiers, URLs or paths.
-// A result_claim_source_sha is NOT yet guaranteed by the current DB schema:
-// if absent, exact source linkage remains UNKNOWN, never inferred from base_sha.
+// The independent typed Workspace Binding snapshot provides the verified worktree
+// head; base_sha and an untrusted result claim are NOT substitutes for PR HEAD.
 export const W39_PROJECT_SQL =
-  'SELECT public.h205f22_project_snapshot_v1($1::uuid,$2::uuid,$3::uuid,0,1,$4::uuid,$5::text,$6::bigint) AS snapshot';
+  'SELECT public.h205f22_project_snapshot_v1($1::uuid,NULL::uuid,$2::uuid,0,1,$3::uuid,$4::text,$5::bigint) AS snapshot';
 export const W39_FLEET_SQL =
   'SELECT public.devos_fleet_snapshot_v1($1::uuid) AS snapshot';
+export const W39_WORKSPACE_SQL =
+  'SELECT public.h205f22_a2_workspace_binding_snapshot_v1($1::uuid) AS snapshot';
 export const W39_TASK_SQL = [
   'SELECT t.task_id,t.workspace_id,t.state,t.lease_generation,t.lease_agent_id,t.base_sha,',
   't.result_sha256,t.result_summary_sha256,t.finished_at,',
   "t.result_summary->>'result_claim_sha256' AS claim_sha256,",
-  "t.result_summary->>'result_claim_source_sha' AS claim_source_sha,",
   'destruktion_meta.project_result_bound_h205f22(t.task_id,\'READY\') AS bound_ready,',
   'destruktion_meta.project_completion_ready_h205f22(t.task_id) AS completion_ready,',
   'pg_catalog.clock_timestamp() AS observed_at,',
@@ -74,7 +75,7 @@ export const W39_CRITIC_SQL = [
   'ORDER BY x.task_seq LIMIT 3',
 ].join(' ');
 
-function boundTask({ expected: b, owner, project, fleet, tasks, critics, nowMs }) {
+function boundTask({ expected: b, owner, project, fleet, workspaces, tasks, critics, nowMs }) {
   if (!isObject(project) || project.schema !== 'metaengine.devos.project-snapshot.v1'
       || project.found !== true || project.authority_effect !== false
       || lower(project.project_id) !== lower(b.run_id)
@@ -98,15 +99,36 @@ function boundTask({ expected: b, owner, project, fleet, tasks, critics, nowMs }
   if (fleet.active_tasks.some(t => t.lease_generation !== b.lease_generation
       || t.state !== 'COMPLETED' || lower(t.lease_agent_id) !== b.agent_id)) return null;
 
+  // Actual W30/W5 workspace registry shape (source-only evidence, not host
+  // attestation). A changed generation/head/lease binding fails closed.
+  if (!isObject(workspaces)
+      || workspaces.schema !== 'metaengine.devos.workspace-binding-snapshot.v1'
+      || workspaces.state !== 'AVAILABLE' || workspaces.authority_effect !== false
+      || lower(workspaces.coordination_workspace_id) !== lower(owner.workspace_id)
+      || !Array.isArray(workspaces.bindings) || workspaces.bindings.length > 64) return null;
+  const bound = workspaces.bindings.filter(w => lower(w?.task_id) === lower(b.task_id));
+  if (bound.length !== 1) return null;
+  const w = bound[0];
+  if (w.lease_generation !== b.lease_generation
+      || w.agent_id !== b.agent_id || lower(w.base_sha) !== lower(p.base_sha)
+      || lower(w.repo_id) !== lower(b.repository)
+      || lower(w.coordination_workspace_id) !== lower(owner.workspace_id)
+      || lower(w.last_verified_head_sha) !== lower(b.source_sha)
+      || !goodInt(w.workspace_generation) || !goodInt(w.claim_id)
+      || !['READY', 'FROZEN'].includes(w.state)
+      || w.dirty_hold !== false || w.ambiguity_code != null
+      || w.authority_effect !== false || w.automatic_retry_allowed !== false
+      || !Number.isFinite(asMs(w.updated_at)) || asMs(w.updated_at) > nowMs) return null;
+
   if (!Array.isArray(tasks) || tasks.length !== 1 || !Array.isArray(critics)
       || critics.length < 1 || critics.length > 2) return null;
   const t = tasks[0];
-  const claim = lower(t.claim_sha256), source = lower(t.claim_source_sha);
+  const claim = lower(t.claim_sha256);
   if (lower(t.task_id) !== lower(b.task_id) || lower(t.workspace_id) !== lower(owner.workspace_id)
       || t.state !== 'COMPLETED' || t.lease_generation !== b.lease_generation
       || t.lease_agent_id !== b.agent_id || lower(t.base_sha) !== lower(p.base_sha)
       || t.bound_ready !== true || t.completion_ready !== true
-      || !HASH.test(claim) || source !== lower(b.source_sha)
+      || !HASH.test(claim)
       || !HASH.test(lower(t.result_sha256))
       || lower(t.result_sha256) !== lower(t.result_summary_sha256)) return null;
   const ready = asMs(t.ready_at), complete = asMs(t.finished_at);
@@ -170,18 +192,19 @@ export async function readBoundClientAgentCompletion({
   try {
     const task = await withReadOnlyTransaction(async tx => {
       if (typeof tx?.unsafe !== 'function') throw new Error('tx_missing');
-      const selectors = [owner.workspace_id, b.run_id, b.task_id, owner.device_id,
+      const selectors = [owner.workspace_id, b.task_id, owner.device_id,
         owner.client_id, owner.admin_grant_epoch];
       const pRows = await tx.unsafe(W39_PROJECT_SQL, selectors);
       const fRows = await tx.unsafe(W39_FLEET_SQL, [owner.workspace_id]);
+      const wRows = await tx.unsafe(W39_WORKSPACE_SQL, [owner.workspace_id]);
       const tasks = await tx.unsafe(W39_TASK_SQL, [
         b.run_id, b.task_id, owner.workspace_id, owner.device_id, owner.client_id, owner.admin_grant_epoch,
       ]);
       const critics = await tx.unsafe(W39_CRITIC_SQL, [b.run_id, b.task_id]);
       if (!Array.isArray(pRows) || pRows.length !== 1 || !Array.isArray(fRows)
-          || fRows.length !== 1) return null;
+          || fRows.length !== 1 || !Array.isArray(wRows) || wRows.length !== 1) return null;
       return boundTask({ expected: b, owner, project: pRows[0]?.snapshot,
-        fleet: fRows[0]?.snapshot, tasks, critics, nowMs: observed_at_ms });
+        fleet: fRows[0]?.snapshot, workspaces: wRows[0]?.snapshot, tasks, critics, nowMs: observed_at_ms });
     });
     if (!task) return fenced('OWN_PG_BINDING_OR_CRITIC_UNPROVEN');
     // W31 performs expiry/freshness and *then* exact repo/PR/current HEAD/check
