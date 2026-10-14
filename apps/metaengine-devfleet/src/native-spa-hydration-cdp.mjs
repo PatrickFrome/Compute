@@ -54,7 +54,7 @@ export async function collectNativeSpaHydration(ctx) {
     // Requests and failure buckets are scoped to THIS debugger and the
     // observation window only. Ignore potentially sensitive event fields.
     subscriber=(_event,method,p)=>{
-      if(!method.startsWith('Network.'))return;
+      if(typeof method!=='string'||!method.startsWith('Network.'))return;
       if(++events>128){net.overflow=true;return;}
       if(method==='Network.requestWillBeSent')net.requests++;
       if(method==='Network.loadingFailed'){
