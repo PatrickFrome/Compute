@@ -4,7 +4,7 @@ import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttrib
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
-import {receiptMarker,postedMessageObserved,postedUserTurnObserved} from './send-receipt-core.mjs';
+import {receiptMarker,postedMessageObserved,postedUserTurnObserved,userTurnReceiptDiagnostic} from './send-receipt-core.mjs';
 import {composerDomText} from './composer-dom-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
@@ -512,7 +512,7 @@ export class ChatSurface {
     }
     throw new Error('send_outcome_requires_manual_readback');
   }
-  async probePosted(tabId,requestId) {
+  async probePosted(tabId,requestId,options={}) {
     const view=this.#views.get(tabId);
     if(!view || view.webContents.isDestroyed())throw Error('receipt_tab_not_live');
     if(typeof requestId!=='string'||!/^[A-Za-z0-9._:-]{12,100}$/.test(requestId))
@@ -528,20 +528,32 @@ export class ChatSurface {
       this.#navigationGenerations.get(tabId)!==epoch||view.webContents.getURL()!==url)
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
-    let scoped=[];
-    if(composer&&value==='') {
-      try{scoped=await scopedUserMessageHtml(view);}catch{ /* fail closed */ }
+    let scoped=[],scopeState='SKIPPED';
+    if((composer&&value==='')||options?.diagnostic===true) {
+      // Read-only evidence sampling; without verified composer this never
+      // changes the fail-closed postedUserTurnObserved receipt predicate.
+      try{scoped=await scopedUserMessageHtml(view);
+        scopeState=(composer&&value==='')?'READ':'DIAGNOSTIC_READ';}
+      catch{scopeState='READ_FAILED'; /* fail closed, do not reveal exception/page */ }
     }
     const stable=!view.webContents.isDestroyed()&&this.#views.get(tabId)===view&&
       this.#navigationGenerations.get(tabId)===epoch&&view.webContents.getURL()===url;
-    const posted=stable&&postedUserTurnObserved({
-      url,composer_observed:!!composer,
-      composer_value:value,
-      user_turn_html:scoped,request_id:requestId
-    });
+    const evidence={url,composer_observed:!!composer,
+      composer_value:value,user_turn_html:scoped,request_id:requestId};
+    const posted=stable&&postedUserTurnObserved(evidence);
+    const diagnostic=options?.diagnostic===true ? {
+      schema:'metaengine.devfleet.receipt-diagnostic.v1',
+      target_stable:stable,scope_state:scopeState,
+      ...userTurnReceiptDiagnostic(evidence),
+      state:posted?'PROVEN_SENT':'UNVERIFIED',
+      reason:!stable?'TARGET_CHANGED':scopeState==='READ_FAILED'?'USER_TURN_SCOPE_READ_FAILED':
+        userTurnReceiptDiagnostic(evidence).reason,
+      text_exposed:false,authority_effect:false
+    }:null;
     return {state:posted?'PROVEN_SENT':'UNVERIFIED',tab_id:tabId,
       request_id:requestId,url,
-      target_id:'webcontents:'+view.webContents.id,authority_effect:false};
+      target_id:'webcontents:'+view.webContents.id,authority_effect:false,
+      ...(diagnostic?{diagnostic}:{})};
   }
   async closeTab(tabId) {
     const view=this.#views.get(tabId);

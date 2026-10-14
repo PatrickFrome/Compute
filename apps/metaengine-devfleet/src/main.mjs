@@ -231,6 +231,7 @@ function listenLocal() {
         'dev.source.patch':p=>operator.withMaintenanceLock(()=>sourceWorkspace.patch(p)),
         'dev.source.reconcile':p=>operator.withMaintenanceLock(()=>sourceWorkspace.reconcile(p)),
         'dev.receipt.status':()=>operator.receiptSummary(),
+        'dev.receipt.inspect':p=>operator.inspectReceipt(p),
         'dev.receipt.reconcile':p=>operator.reconcileReceipt(p),
         'dev.receipt.abandon':p=>operator.abandonReceipt(p),
       };

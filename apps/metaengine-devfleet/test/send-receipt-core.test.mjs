@@ -62,3 +62,30 @@ test('user-turn markup accommodates split marker paragraphs but not spoofed role
    '<article data-message-author-role="tool"><div data-message-author-role="user">[DevFleet request: '+id+']</div></article>'
  ]}),false);
 });
+
+test('bounded receipt diagnostic reasons never leak text or invent physical proof',async()=>{
+ const {userTurnReceiptDiagnostic}=await import('../src/send-receipt-core.mjs');
+ const valid={url:basis.url,request_id:id,composer_observed:true,composer_value:'',
+  user_turn_html:['<div data-message-author-role="user"><p>[DevFleet request: '+id+']</p></div>']};
+ const cases=[
+  [valid,'EXACT_USER_TURN','PROVEN_SENT'],
+  [{...valid,composer_value:null},'COMPOSER_UNKNOWN','UNVERIFIED'],
+  [{...valid,composer_observed:false},'COMPOSER_NOT_PROVEN','UNVERIFIED'],
+  [{...valid,composer_value:'secret draft'},'COMPOSER_NOT_EMPTY','UNVERIFIED'],
+  [{...valid,user_turn_html:[]},'MARKER_MISSING','UNVERIFIED'],
+  [{...valid,user_turn_html:[...valid.user_turn_html,...valid.user_turn_html]},'MARKER_DUPLICATED','UNVERIFIED'],
+  [{...valid,user_turn_html:['<div data-message-author-role="assistant">[DevFleet request: '+id+']</div>']},'USER_TURN_ROLE_INVALID','UNVERIFIED'],
+  [{...valid,url:'https://evil.example/c/abc'},'CONVERSATION_URL_INVALID','UNVERIFIED']
+ ];
+ for(const [input,reason,state] of cases){
+  const observed=userTurnReceiptDiagnostic(input);
+  assert.equal(observed.reason,reason);
+  assert.equal(observed.state,state);
+  assert.equal(observed.text_exposed,false);
+  assert.equal(observed.authority_effect,false);
+  if(input.composer_observed===false || input.composer_value===null)
+    assert.equal(observed.marker_matches,1);
+  assert.equal(JSON.stringify(observed).includes('secret draft'),false);
+  assert.equal(JSON.stringify(observed).includes('<div'),false);
+ }
+});

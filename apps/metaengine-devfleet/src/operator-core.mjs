@@ -477,6 +477,30 @@ export class DevFleetOperator {
     return this.#exclusive(() => this.#assignLocked(params));
   }
 
+  // Bounded read-only proof inspection. This does NOT advance or clear ledger state.
+  async inspectReceipt(params) {
+    this.#requireInit();
+    fields(params,['request_id','tab_id']);
+    const id=validateId(params.request_id);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
+    if(typeof this.#adapter.probePosted!=='function')
+      throw Error('operator_receipt_readback_unavailable');
+    return this.#exclusive(async()=>{
+      const log=this.#state.requests.find(r=>r.operation==='assign'&&r.request_id===id);
+      if(!log||log.tab_id!==tab.tab_id)throw Error('operator_receipt_request_unmatched');
+      if(log.state!=='AMBIGUOUS'&&log.state!=='SENT'&&log.state!=='ABANDONED_UNKNOWN')
+        throw Error('operator_receipt_state_invalid');
+      let proof;
+      try{proof=await this.#adapter.probePosted(tab.tab_id,id,{diagnostic:true});}
+      catch{return {schema:SCHEMA,request_id:id,tab_id:tab.tab_id,
+        ledger_state:log.state,observation:'READBACK_UNAVAILABLE',
+        completion_proven:false,authority_effect:false,automatic_retry_allowed:false};}
+      return {schema:SCHEMA,request_id:id,tab_id:tab.tab_id,
+        ledger_state:log.state,observation:proof?.state==='PROVEN_SENT'?'PROVEN_SENT':'UNVERIFIED',
+        diagnostics:proof?.diagnostic??{state:'UNVERIFIED',reason:'READBACK_UNAVAILABLE'},
+        completion_proven:false,authority_effect:false,automatic_retry_allowed:false};
+    });
+  }
   async reconcileReceipt(params) {
     this.#requireInit();
     fields(params,['request_id','tab_id']);
