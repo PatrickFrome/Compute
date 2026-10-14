@@ -63,6 +63,8 @@ export class BrowserCellCdpContinuityReadback {
   #maxAgeMs;
   #maxCells;
   #last = new Map();
+  #webContentsByTab = new Map();
+  #witnesses = new WeakSet();
   #fenced = new Map();
 
   constructor({
@@ -96,13 +98,17 @@ export class BrowserCellCdpContinuityReadback {
     this.#maxCells = maxCells;
   }
 
-  #remember(tabId, witness) {
+  #remember(tabId, witness, webContents) {
     // Strictly bounded observational cache, never an independent target registry.
     this.#last.delete(tabId);
     this.#last.set(tabId, witness);
+    this.#webContentsByTab.delete(tabId);
+    this.#webContentsByTab.set(tabId, webContents);
+    this.#witnesses.add(witness);
     while (this.#last.size > this.#maxCells) {
       const oldest = this.#last.keys().next().value;
       this.#last.delete(oldest);
+      this.#webContentsByTab.delete(oldest);
       this.#fenced.delete(oldest);
     }
   }
@@ -212,8 +218,13 @@ export class BrowserCellCdpContinuityReadback {
       if (this.#fenced.get(tabId) === key) {
         return result(tabId, 'INVALIDATED', 'NATIVE_LIFECYCLE_TERMINATED_BINDING');
       }
+      if (this.#webContentsByTab.has(tabId)
+          && this.#webContentsByTab.get(tabId) !== wc
+          && stamp(this.#last.get(tabId)) === key) {
+        return unknown('WEBCONTENTS_OBJECT_REINCARNATION_UNPROVEN');
+      }
       if (this.#fenced.has(tabId)) this.#fenced.delete(tabId);
-      this.#remember(tabId, witness);
+      this.#remember(tabId, witness, wc);
       return witness;
     } catch {
       // No callback error/URL/page content crosses this projection boundary.
@@ -240,8 +251,9 @@ export class BrowserCellCdpContinuityReadback {
   // A caller-supplied witness is never authority: it can only be disproved.
   // Re-read the native sources so old identity cannot survive reincarnation.
   isCurrent(witness) {
-    if (witness?.schema !== BROWSERCELL_CDP_CONTINUITY_SCHEMA
-        || witness?.state !== 'BOUND_READ_ONLY') return false;
+    if (!witness || !this.#witnesses.has(witness)
+        || witness.schema !== BROWSERCELL_CDP_CONTINUITY_SCHEMA
+        || witness.state !== 'BOUND_READ_ONLY') return false;
     const current = this.read(witness.tab_id);
     return current.state === 'BOUND_READ_ONLY' && stamp(current) === stamp(witness);
   }
