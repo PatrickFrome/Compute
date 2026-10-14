@@ -236,6 +236,7 @@ function listenLocal() {
         'dev.pipeline.retire_batch':p=>operator.retireBatch(p),
         'dev.receipt.status':()=>operator.receiptSummary(),
         'dev.surface.inspect':p=>operator.inspectSurface(p),
+        'dev.hydration.inspect':p=>operator.inspectHydration(p),
         'dev.receipt.inspect':p=>operator.inspectReceipt(p),
         'dev.receipt.reconcile':p=>operator.reconcileReceipt(p),
         'dev.receipt.abandon':p=>operator.abandonReceipt(p),

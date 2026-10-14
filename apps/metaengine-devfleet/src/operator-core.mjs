@@ -750,6 +750,22 @@ export class DevFleetOperator {
   }
 
   // Bounded read-only proof inspection. This does NOT advance or clear ledger state.
+  async inspectHydration(params) {
+    this.#requireInit();
+    fields(params,['tab_id']);
+    const tab=this.#requireOpen(this.#find(params.tab_id));
+    if(typeof this.#adapter.hydrationProbe!=='function')
+      throw Error('hydration_probe_unavailable');
+    const result=await this.#adapter.hydrationProbe(tab.tab_id);
+    if(!result||result.schema!=='metaengine.devfleet.native-spa-hydration.v1'||
+       result.identity?.tab_id && result.identity.tab_id!==tab.tab_id||
+       result.state!=='UNKNOWN'||result.authority_effect!==false||
+       result.effect_authority!==false||result.send_authorized!==false||
+       result.completion_proven!==false||result.hydration_proven!==false||
+       result.read_only!==true)
+      throw Error('hydration_probe_invalid');
+    return result;
+  }
   async inspectSurface(params) {
     this.#requireInit();
     fields(params,['tab_id']);
