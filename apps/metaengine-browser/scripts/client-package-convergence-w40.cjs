@@ -44,6 +44,20 @@ function assertRuntimeLockClosure({ manifest, identity, installed, packageLockBy
       lock.name !== manifest.name || lock.version !== manifest.version) fail('lock_root_drift');
   if (JSON.stringify(Object.entries(root.dependencies || {}).sort()) !==
       JSON.stringify(Object.entries(manifest.dependencies || {}).sort())) fail('lock_manifest_dependency_drift');
+  // npm ls --all frequently emits shallow deduped nodes. Its V1 normalizer
+  // removes the deduped marker, so independently index exact name+version
+  // witnesses with expanded children instead of treating {} as complete.
+  const witnesses = new Map();
+  const stack=[installed.tree];
+  let visited=0;
+  while (stack.length) {
+    const n=stack.pop();
+    if (++visited > 32768) fail('installed_tree_too_large');
+    const id=n.name+'@'+n.version;
+    if (!witnesses.has(id)) witnesses.set(id,[]);
+    witnesses.get(id).push(n);
+    stack.push(...Object.values(n.dependencies));
+  }
   const resolved = new Set();
   const pending = [{ key: '', pkg: root, installedNode: installed.tree }];
   const requiredInstalled = new Set();
@@ -53,13 +67,22 @@ function assertRuntimeLockClosure({ manifest, identity, installed, packageLockBy
     if (resolved.has(key)) continue;
     resolved.add(key);
     if (++count > 8192) fail('lock_too_large');
-    for (const [name] of Object.entries(requiredDeps(pkg))) {
-      const childPath = depPath(key,name,lock.packages);
+    const needed=Object.entries(requiredDeps(pkg)).map(([name]) => {
+      const childPath=depPath(key,name,lock.packages);
       const child=lock.packages[childPath];
       if (!isRecord(child) || typeof child.version !== 'string' || !child.version) fail('transitive_lock_invalid');
-      // Reject source/link placeholders: an executable must include actual pinned installed bytes.
       if (child.link === true || child.dev === true && !child.devOptional) fail('transitive_lock_not_runtime');
-      const actualChild=installedNode.dependencies[name];
+      return {name,childPath,child};
+    });
+    // A shallow npm dedupe projection can use another expanded witness of
+    // precisely this installed package identity. Never accept an orphaned
+    // child elsewhere without a matching parent and required edge.
+    const identity=installedNode.name+'@'+installedNode.version;
+    const expanded=[installedNode,...(witnesses.get(identity)||[])].find(candidate =>
+      needed.every(({name,child}) => candidate.dependencies?.[name]?.version===child.version));
+    if (!expanded) fail('runtime_transitive_dependency_missing');
+    for (const {name,childPath,child} of needed) {
+      const actualChild=expanded.dependencies[name];
       if (!isRecord(actualChild) || actualChild.name !== name || actualChild.version !== child.version) {
         fail('runtime_transitive_dependency_missing');
       }

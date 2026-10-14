@@ -84,6 +84,30 @@ test('W40 orphaned resolution under a different parent cannot substitute a missi
     f.seal();
   },/client_package_w40_runtime_transitive_dependency_missing/);
 });
+test('W40 accepts npm shallow dedupe ONLY with a same-identity expanded witness',()=>{
+  const f=fixture();
+  try {
+    const shallow=f.tree.dependencies['electron-updater'].dependencies['builder-util-runtime'];
+    const expansion={...shallow,dependencies:{...shallow.dependencies}};
+    shallow.dependencies={};
+    f.tree.dependencies['electron-builder']=node('electron-builder','26.15.7',{
+      'builder-util-runtime':expansion,
+    });
+    f.seal();
+    assert.equal(assertWindowsSourceIdentity(f.input).required_runtime_resolutions_verified,4);
+  }finally{f.cleanup();}
+});
+test('W40 rejects dedupe supplied only by a different package identity',()=>{
+  check(f=>{
+    const shallow=f.tree.dependencies['electron-updater'].dependencies['builder-util-runtime'];
+    const wrong=node('builder-util-runtime','9.6.0',{...shallow.dependencies});
+    shallow.dependencies={};
+    f.tree.dependencies['electron-builder']=node('electron-builder','26.15.7',{
+      'builder-util-runtime':wrong,
+    });
+    f.seal();
+  },/client_package_w40_runtime_transitive_dependency_missing/);
+});
 test('W40 lockfile missing required transitive leaf fails even with self-rehashed lock and identity',()=>{
   check(f=>{delete f.lock.packages['node_modules/debug'];f.seal();},/client_package_w40_transitive_lock_missing/);
 });
