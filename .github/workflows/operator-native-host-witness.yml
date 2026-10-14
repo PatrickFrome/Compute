@@ -1,0 +1,34 @@
+name: Operator Native Host Witness (hermetic)
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-native-host-witness.*'
+      - '.github/workflows/operator-native-host-witness.yml'
+  push:
+    branches:
+      - 'work/metaengine-wave2-w1-host-codec-20261014'
+    paths:
+      - 'infra/client-state-runtime/operator-native-host-witness.*'
+      - '.github/workflows/operator-native-host-witness.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-falsification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate native witness source
+        run: |
+          node --check infra/client-state-runtime/operator-native-host-witness.mjs
+          node --check infra/client-state-runtime/operator-native-host-witness.test.mjs
+      - name: Host witness adversarial contracts
+        run: node --test infra/client-state-runtime/operator-native-host-witness.test.mjs
