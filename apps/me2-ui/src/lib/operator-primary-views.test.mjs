@@ -14,6 +14,7 @@ const frame = (patch = {}) => ({
   identity,
   projection: {
     schema: 'metaengine.operator.observatory.v1', state: 'OBSERVED',
+    authority_effect: false, automatic_retry_allowed: false,
     cursor_state: 'VERIFIED_CURSOR', run_id: identity.run_id,
     event_seq: identity.event_seq, proof_identity: identity.proof_identity,
     planes: {
