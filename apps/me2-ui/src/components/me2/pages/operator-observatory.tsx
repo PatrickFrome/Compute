@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OBSERVATORY_VIEWS } from "@/lib/operator-observatory.mjs";
+import { projectPrimaryOperatorView, type PrimaryDelivery } from "@/lib/operator-primary-views.mjs";
 import {
   advanceOperatorObservatoryResync, emptyOperatorObservatoryResync,
   expireOperatorObservatoryResync,
@@ -52,6 +53,9 @@ export function OperatorObservatoryPage() {
   // a real readback may carry a run, cursor, identity and all seven planes.
   const [resync, setResync] = useState<ObservatoryFrame>(() => emptyOperatorObservatoryResync());
   const [connection, setConnection] = useState<"UNBOUND" | "READING" | "OBSERVED" | "UNAVAILABLE">("UNBOUND");
+  const [delivery, setDelivery] = useState<PrimaryDelivery>("LOADING");
+  const [firstTruthMs, setFirstTruthMs] = useState<number | null>(null);
+  const firstReadStart = useRef<number | null>(null);
   // A single shared checkpoint governs all seven panels. Keep it across
   // transport failures, remount-free navigation and expired readbacks.
   const checkpoint = useRef<ObservatoryFrame>(emptyOperatorObservatoryResync());
@@ -63,6 +67,10 @@ export function OperatorObservatoryPage() {
     if (mounted.current) {
       setResync(next);
       setConnection(next.mode === "TRACKING" ? "OBSERVED" : "UNAVAILABLE");
+      if (next.mode === "TRACKING" && firstReadStart.current !== null) {
+        const elapsed = Math.max(0, Math.round(performance.now() - firstReadStart.current));
+        setFirstTruthMs(previous => previous ?? elapsed);
+      }
     }
   }, []);
 
@@ -71,10 +79,14 @@ export function OperatorObservatoryPage() {
     const bridge = operatorBridge();
     if (!bridge?.readContext) {
       update(advanceOperatorObservatoryResync(checkpoint.current, null));
+      if (mounted.current) setDelivery("UNBOUND");
       return;
     }
     flight.current = true;
-    if (mounted.current) setConnection("READING");
+    if (mounted.current) {
+      setConnection("READING");
+      setDelivery(checkpoint.current.mode === "TRACKING" ? "READING" : "LOADING");
+    }
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       // One read of the canonical in-process Owner context, no HTTP from the
@@ -90,10 +102,16 @@ export function OperatorObservatoryPage() {
       update(advanceOperatorObservatoryResync(checkpoint.current, result, {
         intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
       }));
-    } catch {
-      if (mounted.current) update(advanceOperatorObservatoryResync(checkpoint.current, null, {
-        intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
-      }));
+      setDelivery("IDLE");
+    } catch (error) {
+      if (mounted.current) {
+        update(advanceOperatorObservatoryResync(checkpoint.current, null, {
+          intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
+        }));
+        // Do not render the exception message: it may contain native secrets.
+        setDelivery(error instanceof Error && error.message === "operator_read_timeout"
+          ? "TIMED_OUT" : "FAILED");
+      }
     } finally {
       if (timer) clearTimeout(timer);
       flight.current = false;
@@ -101,9 +119,14 @@ export function OperatorObservatoryPage() {
   }, [update]);
 
   const projection = resync.projection;
+  // Primary views use exactly the same redacted frame as the other four.
+  // No legacy workbench, daemon, HTTP or roster fallback when proof is absent.
+  const primary = view === "Now" || view === "Missions" || view === "Fleet"
+    ? projectPrimaryOperatorView(resync, view, { delivery, firstTruthMs }) : null;
 
   useEffect(() => {
     mounted.current = true;
+    firstReadStart.current ??= performance.now();
     void refresh();
     const ticker = window.setInterval(() => {
       // Expire visual truth on the clock EVEN if the window is hidden, the
@@ -208,6 +231,36 @@ export function OperatorObservatoryPage() {
            "Proof provenance and event cursor; no unsourced event content."}
         </p>
       </div>
+      {primary ? (
+        <section className="border border-cyan-900/40 bg-cyan-950/10 p-4" data-testid="operator-primary-summary"
+          aria-label={primary.title} aria-live="polite">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-[14px] font-medium text-zinc-100">{primary.title}</h3>
+            <span data-testid="operator-primary-phase" className="border border-zinc-700 px-2 py-1 font-mono text-[11px] text-cyan-200">
+              {primary.phase}
+            </span>
+          </div>
+          <p className="mt-2 text-[12px] text-zinc-300" role="status" data-testid="operator-primary-boundary">
+            {primary.hint}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="operator-primary-readback">
+            {primary.facets.map(facet => (
+              <div key={facet.name} className="border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                <span className="text-[11px] capitalize text-zinc-400">{facet.name}</span>
+                <strong className={`ml-2 font-mono text-[11px] ${facet.state === "UNKNOWN" ? "text-zinc-400" : "text-zinc-100"}`}>
+                  {facet.state}
+                </strong>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 border-l-2 border-zinc-600 pl-3 text-[12px] text-zinc-400"
+            data-testid="operator-primary-missing">{primary.missing_detail}</p>
+          <p className="mt-2 text-[11px] text-zinc-500" data-testid="operator-primary-ttft">
+            First source-bound cursor: {primary.first_truth_ms === null
+              ? "UNKNOWN" : `${primary.first_truth_ms} ms`} (UI elapsed; not execution readiness).
+          </p>
+        </section>
+      ) : null}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="operator-planes">
         {names.map((name: string) => {
           const facet = projection.planes[name] ?? { state: "UNKNOWN", fresh: false, proof: "NONE", observed_at: null };
