@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { runObservationBatch } from './fleet-observation-core.mjs';
+import {emptyCodingQueue,readCodingQueue,enqueueCodingTask,cancelQueuedTask,
+  chooseFairCodingWave,codingQueueSummary,HOT_SLOTS} from './coding-task-queue-core.mjs';
 
 export const SCHEMA = 'metaengine.devfleet.operator.v1';
 const requestRe = /^[A-Za-z0-9._:-]{12,100}$/;
@@ -35,7 +37,7 @@ export class DevFleetOperator {
   #adapter;
   #store;
   #contracts;
-  #state = { schema: SCHEMA, sessions: [], requests: [] };
+  #state = { schema: SCHEMA, sessions: [], requests: [], coding_queue:emptyCodingQueue() };
   #busy = false;
   #initialized = false;
   #restoring = false;
@@ -66,7 +68,7 @@ export class DevFleetOperator {
         if (seen.has(s.tab_id) || !ownChatUrl(s.url)) throw new Error('operator_state_session_invalid');
         seen.add(s.tab_id);
       }
-      this.#state = plain(disk);
+      this.#state = plain({...disk,coding_queue:readCodingQueue(disk.coding_queue)});
     }
     // Process reincarnation has destroyed all prior WebContents. Never
     // resurrect a tab whose last durable action was physical retirement:
@@ -86,8 +88,13 @@ export class DevFleetOperator {
         }
       }
     }
+    // A crash may occur after a durable reservation and before native
+    // WebContents/Send proof. Never auto-create or re-send on reincarnation.
+    const interruptedCoding=this.#state.coding_queue.items.filter(x=>
+      x.state==='RESERVED'||x.state==='CREATION_UNKNOWN');
+    for(const x of interruptedCoding)x.state='INTERRUPTED_UNKNOWN';
     this.#initialized = true;
-    if(interrupted.length) await this.#save();
+    if(interrupted.length || interruptedCoding.length) await this.#save();
     this.#restoring = true;
     // RESTORING never reaches the persistence store; it is a live-only truth.
     // Write-ahead request receipts remain untouched, including AMBIGUOUS.
@@ -207,6 +214,7 @@ export class DevFleetOperator {
         historical_ambiguous:this.#state.requests.filter(r=>
           r.operation==='assign'&&r.state==='AMBIGUOUS').length,
         effects_require_new_request_id:true},
+      coding_queue:this.queueStatus(),
       only_actions: ['create','read','assign','close'],
       primary_browser_shared_profile: false,
       hosted_database: false,
@@ -252,6 +260,108 @@ export class DevFleetOperator {
       return plain(log.receipt);
     });
   }
+  // Developer-authorized source-only queue; never wakes or schedules itself.
+  queueStatus() {
+    this.#requireInit();
+    return {...codingQueueSummary(this.#state.coding_queue,
+      this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id)),
+      read_only:true,automatic_retry_allowed:false};
+  }
+  async enqueueCoding(params) {
+    this.#requireInit();
+    fields(params,['task_id','request_id','project_id','text','kind','scope','draft_pr_only']);
+    return this.#exclusive(async()=>{
+      const entry=enqueueCodingTask(this.#state.coding_queue,params,
+        this.#policy().max_prompt_chars);
+      if(!entry.duplicate && this.#state.requests.some(x=>x.request_id===params.request_id))
+        throw Error('coding_queue_request_collision');
+      if(!entry.duplicate){
+        this.#state.coding_queue=entry.queue;
+        await this.#save();
+      }
+      return {schema:'metaengine.devfleet.coding-enqueue.v1',
+        task_id:entry.item.task_id,request_id:entry.item.request_id,
+        state:entry.item.state,duplicate:entry.duplicate,
+        automatic_retry_allowed:false,authority_effect:false};
+    });
+  }
+  async cancelCoding(params) {
+    this.#requireInit();fields(params,['task_id']);
+    return this.#exclusive(async()=>{
+      const next=cancelQueuedTask(this.#state.coding_queue,params.task_id);
+      this.#state.coding_queue=next;
+      await this.#save();
+      return {schema:'metaengine.devfleet.coding-cancel.v1',
+        task_id:params.task_id,state:'CANCELLED',
+        automatic_retry_allowed:false,authority_effect:false};
+    });
+  }
+  // EXPLICIT developer command only. All physical effects use THIS operator's
+  // existing #exclusive and #assignLocked (native proof + write-ahead receipt).
+  // No timer, independent executor, blind Send retry or slot oversubscription.
+  async admitCoding(params={}) {
+    this.#requireInit();fields(params,['max_items']);
+    const policy=this.#policy();
+    if(!policy.dispatch_enabled)throw Error('operator_policy_disarmed');
+    const requested=params.max_items===undefined?HOT_SLOTS:params.max_items;
+    if(!Number.isSafeInteger(requested)||requested<1||requested>HOT_SLOTS)
+      throw Error('coding_queue_admission_budget_invalid');
+    return this.#exclusive(async()=>{
+      const queue=this.#state.coding_queue;
+      const free=this.queueStatus().free_hot_slots;
+      const slots=Math.min(requested,HOT_SLOTS,policy.max_batch_items,free);
+      const selection=chooseFairCodingWave(queue,slots);
+      const results=[];
+      for(const taskId of selection.task_ids) {
+        if(this.#persistenceFenced)throw Error('operator_persistence_reconciliation_required');
+        if(this.#state.requests.length>=500)
+          throw Error('operator_request_history_full');
+        const item=queue.items.find(x=>x.task_id===taskId);
+        if(!item || item.state!=='QUEUED')throw Error('coding_queue_selection_stale');
+        if(this.#state.requests.some(x=>x.request_id===item.request_id))
+          throw Error('coding_queue_request_collision');
+        const tabId='tab_'+crypto.randomUUID();
+        // Reservation is durable BEFORE create. Reincarnation never replays it.
+        item.state='RESERVED';item.tab_id=tabId;
+        queue.last_project=item.project_id;
+        await this.#save();
+        let opened;
+        try {
+          opened=await this.#adapter.create(tabId,'https://chatgpt.com/');
+          const url=ownChatUrl(opened?.url);
+          if(opened?.tab_id!==tabId || !url)throw Error('coding_queue_create_unverified');
+          this.#state.sessions.push({tab_id:tabId,url,state:'OPEN'});
+          item.state='READY_NOT_SENT';
+          await this.#save();
+        } catch {
+          if(this.#persistenceFenced)throw Error('operator_persistence_reconciliation_required');
+          item.state='CREATION_UNKNOWN';
+          await this.#save();
+          results.push({task_id:taskId,request_id:item.request_id,tab_id:tabId,
+            state:'CREATION_UNKNOWN',automatic_retry_allowed:false});
+          continue;
+        }
+        try {
+          const receipt=await this.#assignLocked({
+            request_id:item.request_id,tab_id:tabId,text:item.text});
+          item.state=receipt.state==='SENT'?'SENT':'AMBIGUOUS';
+        } catch {
+          if(this.#persistenceFenced)throw Error('operator_persistence_reconciliation_required');
+          // No native Send passed preflight. Hold the owned slot: never silently
+          // requeue, try another tab, or assert delivery.
+          item.state='READY_NOT_SENT';
+        }
+        await this.#save();
+        results.push({task_id:taskId,request_id:item.request_id,tab_id:tabId,
+          state:item.state,automatic_retry_allowed:false});
+      }
+      return {schema:'metaengine.devfleet.coding-admission.v1',
+        state:'WAVE_COMPLETED',results,hot_limit:HOT_SLOTS,
+        free_hot_slots:this.queueStatus().free_hot_slots,
+        explicit_owner_command:true,automatic_retry_allowed:false};
+    });
+  }
+
   async batchRotate(params) {
     this.#requireInit();
     fields(params,['rotations']);
