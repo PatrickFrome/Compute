@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +33,29 @@ export function candidateArtifactName(sourceHead) {
   const head = required(sourceHead, 'package_build_reservation_source_head_missing').toLowerCase();
   if (!SHA40.test(head)) throw new Error('package_build_reservation_source_head_invalid');
   return `metaengine-browser-windows-candidate-${head}`;
+}
+
+// Version selection is a read-only source-planning operation, never a packaging
+// override. Commit the selected version to package.json AND package-lock.json
+// before invoking the ordinary reservation/identity build pipeline.
+export const MAX_PACKAGE_IDENTITY_CANDIDATES = 4;
+
+export function deriveDistinctCandidatePackageVersion({ packageVersion, sourceHead, slot = 0 } = {}) {
+  const version = required(packageVersion, 'package_build_reservation_version_missing');
+  if (!DEV_VERSION.test(version)) throw new Error('package_build_reservation_version_invalid');
+  const head = required(sourceHead, 'package_build_reservation_source_head_missing').toLowerCase();
+  if (!SHA40.test(head)) throw new Error('package_build_reservation_source_head_invalid');
+  if (!Number.isSafeInteger(slot) || slot < 0 || slot >= MAX_PACKAGE_IDENTITY_CANDIDATES) {
+    throw new Error('package_build_reservation_candidate_slot_invalid');
+  }
+  const payload = `metaengine.package-candidate.v1\n${version}\n${head}\n${slot}\n`;
+  const digest = createHash('sha256').update(payload, 'utf8').digest('hex');
+  // 12 decimal digits in a distinct development namespace; no clock, run ID,
+  // randomness, automatic retry or truncation of the trusted source witness.
+  // Collision with another source is still possible and MUST be checked against
+  // immutable artifact reservations, never assumed away from the hash alone.
+  const serial = 800_000_000_000n + (BigInt(`0x${digest.slice(0, 13)}`) % 100_000_000_000n);
+  return `0.7.0-dev.${serial}.1`;
 }
 
 function normalizeArtifact(row) {
@@ -188,12 +212,87 @@ async function listArtifactsByName({ repository, name, token, apiBase }) {
   url.searchParams.set('name', name);
   url.searchParams.set('per_page', '100');
   const payload = await githubJson(url, token);
-  if (!payload || !Array.isArray(payload.artifacts)) {
+  if (!payload || !Array.isArray(payload.artifacts) || !Number.isSafeInteger(payload.total_count) || payload.total_count < 0 || payload.total_count !== payload.artifacts.length) {
     throw Object.assign(new Error('package_build_reservation_api_shape_invalid'), {
       code: 'PACKAGE_BUILD_RESERVATION_API_SHAPE_INVALID',
     });
   }
   return payload.artifacts;
+}
+
+// Read-only planner: a reserved version gets a bounded, deterministically
+// distinct candidate. It never authorizes packaging, edits source or rewrites
+// artifact identity. The proposed version must be committed in BOTH package
+// manifests (and independently rechecked by the ordinary build preflight).
+export async function planDistinctPackageBuildIdentity({
+  repository, sourceHead, packageVersion, runId, runAttempt, token,
+  apiBase = 'https://api.github.com',
+} = {}) {
+  // Validate source/run/rerun before any remote observation.
+  evaluatePackageBuildReservation({ repository, sourceHead, packageVersion, runId, runAttempt });
+  const sourceName = candidateArtifactName(sourceHead);
+  const existingSource = await listArtifactsByName({ repository, name: sourceName, token, apiBase });
+  const existingVersion = await listArtifactsByName({ repository, name: reservationArtifactName(packageVersion), token, apiBase });
+  try {
+    evaluatePackageBuildReservation({
+      repository, sourceHead, packageVersion, runId, runAttempt,
+      versionArtifacts: existingVersion, sourceArtifacts: existingSource,
+    });
+    return Object.freeze({
+      schema: 'metaengine.browser.package-identity-candidate-plan.v1',
+      source_head: sourceHead.toLowerCase(),
+      manifest_package_version: packageVersion,
+      candidate_package_version: packageVersion,
+      candidate_slot: null,
+      manifest_update_required: false,
+      physical_package_build_allowed: false,
+      promotion_authorized: false,
+      authority_effect: false,
+    });
+  } catch (error) {
+    if (error?.code !== 'PACKAGE_IDENTITY_VERSION_ALREADY_RESERVED') throw error;
+  }
+
+  const collisions = [];
+  for (let slot = 0; slot < MAX_PACKAGE_IDENTITY_CANDIDATES; slot += 1) {
+    const candidate = deriveDistinctCandidatePackageVersion({ packageVersion, sourceHead, slot });
+    if (candidate === packageVersion || collisions.includes(candidate)) {
+      // A candidate collision within the deterministic bounded sequence is
+      // ambiguous, not permission to silently alias the same package version.
+      throw Object.assign(new Error('package_identity_candidate_sequence_collision'), {
+        code: 'PACKAGE_IDENTITY_CANDIDATE_SEQUENCE_COLLISION',
+      });
+    }
+    const reservations = await listArtifactsByName({
+      repository, name: reservationArtifactName(candidate), token, apiBase,
+    });
+    if (reservations.length > 0) {
+      collisions.push(candidate);
+      continue;
+    }
+    // Recheck the exact source candidate: a previously packaged source must
+    // not be repackaged by merely assigning another version.
+    evaluatePackageBuildReservation({
+      repository, sourceHead, packageVersion: candidate, runId, runAttempt,
+      versionArtifacts: reservations, sourceArtifacts: existingSource,
+    });
+    return Object.freeze({
+      schema: 'metaengine.browser.package-identity-candidate-plan.v1',
+      source_head: sourceHead.toLowerCase(),
+      manifest_package_version: packageVersion,
+      candidate_package_version: candidate,
+      candidate_slot: slot,
+      rejected_reserved_candidate_versions: Object.freeze([...collisions]),
+      manifest_update_required: true,
+      physical_package_build_allowed: false,
+      promotion_authorized: false,
+      authority_effect: false,
+    });
+  }
+  throw Object.assign(new Error('package_identity_candidates_exhausted'), {
+    code: 'PACKAGE_IDENTITY_CANDIDATES_EXHAUSTED',
+    details: { source_head: sourceHead.toLowerCase(), manifest_package_version: packageVersion, candidate_count: MAX_PACKAGE_IDENTITY_CANDIDATES },
+  });
 }
 
 export async function observeAndEvaluatePackageBuildReservation({
@@ -224,7 +323,8 @@ export async function observeAndEvaluatePackageBuildReservation({
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const proof = await observeAndEvaluatePackageBuildReservation({
+  const operation = args['plan-distinct'] === true ? planDistinctPackageBuildIdentity : observeAndEvaluatePackageBuildReservation;
+  const proof = await operation({
     repository: args.repository || process.env.GITHUB_REPOSITORY,
     sourceHead: args['source-head'] || process.env.ME2_SOURCE_HEAD || process.env.GITHUB_SHA,
     packageVersion: args['package-version'],
