@@ -113,7 +113,7 @@ test('unrelated private-table SELECT, other-table writes, and sequence writes re
   for (const patch of [
     { can_read_unapproved_table: true }, { can_write_any_table: true },
     { can_advance_any_sequence: true }, { can_write_any_table: null },
-  ]) assert.equal((await check(fake({ wide: [{ ...wideGood(), ...patch }] })).state, 'DENIED');
+  ]) assert.equal((await check(fake({ wide: [{ ...wideGood(), ...patch }] }))).state, 'DENIED');
 });
 
 test('missing, duplicate, malformed catalog or SQL error -> UNKNOWN with no secret or fallback', async () => {
