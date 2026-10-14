@@ -68,6 +68,7 @@ import { createSupabaseHealthSentinel } from './supabase-health-sentinel.mjs';
 import { createFallbackConsoleRuntime } from './fallback-console-runtime.mjs';
 import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
 import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
+import { assertClientNativeShellIpcSender, assertGenericShellCommandAllowed, projectOwnPostgresClientConnection } from './client-native-trust-boundary.mjs';
 import { createOperatorNativeContextReader } from './operator-native-context-bridge.mjs';
 import {
   normalizeClientAgentId,
@@ -439,7 +440,7 @@ async function saveOwnerSafetyGateState(state) {
 }
 
 function assertShellSender(event) {
-  if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
+  return assertClientNativeShellIpcSender({ event, shellView, primaryShellMode, primaryShellUrl });
 }
 
 // This source slice registers the typed IPC but intentionally leaves the trusted
@@ -2749,19 +2750,9 @@ function readClientConnectionStatus() {
     automatic_effect_retry_allowed: false,
     authority_effect: false,
   });
-  const reserve = fallbackConsole?.snapshot?.() || null;
-  const localProvider = explicitLocalSupervisorBase();
-  return Object.freeze({
-    ...status,
-    state_provider: localProvider ? 'LOCAL_POSTGRES' : 'HOSTED',
-    hosted_supabase_required: localProvider == null,
-    fallback_mode: localProvider ? 'LOCAL_PINNED' : (reserve?.gate?.mode || 'CLOUD_AUTHORITY'),
-    fallback_ready: reserve?.gate?.reserve_usable === true,
-    fallback_enabled: reserve?.failover?.enabled === true,
-    cloud_health: localProvider ? 'NOT_CONFIGURED' : (reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN'),
-    legacy_daemon_feed_is_authority: false,
-    authority_effect: false,
-  });
+  let localProvider = null;
+  try { localProvider = explicitLocalSupervisorBase(); } catch { /* untrusted Owner state: fail closed */ }
+  return projectOwnPostgresClientConnection(status, { localProviderAttested: Boolean(localProvider) });
 }
 ipcMain.handle('metaengine:client:connection-status', async (event) => {
   assertShellSender(event);
@@ -3095,7 +3086,11 @@ ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;
   return nativeSupervisor?.systemDeltaTail?.(limit) || Object.freeze([]);
 });
-ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShellSender(event); return handleCommand(String(message?.command || ''), message?.payload || {}); });
+ipcMain.handle('metaengine:shell:command', async (event, message) => {
+  assertShellSender(event);
+  assertGenericShellCommandAllowed(primaryShellMode);
+  return handleCommand(String(message?.command || ''), message?.payload || {});
+});
 ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => {
   assertShellSender(event);
   return devosPresentationFocus.snapshot();
