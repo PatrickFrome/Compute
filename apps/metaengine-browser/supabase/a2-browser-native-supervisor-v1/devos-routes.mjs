@@ -307,7 +307,8 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       // One already-authorized Owner/own-PG runtime readback. An absent or
       // contradictory control witness never permits optimistic DAG claims.
       const dagRuntimeControl=optInDag
-        ? (runtimeControl ?? await readDevosRuntimeControl({rpc,workspaceId})) : null;
+        ? (typeof readRuntimeControl==='function' ? runtimeControl
+          : await readDevosRuntimeControl({rpc,workspaceId})) : null;
       const fleetDagAdmission=optInDag
         ? planFleetDagClaims({snapshot,runtimeControl:dagRuntimeControl}) : null;
       const schedulerBacklog=fleetDagAdmission
