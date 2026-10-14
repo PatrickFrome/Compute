@@ -42,7 +42,7 @@ test('workspace prohibits traversal, sensitive paths and symlink escape',()=>fix
   const outside=await fs.mkdtemp(path.join(os.tmpdir(),'devfleet-source-outside-'));
   try {
     await fs.writeFile(path.join(outside,'victim.mjs'),'important');
-    await fs.symlink(outside,path.join(root,'src','escape'),'dir');
+    await fs.symlink(outside,path.join(root,'src','escape'),process.platform==='win32'?'junction':'dir');
     await assert.rejects(svc.inspect({path:'src/escape/victim.mjs'}),/link_denied/);
     assert.equal(await fs.readFile(path.join(outside,'victim.mjs'),'utf8'),'important');
   } finally {await fs.rm(outside,{recursive:true,force:true});}

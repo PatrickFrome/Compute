@@ -127,6 +127,7 @@ export class DevFleetOperator {
     for(const r of this.#state.requests) {
       if(r.operation!=='assign')continue;
       if(r.state==='SENT')counts.SENT++;
+      if(r.state==='ABANDONED_UNKNOWN')counts.ABANDONED_UNKNOWN=(counts.ABANDONED_UNKNOWN||0)+1;
       if(r.state==='AMBIGUOUS'){
         counts.AMBIGUOUS++;
         if(r.tab_id&&!blocked_tabs.includes(r.tab_id))blocked_tabs.push(r.tab_id);
@@ -394,6 +395,11 @@ export class DevFleetOperator {
     const prior = this.#prior(id,'assign',fingerprint);
     if (prior) return prior;
     this.#requireOpen(tab);
+    for(const old of this.#state.requests.filter(r=>r.operation==='assign' &&
+        r.state==='ABANDONED_UNKNOWN' && r.tab_id===tab.tab_id && !r.replacement_admitted)) {
+      if(old.replacement_request_id!==id || old.replacement_prompt_sha256!==sha(prompt))
+        throw Error('operator_distinct_replacement_binding_required');
+    }
     if (this.#state.requests.some(r => r.operation === 'assign' &&
       r.state === 'AMBIGUOUS' && r.tab_id === tab.tab_id))
       throw new Error('operator_tab_ambiguous_reconciliation_required');
@@ -426,6 +432,8 @@ export class DevFleetOperator {
           throw Error('operator_model_not_proven');
       }
       const log = { ...recordFor(id,'assign',fingerprint), tab_id: tab.tab_id };
+      for(const old of this.#state.requests.filter(r=>r.state==='ABANDONED_UNKNOWN' &&
+          r.tab_id===tab.tab_id && r.replacement_request_id===id))old.replacement_admitted=true;
       this.#state.requests.push(log);
       await this.#save(); // never repeat a send after an uncertain OS/network outcome
       try {
@@ -507,6 +515,47 @@ export class DevFleetOperator {
           reconciliation:'PERSISTENCE_UNPROVEN',automatic_retry_allowed:false};
       }
       return plain(log.receipt);
+    });
+  }
+  // Developer-authorized abandonment is NOT a delivery verdict. Old request
+  // IDs always replay their original UNKNOWN receipt and can never Send again.
+  // Only the explicitly hash-bound, distinct next task may release this hold.
+  async abandonReceipt(params) {
+    this.#requireInit();
+    fields(params,['request_id','tab_id','acknowledge_unknown_delivery',
+      'replacement_request_id','replacement_prompt_sha256']);
+    const id=validateId(params.request_id),next=validateId(params.replacement_request_id);
+    if(id===next || params.acknowledge_unknown_delivery!==true ||
+      !/^[a-f0-9]{64}$/.test(params.replacement_prompt_sha256))
+      throw Error('operator_abandon_parameters_invalid');
+    const tab=this.#requireOpen(this.#find(params.tab_id));
+    return this.#exclusive(async()=>{
+      const old=this.#state.requests.find(r=>r.operation==='assign'&&r.request_id===id);
+      if(!old||old.tab_id!==tab.tab_id)throw Error('operator_receipt_request_unmatched');
+      if(old.state==='ABANDONED_UNKNOWN') {
+        if(old.replacement_request_id!==next || old.replacement_prompt_sha256!==params.replacement_prompt_sha256)
+          throw Error('operator_abandon_collision');
+        return {schema:SCHEMA,state:'ABANDONED_UNKNOWN',request_id:id,tab_id:tab.tab_id,
+          delivery_state:'UNKNOWN',automatic_retry_allowed:false};
+      }
+      if(old.state!=='AMBIGUOUS'||this.#state.requests.some(r=>r.request_id===next))
+        throw Error('operator_abandon_state_invalid');
+      const pre=await this.#adapter.inputProbe(tab.tab_id);
+      if(pre?.tab_id!==tab.tab_id || pre?.authority_effect!==false ||
+         pre?.mode!=='CHAT'||pre?.page_failure||pre?.unique_composer!==true||
+         pre?.generation_active!==false)throw Error('operator_abandon_chat_not_idle');
+      const prior=plain(old);
+      old.state='ABANDONED_UNKNOWN';
+      old.replacement_request_id=next;
+      old.replacement_prompt_sha256=params.replacement_prompt_sha256;
+      old.replacement_admitted=false;
+      old.abandoned_at=new Date().toISOString();
+      try{await this.#save();}catch(error){
+        for(const key of Object.keys(old))delete old[key];
+        Object.assign(old,prior);throw error;
+      }
+      return {schema:SCHEMA,state:'ABANDONED_UNKNOWN',request_id:id,tab_id:tab.tab_id,
+        delivery_state:'UNKNOWN',automatic_retry_allowed:false};
     });
   }
 

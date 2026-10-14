@@ -5,6 +5,7 @@ import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, vi
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
 import {receiptMarker,postedMessageObserved,postedUserTurnObserved} from './send-receipt-core.mjs';
+import {composerDomText} from './composer-dom-core.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -59,8 +60,56 @@ async function ax(view) {
   const debug = view.webContents.debugger;
   if (!debug.isAttached()) debug.attach('1.3');
   await debug.sendCommand('Accessibility.enable');
-  const result = await debug.sendCommand('Accessibility.getFullAXTree');
+  let timeout;
+  let result;
+  try {
+    result=await Promise.race([
+      debug.sendCommand('Accessibility.getFullAXTree'),
+      new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('native_ax_readback_timeout')),4000);})
+    ]);
+  } finally {clearTimeout(timeout);}
   return Array.isArray(result?.nodes) ? result.nodes : [];
+}
+async function composerValue(view, node, diagnostic = null) {
+  if (!node || !Number.isSafeInteger(node.backendDOMNodeId)) return null;
+  const dbg = view.webContents.debugger;
+  await dbg.sendCommand('DOM.enable');
+  const result = await dbg.sendCommand('DOM.describeNode', {
+    backendNodeId:node.backendDOMNodeId,depth:-1,pierce:false
+  });
+  const dom = composerDomText(result?.node,node.backendDOMNodeId);
+  if(diagnostic) {
+    const n=result?.node,attrs=n?.attributes||[];
+    const attr=k=>{const i=attrs.indexOf(k);return i>=0?attrs[i+1]:null;};
+    Object.assign(diagnostic,{tag:n?.nodeName||null,id:attr('id'),
+      editable:attr('contenteditable'),backend_matches:n?.backendNodeId===node.backendDOMNodeId,
+      child_count:n?.childNodeCount??null,children:(n?.children||[]).slice(0,8).map(c=>({
+        tag:c.nodeName,type:c.nodeType,child_count:c.childNodeCount??null,
+        children:c.children?.length??null,pseudo_count:c.pseudoElements?.length||0})),
+      state:dom===null?'UNKNOWN':'PROVEN'});
+  }
+  if (dom !== null) return dom;
+  // Native input value is authoritative for a textarea; contenteditable AX
+  // values can flatten/lag paragraphs and MUST use the exact DOM node above.
+  return result?.node?.nodeName === 'TEXTAREA' &&
+    typeof node.value?.value === 'string' ? node.value.value : null;
+}
+async function readyComposer(view, diagnostic = null) {
+  let nodes=await ax(view),composer=composerFrom(nodes);
+  if(!composer)return {nodes,composer:null,value:null};
+  const dbg=view.webContents.debugger;
+  await dbg.sendCommand('DOM.enable');
+  // ChatGPT's pending textarea lazily mounts the actual editor on focus.
+  // Focus does not type or submit; always rebind to the new native AX node.
+  await dbg.sendCommand('DOM.focus',{backendNodeId:composer.backendDOMNodeId});
+  let value=null;
+  for(let i=0;i<8;i++) {
+    nodes=await ax(view);composer=composerFrom(nodes);
+    value=composer ? await composerValue(view,composer,diagnostic) : null;
+    if(value!==null)break;
+    if(i<7)await sleep(100);
+  }
+  return {nodes,composer,value};
 }
 // CDP user-turn scope is critical: a flattened AX transcript can echo an
 // unsent marker, an assistant quotation, or other untrusted page text.
@@ -155,7 +204,7 @@ export class ChatSurface {
     const view = new WebContentsView({webPreferences:{
       partition:'persist:metaengine-devfleet-auth-v1',
       nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true,
-      spellcheck:true
+      spellcheck:true,backgroundThrottling:false
     }});
     this.#views.set(tabId,view);
     this.#navigationGenerations.set(tabId,0);
@@ -262,6 +311,11 @@ export class ChatSurface {
         } catch { /* Never turn unsupported DOM inspection into CHAT */ }
       }
     }
+    // The ordinary ChatGPT conversation UI can omit the Chat/Work tab pair.
+    // Require both native provider controls; a text label alone is not proof.
+    if(mode==='UNKNOWN' && summary.nodes.length===0 &&
+       modelPickerCandidates(nodes).length===1 && composerControls(nodes).length===1)
+      mode='CHAT';
     return {mode,chat_node:summary.chat_node,
       page_failure:classifyPageFailure(transcript(nodes)),
       high_label_visible:nodes.some(n => /^(high)$/i.test(String(n.name?.value||'').trim())),
@@ -371,11 +425,15 @@ export class ChatSurface {
     if(!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
     this.select(tabId); // hidden WebContents may be throttled; inspect the visible exact tab
     if(!chatUrl(view.webContents.getURL()))throw new Error('tab_origin_not_chatgpt');
+    const diagnostic={state:'ABSENT'};
+    const {nodes,value}=await readyComposer(view,diagnostic);
     const state=await this.#mode(view);
-    const controls=inspectSendSurface(await ax(view));
+    const controls=inspectSendSurface(nodes);
     return {tab_id:tabId,mode:state.mode,page_failure:state.page_failure,
-      unique_composer:controls.unique_composer,unique_send:controls.unique_send,
-      composer_nonempty:Boolean(controls.existing_composer_value),
+      unique_composer:controls.unique_composer && value !== null,unique_send:controls.unique_send,
+      composer_nonempty:value !== null && value.length > 0,
+      generation_active:nodes.some(n=>!n.ignored && roleOf(n)==='button' && stopNames.test(val(n,'name').trim())),
+      composer_readback:diagnostic,
       authority_effect:false};
   }
   async send(tabId,text) {
@@ -396,9 +454,14 @@ export class ChatSurface {
     // The request-ID suffix makes the sent message unique within each chat.
     if (beforeText.includes(text)) throw new Error('request_already_in_transcript');
     await focusAndType(view,composer.backendDOMNodeId,text);
-    const typed = await ax(view);
-    const typedComposer = composerControls(typed)[0] || null;
-    const typedValue = typedComposer ? val(typedComposer,'value') : '';
+    let typed,typedComposer,typedValue;
+    for(let attempt=0;attempt<5;attempt++) {
+      typed=await ax(view);
+      typedComposer=composerControls(typed)[0]||null;
+      typedValue=typedComposer ? await composerValue(view,typedComposer) : null;
+      if(typedValue===text)break;
+      if(attempt<4)await sleep(100);
+    }
     if (typedValue !== text) throw new Error('composer_exact_draft_not_proven');
     // A submit control may change its accessible name, disappear, or be
     // overlaid by the ChatGPT UI. The exact, already verified composer is
@@ -429,13 +492,8 @@ export class ChatSurface {
       if (!chatUrl(url)) throw new Error('chatgpt_origin_changed_after_send');
       if(this.#views.get(tabId)!==view || view.webContents.isDestroyed())
         throw new Error('chatgpt_target_changed_after_send');
-      const nodes=await ax(view);
-      const currentComposer=composerFrom(nodes);
-      if(postedMessageObserved({
-        url,composer_observed:!!currentComposer,
-        composer_value:currentComposer?val(currentComposer,'value'):null,
-        transcript:transcript(nodes),request_id:marker
-      })) {
+      const {nodes,composer:currentComposer,value:currentValue}=await readyComposer(view);
+      if(currentValue==='') {
         // The AX marker is only a cheap hint. Never settle a receipt on it.
         const generation=this.#navigationGenerations.get(tabId);
         let scoped=[];
@@ -445,7 +503,7 @@ export class ChatSurface {
           this.#navigationGenerations.get(tabId)===generation&&
           postedUserTurnObserved({url,request_id:marker,
             composer_observed:!!currentComposer,
-            composer_value:currentComposer?val(currentComposer,'value'):null,
+            composer_value:currentValue,
             user_turn_html:scoped})) {
           return {state:'PROVEN_SENT',tab_id:tabId,url,
             target_id:'webcontents:'+view.webContents.id,prompt_sha256:sha(text)};
@@ -465,21 +523,20 @@ export class ChatSurface {
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
     const epoch=this.#navigationGenerations.get(tabId);
-    const nodes=await ax(view);
+    const {nodes,composer,value}=await readyComposer(view);
     if(view.webContents.isDestroyed()||this.#views.get(tabId)!==view||
       this.#navigationGenerations.get(tabId)!==epoch||view.webContents.getURL()!==url)
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
-    const composer=composerFrom(nodes);
     let scoped=[];
-    if(composer&&val(composer,'value')==='') {
+    if(composer&&value==='') {
       try{scoped=await scopedUserMessageHtml(view);}catch{ /* fail closed */ }
     }
     const stable=!view.webContents.isDestroyed()&&this.#views.get(tabId)===view&&
       this.#navigationGenerations.get(tabId)===epoch&&view.webContents.getURL()===url;
     const posted=stable&&postedUserTurnObserved({
       url,composer_observed:!!composer,
-      composer_value:composer?val(composer,'value'):null,
+      composer_value:value,
       user_turn_html:scoped,request_id:requestId
     });
     return {state:posted?'PROVEN_SENT':'UNVERIFIED',tab_id:tabId,

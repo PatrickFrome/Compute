@@ -32,6 +32,7 @@ const dataDir = process.argv.includes('--devfleet-live-ui-smoke')
 app.setName(APP_NAME);
 app.setPath('userData', dataDir);
 app.commandLine.appendSwitch('disable-features','Translate');
+app.commandLine.appendSwitch('force-renderer-accessibility');
 let mainWindow, surface, operator, httpServer, rpcToken, rpcManifest;
 let liveUiSlots, liveContracts, sourceWorkspace, devConsoleWindow, developerToken, developerManifest;
 let shuttingDown = false;
@@ -231,6 +232,7 @@ function listenLocal() {
         'dev.source.reconcile':p=>operator.withMaintenanceLock(()=>sourceWorkspace.reconcile(p)),
         'dev.receipt.status':()=>operator.receiptSummary(),
         'dev.receipt.reconcile':p=>operator.reconcileReceipt(p),
+        'dev.receipt.abandon':p=>operator.abandonReceipt(p),
       };
       if(!Object.hasOwn(devRoutes,envelope.method))
         return respond(400,{ok:false,error:'developer_method_unknown'});
