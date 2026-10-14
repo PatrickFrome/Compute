@@ -17,13 +17,16 @@ function safeRow(row, expected, nowMs) {
     || row.process_incarnation_id !== expected.processIncarnationId
     || !validNumber(Number(row.lease_generation), 1) || !validNumber(Number(row.event_seq))
     || !Number.isFinite(Date.parse(row.expires_at))
-    || Date.parse(row.expires_at) <= nowMs) return null;
+    || Date.parse(row.expires_at) <= nowMs
+    || (row.last_receipt_sha256 != null && !SHA256.test(String(row.last_receipt_sha256)))) return null;
   if (row.pending_wake_id && (!WAKE.test(row.pending_wake_id)
     || !['PREPARED','AMBIGUOUS','CONFIRMED_SENT','PROVEN_NOT_SENT'].includes(row.pending_wake_status)
     || !validNumber(Number(row.pending_wake_epoch), 1)
     || !validNumber(Number(row.pending_wake_cycle), 1)
     || !IDENTIFIER.test(String(row.pending_wake_process_incarnation_id || ''))
     || !validNumber(Number(row.pending_wake_lease_generation), 1))) return null;
+  if (['CONFIRMED_SENT', 'PROVEN_NOT_SENT'].includes(row.pending_wake_status)
+    && !SHA256.test(String(row.last_receipt_sha256 || ''))) return null;
   return Object.freeze({
     schema: SUPERVISOR_CONTINUITY_SCHEMA,
     source: 'OWN_POSTGRES',
@@ -37,12 +40,7 @@ function safeRow(row, expected, nowMs) {
     pending_wake_cycle: row.pending_wake_cycle == null ? null : Number(row.pending_wake_cycle),
     pending_wake_process_incarnation_id: row.pending_wake_process_incarnation_id || null,
     pending_wake_lease_generation: row.pending_wake_lease_generation == null ? null : Number(row.pending_wake_lease_generation),
-    pending_wake_process_incarnation_id: row.pending_wake_process_incarnation_id || null,
-    pending_wake_lease_generation: row.pending_wake_lease_generation == null ? null : Number(row.pending_wake_lease_generation),
-    pending_wake_process_incarnation_id: row.pending_wake_process_incarnation_id || null,
-    pending_wake_lease_generation: row.pending_wake_lease_generation == null ? null : Number(row.pending_wake_lease_generation),
-    pending_wake_process_incarnation_id: row.pending_wake_process_incarnation_id || null,
-    pending_wake_lease_generation: row.pending_wake_lease_generation == null ? null : Number(row.pending_wake_lease_generation),
+    last_receipt_sha256: row.last_receipt_sha256 || null,
     reconciliation_required: Boolean(row.pending_wake_id),
     authority_effect: false, automatic_retry_allowed: false,
   });
@@ -52,6 +50,16 @@ function safeRow(row, expected, nowMs) {
 // process restart, expired lease, or a model claim. Only a durable, exact native
 // executor receipt with the same lease generation can close it.
 export function qualifySupervisorWakeReceipt(receipt, lease) {
+  const state = receipt?.effect_state === 'SENT' ? 'CONFIRMED_SENT'
+    : receipt?.effect_state === 'NOT_SENT' ? 'PROVEN_NOT_SENT' : null;
+  // A lost ACK after a committed reconciliation must not trap the successor
+  // forever: exact persisted receipt identity may be re-observed, never replayed
+  // as a new effect. Both paths still need an independent native verifier.
+  const alreadyRecorded = Boolean(state && lease?.pending_wake_status === state
+    && receipt?.event_seq === lease?.event_seq
+    && receipt?.receipt_sha256 === lease?.last_receipt_sha256);
+  const unresolved = lease?.pending_wake_status === 'AMBIGUOUS'
+    && validNumber(receipt?.event_seq, lease.event_seq + 1);
   if (!lease || lease.schema !== SUPERVISOR_CONTINUITY_SCHEMA
     || receipt?.source !== 'NATIVE_EXECUTOR_RECEIPT'
     || receipt?.owner_id !== lease.owner_id || receipt?.run_id !== lease.run_id
@@ -60,15 +68,14 @@ export function qualifySupervisorWakeReceipt(receipt, lease) {
     || receipt?.lease_generation !== lease.pending_wake_lease_generation
     || receipt?.supervisor_epoch !== lease.pending_wake_epoch
     || receipt?.cycle_seq !== lease.pending_wake_cycle
-    || !validNumber(receipt?.event_seq, lease.event_seq + 1)
     || !SHA256.test(String(receipt?.receipt_sha256 || ''))
     || receipt?.trusted_native_readback !== true
-    || !['SENT','NOT_SENT'].includes(receipt?.effect_state)) {
+    || !state || !(alreadyRecorded || unresolved)) {
     return Object.freeze({ state: 'UNRESOLVED', automatic_retry_allowed: false, authority_effect: false });
   }
   return Object.freeze({
-    state: receipt.effect_state === 'SENT' ? 'CONFIRMED_SENT' : 'PROVEN_NOT_SENT',
-    receipt_sha256: receipt.receipt_sha256, event_seq: receipt.event_seq,
+    state, receipt_sha256: receipt.receipt_sha256, event_seq: receipt.event_seq,
+    readback_recorded: alreadyRecorded,
     automatic_retry_allowed: false, authority_effect: false,
   });
 }
@@ -111,10 +118,15 @@ export function createOwnPostgresSupervisorContinuityLease({
         VALUES ($1,$2,$3,1,clock_timestamp() + ($4::integer * interval '1 millisecond'),0)
         ON CONFLICT (owner_id, run_id) DO UPDATE SET
           process_incarnation_id = EXCLUDED.process_incarnation_id,
+          -- An expired lease is a new generation even when an incarnation ID is
+          -- accidentally reused. A boot/re-entry can never keep PREPARED alive:
+          -- an ACK-lost reservation could already have crossed the Send boundary.
           lease_generation = CASE WHEN prior.process_incarnation_id = EXCLUDED.process_incarnation_id
+            AND prior.expires_at > clock_timestamp()
             THEN prior.lease_generation ELSE prior.lease_generation + 1 END,
-          pending_wake_status = CASE WHEN prior.process_incarnation_id <> EXCLUDED.process_incarnation_id
-            AND prior.pending_wake_id IS NOT NULL THEN 'AMBIGUOUS' ELSE prior.pending_wake_status END,
+          pending_wake_status = CASE WHEN prior.pending_wake_id IS NOT NULL
+            AND prior.pending_wake_status = 'PREPARED' THEN 'AMBIGUOUS'
+            ELSE prior.pending_wake_status END,
           expires_at = EXCLUDED.expires_at
         WHERE prior.process_incarnation_id = EXCLUDED.process_incarnation_id
           OR prior.expires_at <= clock_timestamp()
@@ -181,6 +193,24 @@ export function createOwnPostgresSupervisorContinuityLease({
       let attested = false;
       try { attested = await verifyNativeReceipt(structuredClone(receipt)) === true; } catch {}
       if (!attested) return { state: 'UNRESOLVED', automatic_retry_allowed: false, authority_effect: false };
+      // Lost reconciliation ACK: re-read the exact durable receipt under the
+      // SAME live lease before permitting local keepalive settlement. A cached
+      // snapshot alone is insufficient across an async native-verifier call.
+      if (qualified.readback_recorded) {
+        const rows = await transaction(tx => tx.unsafe(`
+          SELECT ${PROJECTION} FROM public.metaengine_supervisor_continuity_lease_v1
+          WHERE owner_id=$1 AND run_id=$2 AND process_incarnation_id=$3
+            AND lease_generation=$4 AND expires_at > clock_timestamp()
+            AND pending_wake_id=$5 AND pending_wake_status=$6
+            AND last_receipt_sha256=$7 AND event_seq=$8`,
+        [expected.ownerId, expected.runId, expected.processIncarnationId, current.lease_generation,
+          receipt.wake_id, qualified.state, qualified.receipt_sha256, qualified.event_seq]));
+        const observed = accept(rows);
+        return observed?.pending_wake_status === qualified.state
+          && observed?.last_receipt_sha256 === qualified.receipt_sha256
+          && observed?.event_seq === qualified.event_seq
+          ? qualified : { state: 'UNRESOLVED', automatic_retry_allowed: false, authority_effect: false };
+      }
       const rows = await transaction(tx => tx.unsafe(`
         UPDATE public.metaengine_supervisor_continuity_lease_v1 SET
           pending_wake_status=$6, last_receipt_sha256=$7, event_seq=$8
