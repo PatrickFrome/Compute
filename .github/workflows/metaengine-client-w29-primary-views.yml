@@ -1,0 +1,41 @@
+name: METAENGINE Client W29 primary Now Missions Fleet (source-only)
+
+on:
+  pull_request:
+    paths:
+      - 'apps/me2-ui/**'
+      - '.github/workflows/metaengine-client-w29-primary-views.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  primary-views:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXACT_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout exact candidate without write credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Verify source identity
+        run: test "$(git rev-parse HEAD)" = "$EXACT_SOURCE_SHA"
+      - name: Validate pure source syntax
+        working-directory: apps/me2-ui
+        run: |
+          node --check src/lib/operator-primary-views.mjs
+          node --check src/lib/operator-primary-views.test.mjs
+          node --check src/lib/operator-primary-views.ui.test.mjs
+      - name: W29 Now Missions Fleet hermetic contracts
+        working-directory: apps/me2-ui
+        run: npm run test:operator-primary
+      - name: W6/W23 canonical resync regression contracts
+        working-directory: apps/me2-ui
+        run: npm run test:operator-observatory

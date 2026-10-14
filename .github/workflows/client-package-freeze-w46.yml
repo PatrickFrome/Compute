@@ -1,0 +1,59 @@
+name: METAENGINE Client W46 Frozen Package Source
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/client-package-freeze-w46.yml'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
+      - 'apps/metaengine-browser/scripts/package-build-reservation.mjs'
+      - 'apps/metaengine-browser/scripts/package-lock-material.cjs'
+      - 'apps/metaengine-browser/scripts/client-windows-source-identity.cjs'
+      - 'apps/metaengine-browser/test/client-package-freeze-w46.test.mjs'
+      - 'apps/me2-ui/**'
+
+permissions:
+  contents: read
+
+jobs:
+  frozen-source:
+    name: frozen-source (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - name: Checkout exact candidate SHA, not synthetic merge
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify pristine pinned source
+        shell: bash
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git status --porcelain)"
+      - name: Setup exact physical-package Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Verify frozen package identity and existing adversarial guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = 'v24.21.0'
+          node --test \
+            apps/metaengine-browser/test/client-package-freeze-w46.test.mjs \
+            apps/metaengine-browser/test/client-package-convergence-w40.test.mjs \
+            apps/metaengine-browser/test/client-windows-source-identity.test.mjs \
+            apps/metaengine-browser/test/package-identity-candidates.test.mjs \
+            apps/metaengine-browser/test/package-build-reservation.test.mjs \
+            apps/metaengine-browser/test/installer-provenance-v3.test.mjs
+          git diff --check HEAD^ HEAD
+          test -z "$(git status --porcelain)"
