@@ -77,11 +77,11 @@ export class DevFleetOperator {
       const ids=new Set(interrupted.map(s=>s.tab_id));
       this.#state.sessions=this.#state.sessions.filter(s=>!ids.has(s.tab_id));
       for(const r of this.#state.requests){
-        if(r.operation==='rotate'&&ids.has(r.tab_id)&&
+        if((r.operation==='rotate'||r.operation==='retire')&&ids.has(r.tab_id)&&
            ['RETIRING','RETIRE_UNKNOWN'].includes(r.state)){
-          r.state='ROTATION_INTERRUPTED_UNKNOWN';
+          r.state=r.operation==='retire'?'RETIRE_INTERRUPTED_UNKNOWN':'ROTATION_INTERRUPTED_UNKNOWN';
           r.receipt={...(r.receipt||{}),schema:SCHEMA,
-            state:'ROTATION_INTERRUPTED_UNKNOWN',request_id:r.request_id,
+            state:r.state,request_id:r.request_id,
             old_delivery_state:'UNKNOWN',automatic_retry_allowed:false};
         }
       }
@@ -299,6 +299,90 @@ export class DevFleetOperator {
     return {schema:'metaengine.devfleet.pipeline-batch.v1',
       state:'BATCH_COMPLETED',results,capacity:budget,
       original_ambiguous_delivery_preserved:true,
+      automatic_retry_allowed:false};
+  }
+
+  // Drop one unhealthy WebContents without replaying its uncertain sends.
+  // The durable unknown receipt outlives the physical tab and frees its slot.
+  async retireFailed(params) {
+    this.#requireInit();
+    fields(params,['request_id','tab_id','acknowledge_unknown_delivery']);
+    const id=validateId(params.request_id),tabId=validateTab(params.tab_id);
+    if(params.acknowledge_unknown_delivery!==true)
+      throw Error('pipeline_retirement_acknowledgment_required');
+    const fingerprint=sha('retire:'+tabId);
+    const prior=this.#prior(id,'retire',fingerprint);
+    if(prior)return prior;
+    const tab=this.#find(tabId);
+    if(tab.state!=='OPEN'&&tab.state!=='RESTORE_BLOCKED')
+      throw Error('pipeline_retirement_tab_not_available');
+    if(typeof this.#adapter.closeTab!=='function')
+      throw Error('pipeline_retirement_close_unavailable');
+    return this.#exclusive(async()=>{
+      if(this.#state.requests.length>=497)
+        throw Error('operator_request_history_full');
+      const oldUnknown=this.#state.requests
+        .filter(r=>r.operation==='assign'&&r.tab_id===tabId&&r.state==='AMBIGUOUS')
+        .map(r=>r.request_id);
+      const log={...recordFor(id,'retire',fingerprint),tab_id:tabId,
+        unresolved_request_ids:oldUnknown};
+      const previousState=tab.state;
+      tab.state='RETIRING';
+      log.state='RETIRING';
+      log.receipt={schema:SCHEMA,state:'RETIRING',request_id:id,tab_id:tabId,
+        original_delivery_state:'UNKNOWN',automatic_retry_allowed:false};
+      this.#state.requests.push(log);
+      try{await this.#save();}
+      catch(error){tab.state=previousState;this.#state.requests.pop();throw error;}
+      try{
+        const outcome=await this.#adapter.closeTab(tabId);
+        if(outcome?.tab_id!==tabId||outcome?.closed!==true||
+           outcome?.authority_effect!==false)throw Error('retirement_close_unverified');
+      }catch{
+        tab.state='RETIRE_UNKNOWN';
+        log.state='RETIRE_UNKNOWN';
+        log.receipt={...log.receipt,state:'RETIRE_UNKNOWN'};
+        await this.#save().catch(()=>{});
+        return plain(log.receipt);
+      }
+      this.#state.sessions=this.#state.sessions.filter(s=>s.tab_id!==tabId);
+      log.state='RETIRED';
+      log.receipt={...log.receipt,state:'RETIRED',released_slot:true,
+        prior_unknown_count:oldUnknown.length};
+      await this.#save();
+      return plain(log.receipt);
+    });
+  }
+
+  async retireBatch(params) {
+    this.#requireInit();
+    fields(params,['retirements']);
+    const items=params.retirements;
+    if(!Array.isArray(items)||items.length<1||items.length>4)
+      throw Error('pipeline_retirement_batch_budget');
+    const tabs=new Set(),ids=new Set();
+    for(const row of items){
+      fields(row,['request_id','tab_id','acknowledge_unknown_delivery']);
+      const id=validateId(row.request_id),tabId=validateTab(row.tab_id);
+      if(ids.has(id)||tabs.has(tabId)||row.acknowledge_unknown_delivery!==true)
+        throw Error('pipeline_retirement_batch_identity_conflict');
+      ids.add(id);tabs.add(tabId);
+    }
+    const results=[];
+    for(const row of items){
+      if(this.#persistenceFenced){
+        results.push({state:'NOT_ATTEMPTED',request_id:row.request_id,
+          reason:'DURABILITY_FENCED',automatic_retry_allowed:false});
+        continue;
+      }
+      try{results.push(await this.retireFailed(row));}
+      catch{
+        results.push({state:'NOT_ATTEMPTED',request_id:row.request_id,
+          reason:'LANE_FAILED',automatic_retry_allowed:false});
+      }
+    }
+    return {schema:'metaengine.devfleet.pipeline-retirement-batch.v1',
+      state:'BATCH_COMPLETED',results,unknown_delivery_preserved:true,
       automatic_retry_allowed:false};
   }
 

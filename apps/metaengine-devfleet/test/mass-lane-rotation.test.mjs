@@ -145,3 +145,59 @@ test('batch preflight rejects colliding IDs before closing any live cell',async(
  await assert.rejects(op.batchRotate({rotations:Array(5).fill(first)}),/batch_budget/);
  assert.equal(f.closes.length,0);
 });
+
+test('retiring an AMBIGUOUS lane releases RAM slot without replacing or resending',async()=>{
+ const f=makeFixture();const {op,tab,old}=await original(f);
+ const args={request_id:'mass-retire-one-20261014',tab_id:tab,acknowledge_unknown_delivery:true};
+ const r=await op.retireFailed(args);
+ assert.equal(r.state,'RETIRED');assert.equal(r.released_slot,true);
+ assert.equal(r.original_delivery_state,'UNKNOWN');
+ assert.equal(op.snapshot().session_count,0);
+ assert.equal(op.snapshot().pipeline.free_slots,16);
+ assert.equal(op.receiptSummary().counts.AMBIGUOUS,1);
+ assert.deepEqual(op.receiptSummary().blocked_tabs,[]);
+ assert.equal(f.sends.length,1);
+ assert.equal((await op.retireFailed(args)).state,'RETIRED');
+ assert.equal((await op.assign(old)).state,'AMBIGUOUS');
+ const reboot=new DevFleetOperator(f);await reboot.init();
+ assert.equal(reboot.snapshot().session_count,0);
+ assert.equal((await reboot.retireFailed(args)).state,'RETIRED');
+ assert.equal(f.sends.length,1);
+});
+test('independent retirement batch continues after ambiguous native close',async()=>{
+ const f=makeFixture(),op=new DevFleetOperator(f);await op.init();
+ const tabs=(await op.create({request_id:'retire-wave-create-20261014',count:2})).sessions;
+ for(let i=0;i<2;i++)assert.equal((await op.assign({request_id:'retire-wave-old-job-0'+i,
+   tab_id:tabs[i].tab_id,text:'Independent coding task '+i})).state,'AMBIGUOUS');
+ const closeOrig=f.adapter.closeTab;
+ f.adapter.closeTab=async id=>id===tabs[0].tab_id
+   ?Promise.reject(Error('host_close_unknown')):closeOrig(id);
+ const res=await op.retireBatch({retirements:tabs.map((x,i)=>({
+   request_id:'retire-wave-operation-0'+i,tab_id:x.tab_id,
+   acknowledge_unknown_delivery:true}))});
+ assert.equal(res.state,'BATCH_COMPLETED');
+ assert.deepEqual(res.results.map(x=>x.state),['RETIRE_UNKNOWN','RETIRED']);
+ assert.equal(f.sends.length,2);
+ assert.equal(op.snapshot().session_count,1); // uncertain close still fenced in memory
+ const reboot=new DevFleetOperator(f);await reboot.init();
+ assert.equal(reboot.snapshot().session_count,0); // retired incarnation excluded
+ assert.equal(reboot.receiptSummary().counts.AMBIGUOUS,2);
+ assert.equal(f.sends.length,2);
+});
+test('retirement fails closed on lost durability and missing owner acknowledgment',async()=>{
+ const f=makeFixture();const {op,tab}=await original(f);
+ const args={request_id:'retire-adverse-20261014',tab_id:tab,acknowledge_unknown_delivery:true};
+ await assert.rejects(op.retireFailed({...args,acknowledge_unknown_delivery:false}),/acknowledgment_required/);
+ f.setFailStore(true);
+ await assert.rejects(op.retireFailed(args),/disk_write_failed/);
+ assert.equal(f.closes.length,0);
+ assert.equal(f.disk.sessions.length,1);
+ assert.equal(f.sends.length,1);
+});
+test('retirement batch refuses duplicate identities before any close',async()=>{
+ const f=makeFixture();const {op,tab}=await original(f);
+ const item={request_id:'retire-duplicate-20261014',tab_id:tab,acknowledge_unknown_delivery:true};
+ await assert.rejects(op.retireBatch({retirements:[item,item]}),/identity_conflict/);
+ await assert.rejects(op.retireBatch({retirements:Array(5).fill(item)}),/batch_budget/);
+ assert.equal(f.closes.length,0);
+});

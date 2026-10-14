@@ -18,3 +18,10 @@ A batch is limited to four swaps, reflecting the measured 8 GB Windows host's re
 
 ### Evidence gates
 Focused hermetic rotation tests cover safe re-home, identity collisions, durability failure, unknown native close, unready composer, repeat submission and independent batch lanes. No claim that ChatGPT accepted the new task is made until exact native readback proves a user turn.
+
+### Cold-slot load shedding (second implementation slice)
+- `dev.pipeline.retire` and `dev.pipeline.retire_batch` are owner-authorized bounded operations (max 4 per batch) under the **existing** exclusive operator. They physically close selected unhealthy owned WebContents and release capacity **without** immediately creating new memory-heavy tabs.
+- Every retirement has a new operation ID and retains all old `AMBIGUOUS` assign receipts and their UNKNOWN delivery status. Old request identities stay replay-fenced even after their tabs are gone.
+- Durable `RETIRING`, `RETIRE_UNKNOWN`, and `RETIRED` stages survive restarts. An interrupted retirement is fenced, not replayed. A failed lane does not prevent unrelated retirements.
+- The intended 8 GB-host policy is a **small hot pool (3–4 ChatGPT WebContents)** with queued independent coding tasks and replacement waves. Slot retirement alone does not implement an autonomous scheduler; it supplies the safe native primitive.
+- Regression tests cover retire + reboot, capacity readback, unknown native close, one-failure/one-success batch, and write-ahead durability. Production Browser, Guardian and PostgreSQL remain untouched.
