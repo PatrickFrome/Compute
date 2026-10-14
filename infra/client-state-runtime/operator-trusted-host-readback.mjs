@@ -59,6 +59,10 @@ export function createTrustedHostObservationReadback({readOwner,readGuardianStat
       const a=await inventory(owner),b=await inventory(child);
       const c=await inventory(owner),d=await inventory(child);
       if (!a || !b || !c || !d) return null;
+      // A PID/birth match does not make two contradictory presence samples
+      // interchangeable. In particular ABSENT -> PRESENT must not discard
+      // the first absence and manufacture a live, qualified Host Owner.
+      if (a.state !== c.state || b.state !== d.state) return null;
       // Preserve the first conflicting OS sample; core marks PID reuse AMBIGUOUS.
       return {schema:OPERATOR_HOST_EVIDENCE_SCHEMA,source:OPERATOR_HOST_SOURCE,
         authority_effect:false,observed_at:new Date(now()).toISOString(),
