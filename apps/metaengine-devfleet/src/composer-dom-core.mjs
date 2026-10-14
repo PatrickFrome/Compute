@@ -12,7 +12,7 @@ export function composerDomText(node, backendNodeId) {
     attributes.set(attrs[i].toLowerCase(), attrs[i + 1]);
   }
   if (attributes.get('contenteditable') !== 'true' ||
-      attributes.get('id') !== 'prompt-textarea') return null;
+      (attributes.has('id') && attributes.get('id') !== 'prompt-textarea')) return null;
   const blocks = new Set(['P', 'DIV']);
   const inline = new Set(['SPAN', 'STRONG', 'EM', 'B', 'I', 'CODE', 'A']);
   let count = 0;

@@ -21,6 +21,12 @@ test('CSS placeholder pseudo-content cannot enter authored composer text',()=>{
   assert.equal(composerDomText(root([p]),17),'');
   assert.equal(composerDomText({...root([text('real task')]),pseudoElements:[{nodeValue:'fake task'}]},17),'real task');
 });
+test('id-less native editor still binds exact backend identity and rejects a conflicting id',()=>{
+  const n={...root([element('P',[text('Exact new editor')])]),attributes:['contenteditable','true','class','ProseMirror']};
+  assert.equal(composerDomText(n,17),'Exact new editor');
+  assert.equal(composerDomText(n,18),null);
+  assert.equal(composerDomText({...n,attributes:[...n.attributes,'id','other']},17),null);
+});
 test('wrong node, attribute marker, truncation, scripts and missing evidence fail closed',()=>{
   const n=root([text('task')]);
   assert.equal(composerDomText(n,18),null);

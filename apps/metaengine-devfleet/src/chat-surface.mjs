@@ -60,7 +60,14 @@ async function ax(view) {
   const debug = view.webContents.debugger;
   if (!debug.isAttached()) debug.attach('1.3');
   await debug.sendCommand('Accessibility.enable');
-  const result = await debug.sendCommand('Accessibility.getFullAXTree');
+  let timeout;
+  let result;
+  try {
+    result=await Promise.race([
+      debug.sendCommand('Accessibility.getFullAXTree'),
+      new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('native_ax_readback_timeout')),4000);})
+    ]);
+  } finally {clearTimeout(timeout);}
   return Array.isArray(result?.nodes) ? result.nodes : [];
 }
 async function composerValue(view, node, diagnostic = null) {
@@ -86,6 +93,23 @@ async function composerValue(view, node, diagnostic = null) {
   // values can flatten/lag paragraphs and MUST use the exact DOM node above.
   return result?.node?.nodeName === 'TEXTAREA' &&
     typeof node.value?.value === 'string' ? node.value.value : null;
+}
+async function readyComposer(view, diagnostic = null) {
+  let nodes=await ax(view),composer=composerFrom(nodes);
+  if(!composer)return {nodes,composer:null,value:null};
+  const dbg=view.webContents.debugger;
+  await dbg.sendCommand('DOM.enable');
+  // ChatGPT's pending textarea lazily mounts the actual editor on focus.
+  // Focus does not type or submit; always rebind to the new native AX node.
+  await dbg.sendCommand('DOM.focus',{backendNodeId:composer.backendDOMNodeId});
+  let value=null;
+  for(let i=0;i<8;i++) {
+    nodes=await ax(view);composer=composerFrom(nodes);
+    value=composer ? await composerValue(view,composer,diagnostic) : null;
+    if(value!==null)break;
+    if(i<7)await sleep(100);
+  }
+  return {nodes,composer,value};
 }
 // CDP user-turn scope is critical: a flattened AX transcript can echo an
 // unsent marker, an assistant quotation, or other untrusted page text.
@@ -401,12 +425,10 @@ export class ChatSurface {
     if(!view || view.webContents.isDestroyed()) throw new Error('tab_not_live');
     this.select(tabId); // hidden WebContents may be throttled; inspect the visible exact tab
     if(!chatUrl(view.webContents.getURL()))throw new Error('tab_origin_not_chatgpt');
-    const state=await this.#mode(view);
-    const nodes=await ax(view);
-    const controls=inspectSendSurface(nodes);
-    const composer=composerFrom(nodes);
     const diagnostic={state:'ABSENT'};
-    const value=composer ? await composerValue(view,composer,diagnostic) : null;
+    const {nodes,value}=await readyComposer(view,diagnostic);
+    const state=await this.#mode(view);
+    const controls=inspectSendSurface(nodes);
     return {tab_id:tabId,mode:state.mode,page_failure:state.page_failure,
       unique_composer:controls.unique_composer && value !== null,unique_send:controls.unique_send,
       composer_nonempty:value !== null && value.length > 0,
@@ -470,9 +492,7 @@ export class ChatSurface {
       if (!chatUrl(url)) throw new Error('chatgpt_origin_changed_after_send');
       if(this.#views.get(tabId)!==view || view.webContents.isDestroyed())
         throw new Error('chatgpt_target_changed_after_send');
-      const nodes=await ax(view);
-      const currentComposer=composerFrom(nodes);
-      const currentValue=currentComposer ? await composerValue(view,currentComposer) : null;
+      const {nodes,composer:currentComposer,value:currentValue}=await readyComposer(view);
       if(currentValue==='') {
         // The AX marker is only a cheap hint. Never settle a receipt on it.
         const generation=this.#navigationGenerations.get(tabId);
@@ -503,13 +523,11 @@ export class ChatSurface {
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
     const epoch=this.#navigationGenerations.get(tabId);
-    const nodes=await ax(view);
+    const {nodes,composer,value}=await readyComposer(view);
     if(view.webContents.isDestroyed()||this.#views.get(tabId)!==view||
       this.#navigationGenerations.get(tabId)!==epoch||view.webContents.getURL()!==url)
       return {state:'UNVERIFIED',tab_id:tabId,request_id:requestId,
         authority_effect:false};
-    const composer=composerFrom(nodes);
-    const value=composer ? await composerValue(view,composer) : null;
     let scoped=[];
     if(composer&&value==='') {
       try{scoped=await scopedUserMessageHtml(view);}catch{ /* fail closed */ }
