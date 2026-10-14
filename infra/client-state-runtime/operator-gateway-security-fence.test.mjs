@@ -43,8 +43,8 @@ test('W28: a new Owner generation resets event namespace; old generation cannot 
   guard.accept(snapshot({ owner_epoch: 6, cursor: '0' }));
   assert.throws(() => guard.accept(snapshot({ owner_epoch: 5, cursor: '130' })),
     /owner_epoch_regressed/);
-  assert.throws(() => guard.accept(snapshot({ owner_epoch: 6, cursor: '0' }).cursor === '0'
-    ? snapshot({ owner_epoch: 6, cursor: '0', proof: 'NONE' }) : null), /readback_unverified/);
+  assert.throws(() => guard.accept(snapshot({ owner_epoch: 6, cursor: '0',
+    proof: 'NONE' })), /readback_unverified/);
   guard.accept(snapshot({ owner_epoch: 6, cursor: '1' }));
 });
 
