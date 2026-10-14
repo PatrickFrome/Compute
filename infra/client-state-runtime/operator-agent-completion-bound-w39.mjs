@@ -133,7 +133,7 @@ function boundTask({ expected: b, owner, project, fleet, workspaces, tasks, crit
       || lower(t.result_sha256) !== lower(t.result_summary_sha256)) return null;
   const ready = asMs(t.ready_at), complete = asMs(t.finished_at);
   if (!Number.isFinite(ready) || !Number.isFinite(complete)
-      || complete < ready || complete >= ready + DAY || nowMs >= ready + DAY
+      || complete < ready || complete >= ready + DAY
       || !goodInt(t.ready_seq) || !goodInt(t.completed_seq)
       || t.ready_seq >= t.completed_seq || t.completed_seq > project.last_seq) return null;
   const critic = critics.find(c => c.role === 'CRITIC');
