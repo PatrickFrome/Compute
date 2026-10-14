@@ -13,3 +13,28 @@ All endpoints require exact Host, no Origin, `apikey` (optional matching Bearer)
 **Integration status:** Context is wired through the existing authenticated Owner API. The optional in-process `readRunIdentity`, `readInspect`, `readRunStatus`, `readEvents` hooks intentionally have **no implementation/default**: the separate W2 owner-ledger adapters must be independently qualified and plugged in by trusted Owner startup. Until then run status, inspect and events are fail-closed UNKNOWN. This is source-only; no installed Browser, Guardian or PostgreSQL was changed. Full W2+Gateway integration and physical negative qualification remain mandatory release gates.
 
 Focused test: `node --test infra/client-state-runtime/operator-readonly-gateway.test.mjs`.
+
+
+## W28 security hardening (source-only, DRAFT)
+
+All four authenticated GET routes retain literal origin-form URL allowlisting: normalized
+or absolute-form HTTP targets cannot alias an accepted path. After each asynchronous
+Owner/context/ledger readback, the Gateway re-reads the fixed-loopback Owner health
+and the trusted in-process run identity. A changed owner instance, Owner epoch,
+run/project identity or event watermark becomes explicit UNKNOWN/503 instead of
+a mixed-generation success. This is a best-effort two-read TOCTOU fence, **not** an
+atomic native/SQL transaction or a cryptographic source attestation.
+
+The same listener tracks the greatest accepted `event_seq` for up to 128 distinct
+runs per Owner epoch, rejecting regression across context, inspect, run_status and
+events GETs, including concurrent completion inversion. A strictly greater trusted
+Owner epoch resets the namespace; an old Owner epoch cannot replay. Exceeding the
+bounded run-history budget fails closed rather than evicting replay protection.
+Unconnected adapter remains UNKNOWN. These guards do not create a polling
+scheduler, authority, credential/SQL endpoint or hosted fallback.
+
+Focused test: `node --test --test-concurrency=1 operator-readonly-gateway.test.mjs operator-gateway-security-fence.test.mjs operator-gateway-security-w28.test.mjs`
+(via an isolated source checkout). New exact-head Ubuntu/Windows CI workflow:
+`.github/workflows/operator-gateway-w28-security.yml`. Physical Owner/PG17
+transactional readback, native bridge and Windows installed-package validation
+remain **UNKNOWN** until independent qualification.
