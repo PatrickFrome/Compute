@@ -11,7 +11,6 @@ const MAX_SKEW_MS = 5_000;
 const seq = x => Number.isSafeInteger(x) && x >= 0;
 const observedMs = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const validId = value => typeof value === 'string' && ID.test(value);
-const match = (a, b) => a === b;
 const blank = reason => emptyOperatorObservatory(reason);
 const hidden = (reason, state = 'UNKNOWN') => Object.freeze({
   ...blank(reason), state, cursor_state: state,
@@ -28,6 +27,29 @@ const safeIdentity = context => {
 };
 const sameOrigin = (a, b) => a.run_id === b.run_id && a.owner_id === b.owner_id
   && a.owner_epoch === b.owner_epoch && a.source_sha === b.source_sha;
+
+// A top-level SHA/cursor claim is not an independent source witness. The
+// canonical context must co-locate bounded Source AND Continuity evidence
+// bound to the same trusted Owner epoch before a cursor can be tracked.
+function hasSourceBoundCursor(context, projection, identity) {
+  const source = context?.planes?.source;
+  const continuity = context?.planes?.continuity;
+  const trusted = name => {
+    const plane = projection.planes?.[name];
+    return plane?.fresh === true && plane?.proof === 'TRUSTED_READBACK'
+      && (plane.state === 'AVAILABLE' || plane.state === 'READY');
+  };
+  const bound = value => value?.proven === true
+    && value.owner_id === identity.owner_id
+    && value.owner_epoch === identity.owner_epoch;
+  return trusted('source') && trusted('continuity')
+    && bound(source) && bound(continuity)
+    && typeof source.source_sha === 'string'
+    && source.source_sha.toLowerCase() === identity.source_sha
+    && continuity.event_seq === identity.event_seq
+    && typeof continuity.proof_identity === 'string'
+    && continuity.proof_identity.toLowerCase() === identity.proof_identity;
+}
 
 // Keep the checkpoint across stale/missing reads, but NEVER keep a positive
 // rendered projection across loss of source. All seven views render this ONE
@@ -98,6 +120,11 @@ export function advanceOperatorObservatoryResync(previous, context, {
       null, hidden('CANONICAL_SOURCE_UNKNOWN', mode), checkpoint);
   }
   const identity = safeIdentity(context);
+  if (identity && !hasSourceBoundCursor(context, projection, identity)) {
+    if (old.requires_explicit_resync) return fence(old, 'RESYNC_SOURCE_WITNESS_MISSING');
+    return frame('UNKNOWN', 'CANONICAL_SOURCE_CURSOR_NOT_BOUND', null,
+      blank('CANONICAL_SOURCE_CURSOR_NOT_BOUND'), checkpoint);
+  }
   if (!identity) {
     if (old.requires_explicit_resync) return fence(old, 'RESYNC_SOURCE_IDENTITY_MISSING');
     return frame('UNKNOWN', 'SOURCE_OWNER_EPOCH_UNVERIFIED', null,
