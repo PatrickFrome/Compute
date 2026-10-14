@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DevFleetOperator, SCHEMA } from './operator-core.mjs';
 import {atomicPrivateWrite} from './atomic-private-write.mjs';
+import {createJournalSnapshotStore} from './journal-snapshot-store.mjs';
 import { ChatSurface } from './chat-surface.mjs';
 import { LiveUiSlots } from './live-ui-slots.mjs';
 import { LiveOperatorContracts } from './live-operator-contracts.mjs';
@@ -43,13 +44,9 @@ function safeError(error) {
 }
 // Journal persistence uses bounded same-payload Win32 atomic rename recovery.
 // The operator's write-ahead effect fence still rejects unreconciled failures.
-const disk = {
-  async load() {
-    try {return JSON.parse(await fs.readFile(path.join(dataDir,'operator-state.json'),'utf8'));}
-    catch(error) {if(error.code==='ENOENT') return null;throw error;}
-  },
-  save(data) {return atomicPrivateWrite(path.join(dataDir,'operator-state.json'),JSON.stringify(data,null,2)+'\n');}
-};
+const disk=createJournalSnapshotStore({
+  file:path.join(dataDir,'operator-state.json'),atomicWrite:atomicPrivateWrite
+});
 const livePolicyDisk = {
   async load() {
     try {return JSON.parse(await fs.readFile(path.join(dataDir,'live-operator-contracts.json'),'utf8'));}

@@ -12,10 +12,11 @@ test('fresh operator reports source-backed READY and not a fake receipt',async()
 });
 test('write-ahead persistence error fences future operations and exposes liveness',async()=>{
  let writes=0;
- const op=new DevFleetOperator({adapter,store:{load:async()=>null,save:async()=>{writes++;throw Error('disk_failure')}}});
+ const op=new DevFleetOperator({adapter,store:{load:async()=>null,save:async()=>{writes++;throw Object.assign(Error('path redacted'),{code:'EPERM'})}}});
  await op.init();
- await assert.rejects(op.create({request_id:'client-wave-create-unique-20261014',count:1}),/disk_failure/);
+ await assert.rejects(op.create({request_id:'client-wave-create-unique-20261014',count:1}),/path redacted/);
  assert.equal(op.snapshot().operator_liveness,'DURABILITY_FENCED');
+ assert.equal(op.snapshot().operator_storage_error,'EPERM');
  await assert.rejects(op.create({request_id:'client-wave-next-unique-20261014',count:1}),/operator_persistence_reconciliation_required/);
  assert.equal(writes,1);
 });

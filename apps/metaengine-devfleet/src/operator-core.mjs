@@ -43,6 +43,7 @@ export class DevFleetOperator {
   #restoring = false;
   #restorePromise = Promise.resolve();
   #persistenceFenced = false;
+  #persistenceErrorCode = null;
   #saveTail = Promise.resolve();
   constructor({ adapter, store, contracts=null }) {
     if (!adapter || !['create','read','send'].every(k => typeof adapter[k] === 'function')
@@ -188,7 +189,11 @@ export class DevFleetOperator {
     const pending = this.#saveTail.then(async () => {
       if (this.#persistenceFenced) throw new Error('operator_persistence_reconciliation_required');
       try { await this.#store.save(snapshot); }
-      catch (error) { this.#persistenceFenced = true; throw error; }
+      catch (error) {
+        this.#persistenceErrorCode=/^[A-Z][A-Z0-9_]{2,31}$/.test(String(error?.code||''))
+          ? String(error.code):'UNCLASSIFIED';
+        this.#persistenceFenced=true;throw error;
+      }
     });
     this.#saveTail = pending.catch(() => {});
     await pending;
@@ -205,6 +210,7 @@ export class DevFleetOperator {
       bootstrap_state:this.#restoring?'RESTORING':'READY',
       operator_liveness:this.#persistenceFenced?'DURABILITY_FENCED':
         this.#busy?'EFFECT_IN_PROGRESS':this.#restoring?'RESTORING':'READY',
+      operator_storage_error:this.#persistenceFenced?this.#persistenceErrorCode:null,
       restored_count:this.#state.sessions.filter(x=>x.state==='OPEN').length,
       session_count: this.#state.sessions.length, sessions: this.#state.sessions.map(s => ({
         tab_id: s.tab_id, url: s.url, state: s.state })),
