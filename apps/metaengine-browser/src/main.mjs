@@ -60,14 +60,10 @@ import { verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs
 import { createManagedTaskProjectClientControl } from './managed-task-project-client-control.mjs';
 import { createAutonomousProjectHost } from './autonomous-project-host.mjs';
 import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervisorCommand } from './browser-cognitive-system-deltas.mjs';
-// Fallback Console (operator directive 2026-09-21): embedded reserve control
-// plane. Probes the pinned cloud edge + the local reserve edge, re-points the
-// live supervisor client ONLY while the cloud is unresponsive/degraded, and
-// re-locks the console once the cloud proves stable again.
-import { createSupabaseHealthSentinel } from './supabase-health-sentinel.mjs';
-import { createFallbackConsoleRuntime } from './fallback-console-runtime.mjs';
-import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
+// Client only: obsolete hosted-cloud sentinel and reserve failover are not
+// imported by the native Client runtime. Historical modules are quarantined.
 import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
+import { assertClientNativeShellIpcSender, assertGenericShellCommandAllowed, projectOwnPostgresClientConnection } from './client-native-trust-boundary.mjs';
 import { createOperatorNativeContextReader } from './operator-native-context-bridge.mjs';
 import {
   normalizeClientAgentId,
@@ -439,7 +435,7 @@ async function saveOwnerSafetyGateState(state) {
 }
 
 function assertShellSender(event) {
-  if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
+  return assertClientNativeShellIpcSender({ event, shellView, primaryShellMode, primaryShellUrl });
 }
 
 // This source slice registers the typed IPC but intentionally leaves the trusted
@@ -1538,18 +1534,9 @@ async function handleCommandWithRecoveryAdmission(command, payload = {}) {
   }
   if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
   if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
-  // Fallback Console: probe (sentinel tick + mode apply) and the read-only
-  // reserve-path drill. Both are safe in any mode; neither issues commands.
-  if (command === 'FALLBACK_CONSOLE_PROBE') {
-    if (!fallbackConsole) throw new Error('fallback_console_unavailable');
-    return fallbackConsole.probe();
-  }
-  if (command === 'FALLBACK_CONSOLE_DRILL') {
-    if (!fallbackConsole) throw new Error('fallback_console_unavailable');
-    const drill = await fallbackConsole.drill();
-    await publishSnapshot().catch(() => {});
-    return drill;
-  }
+  // Historical console commands never carry authority in own-DB-only Client.
+  if (command === 'FALLBACK_CONSOLE_PROBE' || command === 'FALLBACK_CONSOLE_DRILL')
+    throw new Error('client_hosted_fallback_disabled');
   // RSI operator console — the single operator surface over the shadow
   // runtime. Read-mostly; ledger-writing actions (promotion nomination,
   // steering nominate/approve) grant nothing without their external gates;
@@ -2236,34 +2223,9 @@ async function initNativeSupervisor() {
     recordStartupSubsystemDegraded('INTERRUPTED_SETUP_RECOVERY', error);
   }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
-  // Fallback Console (operator directive 2026-09-21): reserve control plane
-  // embedded in the browser. The console stays LOCKED while the pinned cloud
-  // edge is healthy. When the cloud is unresponsive/degraded for degrade_streak
-  // probes and METAENGINE_FALLBACK_SUPERVISOR_BASE_URL is configured + reachable,
-  // the whole device-signed supervisor client is re-pointed at the local edge
-  // (live binding swap — no rebuild) and the console unlocks. Authority hands
-  // back only after restore_streak healthy probes AND >= one lease timeout of
-  // fallback residency, so in-flight local leases expire before the switch —
-  // no dual-authority window. If METAENGINE_SUPERVISOR_BASE_URL pins the base,
-  // swapping is disabled. A canonical local provider also omits the hosted
-  // health sentinel; device-signed control remains on the selected endpoint.
-  if (!fallbackConsole && !explicitLocalSupervisorBase()) {
-    const rawLocalBase = String(process.env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL || '').trim();
-    const localReserveBase = rawLocalBase ? resolveNativeSupervisorBase(rawLocalBase) : null;
-    const reserveSentinel = createSupabaseHealthSentinel({
-      cloud_base: NATIVE_SUPERVISOR_DEFAULT_BASE,
-      local_base: localReserveBase,
-      failover_enabled: localReserveBase != null,
-      degraded_latency_ms: Number(process.env.METAENGINE_FALLBACK_DEGRADED_LATENCY_MS || 0) || undefined,
-    });
-    fallbackConsole = createFallbackConsoleRuntime({
-      sentinel: reserveSentinel,
-      local_base: localReserveBase,
-      cloud_default_base: NATIVE_SUPERVISOR_DEFAULT_BASE,
-      base_pinned_by_env: Boolean(String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim()),
-    });
-    fallbackConsole.start({ on_mode_change: () => { void publishSnapshot().catch(() => {}); } });
-  }
+  // W35: the absence of an attested own-local Owner must stay OFFLINE/UNKNOWN.
+  // Never launch a cloud health sentinel or alternate supervisor failover.
+  // The sole native Supervisor remains responsible for its existing leases.
   // T3-11 supervisor loopback RPC primary: local callers get the SAME fenced
   // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
   // path stays as the remote fallback (native-supervisor-runtime-transport).
@@ -2749,19 +2711,9 @@ function readClientConnectionStatus() {
     automatic_effect_retry_allowed: false,
     authority_effect: false,
   });
-  const reserve = fallbackConsole?.snapshot?.() || null;
-  const localProvider = explicitLocalSupervisorBase();
-  return Object.freeze({
-    ...status,
-    state_provider: localProvider ? 'LOCAL_POSTGRES' : 'HOSTED',
-    hosted_supabase_required: localProvider == null,
-    fallback_mode: localProvider ? 'LOCAL_PINNED' : (reserve?.gate?.mode || 'CLOUD_AUTHORITY'),
-    fallback_ready: reserve?.gate?.reserve_usable === true,
-    fallback_enabled: reserve?.failover?.enabled === true,
-    cloud_health: localProvider ? 'NOT_CONFIGURED' : (reserve?.sentinel?.targets?.cloud?.state || 'UNKNOWN'),
-    legacy_daemon_feed_is_authority: false,
-    authority_effect: false,
-  });
+  let localProvider = null;
+  try { localProvider = explicitLocalSupervisorBase(); } catch { /* untrusted Owner state: fail closed */ }
+  return projectOwnPostgresClientConnection(status, { localProviderAttested: Boolean(localProvider) });
 }
 ipcMain.handle('metaengine:client:connection-status', async (event) => {
   assertShellSender(event);
@@ -3095,7 +3047,11 @@ ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;
   return nativeSupervisor?.systemDeltaTail?.(limit) || Object.freeze([]);
 });
-ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShellSender(event); return handleCommand(String(message?.command || ''), message?.payload || {}); });
+ipcMain.handle('metaengine:shell:command', async (event, message) => {
+  assertShellSender(event);
+  assertGenericShellCommandAllowed(primaryShellMode);
+  return handleCommand(String(message?.command || ''), message?.payload || {});
+});
 ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => {
   assertShellSender(event);
   return devosPresentationFocus.snapshot();

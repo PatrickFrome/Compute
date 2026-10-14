@@ -1,0 +1,39 @@
+name: Client Native Trust W35 (hermetic)
+
+on:
+  push:
+    branches:
+      - work/metaengine-mass15-w35-20261014
+  pull_request:
+    paths:
+      - apps/metaengine-browser/src/client-native-trust-boundary.mjs
+      - apps/metaengine-browser/src/main.mjs
+      - apps/metaengine-browser/src/preload-shell.cjs
+      - apps/metaengine-browser/src/operator-native-context-bridge.mjs
+      - apps/metaengine-browser/test/client-native-trust-boundary.test.mjs
+      - apps/metaengine-browser/test/operator-native-context-bridge.test.mjs
+      - .github/workflows/client-native-trust-w35.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-trust:
+    name: Hermetic Client native trust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Source syntax and adversarial Node tests (no dependencies or services)
+        shell: bash
+        run: |
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/client-native-trust-boundary.mjs
+          node --test apps/metaengine-browser/test/client-native-trust-boundary.test.mjs apps/metaengine-browser/test/operator-native-context-bridge.test.mjs
