@@ -1,6 +1,7 @@
 import { createMetaDevosSuperstep } from './meta-devos-superstep.mjs';
 import { createWorkspaceObservationRoutes } from './workspace-observation-routes.mjs';
 import { planFleetDagAdmission } from './fleet-coordination-dag.mjs';
+import { planFleetDagClaims } from './fleet-dag-claim-plan.mjs';
 
 const AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -302,7 +303,13 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       const rawBacklog=backlogOf(snapshot);
       // Existing leased executor, no parallel poller. Opt-in graph tasks must
       // have bounded, source-backed dependency and slot evidence before lease.
-      const fleetDagAdmission=planFleetDagAdmission(snapshot);
+      const optInDag=planFleetDagAdmission(snapshot);
+      // One already-authorized Owner/own-PG runtime readback. An absent or
+      // contradictory control witness never permits optimistic DAG claims.
+      const dagRuntimeControl=optInDag
+        ? (runtimeControl ?? await readDevosRuntimeControl({rpc,workspaceId})) : null;
+      const fleetDagAdmission=optInDag
+        ? planFleetDagClaims({snapshot,runtimeControl:dagRuntimeControl}) : null;
       const schedulerBacklog=fleetDagAdmission
         ? {...rawBacklog,ready:fleetDagAdmission.ready,by_role:fleetDagAdmission.by_role}
         : rawBacklog;
@@ -327,6 +334,22 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       const candidates=leaseCeiling>0?fairIdleLeaseCandidates(snapshot,agents,schedulerBacklog):[];
       for(const agent of candidates.slice(0,32)){
         if((Number(remainingByRole[agent.role]||0)||0)<1||exhaustedRoles.has(agent.role))continue;
+        if(fleetDagAdmission){
+          // Stop/owner-epoch can change after planning. Re-observe before
+          // each bounded lease attempt; the existing DB claim gate remains
+          // the final race/transaction arbiter. No cancellation or retry.
+          const latestControl=typeof readRuntimeControl==='function'
+            ? await readRuntimeControl() : await readDevosRuntimeControl({rpc,workspaceId});
+          if(latestControl?.authoritative!==true||latestControl?.authority_effect!==false
+            ||latestControl?.state!=='OPEN'||latestControl?.continuous_service_allowed!==true
+            ||(dagRuntimeControl?.workspace_id&&latestControl.workspace_id!==dagRuntimeControl.workspace_id)
+            ||(Number.isSafeInteger(dagRuntimeControl?.generation_floor)
+              && latestControl.generation_floor!==dagRuntimeControl.generation_floor)){
+            leaseFence={fenced:true,reason:'FLEET_DAG_STOP_OR_OWNER_EPOCH_CHANGED',
+              authority_effect:false,automatic_retry_allowed:false};
+            break;
+          }
+        }
         leaseAttempts+=1;
         try{
           const result=await rpc('devos_fleet_lease_v1',{p_workspace:workspaceId,p_agent:agent.agent_id,p_role:agent.role,p_tab:agent.tab_id,p_target:agent.target_id,p_epoch:agent.generation_epoch,p_seconds:900});
