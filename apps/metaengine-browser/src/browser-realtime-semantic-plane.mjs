@@ -152,7 +152,7 @@ export class BrowserRealtimeSemanticPlane {
     this.#onChange = onChange;
   }
 
-  #emit(row, method, params = {}) {
+  #emit(row, method, params = {}, envelope = null) {
     this.#sequence += 1;
     const event = Object.freeze({
       schema: 'metaengine.browser.semantic-event.v1',
@@ -160,6 +160,14 @@ export class BrowserRealtimeSemanticPlane {
       tab_id: row?.tabId || null,
       web_contents_id: row?.webContentsId || null,
       target_id: row?.targetId || null,
+      // Exact root CDP lifetime, projected from the already-owned pool event.
+      root_session: envelope?.root_session === true,
+      cdp_attachment_generation: Number.isSafeInteger(envelope?.attachment_generation)
+        ? envelope.attachment_generation : null,
+      cdp_binding_generation: Number.isSafeInteger(envelope?.binding_generation)
+        ? envelope.binding_generation : null,
+      cdp_document_generation: Number.isSafeInteger(envelope?.document_generation)
+        ? envelope.document_generation : null,
       observed_at: new Date(this.#clock()).toISOString(),
       ...eventDetails(method, params),
       raw_params_exposed: false,
@@ -171,7 +179,7 @@ export class BrowserRealtimeSemanticPlane {
       this.#events.splice(0, drop);
       this.#droppedEvents += drop;
     }
-    try { this.#onChange?.(event); } catch {}
+    try { this.#onChange?.(event, row?.webContents || null); } catch {}
     return event;
   }
 
@@ -250,7 +258,7 @@ export class BrowserRealtimeSemanticPlane {
       this.#scheduleRefresh(row);
     }
 
-    this.#emit(row, method, params);
+    this.#emit(row, method, params, envelope);
   }
 
   async #refreshRow(row) {

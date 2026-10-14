@@ -99,6 +99,13 @@ function normalizeEventDetails(details = {}) {
     process_type: text(value.process_type ?? value.type, 80),
     reason: text(value.reason, 160),
     semantic_method: text(value.semantic_method, 160),
+    root_session: value.root_session === true,
+    cdp_attachment_generation: Number.isSafeInteger(value.cdp_attachment_generation)
+      ? value.cdp_attachment_generation : null,
+    cdp_binding_generation: Number.isSafeInteger(value.cdp_binding_generation)
+      ? value.cdp_binding_generation : null,
+    cdp_document_generation: Number.isSafeInteger(value.cdp_document_generation)
+      ? value.cdp_document_generation : null,
     semantic_sequence: Number.isSafeInteger(Number(value.semantic_sequence)) ? Number(value.semantic_sequence) : null,
     exit_code: Number.isInteger(Number(value.exit_code ?? value.exitCode)) ? Number(value.exit_code ?? value.exitCode) : null,
     service_name: text(value.service_name ?? value.serviceName, 160),
@@ -382,7 +389,7 @@ export class BrowserRealtimeProcessPlane {
     }
   }
 
-  #emit(type, details = {}) {
+  #emit(type, details = {}, nativeSource = null) {
     this.#sequence += 1;
     const event = Object.freeze({
       seq: this.#sequence,
@@ -398,7 +405,7 @@ export class BrowserRealtimeProcessPlane {
     }
     this.#cognitiveBus.publish(event);
     this.#dispatchBrainEdge(event);
-    try { this.#onChange?.(event); } catch {}
+    try { this.#onChange?.(event, nativeSource); } catch {}
     return event;
   }
 
@@ -428,14 +435,18 @@ export class BrowserRealtimeProcessPlane {
       this.#semanticPlane = new BrowserRealtimeSemanticPlane({
         getTargets: () => this.#semanticTargets(),
         eventLimit: 4096,
-        onChange: (event) => {
+        onChange: (event, nativeSource) => {
           this.#emit('SEMANTIC_EVENT', {
             web_contents_id: event?.web_contents_id,
             tab_id: event?.tab_id,
             target_id: event?.target_id,
             semantic_method: event?.method,
             semantic_sequence: event?.seq,
-          });
+            root_session: event?.root_session,
+            cdp_attachment_generation: event?.cdp_attachment_generation,
+            cdp_binding_generation: event?.cdp_binding_generation,
+            cdp_document_generation: event?.cdp_document_generation,
+          }, nativeSource);
         },
       });
     }
@@ -477,12 +488,12 @@ export class BrowserRealtimeProcessPlane {
       process_type: safeCall(contents, 'getType', null),
     });
     bind('destroyed', () => {
-      this.#emit('WEB_CONTENTS_DESTROYED', basic());
+      this.#emit('WEB_CONTENTS_DESTROYED', basic(), contents);
       this.#unwireContents(id);
       this.refresh('WEB_CONTENTS_DESTROYED');
     });
     bind('render-process-gone', (_event, details = {}) => {
-      this.#emit('RENDER_PROCESS_GONE', { ...basic(), reason: details.reason, exit_code: details.exitCode });
+      this.#emit('RENDER_PROCESS_GONE', { ...basic(), reason: details.reason, exit_code: details.exitCode }, contents);
       this.refresh('RENDER_PROCESS_GONE');
     });
     bind('unresponsive', () => this.#emit('WEB_CONTENTS_UNRESPONSIVE', basic()));
@@ -522,7 +533,7 @@ export class BrowserRealtimeProcessPlane {
       const sample = Object.freeze({ seq: this.#sequence, type: 'METRICS_SAMPLE', observed_at: this.#observedAt, authority_effect: false });
       this.#cognitiveBus.publish(sample);
       this.#dispatchBrainEdge(sample);
-      try { this.#onChange?.(sample); } catch {}
+      try { this.#onChange?.(sample, null); } catch {}
     }
     return this.snapshot();
   }
