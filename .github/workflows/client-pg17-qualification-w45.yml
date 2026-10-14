@@ -21,6 +21,7 @@ jobs:
       - name: Checkout entire W45 source candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
       - name: Checkout frozen W26 source (read-only fixture input)
