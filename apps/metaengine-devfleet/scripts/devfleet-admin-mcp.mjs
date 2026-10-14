@@ -12,7 +12,7 @@ const methods=new Set([
   'dev.contract.status','dev.contract.stage','dev.contract.activate',
   'dev.contract.rollback','dev.contract.reconcile',
   'dev.source.status','dev.source.inspect','dev.source.patch','dev.source.reconcile',
-  'dev.receipt.status','dev.receipt.reconcile','dev.receipt.abandon'
+  'dev.receipt.status','dev.receipt.inspect','dev.receipt.reconcile','dev.receipt.abandon'
 ]);
 const tools=[
   {name:'devfleet_overview',description:'One bounded, read-only observation of owned ChatGPT cells, exact receipts and native policy; never proves task completion',
