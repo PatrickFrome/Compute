@@ -15,6 +15,10 @@ const fail = reason => ({
 const canonical = s => process.platform === 'win32' ? s.toLowerCase() : s;
 
 export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocReadback, expected, restoreReceipt = null} = {}) {
+  // W47 generated-fixture receipts can never replace an installed Owner backup.
+  if (receipt?.evidence_class === 'SYNTHETIC/STAGING'
+    || receipt?.schema === 'metaengine.client-backup-restore-staging-w47.v1')
+    return fail('STAGING_BACKUP_CANNOT_QUALIFY_INSTALLED');
   if (!receipt || receipt.schema !== 'metaengine.local61.pre-upgrade-database-backup.v1'
     || receipt.state !== 'PASSED') return fail('RECEIPT_MISSING_OR_UNQUALIFIED');
   if (!expected || !Number.isSafeInteger(expected.keeperPid) || expected.keeperPid <= 0
