@@ -1,0 +1,44 @@
+name: Fleet DAG Cancellation Proof
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/fleet-dag-cancellation-proof.mjs'
+      - 'apps/metaengine-browser/test/fleet-dag-cancellation-proof.test.mjs'
+      - '.github/workflows/fleet-dag-cancellation-proof.yml'
+  push:
+    branches:
+      - 'work/metaengine-wave2-w5-dag-stop-20261014'
+
+permissions:
+  contents: read
+
+jobs:
+  fleet-dag-cancellation-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact source SHA
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          printf 'exact_source_sha=%s\n' "$EXPECTED"
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Run focused W5 cancellation/slot-return tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/fleet-dag-cancellation-proof.mjs
+          node --check apps/metaengine-browser/test/fleet-dag-cancellation-proof.test.mjs
+          node --test apps/metaengine-browser/test/fleet-dag-cancellation-proof.test.mjs
