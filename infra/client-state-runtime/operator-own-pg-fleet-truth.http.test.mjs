@@ -157,10 +157,11 @@ test('W25 event cursor corruption cannot gain continuity availability after rest
     const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: key } });
     assert.equal(response.status, 200);
     const body = await response.json();
-    // The W2 reducer intentionally strips positive proof from a corrupted
-    // cursor (UNVERIFIED), rather than exposing an AMBIGUOUS ledger state.
+    // A corrupt event cursor independently poisons the fleet corroboration
+    // (UNVERIFIED), while the continuity facet retains AMBIGUOUS evidence.
+    // Neither plane can claim available/ready or authorize another effect.
     assert.equal(body.planes.fleet.state, 'UNVERIFIED');
-    assert.equal(body.planes.continuity.state, 'UNVERIFIED');
+    assert.equal(body.planes.continuity.state, 'AMBIGUOUS');
     assert.equal(body.authority_effect, false);
     assert.ok(fake.calls.some(c => c.text === OPERATOR_PG17_RESTART_ADMISSION_SQL));
     assert.deepEqual(fake.calls.filter(c => c.text === OPERATOR_OWN_PG_EVENT_SQL)
