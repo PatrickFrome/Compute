@@ -1,0 +1,33 @@
+name: METAENGINE W11 Provenance Boundary
+
+on:
+  push:
+    branches:
+      - work/metaengine-wave2-w11-trust-boundary-20261014
+  pull_request:
+    paths:
+      - infra/client-state-runtime/operator-release-witness-provenance.mjs
+      - infra/client-state-runtime/operator-release-witness-provenance.test.mjs
+      - infra/client-state-runtime/operator-release-witness-provenance.README.md
+      - .github/workflows/operator-release-witness-provenance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  witness-provenance-conformance:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check read-only W11 provenance module
+        run: node --check infra/client-state-runtime/operator-release-witness-provenance.mjs
+      - name: W11 baseline and authenticity/provenance falsification
+        run: node --test infra/client-state-runtime/operator-release-evidence-identity.test.mjs infra/client-state-runtime/operator-release-witness-provenance.test.mjs
