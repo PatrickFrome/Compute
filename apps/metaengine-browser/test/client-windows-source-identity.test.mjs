@@ -146,13 +146,25 @@ test('W24 ambiguous two-installer output directory is rejected', () => {
   }, /client_windows_installer_cardinality_invalid/);
 });
 
-test('W24 symlinked EXE cannot be used in place of a regular single installer', () => {
-  withFixture((input, dir) => {
+test('W24 symlinked EXE cannot be used in place of a regular single installer', (t) => {
+  const { dir, input } = fixture();
+  try {
     const other = join(dir, 'payload.bin');
     writeFileSync(other, readFileSync(input.installerPath));
     rmSync(input.installerPath);
-    symlinkSync(other, input.installerPath);
-  }, /client_windows_installer_file_invalid/);
+    try {
+      symlinkSync(other, input.installerPath);
+    } catch (error) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES', 'ENOSYS'].includes(error?.code)) {
+        t.skip('Windows runner has no unprivileged symlink permission');
+        return;
+      }
+      throw error;
+    }
+    assert.throws(() => assertWindowsSourceIdentity(input), /client_windows_installer_file_invalid/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('W24 direct runtime dependency versions must be exact, not ranged', () => {
