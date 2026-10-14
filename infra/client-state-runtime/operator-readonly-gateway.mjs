@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { authenticated } from './db-api-core.mjs';
+import { createGatewayReadbackFence, sameGatewayRunIdentity } from './operator-gateway-security-fence.mjs';
 
 // W3/P1: strictly observational gateway. Nothing here has SQL, scheduler or effect authority.
 // Caller must provide an attested local Owner instance and optional trusted in-process
@@ -238,6 +239,9 @@ export async function startOperatorReadOnlyGateway({
     if (callback !== null && typeof callback !== 'function') throw new Error('operator_gateway_readback_invalid');
   }
   const base = upstream.origin;
+  // One owner/epoch anti-rollback ledger shared by all four GET routes.
+  // Never grants trust: it only rejects readbacks that contradict earlier ones.
+  const readbackFence = createGatewayReadbackFence();
   let active = 0;
   const server = createServer(async (request, response) => {
     const now = Date.now();
@@ -262,11 +266,21 @@ export async function startOperatorReadOnlyGateway({
       }
       if (active >= 6) throw new GatewayError(503, 'gateway_busy');
       active++; admitted = true;
-      const url = new URL(request.url, base);
-      const route = url.pathname;
+      // Require origin-form, literal allowlisted paths. WHATWG URL normalization
+      // could otherwise alias absolute-form, encoded or dot-segment targets.
+      if (typeof request.url !== 'string' || request.url.length > 2048 ||
+        !request.url.startsWith('/operator/v1/') ||
+        /[\\#\x00-\x20\x7f]/.test(request.url)) {
+        throw new GatewayError(400, 'request_target_invalid');
+      }
+      const route = request.url.split('?', 1)[0];
       if (!['/operator/v1/context', '/operator/v1/inspect',
         '/operator/v1/run_status', '/operator/v1/events'].includes(route)) {
         throw new GatewayError(404, 'route_not_found');
+      }
+      const url = new URL(request.url, base);
+      if (url.pathname !== route || url.origin !== base) {
+        throw new GatewayError(400, 'request_target_invalid');
       }
       operation = route.slice('/operator/v1/'.length);
       const expectedKeys = operation === 'context' ? [] :
@@ -287,9 +301,27 @@ export async function startOperatorReadOnlyGateway({
         throw new GatewayError(503, 'owner_identity_mismatch');
       }
       const identity = readIdentity(readRunIdentity ? await readRunIdentity({ ownerId }) : null, now, ownerId);
+      // Do not report a successful GET on a raced Owner restart, run change or
+      // cursor advance. Re-check both native Owner identity and own-PG generation
+      // after the asynchronous readback, then atomically commit the high watermark.
+      async function checkedSend(body) {
+        const finalHealth = await localGet(base, apiKey, '/health');
+        if (finalHealth.instance_id !== ownerId || finalHealth.mode !== 'LOCAL_POSTGRES') {
+          throw new GatewayError(503, 'owner_identity_changed');
+        }
+        const finalIdentity = readIdentity(readRunIdentity
+          ? await readRunIdentity({ ownerId }) : null, Date.now(), ownerId);
+        if (!sameGatewayRunIdentity(identity, finalIdentity)) {
+          throw new GatewayError(503, 'run_generation_changed');
+        }
+        try { readbackFence.accept(finalIdentity); } catch {
+          throw new GatewayError(503, 'run_generation_regressed');
+        }
+        send(response, 200, body);
+      }
       if (operation === 'context') {
         const context = validateContext(await localGet(base, apiKey, '/operator/v1/context'), now);
-        send(response, 200, { ...gatewayEnvelope(operation, now), context,
+        await checkedSend({ ...gatewayEnvelope(operation, now), context,
           run: identity ? { ...identity, state: 'AVAILABLE' } : unknown('run_identity', now) });
         return;
       }
@@ -302,7 +334,7 @@ export async function startOperatorReadOnlyGateway({
           taskId: optionalId(query.task_id ?? null, 'task_id'), ownerEpoch: identity.owner_epoch });
         const data = validateProjection(raw, identity, now, query.task_id ? ['task_id'] : []);
         if (query.task_id && raw.task_id !== query.task_id) throw new GatewayError(503, 'inspect_task_mismatch');
-        send(response, 200, { ...envelope, ...data, task_id: raw.task_id || null,
+        await checkedSend({ ...envelope, ...data, task_id: raw.task_id || null,
           proof: 'TRUSTED_READBACK', authority_effect: false });
         return;
       }
@@ -311,7 +343,7 @@ export async function startOperatorReadOnlyGateway({
         const raw = await readRunStatus({ projectId: identity.project_id, runId: identity.run_id,
           ownerEpoch: identity.owner_epoch });
         const data = validateProjection(raw, identity, now, []);
-        send(response, 200, { ...envelope, ...data, proof: 'TRUSTED_READBACK', authority_effect: false });
+        await checkedSend({ ...envelope, ...data, proof: 'TRUSTED_READBACK', authority_effect: false });
         return;
       }
       if (!readEvents) throw new GatewayError(503, 'events_readback_unknown');
@@ -320,7 +352,7 @@ export async function startOperatorReadOnlyGateway({
       if (after > Number(identity.cursor)) throw new GatewayError(409, 'event_cursor_ahead');
       const raw = await readEvents({ projectId: identity.project_id, runId: identity.run_id,
         ownerEpoch: identity.owner_epoch, after, limit });
-      send(response, 200, { ...envelope, ...validateEventBatch(raw, identity, after, limit, now),
+      await checkedSend({ ...envelope, ...validateEventBatch(raw, identity, after, limit, now),
         proof: 'TRUSTED_READBACK', authority_effect: false });
     } catch (error) {
       const status = error instanceof GatewayError ? error.status : 503;
