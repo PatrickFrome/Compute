@@ -1,0 +1,49 @@
+name: Client Operator Context Convergence W37
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/operator-native-context-bridge.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/test/operator-native-context-bridge.test.mjs'
+      - 'apps/metaengine-browser/test/client-native-trust-boundary.test.mjs'
+      - 'infra/client-state-runtime/**'
+      - '.github/workflows/operator-context-convergence-w37.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  w37-source-only:
+    name: W37 hermetic (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install only own-PG source-test dependency (no services)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: infra/client-state-runtime
+      - name: Exact checkout source identity
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          git diff --check
+      - name: W37 native-to-Gateway-to-own-PG and upstream critical contracts
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/operator-context-convergence-w37.test.mjs \
+            infra/client-state-runtime/operator-own-pg-fleet-truth.http.test.mjs \
+            infra/client-state-runtime/operator-pg17-restart-admission.test.mjs \
+            infra/client-state-runtime/operator-gateway-security-w28.test.mjs \
+            infra/client-state-runtime/operator-gateway-security-fence.test.mjs \
+            infra/client-state-runtime/operator-owner-guardian-recovery-w27.test.mjs \
+            apps/metaengine-browser/test/operator-native-context-bridge.test.mjs \
+            apps/metaengine-browser/test/client-native-trust-boundary.test.mjs

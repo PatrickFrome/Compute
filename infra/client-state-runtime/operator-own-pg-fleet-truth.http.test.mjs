@@ -77,7 +77,7 @@ test('only authenticated local HTTP and internal Owner readback may inspect Post
     const response = await fetch(runtime.address + '/operator/v1/context', { headers: { apikey: key } });
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(reads, 1);
+    assert.equal(reads, 2, 'W37 must independently recheck the native Owner after SQL readback');
     assert.equal(body.planes.fleet.state, 'AVAILABLE');
     assert.equal(body.planes.fleet.details.claim_count, 1);
     assert.equal(body.planes.continuity.details.next_seq, 1);

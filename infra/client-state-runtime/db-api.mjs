@@ -202,6 +202,29 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
             }, { readOnly: true });
           } catch { ledger = null; }
         }
+        // W37: the capability/PG17 transaction fences postmaster changes, but
+        // the independently observed Owner may reincarnate DURING that async
+        // transaction. Before emitting positive lease/cursor data, re-read the
+        // in-process Owner generation. A caller's "verified" field alone does
+        // not attest native birth or authorize effects.
+        if (ledger) {
+          let ownerAfter = null;
+          let timer;
+          try {
+            ownerAfter = await Promise.race([
+              Promise.resolve().then(() => operatorOwnerReadback()),
+              new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); }),
+            ]);
+          } catch { ownerAfter = null; }
+          finally { clearTimeout(timer); }
+          const ownerKeys = ['project_id', 'workspace_id', 'device_id', 'owner_id',
+            'client_id', 'admin_grant_epoch', 'owner_generation',
+            'process_incarnation', 'event_after_seq'];
+          if (!qualifyOperatorOwner(ownerAfter, Date.now()) ||
+            !ownerKeys.every(key => (owner[key] ?? null) === (ownerAfter[key] ?? null))) {
+            ledger = null; // Owner changed or became UNKNOWN: no stale lease truth.
+          }
+        }
         return send(response, 200, buildUnifiedOperatorContext({ nowMs, observations: {
           ...(hostObservation ? { host: hostObservation } : {}),
           ...(ledger?.fleet ? { fleet: ledger.fleet } : {}),
