@@ -77,7 +77,8 @@ export function projectPrimaryOperatorView(frame, view, {
     : delivery === 'READING' ? 'READING'
     : tracked ? 'TRACKING' : 'UNKNOWN';
   const visible = tracked && phase !== 'RECONCILE' && phase !== 'STALE'
-    && phase !== 'UNBOUND' && phase !== 'TIMED_OUT' && phase !== 'FAILED';
+    && phase !== 'UNBOUND' && phase !== 'TIMED_OUT' && phase !== 'FAILED'
+    && phase !== 'LOADING';
   const projection = visible ? frame.projection : null;
   return Object.freeze({
     schema: 'metaengine.operator.primary-view.v1',
