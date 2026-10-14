@@ -7,6 +7,7 @@ import { AxEventHints } from './ax-event-hints.mjs';
 import {receiptMarker,postedMessageObserved,postedUserTurnObserved,userTurnReceiptDiagnostic} from './send-receipt-core.mjs';
 import {composerDomText} from './composer-dom-core.mjs';
 import {classifyConversationSurface,classifyPostSendNavigation} from './conversation-readiness-core.mjs';
+import {summarizeNativePageMount} from './native-page-mount-proof.mjs';
 
 const CHAT_ROOT = 'https://chatgpt.com/';
 const processEpoch = crypto.randomUUID();
@@ -440,6 +441,40 @@ export class ChatSurface {
       } catch {}
     }
     return result;
+  }
+  async surfaceProbe(tabId) {
+    const view=this.#views.get(tabId);
+    if(!view || view.webContents.isDestroyed())throw Error('surface_probe_tab_not_live');
+    const url=view.webContents.getURL();
+    if(!chatUrl(url,true))throw Error('surface_probe_origin_unverified');
+    const epoch=this.#navigationGenerations.get(tabId);
+    this.select(tabId); // exactly owned WebContents; no navigation or Send
+    const dbg=view.webContents.debugger;
+    if(!dbg.isAttached())dbg.attach('1.3');
+    await dbg.sendCommand('DOM.enable');
+    const doc=await dbg.sendCommand('DOM.getDocument',{depth:1,pierce:false});
+    const rootId=doc?.root?.nodeId;
+    if(!Number.isSafeInteger(rootId)||rootId<1)throw Error('surface_probe_document_unverified');
+    const selectors={
+      main:'main',role_main:'[role="main"]',
+      user_turn:'[data-message-author-role="user"]',
+      assistant_turn:'[data-message-author-role="assistant"]',
+      composer:'[contenteditable="true"],textarea',
+      article:'article',
+      loading:'[role="progressbar"],[aria-busy="true"]'
+    };
+    const counts={};
+    for(const [key,selector] of Object.entries(selectors)){
+      const result=await dbg.sendCommand('DOM.querySelectorAll',{nodeId:rootId,selector});
+      if(!Array.isArray(result?.nodeIds)||result.nodeIds.length>2048)
+        throw Error('surface_probe_scope_unverified');
+      counts[key]=result.nodeIds.length;
+    }
+    const stable=!view.webContents.isDestroyed()&&this.#views.get(tabId)===view&&
+      this.#navigationGenerations.get(tabId)===epoch&&view.webContents.getURL()===url;
+    const status=summarizeNativePageMount({url,stable,
+      is_loading:view.webContents.isLoading(),counts});
+    return {tab_id:tabId,...status,read_only:true,authority_effect:false};
   }
   async inputProbe(tabId) {
     const view=this.#views.get(tabId);
