@@ -33,4 +33,4 @@ jobs:
           node --check apps/me2-ui/src/lib/operator-observatory-resync.mjs
       - name: Run bounded observer and resync falsification
         run: |
-          node --test apps/me2-ui/src/lib/operator-observatory.test.mjs apps/me2-ui/src/lib/operator-observatory-resync.test.mjs
+          node --test apps/me2-ui/src/lib/operator-observatory.test.mjs apps/me2-ui/src/lib/operator-observatory-resync.test.mjs apps/me2-ui/src/lib/operator-observatory-resync.ui.test.mjs
