@@ -269,7 +269,7 @@ export async function startOperatorReadOnlyGateway({
       // Require origin-form, literal allowlisted paths. WHATWG URL normalization
       // could otherwise alias absolute-form, encoded or dot-segment targets.
       if (typeof request.url !== 'string' || request.url.length > 2048 ||
-        !request.url.startsWith('/operator/v1/') ||
+        !request.url.startsWith('/') || request.url.startsWith('//') ||
         /[\\#\x00-\x20\x7f]/.test(request.url)) {
         throw new GatewayError(400, 'request_target_invalid');
       }
