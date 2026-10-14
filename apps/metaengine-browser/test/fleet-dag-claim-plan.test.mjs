@@ -224,6 +224,29 @@ test('generation-floor rollover fences a claim even when service is still OPEN',
   assert.equal(body.lease_attempts,0);
   assert.equal(leases,0);
 });
+test('wrong workspace and unknown Owner generation cannot enter leased executor',async()=>{
+  for (const forged of [
+    {...control,workspace_id:id(999)},
+    {...control,generation_floor:null},
+  ]) {
+    let leases=0;
+    const handler=createDevosSupervisorRoutes({
+      workspaceId,readRuntimeControl:async()=>forged,
+      rpc:async name=>{
+        if(name==='devos_fleet_snapshot_v1')return snap([graph(1)]);
+        if(name==='devos_fleet_reconcile_v1')return {authority_effect:false};
+        if(name==='devos_fleet_lease_v1')leases++;
+        throw Error('unavailable: '+name);
+      },
+    });
+    const r=await handler({req:{method:'POST'},path:'/v1/devos/cycle',
+      clientId:'device',body:{fleet:{agents:[candidate(1)]}}});
+    const body=await r.json();
+    assert.equal(body.fleet_dag_admission.state,'FENCED');
+    assert.equal(body.fleet_dag_admission.ready,0);
+    assert.equal(leases,0);
+  }
+});
 test('canonical own-PG transaction remains sole claim writer',()=>{
   const sql=readFileSync(new URL('../../../infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql',import.meta.url),'utf8');
   const source=readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/fleet-dag-claim-plan.mjs',import.meta.url),'utf8');
