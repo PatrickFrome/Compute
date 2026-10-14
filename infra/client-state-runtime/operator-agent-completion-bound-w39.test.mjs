@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readBoundClientAgentCompletion as read, W39_PROJECT_SQL, W39_FLEET_SQL,
-  W39_TASK_SQL, W39_CRITIC_SQL } from './operator-agent-completion-bound-w39.mjs';
+  W39_TASK_SQL, W39_CRITIC_SQL, W39_WORKSPACE_SQL } from './operator-agent-completion-bound-w39.mjs';
 
 const NOW = Date.parse('2026-10-14T12:30:00Z');
 const TASK = '11111111-1111-4111-8111-111111111111';
@@ -33,10 +33,22 @@ const project = () => ({
     lease_generation: 3, base_sha: BASE, coordination_workspace_id: WORKSPACE },
 });
 const fleet = () => ({ authority_effect: false, active_tasks: [], active_claims: [] });
+const workspace = () => ({
+  schema: 'metaengine.devos.workspace-binding-snapshot.v1', state: 'AVAILABLE',
+  authority_effect: false, coordination_workspace_id: WORKSPACE,
+  bindings: [{
+    task_id: TASK, lease_generation: 3, agent_id: 'agent_aaaaaaaa',
+    base_sha: BASE, repo_id: 'PatrickFrome/Compute',
+    coordination_workspace_id: WORKSPACE, last_verified_head_sha: SOURCE,
+    workspace_generation: 2, claim_id: 17, state: 'FROZEN', dirty_hold: false,
+    ambiguity_code: null, authority_effect: false, automatic_retry_allowed: false,
+    updated_at: ISO(NOW - 15*60_000),
+  }],
+});
 const task = () => ({
   task_id: TASK, workspace_id: WORKSPACE, state: 'COMPLETED', lease_generation: 3,
   lease_agent_id: 'agent_aaaaaaaa', base_sha: BASE,
-  claim_sha256: CLAIM, claim_source_sha: SOURCE, result_sha256: SUMMARY,
+  claim_sha256: CLAIM, result_sha256: SUMMARY,
   result_summary_sha256: SUMMARY, bound_ready: true, completion_ready: true,
   ready_at: ISO(NOW - 90 * 60_000), finished_at: ISO(NOW - 10 * 60_000),
   ready_seq: 2, completed_seq: 7, observed_at: ISO(NOW - 60_000),
@@ -60,7 +72,7 @@ const checks = () => ({
   ],
 });
 function scenario(now = NOW) {
-  const data = { project: project(), fleet: fleet(), tasks: [task()], critics: [critic()] };
+  const data = { project: project(), fleet: fleet(), workspace: workspace(), tasks: [task()], critics: [critic()] };
   const calls = [];
   const api = {
     expected: expected(), owner: owner(now), observed_at_ms: now,
@@ -68,6 +80,7 @@ function scenario(now = NOW) {
       calls.push({sql, params});
       if (sql === W39_PROJECT_SQL) return [{snapshot: data.project}];
       if (sql === W39_FLEET_SQL) return [{snapshot: data.fleet}];
+      if (sql === W39_WORKSPACE_SQL) return [{snapshot: data.workspace}];
       if (sql === W39_TASK_SQL) return data.tasks;
       if (sql === W39_CRITIC_SQL) return data.critics;
       throw Error('arbitrary_sql_denied');
@@ -87,20 +100,21 @@ test('end-to-end: actual P0 project + W30 DevOS snapshot + digest-bound independ
   assert.equal(result.successful_completion, false);
   assert.equal(result.independent_live_attestation_verified, false);
   assert.equal(result.authority_effect, false);
-  assert.deepEqual(calls.slice(0,4).map(c => c.sql),
-    [W39_PROJECT_SQL,W39_FLEET_SQL,W39_TASK_SQL,W39_CRITIC_SQL]);
-  assert.deepEqual(calls[0].params, [WORKSPACE,PROJECT,TASK,DEVICE,'native-owner-one',7]);
+  assert.deepEqual(calls.slice(0,5).map(c => c.sql),
+    [W39_PROJECT_SQL,W39_FLEET_SQL,W39_WORKSPACE_SQL,W39_TASK_SQL,W39_CRITIC_SQL]);
+  assert.deepEqual(calls[0].params, [WORKSPACE,TASK,DEVICE,'native-owner-one',7]);
   assert.deepEqual(calls[1].params,[WORKSPACE]);
-  assert.deepEqual(calls[2].params,[PROJECT,TASK,WORKSPACE,DEVICE,'native-owner-one',7]);
-  assert.deepEqual(calls[3].params,[PROJECT,TASK]);
-  assert.deepEqual(calls[4].pr,{repository:'PatrickFrome/Compute',pr_number:1259});
-  assert.deepEqual(calls[5].checks,{repository:'PatrickFrome/Compute',sha:SOURCE});
+  assert.deepEqual(calls[2].params,[WORKSPACE]);
+  assert.deepEqual(calls[3].params,[PROJECT,TASK,WORKSPACE,DEVICE,'native-owner-one',7]);
+  assert.deepEqual(calls[4].params,[PROJECT,TASK]);
+  assert.deepEqual(calls[5].pr,{repository:'PatrickFrome/Compute',pr_number:1259});
+  assert.deepEqual(calls[6].checks,{repository:'PatrickFrome/Compute',sha:SOURCE});
   assert.equal(result.result_sha256,CLAIM);
   assert.doesNotMatch(JSON.stringify(result),/secret|objective|prompt|token|https?:\/\//i);
 });
 test('base sha is not fabricated into PR head identity', async () => {
   const {api, data} = scenario();
-  data.tasks[0].claim_source_sha = BASE;
+  data.workspace.bindings[0].last_verified_head_sha = BASE;
   const result = await read(api);
   assert.equal(result.state,'UNKNOWN');
 });
@@ -123,7 +137,11 @@ const negatives = [
   ['false subject SQL proof', s => {s.data.tasks[0].bound_ready = false;}],
   ['false completion guard', s => {s.data.tasks[0].completion_ready = false;}],
   ['duplicate CRITIC receipts', s => {s.data.critics.push({...critic(),task_id:DEVICE});}],
-  ['unknown branch source SHA', s => {s.data.tasks[0].claim_source_sha = null;}],
+  ['unknown branch source SHA', s => {s.data.workspace.bindings[0].last_verified_head_sha = null;}],
+  ['dirty workspace', s => {s.data.workspace.bindings[0].dirty_hold = true;}],
+  ['ambiguous workspace', s => {s.data.workspace.bindings[0].ambiguity_code = 'DRIFT';}],
+  ['duplicate workspace binding', s => {s.data.workspace.bindings.push({...s.data.workspace.bindings[0]});}],
+  ['workspace generation changes', s => {s.data.workspace.bindings[0].lease_generation = 4;}],
   ['invalid result summary digest', s => {s.data.tasks[0].result_summary_sha256 = 'e'.repeat(64);}],
   ['READY seq after critic', s => {s.data.critics[0].critic_seq = 1;}],
   ['critic seq after subject completed', s => {s.data.critics[0].critic_seq = 8;}],
@@ -171,7 +189,7 @@ test('selectors contain no dynamic URL, SQL, page/model action or effect authori
   const r=await read(s.api);
   assert.equal(r.source_evidence_qualified,false);
   assert.equal(s.calls.some(x=>x.pr||x.checks),false);
-  for (const sql of [W39_PROJECT_SQL,W39_FLEET_SQL,W39_TASK_SQL,W39_CRITIC_SQL])
+  for (const sql of [W39_PROJECT_SQL,W39_FLEET_SQL,W39_WORKSPACE_SQL,W39_TASK_SQL,W39_CRITIC_SQL])
     assert.match(sql,/^SELECT /);
-  assert.doesNotMatch([W39_PROJECT_SQL,W39_FLEET_SQL,W39_TASK_SQL,W39_CRITIC_SQL].join('\n'),/INSERT |UPDATE |DELETE |DROP |COPY |CREATE |ALTER |SELECT \*|https?:\/\//i);
+  assert.doesNotMatch([W39_PROJECT_SQL,W39_FLEET_SQL,W39_WORKSPACE_SQL,W39_TASK_SQL,W39_CRITIC_SQL].join('\n'),/INSERT |UPDATE |DELETE |DROP |COPY |CREATE |ALTER |SELECT \*|https?:\/\//i);
 });
