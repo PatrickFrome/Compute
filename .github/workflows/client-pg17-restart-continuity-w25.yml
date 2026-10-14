@@ -1,0 +1,50 @@
+name: Client PG17 Restart Continuity W25
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/operator-pg17-restart-admission.mjs'
+      - 'infra/client-state-runtime/operator-pg17-restart-admission.test.mjs'
+      - 'infra/client-state-runtime/db-api.mjs'
+      - 'infra/client-state-runtime/operator-own-pg-fleet-truth.http.test.mjs'
+      - '.github/workflows/client-pg17-restart-continuity-w25.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-w25:
+    name: Source-only PG17 continuity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout exact PR source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Print source identity (no release authority)
+        shell: bash
+        run: |
+          echo "SOURCE_SHA=$(git rev-parse HEAD)"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          fi
+      - name: Install frozen local test dependency only
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/client-state-runtime
+      - name: Syntax checks
+        run: |
+          node --check infra/client-state-runtime/operator-pg17-restart-admission.mjs
+          node --check infra/client-state-runtime/db-api.mjs
+          node --check infra/client-state-runtime/operator-pg17-restart-admission.test.mjs
+      - name: Source-only restart, schema, grants, cursor and HTTP regressions
+        run: |
+          node --test --test-concurrency=1 infra/client-state-runtime/operator-pg17-restart-admission.test.mjs infra/client-state-runtime/operator-own-pg-fleet-truth.http.test.mjs infra/client-state-runtime/operator-own-pg-fleet-truth.test.mjs infra/client-state-runtime/operator-truth-readback.test.mjs infra/client-state-runtime/db-api.test.mjs
