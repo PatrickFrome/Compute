@@ -250,10 +250,33 @@ test('W33 WebContents destroyed/crashed and object replacement fail closed', () 
   assert.equal(f.adapter.read(TAB).reason, 'WEBCONTENTS_UNAVAILABLE');
 });
 
+test('W33 same numeric WebContents ID with a different object needs a new indexed generation', () => {
+  const f = fixture();
+  const before = f.adapter.read(TAB);
+  f.replaceWebContents({
+    id: 7,
+    isDestroyed: () => false,
+    isCrashed: () => false,
+    getOSProcessId: () => 300,
+  });
+  assert.equal(f.adapter.read(TAB).reason, 'WEBCONTENTS_OBJECT_REINCARNATION_UNPROVEN');
+  assert.equal(f.adapter.isCurrent(before), false);
+  f.index.binding_generation += 1;
+  f.binding.binding_generation += 1;
+  f.cdp.binding_generation += 1;
+  f.cdp.attachment_generation += 1;
+  const after = f.adapter.read(TAB);
+  assert.equal(after.state, 'BOUND_READ_ONLY');
+  assert.equal(f.adapter.isCurrent(after), true);
+  assert.equal(f.adapter.isCurrent(before), false);
+});
+
 test('W33 provenance cannot be obtained from raw caller flags or untrusted exception contents', () => {
   const f = fixture();
   const before = f.adapter.read(TAB);
   assert.equal(f.adapter.isCurrent({ ...before, target_id: 'forged', verified: true }), false);
+  assert.equal(f.adapter.isCurrent({ ...before, verified: true }), false);
+  assert.equal(f.adapter.isCurrent(structuredClone(before)), false);
   f.views.get(TAB).webContents.getOSProcessId = () => {
     throw new Error('TOKEN_SHOULD_NOT_LEAK');
   };
