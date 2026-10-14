@@ -59,7 +59,7 @@ test('three exact failed PR source heads receive reproducible distinct candidate
   }));
   assert.equal(new Set(candidates).size, HEADS.length);
   for (let i = 0; i < HEADS.length; i += 1) {
-    assert.match(candidates[i], /^0\\.7\\.0-dev\\.8[0-9]{11}\\.1$/);
+    assert.match(candidates[i], /^0\.7\.0-dev\.8[0-9]{11}\.1$/);
     assert.notEqual(candidates[i], VERSION);
     assert.equal(candidates[i], deriveDistinctCandidatePackageVersion({
       packageVersion: VERSION, sourceHead: HEADS[i].toUpperCase(),
