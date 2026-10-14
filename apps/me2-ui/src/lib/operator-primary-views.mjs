@@ -16,6 +16,9 @@ const ALLOWED_STATES = new Set([
   'OFFLINE', 'DEGRADED', 'AVAILABLE', 'READY',
 ]);
 const DELIVERY = new Set(['IDLE', 'LOADING', 'READING', 'UNBOUND', 'TIMED_OUT', 'FAILED']);
+const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const SHA40 = /^[0-9a-f]{40}$/i;
+const SHA256 = /^[0-9a-f]{64}$/i;
 const HINTS = Object.freeze({
   RECONCILE: 'Event gap, rollback or Owner/source change: fresh, bound reconciliation proof required.',
   STALE: 'Trusted snapshot expired; no current activity is asserted.',
@@ -41,7 +44,13 @@ function boundFrame(frame) {
     && projection?.schema === 'metaengine.operator.observatory.v1'
     && projection.state === 'OBSERVED'
     && projection.cursor_state === 'VERIFIED_CURSOR'
+    && projection.authority_effect === false
+    && projection.automatic_retry_allowed === false
     && identity !== null && typeof identity === 'object'
+    && ID.test(identity.run_id || '') && ID.test(identity.owner_id || '')
+    && Number.isSafeInteger(identity.owner_epoch) && identity.owner_epoch >= 0
+    && SHA40.test(identity.source_sha || '') && SHA256.test(identity.proof_identity || '')
+    && Number.isSafeInteger(identity.event_seq) && identity.event_seq >= 0
     && identity.run_id === projection.run_id
     && identity.event_seq === projection.event_seq
     && identity.proof_identity === projection.proof_identity;
@@ -52,6 +61,11 @@ const unknown = name => Object.freeze({
 function plane(name, projection) {
   const p = projection?.planes?.[name];
   if (!p || !ALLOWED_STATES.has(p.state)) return unknown(name);
+  // A positive badge still requires this plane's own readback witness.
+  // An upstream AVAILABLE/READY string by itself must never be displayed.
+  if ((p.state === 'AVAILABLE' || p.state === 'READY')
+    && (p.proof !== 'TRUSTED_READBACK' || p.fresh !== true))
+    return Object.freeze({ ...unknown(name), state: 'UNVERIFIED' });
   // The pure W6 reducer already qualified source and freshness; keep an
   // allowlist, never leak raw records, private messages or endpoint details.
   return Object.freeze({
