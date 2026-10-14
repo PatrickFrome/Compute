@@ -123,10 +123,47 @@ Next: the coordinator independently validates the new branch, then connects a tr
 - No true independent signed critic receipt, physical P0 Owner/native/Guardian proof, PG17 ACL, signed artifact/rollback witness, or installed no-egress capture has been collected. Exact-head CI must pass before this candidate may advance. No main merge, DevFleet reinstall, live Browser/Guardian/DB mutation or hosted provider.
 
 
-### Unified W1–W7 exact-source candidate — 2026-10-13
+## W49 Independent Candidate Acceptance — 2026-10-15 / Wave 8
 
-- Branch `work/roadmap-unified-w1-w7-source-20261013` combines the **seven independent roadmap implementation lanes** into one isolated source tree. W1+W2+W3 Truth+Gateway from draft #1210; W6 Causal Observatory from #1212; W7 independent critic + local-only Supervisor policy from #1213; durable journal-fence tests from #1214; P0 no-hosted capsule cleanup from #1215; W4 boot/restart lease + ambiguous native receipt source and W5 bounded DAG/admission from draft #1211. This is a **candidate source integration**, never installed runtime qualification.
-- W5 uses the **same existing leased executor**, not a second scheduler. Its new SQL guard is present only as a candidate own-PG migration in the existing local catalog. W4 Supervisor CAS SQL remains unregistered for automatic migrations pending verified PG17 schema, ACL, dual-process crash/lease fencing and signed native receipt tests. No live database operations.
-- **Critical invariant:** UNKNOWN owner/Guardian/runtime -> UNKNOWN rather than ACTIVE; source-plane proofs do not confer effect permission. W5 OPEN cannot settle W4 WAKE_AMBIGUOUS; only independent native receipt identity and readback can. C4 goal-journal disk ambiguity fences same-incarnation writes until restart readback. The agent access capsule never advertises hosted cloud or reserve command authority.
-- W6 renderer's native context bridge remains unbound, W3 Gateway in-process adapter readbacks remain opt-in null, and W7 promotion evaluator never performs deployments. Dedicated source/CI tests are necessary but not sufficient for installed, network/DB/GUI or signed real-agent production E2E.
-- Do **not** merge main, apply SQL to working own PostgreSQL, start another scheduler, install Browser/Guardian/DevFleet, or use Supabase/hosted transport. Exact-head CI, independent critic and disposable PG17/Windows proof are required before candidate promotion.
+**Disposition: BLOCKED; SOURCE critic DRAFT, not R1/C1/C2 acceptance.** This is an append-only checkpoint to the SINGLE living roadmap, fetched from branch work/roadmap-no-cloud-capsule-20261013 at cbb3d51ce0dae092fb8d4bb79905ea6560883e2d. W49 is isolated on work/metaengine-client-wave8-w49-20261015, based on W42 #1265 exact 37ce5d8407a1c1fa9702aa3aeb05133131f7a11a. No main merge, runtime/installed/PG mutation, Supabase/cloud, second scheduler or effect authority. No tracked AGENTS.md appeared in checked source.
+
+**Exact ref readback:** main b26f2d4693e7bab3648e0930b7a9e2c75baef58e; integration/compute-unified-v1 a23b647220c6bdeaa4340f804575dc2009e434cb; Draft #1216 881eb2e29882419921978910ec6c3f184f197801; Draft #1221 85a11b2aa8777f5981a6cd5c4ed30de877417875. The living-roadmap branch is NOT main.
+
+**W43 as observed locally:** work/metaengine-client-wave8-w43-20261015 HEAD 18fe7189bb66b2deb4fd0a3388cc862456d6a994; git merge-base --is-ancestor returned TRUE for all nine pinned parents below. But W43 was DIRTY: two modified native provider tests and untracked client-source-candidate-w43.manifest.json and client-source-candidate-w43.test.mjs. At inspection the W43 branch/PR was NOT present in GitHub readback and no exact-head integration CI existed. This is NOT a frozen or accepted candidate; re-read after W43 publishes its final source.
+
+| PR | Re-read exact HEAD | Positive exact-head check(s) | Failed/missing release gates |
+|---|---|---|---|
+| #1248 W30 | ff9dab18d88a4d656fa91c5cc86f3392fde3f023 | Fleet DAG Claims success | Client State Runtime Contracts failed; Windows Package Smoke cancelled |
+| #1257 W26 | 6498c1596432ea9d9987f343c92505b273d1ac11 | no green Client contracts in returned runs | Client State Runtime Contracts, Windows Package Smoke failed |
+| #1262 W29 | 11c6f0e754d160f4d2c042da86c2cb88e4495298 | W29 UI, W23 TypeScript, Observatory resync passed | Windows Package Smoke failed |
+| #1263 W39 | ee39b256e2b54f5dfddf4bff021977c0185fb744 | Bound Agent Completion Source passed | Client State Runtime Contracts, Windows Package Smoke failed; PR body cited older source SHA |
+| #1264 W40 | ea1703cb6c4d0d15f1c7cd4cb4faf22ec2ac959d | W40 source and W24 provenance, Client contracts passed | Windows Package Smoke and Self Update E2E failed; no W46 distinct signed candidate |
+| #1265 W42 | 37ce5d8407a1c1fa9702aa3aeb05133131f7a11a | Client State Runtime Contracts passed | Windows Package Smoke failed; critic never grants READY |
+| #1266 W37 | 2557acd2ee11464c6f3f63b2e3b22bba74df142f | W37 context, W28 Gateway, W25 hermetic PG, W35 native tests passed | Client contracts, Windows Package Smoke, Self Update E2E failed; native Owner still unbound |
+| #1267 W38 | 2e9018d14cfe55256ddc5a94693ff0a288b90318 | Client State Runtime Contracts/local fixes passed | Windows Package Smoke, Self Update E2E failed |
+| #1268 W41 | 33f97db8d03fb57c4a78fa2e5abcb08509725551 | W41 BrowserCell source and some other source gates passed | Client State Runtime Contracts, Windows Package Smoke failed |
+
+**Actual source falsification:** W42 operator-cross-plane-integration-critic.mjs derives the seven views from the real W6 reducer but its inputs are untrusted source shapes, not cryptographic Owner/PG proof. W37's source readme explicitly reports the native Owner adapter unwired and own-PG SQL injections hermetic. W40's closure function is SOURCE-only and performs no signing or installer execution. W39's fixed project snapshot uses SELECT FOR SHARE: do not wrongly require a READ ONLY PostgreSQL transaction for that particular fixed function. These concrete source constraints invalidate any claimed installed/LIVE acceptance.
+
+**New W49 code:** infra/client-state-runtime/client-candidate-acceptance-w49.mjs and corresponding .test.mjs, registered in the existing client test script. Pure independent critic reuses the actual W42 reducer; exact parent SHA/branch re-read, one immutable candidate/head/tree, checks at ONE identical integrated SHA, generated-only PG17 owner ACL + concurrency/restart, unique signed EXE, owner-only archive/readback/pg_restore --list + actual disposable data-equal restore, rollback and native Agent-origin fences. No remote write, SQL/shell, scheduler, install or effect authority. SYNTHETIC and STAGING receipts cannot claim LIVE, even if verified=true is present; real provider proof remains UNKNOWN. It returns only BLOCKED or REVIEW_REQUIRED and explicitly marks canonical R1/C1/C2, installed and LIVE unproven.
+
+**Windows Node v24.19.0 focused evidence:** W49 + W42 + cross-plane critic 84/84 PASS, after discovering and fixing the first W49 UNKNOWN/W42-missing fail-open test (initial 30/31 W49, then 31/31). This is SOURCE hermetic success only. No actual disposable PostgreSQL server, signed installer, archive restore, backup/rollback exercise or native LIVE run was executed by W49. W49 GitHub exact-head CI requires a fresh post-push readback.
+
+| Evidence level | Current decision | Missing evidence |
+|---|---|---|
+| SOURCE | W49 tests pass; W43 includes nine ancestors but remains dirty | Clean immutable W43 SHA/tree, resolved assembly conflicts and independent critic readback |
+| CI | Disparate parent green tests; several required checks FAIL | ONE frozen integrated W43/W46 SHA with Client contracts, ME2, Windows Package Smoke and Self Update checks green |
+| STAGING | Only explicitly SYNTHETIC/STAGING shapes tested by W49 | Actual own-PG17 role/RLS/grants/concurrency/restart, backup/pg_restore data equality, rollback |
+| INSTALLED | UNKNOWN | Exact signed EXE bytes/source/manifest, native Owner/Guardian/PG birth+epoch, no-hosted egress |
+| LIVE | UNKNOWN / NOT ACCEPTED | Real native Provider/Agent origin, verified Owner lease/effect receipt, checkpoint/restart, independent critic |
+
+### Ordered independent P0–P5 exit gates
+
+1. **P0 Truth:** W44 native actual Owner/Host/Guardian getTrustedBinding; enforce PID+birth/run/epoch/SHA/cursor/proof identity through authenticated Gateway, explicit UNKNOWN on missing witness and no-cloud/no-egress negative checks.
+2. **P1 Frozen source:** W43 clean tree/parent ledger, committed/pushed Draft PR; all tests on exact freeze SHA including Client State Runtime Contracts, ME2 and Windows Package Smoke; re-read branch after any drift. One existing executor only.
+3. **P2 Own PG17 continuity:** W45 uniquely disposable real PG17 ACL/RLS/SELECT/EXECUTE and fixed-function transaction semantics, concurrent CAS, lost ACK, postmaster restart, event order, lease transfer, emergency stop and slot return; no installed PGDATA.
+4. **P3 Productive loop:** W48 isolated temporary Git repo failing test to bounded source change to passing build/test to exact Git+artifact digests, independent critic and own-PG checkpoint/restart readback; preserve STAGING/SYNTHETIC origin until genuine native Agent proof.
+5. **P4 Backup and package:** W47 owner-only custom archive from generated fixtures, digest, independent pg_restore --list AND actual disposable restore/data equality, ambiguous old request fenced, rollback preservation. W46 uniquely unreserved version, frozen exact source/lock/SHA/EXE and real Windows package CI; unsigned or reserved package blocks promotion.
+6. **P5 Independent live acceptance:** verified physical Owner/Guardian/PG installed readback, signed binary, real native Agent origin, no unknown effects, actual rollback rehearsal and independent receipt/checkpoint validation. Only a separately authorized Host can install or promote; W49 never does.
+
+**Independent W49 outcome: BLOCKED.** Parent branch ancestry, 84 hermetic tests and agent-slot counts are not substitutes for canonical C1/C2/R1, own PG17 and installed/LIVE evidence. Preserve AMBIGUOUS/no-retry and UNKNOWN when witness absent.
