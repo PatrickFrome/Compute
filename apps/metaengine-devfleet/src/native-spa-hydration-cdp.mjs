@@ -1,6 +1,7 @@
 import {classifyNativeSpaHydration,unknownHydration} from './native-spa-hydration-proof.mjs';
 // No Runtime.evaluate, DOM text, Request URL, response body, Input, reload,
 // WebContents selection, cookies, or navigation. Probe one already owned WC.
+const activeProbes=new WeakSet(); // per-native-target event-domain ownership
 const SELECTORS=Object.freeze({
   busy:'[aria-busy="true"],[role="progressbar"]',
   composer:'[contenteditable="true"],textarea',
@@ -32,6 +33,8 @@ export async function collectNativeSpaHydration(ctx) {
      typeof ctx?.rendererGeneration!=='function'||
      typeof ctx?.navigationGeneration!=='function')
     return unknownHydration('NATIVE_TARGET_UNKNOWN');
+  if(activeProbes.has(wc))return unknownHydration('CONCURRENT_NATIVE_PROBE');
+  activeProbes.add(wc);
   let events=0,subscriber=null,dbg=null;
   const net={sampled:false,overflow:false,
     requests:0,failed:0,blocked:0,http_4xx:0,http_5xx:0};
@@ -101,5 +104,6 @@ export async function collectNativeSpaHydration(ctx) {
     // Stop this bounded observation domain after the window closes. Never
     // disable on an unsuccessful enable (we do not own such a domain).
     if(net.sampled&&dbg)try{await limited(dbg.sendCommand('Network.disable'),750);}catch{}
+    activeProbes.delete(wc);
   }
 }
