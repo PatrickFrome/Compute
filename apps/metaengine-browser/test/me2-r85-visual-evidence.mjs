@@ -1,6 +1,7 @@
 import { app, BaseWindow, WebContentsView, ipcMain, session } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeShellLayoutState, planShellLayout } from '../src/shell-layout.mjs';
@@ -21,6 +22,14 @@ process.env.ME2_UI_PORT = process.env.ME2_UI_PORT || '39100';
 process.env.ME2_UI_HEALTH_URL = process.env.ME2_UI_HEALTH_URL || `http://127.0.0.1:${process.env.ME2_UI_PORT}/`;
 process.env.ME2_UI_GATEWAY_PORT = process.env.ME2_UI_GATEWAY_PORT || '39101';
 process.env.ME2_ALLOW_EXTERNAL_UI_ADOPT = '0';
+
+// R97 runs in a disposable source/CI profile, never the installed Browser profile.
+// Both Chromium session data and shell userData are confined to the evidence root.
+const visualProfile = path.join(OUTPUT_ROOT, 'disposable-electron-profile');
+const visualSession = path.join(visualProfile, 'session');
+mkdirSync(visualSession, { recursive: true });
+app.setPath('userData', visualProfile);
+app.setPath('sessionData', visualSession);
 
 app.enableSandbox();
 app.commandLine.appendSwitch('disable-gpu');

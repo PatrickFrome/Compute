@@ -78,9 +78,11 @@ test('legacy provider telemetry remains read-only while reviews keep explicit ac
   const supervisor = await text('src/components/me2/pages/supervisor.tsx');
 
   assert.match(supervisor, /me2Fetch<GlmData>\("\/glm\?XTransformPort=3041"\)/);
-  assert.match(supervisor, /LEGACY PROVIDER · REVIEWS/);
+  assert.match(supervisor, /title="Provider diagnostics and reviews"/);
   assert.match(supervisor, /legacy · read-only/);
+  assert.match(supervisor, /data-testid="reviews-run"/);
   assert.match(supervisor, /reviews\/run/);
+  assert.match(supervisor, /disabled=\{mcxBusy \|\| !reviewTaskId\.trim\(\)\}/);
 
   assert.doesNotMatch(supervisor, /mcxOp\("glm"/);
   assert.doesNotMatch(supervisor, /glmOp\(/);

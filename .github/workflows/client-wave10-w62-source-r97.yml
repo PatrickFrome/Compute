@@ -1,6 +1,13 @@
-name: Client W62 Source-only Windows R97 Visual
+name: Client W69 Source-only Windows R97 Visual
 
 on:
+  push:
+    branches:
+      - 'work/metaengine-client-wave11-w69-20261015'
+    paths:
+      - 'apps/me2-ui/**'
+      - 'apps/metaengine-browser/test/**'
+      - '.github/workflows/client-wave10-w62-source-r97.yml'
   pull_request:
     paths:
       - 'apps/me2-ui/**'
@@ -19,14 +26,13 @@ jobs:
     timeout-minutes: 40
     env:
       NEXT_TELEMETRY_DISABLED: '1'
-      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
-      METAENGINE_R85_VISUAL_UI_DIR: ${{ github.workspace }}\\apps\\metaengine-browser\\me2-ui-dist
-      METAENGINE_R85_VISUAL_EVIDENCE_DIR: ${{ runner.temp }}\\client-w62-r97-evidence
+      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      METAENGINE_R85_VISUAL_UI_DIR: ${{ github.workspace }}\apps\metaengine-browser\me2-ui-dist
     steps:
       - name: Checkout exact W62 source without credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -46,7 +52,7 @@ jobs:
       - name: R97 navigation and false-readiness negative suites
         shell: pwsh
         run: |
-          node --test apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs apps/metaengine-browser/test/browser-agentic-workbench-ui.test.mjs
+          node --test apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs apps/metaengine-browser/test/browser-agentic-workbench-ui.test.mjs apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'w62_r97_source_contract_failed' }
       - name: Install disposable Electron harness from frozen Browser lock
         working-directory: apps/metaengine-browser
@@ -77,6 +83,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'w62_staged_ui_manifest_invalid' }
       - name: Capture physical Electron R97 screenshot/negative-state evidence in temporary CI
         working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_R85_VISUAL_EVIDENCE_DIR: ${{ runner.temp }}\client-w69-r97-evidence
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -105,13 +113,21 @@ jobs:
           foreach ($key in @('primary_me2_ui_captured','remote_browser_transport_blocked','exact_main_workspace','advanced_surfaces_settings_only','command_search_available','command_palette_legibility_verified','command_palette_focus_verified','native_geometry_verified','narrow_agent_picker_verified','goal_status_focus_verified','settings_routes_verified','settings_loading_bounded','connected_not_ready_verified','positive_readiness_verified','paused_readiness_verified','stale_readiness_cleared','selection_fail_closed','ime_submission_guard_verified','goal_submit_once_verified','presentation_only')) {
             if ($evidence.$key -ne $true) { throw "w62_r97_negative_or_visual_gate_failed:$key" }
           }
+          if ($evidence.ok -ne $true) { throw 'w69_r97_visual_not_complete' }
           if ($evidence.legacy_shell_captured -ne $false -or $evidence.remote_browser_content_captured -ne $false -or $evidence.authority_effect -ne $false) { throw 'w62_r97_authority_leak' }
           if (-not (@($evidence.blocked_remote_browser_ports) -contains '3042') -or -not (@($evidence.blocked_remote_browser_ports) -contains '3043')) { throw 'w62_r97_remote_port_fence_missing' }
+      - name: Check every captured screenshot digest and exact source head
+        shell: pwsh
+        env:
+          METAENGINE_R85_VISUAL_EVIDENCE_DIR: ${{ runner.temp }}\client-w69-r97-evidence
+        run: |
+          node apps/metaengine-browser/scripts/verify-r97-visual-captures-w69.mjs $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'w69_r97_screenshot_integrity_failed' }
       - name: Preserve CI-only R97 receipt and screenshots, even when red
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: w62-r97-source-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}\\client-w62-r97-evidence
+          name: w69-r97-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\client-w69-r97-evidence
           if-no-files-found: ignore
           retention-days: 7
