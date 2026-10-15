@@ -10,6 +10,7 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const manifest = JSON.parse(read('coordination/operator-control/client-source-candidate-w66.manifest.json'));
 const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
 const w59 = '83e1d60deb8189b09403e157cc7d639629549550';
+const historicalW66 = '61534c1228b81b063b48082c3cdbcbfd2921fe63';
 const exactPublished = new Map([
   [1284, '6d8e8edda321ffe185f4b613f9a787bc2294f8e8'],
   [1285, '00140a57964aacbddea6a5cf4811774bb1196b14'],
@@ -43,14 +44,14 @@ test('W66 has actual Git ancestry for final W62/W61/W64/W65 and all W59 predeces
     assert.equal(spawnSync('git', ['-C', root, 'merge-base', '--is-ancestor', sha, 'HEAD']).status, 0);
 });
 
-test('W66 current-tree ledger is NEW, exact and locally clean, not a stale W59 SHA ledger', () => {
+test('W66 immutable historical ledger stays anchored to W66 source ancestor', () => {
   const blobs = manifest.current_tree_blobs;
   assert.ok(Object.keys(blobs).length >= 55);
   for (const [p, blob] of Object.entries(blobs)) {
     assert.ok(!p.startsWith('/') && !p.includes('..') && !p.includes('\\'), 'invalid source path: ' + p);
     assert.match(blob, /^[a-f0-9]{40}$/, p);
-    assert.equal(git('rev-parse', 'HEAD:' + p), blob, 'stale integrated tree blob: ' + p);
-    assert.equal(git('hash-object', p), blob, 'dirty source path: ' + p);
+    assert.equal(git('rev-parse', historicalW66 + ':' + p), blob, 'historical W66 seal invalid: ' + p);
+    assert.equal(git('rev-parse', historicalW66 + ':coordination/operator-control/client-source-candidate-w66.manifest.json'), '8337b889acb89d6f652c65f1b1ef44d25b17a796');
   }
   const previous = JSON.parse(read('coordination/operator-control/client-source-candidate-w59.manifest.json'));
   assert.notEqual(blobs['infra/client-state-runtime/own-postgres-birth-w61.mjs'],

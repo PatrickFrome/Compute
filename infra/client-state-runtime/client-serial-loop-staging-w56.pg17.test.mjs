@@ -14,6 +14,7 @@ import { inspectStagingLease, sealStagingCheckpoint,
   inspectLiveCompletionForStaging, verifyStagingCheckpointDigest } from './client-serial-loop-staging-w48.mjs';
 import { inspectStagingNextLease } from './client-serial-loop-staging-w56.mjs';
 import { probeW64GeneratedDevelopmentWorker } from './client-serial-loop-development-worker-w64.mjs';
+import { runW80GeneratedFixtureEdit } from './client-c2-worker-edit-w80.mjs';
 
 const BIN = process.env.W48_PG17_BIN;
 const digest = v => createHash('sha256').update(v).digest('hex');
@@ -84,18 +85,41 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
   const lifecycle = createW64DisposablePgLifecycle({run,root,data,port:Number(env.PGPORT),pgUser:'w56_temporary'});
   try {
     await writeFile(marker,JSON.stringify({schema:'metaengine.w56.disposable-pg17.v1',clusterId}));
-    await mkdir(sourceDir);
-    git(sourceDir,'init','-q');
+    // Opt-in W80 physical PG17 lane uses a real locked linked worktree.
+    // Historical W56 test is unchanged unless explicitly run as W80 staging.
+    const w80 = process.env.W80_GENERATED_WORKER === '1';
+    const seed=w80?path.join(root,'w80-seed'):sourceDir;
+    await mkdir(seed);
+    git(seed,'init','-q');
     const src=path.join(sourceDir,'calc.mjs'),tst=path.join(sourceDir,'calc.test.mjs');
-    await writeFile(src,'export const sum=(a,b)=>a-b;\n');
-    await writeFile(tst,"import test from 'node:test';import assert from 'node:assert/strict';import {sum} from './calc.mjs';test('goal',()=>assert.equal(sum(2,3),5));\n");
-    git(sourceDir,'add','--','calc.mjs','calc.test.mjs');
-    git(sourceDir,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','red test');
+    await writeFile(path.join(seed,'calc.mjs'),'export const sum=(a,b)=>a-b;\n');
+    await writeFile(path.join(seed,'calc.test.mjs'),"import test from 'node:test';import assert from 'node:assert/strict';import {sum} from './calc.mjs';test('goal',()=>assert.equal(sum(2,3),5));\n");
+    git(seed,'add','--','calc.mjs','calc.test.mjs');
+    git(seed,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','red test');
+    if(w80){
+      const bare=path.join(root,'repo.git');
+      git(root,'clone','-q','--bare',seed,bare);
+      git(root,'--git-dir',bare,'worktree','add','--detach',sourceDir,'HEAD');
+      git(root,'--git-dir',bare,'worktree','lock',sourceDir);
+    }
     const base_sha=git(sourceDir,'rev-parse','HEAD');
     const developmentBefore=await probeW64GeneratedDevelopmentWorker(sourceDir);
     assert.equal(developmentBefore.head,base_sha,'real DevelopmentPlane must read red Git HEAD');
     assert.equal(runNode(sourceDir,'--test',tst),1,'real red test');
-    await writeFile(src,'export const sum=(a,b)=>a+b;\n');
+    const workspace_id=randomUUID(),task_id=randomUUID(),run_id=randomUUID(),
+      effect_id=randomUUID(),next_task_id=randomUUID();
+    if(w80){
+      const receipt=await runW80GeneratedFixtureEdit({sourceDir,head:base_sha,
+        task_id,run_id,workspace_id,effect_id,lease_generation:3,
+        owner_generation:8,owner_epoch:8});
+      assert.equal(receipt.state,'SOURCE_EDIT_APPLIED_STAGING');
+      assert.equal(receipt.task_id,task_id);
+      assert.equal(receipt.effect_id,effect_id);
+      assert.equal(receipt.lease_generation,3);
+      assert.equal(receipt.authority_effect,false,'generated signed scope cannot attest native Host');
+    } else {
+      await writeFile(src,'export const sum=(a,b)=>a+b;\n');
+    }
     git(sourceDir,'add','--','calc.mjs');
     git(sourceDir,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','bounded green edit');
     const head_sha=git(sourceDir,'rev-parse','HEAD');
@@ -114,12 +138,11 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
       src],{cwd:sourceDir,encoding:'utf8'});
     const critic=JSON.parse(independent);
     assert.deepEqual(critic,{head:head_sha,hash:file_sha256});
-    const workspace_id=randomUUID(),task_id=randomUUID(),next_task_id=randomUUID();
     const lease={schema:'metaengine.client.serial-loop-staging-w48.v1',
       state:'STAGING_LEASE_OBSERVED',origin:'SYNTHETIC/STAGING',
       workspace_id,task_id,agent_id:'agent_implementer0001',
       lease_generation:3,owner_generation:8};
-    const effect={effect_id:randomUUID(),operation:'FIXED_SANDBOX_SOURCE_EDIT',
+    const effect={effect_id,operation:'FIXED_SANDBOX_SOURCE_EDIT',
       task_id,lease_generation:3,state:'ACKED',ack_durable:true};
     const checkpoint=sealStagingCheckpoint({lease,effect,
       source:{repo_scope:'UNIQUE_TEMP_GIT',base_sha,head_sha},
@@ -193,7 +216,7 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
       completedPgReadback:prevPg,completedEffect:effect,
       nextLease:next,nextPgLeaseReadback:db}).state,'UNKNOWN');
     assert.equal((await inspectLiveCompletionForStaging({expected:{
-      task_id,run_id:workspace_id,owner_epoch:8,lease_generation:3,
+      task_id,run_id,owner_epoch:8,lease_generation:3,
       agent_id:lease.agent_id,source_sha:head_sha}})).state,'LIVE_UNKNOWN');
     console.log('W56_PG17_EVIDENCE',JSON.stringify({
       origin:'SYNTHETIC/STAGING',source_head_sha:head_sha,

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createHostPrivateCustodyW76 } from './host-private-custody-w76.mjs';
 import { ChatFastControlRuntime } from './chat-fast-control-runtime.mjs';
 import { controlActionDescriptor } from './control-actions-manifest.mjs';
 import { HostAgentRemoteComposition } from './host-agent-remote-composition.mjs';
@@ -97,6 +98,7 @@ export class FinalRuntimeActivation {
   #getCurrentUrl;
   #executeCommand;
   #fetchImpl;
+  #privateCustody;
   #trustedHostOwnerReadback;
   #guardianOwnerReadback;
   #privateGatewayReadback;
@@ -157,10 +159,11 @@ export class FinalRuntimeActivation {
       throw new Error('final_runtime_w67_backup_root_invalid');
     if ((protectedBackupRoot === null) !== (readBackupOwnerIncarnation === null))
       throw new Error('final_runtime_w67_backup_root_owner_custody_pair_required');
-    this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
+    this.#privateCustody = createHostPrivateCustodyW76({identity});
+    this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation ?? this.#privateCustody.readTrustedHostOwnerIncarnation;
     this.#guardianOwnerReadback = readGuardianOwnerChallenge;
-    this.#privateGatewayReadback = privateGatewayReadback;
-    this.#privatePostgresBirth = privatePostgresBirth;
+    this.#privateGatewayReadback = privateGatewayReadback ?? this.#privateCustody.readPrivateOwnerGatewayCredential;
+    this.#privatePostgresBirth = privatePostgresBirth ?? this.#privateCustody.readPrivateOwnPostgresBirth;
     this.#protectedBackupRoot = protectedBackupRoot;
     this.#readBackupOwnerIncarnation = readBackupOwnerIncarnation;
   }
@@ -236,6 +239,7 @@ export class FinalRuntimeActivation {
     this.#composition = null;
     this.#fastControl = null;
     this.#leasedExecutor = null;
+    this.#privateCustody.close();
     this.#state = 'STOPPED';
     this.#startedAt = null;
     this.#lastError = null;

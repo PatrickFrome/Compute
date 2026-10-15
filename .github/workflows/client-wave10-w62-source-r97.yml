@@ -4,14 +4,22 @@ on:
   push:
     branches:
       - 'work/metaengine-client-wave11-w69-20261015'
+      - 'work/metaengine-client-wave12-w78-20261015'
     paths:
       - 'apps/me2-ui/**'
       - 'apps/metaengine-browser/test/**'
+      - 'apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
       - '.github/workflows/client-wave10-w62-source-r97.yml'
   pull_request:
     paths:
       - 'apps/me2-ui/**'
       - 'apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs'
+      - 'apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs'
+      - 'apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/package-lock.json'
       - 'apps/metaengine-browser/test/me2-r85-visual-evidence.mjs'
       - 'apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs'
       - 'apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs'
@@ -52,15 +60,25 @@ jobs:
       - name: R97 navigation and false-readiness negative suites
         shell: pwsh
         run: |
-          node --test apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs apps/metaengine-browser/test/browser-agentic-workbench-ui.test.mjs apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs
+          node --test apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs apps/metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs apps/metaengine-browser/test/browser-agentic-workbench-ui.test.mjs apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'w62_r97_source_contract_failed' }
-      - name: Install disposable Electron harness from frozen Browser lock
+      - name: Install disposable Electron harness from reviewed pinned package
         working-directory: apps/metaengine-browser
         shell: pwsh
         run: |
+          # npm 11 does not provision Electron 44's binary through npm ci.
+          # Execute only the official install.js shipped inside the lock-pinned
+          # Electron package. @electron/get checks the upstream release SHASUMS.
+          # Do not approve electron-winstaller or all install scripts.
           npm ci --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw 'w62_disposable_browser_npm_ci_failed' }
-          if (-not (Test-Path '.\\node_modules\\electron\\dist\\electron.exe' -PathType Leaf)) { throw 'w62_electron_missing' }
+          if ($LASTEXITCODE -ne 0) { throw 'w78_browser_npm_ci_failed' }
+          node .\scripts\qualify-r97-electron-w78.mjs --check-inputs
+          if ($LASTEXITCODE -ne 0) { throw 'w78_unreviewed_electron_input' }
+          node .\node_modules\electron\install.js
+          if ($LASTEXITCODE -ne 0) { throw 'w78_pinned_electron_install_failed' }
+          node .\scripts\qualify-r97-electron-w78.mjs --verify-binary
+          if ($LASTEXITCODE -ne 0) { throw 'w78_electron_binary_unverified' }
+
       - name: Frozen UI typecheck, build and pack without package identity reservation
         working-directory: apps/me2-ui
         shell: pwsh

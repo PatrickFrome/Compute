@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - work/metaengine-client-wave11-w68-20261015
+      - work/metaengine-client-wave12-w77-20261015
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/installed-executable-provenance-w68.mjs'
+      - 'apps/metaengine-browser/scripts/release-proof-producer-w77.mjs'
+      - 'apps/metaengine-browser/test/release-proof-producer-w77.test.mjs'
       - 'apps/metaengine-browser/src/client-package-identity-w68.mjs'
       - 'apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs'
       - 'apps/metaengine-browser/test/installer-provenance.test.mjs'
@@ -46,6 +49,7 @@ jobs:
         run: >-
           node --test
           test/installed-executable-provenance-w68.test.mjs
+          test/release-proof-producer-w77.test.mjs
           test/installer-provenance.test.mjs
           test/browser-convergence-package-identity.test.mjs
           test/emergency-maintenance-trust-root.test.mjs

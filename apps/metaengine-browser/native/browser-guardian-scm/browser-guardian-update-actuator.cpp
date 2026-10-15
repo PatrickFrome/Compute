@@ -471,6 +471,7 @@ bool clientTransportExact(const OwnerEnrollmentObservation& client) {
         && client.token_user_readback
         && client.token_session_id_readback
         && client.client_pid > 0
+        && browserGuardianClientKernelBirthExact(client.client_pid, client.client_creation_time_100ns)
         && client.session_id > 0
         && !client.user_sid.empty();
 }
@@ -559,8 +560,12 @@ void attachOwnerProof(
     out->expected_owner_sid = narrowAscii(owner.record.expected_owner_sid);
     out->enrollment_evidence_sha256 = owner.record.enrollment_evidence_sha256;
     out->device_key_fingerprint_sha256 = owner.record.device_key_fingerprint_sha256;
-    out->owner_binding_proven = true;
-    out->device_binding_proven = true;
+    // A signed device message cannot revive a reused PID or stale birth.
+    // This second post-challenge sample is independent of pipe observation.
+    out->client_kernel_birth_rechecked =
+        browserGuardianClientKernelBirthExact(client.client_pid, client.client_creation_time_100ns);
+    out->owner_binding_proven = out->client_kernel_birth_rechecked;
+    out->device_binding_proven = out->client_kernel_birth_rechecked;
 }
 
 std::wstring fullPath(const std::wstring& input) {
@@ -1126,8 +1131,9 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
         out.expected_owner_sid = ownerSid;
         out.enrollment_evidence_sha256 = candidate.enrollment_evidence_sha256;
         out.device_key_fingerprint_sha256 = fingerprint;
-        out.owner_binding_proven = true;
-        out.device_binding_proven = true;
+        // First enrollment is a real persistent effect: preserve effect_absent=false.
+        // Do not upgrade to kernel-backed proof before independent OS recheck.
+        attachOwnerProof(&out, client, readback);
         out.effect_absent_proven = false;
         return out;
     }
@@ -1250,6 +1256,7 @@ std::string serializeGuardianUpdateActuatorResult(const GuardianUpdateActuatorRe
         + "\"client_pid\":" + std::to_string(result.client_pid) + ","
         + "\"client_creation_time_100ns\":\"" + jsonEscape(result.client_creation_time_100ns) + "\","
         + "\"client_process_incarnation_id\":\"" + jsonEscape(result.client_process_incarnation_id) + "\","
+        + "\"client_kernel_birth_rechecked\":" + (result.client_kernel_birth_rechecked ? "true" : "false") + ","
         + "\"creation_time_100ns\":" + std::to_string(result.creation_time_100ns) + ","
         + "\"process_incarnation_id\":\"" + jsonEscape(result.process_incarnation_id) + "\","
         + "\"expected_owner_sid\":\"" + jsonEscape(result.expected_owner_sid) + "\","

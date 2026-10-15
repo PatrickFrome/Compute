@@ -143,6 +143,19 @@ test('Windows no native Owner reader never fabricates installed authority',{skip
   assert.equal(x.installed_owner_proven,false);
 });
 
+// Physical same-inode multi-link is an independently executable alias negative on
+// Windows runners without symlink privileges. It NEVER substitutes for the separate
+// symlink/reparse negative: that gate stays UNKNOWN when skipped.
+test('Windows hardlink aliases cannot qualify single-link archive file identity',{skip:!windows},async t=>{
+  const o=await fixture(t);
+  const alias=path.join(o.root,'other-hardlink.dump');
+  await fs.link(o.file,alias);
+  const x=await read(o);
+  assert.equal(x.native_acl_verified,false);
+  assert.equal(x.installed_owner_proven,false);
+  assert.equal(x.upgrade_authorized,false);
+});
+
 test('Windows missing archive stays UNKNOWN',{skip:!windows},async t=>{
   const o=await fixture(t);
   await fs.unlink(o.file);

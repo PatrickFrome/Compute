@@ -1,11 +1,11 @@
 name: METAENGINE Client W43 Frozen Source Candidate
 
+# W82: The W43 seal is immutable historical evidence. Revalidate its own manifest
+# only when that contract changes; current code is checked by the W66/W73 train.
+# A filtered/non-triggered W43 run is NOT a passing final-candidate gate.
 on:
   pull_request:
     paths:
-      - 'apps/metaengine-browser/**'
-      - 'apps/me2-ui/**'
-      - 'infra/client-state-runtime/**'
       - 'coordination/operator-control/client-source-candidate-w43.manifest.json'
       - '.github/workflows/client-source-candidate-w43.yml'
   workflow_dispatch:

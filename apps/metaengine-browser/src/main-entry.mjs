@@ -169,7 +169,7 @@ if (guard.installer_shutdown_control) {
         appDataDirectory: process.env.APPDATA,
       });
       if (setup.state === 'CONFIGURED' && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
-        const readyProvider = await providerBoot.bootstrapPersistentLocalProvider();
+        const readyProvider = await providerBoot.revalidatePersistentLocalProviderAfterAttach();
         bootstrapState = readyProvider.state;
       }
     }

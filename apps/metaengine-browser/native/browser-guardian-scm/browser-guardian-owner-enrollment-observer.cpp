@@ -189,6 +189,16 @@ OwnerEnrollmentObservation OwnerEnrollmentPipe::observeClientIdentity(
     }
     out.revert_to_self_succeeded = true;
 
+    // Second independent OS handle and pipe PID sample AFTER token readback.
+    // No millisecond tolerance and no process-ID-only liveness promotion.
+    ULONG secondPid = 0;
+    if (!GetNamedPipeClientProcessId(pipe_, &secondPid) || secondPid != clientPid ||
+        !browserGuardianClientKernelBirthExact(out.client_pid, out.client_creation_time_100ns)) {
+        out.reason = "CLIENT_KERNEL_BIRTH_POSTCHECK_FAILED";
+        out.win32_error = ERROR_INVALID_DATA;
+        return out;
+    }
+
     if (evidenceError != ERROR_SUCCESS || !out.token_user_readback || !out.token_session_id_readback) {
         out.reason = "CLIENT_TOKEN_READBACK_FAILED";
         out.win32_error = evidenceError == ERROR_SUCCESS ? ERROR_INVALID_DATA : evidenceError;
@@ -198,6 +208,20 @@ OwnerEnrollmentObservation OwnerEnrollmentPipe::observeClientIdentity(
     out.reason = "TOKEN_IDENTITY_OBSERVED";
     out.win32_error = ERROR_SUCCESS;
     return out;
+}
+
+bool browserGuardianClientKernelBirthExact(DWORD pid, std::uint64_t created) noexcept {
+    // Windows FILETIME begins in 1601; reject zero and pre-Unix sentinel dates.
+    if (pid == 0 || created <= 116444736000000000ULL) return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
+    if (process == nullptr) return false;
+    FILETIME born{}, exited{}, kernel{}, user{};
+    const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    const bool sampled = alive && GetProcessTimes(process, &born, &exited, &kernel, &user);
+    ULARGE_INTEGER ticks{};
+    if (sampled) { ticks.LowPart = born.dwLowDateTime; ticks.HighPart = born.dwHighDateTime; }
+    CloseHandle(process);
+    return sampled && ticks.QuadPart == created;
 }
 
 const char* browserGuardianOwnerEnrollmentObserverContractJson() noexcept {
