@@ -75,6 +75,9 @@ test('crash, lost ACK, expiry, stale source/critic and transferred generation fe
     assert.equal(inspect({completedEffect:{...effect,state}}).state,'UNKNOWN');
   }
   assert.equal(inspect({completedEffect:{...effect,ack_durable:false}}).state,'UNKNOWN');
+  assert.equal(inspect({completedEffect:{...effect,effect_id:randomUUID()}}).state,'UNKNOWN');
+  assert.equal(inspect({completedEffect:{...effect,lease_generation:999}}).state,'UNKNOWN');
+  assert.equal(inspect({completedEffect:{...effect,operation:'UNKNOWN'}}).state,'UNKNOWN');
   assert.equal(inspect({completedCheckpoint:{...c,critic_agent_id:'agent_wrong00001'}}).state,'UNKNOWN');
   assert.equal(inspect({completedCheckpoint:{...c,source_sha:'e'.repeat(40)}}).state,'UNKNOWN');
   assert.equal(inspect({completedPgReadback:{...pg,checkpoint_sha256:'e'.repeat(64)}}).state,'UNKNOWN');

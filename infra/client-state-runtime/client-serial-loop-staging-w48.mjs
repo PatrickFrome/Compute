@@ -145,8 +145,7 @@ export function verifyStagingCheckpointDigest(checkpoint) {
 // Reconciliation is read-only. No "resume then replay" on crash/lost ACK.
 export function inspectStagingRestart({ checkpoint, pgReadback, effect, requested_task_id,
   requested_lease_generation, observed_at_ms = Date.now() } = {}) {
-  if (effect?.state === 'PREPARED' || effect?.state === 'AMBIGUOUS' ||
-      effect?.ack_durable !== true)
+  if (effect?.state !== 'ACKED' || effect?.ack_durable !== true)
     return locked('PREPARED_OR_LOST_ACK_NEEDS_EXISTING_EFFECT_RECONCILIATION', 'AMBIGUOUS');
   if (!verifyStagingCheckpointDigest(checkpoint))
     return locked('CHECKPOINT_INVALID');
@@ -161,6 +160,11 @@ export function inspectStagingRestart({ checkpoint, pgReadback, effect, requeste
       pgReadback.artifact_sha256 !== checkpoint.artifact_sha256 ||
       pgReadback.effect_id !== checkpoint.effect_id)
     return locked('DURABLE_OWN_PG_READBACK_MISSING');
+  if (effect.effect_id !== checkpoint.effect_id ||
+      effect.task_id !== checkpoint.task_id ||
+      effect.lease_generation !== checkpoint.lease_generation ||
+      effect.operation !== 'FIXED_SANDBOX_SOURCE_EDIT')
+    return locked('EFFECT_ACK_BINDING_MISMATCH', 'AMBIGUOUS');
   if (requested_task_id === checkpoint.task_id)
     return locked('COMPLETED_TASK_REPLAY_FORBIDDEN', 'FENCED');
   if (!UUID.test(hex(requested_task_id)) || !safe(requested_lease_generation))
