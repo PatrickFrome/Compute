@@ -9,9 +9,22 @@ import {verifyOwnerOnlyWindowsStorage} from './private-windows-storage-acl.mjs';
 
 const run=promisify(execFile);
 const SCHEMA='metaengine.client-backup-acl-native-w58.v1';
-const unknown=reason=>Object.freeze({schema:SCHEMA,state:'UNKNOWN',reason,
-  native_acl_verified:false,installed_owner_proven:false,backup_verified:false,
+const unknown=(reason,diagnostic_phase='NONE')=>Object.freeze({schema:SCHEMA,state:'UNKNOWN',reason,
+  // Bounded phase identifiers only. Never serialize OS errors, stderr, paths or ACL SDDL.
+  diagnostic_phase,native_acl_verified:false,installed_owner_proven:false,backup_verified:false,
   upgrade_authorized:false,automatic_retry_allowed:false,authority_effect:false});
+const safePhase=(e)=>{
+  const phase=String(e?.stdout||'').match(/W72_ACL_PHASE_(?:START|ROOT|FILE|ACL|COMPLETE)/g)?.at(-1);
+  if(phase)return phase.slice('W72_ACL_PHASE_'.length);
+  const m=String(e?.message||'').match(/^private_windows_storage_([a-z_]+)$/);
+  if(m)return 'STORAGE_'+m[1].slice(0,40).toUpperCase();
+  if(e?.code==='ETIMEDOUT')return 'CHILD_TIMEOUT';
+  if(e?.code==='ENOENT')return 'CHILD_NOT_FOUND';
+  if(e?.message==='PHYSICAL_ALIAS')return 'PHYSICAL_ALIAS';
+  if(e?.message==='REPARSE_ANCESTOR')return 'REPARSE_ANCESTOR';
+  if(e?.message==='OWNER_FENCE_UNKNOWN')return 'OWNER_FENCE_UNKNOWN';
+  return 'UNCLASSIFIED';
+};
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const canonical=x=>path.win32.normalize(x).toLowerCase();
 const local=x=>typeof x==='string'&&x.length<2048&&/^[A-Za-z]:\\[^\\]/.test(x)
@@ -53,15 +66,25 @@ async function ancestry(target) {
 // private-windows-storage-acl: current service SID, SYSTEM, Administrators.
 // Rejects inherited grants even when the parent is otherwise allowed.
 const powershell=`$ErrorActionPreference='Stop'
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+Write-Output 'W72_ACL_PHASE_START'
 $me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $allowed=@($me,'S-1-5-18','S-1-5-32-544')|Select-Object -Unique
 $required=@($me,'S-1-5-18')|Select-Object -Unique
 $items=@()
-foreach($pair in @(@($env:METAENGINE_W58_ROOT,'DIRECTORY'),@($env:METAENGINE_W58_FILE,'FILE'))){
-  $i=Get-Item -LiteralPath $pair[0] -Force
+# Object records, not nested PowerShell array expressions (the latter flatten).
+$pairs=@(
+  [pscustomobject]@{path=$env:METAENGINE_W58_ROOT;kind='DIRECTORY'},
+  [pscustomobject]@{path=$env:METAENGINE_W58_FILE;kind='FILE'}
+)
+foreach($pair in $pairs){
+  if($pair.kind -eq 'DIRECTORY'){Write-Output 'W72_ACL_PHASE_ROOT'}
+  else{Write-Output 'W72_ACL_PHASE_FILE'}
+  $i=Get-Item -LiteralPath $pair.path -Force
   if(($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'reparse'}
-  if(($pair[1] -eq 'DIRECTORY') -ne $i.PSIsContainer){throw 'type'}
-  $acl=Get-Acl -LiteralPath $pair[0]
+  if(($pair.kind -eq 'DIRECTORY') -ne $i.PSIsContainer){throw 'type'}
+  $acl=Get-Acl -LiteralPath $pair.path
+  Write-Output 'W72_ACL_PHASE_ACL'
   if(-not $acl.AreAccessRulesProtected){throw 'inheritance'}
   $sid=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if($sid -notin $allowed){throw 'owner'}
@@ -69,7 +92,7 @@ foreach($pair in @(@($env:METAENGINE_W58_ROOT,'DIRECTORY'),@($env:METAENGINE_W58
   foreach($ace in $aces){
     if($ace.IsInherited -or $ace.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow){throw 'inherited_or_deny'}
     if($ace.IdentityReference.Value -notin $allowed){throw 'broad'}
-    $rights=if($pair[1] -eq 'FILE' -and $ace.IdentityReference.Value -eq $me){
+    $rights=if($pair.kind -eq 'FILE' -and $ace.IdentityReference.Value -eq $me){
       [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::WriteData
     }else{[Security.AccessControl.FileSystemRights]::FullControl}
     if(($ace.FileSystemRights -band $rights) -ne $rights){throw 'rights'}
@@ -80,6 +103,7 @@ foreach($pair in @(@($env:METAENGINE_W58_ROOT,'DIRECTORY'),@($env:METAENGINE_W58
   $items+=@{owner_sid=$sid;sddl=$acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)}
 }
 if($items[0].owner_sid -ne $items[1].owner_sid){throw 'owner_changed'}
+Write-Output 'W72_ACL_PHASE_COMPLETE'
 @{service_sid=$me;root=$items[0];file=$items[1]}|ConvertTo-Json -Compress -Depth 4
 `;
 async function nativeAcl(root,file) {
@@ -146,5 +170,5 @@ export async function readClientBackupAclNativeW58({
       root_file_id_sha256:hash(fingerprint(root0)),archive_file_id_sha256:hash(fingerprint(file0)),
       native_dacl_sha256:a.descriptor,installed_owner_proven:false,backup_verified:false,
       upgrade_authorized:false,automatic_retry_allowed:false,authority_effect:false});
-  }catch{return unknown('NATIVE_ACL_UNVERIFIED');}
+  }catch(error){return unknown('NATIVE_ACL_UNVERIFIED',safePhase(error));}
 }

@@ -18,7 +18,7 @@ async function ps(script,variables={}) {
     env:{...process.env,...variables},windowsHide:true,timeout:120000});
 }
 async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'me-w58-acl-'));
+  const generatedRoot=await fs.mkdtemp(path.join(os.tmpdir(),'me-w58-acl-'));\n  // Canonicalize the disposable TEMP spelling, not arbitrary trusted Host paths.\n  const root=process.platform==='win32'?await fs.realpath(generatedRoot):generatedRoot;
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   await protectOwnerOnlyWindowsDirectory(root);
   const file=path.join(root,name);

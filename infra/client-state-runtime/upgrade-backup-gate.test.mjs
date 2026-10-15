@@ -10,7 +10,8 @@ const hash = x => createHash('sha256').update(x).digest('hex');
 const toc = Array.from({length:105},(_,i) => String(i+1)+'; 1 0 TABLE DATA public synthetic'+i+' owner').join('\n')+'\n';
 const expected = {keeperPid:10776,ownerPid:2888,ownerSha256:'a'.repeat(64),postmasterSha256:'b'.repeat(64)};
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-backup-gate-'));
+  const generatedRoot=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-backup-gate-'));
+  const root=process.platform==='win32'?await fs.realpath(generatedRoot):generatedRoot;
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const archivePath=path.join(root,'postgresql-17-snapshot.dump');
   const bytes=Buffer.concat([Buffer.from('PGDMP'),Buffer.alloc(4096,31)]);

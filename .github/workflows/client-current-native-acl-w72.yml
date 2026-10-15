@@ -1,0 +1,62 @@
+name: Client W72 Native Windows ACL (current source)
+on:
+  push:
+    branches: [work/metaengine-client-wave11-w72-20261015]
+  pull_request:
+    paths:
+      - '.github/workflows/client-current-native-acl-w72.yml'
+      - 'apps/metaengine-browser/src/client-backup-acl-native-w58.mjs'
+      - 'infra/client-state-runtime/client-backup-acl-native-w58*.mjs'
+      - 'infra/client-state-runtime/upgrade-backup-*.mjs'
+      - 'infra/client-state-runtime/client-current-acl-critic-w72*.mjs'
+      - 'coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  current-source-acl:
+    name: W72 exact-head native ACL (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source and clean checkout
+        shell: bash
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+          git diff --check
+          node --check apps/metaengine-browser/src/client-backup-acl-native-w58.mjs
+          node --check infra/client-state-runtime/upgrade-backup-gate.mjs
+      - name: Windows native security module
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+          Get-Command Get-Acl,Set-Acl -ErrorAction Stop | Select-Object Name,Source
+      - name: Current source native ACL, wire, archive, restore, critic
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/client-backup-acl-native-w58.test.mjs \
+            infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs \
+            infra/client-state-runtime/upgrade-backup-gate.test.mjs \
+            infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs \
+            infra/client-state-runtime/client-current-acl-critic-w72.test.mjs \
+            infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs
+      - name: Linux native proof remains UNKNOWN
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo 'Linux cannot establish Windows NTFS ACL proof'
