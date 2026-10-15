@@ -7,6 +7,7 @@ on:
     paths:
       - 'infra/client-state-runtime/client-pg17-qualification-w45*'
       - 'infra/client-state-runtime/own-postgres-birth-w61*'
+      - 'infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs'
       - 'infra/client-state-runtime/db-api.mjs'
       - '.github/workflows/client-own-pg-w61.yml'
       - '.github/workflows/client-pg17-qualification-w45.yml'
@@ -111,3 +112,33 @@ jobs:
           node --test --test-concurrency=1 infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs
           echo "WINDOWS_PHYSICAL_PG17=UNKNOWN; no installed PGDATA or port touched"
         shell: bash
+
+  w47-two-cluster-real-restore:
+    name: Pinned PG17 two-cluster W47 real restore (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify whole checkout exact source, syntax and staging-only scope
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          node --check infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs
+          git diff --check
+      - name: Pinned digest exact PostgreSQL17.6
+        run: docker pull postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+      - name: Two newly generated clusters, durable W47 effect barrier and restore/data equality
+        env:
+          W61_DOCKER_PG17: '1'
+          W61_REQUIRE_REAL_PG17: '1'
+          W61_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node --test --test-concurrency=1 infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs
