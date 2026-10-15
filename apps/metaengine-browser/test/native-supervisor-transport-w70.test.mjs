@@ -63,3 +63,67 @@ test('W70 all native Supervisor fetch composition sites use the pinned runtime U
     assert.doesNotMatch(source, /https?:\/\/[^\s'"]*supabase\./i, file);
   }
 });
+test('W70 forged READY environment cannot pin native transport during offline source probe', async t => {
+  const { execFileSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-w70-offline-probe-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const moduleUrl = new URL('../src/native-supervisor-endpoints.mjs', import.meta.url).href;
+  const code = `process.argv.push('--metaengine-version-probe');
+    try { await import(${JSON.stringify(moduleUrl)}); console.log('UNSAFE_PIN'); }
+    catch (error) { console.log(error.message); }`;
+  const env = { ...process.env,
+    APPDATA: path.join(directory, 'roaming'),
+    LOCALAPPDATA: path.join(directory, 'local'),
+    XDG_CONFIG_HOME: path.join(directory, 'xdg'),
+    HOME: directory,
+    USERPROFILE: directory,
+    METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES',
+    METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY',
+    METAENGINE_SUPERVISOR_BASE_URL: BASE,
+    METAENGINE_LOCAL_STATE_INSTANCE_ID: INSTANCE,
+  };
+  const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', code],
+    {env, encoding:'utf8', windowsHide:true, timeout:10000});
+  assert.equal(stdout.trim(), 'native_supervisor_local_provider_unattested');
+});
+
+
+test('W70 signed cognitive transport rejects absent Owner before fetch, even with syntactic device headers', async () => {
+  const { sendNativeSupervisorCognitiveBatch } = await import('../src/native-supervisor-client.mjs');
+  const { BROWSER_COGNITIVE_BATCH_SCHEMA } = await import('../src/browser-cognitive-delta-transport.mjs');
+  const calls = [];
+  const signatures = [];
+  const batch = {
+    schema: BROWSER_COGNITIVE_BATCH_SCHEMA,
+    raw_payload_exposed: false,
+    page_text_exposed: false,
+    input_values_exposed: false,
+    delivery_is_authority: false,
+    control_authority: false,
+    command_leasing: false,
+    authority_effect: false,
+    events: [],
+  };
+  const identity = {
+    ensure: async () => ({ device_id: INSTANCE }),
+    deviceHeaders: async (method, path, body) => {
+      signatures.push({method, path, body});
+      return {'x-w70-fixture': 'staging-only'};
+    },
+  };
+  const fetchImpl = async (url, init) => {
+    calls.push({url, init});
+    throw new Error('SECURITY_REGRESSION_NATIVE_FETCH_REACHED');
+  };
+  await assert.rejects(
+    () => sendNativeSupervisorCognitiveBatch({identity, fetchImpl, batch}),
+    /native_supervisor_local_provider_unattested/,
+  );
+  assert.equal(calls.length, 0, 'no network-hosted or unbound loopback fetch is permitted');
+  assert.equal(signatures.length, 1);
+  assert.equal(signatures[0].method, 'POST');
+  assert.match(signatures[0].path, /^\/a2-browser-native-supervisor-v1\/v1\//);
+  assert.deepEqual(JSON.parse(signatures[0].body), batch);
+});

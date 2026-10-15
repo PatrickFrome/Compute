@@ -1,7 +1,7 @@
 // METAENGINE P0: no implicit cloud transport. The canonical native supervisor
 // endpoint is available only after the own PostgreSQL Owner runtime has
 // attested an explicit loopback base and instance identity.
-import './local-state-provider-bootstrap.mjs';
+import { persistentLocalProviderBootstrap } from './local-state-provider-bootstrap.mjs';
 
 export const NATIVE_SUPERVISOR_DEFAULT_BASE = null;
 
@@ -40,7 +40,15 @@ function attestedLocalBase() {
   if (!raw && !instance) return null;
   if (!raw || !UUID.test(instance) || bootState !== 'READY')
     throw new Error('native_supervisor_local_provider_unattested');
-  return validateLocalBase(raw);
+  const target = validateLocalBase(raw);
+  // Environment READY is only a diagnostic marker. It cannot grant custody.
+  // Pin only a matching, awaited, in-process Owner/runtime/health bootstrap.
+  if (persistentLocalProviderBootstrap?.state !== 'READY' ||
+      persistentLocalProviderBootstrap.provider !== 'LOCAL_POSTGRES' ||
+      persistentLocalProviderBootstrap.base_url !== target ||
+      String(persistentLocalProviderBootstrap.instance_id || '').toLowerCase() !== instance.toLowerCase())
+    throw new Error('native_supervisor_local_provider_unattested');
+  return target;
 }
 
 const pinnedLocalProviderBase = selectedProvider === 'LOCAL_POSTGRES' ?
