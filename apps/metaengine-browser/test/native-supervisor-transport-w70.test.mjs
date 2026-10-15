@@ -63,3 +63,28 @@ test('W70 all native Supervisor fetch composition sites use the pinned runtime U
     assert.doesNotMatch(source, /https?:\/\/[^\s'"]*supabase\./i, file);
   }
 });
+test('W70 forged READY environment cannot pin native transport during offline source probe', async t => {
+  const { execFileSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-w70-offline-probe-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const moduleUrl = new URL('../src/native-supervisor-endpoints.mjs', import.meta.url).href;
+  const code = `process.argv.push('--metaengine-version-probe');
+    try { await import(${JSON.stringify(moduleUrl)}); console.log('UNSAFE_PIN'); }
+    catch (error) { console.log(error.message); }`;
+  const env = { ...process.env,
+    APPDATA: path.join(directory, 'roaming'),
+    LOCALAPPDATA: path.join(directory, 'local'),
+    XDG_CONFIG_HOME: path.join(directory, 'xdg'),
+    HOME: directory,
+    USERPROFILE: directory,
+    METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES',
+    METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY',
+    METAENGINE_SUPERVISOR_BASE_URL: BASE,
+    METAENGINE_LOCAL_STATE_INSTANCE_ID: INSTANCE,
+  };
+  const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', code],
+    {env, encoding:'utf8', windowsHide:true, timeout:10000});
+  assert.equal(stdout.trim(), 'native_supervisor_local_provider_unattested');
+});
