@@ -75,6 +75,21 @@
       "wave": "W58",
       "pr": 1283,
       "sha": "41d755bb9ecd53bd509163f9219473c32d7439b6"
+    },
+    {
+      "wave": "W62_SOURCE",
+      "pr": 1284,
+      "sha": "953e194c9f0235f191b23711a3ddf1b1978dccfc"
+    },
+    {
+      "wave": "W61_SOURCE",
+      "pr": 1285,
+      "sha": "bb6cd167321a3764d40f525f38cb079f5136f589"
+    },
+    {
+      "wave": "W64_SOURCE",
+      "pr": 1288,
+      "sha": "6ece41dbea19bac3e6cb991ad7d9a16022a8cdbd"
     }
   ],
   "pre_version_assembly_anchor": "994e2ac7a04b0a6018c188b1ceb60c5c7cfc0bf9",
@@ -109,16 +124,22 @@
     "infra/client-state-runtime/client-source-candidate-w51.test.mjs": "40ed1d5f411e91f9999d75ef00361fa81daee302",
     "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "cf7314034df743c6c0283f9ad0357a588b74293f",
     "apps/metaengine-browser/package.json": "c7102ca747a612492bc93b917fd4c1da66892ba0",
-    "apps/metaengine-browser/package-lock.json": "af21c8f4836b0db69995ea056d8262673ffb4e65"
+    "apps/metaengine-browser/package-lock.json": "af21c8f4836b0db69995ea056d8262673ffb4e65",
+    "apps/me2-ui/src/lib/client-work-badge-text.d.mts": "67a33b99162cb24ffb4b105adea41cc33069eec5",
+    "apps/me2-ui/src/lib/client-work-badge-text.contract.ts": "1dfa0020a223612a4c2fd81f9e3cab86eb5a17c5",
+    "infra/client-state-runtime/own-postgres-birth-w61.mjs": "011c410b0f3acfd4a952365bf02dd07a053d3db5",
+    "infra/client-state-runtime/own-postgres-birth-w61.test.mjs": "5d33791bfe400e49316dfd234e61fe12c762d293",
+    "infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs": "2483bc63317dd52497417f2b21372680396ef17e",
+    "infra/client-state-runtime/db-api.mjs": "93a85763ab02e89df39233e15a9b19e11dc9001f",
+    "infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.mjs": "3bba30e24cd61275d7f46f262cb178b0ca5ae908",
+    "infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs": "d71c5fa75468cfe46bd3b7e0365477261cb30e59",
+    "infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs": "01dc2e55b314348b9584181bb06ffc187c2dbd11"
   },
   "candidate_sha_rule": "Use only exact GitHub PR head at test time; own source commit cannot self-reference.",
   "freeze_owner": "W62",
   "wave10_unpublished_repair_omissions": [
     "W60",
-    "W61",
-    "W62",
-    "W63",
-    "W64"
+    "W63"
   ],
   "unbound_historical_effects": [
     "W53_AMBIGUOUS_UNKNOWN",
@@ -134,5 +155,11 @@
   "no_supabase": true,
   "authority_effect": false,
   "promotion_authorized": false,
-  "automatic_retry_allowed": false
+  "automatic_retry_allowed": false,
+  "partial_source_qualifications": {
+    "W62": "TYPED_ME2_SOURCE_ONLY_NOT_PACKAGE_FREEZE",
+    "W61": "OWN_PG_BIRTH_AND_DISPOSABLE_RESTORE_SOURCE_NOT_INSTALLED",
+    "W64": "PG17_PROCESS_LIFECYCLE_FIX_NOT_REAL_AGENT"
+  },
+  "package_freeze_status": "W62_SOURCE_ONLY_NO_DISTINCT_PACKAGE"
 }

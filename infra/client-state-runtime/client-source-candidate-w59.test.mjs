@@ -16,7 +16,7 @@ test('W59 retains W51 W57 W58, all prior PRs as real ancestors, and original fro
   assert.equal(manifest.automatic_retry_allowed, false);
   assert.equal(manifest.no_supabase, true);
   assert.equal(manifest.freeze_owner, 'W62');
-  assert.deepEqual(manifest.parent_heads.map(x => x.pr), [1273, 1275, 1272, 1276, 1269, 1271, 1274, 1278, 1282, 1281, 1280, 1279, 1277, 1283]);
+  assert.deepEqual(manifest.parent_heads.map(x => x.pr), [1273, 1275, 1272, 1276, 1269, 1271, 1274, 1278, 1282, 1281, 1280, 1279, 1277, 1283, 1284, 1285, 1288]);
   assert.equal(new Set(manifest.parent_heads.map(x => x.pr)).size, manifest.parent_heads.length);
   for (const p of manifest.parent_heads) {
     assert.match(p.sha, /^[0-9a-f]{40}$/);
@@ -48,7 +48,7 @@ test('W59 union registers W58 ACL and keeps original native Owner, critic, PG an
   assert.match(read('infra/client-state-runtime/client-candidate-acceptance-w57.mjs'), /REVIEW_REQUIRED/);
 });
 test('W59 candidate remains SOURCE-only and cannot grant installed/LIVE or reuse W46 package reservation', () => {
-  assert.deepEqual(manifest.wave10_unpublished_repair_omissions, ['W60', 'W61', 'W62', 'W63', 'W64']);
+  assert.deepEqual(manifest.wave10_unpublished_repair_omissions, ['W60', 'W63']);
   assert.deepEqual(manifest.unbound_historical_effects, ['W53_AMBIGUOUS_UNKNOWN', 'HISTORICAL_59_AMBIGUOUS_UNKNOWN']);
   for (const p of ['STAGING', 'INSTALLED', 'LIVE']) assert.match(manifest.proof_levels[p], /UNKNOWN/);
   assert.equal(manifest.proof_levels.CI, 'EXACT_HEAD_PENDING');
