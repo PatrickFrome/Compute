@@ -1,8 +1,6 @@
 name: Client W61 Own PG Birth, Claim and Restore
 
 on:
-  push:
-    branches: [work/metaengine-client-wave10-w61-20261015]
   pull_request:
     paths:
       - 'infra/client-state-runtime/client-pg17-qualification-w45*'
@@ -14,6 +12,10 @@ on:
       - 'infra/client-state-runtime/operator-supervisor-continuity-lease-v1.sql'
       - 'infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql'
   workflow_dispatch:
+
+concurrency:
+  group: w61-exact-head-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
