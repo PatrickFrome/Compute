@@ -149,6 +149,8 @@ export class HostAgentRuntime {
                   guardian.device_binding_proven === true &&
                   guardian.guardian_client_kernel_birth_verified === true &&
                   guardian.guardian_client_pid === kernel.pid &&
+                  guardian.guardian_client_process_incarnation_id === first.process_incarnation_id &&
+                  /^pid:[0-9]+:created_100ns:[1-9][0-9]{16,18}$/.test(first.process_incarnation_id || '') &&
                   Date.parse(guardian.guardian_client_created_at) === Date.parse(kernel.created_at) &&
                   /^[0-9a-f]{64}$/i.test(guardian.guardian_enrollment_evidence_sha256 || '') &&
                   /^[0-9a-f]{64}$/i.test(guardian.guardian_device_key_fingerprint_sha256 || '') &&
