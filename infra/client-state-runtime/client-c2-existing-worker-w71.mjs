@@ -32,9 +32,9 @@ function fenced(reason, evidence = null) {
 }
 const isPlain = x => x && typeof x === 'object' && !Array.isArray(x)
   && (Object.getPrototypeOf(x) === Object.prototype || Object.getPrototypeOf(x) === null);
-const falseFlags = v => isPlain(v) && ['authority_effect', 'scheduler_authority',
-  'browser_authority', 'release_authority','automatic_retry_allowed']
-  .every(key => v[key] === false);
+const falseFlags = (v,{ retry = false } = {}) => isPlain(v)
+  && ['authority_effect','scheduler_authority','browser_authority','release_authority',
+      ...(retry ? ['automatic_retry_allowed'] : [])].every(key => v[key] === false);
 
 // A goal-submit RPC reply is an ADMISSION observation, never a lease or an
 // effect credential. Recheck both nested canonical replies and exact identity.
@@ -49,7 +49,7 @@ export function inspectW71GoalAdmission({admission, workspace_id, point_id} = {}
     || !ID.test(String(admission.task_id)) || admission.atomic_plan_and_admission !== true
     || admission.operator_initiated !== true
     || admission.task_payload_returned !== false || admission.scheduler_identity_returned !== false
-    || !falseFlags(admission) || !isPlain(admission.activation)
+    || !falseFlags(admission,{retry:true}) || !isPlain(admission.activation)
     || admission.activation.schema !== 'metaengine.meta-orchestrator.plan-state.v1'
     || admission.activation.state !== 'ACTIVE'
     || admission.activation.plan_generation !== admission.plan_generation
