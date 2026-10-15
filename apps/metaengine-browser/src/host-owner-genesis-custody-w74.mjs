@@ -199,6 +199,7 @@ export function createHostOwnerGenesisCustodyW74({
       if (!candidate) return null;
       const after = await check();
       if (!after || x.admin.admin_grant_epoch !== after.admin.admin_grant_epoch ||
+          !same(x.device,after.device,['client_id','device_id','key_fingerprint_sha256']) ||
           !same(x.native,after.native,['guardian_client_pid','guardian_client_process_incarnation_id']) ||
           !same(x.source,after.source,['source_sha','installed_exe_sha256','proof_identity'])) return null;
       // A second independent own-PG transaction catches epoch revocation or

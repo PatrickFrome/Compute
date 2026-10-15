@@ -148,6 +148,26 @@ test('W74 second native observation cannot lose binding or acquire an untrusted 
     assert.equal(reads,2);assert.equal(f.writes,0);
   }
 });
+test('W74 never returns an old Owner after post-commit device/client/key rebinding at the same epoch',async()=>{
+  for(const field of ['device_id','client_id','key_fingerprint_sha256']) {
+    const f=fixture();let current=f.opts.identity.snapshot();
+    f.opts.identity={ensure:async()=>{},snapshot:()=>({...current})};
+    f.opts.readAuthenticatedAdmin=async()=>({...current,admin_grant_epoch:7,admin_ready:true,access_tier:'ADMIN'});
+    const guardian=f.opts.readGuardian;
+    f.opts.readGuardian=async()=>({...await guardian(),guardian_device_key_fingerprint_sha256:current.key_fingerprint_sha256});
+    f.opts.transaction=async fn=>fn({unsafe:async(sql,args)=>sql===W74_SCOPE_LOCK_SQL?[{}]:[
+      {project_id:project,device_id:args[0],client_id:args[1],admin_grant_epoch:'7',observed_at:now()},
+    ]});
+    const write=f.opts.writeSealed;
+    f.opts.writeSealed=async(record,previous)=>{
+      await write(record,previous);
+      current={...current,[field]:field==='key_fingerprint_sha256'?'f'.repeat(64):'44444444-4444-4444-8444-444444444444'};
+    };
+    assert.equal(await createHostOwnerGenesisCustodyW74(f.opts).create(),null,
+      'post-commit '+field+' drift must not return the old sealed Owner');
+    assert.equal(f.writes,1,'retain the durable record as unqualified, without an automatic rewrite');
+  }
+});
 test('W74 rejects client-side self attestation and never uses constructor project text',async()=>{
   const f=fixture();
   f.setIdentity({ensure:async()=>{},snapshot:()=>({client_id:client,device_id:'fake-device',
