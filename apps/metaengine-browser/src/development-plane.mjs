@@ -14,6 +14,7 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'VERIFICATION_SANDBOX_PLAN_CREATE',
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
   'ADVISORY_EVIDENCE_VERIFY',
+  'FIXED_SANDBOX_SOURCE_EDIT',
 ]);
 
 const PAYLOAD_CAPABILITIES = new Set([
@@ -63,6 +64,7 @@ function retainedResultSummary(capability, value) {
 
 export class DevelopmentPlane {
   #spawn;
+  #authorizeFixedEdit;
   #clock;
   #uuid;
   #timeoutMs;
@@ -86,6 +88,9 @@ export class DevelopmentPlane {
 
   constructor({
     spawnWorker,
+    // Private existing authenticated Host/W30 scope callback; never a JSON flag.
+    // Production default is NULL until genuine W74/W75/W76 custody is wired.
+    authorizeFixedSandboxSourceEdit = null,
     clock = () => Date.now(),
     uuid = () => crypto.randomUUID(),
     timeout_ms = 5000,
@@ -96,7 +101,10 @@ export class DevelopmentPlane {
     if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_timeout_invalid');
     if (!Number.isSafeInteger(restart_base_ms) || restart_base_ms < 10 || restart_base_ms > 60000) throw new Error('development_plane_restart_base_invalid');
     if (!Number.isSafeInteger(restart_max_ms) || restart_max_ms < restart_base_ms || restart_max_ms > 300000) throw new Error('development_plane_restart_max_invalid');
+    if (authorizeFixedSandboxSourceEdit != null && typeof authorizeFixedSandboxSourceEdit !== 'function')
+      throw new Error('development_plane_source_edit_authorizer_invalid');
     this.#spawn = spawnWorker;
+    this.#authorizeFixedEdit = authorizeFixedSandboxSourceEdit;
     this.#clock = clock;
     this.#uuid = uuid;
     this.#timeoutMs = timeout_ms;
@@ -125,6 +133,8 @@ export class DevelopmentPlane {
       verification_sandbox_planning: true,
       verification_sandbox_prepare_only: true,
       verification_sandbox_execution: false,
+      fixed_sandbox_source_edit_registered: true,
+      fixed_sandbox_source_edit_default_authorized: false,
       sandbox_backend_bound: false,
       advisory_evidence_verification: true,
       advisory_evidence_network_dispatch: false,
@@ -249,7 +259,20 @@ export class DevelopmentPlane {
     if (!DEVELOPMENT_PLANE_CAPABILITIES.includes(cap)) throw new Error('development_plane_capability_denied');
     if (this.#state !== 'READY' || !this.#child) throw new Error('development_plane_not_ready');
     let normalizedPayload = null;
-    if (PAYLOAD_CAPABILITIES.has(cap)) {
+    if (cap === 'FIXED_SANDBOX_SOURCE_EDIT') {
+      if (!this.#authorizeFixedEdit) throw new Error('development_plane_source_edit_owner_capability_absent');
+      if (!plainObject(payload) || 'claim' in payload || 'signature' in payload)
+        throw new Error('development_plane_source_edit_untrusted_authorization');
+      const request = clone(payload);
+      // This method executes solely inside the privileged parent. It must obtain
+      // a fresh W30 lease/Host challenge, never trust fields on request itself.
+      const signed = await this.#authorizeFixedEdit(request);
+      if (!plainObject(signed) || !plainObject(signed.claim) || typeof signed.signature !== 'string')
+        throw new Error('development_plane_source_edit_authorization_denied');
+      normalizedPayload = clone(signed);
+      if (Buffer.byteLength(JSON.stringify(normalizedPayload),'utf8') > 4096)
+        throw new Error('development_plane_source_edit_payload_too_large');
+    } else if (PAYLOAD_CAPABILITIES.has(cap)) {
       if (!plainObject(payload)) throw new Error('development_plane_payload_required');
       const encoded = JSON.stringify(payload);
       if (Buffer.byteLength(encoded, 'utf8') > MAX_REQUEST_PAYLOAD_BYTES) throw new Error('development_plane_payload_too_large');
