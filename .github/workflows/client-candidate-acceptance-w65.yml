@@ -1,0 +1,69 @@
+name: METAENGINE Client W65 Independent Falsifier
+on:
+  push:
+    branches: [work/metaengine-client-wave10-w65-20261015]
+  pull_request:
+    paths:
+      - '.github/workflows/client-candidate-acceptance-w65.yml'
+      - 'infra/client-state-runtime/client-candidate-acceptance-w65.mjs'
+      - 'infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs'
+      - 'infra/client-state-runtime/client-winps-fixture-w65.mjs'
+      - 'infra/client-state-runtime/client-winps-fixture-w65.test.mjs'
+      - 'coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  independent-receipt:
+    name: W65 exact SHA receipt critic (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pin actual W65 source
+        shell: bash
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          git diff --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fail closed stale/QUEUED/unrelated CI and real-Windows ACL assertions
+        shell: bash
+        run: |
+          node --check infra/client-state-runtime/client-candidate-acceptance-w65.mjs
+          node --test infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs infra/client-state-runtime/client-winps-fixture-w65.test.mjs
+  historical-w58-windows:
+    name: W58 pinned historical native ACL reproduction (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 41d755bb9ecd53bd509163f9219473c32d7439b6
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact historical source and Windows PowerShell ACL module
+        shell: powershell
+        run: |
+          if ((git rev-parse HEAD) -ne '41d755bb9ecd53bd509163f9219473c32d7439b6') { throw 'W58_SOURCE_PIN_CHANGED' }
+          Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+          Get-Command Get-Acl,Set-Acl | Select-Object Name,Source
+      - name: Windows W58 actual native ACL and upgrade restore negatives
+        shell: powershell
+        run: |
+          node --test --test-concurrency=1 infra/client-state-runtime/client-backup-acl-native-w58.test.mjs infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs infra/client-state-runtime/upgrade-backup-gate.test.mjs infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs
+      - name: No installed or final-SHA conclusion
+        if: always()
+        shell: powershell
+        run: Write-Host 'Historical W58 source qualification only; W59/W62 final SHA and installed/LIVE remain UNKNOWN.'

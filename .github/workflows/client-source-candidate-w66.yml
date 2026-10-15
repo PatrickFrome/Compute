@@ -1,0 +1,141 @@
+name: METAENGINE Client W66 Exact SHA Integration
+
+on:
+  push:
+    branches:
+      - work/metaengine-client-wave11-w66-20261015
+  pull_request:
+    paths:
+      - '.github/workflows/client-source-candidate-w59.yml'
+      - '.github/workflows/client-source-candidate-w66.yml'
+      - '.github/workflows/client-source-candidate-w51.yml'
+      - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/**'
+      - 'infra/client-state-runtime/**'
+      - 'coordination/operator-control/client-source-candidate-w59.manifest.json'
+      - 'coordination/operator-control/client-source-candidate-w66.manifest.json'
+      - 'coordination/operator-control/client-source-candidate-w51.manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-integrated-source:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - name: Verify one full clean source and install isolated Node dependencies
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git config --bool core.sparseCheckout || echo false)" = false
+          test -z "$(git status --porcelain)"
+          npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
+      - name: Frozen W43/W51 historical baselines and W59 current nineteen-parent ledger
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/client-source-candidate-w43.test.mjs \
+            infra/client-state-runtime/client-source-candidate-w51.test.mjs \
+            infra/client-state-runtime/client-source-candidate-w59.test.mjs \
+            infra/client-state-runtime/client-source-candidate-w66.test.mjs \
+            infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs \
+            infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs \
+            infra/client-state-runtime/client-current-acl-critic-w72.test.mjs \
+            infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs
+      - name: Full Client State Runtime Contracts
+        shell: bash
+        run: npm --prefix infra/client-state-runtime test
+      - name: Native context, W38 absent Owner, source sync, completion, critic, BrowserCell and existing scheduler
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/client-local-contracts-w38.test.mjs \
+            apps/metaengine-browser/test/explicit-local-supervisor-provider.test.mjs \
+            apps/metaengine-browser/test/explicit-local-supervisor-provider-w40.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-local-provider-pin-w40.test.mjs \
+            apps/metaengine-browser/test/browsercell-cdp-continuity-readback.test.mjs \
+            apps/metaengine-browser/test/browsercell-continuity-integration-w41.test.mjs \
+            apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs \
+            apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs \
+            apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs \
+            apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
+            apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs \
+            infra/client-state-runtime/client-backup-acl-native-w58.test.mjs \
+            infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs \
+            apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs \
+            apps/metaengine-browser/test/supervisor-continuity-lease.test.mjs \
+            apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs \
+            apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs \
+            apps/metaengine-browser/test/fleet-dag-cancellation-proof.test.mjs \
+            apps/metaengine-browser/test/client-package-convergence-w40.test.mjs \
+            apps/metaengine-browser/test/client-windows-source-identity.test.mjs \
+            apps/metaengine-browser/test/package-identity-candidates.test.mjs
+      - name: Wave11 W67-W70 source, custody, provenance, visual and transport negatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-owner-custody-w67.test.mjs \
+            apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs \
+            apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-transport-w70.test.mjs
+
+      - name: Backup and serial coding loop source guards, not installed qualification
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/client-backup-restore-staging-w47.test.mjs \
+            infra/client-state-runtime/upgrade-backup-gate.test.mjs \
+            infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs \
+            infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs \
+            infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs \
+            infra/client-state-runtime/own-postgres-birth-w61.test.mjs
+
+  frozen-me2-seven-views:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.3.3'
+      - name: Frozen ME2 seven view tests, typecheck, build and pack
+        working-directory: apps/me2-ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun run test:operator-observatory
+          bun run test:operator-primary
+          bun run typecheck
+          bun run build
+          bun run pack
+          node -e "const m=require('./me2-ui-dist/me2-ui-manifest.json');if(m.schema!=='me2.ui-bundle-manifest.v1'||m.git_sha!==process.env.ME2_BUILD_SHA)process.exit(1)"
+

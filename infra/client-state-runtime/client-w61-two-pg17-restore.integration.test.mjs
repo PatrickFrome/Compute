@@ -2,7 +2,7 @@
 // pinned; entirely new containers and generated archive/journal, never Owner.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomBytes,createHash} from 'node:crypto';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {createReadStream} from 'node:fs';
 import fs from 'node:fs/promises';
@@ -13,7 +13,7 @@ import {buildBackupEffectIntent,publishBackupEffectIntent,crossBackupEffectBarri
   readBackupEffectFence} from './pg17-backup-effect-barrier.mjs';
 import {sealClientBackupRestoreStagingW47,readClientBackupRestoreStagingW47}
   from './client-backup-restore-staging-w47.mjs';
-import {OWN_PG_BIRTH_SQL_W61} from './own-postgres-birth-w61.mjs';
+import {OWN_PG_BIRTH_SQL_W61,OWN_PG_OWNER_EPOCH_SQL_W61} from './own-postgres-birth-w61.mjs';
 
 const exec=promisify(execFile);
 const IMAGE='postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3';
@@ -82,8 +82,12 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     assert.notEqual(srcHostPid,dstHostPid);
     assert.notEqual(srcHostPid,process.pid);
     assert.notEqual(dstHostPid,process.pid);
+    const fixtureProject=randomUUID(),fixtureDevice=randomUUID();
     await dbsql(from,`CREATE SCHEMA destruktion_meta;
-      CREATE TABLE destruktion_meta.project_run_h205f22(project_id uuid primary key);
+      CREATE TABLE destruktion_meta.project_run_h205f22(
+        project_id uuid primary key,device_id uuid,client_id text,admin_grant_epoch bigint);
+      INSERT INTO destruktion_meta.project_run_h205f22
+        VALUES ('${fixtureProject}'::uuid,'${fixtureDevice}'::uuid,'owner-w61',9);
       CREATE TABLE public.w61_restore_rows(id integer PRIMARY KEY, body text NOT NULL);
       INSERT INTO public.w61_restore_rows VALUES (1,'alpha'),(2,'lambda-'||chr(1105)),(3,'omega');
       CREATE ROLE w61_fixture_reader NOLOGIN;
@@ -94,8 +98,18 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     const targetVersion=Number((await dbsql(to,'SHOW server_version_num')).trim());
     assert(sourceVersion>=170000&&sourceVersion<180000);
     assert(targetVersion>=170000&&targetVersion<180000);
-    const birth=(await dbsql(from,OWN_PG_BIRTH_SQL_W61.replace(/\\s+/g,' '))).trim();
-    assert.match(birth,/w61_db/); // fixed PostgreSQL catalog source, not Owner attestation
+    const birth=(await dbsql(from,OWN_PG_BIRTH_SQL_W61.replace(/\s+/g,' '))).trim();
+    assert.match(birth,/w61_db\|17[0-9]+\|t\|t/);
+    // Fixed W61 SQL with only generated test selectors; no Host/native claims.
+    const scopedSql=OWN_PG_OWNER_EPOCH_SQL_W61
+      .replace('$1::uuid',`'${fixtureProject}'::uuid`)
+      .replace('$2::uuid',`'${fixtureDevice}'::uuid`)
+      .replace('$3::text',"'owner-w61'::text")
+      .replace('$4::bigint','9::bigint');
+    assert.equal((await dbsql(from,scopedSql)).trim(),'1',
+      'exact scoped project/device/client/epoch exists in generated catalog');
+    assert.equal((await dbsql(from,scopedSql.replace('9::bigint','8::bigint'))).trim(),'0',
+      'wrong Owner epoch cannot use same PG birth');
     const sourceIdentity=(await dbsql(from,'SELECT system_identifier::text FROM pg_control_system()')).trim();
     const destIdentity=(await dbsql(to,'SELECT system_identifier::text FROM pg_control_system()')).trim();
     assert.match(sourceIdentity,/^[1-9][0-9]{9,19}$/);
@@ -115,7 +129,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     if(process.env.W61_SOURCE_SHA)assert.equal(sourceHead,process.env.W61_SOURCE_SHA);
     const ownerDigest=await hashFile(process.execPath);
     const pgDigest=(await docker('exec',from,'sha256sum','/usr/lib/postgresql/17/bin/postgres'))
-      .trim().split(/\\s+/)[0];
+      .trim().split(/\s+/)[0];
     assert.match(pgDigest,/^[a-f0-9]{64}$/);
     const rollbackPath=path.join(root,'rollback-preserved.bin');
     await fs.writeFile(rollbackPath,'GENERATED_ROLLBACK:'+rows,{flag:'wx',mode:0o600});
@@ -138,6 +152,12 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     const info=await fs.stat(archive);
     assert(info.size>1024);
     const archiveDigest=await hashFile(archive);
+    assert.equal((await dbsql(from,'SELECT system_identifier::text FROM pg_control_system()')).trim(),
+      sourceIdentity,'source cluster system identifier cannot drift across dump');
+    assert.equal((await dbsql(from,'SELECT pg_postmaster_start_time()')).trim(),
+      sourceBirth,'postmaster incarnation cannot change across physical archive');
+    assert.equal((await dbsql(from,scopedSql)).trim(),'1',
+      'Owner scoped project/device/client/epoch must survive source backup');
     const h=await fs.open(archive,'r');
     const magic=Buffer.alloc(5);
     try{await h.read(magic,0,5,0);}finally{await h.close();}
@@ -157,6 +177,8 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     };
     await docker('exec',to,'pg_restore','--exit-on-error','--single-transaction',
       '--no-owner','--no-password','-U','postgres','-d','w61_db','/tmp/w61-backup.dump');
+    assert.equal((await dbsql(to,scopedSql)).trim(),'1',
+      'restored real catalog retains exact Owner/project/epoch fixture');
     const restoredRows=(await dbsql(to,fingerprint)).trim();
     assert.equal(restoredRows,rows,'full content digest and row counts');
     assert.equal((await dbsql(to,`SELECT has_table_privilege('w61_fixture_reader',
@@ -165,6 +187,14 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
       'public.w61_restore_rows','INSERT')::text`)).trim(),'false','no privilege elevation');
     assert.equal(await hashFile(archive),archiveDigest,'archive immutable across restore');
     assert.equal(await hashFile(rollbackPath),rollbackDigest,'rollback immutable across restore');
+    const roleSql = `SELECT current_user || ':' ||
+      has_database_privilege(current_user,current_database(),'CONNECT')::text || ':' ||
+      has_table_privilege(current_user,'public.w61_restore_rows','SELECT')::text || ':' ||
+      has_database_privilege(current_user,current_database(),'CREATE')::text`;
+    const sourceRole=(await dbsql(from,roleSql)).trim().split(':');
+    const restoreRole=(await dbsql(to,roleSql)).trim().split(':');
+    assert.deepEqual(sourceRole,['postgres','true','true','true'],'source role rights measured in PG17');
+    assert.deepEqual(restoreRole,['postgres','true','true','true'],'destination role rights measured in PG17');
     const staging=await sealClientBackupRestoreStagingW47({
       journalDirectory:root,intent,archiveReceipt,tocReadback:toc,
       rollbackSha256:rollbackDigest,
@@ -179,9 +209,9 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
         pg_pid:dstHostPid,fingerprint:restoredRows,
       },
       roleReadback:{
-        source_role:'postgres',restore_role:'postgres',
-        source_connect:true,source_select:true,
-        restore_connect:true,restore_create:true,
+        source_role:sourceRole[0],restore_role:restoreRole[0],
+        source_connect:sourceRole[1]==='true',source_select:sourceRole[2]==='true',
+        restore_connect:restoreRole[1]==='true',restore_create:restoreRole[3]==='true',
       },
     });
     assert.equal(staging.state,'STAGING_PASSED');

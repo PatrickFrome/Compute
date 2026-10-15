@@ -326,9 +326,12 @@ test('ME2 supervisor renders the canonical work graph and keeps RSI adoption beh
     path.join(HERE, '..', '..', 'me2-ui', 'src', 'components', 'me2', 'pages', 'supervisor.tsx'),
     'utf8',
   );
-  assert.match(supervisor, /WORKGRAPH · ПРОЕКЦИЯ/);
+  // R97 uses the goal-to-task-to-agent projection, not the retired raw work_graph heading.
+  assert.match(supervisor, /title="Goal relationships"/);
   assert.match(supervisor, /data-testid="wg-projection"/);
-  assert.match(supervisor, /загрузка work_graph/);
+  assert.match(supervisor, /Goal relationships are unavailable/);
+  assert.match(supervisor, /setWg\(r\?\.ok === true \? r : null\)/);
+  assert.doesNotMatch(supervisor, /WORKGRAPH · ПРОЕКЦИЯ/);
   assert.match(supervisor, /rsi_adopt/);
   assert.match(supervisor, /RSI adopt/);
 });

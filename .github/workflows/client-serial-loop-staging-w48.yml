@@ -5,6 +5,7 @@ on:
       - 'infra/client-state-runtime/client-serial-loop-staging-w48*'
       - 'infra/client-state-runtime/client-serial-loop-staging-w56*'
       - 'infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64*'
+      - 'infra/client-state-runtime/client-serial-loop-development-worker-w64*'
       - '.github/workflows/client-serial-loop-staging-w48.yml'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/fleet-dag*'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs'
@@ -32,6 +33,9 @@ jobs:
           if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'W56_EXACT_HEAD_MISMATCH' }
           node --check infra/client-state-runtime/client-serial-loop-staging-w48.mjs
           node --check infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.mjs
+          node --test infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.test.mjs
+          node --check infra/client-state-runtime/client-serial-loop-development-worker-w64.mjs
+          node --test infra/client-state-runtime/client-serial-loop-development-worker-w64.test.mjs
           node --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs
   disposable-pg17:
     runs-on: ubuntu-24.04
@@ -72,6 +76,6 @@ jobs:
             test "$(id -un)" = postgres
             test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
             test -z "$(git status --porcelain)"
-            "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs
+            "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs infra/client-state-runtime/client-serial-loop-development-worker-w64.test.mjs infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.test.mjs
             "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
           '

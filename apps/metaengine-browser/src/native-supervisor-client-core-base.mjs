@@ -1,4 +1,5 @@
 import { BoundedWorkerObserver } from './bounded-worker-observer.mjs';
+import { nativeSupervisorRuntimeUrl } from './native-supervisor-endpoints.mjs';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { DevOsNativeTaskCycle } from './devos-native-task-cycle.mjs';
 import {
@@ -190,7 +191,7 @@ async function postStateHeartbeat({ identity, fetchImpl, payload } = {}) {
   const bodyText = JSON.stringify(payload);
   const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/state`;
   const headers = await identity.deviceHeaders('POST', requestPath, bodyText);
-  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
+  const response = await fetchImpl(nativeSupervisorRuntimeUrl('/v1/state'), {
     method: 'POST', headers, body: bodyText, cache: 'no-store',
   });
   if (response.status !== 202) throw new Error(`native_supervisor_watchdog_state_http_${response.status}`);
@@ -342,7 +343,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       const headers = await identity.deviceHeaders(method, requestPath, bodyText);
       const init = { method, headers, cache: 'no-store' };
       if (method !== 'GET') init.body = bodyText;
-      return boundedFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
+      return boundedFetch(nativeSupervisorRuntimeUrl(path), init);
     };
 
     const observeEffectBinding = prepareEffectBinding || (async (command) => {

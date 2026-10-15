@@ -140,6 +140,19 @@ OwnerEnrollmentObservation OwnerEnrollmentPipe::observeClientIdentity(
         return out;
     }
     out.client_pid = static_cast<DWORD>(clientPid);
+    // Bind the pipe-reported PID to an OS process birth before accepting a
+    // later Guardian Owner challenge; an unavailable process remains UNKNOWN.
+    HANDLE clientProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, out.client_pid);
+    if (clientProcess != nullptr) {
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (GetProcessTimes(clientProcess, &created, &exited, &kernel, &user)) {
+            ULARGE_INTEGER ticks{};
+            ticks.LowPart = created.dwLowDateTime;
+            ticks.HighPart = created.dwHighDateTime;
+            out.client_creation_time_100ns = ticks.QuadPart;
+        }
+        CloseHandle(clientProcess);
+    }
 
     if (!ImpersonateNamedPipeClient(pipe_)) {
         out.reason = "PIPE_CLIENT_IMPERSONATION_FAILED";

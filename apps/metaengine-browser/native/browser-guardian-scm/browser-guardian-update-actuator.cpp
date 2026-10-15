@@ -551,6 +551,11 @@ void attachOwnerProof(
     if (out == nullptr) return;
     out->session_id = client.session_id;
     out->client_pid = client.client_pid;
+    if (client.client_creation_time_100ns != 0) {
+        out->client_creation_time_100ns = std::to_string(client.client_creation_time_100ns);
+        out->client_process_incarnation_id = "pid:" + std::to_string(client.client_pid)
+            + ":created_100ns:" + out->client_creation_time_100ns;
+    }
     out->expected_owner_sid = narrowAscii(owner.record.expected_owner_sid);
     out->enrollment_evidence_sha256 = owner.record.enrollment_evidence_sha256;
     out->device_key_fingerprint_sha256 = owner.record.device_key_fingerprint_sha256;
@@ -1243,6 +1248,8 @@ std::string serializeGuardianUpdateActuatorResult(const GuardianUpdateActuatorRe
         + "\"pid\":" + std::to_string(result.pid) + ","
         + "\"session_id\":" + std::to_string(result.session_id) + ","
         + "\"client_pid\":" + std::to_string(result.client_pid) + ","
+        + "\"client_creation_time_100ns\":\"" + jsonEscape(result.client_creation_time_100ns) + "\","
+        + "\"client_process_incarnation_id\":\"" + jsonEscape(result.client_process_incarnation_id) + "\","
         + "\"creation_time_100ns\":" + std::to_string(result.creation_time_100ns) + ","
         + "\"process_incarnation_id\":\"" + jsonEscape(result.process_incarnation_id) + "\","
         + "\"expected_owner_sid\":\"" + jsonEscape(result.expected_owner_sid) + "\","

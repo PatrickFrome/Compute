@@ -13,6 +13,7 @@ import { createDevosSupervisorRoutes } from '../../apps/metaengine-browser/supab
 import { inspectStagingLease, sealStagingCheckpoint,
   inspectLiveCompletionForStaging, verifyStagingCheckpointDigest } from './client-serial-loop-staging-w48.mjs';
 import { inspectStagingNextLease } from './client-serial-loop-staging-w56.mjs';
+import { probeW64GeneratedDevelopmentWorker } from './client-serial-loop-development-worker-w64.mjs';
 
 const BIN = process.env.W48_PG17_BIN;
 const digest = v => createHash('sha256').update(v).digest('hex');
@@ -91,11 +92,17 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
     git(sourceDir,'add','--','calc.mjs','calc.test.mjs');
     git(sourceDir,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','red test');
     const base_sha=git(sourceDir,'rev-parse','HEAD');
+    const developmentBefore=await probeW64GeneratedDevelopmentWorker(sourceDir);
+    assert.equal(developmentBefore.head,base_sha,'real DevelopmentPlane must read red Git HEAD');
     assert.equal(runNode(sourceDir,'--test',tst),1,'real red test');
     await writeFile(src,'export const sum=(a,b)=>a+b;\n');
     git(sourceDir,'add','--','calc.mjs');
     git(sourceDir,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','bounded green edit');
     const head_sha=git(sourceDir,'rev-parse','HEAD');
+    const developmentAfter=await probeW64GeneratedDevelopmentWorker(sourceDir);
+    assert.equal(developmentAfter.head,head_sha,'real DevelopmentPlane must read repaired Git HEAD');
+    assert.notEqual(developmentBefore.head,developmentAfter.head);
+    assert.equal(developmentAfter.edit_authority,false);
     assert.notEqual(head_sha,base_sha);
     assert.equal(runNode(sourceDir,'--test',tst),0,'real green test');
     assert.equal(runNode(sourceDir,'--check',src),0,'real build syntax');
@@ -194,6 +201,7 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
       next_task_id,after_immediate_restarts:2,
       postmaster_birth_sequence:[first.birthMs,second.birthMs,third.birthMs],
       distinct_postmasters:new Set([first.pid,second.pid,third.pid]).size,
+      development_plane:'ACTUAL_READ_ONLY_WORKER',development_plane_source:developmentAfter.head,
       continuation:verdict.state,live:'UNKNOWN',effect_authority:false}));
   }catch(e){
     console.error('W56_OWNED_PG17_LOG_TAIL',await lifecycle.logTail());
