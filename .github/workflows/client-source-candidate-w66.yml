@@ -56,6 +56,8 @@ jobs:
             infra/client-state-runtime/client-source-candidate-w59.test.mjs \
             infra/client-state-runtime/client-source-candidate-w66.test.mjs \
             infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs \
+            infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs \
+            infra/client-state-runtime/client-current-acl-critic-w72.test.mjs \
             infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs
       - name: Full Client State Runtime Contracts
         shell: bash
@@ -85,6 +87,16 @@ jobs:
             apps/metaengine-browser/test/client-package-convergence-w40.test.mjs \
             apps/metaengine-browser/test/client-windows-source-identity.test.mjs \
             apps/metaengine-browser/test/package-identity-candidates.test.mjs
+      - name: Wave11 W67-W70 source, custody, provenance, visual and transport negatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-owner-custody-w67.test.mjs \
+            apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs \
+            apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-transport-w70.test.mjs
+
       - name: Backup and serial coding loop source guards, not installed qualification
         shell: bash
         run: |

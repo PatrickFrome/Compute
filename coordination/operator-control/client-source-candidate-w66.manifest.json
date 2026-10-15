@@ -114,45 +114,47 @@
     },
     {
       "pr": 1292,
-      "wave": "W67_PUBLISHED_NOT_FINAL_QUALIFIED",
-      "sha": "da61c6318cee921967b9beebc804c3694250beaa"
+      "wave": "W67_CURRENT_PUBLISHED_SOURCE_NOT_FINAL_CI",
+      "sha": "da3c7ef7799dacc9835e13777838c0e3f3503592"
     },
     {
       "pr": 1294,
-      "wave": "W68_PUBLISHED_NOT_FINAL_QUALIFIED",
-      "sha": "b16e54ec8cc421d6c4175dd89249154dff8fcf7f"
+      "wave": "W68_CURRENT_PUBLISHED_SOURCE_NOT_FINAL_CI",
+      "sha": "73501c8e37534721164f7ed349f004787c18302a"
     },
     {
       "pr": 1295,
-      "wave": "W69_PUBLISHED_NOT_FINAL_QUALIFIED",
-      "sha": "50085af5e422e691145f6a4c00f147a2e91e1422"
+      "wave": "W69_CURRENT_PUBLISHED_SOURCE_NOT_FINAL_CI",
+      "sha": "3b31239aac9abed880bb4d894f0ed5c1226ac525"
     },
     {
       "pr": 1297,
-      "wave": "W70_PUBLISHED_NOT_FINAL_QUALIFIED",
-      "sha": "b549de91b1f8ff74b47e8595d6354a4687150677"
+      "wave": "W70_CURRENT_PUBLISHED_SOURCE_NOT_FINAL_CI",
+      "sha": "3387c8bcbbf60b1522424d04d4c7cfecd66e0197"
     },
     {
       "pr": 1296,
-      "wave": "W71_PUBLISHED_NOT_FINAL_QUALIFIED",
-      "sha": "5b7fe710e333ba07ea42f894193102825a5a7ef5"
+      "wave": "W71_CURRENT_PUBLISHED_SOURCE_NOT_FINAL_CI",
+      "sha": "457e6d88e5b6838683145117159e732a3b42c745"
     },
     {
       "pr": 1293,
-      "wave": "W72_PUBLISHED_NOT_FINAL_QUALIFIED",
-      "sha": "805dabdfbd811924eab94820460669a76f35287e"
+      "wave": "W72_CURRENT_PUBLISHED_SOURCE_NOT_FINAL_CI",
+      "sha": "e0a2180e3b1d177d9d7d8c608a2060a5100060dc"
     }
   ],
   "pre_version_assembly_anchor": "cea13276841f27ba2b2e45a72038b8cb2e8b58c4",
   "current_tree_blobs": {
-    ".github/workflows/client-c2-existing-worker-w71.yml": "ea7a1efa0d5c67b4e8873f2026a15a50c5c94611",
+    ".github/workflows/client-c2-existing-worker-w71.yml": "feb6edfd22808b7b6b303b8fb56dcf2a77bc5ab7",
     ".github/workflows/client-candidate-acceptance-w65.yml": "be516923f7e4523b8f9c976f929afc70855ae865",
+    ".github/workflows/client-current-native-acl-w72.yml": "488e385c8a50c3c48ebca073ae5a911d4b5f23b6",
     ".github/workflows/client-host-owner-w60.yml": "18e046498eafefa410a2ad82e751bd8a071e7f60",
-    ".github/workflows/client-native-supervisor-w70.yml": "848d489d2722de3f8a5ab1104e1614205e07d291",
+    ".github/workflows/client-host-owner-w67.yml": "065178d59bfdcc1af7217894dc5d28c897f34e4a",
+    ".github/workflows/client-native-supervisor-w70.yml": "5a090d05376641cee02770980c3573c9f052879d",
     ".github/workflows/client-own-pg-w61.yml": "b633e3796a1910fe7230e9f9de06625317066c5a",
     ".github/workflows/client-serial-loop-staging-w48.yml": "d2fc249424234d592e061a7cac69907c4cdb62d2",
-    ".github/workflows/client-source-candidate-w66.yml": "51695db53bb93ad5b761f4f9c48c4a9dc0300409",
-    ".github/workflows/client-wave10-w62-source-r97.yml": "9b4f7cfdccbb0374f4f6ff7979dc28325b2ca634",
+    ".github/workflows/client-source-candidate-w66.yml": "b1acf9bf8271585c485c90106995f03b4a0e0f0f",
+    ".github/workflows/client-wave10-w62-source-r97.yml": "087f4fa4d80e7d3b8b4370e08c1f3dff3fca60d0",
     ".github/workflows/client-wave11-w68-release-provenance.yml": "c4a3f86b637e847d05e197ab2c8d002c81d17db1",
     "apps/me2-ui/src/components/me2/shell/command-palette.tsx": "a73c3dcbb900dc7eae1db839e6668bbddd5c359e",
     "apps/me2-ui/src/components/me2/shell/topbar.tsx": "873213220b4953c7bacc18e9ad6f1998f3615415",
@@ -166,24 +168,27 @@
     "apps/metaengine-browser/package-lock.json": "af21c8f4836b0db69995ea056d8262673ffb4e65",
     "apps/metaengine-browser/package.json": "c7102ca747a612492bc93b917fd4c1da66892ba0",
     "apps/metaengine-browser/scripts/verify-r97-visual-captures-w69.mjs": "ac01710c860f32e73a33b05c574fd21b1ed651db",
-    "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs": "c978bb37b57f6bd7874b99804da6cd4638fa1d6c",
-    "apps/metaengine-browser/src/client-backup-acl-native-w58.mjs": "5b6cd2312e52cb247bfac26308d7bc94ba39f1d7",
+    "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs": "27907920517d3c066b8885326c76f0d6d01bba43",
+    "apps/metaengine-browser/src/client-backup-acl-native-w58.mjs": "976f2c9893dbaa43833ae3e0f77a02dbe22aa55a",
     "apps/metaengine-browser/src/client-package-identity-w68.mjs": "618a0095085417e02e1a6720bc77a1689bd3c5b9",
     "apps/metaengine-browser/src/client-source-sync-native-w55.mjs": "29c10b49bf4f4b5024bc0c208f35910aa8278409",
     "apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs": "d2956a87bd26a5033cfec602969e884c20fbfddd",
+    "apps/metaengine-browser/src/final-runtime-activation.mjs": "d378d7a742df2385cac945144f38d6aa3870de29",
+    "apps/metaengine-browser/src/guardian-client-kernel-birth-w67.mjs": "be7b1380fd12dfcd09e1315accda6e55df4483ec",
     "apps/metaengine-browser/src/host-agent-protocol.mjs": "67e2403ffa5ff8fbfc7da643120e2082707e6c6a",
-    "apps/metaengine-browser/src/host-agent-remote-composition.mjs": "718672869d5d9818ca705458a2c77a7b77febe11",
-    "apps/metaengine-browser/src/host-agent-runtime.mjs": "0a3cf833a0c1d6f0f4ff1eee87d59785099ef09a",
-    "apps/metaengine-browser/src/host-native-owner-producers-w60.mjs": "558ccc946e0645a918104f19b981072e0a03de1e",
-    "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs": "6bd6c118c9d135dc3028e6515f1e0f08207af3fd",
-    "apps/metaengine-browser/src/main.mjs": "6c0164ccdba4de3ce1f944d4657c9fc749359414",
+    "apps/metaengine-browser/src/host-agent-remote-composition.mjs": "70070b67f803187a84faa48e3ed450c68d44422e",
+    "apps/metaengine-browser/src/host-agent-runtime.mjs": "ceb38778db87ef22d13a58e19b380a12e9fba042",
+    "apps/metaengine-browser/src/host-native-owner-producers-w60.mjs": "776d89a771518959305ed8a01ad769270a0defc7",
+    "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs": "a6d404763ced2ef34d229489d25660a7a3e473b1",
+    "apps/metaengine-browser/src/main.mjs": "95d8ab7ddd8c8f4b6d53b23ac8f51257c962848e",
     "apps/metaengine-browser/src/managed-task-project-host.mjs": "f7c7594f987e7c8f37f0223d54a43ef1780c2e69",
     "apps/metaengine-browser/src/native-owner-verifier-w52.mjs": "5ae017dee407fe5f13b74f95a0d7bfe17826dda1",
     "apps/metaengine-browser/src/native-supervisor-client-base.mjs": "b3a0a300dc2118d1d2ae55c5791cdffaf5185362",
     "apps/metaengine-browser/src/native-supervisor-client-core-base.mjs": "561f925f7c9f11a1ac6c008e024b5dbec550d07a",
     "apps/metaengine-browser/src/native-supervisor-client.mjs": "2e0e660fdbca91f355927bb63b76b2e1be40b5aa",
+    "apps/metaengine-browser/src/native-supervisor-endpoints.mjs": "7b7acaadf557708dd40050b5c0a8e08ec4186813",
     "apps/metaengine-browser/src/operator-canonical-native-w44.mjs": "f6c89742d822528d00ce299ad1ececfc02a5136c",
-    "apps/metaengine-browser/src/supervisor-device-identity.mjs": "c26270c891e5de243350e9d91c73f55667100698",
+    "apps/metaengine-browser/src/supervisor-device-identity.mjs": "8cbeb3b1bd8252b75dcc0840334f264dbd057f12",
     "apps/metaengine-browser/src/workspace-git-hardening.mjs": "3fc226b694e7e012e50c40c0c481d4b908fdd1d5",
     "apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs": "721d9f9550d88b8e75174b34ac9fd94886ddf22e",
     "apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs": "49720adf61a5f69412e1e1c02adb7fb32c1f284f",
@@ -191,31 +196,34 @@
     "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs": "acf84ea9fad6a5700465b6722e36ab51ac195b60",
     "apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs": "be57523967db034ce44fc3600c6bfec2f11de03e",
     "apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs": "ca4c1d0594ac88740795d4082dd3a703ea32ff3f",
+    "apps/metaengine-browser/test/host-owner-custody-w67.test.mjs": "5e86e96a9fece8d0b081274af58e4b86b4c1b474",
     "apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs": "bc679700720b2e76a7225b617be8b806baf27f53",
-    "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs": "449516fe452068e5345d8b008040f781578b8cdf",
+    "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs": "6186eed213feaff9bb2f8b137c8cfd35840f69a6",
     "apps/metaengine-browser/test/installer-provenance.test.mjs": "e39683e8cfa3e53c7e0cbc60d95c4d2782ace252",
-    "apps/metaengine-browser/test/me2-r85-visual-evidence.mjs": "36164aa9be8e285315235066af03ff8c6ec1c6b7",
+    "apps/metaengine-browser/test/me2-r85-visual-evidence.mjs": "697962bf260f6de0cec38585586e9044741d8bc6",
     "apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs": "381de0a29807caf9bd09b7a238a1327d9d160148",
     "apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs": "049e1e67bbc9ad1a050182d1409eaab07a575ee3",
-    "apps/metaengine-browser/test/native-supervisor-transport-w70.test.mjs": "d497cb8a1824a8168c06ef071b501ed6b9453fa6",
+    "apps/metaengine-browser/test/native-supervisor-transport-w70.test.mjs": "f652f88545d62ea00fd3368645997dd01e262531",
     "apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs": "4e077e3a6335b70cad2f175d5c5f8d35e2ea993b",
     "apps/metaengine-browser/test/r95-utility-panel-docking.test.mjs": "41e89fbb2c6d453137471c2b9970095fdefbde07",
     "apps/metaengine-browser/test/r95e-command-palette-agent-binding.test.mjs": "87ec8232e36627dfc1069e8560cc6df5629cf1ea",
-    "apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs": "440d7ac11bb85b60eabbcc4df5ae6d875b321750",
+    "apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs": "85b5863cc66ef1305bb1721e593b7d4a127a8717",
     "apps/metaengine-browser/test/source-sync-fixture-diagnostics-w63.mjs": "91d92be41a4add219e2538673d62665369e62a75",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "edb7b0573716c66b4b96a529eec1231799f75e14",
-    "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "075bfb8bec844dba850dc713f5a47e86228fab60",
-    "infra/client-state-runtime/client-backup-acl-native-w58.test.mjs": "1a54bbd2d4f2e36cd9fbc46de2d7996f90f5baad",
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "bea4c8bb7b76baf216c8b6c95cda55a4cda55fc1",
+    "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "9e2eb01f3e2cac9fe31e97165687237b0aaa00ee",
+    "infra/client-state-runtime/client-backup-acl-native-w58.test.mjs": "49cee6d9ab92c1a5f5aadb7f83289fd6569d86aa",
     "infra/client-state-runtime/client-backup-restore-staging-w47.mjs": "ca52e2c7eb7934c62955479fd0e61c64f51f7401",
-    "infra/client-state-runtime/client-c2-existing-worker-w71.mjs": "d6ca6e93727bc69213674db16fbcf059f81b6dd7",
-    "infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs": "f91b7aa545624c2bade9e816fffc39ab0d3e09e7",
+    "infra/client-state-runtime/client-c2-existing-worker-w71.mjs": "934248a87a20cab7b01cc559f7de678b1201ae64",
+    "infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs": "3514ee9301a16a17aa1681744dbec12ce8bde610",
     "infra/client-state-runtime/client-candidate-acceptance-w49.mjs": "96d8855731e85fc8157fc11f940c220aa5e27005",
     "infra/client-state-runtime/client-candidate-acceptance-w57.mjs": "d0a2688c8e75dceb1ad9a64020b83d3a5b95b4a5",
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
+    "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
+    "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs": "711d873db8e570242425f9b8d48e99894060680d",
-    "infra/client-state-runtime/client-serial-loop-development-worker-w64.mjs": "427965da9e21b736dac20f7e80292a74bdc275d7",
+    "infra/client-state-runtime/client-serial-loop-development-worker-w64.mjs": "9543317e223f96e9c73f3881f6b68bcb565237f6",
     "infra/client-state-runtime/client-serial-loop-development-worker-w64.test.mjs": "817a56479059fcfe47aa0c8450123095fd3fb000",
     "infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.mjs": "73534e546fab171058ec80df01efe548ca079c23",
     "infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.test.mjs": "7a2aec90a9cefc5d6dfc536ee0b32eb9c7ba2d0a",
@@ -224,7 +232,7 @@
     "infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs": "af2fbcc34a94f3d248c0e48bedba2180f173d24a",
     "infra/client-state-runtime/client-source-candidate-w51.test.mjs": "afbdfeadae606b38083cda5515a720166f7555a5",
     "infra/client-state-runtime/client-source-candidate-w59.test.mjs": "82906153447c482b8fe5bc490763ec57e0bb7b35",
-    "infra/client-state-runtime/client-source-candidate-w66.test.mjs": "e5935cf90c67d13ae2ba46dfd491aac016d8136d",
+    "infra/client-state-runtime/client-source-candidate-w66.test.mjs": "44a4048d503c0a4a4d2acd570d5838fff7a546bb",
     "infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs": "6c11865c4886149ab085c5de01eb12a1f8cbc583",
     "infra/client-state-runtime/client-winps-fixture-w65.mjs": "4cddb8206bac1bb0586bfb64c96819acd5009818",
     "infra/client-state-runtime/client-winps-fixture-w65.test.mjs": "31b33f77a028a94e6edf1b06ff0bb24b3b46e0ca",
@@ -232,9 +240,11 @@
     "infra/client-state-runtime/operator-readonly-gateway.mjs": "816b3da164d012d6365483bb663f00a2ec32bb16",
     "infra/client-state-runtime/own-postgres-birth-w61.mjs": "4cef06ef8a8a6c9a8e25419879dc442623b707ef",
     "infra/client-state-runtime/own-postgres-birth-w61.test.mjs": "bbb06f95fb9a9c34c9d9f8be2d842e1918d317e5",
-    "infra/client-state-runtime/package.json": "87a3694093f9717fb1c1d322ecf617d289577b16",
+    "infra/client-state-runtime/package.json": "34bd4ba0e07df86e3a11aa0685fcbe2529884177",
     "infra/client-state-runtime/README-host-native-owner-w60.md": "d308afbc4f3ec05be6670a3db8d2c29a3c3a6ddc",
-    "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34"
+    "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34",
+    "infra/client-state-runtime/upgrade-backup-gate.test.mjs": "fe6011a9871b9cfa2d349e0b107a1b4d608f7f8b",
+    "infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs": "ecd535de5e25fa4c2017d09a050abc0d23f5face"
   },
   "candidate_sha_rule": "PR exact head; no self-reference; renew ledger after every committed source change",
   "integrated_source_components": [
@@ -257,7 +267,7 @@
   "proof_levels": {
     "SOURCE": "INTEGRATED_REVIEW_REQUIRED",
     "CI": "EXACT_HEAD_REQUALIFICATION_PENDING",
-    "STAGING": "UNKNOWN_PENDING_INTEGRATED_PHYSICAL_PG17_AND_C2",
+    "STAGING": "UNKNOWN_PENDING_INTEGRATED_PG17_C2_AND_NATIVE_OWNER",
     "INSTALLED": "UNKNOWN",
     "LIVE": "UNKNOWN"
   },
@@ -275,33 +285,34 @@
   "wave11_integrated_unqualified": [
     {
       "pr": 1292,
-      "sha": "da61c6318cee921967b9beebc804c3694250beaa",
-      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+      "sha": "da3c7ef7799dacc9835e13777838c0e3f3503592",
+      "proof": "INTEGRATED_SOURCE_CI_PENDING"
     },
     {
       "pr": 1294,
-      "sha": "b16e54ec8cc421d6c4175dd89249154dff8fcf7f",
-      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+      "sha": "73501c8e37534721164f7ed349f004787c18302a",
+      "proof": "INTEGRATED_SOURCE_CI_PENDING"
     },
     {
       "pr": 1295,
-      "sha": "50085af5e422e691145f6a4c00f147a2e91e1422",
-      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+      "sha": "3b31239aac9abed880bb4d894f0ed5c1226ac525",
+      "proof": "INTEGRATED_SOURCE_CI_PENDING"
     },
     {
       "pr": 1297,
-      "sha": "b549de91b1f8ff74b47e8595d6354a4687150677",
-      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+      "sha": "3387c8bcbbf60b1522424d04d4c7cfecd66e0197",
+      "proof": "INTEGRATED_SOURCE_CI_PENDING"
     },
     {
       "pr": 1296,
-      "sha": "5b7fe710e333ba07ea42f894193102825a5a7ef5",
-      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+      "sha": "457e6d88e5b6838683145117159e732a3b42c745",
+      "proof": "INTEGRATED_SOURCE_CI_PENDING"
     },
     {
       "pr": 1293,
-      "sha": "805dabdfbd811924eab94820460669a76f35287e",
-      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+      "sha": "e0a2180e3b1d177d9d7d8c608a2060a5100060dc",
+      "proof": "INTEGRATED_SOURCE_CI_PENDING"
     }
-  ]
+  ],
+  "manifest_generated_from_local_head": "80e74ace3a90feab2b1ac5f0e4a56012edf48dbf"
 }
