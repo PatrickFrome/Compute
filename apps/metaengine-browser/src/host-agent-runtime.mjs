@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { readClientBackupAclNativeW58 } from './client-backup-acl-native-w58.mjs';
 import { createHostAgentServer } from './host-agent-ipc.mjs';
 import { hostAgentProtocolManifest } from './host-agent-protocol.mjs';
 
@@ -41,6 +43,8 @@ export class HostAgentRuntime {
   #developmentPlane;
   #fastControl;
   #browserBoundary;
+  #backupDirectory;
+  #backupOwnerIncarnation;
   #startedAt = null;
   #requests = 0;
   #browserPlanRequests = 0;
@@ -54,10 +58,15 @@ export class HostAgentRuntime {
     browserStatus = null,
     browserPlanExecute = null,
     browserPlanCancel = null,
+    backupDirectory = null,
+    readBackupOwnerIncarnation = null,
     netModule,
   } = {}) {
     if (!developmentPlane || typeof developmentPlane.request !== 'function') throw new Error('host_agent_development_plane_required');
     if (!fastControl || typeof fastControl.invoke !== 'function') throw new Error('host_agent_fast_control_required');
+    // Host-owned configured directory only. IPC must never select a filesystem path.
+    this.#backupDirectory = backupDirectory;
+    this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
     this.#browserBoundary = bindBrowserBoundary({ browserClient, browserStatus, browserPlanExecute, browserPlanCancel });
@@ -78,6 +87,17 @@ export class HostAgentRuntime {
         HOST_STATUS: async () => {
           this.#requests += 1;
           return this.snapshot();
+        },
+        BACKUP_ACL_READBACK: async (payload) => {
+          this.#requests += 1;
+          if (Object.keys(payload || {}).length) throw new Error('host_backup_acl_payload_forbidden');
+          // Absence of a Host-pinned archive root remains UNKNOWN, not success.
+          const root = this.#backupDirectory;
+          return readClientBackupAclNativeW58({
+            backupDirectory: root,
+            archivePath: root ? path.win32.join(root,'postgresql-17-snapshot.dump') : null,
+            readOwnerIncarnation: this.#backupOwnerIncarnation,
+          });
         },
         SOURCE_STATUS: async () => {
           this.#requests += 1;

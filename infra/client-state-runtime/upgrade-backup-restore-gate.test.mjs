@@ -43,7 +43,7 @@ async function fixture(t){
 test('TOC-qualified archive without full disposable restore is NOT restore-qualified',async t=>{
   const x=await fixture(t); delete x.restoreReceipt;
   const result=await verifyInstalledUpgradeBackup(x);
-  assert.equal(result.backup_verified,true);
+  assert.equal(result.backup_verified,false);
   assert.equal(result.restore_verified,false);
   assert.equal(result.restore_reason,'RESTORE_RECEIPT_MISSING_OR_UNQUALIFIED');
   assert.equal(result.upgrade_authorized,false);
@@ -51,11 +51,11 @@ test('TOC-qualified archive without full disposable restore is NOT restore-quali
 test('self-asserted synthetic receipt is consistent but NEVER physical restore proof',async t=>{
   const x=await fixture(t);
   const r=await verifyInstalledUpgradeBackup(x);
-  assert.equal(r.backup_verified,true);
+  assert.equal(r.backup_verified,false);
   assert.equal(r.restore_receipt_consistent,true);
   assert.equal(r.restore_verified,false);
   assert.equal(r.physical_restore_proven,false);
-  assert.equal(r.reason,'BACKUP_AND_RESTORE_RECEIPT_CONSISTENT_PHYSICAL_PROOF_REQUIRED');
+  assert.match(r.reason,/^NATIVE_BACKUP_ACL_/);
   assert.equal(r.upgrade_authorized,false);
   assert.equal(r.automatic_retry_allowed,false);
   assert.equal(r.authority_effect,false);
