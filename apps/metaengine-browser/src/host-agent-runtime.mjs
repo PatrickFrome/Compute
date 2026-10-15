@@ -143,7 +143,9 @@ export class HostAgentRuntime {
                   /^[A-Za-z0-9_.:-]{1,128}$/.test(first.project_id || '') &&
                   /^[A-Za-z0-9_.:-]{8,128}$/.test(first.process_incarnation_id || '') &&
                   guardian?.schema === 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' &&
-                  guardian.state === 'READY' && guardian.owner_binding_proven === true &&
+                  guardian.fixture_classification == null && guardian.staging !== true &&
+                  guardian.synthetic !== true && guardian.untrusted !== true &&
+                  guardian.authority_effect === false && guardian.state === 'READY' && guardian.owner_binding_proven === true &&
                   guardian.device_binding_proven === true &&
                   guardian.guardian_client_kernel_birth_verified === true &&
                   guardian.guardian_client_pid === kernel.pid &&
@@ -151,6 +153,13 @@ export class HostAgentRuntime {
                   /^[0-9a-f]{64}$/i.test(guardian.guardian_enrollment_evidence_sha256 || '') &&
                   /^[0-9a-f]{64}$/i.test(guardian.guardian_device_key_fingerprint_sha256 || '') &&
                   first.device_key_fingerprint_sha256 === guardian.guardian_device_key_fingerprint_sha256 &&
+                  first.owner_id === last.owner_id && first.device_id === last.device_id &&
+                  first.project_id === last.project_id &&
+                  /^[A-Za-z0-9_.:-]{1,128}$/.test(first.owner_id || '') &&
+                  /^[A-Za-z0-9_.:-]{1,128}$/.test(first.device_id || '') &&
+                  Number.isFinite(Date.parse(first.observed_at)) &&
+                  Date.parse(first.observed_at) >= Date.now() - 30000 &&
+                  Date.parse(first.observed_at) <= Date.now() + 5000 &&
                   Date.parse(last.observed_at) >= Date.now() - 30000 &&
                   Date.parse(last.observed_at) <= Date.now() + 5000) {
                 owner = Object.freeze({ ...last });
