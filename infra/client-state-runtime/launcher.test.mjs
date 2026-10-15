@@ -29,10 +29,21 @@ async function freePort() {
   return port;
 }
 
+async function distinctFreePorts(count) {
+  const reservations = [];
+  try {
+    for (let i = 0; i < count; i++) reservations.push(await bind());
+    const ports = reservations.map(({ port }) => port);
+    assert.equal(new Set(ports).size, count, 'test runtime ports must be distinct');
+    return ports;
+  } finally {
+    await Promise.all(reservations.map(({ server }) => new Promise(resolve => server.close(resolve))));
+  }
+}
 async function setup(t) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'compute-launcher-test-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
-  const databasePort = await freePort();
+  const [databasePort, apiPort, edgePort] = await distinctFreePorts(3);
   await writeFile(path.join(dataDir, 'postmaster.pid'), `${process.pid}\n${dataDir}\n0\n${databasePort}\n127.0.0.1\n`);
   const input = {
     mode: 'local',
@@ -41,8 +52,8 @@ async function setup(t) {
     pgBinDir: here,
     pgDataDir: dataDir,
     denoPath: process.execPath,
-    apiPort: await freePort(),
-    edgePort: await freePort(),
+    apiPort,
+    edgePort,
     healthIntervalMs: 100,
     startupTimeoutMs: 10000,
   };
