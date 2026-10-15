@@ -66,14 +66,15 @@ async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emi
   holdQuit = false, firstRunAutoConnect } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
-    if (/^METAENGINE_(STATE_PROVIDER|SUPERVISOR_BASE_URL|FALLBACK_SUPERVISOR_BASE_URL|LOCAL_STATE_INSTANCE_ID|LOCAL_PROVIDER_|PROFILE_PROBE_|SINGLETON_TEST_)/.test(name)) delete env[name];
+    if (/^(?:METAENGINE_|SUPABASE_|DATABASE_URL$|PG(?:HOST|PORT|USER|PASSWORD|DATABASE|DATA|SERVICE)|GITHUB_TOKEN$|GH_TOKEN$|COMPUTE_RUNTIME_HOST_CONFIG$|NODE_OPTIONS$)/.test(name)) delete env[name];
   }
   const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, quitAfterBoot,
     installerAfterBoot, installerDuringStartup, holdQuit, firstRunAutoConnect };
   let output;
   try {
     output = await execute(process.execPath, [runner], {
-      env: { ...env, APPDATA: f.appData, XDG_CONFIG_HOME: f.appData, ME2_INTEGRATION: '0',
+      env: { ...env, HOME: f.directory, USERPROFILE: f.directory, APPDATA: f.appData,
+        LOCALAPPDATA: path.join(f.directory, 'localappdata'), XDG_CONFIG_HOME: f.appData, ME2_INTEGRATION: '0',
         METAENGINE_SINGLETON_TEST_OPTIONS: JSON.stringify(options), ...extraEnv },
       timeout: 15000, windowsHide: true,
     });
@@ -147,6 +148,26 @@ for (const entry of entries) {
     if(entry==='final-runtime-entry.mjs')assert.ok(eventIndex(result,'runtime-import')<eventIndex(result,'me2-start'));
     assert.equal(result.boot_state,'READY');
     assert.equal(f.requests.length,1);
+  });
+
+  test(entry + ': invalid attached Keeper config stays BLOCKED and cannot publish a READY endpoint', async t => {
+    const f = await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result = await launch(f, { entry, firstRunAutoConnect: {
+      ownerFile: f.ownerFile, ownerJson: JSON.stringify({
+        schema: LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, profile: LOCAL_STATE_PROVIDER_PROFILE,
+        provider: 'LOCAL_POSTGRES', base_url: 'https://hosted.example.invalid/unsafe',
+        runtime_identity_file: f.identityFile,
+      }), outcome: 'CONFIGURED',
+    }, extraEnv: { ME2_INTEGRATION: '1', METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY' } });
+    assert.equal(result.code, 1, result.stderr);
+    assert.ok(eventIndex(result, 'autoconnect-completed') >= 0);
+    assert.equal(event(result, 'fetch'), undefined);
+    assert.equal(event(result, 'runtime-import'), undefined);
+    assert.equal(event(result, 'me2-import'), undefined);
+    assert.equal(result.boot_state, 'BLOCKED');
+    assert.equal(f.requests.length, 0);
+    assert.match(result.stderr, /LOCAL_PROVIDER_STARTUP_BLOCKED/);
   });
 
   test(entry + ': missing attached descriptor cannot import the runtime or ME2',async t=>{
