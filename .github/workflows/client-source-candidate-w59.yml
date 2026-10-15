@@ -1,9 +1,9 @@
 name: METAENGINE Client W59 Exact Integrated Qualification
 
 # W82: Legacy W59 qualification is *explicitly* re-run on the final exact
-# integrated SHA via workflow_dispatch when its physical PG17 and current source
-# gates are required. W66/W73 keep historical seals and the current ledger
-# separate; an omitted or skipped workflow never becomes a passing final gate.
+# integrated SHA when the W66/W73 candidate manifest changes; its physical PG17
+# gates are NOT optional. GitHub dispatch requires workflow on default branch
+# (not present on main). No filtered/skipped workflow is a passing gate.
 # Avoid queuing six W59 jobs on every unrelated component/Browser change.
 on:
   pull_request:
@@ -11,6 +11,8 @@ on:
       - '.github/workflows/client-source-candidate-w59.yml'
       - 'coordination/operator-control/client-source-candidate-w59.manifest.json'
       - 'coordination/operator-control/client-source-candidate-w51.manifest.json'
+      - 'coordination/operator-control/client-source-candidate-w66.manifest.json'
+      - 'coordination/operator-control/client-source-candidate-w73.manifest.json'
   workflow_dispatch:
 
 permissions:
