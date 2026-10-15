@@ -65,6 +65,7 @@ import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervis
 import { explicitLocalSupervisorBase } from './explicit-local-supervisor-provider.mjs';
 import { assertClientNativeShellIpcSender, assertGenericShellCommandAllowed, projectOwnPostgresClientConnection } from './client-native-trust-boundary.mjs';
 import { createOperatorNativeContextReader } from './operator-native-context-bridge.mjs';
+import { createOperatorCanonicalNativeBindingReadback } from './operator-canonical-native-w44.mjs';
 import {
   normalizeClientAgentId,
   normalizeClientAgentSelectionReadback,
@@ -438,10 +439,15 @@ function assertShellSender(event) {
   return assertClientNativeShellIpcSender({ event, shellView, primaryShellMode, primaryShellUrl });
 }
 
-// This source slice registers the typed IPC but intentionally leaves the trusted
-// Owner -> local Gateway credential readback unbound until native Owner proof is
-// independently integrated. No env-derived key, guessed port or hosted fallback.
-const operatorContextReader = createOperatorNativeContextReader();
+// W44: main-process-only trust wiring. Never accept renderer fields, env keys,
+// PID-only health or a Guardian READY projection as a verified Owner binding.
+// The existing Supervisor must expose a fully qualified native Owner/Guardian/
+// installed-bytes/own-PG verifier. Until it does, this remains UNKNOWN.
+const operatorContextReader = createOperatorNativeContextReader({
+  getTrustedBinding: createOperatorCanonicalNativeBindingReadback({
+    nativeVerifier: () => nativeSupervisor?.getTrustedOperatorOwnerVerifier?.() ?? null,
+  }),
+});
 function assertOperatorContextSender(event) {
   assertShellSender(event);
   if (event.senderFrame !== shellView.webContents.mainFrame ||
