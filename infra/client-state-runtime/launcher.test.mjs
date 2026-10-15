@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure, runtimeEnvironment } from './launcher.mjs';
+import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure, classifyEdgeCapabilityReadiness, runtimeEnvironment } from './launcher.mjs';
 import { captureStartupSource, safeRuntimePolicy, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
 import { ATTACHED_ONBOARDING_ENTRY, BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
 
@@ -89,6 +89,34 @@ test('health diagnostics accept only finite public categories and bounded metada
     { consecutive_failures: 4 }, { http_status: 600 }, { http_status: null }, { authority_effect: true },
     { code: 'postgres_incarnation_mismatch' }, { response_body: 'synthetic-private-response' },
   ]) assert.throws(() => normalizeRuntimeHealthFailure({ ...diagnostic, ...mutation }), /health_failure_contract_invalid/);
+});
+
+test('Edge readiness publishes only exact capability reason categories, not remote strings', () => {
+  const health = reason => ({ runtime_ready: false, capability_health: {
+    schema: 'metaengine.native-browser-supervisor.capability-health.v1', state: 'UNATTESTED',
+    reason, readiness_eligible: false, authority_effect: false,
+  } });
+  const codes = {
+    CAPABILITY_RPC_UNAVAILABLE: 'health_capability_rpc_unavailable',
+    RUNTIME_NOT_DEPLOYED: 'health_capability_runtime_not_deployed',
+    ATTESTATION_TIMEOUT: 'health_capability_attestation_timeout',
+    DB_SOURCE_ATTESTATION_FAILED: 'health_capability_source_mismatch',
+    DB_SOURCE_READ_FAILED: 'health_capability_db_read_failed',
+  };
+  for (const [reason, code] of Object.entries(codes)) {
+    assert.equal(classifyEdgeCapabilityReadiness(health(reason)), code);
+    assert.equal(normalizeRuntimeHealthFailure({ schema: 'metaengine.client-state.health-failure.v1',
+      code, component: 'edge', consecutive_failures: 3, http_status: null, authority_effect: false }).code, code);
+    assert.throws(() => normalizeRuntimeHealthFailure({ schema: 'metaengine.client-state.health-failure.v1',
+      code, component: 'api', consecutive_failures: 1, http_status: null, authority_effect: false }),
+      /health_failure_contract_invalid/);
+  }
+  for (const modified of [health('__proto__'), health('private-secret-or-path'),
+    { ...health('DB_SOURCE_READ_FAILED'), runtime_ready: true },
+    { ...health('ATTESTATION_TIMEOUT'), capability_health: { ...health('ATTESTATION_TIMEOUT').capability_health, authority_effect: true } },
+    { ...health('ATTESTATION_TIMEOUT'), capability_health: { ...health('ATTESTATION_TIMEOUT').capability_health, schema: 'forged' } },
+    { ...health('ATTESTATION_TIMEOUT'), capability_health: { ...health('ATTESTATION_TIMEOUT').capability_health, readiness_eligible: true } },
+    null, 'not-json-object']) assert.equal(classifyEdgeCapabilityReadiness(modified), 'health_capability_unattested');
 });
 
 test('requires local mode, explicit PostgreSQL ownership, loopback URL and distinct ports', () => {
