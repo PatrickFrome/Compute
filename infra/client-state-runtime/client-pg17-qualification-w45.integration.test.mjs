@@ -229,6 +229,19 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       }
       const insert = n => admin.unsafe("INSERT INTO destruktion_meta.devos_fleet_claim_h205f22(task_id,workspace_id,lease_generation,agent_id,expires_at) VALUES($1,$2,1,$3,clock_timestamp()+interval '30 seconds') RETURNING claim_id", [tasks[n], ws, 'agent_' + n]);
       const attempts = await Promise.allSettled([insert(0), insert(1), insert(2)]);
+      if (attempts.filter(a => a.status === 'fulfilled').length !== 1) {
+        // Failure-only observability of REAL DB values; no generated Owner data is sensitive.
+        const claims = await admin.unsafe(`SELECT c.claim_id,c.state,c.expires_at,clock_timestamp() AS observed_at,
+          t.role,t.task_spec#>>'{fleet_coordination_v1,resource}' AS resource,
+          t.task_spec#>>'{fleet_coordination_v1,slots}' AS slots
+          FROM destruktion_meta.devos_fleet_claim_h205f22 c
+          JOIN destruktion_meta.devos_fleet_task_h205f22 t USING(task_id)
+          ORDER BY c.claim_id`);
+        const triggers = await admin.unsafe(`SELECT tgname,tgenabled,pg_get_triggerdef(oid) AS definition
+          FROM pg_trigger WHERE tgrelid='destruktion_meta.devos_fleet_claim_h205f22'::regclass`);
+        console.error('W61_PG17_HOST_CAP_FAILURE', JSON.stringify({claims,triggers,
+          outcomes:attempts.map(a=>a.status)}));
+      }
       assert.equal(attempts.filter(a => a.status === 'fulfilled').length, 1, 'HOST 2-slot capacity is strict under concurrent claims');
       assert(attempts.filter(a => a.status === 'rejected').every(a => isCode(a.reason, '55000')));
       const [active] = await admin.unsafe("SELECT count(*)::int AS count FROM destruktion_meta.devos_fleet_claim_h205f22 WHERE state='ACTIVE'");
