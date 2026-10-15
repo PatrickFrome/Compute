@@ -13,6 +13,7 @@ import postgres from 'postgres';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
+import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES, probeNativeSupervisorRuntimeCapabilities } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
 
 const exec = promisify(execFile);
 const bundleDirectory = process.env.LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY;
@@ -212,6 +213,17 @@ test('verified bundled onboarding and attached host restart preserve an existing
   await fs.writeFile(tocPath, restorePlan.selected.join('\n') + '\n', { flag: 'wx', mode: 0o600 });
   await privateExec(path.join(bin, 'pg_restore.exe'), ['--schema-only', '--no-owner', '--exit-on-error', '--single-transaction',
     '--host=127.0.0.1', '--port=' + port, '--username=' + owner, '--dbname=postgres', '--use-list=' + tocPath, dump], env, 'schema_restore');
+  // A schema-only restored Owner must carry the exact DB capability
+  // attestation function. Catalog-only synthetic JSON can never qualify Edge.
+  const [restoredCapabilityRow] = await sql.unsafe('SELECT public.devos_runtime_capabilities_v1() AS capabilities');
+  assert.deepEqual(restoredCapabilityRow.capabilities, NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES,
+    'restored capability RPC must match the exact browser source protocol');
+  assert.deepEqual(await probeNativeSupervisorRuntimeCapabilities({ rpc: async (name, args) => {
+    assert.equal(name, 'devos_runtime_capabilities_v1');
+    assert.deepEqual(args, {});
+    return restoredCapabilityRow.capabilities;
+  } }), NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
+  t.diagnostic('restored physical PG17 capability RPC matches immutable installed Edge source');
   const tables = await sql.unsafe("SELECT n.nspname,c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT LIKE 'pg_%' AND n.nspname <> 'information_schema'");
   for (const table of tables) {
     const rows = await sql.unsafe('SELECT count(*)::int AS count FROM "' + table.nspname.replaceAll('"', '""') + '"."' + table.relname.replaceAll('"', '""') + '"');
