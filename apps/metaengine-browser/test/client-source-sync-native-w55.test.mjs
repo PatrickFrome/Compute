@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createClientSourceSyncNativeServiceW55, createFixedGithubRefReaderW55 } from '../src/client-source-sync-native-w55.mjs';
 import { createShellFreeGitExecutor } from '../src/managed-task-project-runtime.mjs';
 import { samePhysicalWorkspacePath } from '../src/workspace-git-hardening.mjs';
+import { sourceSyncFixtureDiagnostics } from './source-sync-fixture-diagnostics-w63.mjs';
 
 const NOW = Date.parse('2026-10-15T01:00:00.000Z');
 const ISO = new Date(NOW).toISOString();
@@ -138,7 +139,8 @@ test('existing shell-free managed Git runner + native binding + current GitHub A
     managedProjectHost:{readSourceSyncGit:plan=>gitRunner.execute(plan)},
   });
   const clean=await service.read();
-  assert.equal(clean.state,'SYNCED_SOURCE',clean.reason);
+  assert.equal(clean.state,'SYNCED_SOURCE',clean.state === 'SYNCED_SOURCE' ? clean.reason :
+    clean.reason + ' ' + sourceSyncFixtureDiagnostics({repo,dir,work,sha,branch:BRANCH}));
   assert.equal(clean.current_source_sha,sha);
   assert.match(clean.witness_sha256,/^[a-f0-9]{64}$/);
   assert.ok(ownerReads>=2 && nativeReads>=2 && seen.length===1);

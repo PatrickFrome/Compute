@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { sourceSyncFixtureDiagnostics } from './source-sync-fixture-diagnostics-w63.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { readClientSourceSyncPreflightW50 as preflight, CLIENT_SOURCE_SYNC_W50_PARENT } from '../src/client-source-sync-preflight-w50.mjs';
@@ -227,7 +228,8 @@ test('disposable actual Git worktree and current-ref adapter: clean, untracked, 
     },
   });
   const success = await read();
-  assert.equal(success.state, 'SYNCED_SOURCE', `real git preflight: ${success.state}/${success.reason}`);
+  assert.equal(success.state, 'SYNCED_SOURCE', 'real git preflight: ' + success.state + '/' + success.reason +
+    (success.state === 'SYNCED_SOURCE' ? '' : ' ' + sourceSyncFixtureDiagnostics({repo,dir,work,sha,branch})));
   assert.equal(success.current_source_sha, sha);
   writeFileSync(path.join(work, 'untracked-source.mjs'), 'export const x = 1;\n');
   assert.equal((await read()).reason, 'WORKTREE_DIRTY_TRACKED_OR_UNTRACKED');
