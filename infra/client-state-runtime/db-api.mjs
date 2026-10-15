@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import { buildUnifiedOperatorContext } from './operator-unified-snapshot-core.mjs';
 import { OPERATOR_DB_IDENTITY_SQL, qualifyLocalPostgresEvidence } from './operator-truth-readback.mjs';
 import { qualifyOperatorOwner, readOwnPostgresOperatorTruth } from './operator-own-pg-fleet-truth.mjs';
+import { bindOwnPostgresBirthProviderW61 } from './own-postgres-birth-w61.mjs';
 import { admitOwnPg17LedgerReadback } from './operator-pg17-restart-admission.mjs';
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
@@ -58,9 +59,10 @@ function driverValues(sql, values) {
   });
 }
 
-export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql, hostObservationReadback = null, operatorOwnerReadback = null } = {}) {
+export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port = 15432, instanceId = '', roleMode = 'service_role', sql: injectedSql, hostObservationReadback = null, operatorOwnerReadback = null, trustedNativeOwnerBirthReadback = null } = {}) {
   if (hostObservationReadback !== null && typeof hostObservationReadback !== 'function') throw new Error('operator_host_readback_invalid');
   if (operatorOwnerReadback !== null && typeof operatorOwnerReadback !== 'function') throw new Error('operator_owner_readback_invalid');
+  if (trustedNativeOwnerBirthReadback !== null && typeof trustedNativeOwnerBirthReadback !== 'function') throw new Error('native_owner_birth_readback_invalid');
   if (!['service_role', 'direct'].includes(roleMode)) throw new Error('local_state_api_role_mode_invalid');
   if (host !== '127.0.0.1') throw new Error('local_state_loopback_host_required');
   if (typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(apiKey)) throw new Error('local_state_random_api_key_required');
@@ -77,6 +79,11 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       if (!Number.isSafeInteger(number)) throw new Error('local_state_integer_out_of_range');
       return number;
     } } },
+  });
+  // Private service capability: never routable over HTTP, page or Gateway.
+  // Absent W60 authenticated Host producer: null, not a fabricated birth.
+  const readOwnPostgresBirth = bindOwnPostgresBirthProviderW61({
+    transaction, trustedOwnerReadback: trustedNativeOwnerBirthReadback,
   });
   let signatures;
   let tableAccess;
@@ -284,6 +291,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
   }
   return {
     server,
+    readOwnPostgresBirth,
     address: `http://127.0.0.1:${server.address().port}`,
     async close() {
       server.closeIdleConnections();
