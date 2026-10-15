@@ -44,7 +44,8 @@ const run=promisify(execFile);
 test('Windows authenticated Host wire executes real fixed-root ACL provider, never installed Owner approval',{
   skip:process.platform!=='win32',
 },async t=>{
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-w58-ipc-native-'));
+  const generatedRoot=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-w58-ipc-native-'));
+  const root=process.platform==='win32'?await fs.realpath(generatedRoot):generatedRoot;
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   await protectOwnerOnlyWindowsDirectory(root);
   const file=path.join(root,'postgresql-17-snapshot.dump');
