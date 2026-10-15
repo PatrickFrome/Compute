@@ -98,11 +98,26 @@ test('W67 missing signed Guardian/Owner/PG never upgrades enrolled device',async
     });
     await identity.ensure();
     await identity.bindDevice(crypto.randomUUID());
-    identity.bindGuardianOwnerEvidenceW67({status:async()=>({
+    const unbind = identity.bindGuardianOwnerEvidenceW67({status:async()=>({
       schema:'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
       state:'READY',owner_binding_proven:true,device_binding_proven:true,
       guardian_client_kernel_birth_verified:false,
     })});
+    assert.equal(await identity.readGuardianOwnerEvidenceW67(),null);
+    unbind();
+    const owner = genesis();
+    let challenge = 0;
+    identity.bindGuardianOwnerEvidenceW67({status:async()=>({
+      schema:'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
+      state:'READY',owner_binding_proven:true,device_binding_proven:true,
+      authority_effect:false,guardian_client_kernel_birth_verified:true,
+      guardian_client_pid:owner.client_pid + challenge++,
+      guardian_client_created_at:'2026-10-15T00:00:00.000Z',
+      guardian_client_process_incarnation_id:owner.client_process_incarnation_id,
+      guardian_enrollment_evidence_sha256:'1'.repeat(64),
+      guardian_device_key_fingerprint_sha256:identity.snapshot().key_fingerprint_sha256,
+    })});
+    // Two *different* native challenge observations cannot be joined.
     assert.equal(await identity.readGuardianOwnerEvidenceW67(),null);
     assert.equal(await identity.readHostOwnerIncarnation(),null);
   } finally {await fs.rm(dir,{recursive:true,force:true});}
