@@ -3,6 +3,9 @@
 // does not submit a goal before a legitimate, independently attested write-capable
 // worker is available: an admitted but unexecutable goal is not progress.
 // No DB connection, Host bootstrap, network fallback or scheduler is created.
+import path from 'node:path';
+import os from 'node:os';
+import {realpath} from 'node:fs/promises';
 import { probeW64GeneratedDevelopmentWorker } from './client-serial-loop-development-worker-w64.mjs';
 import { verifyStagingCheckpointDigest } from './client-serial-loop-staging-w48.mjs';
 import { inspectStagingNextLease } from './client-serial-loop-staging-w56.mjs';
@@ -32,9 +35,9 @@ function fenced(reason, evidence = null) {
 }
 const isPlain = x => x && typeof x === 'object' && !Array.isArray(x)
   && (Object.getPrototypeOf(x) === Object.prototype || Object.getPrototypeOf(x) === null);
-const falseFlags = v => isPlain(v) && ['authority_effect', 'scheduler_authority',
-  'browser_authority', 'release_authority','automatic_retry_allowed']
-  .every(key => v[key] === false);
+const falseFlags = (v,{ retry = false } = {}) => isPlain(v)
+  && ['authority_effect','scheduler_authority','browser_authority','release_authority',
+      ...(retry ? ['automatic_retry_allowed'] : [])].every(key => v[key] === false);
 
 // A goal-submit RPC reply is an ADMISSION observation, never a lease or an
 // effect credential. Recheck both nested canonical replies and exact identity.
@@ -49,7 +52,7 @@ export function inspectW71GoalAdmission({admission, workspace_id, point_id} = {}
     || !ID.test(String(admission.task_id)) || admission.atomic_plan_and_admission !== true
     || admission.operator_initiated !== true
     || admission.task_payload_returned !== false || admission.scheduler_identity_returned !== false
-    || !falseFlags(admission) || !isPlain(admission.activation)
+    || !falseFlags(admission,{retry:true}) || !isPlain(admission.activation)
     || admission.activation.schema !== 'metaengine.meta-orchestrator.plan-state.v1'
     || admission.activation.state !== 'ACTIVE'
     || admission.activation.plan_generation !== admission.plan_generation
@@ -82,7 +85,21 @@ export async function probeW71ExistingC2({
   if (!SHA.test(String(expected_source_sha))
       || !Number.isSafeInteger(owner_epoch) || owner_epoch < 1)
     return fenced('SOURCE_OR_OWNER_EPOCH_INVALID');
-  const worker = await probeW64GeneratedDevelopmentWorker(sourceDir);
+  // W71 probes may only enter a fresh direct child of the OS temp root,
+  // never an installed profile, managed workspace, Owner home or PGDATA.
+  let generatedDir, temp;
+  try {
+    generatedDir = await realpath(sourceDir);
+    temp = await realpath(os.tmpdir());
+  } catch { return fenced('GENERATED_SOURCE_PATH_ABSENT'); }
+  const root = path.dirname(generatedDir);
+  const same = (a,b) => process.platform === 'win32'
+    ? a.toLowerCase() === b.toLowerCase() : a === b;
+  if (path.basename(generatedDir) !== 'unique-git'
+      || !/^metaengine-w56-own-pg17-[A-Za-z0-9_-]+$/.test(path.basename(root))
+      || !same(path.dirname(root),temp))
+    return fenced('NON_DISPOSABLE_SOURCE_PATH_FENCED');
+  const worker = await probeW64GeneratedDevelopmentWorker(generatedDir);
   if (worker.head !== expected_source_sha
       || worker.origin !== 'SYNTHETIC/STAGING' || worker.edit_authority !== false
       || worker.authority_effect !== false)

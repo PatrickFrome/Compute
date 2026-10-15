@@ -27,7 +27,17 @@ export async function probeW64GeneratedDevelopmentWorker(sourceDir) {
   const plane = new DevelopmentPlane({
     timeout_ms: 10_000,
     spawnWorker: () => {
-      spawned = new Worker(source, { eval:true, workerData: { sourceDir:dir, workerPath } });
+      // W71: do NOT inherit configured Owner bootstrap, enrollment, HOME, CI
+      // secrets, production fallback, user source provenance or login settings.
+      // This worker has exactly one generated repo read and no OS actuation.
+      spawned = new Worker(source, { eval:true,
+        env: {
+          HOME:path.dirname(dir), USERPROFILE:path.dirname(dir),
+          TMP:path.dirname(dir), TEMP:path.dirname(dir), TMPDIR:path.dirname(dir),
+          METAENGINE_REPO_ROOT:dir, METAENGINE_GIT_REPOSITORY:'PatrickFrome/Compute',
+        },
+        workerData: { sourceDir:dir, workerPath },
+      });
       // Existing plane expects the Electron utilityProcess API; this shim only
       // bridges Worker lifecycle. No shell, Git mutation, or arbitrary RPC.
       spawned.kill = () => { void spawned.terminate(); return true; };
