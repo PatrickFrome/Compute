@@ -244,7 +244,8 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
     reject('prepackage_exe_path');
   }
   const stablePaths = [candidateRoot,slsaDir,exeParent,exePath,installerPath,bundlePath,receiptPath];
-  const stableBefore = stablePaths.map(file => fs.lstatSync(file));  const installerBytes = checkedFile(installerPath,candidateRoot);
+  const stableBefore = stablePaths.map(file => fs.lstatSync(file));
+  const installerBytes = checkedFile(installerPath,candidateRoot);
   const bundleBytes = checkedFile(bundlePath,slsaDir);
   const receiptBytes = checkedFile(receiptPath,slsaDir);
   const exeBytes = checkedFile(exePath,exeParent);
@@ -276,8 +277,10 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
     fs.writeFileSync(verification,gh.stdout,{flag:'wx',mode:0o600});
     // On Windows file:///C:/... URL pathname has a leading slash; use fileURLToPath.
     const {fileURLToPath} = await import('node:url');
-    const verifierPath = path.join(path.dirname(fileURLToPath(import.meta.url)),
-      'browser-slsa-provenance-verification.mjs');
+    const verifierPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+      '../../../scripts/browser-slsa-provenance-verification.mjs');
+    const verifierStat = fs.lstatSync(verifierPath);
+    if (!verifierStat.isFile() || verifierStat.isSymbolicLink()) reject('existing_slsa_verifier_missing_or_reparse');
     const args = [verifierPath,
       '--verification',verification,
       '--expected-source-sha',sourceSha,
