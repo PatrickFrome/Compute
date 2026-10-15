@@ -225,8 +225,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "16b329c3ec1ab5aebda438cf73259431f56bd8e6",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "23c8d2a29591b4a7b1fc05cae2b4e4af76870c8f",
-    "apps/metaengine-browser/package.json": "12323dd90cb66ea6cefb84f103c6f23db9f18580",
+    "apps/metaengine-browser/package-lock.json": "bb7935a5cfbd95bd70ff158539091a95a6563d88",
+    "apps/metaengine-browser/package.json": "a9134e2fce54a7e68561f5dfc4cce83e26eab315",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "fb48143a65bae6044e984b89aae9dd4c59b88ac1",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "5c205488d854ccbbfeb71c7f9304f341d732aba0",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "a25d7f56eb5a916c9a211a68c3100d1ea30224b2",
@@ -338,7 +338,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "3b75577347630d9a5f73b995d2a1f47d60279509",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "8b57139a4ce19b05734bb9ef28572b428ac54553",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -361,7 +361,7 @@
     "infra/client-state-runtime/client-winps-fixture-w65.test.mjs": "31b33f77a028a94e6edf1b06ff0bb24b3b46e0ca",
     "infra/client-state-runtime/db-api.mjs": "93a85763ab02e89df39233e15a9b19e11dc9001f",
     "infra/client-state-runtime/host-owner-genesis-w74.pg17.integration.test.mjs": "38556a2de0299d5e725673dc6462195c9e1e46e3",
-    "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs": "898c924afbe064e6aa0a2e63953df088c27e5822",
+    "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs": "fe367bd8d1b60529afe529973c3a6f3baf17e1c9",
     "infra/client-state-runtime/local-runtime-migrations.mjs": "5c2f075e5a53b7f01ac5be95f27df1ed32faa801",
     "infra/client-state-runtime/local-runtime-migrations.test.mjs": "e05f772fa7b7bf0ee6428716efeb082193d9dee2",
     "infra/client-state-runtime/operator-readonly-gateway.mjs": "816b3da164d012d6365483bb663f00a2ec32bb16",
@@ -376,7 +376,8 @@
     "infra/client-state-runtime/client-source-candidate-w43.test.mjs": "c5ba1faa7a9521538f5fac26f929ff7937f2d689",
     "apps/metaengine-browser/test/installed-client-launch-qualification.test.mjs": "966e4c70c452d3a298f00e20d3f0f1ad76c25b8d",
     "apps/metaengine-browser/test/rsi-runtime-startup-fork-recovery.test.mjs": "13bb5da50401ddda012c2769e0917bccd5196567",
-    "apps/metaengine-browser/test/local-restored-pg17-auto-prepare.test.mjs": "497e554a50d499d27008dca4ec59fbe0e5921704"
+    "apps/metaengine-browser/test/local-restored-pg17-auto-prepare.test.mjs": "497e554a50d499d27008dca4ec59fbe0e5921704",
+    ".github/workflows/browser-windows-package-smoke.yml": "48cc186af11d34d957d13fd905278b54ea8c9d2e"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -401,7 +402,8 @@
     "0.7.0-dev.876115728125.1",
     "0.7.0-dev.820525137379.1",
     "0.7.0-dev.883728765516.1",
-    "0.7.0-dev.894615027143.1"
+    "0.7.0-dev.894615027143.1",
+    "0.7.0-dev.916530812741.1"
   ],
   "verification_workflow": ".github/workflows/client-source-candidate-w73.yml",
   "physical_pg_complement": ".github/workflows/client-source-candidate-w59.yml",
@@ -417,7 +419,7 @@
     "classification": "ISOLATED_TEST_PACKAGE_ONLY",
     "branch": "work/metaengine-test-candidate-20261015",
     "source_parent": "49d050ff127e22ca27fbe3514324ba99832afb24",
-    "version": "0.7.0-dev.916530812741.1",
+    "version": "0.7.0-dev.959132647810.1",
     "production_release_authorized": false,
     "installed_mutation_authorized": false,
     "exact_ci_required": true,

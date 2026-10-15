@@ -470,8 +470,15 @@ jobs:
           $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
           $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $digest
           $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
+          $schemaDirectory = Join-Path $env:RUNNER_TEMP 'generated-empty-schema-qa'
+          New-Item -ItemType Directory -Path $schemaDirectory -ErrorAction Stop | Out-Null
+          $env:LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY = $schemaDirectory
           npm run test:attached-onboarding
           if ($LASTEXITCODE -ne 0) { throw 'physical_attached_onboarding_failed' }
+          $schemaArchive = Join-Path $schemaDirectory 'generated-empty-schema-pg17.dump'
+          $schemaPin = Join-Path $schemaDirectory 'generated-empty-schema-pg17.sha256'
+          if (-not (Test-Path $schemaArchive -PathType Leaf) -or -not (Test-Path $schemaPin -PathType Leaf)) { throw 'generated_schema_archive_missing' }
+          if ((Get-Content $schemaPin -Raw).Trim() -ne (Get-FileHash $schemaArchive -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'generated_schema_archive_digest_mismatch' }
 
       - name: Verify ordinary UI host child socket ownership and loopback binding
         working-directory: apps/metaengine-browser
@@ -946,274 +953,50 @@ jobs:
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
 
 
-      - name: Prove normal packaged UI boot and second-instance activation
-        # The owned provider requires an explicit private fixture, absent on this runner.
-        if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')
-        working-directory: apps/metaengine-browser
-        shell: powershell
+      - name: Prove real installed Owner-backed UI on disposable attached PG17
+        timeout-minutes: 35
+        working-directory: infra/client-state-runtime
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
-          $expectedSourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
-          if ([string]$proof.source_head -ne $expectedSourceHead) { throw 'installed_restart_source_head_drift' }
-          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
-          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
-          if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
-
-          $userData = [string]$proof.user_data_path
-          $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
-          $normalOut = "$env:RUNNER_TEMP\package-normal-ui.out"
-          $normalErr = "$env:RUNNER_TEMP\package-normal-ui.err"
-          $secondOut = "$env:RUNNER_TEMP\package-second-instance.out"
-          $secondErr = "$env:RUNNER_TEMP\package-second-instance.err"
-          Remove-Item $journal -Force -ErrorAction SilentlyContinue
-          Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
-          Remove-Item $normalOut,$normalErr,$secondOut,$secondErr -Force -ErrorAction SilentlyContinue
-
-          $normal = $null
-          try {
-            # No probe/smoke flag is allowed here. This must exercise the same
-            # main-entry path a user launches from Explorer/Start Menu.
-            $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
-            $null = $normal.Handle
-            $deadline = [DateTime]::UtcNow.AddSeconds(55)
-            $stableEvent = $null
-            while ([DateTime]::UtcNow -lt $deadline) {
-              if ($normal.HasExited) {
-                Get-Content $normalErr -ErrorAction SilentlyContinue
-                throw "normal_ui_primary_exited_early:$($normal.ExitCode)"
-              }
-              if (Test-Path $journal -PathType Leaf) {
-                try {
-                  $startup = Get-Content $journal -Raw | ConvertFrom-Json
-                  if ($startup.schema -ne 'metaengine.browser.startup-journal.v1') { throw 'normal_ui_startup_journal_schema_invalid' }
-                  $importFailure = @($startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_FAILED' } | Select-Object -Last 1)
-                  if ($importFailure.Count -gt 0) {
-                    $importFailure | ConvertTo-Json -Depth 8 | Write-Host
-                    Get-Content $normalErr -ErrorAction SilentlyContinue
-                    throw 'normal_ui_runtime_import_failed'
-                  }
-                  $stableEvent = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'PRIMARY_WINDOW_STABLE' } | Select-Object -Last 1
-                  if ($stableEvent) { break }
-                } catch {
-                  if ($_.Exception.Message -eq 'normal_ui_runtime_import_failed') { throw }
-                }
-              }
-              Start-Sleep -Milliseconds 250
-              $normal.Refresh()
-            }
-            if (-not $stableEvent) {
-              Get-Content $normalErr -ErrorAction SilentlyContinue
-              if (Test-Path $journal) { Get-Content $journal -Raw -ErrorAction SilentlyContinue | Write-Host }
-              throw 'normal_ui_stable_window_timeout'
-            }
-
-            $startup = Get-Content $journal -Raw | ConvertFrom-Json
-            $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
-            if (-not $runtimeImport) { throw 'normal_ui_runtime_import_success_evidence_missing' }
-            if ($stableEvent.details.visible -ne $true) { throw 'normal_ui_stable_window_not_visible' }
-            $stableSequence = [int64]$stableEvent.sequence
-
-            # A second ordinary launch must not create a second fleet/runtime.
-            # Electron forwards it to the primary, which must show/restore/focus
-            # the already-created BaseWindow and record exact-nonce activation.
-            $second = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
-            $null = $second.Handle
-            if (-not $second.WaitForExit(18000)) {
-              try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}
-              throw 'normal_ui_second_instance_did_not_exit'
-            }
-            if ($second.ExitCode -ne 0) {
-              Get-Content $secondErr -ErrorAction SilentlyContinue
-              throw "normal_ui_second_instance_exit_$($second.ExitCode)"
-            }
-            $secondaryLine = Get-Content $secondOut | Where-Object { $_.Trim() } | Select-Object -Last 1
-            if (-not $secondaryLine) { throw 'normal_ui_second_instance_ack_output_missing' }
-            $secondaryAck = $secondaryLine | ConvertFrom-Json
-            if ($secondaryAck.schema -ne 'metaengine.browser.secondary-launch.v1' `
-                -or $secondaryAck.state -ne 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED' `
-                -or -not [string]$secondaryAck.launch_id `
-                -or $secondaryAck.second_browser_runtime_started -ne $false `
-                -or $secondaryAck.authority_effect -ne $false) {
-              $secondaryAck | ConvertTo-Json -Depth 6 | Write-Host
-              throw 'normal_ui_second_instance_ack_contract_invalid'
-            }
-
-            $activationDeadline = [DateTime]::UtcNow.AddSeconds(12)
-            $activation = $null
-            while ([DateTime]::UtcNow -lt $activationDeadline) {
-              $startup = Get-Content $journal -Raw | ConvertFrom-Json
-              $activation = $startup.events | Where-Object {
-                $_.boot_id -eq $startup.current_boot_id `
-                  -and $_.state -eq 'PRIMARY_WINDOW_ACTIVATED' `
-                  -and [int64]$_.sequence -gt $stableSequence `
-                  -and $_.details.launch_id -eq [string]$secondaryAck.launch_id
-              } | Select-Object -Last 1
-              if ($activation) { break }
-              Start-Sleep -Milliseconds 200
-            }
-            if (-not $activation) {
-              Get-Content $journal -Raw | Write-Host
-              Get-Content $secondOut -ErrorAction SilentlyContinue
-              Get-Content $secondErr -ErrorAction SilentlyContinue
-              throw 'normal_ui_second_instance_activation_missing'
-            }
-            if ($activation.details.visible -ne $true) { throw 'normal_ui_second_instance_window_not_visible' }
-            if ([int64]$secondaryAck.event_sequence -ne [int64]$activation.sequence) { throw 'normal_ui_second_instance_ack_sequence_drift' }
-            if ([int64]$secondaryAck.primary_pid -ne [int64]$activation.pid) { throw 'normal_ui_second_instance_ack_pid_drift' }
-            if ([string]$secondaryAck.primary_version -ne [string]$activation.version) { throw 'normal_ui_second_instance_ack_version_drift' }
-
-            $normal.Refresh()
-            if ($normal.HasExited) { throw 'normal_ui_primary_died_after_second_instance' }
-
-            # Live 0.7.0-dev.2.1 repeatedly crossed the Sentinel's 180-second
-            # startup grace and relaunched a healthy parent. Bind the exact
-            # packaged process, Sentinel token/boot and useful-progress lease,
-            # then stay alive beyond that boundary with no recovery generation.
-            $sentinelPath = Join-Path $userData 'metaengine-browser-sentinel-v1.json'
-            $progressPath = "$sentinelPath.parent-progress-v1.json"
-            $workerHeartbeatPath = "$sentinelPath.worker-heartbeat-v1.json"
-            $sentinelDeadline = [DateTime]::UtcNow.AddSeconds(35)
-            $sentinelBefore = $null
-            $progressBefore = $null
-            $workerHeartbeatBefore = $null
-            while ([DateTime]::UtcNow -lt $sentinelDeadline) {
-              try {
-                if ((Test-Path $sentinelPath -PathType Leaf) `
-                    -and (Test-Path $progressPath -PathType Leaf) `
-                    -and (Test-Path $workerHeartbeatPath -PathType Leaf)) {
-                  $sentinelBefore = Get-Content $sentinelPath -Raw | ConvertFrom-Json
-                  $progressBefore = Get-Content $progressPath -Raw | ConvertFrom-Json
-                  $workerHeartbeatBefore = Get-Content $workerHeartbeatPath -Raw | ConvertFrom-Json
-                  if ($sentinelBefore.schema -eq 'metaengine.browser-sentinel.state.v1' `
-                      -and [int64]$sentinelBefore.parent_pid -eq [int64]$normal.Id `
-                      -and [int64]$sentinelBefore.worker_pid -gt 0 `
-                      -and $sentinelBefore.worker_released -eq $false `
-                      -and $progressBefore.schema -eq 'metaengine.browser-sentinel.parent-progress.v1' `
-                      -and [string]$progressBefore.token -eq [string]$sentinelBefore.token `
-                      -and [int64]$progressBefore.parent_pid -eq [int64]$normal.Id `
-                      -and $workerHeartbeatBefore.schema -eq 'metaengine.browser-sentinel.worker-heartbeat.v1' `
-                      -and [string]$workerHeartbeatBefore.token -eq [string]$sentinelBefore.token `
-                      -and [int64]$workerHeartbeatBefore.parent_pid -eq [int64]$normal.Id `
-                      -and [int64]$workerHeartbeatBefore.worker_pid -eq [int64]$sentinelBefore.worker_pid `
-                      -and $workerHeartbeatBefore.lifecycle -eq 'READY') { break }
-                }
-              } catch {}
-              $sentinelBefore = $null
-              $progressBefore = $null
-              $workerHeartbeatBefore = $null
-              Start-Sleep -Milliseconds 250
-            }
-            if (-not $sentinelBefore -or -not $progressBefore -or -not $workerHeartbeatBefore) { throw 'normal_ui_sentinel_progress_binding_missing' }
-            $sentinelToken = [string]$sentinelBefore.token
-            $sentinelCreatedAt = [string]$sentinelBefore.created_at
-            $sentinelWorkerPid = [int64]$sentinelBefore.worker_pid
-            $recoveryGeneration = [int64]$sentinelBefore.worker_recovery_generation
-            $progressSequence = [int64]$progressBefore.progress_seq
-
-            Start-Sleep -Seconds 190
-            $normal.Refresh()
-            if ($normal.HasExited) { throw 'normal_ui_primary_died_across_sentinel_startup_grace' }
-            $startupAfter = Get-Content $journal -Raw | ConvertFrom-Json
-            $sentinelAfter = Get-Content $sentinelPath -Raw | ConvertFrom-Json
-            $progressAfter = Get-Content $progressPath -Raw | ConvertFrom-Json
-            $workerHeartbeatAfter = Get-Content $workerHeartbeatPath -Raw | ConvertFrom-Json
-            if ([string]$startupAfter.current_boot_id -ne [string]$startup.current_boot_id) { throw 'normal_ui_boot_id_changed_across_sentinel_startup_grace' }
-            if ($sentinelAfter.schema -ne 'metaengine.browser-sentinel.state.v1' `
-                -or [string]$sentinelAfter.token -ne $sentinelToken `
-                -or [string]$sentinelAfter.created_at -ne $sentinelCreatedAt `
-                -or [int64]$sentinelAfter.parent_pid -ne [int64]$normal.Id `
-                -or [int64]$sentinelAfter.worker_pid -ne $sentinelWorkerPid `
-                -or $sentinelAfter.worker_released -ne $false `
-                -or $sentinelAfter.relaunch_attempted -ne $false `
-                -or [int64]$sentinelAfter.worker_recovery_generation -ne $recoveryGeneration) {
-              throw 'normal_ui_sentinel_identity_or_recovery_drift'
-            }
-            if ($workerHeartbeatAfter.schema -ne 'metaengine.browser-sentinel.worker-heartbeat.v1' `
-                -or [string]$workerHeartbeatAfter.token -ne $sentinelToken `
-                -or [int64]$workerHeartbeatAfter.parent_pid -ne [int64]$normal.Id `
-                -or [int64]$workerHeartbeatAfter.worker_pid -ne $sentinelWorkerPid `
-                -or $workerHeartbeatAfter.lifecycle -ne 'READY') {
-              throw 'normal_ui_sentinel_worker_heartbeat_binding_drift'
-            }
-            $workerHeartbeatAgeSeconds = ([DateTime]::UtcNow - ([DateTime]::Parse([string]$workerHeartbeatAfter.heartbeat_at)).ToUniversalTime()).TotalSeconds
-            if ($workerHeartbeatAgeSeconds -lt 0 -or $workerHeartbeatAgeSeconds -gt 15) { throw "normal_ui_sentinel_worker_heartbeat_stale:$workerHeartbeatAgeSeconds" }
-            if ($progressAfter.schema -ne 'metaengine.browser-sentinel.parent-progress.v1' `
-                -or [string]$progressAfter.token -ne $sentinelToken `
-                -or [int64]$progressAfter.parent_pid -ne [int64]$normal.Id `
-                -or [int64]$progressAfter.progress_seq -le $progressSequence) {
-              throw 'normal_ui_parent_progress_did_not_advance'
-            }
-            $progressAgeSeconds = ([DateTime]::UtcNow - ([DateTime]::Parse([string]$progressAfter.progress_at)).ToUniversalTime()).TotalSeconds
-            if ($progressAgeSeconds -lt 0 -or $progressAgeSeconds -gt 30) { throw "normal_ui_parent_progress_stale:$progressAgeSeconds" }
-
-            $me2Output = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
-            if ($me2Output -notmatch '"event":"DAEMON_HEALTHY"') { throw 'normal_ui_me2_daemon_health_readback_missing' }
-            if ($me2Output -notmatch '"event":"ME2_CONTRACT_OK"') { throw 'normal_ui_me2_contract_readback_missing' }
-            # R84 primary-shell regression gate: the previous installer was a
-            # false green because ME2 was packaged/healthy while the visible
-            # Browser still loaded metaengine://shell. A healthy packaged ME2
-            # candidate must now prove the actual normal user-visible startup.
-            if ($me2Output -notmatch '"state":"ME2_PRIMARY_SHELL_VISIBLE"') {
-              Get-Content $normalOut -ErrorAction SilentlyContinue
-              Get-Content $normalErr -ErrorAction SilentlyContinue
-              throw 'normal_ui_me2_primary_shell_not_visible'
-            }
-            if ($me2Output -match '"state":"LEGACY_RECOVERY_SHELL_VISIBLE"') {
-              throw 'normal_ui_legacy_shell_used_despite_packaged_me2'
-            }
-            if ($me2Output -notmatch '"legacy_shell_is_normal_path":false') {
-              throw 'normal_ui_primary_shell_contract_missing'
-            }
-            if ($me2Output -notmatch '"state":"ME2_R97_UI_CONTRACT_CONFIRMED"') {
-              Get-Content $normalOut -ErrorAction SilentlyContinue
-              Get-Content $normalErr -ErrorAction SilentlyContinue
-              throw 'normal_ui_r97_dom_contract_not_confirmed'
-            }
-            if ($me2Output -match '"state":"ME2_R97_UI_CONTRACT_INCOMPLETE"') {
-              throw 'normal_ui_r97_dom_contract_incomplete'
-            }
-            if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
-              throw 'normal_ui_me2_integration_degraded'
-            }
-            if ($me2Output -match '\[guard\] lock failed:') {
-              Get-Content $normalErr -ErrorAction SilentlyContinue
-              throw 'normal_ui_me2_daemon_incarnation_lock_failed'
-            }
-
-            Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-v1.json" -Force
-            Copy-Item $sentinelPath "$env:RUNNER_TEMP\browser-sentinel-v1.json" -Force
-            Copy-Item $progressPath "$env:RUNNER_TEMP\browser-parent-progress-v1.json" -Force
-            Copy-Item $workerHeartbeatPath "$env:RUNNER_TEMP\browser-sentinel-worker-heartbeat-v1.json" -Force
-            $proof | Add-Member -NotePropertyName me2_browser_integration_verified -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'primary_me2_shell' -Force
-            $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName me2_r97_dom_contract_verified -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName legacy_shell_used_on_normal_startup -NotePropertyValue $false -Force
-            $proof.normal_ui_boot_verified = $true
-            $proof.runtime_import_observability_verified = $true
-            $proof.second_instance_activation_verified = $true
-            $proof | Add-Member -NotePropertyName startup_grace_survival_seconds -NotePropertyValue 190 -Force
-            $proof | Add-Member -NotePropertyName same_primary_pid_across_startup_grace -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName same_sentinel_token_across_startup_grace -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName parent_progress_advanced_across_startup_grace -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName sentinel_relaunch_attempted -NotePropertyValue $false -Force
-            $proof | Add-Member -NotePropertyName startup_journal_schema -NotePropertyValue 'metaengine.browser.startup-journal.v1' -Force
-            $proof | Add-Member -NotePropertyName normal_ui_stable_event_sequence -NotePropertyValue ([int64]$stableEvent.sequence) -Force
-            $proof | Add-Member -NotePropertyName second_instance_activation_event_sequence -NotePropertyValue ([int64]$activation.sequence) -Force
-            $proof | Add-Member -NotePropertyName second_instance_launch_id -NotePropertyValue ([string]$secondaryAck.launch_id) -Force
-            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
-            Write-Host ($proof | ConvertTo-Json -Compress)
-          } finally {
-            if ($normal -and -not $normal.HasExited) {
-              # Cleanup is not evidence. Native taskkill can return 1 when a child
-              # exits between enumeration and termination even after the primary
-              # was terminated. Preserve /T tree cleanup but force cleanup-only
-              # exit status to zero so it cannot invalidate completed UI proof.
-              cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
-            }
-          }
+          $sha = (git -C $env:GITHUB_WORKSPACE rev-parse HEAD).Trim()
+          if ([string]$proof.source_head -ne $sha -or $proof.installed_first_run_qualified -ne $true -or $proof.installed_owned_ui_host_qualified -ne $true) { throw 'installed_owner_qa_prerequisites_invalid' }
+          $install = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $bundle = Join-Path $install 'resources\client-state-runtime'
+          $manifest = Get-Content (Join-Path $bundle 'offline-runtime-bundle.json') -Raw | ConvertFrom-Json
+          $bundleSha = [string]$manifest.bundle_sha256
+          if ($bundleSha -notmatch '^[a-f0-9]{64}$' -or $bundleSha -ne [string]$proof.client_state_runtime_bundle_sha256) { throw 'installed_owner_qa_bundle_mismatch' }
+          $dump = Join-Path $env:RUNNER_TEMP 'generated-empty-schema-qa\generated-empty-schema-pg17.dump'
+          $pin = Join-Path $env:RUNNER_TEMP 'generated-empty-schema-qa\generated-empty-schema-pg17.sha256'
+          if (-not (Test-Path $dump -PathType Leaf) -or -not (Test-Path $pin -PathType Leaf)) { throw 'installed_owner_qa_schema_missing' }
+          $digest = (Get-Content $pin -Raw).Trim()
+          if ($digest -notmatch '^[a-f0-9]{64}$' -or $digest -ne (Get-FileHash $dump -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'installed_owner_qa_schema_pin_drift' }
+          $evidence = Join-Path $env:RUNNER_TEMP 'installed-launch-qualification'
+          if (-not (Test-Path $evidence -PathType Container)) { throw 'installed_owner_qa_evidence_root_missing' }
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $bundleSha
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP = $dump
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP_SHA256 = $digest
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT = $install
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_SOURCE_HEAD = $sha
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_VERSION = [string]$proof.package_version
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_EVIDENCE_DIRECTORY = $evidence
+          node --test --test-concurrency=1 attached-bundled-runtime.integration.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'installed_owner_qa_real_pg17_failed' }
+          $positive = Get-Content (Join-Path $evidence 'installed-launch-qualification.json') -Raw | ConvertFrom-Json
+          $owner = Get-Content (Join-Path $evidence 'installed-owner-boot-proof.json') -Raw | ConvertFrom-Json
+          if ($positive.source_head -ne $sha -or $positive.package_version -ne [string]$proof.package_version -or $positive.owner_boot_qualified -ne $true -or $positive.normal_ui_boot_verified -ne $true -or $positive.production_ready -ne $false -or $positive.authority_effect -ne $false) { throw 'installed_owner_qa_proof_invalid' }
+          if ($owner.second_instance_activation_verified -ne $true -or $owner.native_activation_before_and_after_grace_verified -ne $true -or $owner.current_os_window_visible -ne $true -or $owner.same_os_window_across_startup_grace -ne $true -or $owner.attached_postgres_incarnation_preserved -ne $true -or $owner.process_cleanup_confirmed -ne $true -or $owner.runtime_host_lock_released -ne $true -or $owner.runtime_ports_closed -ne $true) { throw 'installed_owner_qa_native_proof_invalid' }
+          $proof.normal_ui_boot_verified = $true
+          $proof.runtime_import_observability_verified = $true
+          $proof.second_instance_activation_verified = $true
+          $proof | Add-Member -NotePropertyName installed_owner_qualification_state -NotePropertyValue 'PASSED_ISOLATED_REAL_RUNTIME' -Force
+          $proof | Add-Member -NotePropertyName generated_schema_owner_qualified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName generated_schema_sha256 -NotePropertyValue $digest -Force
+          $proof | Add-Member -NotePropertyName production_database_modified -NotePropertyValue $false -Force
+          $proof | ConvertTo-Json -Depth 7 | Set-Content $proofPath -Encoding utf8
 
       - name: Prove installed Client useful-work journal survives process restart without replay
         working-directory: apps/metaengine-browser
@@ -1359,13 +1142,14 @@ jobs:
               -or $proof.installed_owned_ui_host_qualified -ne $true `
               -or $proof.installed_os_ui_listener_verified -ne $true `
               -or $proof.production_ready -ne $false) { throw 'installed_candidate_qualification_incomplete' }
-          $proof | Add-Member -NotePropertyName installed_candidate_qualification -NotePropertyValue 'PASSED_ISOLATED_FIRST_RUN_AND_UI_HOST' -Force
+          if ($proof.normal_ui_boot_verified -ne $true -or $proof.installed_owner_qualification_state -ne 'PASSED_ISOLATED_REAL_RUNTIME' -or $proof.generated_schema_owner_qualified -ne $true -or $proof.production_database_modified -ne $false) { throw 'installed_owner_positive_proof_missing' }
+          $proof | Add-Member -NotePropertyName installed_candidate_qualification -NotePropertyValue 'PASSED_ISOLATED_OWNER_UI_AND_UI_HOST' -Force
           $proof | ConvertTo-Json -Depth 7 | Set-Content $proofPath -Encoding utf8
           @(
             'Installed candidate: first-run, protected source identity, installed UI host and OS loopback listener verified.',
             "Normal Owner boot verified: $($proof.normal_ui_boot_verified).",
             "Owner qualification state: $($proof.installed_owner_qualification_state).",
-            'Production readiness: false. A real isolated schema fixture must qualify Owner boot separately.'
+            'Production readiness: false. Generated empty-schema Owner UI does not confer production release authority.'
           ) | Add-Content $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
       - name: Upload exact-head Windows qualification evidence
