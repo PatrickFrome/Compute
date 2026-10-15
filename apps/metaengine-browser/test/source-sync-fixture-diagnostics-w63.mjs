@@ -35,6 +35,10 @@ export function sourceSyncFixtureDiagnostics({ repo, dir, work, sha, branch }) {
       pathRealpathEqual: physical(r.worktree) !== null
         && canonWork !== null && samePhysicalWorkspacePath(physical(r.worktree), canonWork),
       pathLengthDelta: typeof r.worktree === 'string' ? r.worktree.length - work.length : null,
+      prefixCodepoints: typeof r.worktree === 'string' ? Array.from(r.worktree.slice(0, 6), c => c.charCodeAt(0)) : [],
+      suffixCodepoints: typeof r.worktree === 'string' ? Array.from(r.worktree.slice(-6), c => c.charCodeAt(0)) : [],
+      relativeSuffixEquals: typeof r.worktree === 'string' && r.worktree.endsWith(path.basename(work)),
+      controlCharacterCount: typeof r.worktree === 'string' ? (r.worktree.match(/[\\x00-\\x1f]/g) || []).length : null,
       headMatches: r.HEAD === sha, branchMatches: r.branch === 'refs/heads/' + branch,
       locked: Boolean(r.locked), lockType: typeof r.locked,
       detached: Boolean(r.detached), prunable: Boolean(r.prunable),
