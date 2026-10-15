@@ -7,7 +7,7 @@ import test from 'node:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { runInNewContext } from 'node:vm';
-import { createPackage, uncache } from '@electron/asar';
+import { createPackage } from '@electron/asar';
 import { assertInstalledLaunchIdentity, assertMissingDescriptorAdmissionContract, assertOwnerStartupGrace,
   assertInstalledPrimaryWindowJournal, assertInstalledPrimaryCdpSurface, assertInstalledPrimaryActivationAck,
   assertInstalledVisibleWindow,
@@ -203,11 +203,18 @@ test('installed launch reads actual nested ASAR bytes on Windows before enforcin
     await assert.rejects(qualifyInstalledClientLaunch({ installRoot, sourceRoot, expectedHead, expectedVersion,
       evidenceDirectory: root }), /database_wizard_still_packaged/);
     await fs.unlink(staleWizard);
-    uncache(path.join(resources, 'app.asar'));
-    await createPackage(archiveSource, path.join(resources, 'app.asar'));
+    // Do not rewrite an archive after ASAR has parsed it at the same path:
+    // Electron/ASAR headers may outlive that path and return stale offsets.
+    // The negative and positive path traversals use TWO independent
+    // disposable installed roots, each with a freshly created physical ASAR.
+    const cleanInstallRoot = path.join(root, 'installed-clean');
+    const cleanResources = path.join(cleanInstallRoot, 'resources');
+    await fs.mkdir(cleanResources, { recursive: true });
+    await fs.writeFile(path.join(cleanInstallRoot, 'METAENGINE Browser Test.exe'), 'inert-unlaunchable-fixture');
+    await createPackage(archiveSource, path.join(cleanResources, 'app.asar'));
     // The inert executable must never run. Successful nested source/verifier
     // reads reach the real runtime admission gate, which denies this fixture.
-    await assert.rejects(qualifyInstalledClientLaunch({ installRoot, sourceRoot, expectedHead, expectedVersion,
+    await assert.rejects(qualifyInstalledClientLaunch({ installRoot: cleanInstallRoot, sourceRoot, expectedHead, expectedVersion,
       evidenceDirectory: root }), /packaged_client_state_runtime_binding_missing/);
     assert.equal((await fs.readdir(root)).some(name => name.startsWith('isolated-launch-')), false);
   });

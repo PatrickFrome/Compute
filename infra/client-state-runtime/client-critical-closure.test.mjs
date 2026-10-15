@@ -40,8 +40,20 @@ test('source closure has no authority to promote installed state or replay histo
  assert.equal(manifest.parent_checks_not_transitive,true);
  for(const level of ['CI','INSTALLED','LIVE'])assert.match(manifest.proof_levels[level],/PENDING|UNKNOWN|NOT_QUALIFIED/);
  assert.deepEqual(manifest.unbound_historical_effects,['W53_AMBIGUOUS_UNKNOWN','HISTORICAL_59_AMBIGUOUS_UNKNOWN']);
- assert.equal(JSON.parse(read('apps/metaengine-browser/package.json')).version,
-  JSON.parse(git('show',manifest.base_w73+':apps/metaengine-browser/package.json')).version);
+ const observed=JSON.parse(read('apps/metaengine-browser/package.json')).version;
+ const historical=JSON.parse(git('show',manifest.base_w73+':apps/metaengine-browser/package.json')).version;
+ if(manifest.test_candidate){
+  const c=manifest.test_candidate;
+  assert.equal(c.classification,'ISOLATED_TEST_PACKAGE_ONLY');
+  assert.equal(c.source_parent,'49d050ff127e22ca27fbe3514324ba99832afb24');
+  assert.equal(c.branch,'work/metaengine-test-candidate-20261015');
+  assert.equal(c.version,'0.7.0-dev.1028947361258.1');
+  assert.equal(c.production_release_authorized,false);
+  assert.equal(c.installed_mutation_authorized,false);
+  assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',c.source_parent,'HEAD']).status,0);
+  assert.equal(observed,c.version);
+  assert.notEqual(observed,historical);
+ }else assert.equal(observed,historical);
 });
 
 test('current CI runs the complete Browser and Client suites and preserves physical qualification',()=>{

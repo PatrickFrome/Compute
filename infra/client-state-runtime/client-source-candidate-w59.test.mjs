@@ -63,8 +63,17 @@ test('W59 candidate remains SOURCE-only and cannot grant installed/LIVE or reuse
   assert.deepEqual(manifest.unbound_historical_effects, ['W53_AMBIGUOUS_UNKNOWN', 'HISTORICAL_59_AMBIGUOUS_UNKNOWN']);
   for (const p of ['STAGING', 'INSTALLED', 'LIVE']) assert.match(manifest.proof_levels[p], /UNKNOWN/);
   assert.equal(manifest.proof_levels.CI, 'EXACT_HEAD_PENDING');
-  assert.equal(JSON.parse(read('apps/metaengine-browser/package.json')).version,
-    JSON.parse(git('show', manifest.source_base_w51 + ':apps/metaengine-browser/package.json')).version);
+  const historicalVersion=JSON.parse(git('show',manifest.source_base_w51+':apps/metaengine-browser/package.json')).version;
+  const observedVersion=JSON.parse(read('apps/metaengine-browser/package.json')).version;
+  const candidate=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json')).test_candidate;
+  if(candidate){
+    assert.equal(candidate.classification,'ISOLATED_TEST_PACKAGE_ONLY');
+    assert.equal(candidate.branch,'work/metaengine-test-candidate-20261015');
+    assert.equal(candidate.production_release_authorized,false);
+    assert.equal(candidate.installed_mutation_authorized,false);
+    assert.equal(observedVersion,candidate.version);
+    assert.notEqual(observedVersion,historicalVersion);
+  }else assert.equal(observedVersion,historicalVersion);
   const roadmap = read('coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md');
   assert.match(roadmap, /W43 one-source Client convergence checkpoint/);
   assert.match(roadmap, /W57/);

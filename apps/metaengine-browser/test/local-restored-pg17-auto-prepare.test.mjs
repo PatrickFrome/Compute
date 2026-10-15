@@ -10,7 +10,7 @@ const OLD='a'.repeat(64),NEW='b'.repeat(64);
 const identifier='7512345678901234567';
 const validState='Database system identifier: '+identifier+'\nDatabase cluster state: shut down\n';
 async function fixture(t){
-  const home=await fs.mkdtemp(path.join(os.tmpdir(),'pg17-auto-prepare-test-'));
+  const home=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'pg17-auto-prepare-test-')));
   t.after(()=>fs.rm(home,{recursive:true,force:true}));
   const temp=path.join(home,'temp'),localAppData=path.join(home,'AppData','Local');
   const original=path.join(home,'original','data'),bundle=path.join(home,'sealed','client-state-runtime');

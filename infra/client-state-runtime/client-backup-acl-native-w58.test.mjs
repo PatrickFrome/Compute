@@ -12,10 +12,13 @@ const run=promisify(execFile);
 const windows=process.platform==='win32';
 const name='postgresql-17-snapshot.dump';
 async function ps(script,variables={}) {
-  const exe=path.win32.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
+  const psRoot=path.win32.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0');
+  const exe=path.win32.join(psRoot,'powershell.exe');
+  const bootstrap="$ErrorActionPreference='Stop';Import-Module Microsoft.PowerShell.Security -ErrorAction Stop;";
   return run(exe,['-NoProfile','-NonInteractive','-EncodedCommand',
-    Buffer.from("$ErrorActionPreference='Stop';"+script,'utf16le').toString('base64')],{
-    env:{...process.env,...variables},windowsHide:true,timeout:120000});
+    Buffer.from(bootstrap+script,'utf16le').toString('base64')],{
+    env:{...process.env,...variables,PSModulePath:path.win32.join(psRoot,'Modules')},
+    windowsHide:true,timeout:120000});
 }
 async function fixture(t) {
   const generatedRoot=await fs.mkdtemp(path.join(os.tmpdir(),'me-w58-acl-'));

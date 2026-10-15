@@ -58,7 +58,7 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
 ]);
 function sourcePathAllowed(value) {
-  return (migrationResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
+  return (value === runtimeRoot + 'local-vault-compat.sql' || migrationResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
     || /^(?:infra\/client-state-runtime\/[^/]+\.mjs|apps\/metaengine-browser\/src\/meta-(?:objective|orchestrator)-[^/]+\.mjs|apps\/metaengine-browser\/supabase\/a2-browser-native-supervisor-v1\/[^/]+\.(?:mjs|ts))$/.test(value))
     && !/(?:\.test\.|-fixture\.)/.test(value);
 }
@@ -125,7 +125,7 @@ export function reviewedBundlePlan(startupManifest, expectedSourceDigest, { incl
     const selected = classifyRecord(record);
     if (selected) records.push(selected);
   }
-  for (const name of [...selectedEntries(includeRuntimeHost), ...migrationResources, ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
+  for (const name of [...selectedEntries(includeRuntimeHost), runtimeRoot + 'local-vault-compat.sql', ...migrationResources, ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
     if (!records.some(record => record.path === name)) fail('bundle_required_resource_missing');
   }
   const paths = records.map(record => record.path);

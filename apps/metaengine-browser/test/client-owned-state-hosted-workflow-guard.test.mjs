@@ -77,12 +77,16 @@ test('guard preserves other PRs, historical push and explicit dispatch without a
   assert.doesNotMatch(workflow, /^\s+[\w-]+:\s*write\s*$/m);
 });
 
-test('offline successor builds a physical package without qualifying historical hosted normal boot', () => {
+test('offline successor separates no-Owner admission from guarded physical installed Owner-backed boot', () => {
   const source = readFileSync(new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url), 'utf8');
   const produces = new Function('github', `return ${producerGuard};`);
   assert.equal(produces({ event_name: 'pull_request', head_ref: 'work/client-runtime-restart-singleton-v1' }), true);
   assert.match(source, /- name: Prove exact packaged profile with an offline diagnostic/);
-  const normalStep = source.split('- name: Prove normal packaged UI boot and second-instance activation')[1].split('\n      - name:')[0];
+  const normalStep = source.split('- name: Prove real installed Owner-backed UI on disposable attached PG17')[1]?.split('\n      - name:')[0];
+  assert.ok(normalStep, 'real attached-PG17 Owner positive step required');
+  assert.match(normalStep, /attached-bundled-runtime\.integration\.test\.mjs/);
+  assert.match(normalStep, /LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT/);
+  assert.match(normalStep, /generated-empty-schema-pg17\.dump/);
   const condition = normalStep.match(/\n\s*if: ([^\r\n]+)/)?.[1];
   assert.ok(condition, 'normal boot has a separate admission condition');
   const qualifiesNormalBoot = new Function('github', `return ${condition};`);

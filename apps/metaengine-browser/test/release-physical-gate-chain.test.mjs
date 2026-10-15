@@ -83,10 +83,25 @@ test('release gates physically cover the live restart boundary and native emerge
   const physical = readBrowserFile('test/self-update-fast-physical.ps1');
   const detachedCapture = readBrowserFile('test/browser-capture-view-detached-physical.electron.mjs');
 
-  assert.match(packaged, /Start-Sleep -Seconds 190/);
-  assert.match(packaged, /normal_ui_primary_died_across_sentinel_startup_grace/);
-  assert.match(packaged, /normal_ui_parent_progress_did_not_advance/);
-  assert.match(packaged, /sentinel_relaunch_attempted -NotePropertyValue \$false/);
+  const ownerPhysical = readBrowserFile('scripts/qualify-installed-client-launch.mjs');
+  // The 190-second survival now runs under an actual disposable SCRAM PG17
+  // and trusted test Owner, not a default-profile UI without Owner admission.
+  assert.match(packaged, /generated-empty-schema-pg17\.dump/);
+  assert.equal((packaged.match(/require\('node:os'\)\.tmpdir\(\)/g) || []).length, 2,
+    'producer and consumer must share Node os.tmpdir; RUNNER_TEMP is not necessarily that root on Windows');
+  assert.doesNotMatch(packaged, /Join-Path \$env:RUNNER_TEMP 'generated-empty-schema-qa/);
+  assert.match(packaged, /attached-bundled-runtime\.integration\.test\.mjs/);
+  assert.match(packaged, /LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT/);
+  assert.match(packaged, /owner\.second_instance_activation_verified/);
+  assert.match(packaged, /owner\.native_activation_before_and_after_grace_verified/);
+  assert.match(packaged, /owner\.same_os_window_across_startup_grace/);
+  assert.match(packaged, /owner\.attached_postgres_incarnation_preserved/);
+  assert.match(packaged, /owner\.runtime_host_lock_released/);
+  assert.match(packaged, /production_database_modified -NotePropertyValue \$false/);
+  assert.match(ownerPhysical, /await delay\(190000\)/);
+  assert.match(ownerPhysical, /assertOwnerStartupGrace\(/);
+  assert.match(ownerPhysical, /sentinel_relaunch_attempted: false/);
+  assert.match(ownerPhysical, /same_ui_child_across_startup_grace: true/);
   assert.match(emergency, /build-guardian-native-staging\.ps1/);
   assert.match(emergency, /update_actuator_native_write_ahead_effect_barrier/);
   assert.match(emergency, /update_actuator_at_most_one_dispatch_per_effect_id/);
