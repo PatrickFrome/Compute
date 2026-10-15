@@ -55,7 +55,7 @@ export function createOperatorCanonicalNativeBindingReadback({
         kernel.process_incarnation_id !== owner.process_incarnation_id ||
         Date.parse(kernel.created_at) !== Date.parse(owner.created_at) ||
         !validTime(kernel.observed_at, now())) return null;
-      const guardian = await verifier.readGuardian();
+      const guardian = await verifier.readGuardian(owner);
       if (guardian?.schema !== 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' ||
         guardian.state !== 'READY' || guardian.owner_binding_proven !== true ||
         guardian.device_binding_proven !== true || guardian.authority_effect !== false ||
@@ -64,7 +64,7 @@ export function createOperatorCanonicalNativeBindingReadback({
         guardian.owner_process_incarnation_id !== owner.process_incarnation_id ||
         Date.parse(guardian.owner_created_at) !== Date.parse(owner.created_at) ||
         !validTime(guardian.observed_at, now())) return null;
-      const installed = await verifier.verifyInstalledSource();
+      const installed = await verifier.verifyInstalledSource(owner);
       // This comes from an independent native executable/manifest verifier;
       // no source SHA is derived from arbitrary fields or git working-tree state.
       if (installed?.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
