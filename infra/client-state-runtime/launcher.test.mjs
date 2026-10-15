@@ -337,6 +337,10 @@ test('HTTP liveness without database source attestation cannot produce a ready r
   process.env.LAUNCHER_TEST_UNATTESTED = '1';
   try {
     await assert.rejects(launchClientStateRuntime(input, hooks), /edge_readiness_timeout/);
+    assert.deepEqual(events.filter(event=>event.event==='health_failure').map(event=>event.health_failure),[
+      {schema:'metaengine.client-state.health-failure.v1',component:'edge',code:'health_capability_unattested',
+        consecutive_failures:3,http_status:null,authority_effect:false},
+    ]);
     assert.equal(events.some(event => event.event === 'ready'), false);
     assert(events.filter(event => event.event === 'spawned').every(event => !alive(event.pid)));
     assert(alive(process.pid));

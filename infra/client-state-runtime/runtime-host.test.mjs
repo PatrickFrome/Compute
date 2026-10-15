@@ -135,6 +135,22 @@ test('host owns one lock, publishes public status and idempotently stops its run
   assert.equal(JSON.parse(await readFile(host.statusFile, 'utf8')).state, 'STOPPED');
 });
 
+test('failed startup retains the finite health witness instead of overwriting it with an empty FAILED status',async t=>{
+  const f=await fixture(t);
+  const diagnostic={schema:'metaengine.client-state.health-failure.v1',code:'health_capability_unattested',
+    component:'edge',consecutive_failures:3,http_status:null,authority_effect:false};
+  f.hooks.launchRuntime=async(_config,{report})=>{
+    await report({event:'health_failure',health_failure:diagnostic});
+    throw Object.assign(new Error('edge_readiness_timeout'),{code:'edge_readiness_timeout'});
+  };
+  await assert.rejects(startManagedRuntimeHost({configFile:f.configFile},f.hooks),/edge_readiness_timeout/);
+  const status=JSON.parse(await readFile(path.join(f.config.state_directory,'runtime-instance.json'),'utf8'));
+  assert.equal(status.state,'FAILED');assert.equal(status.runtime_ready,false);
+  assert.equal(status.reason,'edge_readiness_timeout');
+  assert.deepEqual(status.last_health_failure,diagnostic);
+  assert(!JSON.stringify(status).includes('private-password'));
+});
+
 test('host persists a finite health failure before terminal cleanup and retains it after STOPPED', async t => {
   const f = await fixture(t);
   let report;

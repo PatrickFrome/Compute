@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import postgres from 'postgres';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
+import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
 
 const exec = promisify(execFile);
@@ -292,6 +293,13 @@ test('verified bundled onboarding and attached host restart preserve an existing
           && /^[a-z0-9_]{1,160}$/.test(status.reason || '')) reason = status.reason;
       }
       t.diagnostic('bundled attached host startup failure reason: ' + reason);
+      // Only finite public health categories reach CI; never print child
+      // stderr, endpoints, private configuration or a server response body.
+      try {
+        const status=JSON.parse(await fs.readFile(statusFile,'utf8'));
+        if(status?.schema==='metaengine.client-state.runtime-status.v1' && status.state==='FAILED')
+          t.diagnostic('bundled attached host startup health: '+JSON.stringify(normalizeRuntimeHealthFailure(status.last_health_failure)));
+      } catch { /* Missing/untrusted diagnostics cannot replace the original failure. */ }
       throw error;
     }
     assert.equal(descriptor.runtime_ready, true);

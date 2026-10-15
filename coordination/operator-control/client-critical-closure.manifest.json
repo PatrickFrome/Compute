@@ -323,7 +323,7 @@
     "apps/metaengine-browser/test/supervisor-bootstrap-ambiguity-repair-r4.test.mjs": "74d55ad5924f1c9a5f7ab8fe60ac0e8abedd3c48",
     "apps/metaengine-browser/test/supervisor-rollover-draft-hardening.test.mjs": "8f02d49595ef63032817c9eee3ad300171955b8b",
     "coordination/operator-control/DEVFLEET_WAVE13_AUTONOMY_10.json": "d0ad641974c9e257fc2a2bc043c250144974884e",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "f4e2ef16192882451ebd00218abcc99efee0633d",
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "c87f22c439361bc7668372e5d89a95e347e604c5",
     "infra/client-state-runtime/README-client-local-provider.md": "630854f33b331eed8cd0e0b74a5ba8961a8b9473",
     "infra/client-state-runtime/README-host-native-owner-w60.md": "d308afbc4f3ec05be6670a3db8d2c29a3c3a6ddc",
     "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "b8b1e6f8b0e95a687cc050d153808465ab961b61",
@@ -381,12 +381,16 @@
     "apps/metaengine-browser/test/release-physical-gate-chain.test.mjs": "56b57b958fc743e3545652ea361561d26966bb89",
     "infra/client-state-runtime/package-runtime-resources.mjs": "7824baa3146985f71d4afcfe6060a347c99a2f30",
     "infra/client-state-runtime/package-runtime-resources.test.mjs": "0d515c07f1872c5d8dc6daf95156b84a47b2013f",
-    "infra/client-state-runtime/attached-bundled-runtime.integration.test.mjs": "ad4b9c5f8a09fa5aa5d9c2c74357c33cd8390d85",
+    "infra/client-state-runtime/attached-bundled-runtime.integration.test.mjs": "52b65f71a887bfb41cf49cf594f39f6fac8c9c53",
     "apps/metaengine-browser/src/local-runtime-host-controller.mjs": "e228ddff80a13490bd62c2f90505a8e8f743daf9",
     "apps/metaengine-browser/test/local-runtime-host-controller.test.mjs": "877303b223316ab7553b9a7102b7a3e6aa1d8159",
     "docs/CANONICAL_ROADMAP.md": "7692bd1802847150787a8acb51fa7a6ab54eea3e",
     "infra/client-state-runtime/runtime-host-orphan-reconciliation.mjs": "2d9513156a931319c5c89af2eb64f7f0db9abca6",
-    "infra/client-state-runtime/runtime-host-orphan-reconciliation.test.mjs": "673b6c56670e6a7ef9d6ca6f5a548792de3dd1b8"
+    "infra/client-state-runtime/runtime-host-orphan-reconciliation.test.mjs": "673b6c56670e6a7ef9d6ca6f5a548792de3dd1b8",
+    "infra/client-state-runtime/launcher.mjs": "8132eda912d2f7aa9f8a84d1ac0578996982b15d",
+    "infra/client-state-runtime/launcher.test.mjs": "0e2b38eb803cc9c203ba63784e78c99927f13def",
+    "infra/client-state-runtime/runtime-host.mjs": "e049e4ded28cfbedf30568cb64fad7b1449e61da",
+    "infra/client-state-runtime/runtime-host.test.mjs": "0847a708b7dcad0218db53e1b2e8123e9954c001"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {

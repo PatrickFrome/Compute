@@ -387,7 +387,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if (runtime) await stop('requested');
     else {
       signal?.removeEventListener('abort', onAbort);
-      try { await persist({ ...baseStatus, state: 'FAILED', reason: /^[a-z0-9_]+$/.test(error.code || '') ? error.code : 'runtime_host_start_failed' }); }
+      try { await persist({ ...baseStatus, state: 'FAILED', last_health_failure: lastHealthFailure,
+        reason: /^[a-z0-9_]+$/.test(error.code || '') ? error.code : 'runtime_host_start_failed' }); }
       finally { if (error.code !== 'runtime_cleanup_unconfirmed') await release(); }
     }
     throw error;

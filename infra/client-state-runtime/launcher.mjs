@@ -388,13 +388,28 @@ export async function launchClientStateRuntime(input, hooks = {}) {
 
   async function waitReady(operation, label) {
     const deadline = Date.now() + config.startupTimeoutMs;
+    let diagnostic=null, failures=0;
+    const retainStartupFailure=async()=>{
+      if(!diagnostic)return;
+      lastHealthFailure=diagnostic;
+      await Promise.resolve().then(()=>report({event:'health_failure',health_failure:diagnostic})).catch(()=>{});
+    };
     do {
       if (stopping) throw runtimeError(`${label}_process_failed`);
       try { return await operation(); } catch (error) {
-        if (String(error.code || '').includes('mismatch')) throw error;
+        if(label==='api'||label==='edge'){
+          failures++;
+          const code=HEALTH_FAILURE_CODES.has(error.healthFailureCode) && !error.healthFailureCode.startsWith('postgres_')
+            ? error.healthFailureCode:'health_response_invalid';
+          diagnostic=normalizeRuntimeHealthFailure({schema:HEALTH_FAILURE_SCHEMA,component:label,code,
+            consecutive_failures:Math.min(3,failures),http_status:code==='health_http_failed'?error.healthHttpStatus:null,
+            authority_effect:false});
+        }
+        if (String(error.code || '').includes('mismatch')) { await retainStartupFailure(); throw error; }
       }
       await sleep(100);
     } while (Date.now() < deadline);
+    await retainStartupFailure();
     throw runtimeError(`${label}_readiness_timeout`);
   }
 
