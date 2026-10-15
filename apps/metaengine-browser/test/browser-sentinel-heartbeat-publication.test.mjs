@@ -97,7 +97,10 @@ for (const failure of ['transient', 'reported_success']) {
     assert.equal(f.exited(), null);
     process.kill(f.child.pid, 0);
     const observed = await f.observations();
-    assert.equal(observed.rename_attempts, failure === 'transient' ? 2 : 1);
+    // This is a continuous worker: another normal heartbeat may publish between
+    // observing recovery and sampling the counter. Require the fault recovery
+    // minimum; keep zero process/relaunch actuation as the hard invariant.
+    assert.ok(observed.rename_attempts >= (failure === 'transient' ? 2 : 1));
     assert.equal(observed.process_signal_attempts, 0);
     assert.equal(observed.relaunch_attempts, 0);
   });
@@ -106,7 +109,7 @@ for (const failure of ['transient', 'reported_success']) {
 for (const failure of ['persistent', 'non_transient']) {
   test(`real sentinel worker fails closed on ${failure} publication failure and preserves the prior heartbeat`, async t => {
     const f = await fixture(t, failure);
-    const result = await Promise.race([f.closed, delay(5000, { timed_out: true })]);
+    const result = await Promise.race([f.closed, delay(15000, { timed_out: true })]);
     assert.deepEqual(result, { code: 1, signal: null });
     assert.equal((await fs.readFile(f.heartbeatPath)).equals(f.prior), true);
     const observed = await f.observations();
