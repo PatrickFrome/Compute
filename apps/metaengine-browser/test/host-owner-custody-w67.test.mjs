@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { guardianClientKernelBirthW67 } from '../src/browser-guardian-machine-bootstrap-launcher.mjs';
+import { guardianClientKernelBirthW67 } from '../src/guardian-client-kernel-birth-w67.mjs';
 import { SupervisorDeviceIdentity } from '../src/supervisor-device-identity.mjs';
 import { createHostAgentServer, HostAgentClient, hostAgentEndpoint } from '../src/host-agent-ipc.mjs';
 

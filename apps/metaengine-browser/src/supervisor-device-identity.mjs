@@ -186,6 +186,14 @@ export class SupervisorDeviceIdentity {
     try {
       const before = this.#state.device_id;
       const g = await reader();
+      const after = await reader(); // independent native nonce/challenge readback
+      if (after?.schema !== g?.schema || after?.state !== g?.state ||
+          after?.guardian_client_pid !== g?.guardian_client_pid ||
+          after?.guardian_client_created_at !== g?.guardian_client_created_at ||
+          after?.guardian_client_process_incarnation_id !== g?.guardian_client_process_incarnation_id ||
+          after?.guardian_enrollment_evidence_sha256 !== g?.guardian_enrollment_evidence_sha256 ||
+          after?.guardian_device_key_fingerprint_sha256 !== g?.guardian_device_key_fingerprint_sha256 ||
+          after?.guardian_client_kernel_birth_verified !== g?.guardian_client_kernel_birth_verified) return null;
       if (this.#state?.device_id !== before ||
           g?.schema !== 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' ||
           g.state !== 'READY' || g.owner_binding_proven !== true ||
