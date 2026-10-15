@@ -31,5 +31,35 @@ jobs:
           git diff --exit-code
       - name: Install source-only test dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Selected provider, Sentinel and strict transport regression
-        run: node --test test/native-supervisor-transport-w70.test.mjs test/explicit-local-supervisor-provider.test.mjs test/browser-sentinel.test.mjs test/local-provider-recovery-environment.test.mjs test/native-supervisor-local-provider-pin.test.mjs
+      - name: Hermetic local provider, Sentinel and singleton regression
+        run: >-
+          node --test
+          test/native-supervisor-transport-w70.test.mjs
+          test/explicit-local-supervisor-provider.test.mjs
+          test/browser-sentinel.test.mjs
+          test/local-provider-recovery-environment.test.mjs
+          test/native-supervisor-local-provider-pin.test.mjs
+          test/native-supervisor-local-provider-pin-w40.test.mjs
+          test/native-supervisor-endpoints.test.mjs
+          test/persistent-local-provider-boot.test.mjs
+          test/local-provider-singleton-admission.test.mjs
+          test/native-supervisor-local-readiness-loss.test.mjs
+      - name: Signed native command, enrollment, result and lost-ACK transport regressions
+        run: >-
+          node --test
+          test/native-supervisor-command-fastlane.test.mjs
+          test/native-supervisor-command-batch-fastlane.test.mjs
+          test/native-supervisor-bounded-fetch.test.mjs
+          test/native-supervisor-bootstrap-heartbeat.test.mjs
+          test/native-supervisor-heartbeat-contract-coherence.test.mjs
+          test/native-supervisor-result-batch.test.mjs
+          test/native-supervisor-enrollment-correlation.test.mjs
+          test/native-supervisor-lease-retry-backoff.test.mjs
+          test/native-supervisor-state-single-writer.test.mjs
+          test/native-supervisor-nonce-concurrency-contract.test.mjs
+          test/native-supervisor-batch-deadline-contract.test.mjs
+          test/native-supervisor-effect-intent-route.test.mjs
+          test/native-supervisor-control-plane-wedge-hardening.test.mjs
+          test/browser-guardian-enrollment-ticket-client.test.mjs
+          test/client-admission-recovery.test.mjs
+          test/meta-orchestrator-effect-deadline.test.mjs
