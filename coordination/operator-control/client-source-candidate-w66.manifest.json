@@ -111,50 +111,104 @@
       "pr": 1289,
       "wave": "W65_FINAL_FALSIFIER",
       "sha": "2cf2de5337daa236791da7b6073ad4e89ffb01e3"
+    },
+    {
+      "pr": 1292,
+      "wave": "W67_PUBLISHED_NOT_FINAL_QUALIFIED",
+      "sha": "da61c6318cee921967b9beebc804c3694250beaa"
+    },
+    {
+      "pr": 1294,
+      "wave": "W68_PUBLISHED_NOT_FINAL_QUALIFIED",
+      "sha": "b16e54ec8cc421d6c4175dd89249154dff8fcf7f"
+    },
+    {
+      "pr": 1295,
+      "wave": "W69_PUBLISHED_NOT_FINAL_QUALIFIED",
+      "sha": "50085af5e422e691145f6a4c00f147a2e91e1422"
+    },
+    {
+      "pr": 1297,
+      "wave": "W70_PUBLISHED_NOT_FINAL_QUALIFIED",
+      "sha": "b549de91b1f8ff74b47e8595d6354a4687150677"
+    },
+    {
+      "pr": 1296,
+      "wave": "W71_PUBLISHED_NOT_FINAL_QUALIFIED",
+      "sha": "5b7fe710e333ba07ea42f894193102825a5a7ef5"
+    },
+    {
+      "pr": 1293,
+      "wave": "W72_PUBLISHED_NOT_FINAL_QUALIFIED",
+      "sha": "805dabdfbd811924eab94820460669a76f35287e"
     }
   ],
   "pre_version_assembly_anchor": "cea13276841f27ba2b2e45a72038b8cb2e8b58c4",
   "current_tree_blobs": {
+    ".github/workflows/client-c2-existing-worker-w71.yml": "ea7a1efa0d5c67b4e8873f2026a15a50c5c94611",
     ".github/workflows/client-candidate-acceptance-w65.yml": "be516923f7e4523b8f9c976f929afc70855ae865",
     ".github/workflows/client-host-owner-w60.yml": "18e046498eafefa410a2ad82e751bd8a071e7f60",
+    ".github/workflows/client-native-supervisor-w70.yml": "848d489d2722de3f8a5ab1104e1614205e07d291",
     ".github/workflows/client-own-pg-w61.yml": "b633e3796a1910fe7230e9f9de06625317066c5a",
     ".github/workflows/client-serial-loop-staging-w48.yml": "d2fc249424234d592e061a7cac69907c4cdb62d2",
     ".github/workflows/client-source-candidate-w66.yml": "51695db53bb93ad5b761f4f9c48c4a9dc0300409",
-    ".github/workflows/client-wave10-w62-source-r97.yml": "5a040d43f379d011d6d63c1e51e9ebf2d605111e",
+    ".github/workflows/client-wave10-w62-source-r97.yml": "9b4f7cfdccbb0374f4f6ff7979dc28325b2ca634",
+    ".github/workflows/client-wave11-w68-release-provenance.yml": "c4a3f86b637e847d05e197ab2c8d002c81d17db1",
     "apps/me2-ui/src/components/me2/shell/command-palette.tsx": "a73c3dcbb900dc7eae1db839e6668bbddd5c359e",
     "apps/me2-ui/src/components/me2/shell/topbar.tsx": "873213220b4953c7bacc18e9ad6f1998f3615415",
     "apps/me2-ui/src/lib/client-work-badge-text.contract.ts": "1dfa0020a223612a4c2fd81f9e3cab86eb5a17c5",
     "apps/me2-ui/src/lib/client-work-badge-text.d.mts": "67a33b99162cb24ffb4b105adea41cc33069eec5",
     "apps/me2-ui/src/lib/client-work-badge-text.mjs": "96097f731f3e90f5a9482bcd1202bbcf1ddb1656",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.cpp": "564e38aeaef8cb42f19c20cb816d438bff1e65b0",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "c38dec6c825d5b4ef8554e352ebdcc50c37c1af4",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "677a9b635f9767dbc9715de1cf9f66d94f2e0645",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "6af321adbee9ab336312621ae2c64b4af5739370",
     "apps/metaengine-browser/package-lock.json": "af21c8f4836b0db69995ea056d8262673ffb4e65",
     "apps/metaengine-browser/package.json": "c7102ca747a612492bc93b917fd4c1da66892ba0",
+    "apps/metaengine-browser/scripts/verify-r97-visual-captures-w69.mjs": "ac01710c860f32e73a33b05c574fd21b1ed651db",
+    "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs": "c978bb37b57f6bd7874b99804da6cd4638fa1d6c",
     "apps/metaengine-browser/src/client-backup-acl-native-w58.mjs": "5b6cd2312e52cb247bfac26308d7bc94ba39f1d7",
+    "apps/metaengine-browser/src/client-package-identity-w68.mjs": "618a0095085417e02e1a6720bc77a1689bd3c5b9",
     "apps/metaengine-browser/src/client-source-sync-native-w55.mjs": "29c10b49bf4f4b5024bc0c208f35910aa8278409",
     "apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs": "d2956a87bd26a5033cfec602969e884c20fbfddd",
     "apps/metaengine-browser/src/host-agent-protocol.mjs": "67e2403ffa5ff8fbfc7da643120e2082707e6c6a",
     "apps/metaengine-browser/src/host-agent-remote-composition.mjs": "718672869d5d9818ca705458a2c77a7b77febe11",
-    "apps/metaengine-browser/src/host-agent-runtime.mjs": "978884a66f9113266c84733b13079d3481e3172e",
+    "apps/metaengine-browser/src/host-agent-runtime.mjs": "0a3cf833a0c1d6f0f4ff1eee87d59785099ef09a",
     "apps/metaengine-browser/src/host-native-owner-producers-w60.mjs": "558ccc946e0645a918104f19b981072e0a03de1e",
+    "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs": "6bd6c118c9d135dc3028e6515f1e0f08207af3fd",
     "apps/metaengine-browser/src/main.mjs": "6c0164ccdba4de3ce1f944d4657c9fc749359414",
     "apps/metaengine-browser/src/managed-task-project-host.mjs": "f7c7594f987e7c8f37f0223d54a43ef1780c2e69",
     "apps/metaengine-browser/src/native-owner-verifier-w52.mjs": "5ae017dee407fe5f13b74f95a0d7bfe17826dda1",
-    "apps/metaengine-browser/src/native-supervisor-client.mjs": "52710624d6fc25398ce4f1fc3b7fbb80ff2c1ff7",
+    "apps/metaengine-browser/src/native-supervisor-client-base.mjs": "b3a0a300dc2118d1d2ae55c5791cdffaf5185362",
+    "apps/metaengine-browser/src/native-supervisor-client-core-base.mjs": "561f925f7c9f11a1ac6c008e024b5dbec550d07a",
+    "apps/metaengine-browser/src/native-supervisor-client.mjs": "2e0e660fdbca91f355927bb63b76b2e1be40b5aa",
     "apps/metaengine-browser/src/operator-canonical-native-w44.mjs": "f6c89742d822528d00ce299ad1ececfc02a5136c",
+    "apps/metaengine-browser/src/supervisor-device-identity.mjs": "c26270c891e5de243350e9d91c73f55667100698",
     "apps/metaengine-browser/src/workspace-git-hardening.mjs": "3fc226b694e7e012e50c40c0c481d4b908fdd1d5",
+    "apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs": "721d9f9550d88b8e75174b34ac9fd94886ddf22e",
+    "apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs": "49720adf61a5f69412e1e1c02adb7fb32c1f284f",
     "apps/metaengine-browser/test/client-local-contracts-w38.test.mjs": "5c4d976bfc75dceb093c793619e41e641b14e299",
     "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs": "acf84ea9fad6a5700465b6722e36ab51ac195b60",
     "apps/metaengine-browser/test/client-v1-admin-connectivity.test.mjs": "be57523967db034ce44fc3600c6bfec2f11de03e",
     "apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs": "ca4c1d0594ac88740795d4082dd3a703ea32ff3f",
     "apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs": "bc679700720b2e76a7225b617be8b806baf27f53",
+    "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs": "449516fe452068e5345d8b008040f781578b8cdf",
+    "apps/metaengine-browser/test/installer-provenance.test.mjs": "e39683e8cfa3e53c7e0cbc60d95c4d2782ace252",
+    "apps/metaengine-browser/test/me2-r85-visual-evidence.mjs": "36164aa9be8e285315235066af03ff8c6ec1c6b7",
+    "apps/metaengine-browser/test/me2-ui-chatgpt-convergence.test.mjs": "381de0a29807caf9bd09b7a238a1327d9d160148",
     "apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs": "049e1e67bbc9ad1a050182d1409eaab07a575ee3",
+    "apps/metaengine-browser/test/native-supervisor-transport-w70.test.mjs": "d497cb8a1824a8168c06ef071b501ed6b9453fa6",
     "apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs": "4e077e3a6335b70cad2f175d5c5f8d35e2ea993b",
     "apps/metaengine-browser/test/r95-utility-panel-docking.test.mjs": "41e89fbb2c6d453137471c2b9970095fdefbde07",
     "apps/metaengine-browser/test/r95e-command-palette-agent-binding.test.mjs": "87ec8232e36627dfc1069e8560cc6df5629cf1ea",
+    "apps/metaengine-browser/test/r97-visual-capture-digest-w69.test.mjs": "440d7ac11bb85b60eabbcc4df5ae6d875b321750",
     "apps/metaengine-browser/test/source-sync-fixture-diagnostics-w63.mjs": "91d92be41a4add219e2538673d62665369e62a75",
     "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "edb7b0573716c66b4b96a529eec1231799f75e14",
     "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "075bfb8bec844dba850dc713f5a47e86228fab60",
     "infra/client-state-runtime/client-backup-acl-native-w58.test.mjs": "1a54bbd2d4f2e36cd9fbc46de2d7996f90f5baad",
     "infra/client-state-runtime/client-backup-restore-staging-w47.mjs": "ca52e2c7eb7934c62955479fd0e61c64f51f7401",
+    "infra/client-state-runtime/client-c2-existing-worker-w71.mjs": "d6ca6e93727bc69213674db16fbcf059f81b6dd7",
+    "infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs": "f91b7aa545624c2bade9e816fffc39ab0d3e09e7",
     "infra/client-state-runtime/client-candidate-acceptance-w49.mjs": "96d8855731e85fc8157fc11f940c220aa5e27005",
     "infra/client-state-runtime/client-candidate-acceptance-w57.mjs": "d0a2688c8e75dceb1ad9a64020b83d3a5b95b4a5",
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
@@ -170,7 +224,7 @@
     "infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs": "af2fbcc34a94f3d248c0e48bedba2180f173d24a",
     "infra/client-state-runtime/client-source-candidate-w51.test.mjs": "afbdfeadae606b38083cda5515a720166f7555a5",
     "infra/client-state-runtime/client-source-candidate-w59.test.mjs": "82906153447c482b8fe5bc490763ec57e0bb7b35",
-    "infra/client-state-runtime/client-source-candidate-w66.test.mjs": "7fd63d5df015015fd6a7635ed0483e103fccb7a8",
+    "infra/client-state-runtime/client-source-candidate-w66.test.mjs": "e5935cf90c67d13ae2ba46dfd491aac016d8136d",
     "infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs": "6c11865c4886149ab085c5de01eb12a1f8cbc583",
     "infra/client-state-runtime/client-winps-fixture-w65.mjs": "4cddb8206bac1bb0586bfb64c96819acd5009818",
     "infra/client-state-runtime/client-winps-fixture-w65.test.mjs": "31b33f77a028a94e6edf1b06ff0bb24b3b46e0ca",
@@ -190,21 +244,20 @@
     "W62_FINAL_TYPED_ME2",
     "W61_FINAL_PG17_CAP_RESTORE",
     "W64_FINAL_WORKER_RESTART",
-    "W65_INDEPENDENT_FALSIFIER"
+    "W65_INDEPENDENT_FALSIFIER",
+    "W67_PUBLISHED_SOURCE",
+    "W68_PUBLISHED_SOURCE",
+    "W69_PUBLISHED_SOURCE",
+    "W70_PUBLISHED_SOURCE",
+    "W71_PUBLISHED_SOURCE",
+    "W72_PUBLISHED_SOURCE"
   ],
-  "wave11_pending_owned": [
-    "W67",
-    "W68",
-    "W69",
-    "W70",
-    "W71",
-    "W72"
-  ],
+  "wave11_pending_owned": [],
   "parent_checks_not_transitive": true,
   "proof_levels": {
     "SOURCE": "INTEGRATED_REVIEW_REQUIRED",
-    "CI": "EXACT_HEAD_PENDING",
-    "STAGING": "UNKNOWN_EXACT_HEAD_PHYSICAL_PG17_PENDING",
+    "CI": "EXACT_HEAD_REQUALIFICATION_PENDING",
+    "STAGING": "UNKNOWN_PENDING_INTEGRATED_PHYSICAL_PG17_AND_C2",
     "INSTALLED": "UNKNOWN",
     "LIVE": "UNKNOWN"
   },
@@ -218,5 +271,37 @@
   "no_supabase": true,
   "authority_effect": false,
   "promotion_authorized": false,
-  "automatic_retry_allowed": false
+  "automatic_retry_allowed": false,
+  "wave11_integrated_unqualified": [
+    {
+      "pr": 1292,
+      "sha": "da61c6318cee921967b9beebc804c3694250beaa",
+      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+    },
+    {
+      "pr": 1294,
+      "sha": "b16e54ec8cc421d6c4175dd89249154dff8fcf7f",
+      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+    },
+    {
+      "pr": 1295,
+      "sha": "50085af5e422e691145f6a4c00f147a2e91e1422",
+      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+    },
+    {
+      "pr": 1297,
+      "sha": "b549de91b1f8ff74b47e8595d6354a4687150677",
+      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+    },
+    {
+      "pr": 1296,
+      "sha": "5b7fe710e333ba07ea42f894193102825a5a7ef5",
+      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+    },
+    {
+      "pr": 1293,
+      "sha": "805dabdfbd811924eab94820460669a76f35287e",
+      "proof": "PUBLISHED_SOURCE_ONLY_INTEGRATED_CI_PENDING"
+    }
+  ]
 }

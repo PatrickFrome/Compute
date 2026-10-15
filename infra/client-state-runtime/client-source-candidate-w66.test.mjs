@@ -15,6 +15,12 @@ const exactPublished = new Map([
   [1285, '00140a57964aacbddea6a5cf4811774bb1196b14'],
   [1288, '30e9641ba13b56cb3a18be9b6f93dc92db4df116'],
   [1289, '2cf2de5337daa236791da7b6073ad4e89ffb01e3'],
+  [1292, 'da61c6318cee921967b9beebc804c3694250beaa'],
+  [1294, 'b16e54ec8cc421d6c4175dd89249154dff8fcf7f'],
+  [1295, '50085af5e422e691145f6a4c00f147a2e91e1422'],
+  [1297, 'b549de91b1f8ff74b47e8595d6354a4687150677'],
+  [1296, '5b7fe710e333ba07ea42f894193102825a5a7ef5'],
+  [1293, '805dabdfbd811924eab94820460669a76f35287e'],
 ]);
 
 test('W66 has actual Git ancestry for final W62/W61/W64/W65 and all W59 predecessors', () => {
