@@ -46,8 +46,8 @@ test('source closure has no authority to promote installed state or replay histo
   const c=manifest.test_candidate;
   assert.equal(c.classification,'ISOLATED_TEST_PACKAGE_ONLY');
   assert.equal(c.source_parent,'49d050ff127e22ca27fbe3514324ba99832afb24');
-  assert.equal(c.branch,'work/metaengine-test-candidate-20261015');
-  assert.equal(c.version,'0.7.0-dev.1028947361258.1');
+  assert.equal(c.branch,'work/metaengine-edge-health-physical-20261015');
+  assert.equal(c.version,'0.7.0-dev.1085123449201.1');
   assert.equal(c.production_release_authorized,false);
   assert.equal(c.installed_mutation_authorized,false);
   assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',c.source_parent,'HEAD']).status,0);
