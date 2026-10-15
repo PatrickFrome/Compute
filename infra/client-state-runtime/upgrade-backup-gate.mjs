@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
+import {readClientBackupAclNativeW58} from '../../apps/metaengine-browser/src/client-backup-acl-native-w58.mjs';
 import { qualifyIndependentDisposableRestore } from './upgrade-backup-restore-gate.mjs';
 
 const HEX = /^[a-f0-9]{64}$/;
@@ -70,6 +71,16 @@ export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocRea
     if (first.toString('ascii') !== 'PGDMP' || h.digest('hex') !== receipt.file_sha256)
       return fail('ARCHIVE_BYTES_UNVERIFIED');
   } catch { return fail('ARCHIVE_READ_FAILED'); }
+  // W58: POSIX mode and a self-asserted owner_dacl_verified are never NTFS
+  // evidence. This default production path queries the actual Host/OS readback;
+  // no caller can inject a verified=true ACL receipt here.
+  const acl = await readClientBackupAclNativeW58({
+    backupDirectory: expected.backupDirectory, archivePath,
+  });
+  if (acl.native_acl_verified !== true)
+    return {...fail('NATIVE_BACKUP_ACL_'+acl.reason),archive_integrity_verified:true};
+  // Source/CI NTFS ACL proof does not attest an installed Owner incarnation.
+  // W52/native Owner is separately required; keep installed backup UNKNOWN.
   // Only after independent archive bytes and TOC readback qualify the
   // standalone disposable-restore evidence. An archive header and listing
   // do NOT establish that it can reconstruct the actual user data.
@@ -78,14 +89,13 @@ export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocRea
   });
   return {
     schema:'metaengine.installed-upgrade-backup-gate.v1',
-    backup_verified:true, independent_toc_bound:true,
+    backup_verified:false,archive_integrity_verified:true,
+    native_acl_verified:true,installed_owner_proven:false,independent_toc_bound:true,
     restore_receipt_consistent:restore.restore_receipt_consistent,
     restore_verified:false, physical_restore_proven:false,
     restore_reason:restore.reason,
     upgrade_authorized:false, // Later quiescence, identity, rollback & authority gates remain.
     automatic_retry_allowed:false, authority_effect:false,
-    reason:restore.restore_receipt_consistent
-      ? 'BACKUP_AND_RESTORE_RECEIPT_CONSISTENT_PHYSICAL_PROOF_REQUIRED'
-      : 'BACKUP_ONLY_VERIFIED',
+    reason:'NATIVE_ACL_VERIFIED_INSTALLED_OWNER_UNKNOWN',
   };
 }
