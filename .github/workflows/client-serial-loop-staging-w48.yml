@@ -1,42 +1,75 @@
-name: Client W48 Serial Staging Source and Disposable PG17
+name: Client W56 Serial Staging Source and Disposable PG17
 on:
   pull_request:
     paths:
       - 'infra/client-state-runtime/client-serial-loop-staging-w48*'
+      - 'infra/client-state-runtime/client-serial-loop-staging-w56*'
+      - '.github/workflows/client-serial-loop-staging-w48.yml'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/fleet-dag*'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs'
-      - '.github/workflows/client-serial-loop-staging-w48.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   windows-source:
-    runs-on: windows-latest
+    runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Exact candidate and relevant source contracts
+      - name: Assert exact head and run existing/W56 source contracts
         shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          git rev-parse HEAD
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'W56_EXACT_HEAD_MISMATCH' }
           node --check infra/client-state-runtime/client-serial-loop-staging-w48.mjs
-          node --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs
+          node --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs
   disposable-pg17:
     runs-on: ubuntu-24.04
     container:
       image: postgres:17
     steps:
-      - name: Install Git only in ephemeral CI container
+      - name: Install Git in disposable PG17 container
         run: apt-get update -qq && apt-get install -y -qq git ca-certificates
-      - uses: actions/checkout@v4
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Run source and real temporary PG17 as unprivileged postgres user
+      - name: Repair checkout ownership inside isolated CI container only
+        shell: sh
         run: |
-          git rev-parse HEAD
-          node --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs
+          set -eu
+          test "$(id -u)" -eq 0
+          test -n "$GITHUB_WORKSPACE"
+          test "$(realpath "$GITHUB_WORKSPACE")" = "$(pwd -P)"
+          test -d "$GITHUB_WORKSPACE/.git"
+          chown -R postgres:postgres "$GITHUB_WORKSPACE"
+          test "$(stat -c %U "$GITHUB_WORKSPACE/.git")" = postgres
           test -x /usr/lib/postgresql/17/bin/initdb
-          runuser -u postgres -- env W48_PG17_BIN=/usr/lib/postgresql/17/bin "$(command -v node)" --test infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs
+      - name: Exact-head source and real PG17 crash/restart as postgres
+        shell: sh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -eu
+          NODE_BIN="$(command -v node)"
+          runuser -u postgres -- env GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin NODE_BIN="$NODE_BIN" sh -ec '
+            cd "$GITHUB_WORKSPACE"
+            test "$(id -un)" = postgres
+            test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+            test -z "$(git status --porcelain)"
+            "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs
+            "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
+          '
