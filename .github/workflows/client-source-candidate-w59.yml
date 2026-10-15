@@ -42,7 +42,7 @@ jobs:
           test "$(git config --bool core.sparseCheckout || echo false)" = false
           test -z "$(git status --porcelain)"
           npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
-      - name: Frozen W43/W51 historical baselines and W59 current seventeen-parent ledger
+      - name: Frozen W43/W51 historical baselines and W59 current eighteen-parent ledger
         shell: bash
         run: |
           node --test --test-concurrency=1 \
@@ -66,6 +66,8 @@ jobs:
             apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs \
             apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs \
             apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs \
+            apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
+            apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs \
             infra/client-state-runtime/client-backup-acl-native-w58.test.mjs \
             infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs \
             apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs \
