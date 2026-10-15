@@ -1,0 +1,68 @@
+name: Client W74 Authenticated Host Owner Genesis
+on:
+  push:
+    branches:
+      - 'work/metaengine-client-wave12-w74-20261015'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs'
+      - 'apps/metaengine-browser/src/supervisor-device-identity.mjs'
+      - 'apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs'
+      - 'apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs'
+      - 'infra/client-state-runtime/host-owner-genesis-w74.pg17.integration.test.mjs'
+      - '.github/workflows/client-host-owner-w74.yml'
+permissions:
+  contents: read
+concurrency:
+  group: w74-host-owner-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-custody:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact source and no dirty inherited profile
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git diff --check
+          node --check apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs
+          node --check apps/metaengine-browser/src/supervisor-device-identity.mjs
+          node --check infra/client-state-runtime/host-owner-genesis-w74.pg17.integration.test.mjs
+      - name: Pure staged genesis / negative trusted custody and W67 regressions
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs \
+            apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs \
+            apps/metaengine-browser/test/host-owner-custody-w67.test.mjs
+  real-pg17:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Install existing pinned own-PG client only
+        shell: bash
+        run: npm install --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Generated standalone Docker PostgreSQL 17 (no inherited Owner/DB)
+        shell: bash
+        env:
+          W74_DOCKER_PG17: '1'
+          W74_REQUIRE_REAL_PG17: '1'
+        run: node --test --test-concurrency=1 infra/client-state-runtime/host-owner-genesis-w74.pg17.integration.test.mjs

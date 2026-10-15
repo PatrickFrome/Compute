@@ -27,7 +27,7 @@ test('W73 truly merges W66 and final W67 as Git ancestors, retaining frozen hist
 });
 test('W73 100+ protected blobs equal committed HEAD and exact local bytes',()=>{
   const entries=Object.entries(m.current_tree_blobs);
-  assert.ok(entries.length>=100);
+  assert.ok(entries.length>=125);
   for(const [p,sha] of entries){
     assert.ok(!p.startsWith('/')&&!p.includes('..')&&!p.includes('\\'));
     assert.match(sha,/^[a-f0-9]{40}$/);
@@ -57,7 +57,12 @@ test('W73 authenticated operations, Windows sync and no unsafe promotion',()=>{
   assert.deepEqual(m.unbound_historical_effects,['W53_AMBIGUOUS_UNKNOWN','HISTORICAL_59_AMBIGUOUS_UNKNOWN']);
   for(const gate of ['CI','STAGING','INSTALLED','LIVE'])
     assert.match(m.proof_levels[gate],/UNKNOWN|PENDING|NOT_QUALIFIED/);
-  assert.deepEqual(m.wave12_integrated_pins,[]);
+  assert.equal(m.wave12_integrated_pins.length,8);
+  for(const x of m.wave12_integrated_pins){
+    assert.equal(m.parent_heads.find(p=>p.pr===x.pr)?.sha,x.sha);
+    assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',x.sha,'HEAD']).status,0,'missing Wave12 parent #'+x.pr);
+    assert.match(x.proof,/SOURCE_MERGED_EXACT_HEAD_CI_NOT_YET_TERMINAL/);
+  }
 });
 test('W73 tests explicitly registered with exact-head CI, parent CI nontransitive',()=>{
   const workflow=read('.github/workflows/client-source-candidate-w73.yml');
@@ -70,4 +75,12 @@ test('W73 tests explicitly registered with exact-head CI, parent CI nontransitiv
   const scripts=JSON.parse(read('infra/client-state-runtime/package.json')).scripts;
   assert.match(scripts['test:w73:source'],/client-source-candidate-w73\.test\.mjs/);
   assert.equal(m.parent_checks_not_transitive,true);
+});
+
+test('W73 preserves physical and source classification boundaries after Wave12 integration',()=>{
+ for(const w of ['W74','W75','W76','W78','W79','W80','W81','W82'])assert.ok(m.wave12_integrated_pins.find(x=>x.wave===w));
+ for(const p of ['apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs','apps/metaengine-browser/src/host-private-custody-w76.mjs','apps/metaengine-browser/src/development-plane-fixed-sandbox-edit.cjs','infra/client-state-runtime/client-current-acl-critic-w81.mjs','.github/workflows/client-source-candidate-w59.yml'])assert.match(m.current_tree_blobs[p],/^[a-f0-9]{40}$/);
+ for(const x of ['STAGING','INSTALLED','LIVE'])assert.match(m.proof_levels[x],/UNKNOWN/);
+ assert.equal(m.package_version_change_authorized,false);
+ assert.equal(m.wave12_distinct_ownership_preserved,true);
 });

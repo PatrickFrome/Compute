@@ -1,0 +1,90 @@
+name: Client W75 Guardian Native 100ns Birth and Source Compile
+on:
+  push:
+    branches:
+      - 'work/metaengine-client-wave12-w75-20261015'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/browser-guardian-scm/**'
+      - 'apps/metaengine-browser/src/guardian-client-kernel-birth-w67.mjs'
+      - 'apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs'
+      - 'apps/metaengine-browser/test/guardian-client-kernel-birth-w75.test.mjs'
+      - 'apps/metaengine-browser/test/native/guardian-owner-kernel-birth-w75.cpp'
+      - '.github/workflows/client-host-owner-w75.yml'
+permissions:
+  contents: read
+jobs:
+  pure-kernel-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Exact source and pure birth negative tests
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          node --test apps/metaengine-browser/test/guardian-client-kernel-birth-w75.test.mjs
+          node --test apps/metaengine-browser/test/host-owner-custody-w67.test.mjs
+          git diff --check
+  actual-native-msvc:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Actual production Guardian MSVC compile/link, no service activation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $outDir = Join-Path $env:RUNNER_TEMP 'w75-guardian-native-staging'
+          & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -OutputDir $outDir
+          if ($LASTEXITCODE -ne 0) { throw "guardian_native_build_exit_$LASTEXITCODE" }
+          $exe = Join-Path $outDir 'METAENGINEBrowserGuardian.exe'
+          $manifest = Join-Path $outDir 'guardian-native-manifest.json'
+          if (-not (Test-Path $exe) -or -not (Test-Path $manifest)) { throw 'guardian_native_staging_missing' }
+          $m = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+          if ($m.staging_only -ne $true -or $m.service_activation_authorized -ne $false -or $m.service_installation_authorized -ne $false) { throw 'installed_boundary_not_blocked' }
+          $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $binary = @($m.binaries | Where-Object name -eq 'METAENGINEBrowserGuardian.exe')
+          if ($binary.Count -ne 1 -or $actual -ne $binary[0].sha256) { throw 'native_binary_hash_mismatch' }
+      - name: Compile and run real OS process-kernel 100ns regression
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'msvc_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          $src = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.cpp').Path
+          $dir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $probe = (Resolve-Path 'apps/metaengine-browser/test/native/guardian-owner-kernel-birth-w75.cpp').Path
+          $exe = Join-Path $env:RUNNER_TEMP 'guardian-owner-kernel-birth-w75.exe'
+          $cmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" /Fe:"{4}" /link advapi32.lib' -f $vcvars,$dir,$src,$probe,$exe
+          & $env:ComSpec /d /s /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "kernel_birth_compile_exit_$LASTEXITCODE" }
+          $result = & $exe
+          if ($LASTEXITCODE -ne 0 -or $result -ne 'GUARDIAN_KERNEL_BIRTH_100NS_EXACT_PASS') { throw 'kernel_birth_real_process_negative_failed' }
+      - name: W75 JS negative tests and exact source readback
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          node --test apps/metaengine-browser/test/guardian-client-kernel-birth-w75.test.mjs
+          git diff --check
+          test -z "$(git status --porcelain --untracked-files=all)"

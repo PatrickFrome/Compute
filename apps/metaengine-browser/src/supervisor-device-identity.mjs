@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { HostAgentClient } from './host-agent-ipc.mjs';
+import { createHostOwnerGenesisCustodyW74 } from './host-owner-genesis-custody-w74.mjs';
 
 export const SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 export const ENROLLMENT_SIGNATURE_PROFILE = 'METAENGINE_NATIVE_ENROLLMENT_V1';
@@ -67,6 +68,7 @@ function atomicStateShape(value) {
     public_jwk: canonicalPublicJwk(value.public_jwk),
     key_fingerprint_sha256: String(value.key_fingerprint_sha256 || ''),
     encrypted_private_key_b64: String(value.encrypted_private_key_b64 || ''),
+    encrypted_host_owner_record_b64: String(value.encrypted_host_owner_record_b64 || ''),
     enrollment_request_id: value.enrollment_request_id ? String(value.enrollment_request_id) : null,
     device_id: value.device_id ? String(value.device_id) : null,
     created_at: value.created_at || new Date().toISOString(),
@@ -84,6 +86,7 @@ export class SupervisorDeviceIdentity {
   #w67PrivateGatewayReadback = null;
   #w67PrivatePostgresBirth = null;
   #w67GuardianObservation = null;
+  #w74OwnerCustody = null;
 
   constructor({ statePath, secureStorage }) {
     if (!statePath) throw new Error('supervisor_device_state_path_required');
@@ -165,7 +168,8 @@ export class SupervisorDeviceIdentity {
 
   snapshot() {
     if (!this.#state) return null;
-    const { encrypted_private_key_b64: _secret, ...safe } = this.#state;
+    const { encrypted_private_key_b64: _secret,
+      encrypted_host_owner_record_b64: _ownerSecret, ...safe } = this.#state;
     return structuredClone({ ...safe, enrolled: Boolean(this.#state.device_id) });
   }
 
@@ -320,6 +324,62 @@ export class SupervisorDeviceIdentity {
     } catch { return null; }
   }
 
+  // W74 shares the EXISTING DPAPI/Electron secureStorage custody with the
+  // enrolled device key. An encrypted record is a cache, never authority:
+  // every read joins fresh own-PG project/epoch + signed native Guardian
+  // incarnation + installed source proof before returning any Host Owner.
+  // Only the authenticated private Host/bootstrap composition may bind this.
+  bindHostOwnerGenesisW74({ transaction, readAuthenticatedAdmin,
+    readSourceProof, readNativeKernel, staging = false } = {}) {
+    if (this.#w74OwnerCustody || !this.#w67GuardianObservation)
+      throw new Error('w74_native_guardian_not_bound');
+    const readSealed = async () => {
+      await this.ensure();
+      const encoded = this.#state?.encrypted_host_owner_record_b64;
+      if (!encoded) return null;
+      if (this.#secureStorage.isEncryptionAvailable?.() === false)
+        throw new Error('w74_secure_storage_unavailable');
+      const plain = this.#secureStorage.decryptString(Buffer.from(encoded,'base64'));
+      const record = JSON.parse(plain);
+      if (record?.schema !== 'metaengine.host.owner-incarnation.v1')
+        throw new Error('w74_protected_owner_record_invalid');
+      return record;
+    };
+    const writeSealed = async (next, previous) => {
+      const current = await readSealed();
+      // Do not repair a corrupt record or race a different Owner transition.
+      if (JSON.stringify(current) !== JSON.stringify(previous))
+        throw new Error('w74_owner_cas_changed');
+      if (!this.#state?.device_id || this.#state.device_id !== next.device_id ||
+          this.#state.client_id !== next.owner_id)
+        throw new Error('w74_owner_device_changed');
+      const encoded = Buffer.from(this.#secureStorage.encryptString(
+        JSON.stringify(next))).toString('base64');
+      await this.#persist({
+        ...this.#state, encrypted_host_owner_record_b64: encoded,
+      });
+    };
+    const bound = createHostOwnerGenesisCustodyW74({
+      identity:this,transaction,readAuthenticatedAdmin,
+      readGuardian:()=>this.readGuardianOwnerEvidenceW67(),
+      readSourceProof,readNativeKernel,readSealed,writeSealed,staging,
+    });
+    this.#w74OwnerCustody = bound;
+    return () => {
+      if (this.#w74OwnerCustody !== bound) return;
+      bound.close();
+      this.#w74OwnerCustody = null;
+    };
+  }
+
+  async establishHostOwnerW74() {
+    return this.#w74OwnerCustody?.create() ?? null;
+  }
+
+  async readTrustedHostOwnerIncarnationW74() {
+    return this.#w74OwnerCustody?.read() ?? null;
+  }
+
   async bindEnrollmentRequest(requestId) {
     await this.ensure();
     return this.#persist({ ...this.#state, enrollment_request_id: String(requestId || ''), device_id: null });
@@ -341,13 +401,15 @@ export class SupervisorDeviceIdentity {
       ...this.#state,
       enrollment_request_id: null,
       device_id: null,
+      encrypted_host_owner_record_b64: '',
     });
   }
 
   async bindDevice(deviceId) {
     await this.ensure();
     if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw new Error('supervisor_device_id_invalid');
-    return this.#persist({ ...this.#state, device_id: String(deviceId), enrollment_request_id: null });
+    return this.#persist({ ...this.#state, device_id: String(deviceId),
+      enrollment_request_id: null, encrypted_host_owner_record_b64: '' });
   }
 
   #sign(material) {

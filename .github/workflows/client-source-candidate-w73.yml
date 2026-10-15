@@ -109,6 +109,20 @@ jobs:
             infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs \
             infra/client-state-runtime/own-postgres-birth-w61.test.mjs
 
+      - name: Wave12 source and disposable STAGING safety contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs \
+            apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs \
+            apps/metaengine-browser/test/guardian-client-kernel-birth-w75.test.mjs \
+            apps/metaengine-browser/test/host-private-custody-w76.test.mjs \
+            apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs \
+            infra/client-state-runtime/client-c2-worker-edit-w80.test.mjs \
+            infra/client-state-runtime/client-current-acl-critic-w81.test.mjs
+          node --test .github/client-ci-train-w82.test.mjs
+
   frozen-me2-seven-views:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
