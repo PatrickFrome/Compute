@@ -214,11 +214,12 @@ export function CommandPalette() {
         </CommandGroup>}
         {mode === "all" ? <CommandSeparator /> : null}
 
-        {/* Native agents live in the Browser workspace rail. The palette does
-            not spawn daemon/API agents or invent a second fleet projection. */}
+        {/* Native agents live in the Browser workspace rail. This is a
+            navigation-only affordance: no agent spawn, dispatch or parallel
+            fleet projection from a renderer command. */}
         {mode === "all" ? (
-          <CommandGroup heading="Agents">
-            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}> Open agent workspace
+          <CommandGroup heading="Native Agent fleet">
+            <CommandItem value="open native ChatGPT agent fleet browser workspace" onSelect={() => { setPage("browser"); setOpen(false); }}> Open native ChatGPT agent fleet
               <span data-palette-detail className="ml-auto text-[12px] text-zinc-400">Existing sessions</span>
             </CommandItem>
           </CommandGroup>
