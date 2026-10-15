@@ -31,7 +31,7 @@ const negatives=[
   ['Windows ACL failed',x=>x.runs[5].jobs[0].conclusion='failure','ACL_PUSH_WINDOWS'],
   ['Windows ACL skipped',x=>x.runs[5].jobs[0].conclusion='skipped','ACL_PUSH_WINDOWS'],
   ['Linux is not Windows ACL',x=>x.runs[5].jobs.shift(),'ACL_PUSH_WINDOWS'],
-  ['Linux ACL failure',x=>x.runs[5].jobs[1].conclusion='failure','SAME_SHA_Client W58 Native Windows Backup ACL'],
+  ['Linux ACL failure',x=>x.runs[5].jobs[1].conclusion='failure','ACL_PUSH_WINDOWS'],
   ['missing job',x=>x.runs[5].jobs=[],'ACL_PUSH_WINDOWS'],
   ['job from parent',x=>x.runs[5].jobs[0].head_sha=PARENT,'ACL_PUSH_WINDOWS'],
   ['job from foreign run',x=>x.runs[5].jobs[0].run_id=999,'ACL_PUSH_WINDOWS'],
