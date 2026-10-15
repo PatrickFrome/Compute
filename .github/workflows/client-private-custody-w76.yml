@@ -1,0 +1,56 @@
+name: Client W76 Private Host Custody (source-only)
+on:
+  push:
+    branches: [work/metaengine-client-wave12-w76-20261015]
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/host-private-custody-w76.mjs'
+      - 'apps/metaengine-browser/src/final-runtime-activation.mjs'
+      - 'apps/metaengine-browser/src/host-agent-remote-composition.mjs'
+      - 'apps/metaengine-browser/test/host-private-custody-w76.test.mjs'
+      - '.github/workflows/client-private-custody-w76.yml'
+permissions:
+  contents: read
+concurrency:
+  group: w76-private-custody-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  exact-source:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact clean source and disposable isolated profile
+        shell: pwsh
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED) { throw 'W76_EXACT_HEAD_MISMATCH' }
+          $profile = Join-Path $env:RUNNER_TEMP ('w76-disposable-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $profile | Out-Null
+          $env:HOME = $profile
+          $env:USERPROFILE = $profile
+          $env:APPDATA = $profile
+          $env:LOCALAPPDATA = $profile
+          $env:XDG_CONFIG_HOME = $profile
+          $env:XDG_DATA_HOME = $profile
+          $env:NODE_OPTIONS = ''
+          node --check apps/metaengine-browser/src/host-private-custody-w76.mjs
+          node --check apps/metaengine-browser/src/final-runtime-activation.mjs
+          node --check apps/metaengine-browser/src/host-agent-remote-composition.mjs
+          node --test --test-concurrency=1 apps/metaengine-browser/test/host-private-custody-w76.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'W76_SOURCE_TESTS_FAILED' }
+          git diff --check
+      - name: Status boundary
+        shell: pwsh
+        run: Write-Output 'W76_SOURCE_ONLY; W74/W75/W77 final native+PG17 protected custody and installed Owner = UNKNOWN'
