@@ -152,6 +152,12 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     const info=await fs.stat(archive);
     assert(info.size>1024);
     const archiveDigest=await hashFile(archive);
+    assert.equal((await dbsql(from,'SELECT system_identifier::text FROM pg_control_system()')).trim(),
+      sourceIdentity,'source cluster system identifier cannot drift across dump');
+    assert.equal((await dbsql(from,'SELECT pg_postmaster_start_time()')).trim(),
+      sourceBirth,'postmaster incarnation cannot change across physical archive');
+    assert.equal((await dbsql(from,scopedSql)).trim(),'1',
+      'Owner scoped project/device/client/epoch must survive source backup');
     const h=await fs.open(archive,'r');
     const magic=Buffer.alloc(5);
     try{await h.read(magic,0,5,0);}finally{await h.close();}
