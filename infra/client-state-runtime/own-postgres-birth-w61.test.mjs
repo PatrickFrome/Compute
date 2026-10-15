@@ -52,6 +52,14 @@ test('birth is a private fixed catalog SELECT, two distinct read-only transactio
   assert.equal(r.queries.length,4);
   assert.equal(v.owner_epoch_bound,true);
 });
+test('Host callback reconstructs distinct Date objects with identical kernel birth',async()=>{
+  const owners=[owner(),owner(),owner()].map(x=>({
+    ...x,created_at:new Date(x.created_at),observed_at:new Date(x.observed_at),
+  }));
+  const evidence=await rig({owners}).provider('owner-w61',9);
+  assert.equal(evidence?.owner_epoch_bound,true);
+  assert.equal(evidence?.source,'OWN_PG_POSTMASTER_READBACK');
+});
 test('no Host producer and invalid selector cannot generate proof',async()=>{
   assert.equal(bindOwnPostgresBirthProviderW61({transaction:async()=>[]}),null);
   const r=rig();
