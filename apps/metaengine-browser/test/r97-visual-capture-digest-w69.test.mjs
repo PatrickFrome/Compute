@@ -70,3 +70,19 @@ test('W69 rejects missing, modified and path-escaping screenshots', async () => 
     await assert.rejects(() => verifyR97VisualCaptures(root, HEAD), /r97_filename_must_be_flat_png/);
   });
 });
+
+
+test('W69 R97 workflow registers valid push/PR receipts without uploading a browser profile', async () => {
+  const workflow = await readFile(new URL('../../../.github/workflows/client-wave10-w62-source-r97.yml', import.meta.url), 'utf8');
+  const harness = await readFile(new URL('./me2-r85-visual-evidence.mjs', import.meta.url), 'utf8');
+  assert.match(workflow, /^  push:/m);
+  assert.match(workflow, /^  pull_request:/m);
+  assert.match(workflow, /github\.event\.pull_request\.head\.sha \|\| github\.sha/);
+  assert.doesNotMatch(workflow, /^      METAENGINE_R85_VISUAL_EVIDENCE_DIR:/m);
+  assert.match(workflow, /runner\.temp.*client-w69-r97-evidence/);
+  assert.match(workflow, /client-w69-r97-evidence\\\*\.png/);
+  assert.match(workflow, /client-w69-r97-evidence\\r85-visual-evidence\.json/);
+  assert.match(harness, /path\.dirname\(OUTPUT_ROOT\)/);
+  assert.match(harness, /app\.setPath\('userData', visualProfile\)/);
+  assert.match(harness, /app\.setPath\('sessionData', visualSession\)/);
+});

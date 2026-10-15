@@ -24,8 +24,9 @@ process.env.ME2_UI_GATEWAY_PORT = process.env.ME2_UI_GATEWAY_PORT || '39101';
 process.env.ME2_ALLOW_EXTERNAL_UI_ADOPT = '0';
 
 // R97 runs in a disposable source/CI profile, never the installed Browser profile.
-// Both Chromium session data and shell userData are confined to the evidence root.
-const visualProfile = path.join(OUTPUT_ROOT, 'disposable-electron-profile');
+// Both Chromium session data and shell userData remain in disposable CI temp custody.
+// Keep Chromium session caches OUTSIDE the screenshot artifact directory.
+const visualProfile = path.join(path.dirname(OUTPUT_ROOT), `disposable-w69-r97-profile-${process.pid}`);
 const visualSession = path.join(visualProfile, 'session');
 mkdirSync(visualSession, { recursive: true });
 app.setPath('userData', visualProfile);
