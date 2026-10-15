@@ -22,13 +22,16 @@ test('W60: production Host Runtime emits fixed process census across authenticat
   const client=new HostAgentClient({endpoint,sessionKey});
   await host.start();
   try {
-    const receipt=await client.request('OWNER_NATIVE_READBACK',{}, {timeoutMs:5000});
+    const receipt=await client.request('OWNER_NATIVE_READBACK',{}, {timeoutMs:20000});
     assert.equal(receipt.schema,'metaengine.host.owner-native-readback.w60.v1');
     assert.equal(receipt.owner_binding_proven,false);
     assert.equal(receipt.signed_installed_exe_proven,false);
     assert.equal(receipt.credential_exposed,false);
     assert.equal(receipt.authority_effect,false);
     assert.ok(['UNKNOWN','KERNEL_PROCESS_OBSERVED'].includes(receipt.state));
+    // Real Windows runner must actually execute the fixed OS PID/birth reader.
+    if(process.platform === 'win32')
+      assert.equal(receipt.state,'KERNEL_PROCESS_OBSERVED');
     if(receipt.kernel){
       assert.equal(receipt.kernel.pid,process.pid);
       assert.equal(receipt.kernel.source,'OS_PROCESS_INVENTORY');

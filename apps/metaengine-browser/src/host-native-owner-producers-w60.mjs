@@ -19,16 +19,20 @@ const frozen = x => x ? Object.freeze(x) : null;
 
 // Fixed PowerShell, numeric PID only. Unlike Get-Process from a status screenshot,
 // StartTime is read from the Windows kernel at the time of each observation.
-const PROCESS_SCRIPT = [
+// Numeric-only interpolation avoids PowerShell's -Command trailing-argument
+// ambiguity: $args[0] is not populated consistently on Windows PowerShell 5.1.
+const processScript = pid => [
   '$ErrorActionPreference = "Stop"',
-  '$p = Get-Process -Id ([int]$args[0]) -ErrorAction Stop',
+  '$p = Get-Process -Id ' + String(pid) + ' -ErrorAction Stop',
   '$start = $p.StartTime.ToUniversalTime().ToString("o")',
   '$exe = $p.Path',
   '@{ pid = [int]$p.Id; created_at = $start; exe_path = $exe } | ConvertTo-Json -Compress',
 ].join('; ');
-const SIGNATURE_SCRIPT = [
+const signatureScript = executable => [
   '$ErrorActionPreference = "Stop"',
-  '$f = [System.IO.Path]::GetFullPath($args[0])',
+  // A single, PowerShell-literal-escaped trusted native EXE path; no command
+  // fragment, wildcard, option injection or trailing $args invocation.
+  "$f = [System.IO.Path]::GetFullPath('" + executable.replace(/'/g, "''") + "')",
   '$s = Get-AuthenticodeSignature -LiteralPath $f -ErrorAction Stop',
   '@{ status = [string]$s.Status; thumbprint = [string]$s.SignerCertificate.Thumbprint } | ConvertTo-Json -Compress',
 ].join('; ');
@@ -37,8 +41,8 @@ export async function readWindowsKernelProcessW60(pid, { platform = process.plat
   if (platform !== 'win32' || !pos(pid) || pid > 0x7fffffff) return null;
   return safe(async () => {
     const { stdout } = await exec('powershell.exe',
-      ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command', PROCESS_SCRIPT, String(pid)],
-      { timeout: 2500, windowsHide: true, maxBuffer: 4096 });
+      ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command', processScript(pid)],
+      { timeout: 15000, windowsHide: true, maxBuffer: 4096 });
     const x = JSON.parse(stdout.trim());
     if (x.pid !== pid || !Number.isFinite(Date.parse(x.created_at)) ||
       typeof x.exe_path !== 'string' || !x.exe_path) return null;
@@ -50,11 +54,12 @@ export async function readWindowsKernelProcessW60(pid, { platform = process.plat
 export async function readWindowsSignedExecutableW60(executable, {
   platform = process.platform, exec = run, readFile = fs.readFile,
 } = {}) {
-  if (platform !== 'win32' || typeof executable !== 'string' || !executable ||
+  if (platform !== 'win32' || typeof executable !== 'string' ||
+    executable.length > 2048 || !/^[A-Za-z]:\\/.test(executable) ||
     executable.startsWith('\\\\') || executable.includes('\0')) return null;
   return safe(async () => {
     const { stdout } = await exec('powershell.exe',
-      ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',SIGNATURE_SCRIPT,executable],
+      ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',signatureScript(executable)],
       { timeout: 3500, windowsHide: true, maxBuffer: 4096 });
     const sig = JSON.parse(stdout.trim());
     if (sig.status !== 'Valid' || !HEX40.test(sig.thumbprint || '')) return null;
