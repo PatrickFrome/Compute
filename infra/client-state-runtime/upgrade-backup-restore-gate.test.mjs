@@ -12,7 +12,8 @@ const toc=Array.from({length:105},(_,i)=>`${i+1}; 1 0 TABLE DATA public syntheti
 const expectedBase={keeperPid:10776,ownerPid:2888,ownerSha256:'a'.repeat(64),
   postmasterSha256:'b'.repeat(64),sourcePgPort:55432,qualifiedExecutorSha256:'c'.repeat(64)};
 async function fixture(t){
-  const backupDirectory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-restore-gate-'));
+  const generatedDirectory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-restore-gate-'));
+  const backupDirectory=process.platform==='win32'?await fs.realpath(generatedDirectory):generatedDirectory;
   t.after(()=>fs.rm(backupDirectory,{recursive:true,force:true}));
   const archivePath=path.join(backupDirectory,'postgresql-17-snapshot.dump');
   const bytes=Buffer.concat([Buffer.from('PGDMP'),Buffer.alloc(4096,31)]);
