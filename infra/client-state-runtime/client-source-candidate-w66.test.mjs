@@ -99,8 +99,17 @@ test('W66 retains source registration and cannot qualify staging, package or liv
   assert.deepEqual(manifest.unbound_historical_effects, ['W53_AMBIGUOUS_UNKNOWN', 'HISTORICAL_59_AMBIGUOUS_UNKNOWN']);
   assert.equal(manifest.package_freeze_owner, 'W69');
   assert.equal(manifest.package_version_change_authorized, false);
-  assert.equal(JSON.parse(read('apps/metaengine-browser/package.json')).version,
-    JSON.parse(git('show', w59 + ':apps/metaengine-browser/package.json')).version);
+  const historicalVersion=JSON.parse(git('show',w59+':apps/metaengine-browser/package.json')).version;
+  const observedVersion=JSON.parse(read('apps/metaengine-browser/package.json')).version;
+  const candidate=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json')).test_candidate;
+  if(candidate){
+    assert.equal(candidate.classification,'ISOLATED_TEST_PACKAGE_ONLY');
+    assert.equal(candidate.branch,'work/metaengine-test-candidate-20261015');
+    assert.equal(candidate.production_release_authorized,false);
+    assert.equal(candidate.installed_mutation_authorized,false);
+    assert.equal(observedVersion,candidate.version);
+    assert.notEqual(observedVersion,historicalVersion);
+  }else assert.equal(observedVersion,historicalVersion);
   const roadmap = read('coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md');
   assert.match(roadmap, /W43 one-source Client convergence checkpoint/);
   assert.doesNotMatch(roadmap, /^<<<<<<< |^=======|^>>>>>>> /m);

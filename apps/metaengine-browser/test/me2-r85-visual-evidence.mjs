@@ -568,7 +568,7 @@ async function main() {
       `document.querySelector('[data-testid="settings-button"]')?.click(); true`,
     );
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === 'system'");
-    await waitFor(shellView.webContents, "document.querySelectorAll('[data-testid^=settings-open-]').length === 5");
+    await waitFor(shellView.webContents, "document.querySelectorAll('[data-testid^=settings-open-]').length === 6");
     const settingsCapture = await capture(shellView, 'r97-settings-advanced-surface-1440x960');
     if (settingsCapture.metrics.primary != null || settingsCapture.metrics.rail != null) {
       throw new Error('r97_visual_main_rail_persisted_inside_settings');
@@ -578,9 +578,10 @@ async function main() {
     if (settingsCapture.metrics.settings_area_count !== 5) throw new Error('ui1_settings_areas_missing');
     if (geometryFixture.getVisible()) throw new Error('ui1_native_fixture_visible_in_settings');
 
-    for (const target of ['tasks','code','supervisor','memory','observability']) {
+    for (const target of ['tasks','code','supervisor','memory','observability','operator']) {
       await shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-open-${target}"]')?.click(); true`);
-      await waitFor(shellView.webContents, `Boolean(document.querySelector('[data-testid="page-${target}"]'))`);
+      await waitFor(shellView.webContents, `document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === '${target}'`);
+      if(target !== 'operator') await waitFor(shellView.webContents, `Boolean(document.querySelector('[data-testid="page-${target}"]'))`);
       await shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-button"]')?.click(); true`);
       await waitFor(shellView.webContents, "Boolean(document.querySelector('[data-testid=settings-advanced-surfaces]'))");
     }
