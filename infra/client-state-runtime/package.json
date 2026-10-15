@@ -15,7 +15,8 @@
     "test:w47:staging": "node --test client-backup-restore-staging-w47.test.mjs pg17-backup-effect-barrier.test.mjs upgrade-backup-gate.test.mjs upgrade-backup-restore-gate.test.mjs",
     "test:w47:pg17": "node --test disposable-pg17-logical-restore.integration.test.mjs",
     "test:w58:acl": "node --test --test-concurrency=1 client-backup-acl-native-w58.test.mjs client-backup-acl-native-w58.ipc.test.mjs upgrade-backup-gate.test.mjs upgrade-backup-restore-gate.test.mjs",
-    "test:w66:source": "node --test --test-concurrency=1 client-source-candidate-w43.test.mjs client-source-candidate-w51.test.mjs client-source-candidate-w59.test.mjs client-source-candidate-w66.test.mjs client-candidate-acceptance-w65.test.mjs client-serial-loop-development-worker-w64.test.mjs client-serial-loop-pg17-lifecycle-w64.test.mjs client-c2-existing-worker-w71.test.mjs client-current-acl-critic-w72.test.mjs"
+    "test:w66:source": "node --test --test-concurrency=1 client-source-candidate-w43.test.mjs client-source-candidate-w51.test.mjs client-source-candidate-w59.test.mjs client-source-candidate-w66.test.mjs client-candidate-acceptance-w65.test.mjs client-serial-loop-development-worker-w64.test.mjs client-serial-loop-pg17-lifecycle-w64.test.mjs client-c2-existing-worker-w71.test.mjs client-current-acl-critic-w72.test.mjs",
+    "test:w73:source": "node --test client-source-candidate-w73.test.mjs"
   },
   "dependencies": {
     "postgres": "3.4.7"
