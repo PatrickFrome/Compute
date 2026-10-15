@@ -1,6 +1,7 @@
 // W56 actual disposable PG17 + temporary Git serial continuation.
 // Owns no installed PGDATA, model Send, provider token, or external effect.
 import test from 'node:test';
+import { createW64DisposablePgLifecycle } from './client-serial-loop-pg17-lifecycle-w64.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, realpath, rm } from 'node:fs/promises';
@@ -12,6 +13,7 @@ import { createDevosSupervisorRoutes } from '../../apps/metaengine-browser/supab
 import { inspectStagingLease, sealStagingCheckpoint,
   inspectLiveCompletionForStaging, verifyStagingCheckpointDigest } from './client-serial-loop-staging-w48.mjs';
 import { inspectStagingNextLease } from './client-serial-loop-staging-w56.mjs';
+import { probeW64GeneratedDevelopmentWorker } from './client-serial-loop-development-worker-w64.mjs';
 
 const BIN = process.env.W48_PG17_BIN;
 const digest = v => createHash('sha256').update(v).digest('hex');
@@ -79,7 +81,7 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
   const run=(name,args)=>execFileSync(path.join(BIN,name),args,{
     env,encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:35_000}).trim();
   const sql=s=>run('psql',['-X','-v','ON_ERROR_STOP=1','-A','-t','-c',s]);
-  let started=false;
+  const lifecycle = createW64DisposablePgLifecycle({run,root,data,port:Number(env.PGPORT),pgUser:'w56_temporary'});
   try {
     await writeFile(marker,JSON.stringify({schema:'metaengine.w56.disposable-pg17.v1',clusterId}));
     await mkdir(sourceDir);
@@ -90,11 +92,17 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
     git(sourceDir,'add','--','calc.mjs','calc.test.mjs');
     git(sourceDir,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','red test');
     const base_sha=git(sourceDir,'rev-parse','HEAD');
+    const developmentBefore=await probeW64GeneratedDevelopmentWorker(sourceDir);
+    assert.equal(developmentBefore.head,base_sha,'real DevelopmentPlane must read red Git HEAD');
     assert.equal(runNode(sourceDir,'--test',tst),1,'real red test');
     await writeFile(src,'export const sum=(a,b)=>a+b;\n');
     git(sourceDir,'add','--','calc.mjs');
     git(sourceDir,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','bounded green edit');
     const head_sha=git(sourceDir,'rev-parse','HEAD');
+    const developmentAfter=await probeW64GeneratedDevelopmentWorker(sourceDir);
+    assert.equal(developmentAfter.head,head_sha,'real DevelopmentPlane must read repaired Git HEAD');
+    assert.notEqual(developmentBefore.head,developmentAfter.head);
+    assert.equal(developmentAfter.edit_authority,false);
     assert.notEqual(head_sha,base_sha);
     assert.equal(runNode(sourceDir,'--test',tst),0,'real green test');
     assert.equal(runNode(sourceDir,'--check',src),0,'real build syntax');
@@ -128,15 +136,17 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
     assert.match(run('initdb',['--version']),/PostgreSQL\) 17\./);
     run('initdb',['-D',data,'-A','trust','--no-instructions','-U','w56_temporary']);
     const opts='-h 127.0.0.1 -p '+env.PGPORT+' -k '+root;
-    run('pg_ctl',['-D',data,'-w','-o',opts,'start']);started=true;
+    const first = await lifecycle.start(opts);
     sql("CREATE TABLE w56_checkpoint(task_id uuid PRIMARY KEY, lease_generation int NOT NULL, effect_id uuid NOT NULL, source_sha char(40) NOT NULL, artifact_sha256 char(64) NOT NULL, checkpoint_sha256 char(64) NOT NULL, origin text NOT NULL CHECK(origin='SYNTHETIC/STAGING'))");
     sql("CREATE TABLE w56_next_lease(task_id uuid PRIMARY KEY, workspace_id uuid NOT NULL, agent_id text NOT NULL, lease_generation int NOT NULL, owner_generation int NOT NULL, event_seq int NOT NULL, predecessor char(64) NOT NULL, origin text NOT NULL CHECK(origin='SYNTHETIC/STAGING'))");
     sql('INSERT INTO w56_checkpoint VALUES ('+
       [q(task_id),3,q(effect.effect_id),q(head_sha),q(artifact_sha256),
         q(checkpoint.checkpoint_sha256),q('SYNTHETIC/STAGING')].join(',')+')');
     // Abrupt postmaster death/restart forces WAL recovery, not process-local memory.
-    run('pg_ctl',['-D',data,'-w','-m','immediate','stop']);started=false;
-    run('pg_ctl',['-D',data,'-w','-o',opts,'start']);started=true;
+    await lifecycle.stop();
+    const second = await lifecycle.start(opts);
+    assert.notEqual(first.pid, second.pid, 'first restart must replace postmaster PID');
+    assert.ok(second.birthMs >= first.birthMs);
     const prev=sql('SELECT task_id::text,lease_generation,effect_id::text,trim(source_sha),trim(artifact_sha256),trim(checkpoint_sha256),origin FROM w56_checkpoint WHERE task_id='+q(task_id));
     const fields=prev.split('|');
     assert.equal(fields.length,7);
@@ -156,8 +166,10 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
        next.lease_generation,next.owner_generation,10,
        q(checkpoint.checkpoint_sha256),q('SYNTHETIC/STAGING')].join(',')+')'),
       /duplicate key|failed with status/, 'same task cannot receive duplicate row');
-    run('pg_ctl',['-D',data,'-w','-m','immediate','stop']);started=false;
-    run('pg_ctl',['-D',data,'-w','-o',opts,'start']);started=true;
+    await lifecycle.stop();
+    const third = await lifecycle.start(opts);
+    assert.notEqual(second.pid, third.pid, 'second restart must replace postmaster PID');
+    assert.ok(third.birthMs >= second.birthMs);
     const dbRow=sql('SELECT task_id::text,workspace_id::text,agent_id,lease_generation,owner_generation,event_seq,trim(predecessor),origin FROM w56_next_lease WHERE task_id='+q(next_task_id));
     const r=dbRow.split('|');
     assert.equal(r.length,8);
@@ -187,11 +199,18 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
       origin:'SYNTHETIC/STAGING',source_head_sha:head_sha,
       checkpoint_sha256:checkpoint.checkpoint_sha256,
       next_task_id,after_immediate_restarts:2,
+      postmaster_birth_sequence:[first.birthMs,second.birthMs,third.birthMs],
+      distinct_postmasters:new Set([first.pid,second.pid,third.pid]).size,
+      development_plane:'ACTUAL_READ_ONLY_WORKER',development_plane_source:developmentAfter.head,
       continuation:verdict.state,live:'UNKNOWN',effect_authority:false}));
+  }catch(e){
+    console.error('W56_OWNED_PG17_LOG_TAIL',await lifecycle.logTail());
+    throw e;
   }finally{
-    if(started)try{run('pg_ctl',['-D',data,'-w','-m','immediate','stop']);}catch{}
+    const cleaned=await lifecycle.cleanup();
+    if(!cleaned)console.error('W56_PG17_CLEANUP_FAILED',await lifecycle.logTail());
     const saved=JSON.parse(await readFile(marker,'utf8').catch(()=>'{}'));
     if(saved.schema==='metaengine.w56.disposable-pg17.v1'&&saved.clusterId===clusterId
-        &&path.dirname(root)===base)await rm(root,{recursive:true,force:true});
+        &&path.dirname(root)===base&&cleaned)await rm(root,{recursive:true,force:true});
   }
 });
