@@ -300,11 +300,20 @@ export class SupervisorDeviceIdentity {
     try {
       const result = await reader(ownerId, epoch);
       const latest = await this.readHostOwnerIncarnation();
-      if (!result || result.source !== 'OWN_PG_POSTMASTER_READBACK' ||
+      if (!result || result.schema !== 'metaengine.own-pg.birth-w61.v1' ||
+          result.source !== 'OWN_PG_POSTMASTER_READBACK' ||
+          result.fixture_classification != null || result.staging === true ||
+          result.synthetic === true || result.untrusted === true ||
           result.owner_id !== ownerId || result.owner_epoch !== epoch ||
+          result.owner_generation !== owner.generation ||
+          result.owner_device_id !== owner.device_id ||
           result.owner_process_incarnation_id !== owner.process_incarnation_id ||
           result.owner_project_id !== owner.project_id ||
           result.source_sha?.toLowerCase() !== owner.source_sha.toLowerCase() ||
+          !Number.isFinite(Date.parse(result.postgres_started_at)) ||
+          !Number.isFinite(Date.parse(result.observed_at)) ||
+          Date.parse(result.observed_at) < Date.now() - 30000 ||
+          Date.parse(result.observed_at) > Date.now() + 5000 ||
           latest?.generation !== owner.generation || latest?.epoch !== epoch ||
           latest?.process_incarnation_id !== owner.process_incarnation_id) return null;
       return Object.freeze({ ...result, authority_effect: false });
