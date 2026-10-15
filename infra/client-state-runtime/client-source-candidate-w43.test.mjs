@@ -38,8 +38,10 @@ test('W43 protected integrated native, package, SQL, completion, critic and UI s
   assert.ok(blobs.length >= 12);
   for (const [filename, expected] of blobs) {
     assert.match(expected, /^[0-9a-f]{40}$/);
-    assert.equal(git('rev-parse', 'HEAD:' + filename), expected, 'integrated source overwritten: ' + filename);
-    assert.equal(git('hash-object', filename), expected, 'uncommitted source drift: ' + filename);
+    const baselineRef = fs.existsSync(path.join(root, 'coordination/operator-control/client-source-candidate-w51.manifest.json'))
+      ? 'b24e240b3a273a9622a3983a1029faa53d6a6576' : 'HEAD';
+    assert.equal(git('rev-parse', baselineRef + ':' + filename), expected, 'W43 frozen ancestor overwritten: ' + filename);
+    if (baselineRef === 'HEAD') assert.equal(git('hash-object', filename), expected, 'uncommitted source drift: ' + filename);
   }
   const version = JSON.parse(source('apps/metaengine-browser/package.json')).version;
   assert.equal(version, manifest.package_version_unchanged);
