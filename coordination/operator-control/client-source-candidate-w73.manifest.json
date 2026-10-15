@@ -291,11 +291,11 @@
     "infra/client-state-runtime/upgrade-backup-gate.test.mjs": "fe6011a9871b9cfa2d349e0b107a1b4d608f7f8b",
     "infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs": "ecd535de5e25fa4c2017d09a050abc0d23f5face",
     ".github/workflows/client-source-candidate-w73.yml": "aefeda3060d6d96e53c678d8077922d2337d5193",
-    "infra/client-state-runtime/client-source-candidate-w73.test.mjs": "82f9f6c90faeee19b9ea820992fb4cfa812eeace",
+    "infra/client-state-runtime/client-source-candidate-w73.test.mjs": "1ff7e7490d5f6f57175c8f40ef3e3f7be37a1341",
     ".github/workflows/client-host-owner-w74.yml": "bd7c0ac888e290f2980d139eba84b3f29f4e1a56",
-    "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs": "96942c26fadb13be1e63659fc488526d7bda93ad",
-    "apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs": "0202d2288a25707d50a6a93a77da1be74d84256c",
-    "apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs": "a18d5e89a03c1e68c3590380081b4017fa641127",
+    "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs": "1a0bc218b30eb5d8f855dfd3cf6966967a23b33d",
+    "apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs": "db8aa528da66f4bcec254169f764537f19f157b6",
+    "apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs": "8eea8abb40c81286ea733aa4fe93b5023a0bf6e2",
     "infra/client-state-runtime/host-owner-genesis-w74.pg17.integration.test.mjs": "b85b7b31adf2dcc4db388e939b91e177ed54a73d",
     ".github/workflows/client-host-owner-w75.yml": "137071dbd07f1bf2582cae9fe11950b6769f5703",
     "apps/metaengine-browser/test/guardian-client-kernel-birth-w75.test.mjs": "de7381d325dc0ce53e211ddc0f3a10bb99f6b27b",
@@ -355,7 +355,7 @@
   "parent_checks_not_transitive": true,
   "proof_levels": {
     "SOURCE": "WAVE12_W74_THROUGH_W82_ALL_PUBLISHED_SOURCE_MERGED_UNQUALIFIED",
-    "CI": "EXACT_W73_CURRENT_HEAD_TERMINAL_PENDING",
+    "CI": "CURRENT_HEAD_NEEDS_TERMINAL_WINDOWS_LINUX_PG17_NOT_QUALIFIED",
     "STAGING": "UNKNOWN_INTEGRATED_PG17_C2_WINDOWS_NATIVE",
     "INSTALLED": "UNKNOWN",
     "LIVE": "UNKNOWN"
@@ -403,7 +403,7 @@
       "proof": "INTEGRATED_SOURCE_CI_PENDING"
     }
   ],
-  "manifest_generated_from_local_head": "c1276745f65533d08d7443553602e3dc7d815979",
+  "manifest_generated_from_local_head": "a43d1f32c7170de9537a72343ff7cd44bd568f16",
   "base_w66": "61534c1228b81b063b48082c3cdbcbfd2921fe63",
   "wave12_integrated_pins": [
     {
@@ -468,5 +468,8 @@
     "W80_AUTHENTICATED_REAL_C2_INCOMPLETE",
     "W81_WINDOWS_ACL_TERMINAL_PENDING"
   ],
-  "wave12_distinct_ownership_preserved": true
+  "wave12_distinct_ownership_preserved": true,
+  "wave12_bounded_merge_repairs": [
+    "W74_W75_NATIVE_100NS_INDEPENDENT_POSTCHECK_INCOMPATIBILITY_FIXED_W73"
+  ]
 }

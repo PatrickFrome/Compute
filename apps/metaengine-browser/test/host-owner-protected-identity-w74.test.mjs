@@ -38,7 +38,7 @@ test('W74 protected device identity record survives restart without promoting ST
       schema:'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
       state:'READY',guardian_client_pid:pid,guardian_client_created_at:birth,
       guardian_client_process_incarnation_id:`pid:${pid}:created_100ns:${ticks}`,
-      guardian_client_kernel_birth_verified:true,device_binding_proven:true,
+      guardian_client_kernel_birth_verified:true,guardian_client_kernel_birth_rechecked:true,device_binding_proven:true,
       owner_binding_proven:true,
       guardian_device_key_fingerprint_sha256:snap.key_fingerprint_sha256,
       guardian_enrollment_evidence_sha256:'f'.repeat(64),

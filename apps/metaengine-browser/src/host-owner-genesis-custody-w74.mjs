@@ -61,9 +61,9 @@ export function createHostOwnerGenesisCustodyW74({
     const second = await readGuardian();
     if (!same(native,second,['guardian_client_pid','guardian_client_created_at',
       'guardian_client_process_incarnation_id','guardian_device_key_fingerprint_sha256',
-      'guardian_enrollment_evidence_sha256','state']) ||
+      'guardian_enrollment_evidence_sha256','state','guardian_client_kernel_birth_rechecked']) ||
         native?.schema !== 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' ||
-        native?.state !== 'READY' || native?.owner_binding_proven !== true ||
+        native?.state !== 'READY' || native?.guardian_client_kernel_birth_rechecked !== true || native?.owner_binding_proven !== true ||
         native?.device_binding_proven !== true || native?.guardian_client_kernel_birth_verified !== true ||
         mark(native) || native.guardian_device_key_fingerprint_sha256 !== device.key_fingerprint_sha256 ||
         !HEX.test(native.guardian_enrollment_evidence_sha256 || '')) return null;
@@ -71,6 +71,7 @@ export function createHostOwnerGenesisCustodyW74({
     if (!m || Number(m[1]) !== native.guardian_client_pid ||
         !Number.isFinite(time(native.guardian_client_created_at))) return null;
     const decoded = guardianClientKernelBirthW67({client_pid:native.guardian_client_pid,
+      client_kernel_birth_rechecked: native.guardian_client_kernel_birth_rechecked,
       client_creation_time_100ns:m[2],client_process_incarnation_id:
         native.guardian_client_process_incarnation_id});
     if (!decoded || time(decoded.created_at) !== time(native.guardian_client_created_at)) return null;

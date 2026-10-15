@@ -24,6 +24,7 @@ function fixture() {
     guardian_client_created_at:new Date().toISOString(),
     guardian_client_process_incarnation_id:birth,owner_binding_proven:true,
     device_binding_proven:true,guardian_client_kernel_birth_verified:true,
+    guardian_client_kernel_birth_rechecked:true,
     guardian_device_key_fingerprint_sha256:'b'.repeat(64),
     guardian_enrollment_evidence_sha256:'c'.repeat(64)});
   const g=guardian();
@@ -100,6 +101,17 @@ test('W74 denies Guardian PID/100ns birth drift, wrong device, lost epoch and un
     guardian_device_key_fingerprint_sha256:'b'.repeat(64),
     guardian_enrollment_evidence_sha256:'c'.repeat(64)}));
   assert.equal(await createHostOwnerGenesisCustodyW74(bad.opts).create(),null);
+  const absentPostcheck=fixture();
+  const readNative=absentPostcheck.opts.readGuardian;
+  absentPostcheck.setGuardian(async()=>({...await readNative(),guardian_client_kernel_birth_rechecked:false}));
+  assert.equal(await createHostOwnerGenesisCustodyW74(absentPostcheck.opts).create(),null,
+    'W75 independent native kernel-birth postcheck must be mandatory');
+  const contradictoryPostcheck=fixture();
+  let sightings=0;const firstPostcheck=contradictoryPostcheck.opts.readGuardian;
+  contradictoryPostcheck.setGuardian(async()=>({...await firstPostcheck(),
+    guardian_client_kernel_birth_rechecked:++sightings===1}));
+  assert.equal(await createHostOwnerGenesisCustodyW74(contradictoryPostcheck.opts).create(),null,
+    'two guardian observations must agree on native postcheck');
   const f=fixture();const b=createHostOwnerGenesisCustodyW74(f.opts);
   assert.equal((await b.create())?.generation,1);
   f.driftEpoch();assert.equal(await b.read(),null);
