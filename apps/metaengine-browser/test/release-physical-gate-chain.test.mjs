@@ -87,6 +87,9 @@ test('release gates physically cover the live restart boundary and native emerge
   // The 190-second survival now runs under an actual disposable SCRAM PG17
   // and trusted test Owner, not a default-profile UI without Owner admission.
   assert.match(packaged, /generated-empty-schema-pg17\.dump/);
+  assert.equal((packaged.match(/require\('node:os'\)\.tmpdir\(\)/g) || []).length, 2,
+    'producer and consumer must share Node os.tmpdir; RUNNER_TEMP is not necessarily that root on Windows');
+  assert.doesNotMatch(packaged, /Join-Path \$env:RUNNER_TEMP 'generated-empty-schema-qa/);
   assert.match(packaged, /attached-bundled-runtime\.integration\.test\.mjs/);
   assert.match(packaged, /LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT/);
   assert.match(packaged, /owner\.second_instance_activation_verified/);

@@ -470,7 +470,11 @@ jobs:
           $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
           $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $digest
           $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
-          $schemaDirectory = Join-Path $env:RUNNER_TEMP 'generated-empty-schema-qa'
+          # Node physical fixture requires an OS tmpdir descendant, which need
+          # not equal GITHUB RUNNER_TEMP on windows-2025.
+          $nodeTemp = (node -p "require('node:os').tmpdir()").Trim()
+          if (-not [System.IO.Path]::IsPathRooted($nodeTemp)) { throw 'generated_schema_os_temp_invalid' }
+          $schemaDirectory = Join-Path $nodeTemp 'generated-empty-schema-qa'
           New-Item -ItemType Directory -Path $schemaDirectory -ErrorAction Stop | Out-Null
           $env:LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY = $schemaDirectory
           npm run test:attached-onboarding
@@ -970,8 +974,11 @@ jobs:
           $manifest = Get-Content (Join-Path $bundle 'offline-runtime-bundle.json') -Raw | ConvertFrom-Json
           $bundleSha = [string]$manifest.bundle_sha256
           if ($bundleSha -notmatch '^[a-f0-9]{64}$' -or $bundleSha -ne [string]$proof.client_state_runtime_bundle_sha256) { throw 'installed_owner_qa_bundle_mismatch' }
-          $dump = Join-Path $env:RUNNER_TEMP 'generated-empty-schema-qa\generated-empty-schema-pg17.dump'
-          $pin = Join-Path $env:RUNNER_TEMP 'generated-empty-schema-qa\generated-empty-schema-pg17.sha256'
+          $nodeTemp = (node -p "require('node:os').tmpdir()").Trim()
+          if (-not [System.IO.Path]::IsPathRooted($nodeTemp)) { throw 'installed_owner_qa_os_temp_invalid' }
+          $schemaDirectory = Join-Path $nodeTemp 'generated-empty-schema-qa'
+          $dump = Join-Path $schemaDirectory 'generated-empty-schema-pg17.dump'
+          $pin = Join-Path $schemaDirectory 'generated-empty-schema-pg17.sha256'
           if (-not (Test-Path $dump -PathType Leaf) -or -not (Test-Path $pin -PathType Leaf)) { throw 'installed_owner_qa_schema_missing' }
           $digest = (Get-Content $pin -Raw).Trim()
           if ($digest -notmatch '^[a-f0-9]{64}$' -or $digest -ne (Get-FileHash $dump -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'installed_owner_qa_schema_pin_drift' }

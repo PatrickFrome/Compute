@@ -225,8 +225,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "16b329c3ec1ab5aebda438cf73259431f56bd8e6",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "a7ffa74fedb5a9cd85fe8338613410a5f80a892b",
-    "apps/metaengine-browser/package.json": "46e9332057880428218b852ab78067e06f548a49",
+    "apps/metaengine-browser/package-lock.json": "7722932222884fd3fdaf80446c3e9a11c3848b5a",
+    "apps/metaengine-browser/package.json": "394497c3adec7b672546d4295265b6209dab5803",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "fb48143a65bae6044e984b89aae9dd4c59b88ac1",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "5c205488d854ccbbfeb71c7f9304f341d732aba0",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "a25d7f56eb5a916c9a211a68c3100d1ea30224b2",
@@ -338,7 +338,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "1a737d8f95987a242fc58520e6729c76e213005a",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "668851f9bd3c153865ab2f28d42216c0a792f632",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -377,8 +377,8 @@
     "apps/metaengine-browser/test/installed-client-launch-qualification.test.mjs": "966e4c70c452d3a298f00e20d3f0f1ad76c25b8d",
     "apps/metaengine-browser/test/rsi-runtime-startup-fork-recovery.test.mjs": "13bb5da50401ddda012c2769e0917bccd5196567",
     "apps/metaengine-browser/test/local-restored-pg17-auto-prepare.test.mjs": "497e554a50d499d27008dca4ec59fbe0e5921704",
-    ".github/workflows/browser-windows-package-smoke.yml": "c8d48499118a17df0cb0d76cabfda8a11ae8593f",
-    "apps/metaengine-browser/test/release-physical-gate-chain.test.mjs": "63fe43cf6205b3ba551307c447eefafa6d18da1e"
+    ".github/workflows/browser-windows-package-smoke.yml": "79c175dc456cea259952850bb09d54e686eeb9fd",
+    "apps/metaengine-browser/test/release-physical-gate-chain.test.mjs": "56b57b958fc743e3545652ea361561d26966bb89"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -406,7 +406,8 @@
     "0.7.0-dev.894615027143.1",
     "0.7.0-dev.916530812741.1",
     "0.7.0-dev.959132647810.1",
-    "0.7.0-dev.974123087529.1"
+    "0.7.0-dev.974123087529.1",
+    "0.7.0-dev.985461320719.1"
   ],
   "verification_workflow": ".github/workflows/client-source-candidate-w73.yml",
   "physical_pg_complement": ".github/workflows/client-source-candidate-w59.yml",
@@ -422,7 +423,7 @@
     "classification": "ISOLATED_TEST_PACKAGE_ONLY",
     "branch": "work/metaengine-test-candidate-20261015",
     "source_parent": "49d050ff127e22ca27fbe3514324ba99832afb24",
-    "version": "0.7.0-dev.985461320719.1",
+    "version": "0.7.0-dev.993714258601.1",
     "production_release_authorized": false,
     "installed_mutation_authorized": false,
     "exact_ci_required": true,
