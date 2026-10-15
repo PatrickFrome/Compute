@@ -24,7 +24,7 @@ const rootFor = key => ({
   public_key_spki_sha256: digest(key.export({ type: 'spki', format: 'der' })),
 });
 function makeFixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'me2-w68-release-staging-'));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'me2-w68-release-staging-')));
   const exe = path.join(dir, 'METAENGINE-Browser.exe');
   const exeBytes = crypto.randomBytes(2048);
   fs.writeFileSync(exe, exeBytes);

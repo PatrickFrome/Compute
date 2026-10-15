@@ -205,6 +205,9 @@ test('installed launch reads actual nested ASAR bytes on Windows before enforcin
     await fs.unlink(staleWizard);
     uncache(path.join(resources, 'app.asar'));
     await createPackage(archiveSource, path.join(resources, 'app.asar'));
+    // The header offset cache belongs to the prior archive at this same path.
+    // Refresh it after the second package is fully written before reading bytes.
+    uncache(path.join(resources, 'app.asar'));
     // The inert executable must never run. Successful nested source/verifier
     // reads reach the real runtime admission gate, which denies this fixture.
     await assert.rejects(qualifyInstalledClientLaunch({ installRoot, sourceRoot, expectedHead, expectedVersion,

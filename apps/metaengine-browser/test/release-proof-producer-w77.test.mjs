@@ -21,7 +21,7 @@ const THUMB = 'b'.repeat(40);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
 function fixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-w77-SOURCE-STAGING-'));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-w77-SOURCE-STAGING-')));
   const exe = path.join(dir, 'METAENGINE Browser Test.exe');
   const installer = path.join(dir, 'METAENGINE-Browser-Test-Setup-' + VERSION + '-x64.exe');
   const bundle = path.join(dir, RELEASE_PROOF_FILES_W77.bundle);

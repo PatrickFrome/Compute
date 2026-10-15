@@ -29,7 +29,7 @@ async function fixture(root) {
 }
 
 test('known startup fork recovery preserves every original byte and verified prefix, with a replayable quarantine receipt', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-recovery-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-recovery-')));
   try {
     const data = await fixture(root);
     const options = { ledgerPath: data.ledgerPath, expected_sha256: data.digest, source_sha: 'b'.repeat(40) };
@@ -57,7 +57,7 @@ test('known startup fork recovery preserves every original byte and verified pre
 });
 
 test('recovery rejects tampering, task events, arbitrary gaps and stale file identity without modifying originals', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-recovery-deny-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-recovery-deny-')));
   try {
     const data = await fixture(root);
     const rows = data.original.trim().split('\n').map(JSON.parse);
