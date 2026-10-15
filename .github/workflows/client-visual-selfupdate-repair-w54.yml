@@ -1,0 +1,62 @@
+﻿name: Client W54 Visual and Local-Only Contract Repair
+on:
+  pull_request:
+    paths:
+      - 'apps/me2-ui/src/components/me2/shell/topbar.tsx'
+      - 'apps/me2-ui/src/lib/client-work-badge-text.mjs'
+      - 'apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-endpoints.test.mjs'
+      - '.github/workflows/client-visual-selfupdate-repair-w54.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fail-closed-local-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Show immutable source head
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          fi
+      - name: Offline-only negative contracts, no installed Owner/bootstrap
+        shell: bash
+        run: |
+          node --check apps/me2-ui/src/lib/client-work-badge-text.mjs
+          node --check apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs
+          node --test apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs apps/metaengine-browser/test/client-work-readiness.test.mjs apps/metaengine-browser/test/native-supervisor-endpoints.test.mjs
+          git diff --check
+
+  ui-frozen-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund --prefix apps/me2-ui
+      - run: npm run typecheck --prefix apps/me2-ui
+      - run: npm run build --prefix apps/me2-ui
+      - run: npm run pack --prefix apps/me2-ui
