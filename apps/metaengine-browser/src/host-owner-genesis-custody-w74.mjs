@@ -83,6 +83,12 @@ export function createHostOwnerGenesisCustodyW74({
     if (!source || source.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
         !SHA.test(source.source_sha || '') ||
         source.exact_bytes_verified !== true || source.native_signature_verified !== true ||
+        // W68 verifies a release-root Ed25519 signature binding the exact
+        // installed EXE and SLSA digests. No unsigned "valid signer" shortcut.
+        source.release_root_signature_verified !== true ||
+        source.slsa_evidence_digest_bound !== true ||
+        source.authority_effect !== false ||
+        !fresh(source.observed_at,now()) ||
         !HEX.test(source.installed_exe_sha256 || '') ||
         !HEX.test(source.proof_identity || '') ||
         (!staging && mark(source))) return null;
@@ -180,6 +186,11 @@ export function createHostOwnerGenesisCustodyW74({
       if (!after || x.admin.admin_grant_epoch !== after.admin.admin_grant_epoch ||
           !same(x.native,after.native,['guardian_client_pid','guardian_client_process_incarnation_id']) ||
           !same(x.source,after.source,['source_sha','installed_exe_sha256','proof_identity'])) return null;
+      // A second independent own-PG transaction catches epoch revocation or
+      // project replacement that occurred after the write transaction committed.
+      const postScope = await transaction(tx=>scope(tx,after),{readOnly:true});
+      if (!postScope || postScope.project_id !== candidate.project_id ||
+          postScope.admin_grant_epoch !== candidate.epoch) return null;
       const verified = await readSealed();
       if (!same(candidate,verified,identityKeys)) return null;
       if (staging) return Object.freeze({...candidate,fixture_classification:'STAGING'});

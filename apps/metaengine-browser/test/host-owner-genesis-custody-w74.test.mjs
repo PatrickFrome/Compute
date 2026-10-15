@@ -30,10 +30,12 @@ function fixture() {
   g.guardian_client_created_at=nativeCreated;
   const kernel=()=>({pid:9101,created_at:nativeCreated,observed_at:now(),
     source:'OS_PROCESS_INVENTORY'});
+  let guardianOverride=null;
   let native=()=>kernel(), signed=()=>({source:'INSTALLED_EXE_NATIVE_VERIFIER',
     source_sha:sourceSha,exact_bytes_verified:true,native_signature_verified:true,
     installed_exe_sha256:'d'.repeat(64),proof_identity:'e'.repeat(64),
-    fixture_classification:'STAGING'});
+    release_root_signature_verified:true,slsa_evidence_digest_bound:true,
+    observed_at:now(),authority_effect:false,fixture_classification:'STAGING'});
   const transaction=async(fn, opts)=>{
     queries.push(opts);
     return fn({unsafe:async(sql,args)=>{
@@ -46,7 +48,8 @@ function fixture() {
   };
   const opts={
     identity,transaction,readAuthenticatedAdmin:admin,
-    readGuardian:async()=>({...g,guardian_client_process_incarnation_id:birth}),
+    readGuardian:async()=>guardianOverride ? guardianOverride() :
+      {...g,guardian_client_process_incarnation_id:birth},
     readSourceProof:async()=>signed(),
     readNativeKernel:async(pid)=>native(pid),
     readSealed:async()=>{if(corrupt)throw Error('sealed_corrupt');return owner;},
@@ -61,7 +64,7 @@ function fixture() {
     driftEpoch(){epoch++}, driftProcess(){birth='pid:9102:created_100ns:134050012345678902'},
     revokeSource(){signed=()=>null}, markSourceInvalid(){signed=()=>({source_sha:sourceSha})},
     dropRows(){rows=0}, corrupt(){corrupt=true},
-    replaceKernel(f){native=f}, setGuardian(f){opts.readGuardian=f},
+    replaceKernel(f){native=f}, setGuardian(f){guardianOverride=f},
     setIdentity(f){opts.identity=f},
   };
 }
@@ -114,4 +117,26 @@ test('W74 rejects client-side self attestation and never uses constructor projec
     verified:true,authority_effect:true});
   assert.equal(await b.create(),null);
   assert.equal(f.writes,0);
+});
+
+test('W74 only transfers generation on independently verified old PID death (STAGING)',async()=>{
+  const f=fixture(), b=createHostOwnerGenesisCustodyW74(f.opts);
+  assert.equal((await b.create())?.generation,1);
+  const previous=await f.opts.readGuardian();
+  const nextBorn=now(), nextPid=9202;
+  const nextTick=(BigInt(Date.parse(nextBorn))*10000n+116444736000000000n).toString();
+  f.setGuardian(async()=>({...previous,guardian_client_pid:nextPid,
+    guardian_client_created_at:nextBorn,
+    guardian_client_process_incarnation_id:`pid:${nextPid}:created_100ns:${nextTick}`}));
+  f.replaceKernel(async pid=>pid===nextPid
+    ? {pid:nextPid,created_at:nextBorn,observed_at:now(),source:'OS_PROCESS_INVENTORY'}
+    : null);
+  assert.equal(await b.create(),null,'missing old-PID witness is UNKNOWN, no takeover');
+  f.replaceKernel(async pid=>pid===nextPid
+    ? {pid:nextPid,created_at:nextBorn,observed_at:now(),source:'OS_PROCESS_INVENTORY'}
+    : {pid:9101,state:'NOT_RUNNING',native_verified:true});
+  const successor=await b.create();
+  assert.equal(successor?.generation,2);
+  assert.equal(successor?.fixture_classification,'STAGING');
+  assert.equal(successor?.pid,nextPid);
 });

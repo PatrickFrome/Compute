@@ -90,7 +90,9 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
       readSourceProof:async()=>({source:'INSTALLED_EXE_NATIVE_VERIFIER',
         source_sha:'a'.repeat(40),exact_bytes_verified:true,
         native_signature_verified:true,proof_identity:'d'.repeat(64),
-        installed_exe_sha256:'e'.repeat(64),fixture_classification:'STAGING'}),
+        installed_exe_sha256:'e'.repeat(64),release_root_signature_verified:true,
+        slsa_evidence_digest_bound:true,observed_at:at(),authority_effect:false,
+        fixture_classification:'STAGING'}),
       readSealed:async()=>record,
       writeSealed:async(next,previous)=>{
         assert.equal(record,previous);record=next;
