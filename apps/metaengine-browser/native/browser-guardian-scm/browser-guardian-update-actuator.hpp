@@ -23,6 +23,7 @@ struct GuardianUpdateActuatorResult {
     // Separate from installer PID/birth; derived from the authenticated pipe.
     std::string client_creation_time_100ns;
     std::string client_process_incarnation_id;
+    bool client_kernel_birth_rechecked = false;
     std::uint64_t creation_time_100ns = 0;
     std::string process_incarnation_id;
     std::string expected_owner_sid;

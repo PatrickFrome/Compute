@@ -186,6 +186,7 @@ function ownerObservationState(result, binding) {
       guardian_client_created_at: kernel?.created_at ?? null,
       guardian_client_process_incarnation_id: kernel?.process_incarnation_id ?? null,
       guardian_client_kernel_birth_verified: kernel !== null,
+      guardian_client_kernel_birth_rechecked: result.client_kernel_birth_rechecked === true,
       guardian_device_key_fingerprint_sha256: result.device_key_fingerprint_sha256 ?? null,
       guardian_enrollment_evidence_sha256: result.enrollment_evidence_sha256 ?? null,
       source_head: binding.source_head,

@@ -12,6 +12,8 @@ const genesis = () => {
   const born = new Date('2026-10-15T00:00:00.000Z');
   const ticks = (BigInt(born.getTime()) * 10000n + 116444736000000000n).toString();
   return { client_pid: 9876, client_creation_time_100ns: ticks,
+    // A native W75 postchallenge kernel recheck is now mandatory for proof.
+    client_kernel_birth_rechecked: true,
     client_process_incarnation_id: `pid:9876:created_100ns:${ticks}` };
 };
 
