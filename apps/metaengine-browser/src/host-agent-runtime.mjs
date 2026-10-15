@@ -46,6 +46,8 @@ export class HostAgentRuntime {
   #browserBoundary;
   #backupDirectory;
   #backupOwnerIncarnation;
+  #trustedOwnerReadback;
+  #guardianOwnerReadback;
   #startedAt = null;
   #requests = 0;
   #browserPlanRequests = 0;
@@ -61,6 +63,8 @@ export class HostAgentRuntime {
     browserPlanCancel = null,
     backupDirectory = null,
     readBackupOwnerIncarnation = null,
+    readTrustedHostOwnerIncarnation = null,
+    readGuardianOwnerChallenge = null,
     netModule,
   } = {}) {
     if (!developmentPlane || typeof developmentPlane.request !== 'function') throw new Error('host_agent_development_plane_required');
@@ -68,6 +72,12 @@ export class HostAgentRuntime {
     // Host-owned configured directory only. IPC must never select a filesystem path.
     this.#backupDirectory = backupDirectory;
     this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
+    if (readTrustedHostOwnerIncarnation !== null && typeof readTrustedHostOwnerIncarnation !== 'function')
+      throw new Error('host_owner_custody_reader_invalid');
+    if (readGuardianOwnerChallenge !== null && typeof readGuardianOwnerChallenge !== 'function')
+      throw new Error('host_guardian_challenge_reader_invalid');
+    this.#trustedOwnerReadback = readTrustedHostOwnerIncarnation;
+    this.#guardianOwnerReadback = readGuardianOwnerChallenge;
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
     this.#browserBoundary = bindBrowserBoundary({ browserClient, browserStatus, browserPlanExecute, browserPlanCancel });
@@ -109,13 +119,52 @@ export class HostAgentRuntime {
               Object.keys(payload).length !== 0)
             throw new Error('host_owner_native_payload_denied');
           const kernel = await readWindowsKernelProcessW60(process.pid);
+          // The Host cannot turn its own kernel PID or device enrollment into
+          // an Owner. Both sources must exist: own-PG/private Host custody and
+          // a *separate* signed native Guardian challenge with OS client birth.
+          let owner = null;
+          if (kernel && this.#trustedOwnerReadback && this.#guardianOwnerReadback) {
+            try {
+              const first = await this.#trustedOwnerReadback();
+              const guardian = await this.#guardianOwnerReadback();
+              const last = await this.#trustedOwnerReadback();
+              const equal = ['owner_id','project_id','device_id','pid','created_at',
+                'process_incarnation_id','generation','epoch','source_sha']
+                .every(k => first?.[k] === last?.[k]);
+              if (first?.schema === 'metaengine.host.owner-incarnation.v1' &&
+                  first.source === 'LOCAL_HOST_OWNER' && first.authority_effect === false &&
+                  first.fixture_classification == null && first.staging !== true &&
+                  first.synthetic !== true && first.untrusted !== true && equal &&
+                  first.pid === kernel.pid &&
+                  Date.parse(first.created_at) === Date.parse(kernel.created_at) &&
+                  Number.isSafeInteger(first.epoch) && first.epoch > 0 &&
+                  Number.isSafeInteger(first.generation) && first.generation > 0 &&
+                  /^[0-9a-f]{40}$/i.test(first.source_sha || '') &&
+                  /^[A-Za-z0-9_.:-]{1,128}$/.test(first.project_id || '') &&
+                  /^[A-Za-z0-9_.:-]{8,128}$/.test(first.process_incarnation_id || '') &&
+                  guardian?.schema === 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' &&
+                  guardian.state === 'READY' && guardian.owner_binding_proven === true &&
+                  guardian.device_binding_proven === true &&
+                  guardian.guardian_client_kernel_birth_verified === true &&
+                  guardian.guardian_client_pid === kernel.pid &&
+                  Date.parse(guardian.guardian_client_created_at) === Date.parse(kernel.created_at) &&
+                  /^[0-9a-f]{64}$/i.test(guardian.guardian_enrollment_evidence_sha256 || '') &&
+                  /^[0-9a-f]{64}$/i.test(guardian.guardian_device_key_fingerprint_sha256 || '') &&
+                  first.device_key_fingerprint_sha256 === guardian.guardian_device_key_fingerprint_sha256 &&
+                  Date.parse(last.observed_at) >= Date.now() - 30000 &&
+                  Date.parse(last.observed_at) <= Date.now() + 5000) {
+                owner = Object.freeze({ ...last });
+              }
+            } catch { /* missing owner/custody/Guardian remains UNKNOWN */ }
+          }
           return Object.freeze({
             schema: 'metaengine.host.owner-native-readback.w60.v1',
             state: kernel ? 'KERNEL_PROCESS_OBSERVED' : 'UNKNOWN',
             kernel: kernel ? Object.freeze({pid:kernel.pid,
               created_at:kernel.created_at,observed_at:kernel.observed_at,
               source:'OS_PROCESS_INVENTORY',authority_effect:false}) : null,
-            owner_binding_proven: false,
+            owner_binding_proven: owner !== null,
+            owner,
             signed_installed_exe_proven: false,
             credential_exposed: false,
             authority_effect: false,
