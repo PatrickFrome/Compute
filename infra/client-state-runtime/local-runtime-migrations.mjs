@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
+// Reviewed offline SQL resource required when a freshly generated PG17 schema
+// lacks the local vault compatibility functions. sourceClosure hashes this
+// literal URL and the physical installer retains its exact file digest.
+export const LOCAL_VAULT_COMPAT_SQL_RESOURCE = new URL('./local-vault-compat.sql', import.meta.url);
+
 export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
   { path: '20260901034000_meta_orchestrator_controller_lease_v1.sql', signature: 'public.meta_orchestrator_controller_lease_v1(uuid,text,text,integer)', source_url: new URL('../../supabase/migrations/20260901034000_meta_orchestrator_controller_lease_v1.sql', import.meta.url),
     relations: Object.freeze(['destruktion_meta.meta_orchestrator_controller_lease_h205f22']) },

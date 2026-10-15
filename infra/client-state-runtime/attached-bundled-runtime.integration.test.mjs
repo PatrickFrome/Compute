@@ -139,7 +139,7 @@ test('verified bundled onboarding and attached host restart preserve an existing
     assert(evidence.isDirectory() && !evidence.isSymbolicLink());
   }
   const bundledModule = name => import(pathToFileURL(path.join(verified.paths.sourceRoot, 'infra/client-state-runtime', name)).href);
-  const { loadLocalRuntimeMigrationPlan } = await bundledModule('local-runtime-migrations.mjs');
+  const { loadLocalRuntimeMigrationPlan, LOCAL_VAULT_COMPAT_SQL_RESOURCE } = await bundledModule('local-runtime-migrations.mjs');
   const { secureAttachedPrivateFile, inspectAttachedApiAdmission } = await bundledModule('attached-postgres-onboarding.mjs');
   const { initializeLocalVaultKey } = await bundledModule('local-vault-key.mjs');
   const { startOwnedWindowsPostgres } = await bundledModule('owned-postgres-process.mjs');
@@ -205,7 +205,7 @@ test('verified bundled onboarding and attached host restart preserve an existing
   await sql.unsafe('CREATE SCHEMA extensions; CREATE SCHEMA vault; CREATE EXTENSION pgcrypto WITH SCHEMA extensions');
   await initializeLocalVaultKey({ dataDirectory: data });
   const { stdout: toc } = await privateExec(path.join(bin, 'pg_restore.exe'), ['--list', dump], env, 'archive_toc');
-  if (!/ FUNCTION vault _local_key\(/.test(toc)) await sql.unsafe(await fs.readFile(path.join(verified.paths.sourceRoot, 'infra/client-state-runtime/local-vault-compat.sql'), 'utf8'));
+  if (!/ FUNCTION vault _local_key\(/.test(toc)) await sql.unsafe(await fs.readFile(LOCAL_VAULT_COMPAT_SQL_RESOURCE, 'utf8'));
   const restorePlan = schemaOnlyRestorePlan(toc);
   const tocPath = path.join(root, 'schema-only.list');
   await fs.writeFile(tocPath, restorePlan.selected.join('\n') + '\n', { flag: 'wx', mode: 0o600 });
