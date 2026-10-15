@@ -72,6 +72,16 @@ export function parseWorktreePorcelainZ(stdout = '') {
   return Object.freeze(records);
 }
 
+// Git for Windows serializes physical worktree paths with filesystem-provided
+// casing, which can differ from the managed reservation. Compare canonical
+// spelling case-insensitively *only* on Windows; physical realpath and the
+// locked worktree/generation identity are independently required upstream.
+export function samePhysicalWorkspacePath(a, b, { platform = process.platform } = {}) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !path.isAbsolute(a) || !path.isAbsolute(b)) return false;
+  const left = path.resolve(a), right = path.resolve(b);
+  return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
 export function verifyWorkspaceInventory(binding, stdout, {
   expected_head_sha = binding?.initial_head_sha || binding?.base_sha,
   require_locked = true,
@@ -81,7 +91,7 @@ export function verifyWorkspaceInventory(binding, stdout, {
   if (!SHA_RE.test(expectedHead)) throw new Error('workspace_git_expected_head_invalid');
   const expectedPath = path.resolve(binding.worktree_path);
   const records = parseWorktreePorcelainZ(stdout);
-  const matches = records.filter((record) => record.worktree && path.resolve(String(record.worktree)) === expectedPath);
+  const matches = records.filter((record) => samePhysicalWorkspacePath(record.worktree, expectedPath));
   if (matches.length !== 1) throw new Error(matches.length ? 'workspace_git_inventory_path_ambiguous' : 'workspace_git_inventory_path_missing');
   const record = matches[0];
   if (record.prunable) throw new Error('workspace_git_inventory_prunable');
