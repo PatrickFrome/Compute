@@ -29,6 +29,8 @@ export class HostAgentRemoteComposition {
   #sessionKeysConsumed = false;
   #developmentPlane;
   #fastControl;
+  #backupDirectory;
+  #backupOwnerIncarnation;
   #browserStatus;
   #browserPlanExecute;
   #browserPlanCancel;
@@ -51,6 +53,8 @@ export class HostAgentRemoteComposition {
     hostSessionKey,
     developmentPlane,
     fastControl,
+    backupDirectory = null,
+    readBackupOwnerIncarnation = null,
     browserStatus,
     browserPlanExecute,
     browserPlanCancel,
@@ -73,6 +77,8 @@ export class HostAgentRemoteComposition {
     this.#hostSessionKey = String(hostSessionKey);
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
+    this.#backupDirectory = backupDirectory;
+    this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
     this.#browserStatus = requireFunction(browserStatus, 'host_agent_remote_browser_status_required');
     this.#browserPlanExecute = requireFunction(browserPlanExecute, 'host_agent_remote_browser_execute_required');
     this.#browserPlanCancel = requireFunction(browserPlanCancel, 'host_agent_remote_browser_cancel_required');
@@ -133,6 +139,8 @@ export class HostAgentRemoteComposition {
         sessionKey: hostSessionKey,
         developmentPlane: this.#developmentPlane,
         fastControl: this.#fastControl,
+        backupDirectory: this.#backupDirectory,
+        readBackupOwnerIncarnation: this.#backupOwnerIncarnation,
         browserClient: this.#browserClient,
       });
       await this.#hostRuntime.start();
