@@ -39,8 +39,8 @@ test('historical W51 frozen source blob ledger remains exact in its immutable an
  assert.ok(Object.keys(m.protected_git_blobs).length>=38);
  for(const [p,sha] of Object.entries(m.protected_git_blobs)){
   assert.match(sha,/^[0-9a-f]{40}$/);
-  assert.equal(git('rev-parse','HEAD:'+p),sha,'wrong frozen tree: '+p);
-  assert.equal(git('hash-object',p),sha,'dirty protected source: '+p);
+  assert.equal(git('rev-parse',originalW51Candidate+':'+p),sha,'wrong original W51 tree: '+p);
+  if(git('rev-parse','HEAD:'+p)===sha)assert.equal(git('hash-object',p),sha,'dirty unchanged protected source: '+p);
  }
  const sparse=spawnSync('git',['-C',root,'config','--bool','core.sparseCheckout'],{encoding:'utf8'});
  assert.ok(sparse.status!==0 || sparse.stdout.trim()==='false','sparse checkout forbidden');

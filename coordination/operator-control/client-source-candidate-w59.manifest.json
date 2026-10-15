@@ -1,165 +1,165 @@
 {
-  "schema": "metaengine.client.source-candidate-w59.v1",
-  "classification": "SOURCE_ONLY_INTEGRATED_REVIEW_REQUIRED",
-  "repository": "PatrickFrome/Compute",
-  "branch": "work/metaengine-client-wave10-w59-20261015",
-  "source_base_w51": "42f81c858b9c18e163d2dfac6db79de076f5699d",
-  "historical_w43_sha": "b24e240b3a273a9622a3983a1029faa53d6a6576",
-  "parent_heads": [
-    {
-      "pr": 1273,
-      "wave": "W43",
-      "sha": "b24e240b3a273a9622a3983a1029faa53d6a6576"
-    },
-    {
-      "pr": 1275,
-      "wave": "W44",
-      "sha": "56ba9d7ebedd3805e778cbee4fdcb46ce07e574d"
-    },
-    {
-      "pr": 1272,
-      "wave": "W49",
-      "sha": "241f1ed06dc6063e95806e6965c7a17a8bd91cfa"
-    },
-    {
-      "pr": 1276,
-      "wave": "W50",
-      "sha": "adde7d726dd7272aaa84806add559aaaba371482"
-    },
-    {
-      "pr": 1269,
-      "wave": "W45",
-      "sha": "8628b9dd35e1e918d045e45fd0b6d405d30786d8"
-    },
-    {
-      "pr": 1271,
-      "wave": "W47",
-      "sha": "f0935e0b5027304cdc2ba20d2cc58b14dfd67ab1"
-    },
-    {
-      "pr": 1274,
-      "wave": "W48",
-      "sha": "67d67a0b7eca53d3a8bf42550affdd99404ccae7"
-    },
-    {
-      "pr": 1278,
-      "wave": "W54",
-      "sha": "415e4255e45aac2b78f092646190bef4418ac6d1"
-    },
-    {
-      "pr": 1282,
-      "wave": "W52",
-      "sha": "b88f595192e5f40c7b462a85efe37ff441d5a52f"
-    },
-    {
-      "pr": 1281,
-      "wave": "W55",
-      "sha": "08f1192eb9e1a4dd1a060f11219ff2a75dd203db"
-    },
-    {
-      "pr": 1280,
-      "wave": "W56",
-      "sha": "582b25b0e42480d648a9ede3abfbcc31633401ce"
-    },
-    {
-      "wave": "W51",
-      "pr": 1279,
-      "sha": "42f81c858b9c18e163d2dfac6db79de076f5699d"
-    },
-    {
-      "wave": "W57",
-      "pr": 1277,
-      "sha": "4759fc07bcd52de9ef255a7509db51b1c8a6d7d4"
-    },
-    {
-      "wave": "W58",
-      "pr": 1283,
-      "sha": "41d755bb9ecd53bd509163f9219473c32d7439b6"
-    },
-    {
-      "wave": "W62_SOURCE",
-      "pr": 1284,
-      "sha": "953e194c9f0235f191b23711a3ddf1b1978dccfc"
-    },
-    {
-      "wave": "W61_SOURCE",
-      "pr": 1285,
-      "sha": "bb6cd167321a3764d40f525f38cb079f5136f589"
-    },
-    {
-      "wave": "W64_SOURCE",
-      "pr": 1288,
-      "sha": "6ece41dbea19bac3e6cb991ad7d9a16022a8cdbd"
-    }
-  ],
-  "pre_version_assembly_anchor": "994e2ac7a04b0a6018c188b1ceb60c5c7cfc0bf9",
-  "current_tree_blobs": {
-    "apps/metaengine-browser/src/main.mjs": "c930cbd15e3d19539664524f9a3d470297be4e5d",
-    "apps/metaengine-browser/src/native-supervisor-client.mjs": "52710624d6fc25398ce4f1fc3b7fbb80ff2c1ff7",
-    "apps/metaengine-browser/src/native-owner-verifier-w52.mjs": "5ae017dee407fe5f13b74f95a0d7bfe17826dda1",
-    "apps/metaengine-browser/src/operator-canonical-native-w44.mjs": "f6c89742d822528d00ce299ad1ececfc02a5136c",
-    "apps/metaengine-browser/src/client-source-sync-native-w55.mjs": "29c10b49bf4f4b5024bc0c208f35910aa8278409",
-    "apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs": "d2956a87bd26a5033cfec602969e884c20fbfddd",
-    "apps/metaengine-browser/src/managed-task-project-host.mjs": "f7c7594f987e7c8f37f0223d54a43ef1780c2e69",
-    "apps/metaengine-browser/src/workspace-git-hardening.mjs": "3fc226b694e7e012e50c40c0c481d4b908fdd1d5",
-    "apps/metaengine-browser/src/host-agent-protocol.mjs": "d940a845818dfb69ee2e25070b87e350ef3fa488",
-    "apps/metaengine-browser/src/host-agent-remote-composition.mjs": "718672869d5d9818ca705458a2c77a7b77febe11",
-    "apps/metaengine-browser/src/host-agent-runtime.mjs": "0371fd30a1cd08ad9e7e39321efc8b8161128543",
-    "apps/metaengine-browser/src/client-backup-acl-native-w58.mjs": "5b6cd2312e52cb247bfac26308d7bc94ba39f1d7",
-    "apps/metaengine-browser/test/client-local-contracts-w38.test.mjs": "5c4d976bfc75dceb093c793619e41e641b14e299",
-    "apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs": "049e1e67bbc9ad1a050182d1409eaab07a575ee3",
-    "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs": "79d113caa9adeb696459cadb646620a8d06d2324",
-    "apps/me2-ui/src/components/me2/shell/topbar.tsx": "c072a5183ddfeec90d94a9445fda5f8cc48426f8",
-    "apps/me2-ui/src/lib/client-work-badge-text.mjs": "96097f731f3e90f5a9482bcd1202bbcf1ddb1656",
-    "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34",
-    "infra/client-state-runtime/client-backup-restore-staging-w47.mjs": "ca52e2c7eb7934c62955479fd0e61c64f51f7401",
-    "infra/client-state-runtime/client-candidate-acceptance-w49.mjs": "96d8855731e85fc8157fc11f940c220aa5e27005",
-    "infra/client-state-runtime/client-candidate-acceptance-w57.mjs": "d0a2688c8e75dceb1ad9a64020b83d3a5b95b4a5",
-    "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
-    "infra/client-state-runtime/client-backup-acl-native-w58.test.mjs": "1a54bbd2d4f2e36cd9fbc46de2d7996f90f5baad",
-    "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "075bfb8bec844dba850dc713f5a47e86228fab60",
-    "infra/client-state-runtime/operator-readonly-gateway.mjs": "816b3da164d012d6365483bb663f00a2ec32bb16",
-    "infra/client-state-runtime/client-serial-loop-staging-w56.mjs": "6f8213a46f242fb8d371cdd9907fc15ffb80f6a1",
-    "infra/client-state-runtime/package.json": "491fb88065d21c6f8211e33cd5c8d972717891dd",
-    "infra/client-state-runtime/client-source-candidate-w51.test.mjs": "40ed1d5f411e91f9999d75ef00361fa81daee302",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "cf7314034df743c6c0283f9ad0357a588b74293f",
-    "apps/metaengine-browser/package.json": "c7102ca747a612492bc93b917fd4c1da66892ba0",
-    "apps/metaengine-browser/package-lock.json": "af21c8f4836b0db69995ea056d8262673ffb4e65",
-    "apps/me2-ui/src/lib/client-work-badge-text.d.mts": "67a33b99162cb24ffb4b105adea41cc33069eec5",
-    "apps/me2-ui/src/lib/client-work-badge-text.contract.ts": "1dfa0020a223612a4c2fd81f9e3cab86eb5a17c5",
-    "infra/client-state-runtime/own-postgres-birth-w61.mjs": "011c410b0f3acfd4a952365bf02dd07a053d3db5",
-    "infra/client-state-runtime/own-postgres-birth-w61.test.mjs": "5d33791bfe400e49316dfd234e61fe12c762d293",
-    "infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs": "2483bc63317dd52497417f2b21372680396ef17e",
-    "infra/client-state-runtime/db-api.mjs": "93a85763ab02e89df39233e15a9b19e11dc9001f",
-    "infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.mjs": "3bba30e24cd61275d7f46f262cb178b0ca5ae908",
-    "infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs": "d71c5fa75468cfe46bd3b7e0365477261cb30e59",
-    "infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs": "01dc2e55b314348b9584181bb06ffc187c2dbd11"
-  },
-  "candidate_sha_rule": "Use only exact GitHub PR head at test time; own source commit cannot self-reference.",
-  "freeze_owner": "W62",
-  "wave10_unpublished_repair_omissions": [
-    "W60",
-    "W63"
-  ],
-  "unbound_historical_effects": [
-    "W53_AMBIGUOUS_UNKNOWN",
-    "HISTORICAL_59_AMBIGUOUS_UNKNOWN"
-  ],
-  "proof_levels": {
-    "SOURCE": "INTEGRATED_NOT_FINAL_QUALIFIED",
-    "CI": "EXACT_HEAD_PENDING",
-    "STAGING": "UNKNOWN_PENDING_DISPOSABLE_PG",
-    "INSTALLED": "UNKNOWN",
-    "LIVE": "UNKNOWN"
-  },
-  "no_supabase": true,
-  "authority_effect": false,
-  "promotion_authorized": false,
-  "automatic_retry_allowed": false,
-  "partial_source_qualifications": {
-    "W62": "TYPED_ME2_SOURCE_ONLY_NOT_PACKAGE_FREEZE",
-    "W61": "OWN_PG_BIRTH_AND_DISPOSABLE_RESTORE_SOURCE_NOT_INSTALLED",
-    "W64": "PG17_PROCESS_LIFECYCLE_FIX_NOT_REAL_AGENT"
-  },
-  "package_freeze_status": "W62_SOURCE_ONLY_NO_DISTINCT_PACKAGE"
-}
+    "schema":  "metaengine.client.source-candidate-w59.v1",
+    "classification":  "SOURCE_ONLY_INTEGRATED_REVIEW_REQUIRED",
+    "repository":  "PatrickFrome/Compute",
+    "branch":  "work/metaengine-client-wave10-w59-20261015",
+    "source_base_w51":  "42f81c858b9c18e163d2dfac6db79de076f5699d",
+    "historical_w43_sha":  "b24e240b3a273a9622a3983a1029faa53d6a6576",
+    "parent_heads":  [
+                         {
+                             "pr":  1273,
+                             "wave":  "W43",
+                             "sha":  "b24e240b3a273a9622a3983a1029faa53d6a6576"
+                         },
+                         {
+                             "pr":  1275,
+                             "wave":  "W44",
+                             "sha":  "56ba9d7ebedd3805e778cbee4fdcb46ce07e574d"
+                         },
+                         {
+                             "pr":  1272,
+                             "wave":  "W49",
+                             "sha":  "241f1ed06dc6063e95806e6965c7a17a8bd91cfa"
+                         },
+                         {
+                             "pr":  1276,
+                             "wave":  "W50",
+                             "sha":  "adde7d726dd7272aaa84806add559aaaba371482"
+                         },
+                         {
+                             "pr":  1269,
+                             "wave":  "W45",
+                             "sha":  "8628b9dd35e1e918d045e45fd0b6d405d30786d8"
+                         },
+                         {
+                             "pr":  1271,
+                             "wave":  "W47",
+                             "sha":  "f0935e0b5027304cdc2ba20d2cc58b14dfd67ab1"
+                         },
+                         {
+                             "pr":  1274,
+                             "wave":  "W48",
+                             "sha":  "67d67a0b7eca53d3a8bf42550affdd99404ccae7"
+                         },
+                         {
+                             "pr":  1278,
+                             "wave":  "W54",
+                             "sha":  "415e4255e45aac2b78f092646190bef4418ac6d1"
+                         },
+                         {
+                             "pr":  1282,
+                             "wave":  "W52",
+                             "sha":  "b88f595192e5f40c7b462a85efe37ff441d5a52f"
+                         },
+                         {
+                             "pr":  1281,
+                             "wave":  "W55",
+                             "sha":  "08f1192eb9e1a4dd1a060f11219ff2a75dd203db"
+                         },
+                         {
+                             "pr":  1280,
+                             "wave":  "W56",
+                             "sha":  "582b25b0e42480d648a9ede3abfbcc31633401ce"
+                         },
+                         {
+                             "wave":  "W51",
+                             "pr":  1279,
+                             "sha":  "42f81c858b9c18e163d2dfac6db79de076f5699d"
+                         },
+                         {
+                             "wave":  "W57",
+                             "pr":  1277,
+                             "sha":  "4759fc07bcd52de9ef255a7509db51b1c8a6d7d4"
+                         },
+                         {
+                             "wave":  "W58",
+                             "pr":  1283,
+                             "sha":  "41d755bb9ecd53bd509163f9219473c32d7439b6"
+                         },
+                         {
+                             "wave":  "W62_SOURCE",
+                             "pr":  1284,
+                             "sha":  "953e194c9f0235f191b23711a3ddf1b1978dccfc"
+                         },
+                         {
+                             "wave":  "W61_SOURCE",
+                             "pr":  1285,
+                             "sha":  "bb6cd167321a3764d40f525f38cb079f5136f589"
+                         },
+                         {
+                             "wave":  "W64_SOURCE",
+                             "pr":  1288,
+                             "sha":  "6ece41dbea19bac3e6cb991ad7d9a16022a8cdbd"
+                         }
+                     ],
+    "pre_version_assembly_anchor":  "994e2ac7a04b0a6018c188b1ceb60c5c7cfc0bf9",
+    "current_tree_blobs":  {
+                               "apps/metaengine-browser/src/main.mjs":  "c930cbd15e3d19539664524f9a3d470297be4e5d",
+                               "apps/metaengine-browser/src/native-supervisor-client.mjs":  "52710624d6fc25398ce4f1fc3b7fbb80ff2c1ff7",
+                               "apps/metaengine-browser/src/native-owner-verifier-w52.mjs":  "5ae017dee407fe5f13b74f95a0d7bfe17826dda1",
+                               "apps/metaengine-browser/src/operator-canonical-native-w44.mjs":  "f6c89742d822528d00ce299ad1ececfc02a5136c",
+                               "apps/metaengine-browser/src/client-source-sync-native-w55.mjs":  "29c10b49bf4f4b5024bc0c208f35910aa8278409",
+                               "apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs":  "d2956a87bd26a5033cfec602969e884c20fbfddd",
+                               "apps/metaengine-browser/src/managed-task-project-host.mjs":  "f7c7594f987e7c8f37f0223d54a43ef1780c2e69",
+                               "apps/metaengine-browser/src/workspace-git-hardening.mjs":  "3fc226b694e7e012e50c40c0c481d4b908fdd1d5",
+                               "apps/metaengine-browser/src/host-agent-protocol.mjs":  "d940a845818dfb69ee2e25070b87e350ef3fa488",
+                               "apps/metaengine-browser/src/host-agent-remote-composition.mjs":  "718672869d5d9818ca705458a2c77a7b77febe11",
+                               "apps/metaengine-browser/src/host-agent-runtime.mjs":  "0371fd30a1cd08ad9e7e39321efc8b8161128543",
+                               "apps/metaengine-browser/src/client-backup-acl-native-w58.mjs":  "5b6cd2312e52cb247bfac26308d7bc94ba39f1d7",
+                               "apps/metaengine-browser/test/client-local-contracts-w38.test.mjs":  "5c4d976bfc75dceb093c793619e41e641b14e299",
+                               "apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs":  "049e1e67bbc9ad1a050182d1409eaab07a575ee3",
+                               "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs":  "79d113caa9adeb696459cadb646620a8d06d2324",
+                               "apps/me2-ui/src/components/me2/shell/topbar.tsx":  "c072a5183ddfeec90d94a9445fda5f8cc48426f8",
+                               "apps/me2-ui/src/lib/client-work-badge-text.mjs":  "96097f731f3e90f5a9482bcd1202bbcf1ddb1656",
+                               "infra/client-state-runtime/upgrade-backup-gate.mjs":  "90f9f3b0090beb64008b6d63efae1363c010ca34",
+                               "infra/client-state-runtime/client-backup-restore-staging-w47.mjs":  "ca52e2c7eb7934c62955479fd0e61c64f51f7401",
+                               "infra/client-state-runtime/client-candidate-acceptance-w49.mjs":  "96d8855731e85fc8157fc11f940c220aa5e27005",
+                               "infra/client-state-runtime/client-candidate-acceptance-w57.mjs":  "d0a2688c8e75dceb1ad9a64020b83d3a5b95b4a5",
+                               "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs":  "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
+                               "infra/client-state-runtime/client-backup-acl-native-w58.test.mjs":  "1a54bbd2d4f2e36cd9fbc46de2d7996f90f5baad",
+                               "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs":  "075bfb8bec844dba850dc713f5a47e86228fab60",
+                               "infra/client-state-runtime/operator-readonly-gateway.mjs":  "816b3da164d012d6365483bb663f00a2ec32bb16",
+                               "infra/client-state-runtime/client-serial-loop-staging-w56.mjs":  "6f8213a46f242fb8d371cdd9907fc15ffb80f6a1",
+                               "infra/client-state-runtime/package.json":  "491fb88065d21c6f8211e33cd5c8d972717891dd",
+                               "infra/client-state-runtime/client-source-candidate-w51.test.mjs":  "afbdfeadae606b38083cda5515a720166f7555a5",
+                               "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md":  "cf7314034df743c6c0283f9ad0357a588b74293f",
+                               "apps/metaengine-browser/package.json":  "c7102ca747a612492bc93b917fd4c1da66892ba0",
+                               "apps/metaengine-browser/package-lock.json":  "af21c8f4836b0db69995ea056d8262673ffb4e65",
+                               "apps/me2-ui/src/lib/client-work-badge-text.d.mts":  "67a33b99162cb24ffb4b105adea41cc33069eec5",
+                               "apps/me2-ui/src/lib/client-work-badge-text.contract.ts":  "1dfa0020a223612a4c2fd81f9e3cab86eb5a17c5",
+                               "infra/client-state-runtime/own-postgres-birth-w61.mjs":  "011c410b0f3acfd4a952365bf02dd07a053d3db5",
+                               "infra/client-state-runtime/own-postgres-birth-w61.test.mjs":  "5d33791bfe400e49316dfd234e61fe12c762d293",
+                               "infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs":  "2483bc63317dd52497417f2b21372680396ef17e",
+                               "infra/client-state-runtime/db-api.mjs":  "93a85763ab02e89df39233e15a9b19e11dc9001f",
+                               "infra/client-state-runtime/client-serial-loop-pg17-lifecycle-w64.mjs":  "3bba30e24cd61275d7f46f262cb178b0ca5ae908",
+                               "infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs":  "d71c5fa75468cfe46bd3b7e0365477261cb30e59",
+                               "infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs":  "01dc2e55b314348b9584181bb06ffc187c2dbd11"
+                           },
+    "candidate_sha_rule":  "Use only exact GitHub PR head at test time; own source commit cannot self-reference.",
+    "freeze_owner":  "W62",
+    "wave10_unpublished_repair_omissions":  [
+                                                "W60",
+                                                "W63"
+                                            ],
+    "unbound_historical_effects":  [
+                                       "W53_AMBIGUOUS_UNKNOWN",
+                                       "HISTORICAL_59_AMBIGUOUS_UNKNOWN"
+                                   ],
+    "proof_levels":  {
+                         "SOURCE":  "INTEGRATED_NOT_FINAL_QUALIFIED",
+                         "CI":  "EXACT_HEAD_PENDING",
+                         "STAGING":  "UNKNOWN_PENDING_DISPOSABLE_PG",
+                         "INSTALLED":  "UNKNOWN",
+                         "LIVE":  "UNKNOWN"
+                     },
+    "no_supabase":  true,
+    "authority_effect":  false,
+    "promotion_authorized":  false,
+    "automatic_retry_allowed":  false,
+    "partial_source_qualifications":  {
+                                          "W62":  "TYPED_ME2_SOURCE_ONLY_NOT_PACKAGE_FREEZE",
+                                          "W61":  "OWN_PG_BIRTH_AND_DISPOSABLE_RESTORE_SOURCE_NOT_INSTALLED",
+                                          "W64":  "PG17_PROCESS_LIFECYCLE_FIX_NOT_REAL_AGENT"
+                                      },
+    "package_freeze_status":  "W62_SOURCE_ONLY_NO_DISTINCT_PACKAGE"
+}`n
