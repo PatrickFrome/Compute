@@ -56,7 +56,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
         className="group mx-auto flex h-8 min-w-0 flex-1 max-w-[720px] items-center gap-2 border border-zinc-800 bg-zinc-900/55 px-2.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
       >
         <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-400">
-           Search workspace
+           Search tools and commands
         </span>
         <kbd className="hidden shrink-0 items-center gap-0.5 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 sm:flex">
           Ctrl K

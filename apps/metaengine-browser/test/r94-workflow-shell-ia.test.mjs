@@ -24,7 +24,9 @@ test('R98 workflow ownership excludes retired daemon/API-agent product pages', (
   assert.match(store, /key: "build"[\s\S]{0,180}pages: \["code"\]/);
   assert.match(store, /key: "run"[\s\S]{0,180}pages: \["browser"\]/);
   assert.match(store, /key: "fleet"[\s\S]{0,220}pages: \["supervisor"\]/);
-  assert.match(store, /key: "observe"[\s\S]{0,220}pages: \["observability", "memory"\]/);
+  // The canonical read-only Operator plane is now an explicit OBSERVE page;
+  // retain the full stage membership rather than erasing its visibility.
+  assert.match(store, /key: "observe"[\s\S]{0,220}pages: \["observability", "operator", "memory"\]/);
   assert.match(store, /key: "system"[\s\S]{0,220}pages: \["system"\]/);
   assert.doesNotMatch(store, /key: "command"[\s\S]{0,180}pages: \["command"\]/);
   assert.doesNotMatch(store, /pages: \["agents"/);
