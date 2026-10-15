@@ -224,7 +224,7 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       for (let n = 0; n < tasks.length; n++) {
         await admin.unsafe('INSERT INTO destruktion_meta.project_task_h205f22 VALUES($1,$2)', [tasks[n], project]);
         await admin.unsafe("INSERT INTO destruktion_meta.devos_fleet_task_h205f22(task_id,workspace_id,role,task_spec,state,lease_generation,lease_agent_id) VALUES($1,$2,'IMPLEMENTER',$3::jsonb,'LEASED',1,$4)", [
-          tasks[n], ws, JSON.stringify({ fleet_coordination_v1: {
+          tasks[n], ws, admin.json({ fleet_coordination_v1: {
             version: 1, role: 'IMPLEMENTER', resource: 'HOST', slots: 2, dependencies: [] } }), 'agent_' + n]);
       }
       const fixtureReadback = await admin.unsafe(`SELECT task_id,task_spec::text AS serialized,
