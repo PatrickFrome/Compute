@@ -7,6 +7,8 @@ on:
       - '.github/workflows/client-candidate-acceptance-w65.yml'
       - 'infra/client-state-runtime/client-candidate-acceptance-w65.mjs'
       - 'infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs'
+      - 'infra/client-state-runtime/client-winps-fixture-w65.mjs'
+      - 'infra/client-state-runtime/client-winps-fixture-w65.test.mjs'
       - 'coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md'
   workflow_dispatch:
 permissions:
@@ -38,7 +40,7 @@ jobs:
         shell: bash
         run: |
           node --check infra/client-state-runtime/client-candidate-acceptance-w65.mjs
-          node --test infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs
+          node --test infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs infra/client-state-runtime/client-winps-fixture-w65.test.mjs
   historical-w58-windows:
     name: W58 pinned historical native ACL reproduction (Windows)
     runs-on: windows-2025
