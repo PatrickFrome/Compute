@@ -21,6 +21,21 @@ const local=x=>typeof x==='string'&&x.length<2048&&/^[A-Za-z]:\\[^\\]/.test(x)
 const same=(a,b)=>canonical(a)===canonical(b);
 const fingerprint=st=>[st.dev,st.ino,st.nlink,st.size,st.birthtimeNs,st.mtimeNs].map(String).join('/');
 const stable=(a,b)=>a.ino>0n&&a.nlink===1n&&b.nlink===1n&&fingerprint(a)===fingerprint(b);
+function ownerFence(owner) {
+  // A callback is Host-only, never request payload. This validates continuity
+  // shape, NOT W52 native Owner attestation or a caller-supplied verified flag.
+  if(!owner||owner.schema!=='metaengine.host.owner-incarnation.v1'
+    ||owner.source!=='LOCAL_HOST_OWNER'||owner.authority_effect!==false
+    ||!Number.isSafeInteger(owner.pid)||owner.pid<=0
+    ||!Number.isSafeInteger(owner.generation)||owner.generation<1
+    ||typeof owner.created_at!=='string'||!Number.isFinite(Date.parse(owner.created_at))
+    ||!['owner_id','device_id','process_incarnation_id'].every(k=>
+      typeof owner[k]==='string'&&/^[A-Za-z0-9_.:-]{8,128}$/.test(owner[k])))
+    throw Error('OWNER_FENCE_UNKNOWN');
+  return JSON.stringify([owner.owner_id,owner.device_id,owner.generation,
+    owner.pid,new Date(owner.created_at).toISOString(),owner.process_incarnation_id]);
+}
+
 async function physical(target,type) {
   const st=await fs.lstat(target,{bigint:true});
   if(st.isSymbolicLink()||(type==='file'?!st.isFile():!st.isDirectory())
@@ -97,12 +112,16 @@ async function nativeAcl(root,file) {
 // it can change the observed object but cannot forge a positive descriptor.
 export async function readClientBackupAclNativeW58({
   backupDirectory,archivePath,platform=process.platform,afterFirstRead=null,
+  readOwnerIncarnation=null,
 }={}) {
   if(platform!=='win32')return unknown('NATIVE_NTFS_UNSUPPORTED');
   if(!local(backupDirectory)||!local(archivePath)
     ||!same(archivePath,path.win32.join(backupDirectory,'postgresql-17-snapshot.dump')))
     return unknown('NATIVE_PATH_UNTRUSTED');
   try {
+    if(readOwnerIncarnation!==null&&typeof readOwnerIncarnation!=='function')
+      return unknown('OWNER_READER_UNTRUSTED');
+    const owner0=readOwnerIncarnation?ownerFence(await readOwnerIncarnation()):null;
     await ancestry(archivePath);
     const root0=await physical(backupDirectory,'directory');
     const file0=await physical(archivePath,'file');
@@ -115,12 +134,15 @@ export async function readClientBackupAclNativeW58({
     const root1=await physical(backupDirectory,'directory');
     const file1=await physical(archivePath,'file');
     await ancestry(archivePath);
+    const owner1=readOwnerIncarnation?ownerFence(await readOwnerIncarnation()):null;
+    if(owner0!==owner1)return unknown('OWNER_INCAR_CHANGED_DURING_ACL_READ');
     if(!stable(root0,root1)||!stable(file0,file1)
       ||a.sid!==b.sid||a.service!==b.service||a.descriptor!==b.descriptor)
       return unknown('NATIVE_ACL_OR_FILE_IDENTITY_CHANGED');
     return Object.freeze({schema:SCHEMA,state:'NATIVE_ACL_VERIFIED',
       reason:'INSTALLED_OWNER_PROOF_SEPARATELY_REQUIRED',
-      native_acl_verified:true,owner_sid:a.sid,service_sid:a.service,
+      native_acl_verified:true,owner_incarnation_continuity_only:owner0!==null,
+      owner_sid:a.sid,service_sid:a.service,
       root_file_id_sha256:hash(fingerprint(root0)),archive_file_id_sha256:hash(fingerprint(file0)),
       native_dacl_sha256:a.descriptor,installed_owner_proven:false,backup_verified:false,
       upgrade_authorized:false,automatic_retry_allowed:false,authority_effect:false});
