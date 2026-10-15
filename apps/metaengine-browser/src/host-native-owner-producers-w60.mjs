@@ -130,16 +130,29 @@ export function createHostNativeOwnerReadersW60({
     async readGuardianOwner(ownerId, generation) {
       const owner = await ownerRecord();
       if (!owner || owner.owner_id !== ownerId || owner.generation !== generation) return null;
+      // Guardian's independent native challenge verifies device + durable
+      // machine owner SID, and now samples its authenticated pipe client PID
+      // and OS birth. It does NOT by itself know project/epoch: only join to a
+      // separately authenticated Host Owner record, then recheck both.
       const g = await safe(() => guardianLauncher.status());
-      // Historical machine bootstrap status only has two booleans. Never
-      // transmute that into PID/birth/epoch evidence.
       if (!valid(g) || fixtures(g) || g.schema !== 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' ||
-        g.state !== 'READY' || g.owner_binding_proven !== true || g.device_binding_proven !== true ||
-        g.owner_id !== owner.owner_id || g.device_id !== owner.device_id ||
-        g.owner_pid !== owner.pid || g.owner_generation !== owner.generation ||
-        g.owner_epoch !== owner.epoch || g.owner_process_incarnation_id !== owner.process_incarnation_id ||
-        Date.parse(g.owner_created_at) !== Date.parse(owner.created_at)) return null;
-      return frozen({...g,observed_at:at(),authority_effect:false});
+          g.state !== 'READY' || g.owner_binding_proven !== true || g.device_binding_proven !== true ||
+          g.guardian_client_kernel_birth_verified !== true ||
+          g.guardian_client_pid !== owner.pid ||
+          Date.parse(g.guardian_client_created_at) !== Date.parse(owner.created_at) ||
+          g.guardian_client_process_incarnation_id !== owner.process_incarnation_id ||
+          !/^pid:[0-9]+:created_100ns:[1-9][0-9]{16,18}$/.test(
+            g.guardian_client_process_incarnation_id || '') ||
+          !HEX64.test(g.guardian_enrollment_evidence_sha256 || '') ||
+          g.guardian_device_key_fingerprint_sha256 !== identity.snapshot()?.key_fingerprint_sha256) return null;
+      const after = await ownerRecord();
+      if (!after || !['owner_id','device_id','project_id','pid','created_at',
+        'generation','epoch','process_incarnation_id','source_sha'].every(k=>owner[k]===after[k])) return null;
+      return frozen({...g,owner_id:owner.owner_id,device_id:owner.device_id,
+        owner_pid:owner.pid,owner_created_at:owner.created_at,
+        owner_generation:owner.generation,owner_epoch:owner.epoch,
+        owner_process_incarnation_id:owner.process_incarnation_id,
+        observed_at:at(),authority_effect:false});
     },
     async readSignedInstalledExecutable(ownerId, generation) {
       const owner = await ownerRecord();
@@ -183,7 +196,15 @@ export function createHostNativeOwnerReadersW60({
         typeof postgresBirth !== 'function') return null;
       const x = await safe(() => postgresBirth(ownerId,epoch));
       if (!valid(x) || fixtures(x) || x.owner_id !== ownerId || x.owner_epoch !== epoch ||
-        x.source !== 'OWN_PG_POSTMASTER_READBACK') return null;
+        x.source !== 'OWN_PG_POSTMASTER_READBACK' ||
+        x.owner_project_id !== owner.project_id ||
+        x.owner_device_id !== owner.device_id ||
+        x.owner_generation !== owner.generation ||
+        x.owner_process_incarnation_id !== owner.process_incarnation_id ||
+        x.source_sha?.toLowerCase() !== owner.source_sha?.toLowerCase()) return null;
+      const after = await ownerRecord();
+      if (!after || !['owner_id','device_id','project_id','pid','created_at',
+        'generation','epoch','process_incarnation_id','source_sha'].every(k=>owner[k]===after[k])) return null;
       return frozen({...x,authority_effect:false});
     },
   };

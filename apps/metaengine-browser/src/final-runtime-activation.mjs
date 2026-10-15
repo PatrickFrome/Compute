@@ -97,6 +97,12 @@ export class FinalRuntimeActivation {
   #getCurrentUrl;
   #executeCommand;
   #fetchImpl;
+  #trustedHostOwnerReadback;
+  #guardianOwnerReadback;
+  #privateGatewayReadback;
+  #privatePostgresBirth;
+  #protectedBackupRoot;
+  #readBackupOwnerIncarnation;
   #fastControl = null;
   #leasedExecutor = null;
   #composition = null;
@@ -113,6 +119,14 @@ export class FinalRuntimeActivation {
     getBrowserState,
     getCurrentUrl,
     executeCommand,
+    // Only real main/Host custody and private db-api service may provide these.
+    // No root is derived from userDataPath, IPC, environment or page state.
+    readTrustedHostOwnerIncarnation = null,
+    readGuardianOwnerChallenge = null,
+    privateGatewayReadback = null,
+    privatePostgresBirth = null,
+    protectedBackupRoot = null,
+    readBackupOwnerIncarnation = null,
     fetchImpl = globalThis.fetch,
   } = {}) {
     if (!String(userDataPath || '')) throw new Error('final_runtime_user_data_path_required');
@@ -132,6 +146,23 @@ export class FinalRuntimeActivation {
     this.#getCurrentUrl = getCurrentUrl;
     this.#executeCommand = executeCommand;
     this.#fetchImpl = fetchImpl;
+    for (const [name,readback] of Object.entries({readTrustedHostOwnerIncarnation,
+      readGuardianOwnerChallenge,privateGatewayReadback,privatePostgresBirth,
+      readBackupOwnerIncarnation})) {
+      if (readback !== null && typeof readback !== 'function')
+        throw new Error(`final_runtime_w67_private_readback_invalid:${name}`);
+    }
+    if (protectedBackupRoot !== null &&
+        (typeof protectedBackupRoot !== 'string' || protectedBackupRoot.length < 4))
+      throw new Error('final_runtime_w67_backup_root_invalid');
+    if ((protectedBackupRoot === null) !== (readBackupOwnerIncarnation === null))
+      throw new Error('final_runtime_w67_backup_root_owner_custody_pair_required');
+    this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
+    this.#guardianOwnerReadback = readGuardianOwnerChallenge;
+    this.#privateGatewayReadback = privateGatewayReadback;
+    this.#privatePostgresBirth = privatePostgresBirth;
+    this.#protectedBackupRoot = protectedBackupRoot;
+    this.#readBackupOwnerIncarnation = readBackupOwnerIncarnation;
   }
 
   async start() {
@@ -163,6 +194,12 @@ export class FinalRuntimeActivation {
         hostSessionKey: sessionKey(),
         developmentPlane: this.#developmentPlane,
         fastControl: this.#fastControl,
+        readTrustedHostOwnerIncarnation: this.#trustedHostOwnerReadback,
+        readGuardianOwnerChallenge: this.#guardianOwnerReadback,
+        privateGatewayReadback: this.#privateGatewayReadback,
+        privatePostgresBirth: this.#privatePostgresBirth,
+        backupDirectory: this.#protectedBackupRoot,
+        readBackupOwnerIncarnation: this.#readBackupOwnerIncarnation,
         browserStatus: async () => ({
           schema: 'metaengine.browser.final-runtime-status.v1',
           version: this.#appVersion,

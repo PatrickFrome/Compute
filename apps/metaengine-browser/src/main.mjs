@@ -2028,6 +2028,8 @@ function ensureGuardianBootstrapLauncher() {
       identity: ensureSupervisorIdentity(),
       openPath: (fixedExecutable) => shell.openPath(fixedExecutable),
     });
+    // Private in-process hook; no field exposed on identity snapshot/status.
+    ensureSupervisorIdentity().bindGuardianOwnerEvidenceW67(guardianBootstrapLauncher);
   }
   return guardianBootstrapLauncher;
 }
@@ -2127,6 +2129,10 @@ async function initNativeSupervisor() {
       // privileged custody or pinned signed EXE remains explicit UNKNOWN.
       trustedNativeOwnerReaders: createHostNativeOwnerReadersW60({
         identity, guardianLauncher: ensureGuardianBootstrapLauncher(), app,
+        // W61 is only an in-process private own-PostgreSQL closure when the
+        // existing db-api Host has installed that capability. Missing PG is
+        // UNKNOWN; never manufacture postmaster birth from a socket health ping.
+        postgresBirth: (ownerId, epoch) => identity.readPrivateOwnPostgresBirthW67(ownerId, epoch),
       }),
       version: app.getVersion(),
       intervalMs: 2000,

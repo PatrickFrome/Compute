@@ -1,0 +1,54 @@
+name: Client W67 Host Custody Guardian Readback
+on:
+  push:
+    branches:
+      - 'work/metaengine-client-wave11-w67-20261015'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/supervisor-device-identity.mjs'
+      - 'apps/metaengine-browser/src/host-agent-remote-composition.mjs'
+      - 'apps/metaengine-browser/src/host-agent-runtime.mjs'
+      - 'apps/metaengine-browser/src/host-native-owner-producers-w60.mjs'
+      - 'apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/**'
+      - 'apps/metaengine-browser/test/host-owner-custody-w67.test.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - '.github/workflows/client-host-owner-w67.yml'
+permissions:
+  contents: read
+jobs:
+  w67-isolated-source-custody:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact head
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git diff --check
+      - name: Source syntax only (no installed bootstrap)
+        shell: bash
+        run: |
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/supervisor-device-identity.mjs
+          node --check apps/metaengine-browser/src/host-agent-runtime.mjs
+          node --check apps/metaengine-browser/src/host-agent-remote-composition.mjs
+          node --check apps/metaengine-browser/src/host-native-owner-producers-w60.mjs
+          node --check apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs
+      - name: Uniquely disposable Host/Guardian negative tests
+        shell: bash
+        run: |
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-owner-custody-w67.test.mjs \
+            apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
+            apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs \
+            apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs

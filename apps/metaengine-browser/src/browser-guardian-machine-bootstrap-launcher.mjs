@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { guardianClientKernelBirthW67 } from './guardian-client-kernel-birth-w67.mjs';
+export { guardianClientKernelBirthW67 };
 
 import {
   loadPackagedEmergencyMaintenanceTrustRoot,
@@ -169,11 +171,23 @@ export function verifyPackagedGuardianBootstrapExecutable({
   });
 }
 
+// This is the Windows FILETIME of the authenticated named-pipe client,
+// not the installer PID/birth. The native wire carries decimal text because
+// FILETIME exceeds JavaScript's safe integer range. No invented Owner epoch.
 function ownerObservationState(result, binding) {
   if (result?.state === 'OWNER_BOUND'
       && result.owner_binding_proven === true
       && result.device_binding_proven === true) {
+    const kernel = guardianClientKernelBirthW67(result);
     return state('READY', 'GUARDIAN_OWNER_AND_DEVICE_BOUND', {
+      // An old binary without native OS birth cannot qualify W52's exact
+      // Owner-Process join. Historical READY is not full Owner proof.
+      guardian_client_pid: kernel?.pid ?? null,
+      guardian_client_created_at: kernel?.created_at ?? null,
+      guardian_client_process_incarnation_id: kernel?.process_incarnation_id ?? null,
+      guardian_client_kernel_birth_verified: kernel !== null,
+      guardian_device_key_fingerprint_sha256: result.device_key_fingerprint_sha256 ?? null,
+      guardian_enrollment_evidence_sha256: result.enrollment_evidence_sha256 ?? null,
       source_head: binding.source_head,
       package_version: binding.package_version,
       guardian_service_ready: true,
