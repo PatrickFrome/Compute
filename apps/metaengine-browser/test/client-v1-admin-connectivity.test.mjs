@@ -123,7 +123,12 @@ test('top bar no longer treats legacy Socket.IO feed as product connection autho
   assert.match(topbar, /data-admin-ready/);
   assert.match(topbar, /data-work-state/);
   assert.match(topbar, /data-work-reason/);
-  assert.match(topbar, /work\?\.continuous_autonomy_ready === true/);
+  // Readiness is projected by the typed W54 presentation boundary; ADMIN
+  // connection alone may only select amber, never autonomous green.
+  assert.match(topbar, /projectClientWorkBadge\(\{ connection, work \}\)/);
+  assert.match(topbar, /badge\.autonomous_ready_color/);
+  assert.match(topbar, /data-work-state=\{badge\.state\}/);
+  assert.doesNotMatch(topbar, /connection\?\.admin_ready === true\s*&&\s*work\?\.execution_ready/);
   assert.doesNotMatch(topbar, /useEffect|setInterval|Socket\.IO/);
 });
 

@@ -170,7 +170,11 @@ test('R95C native Utility sync runs only on RUN and waits for the primary-page a
   assert.match(setPageBlock, /primaryPageAck\.then\(reconcileRunGeometry\)/);
   assert.match(setPageBlock, /if \(get\(\)\.page === "browser"\) get\(\)\.syncContextDrawer\(\)/);
   assert.doesNotMatch(store, /if \(request\.page !== "command"\)/);
-  assert.match(main, /primaryShellPage === 'browser' && primaryShellOverlayActive !== true/);
+  // Production now uses an earlier negative guard and then requires the
+  // exact selected native actor. That is stricter than the retired inline
+  // positive expression and must not regress to page-only eligibility.
+  assert.match(main, /if \(primaryShellPage !== 'browser' \|\| primaryShellOverlayActive === true\) return false/);
+  assert.match(main, /actor\.exact_native_binding === true/);
   assert.match(main, /primaryShellPage === 'browser'[\s\S]{0,120}\? 'ME2_R95_RUN'/);
 });
 
