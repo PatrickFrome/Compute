@@ -131,7 +131,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   const capabilityComment = 'comment on function public.devos_runtime_capabilities_v1() is';
   const definitionStart = computerSql.indexOf(capabilityDefinition);
   const commentStart = computerSql.indexOf(capabilityComment, definitionStart);
-  const definitionEnd = computerSql.indexOf(';', commentStart);
+  const definitionEnd = computerSql.indexOf("';", commentStart) + 1;
   assert(definitionStart >= 0 && commentStart > definitionStart && definitionEnd > commentStart,
     'canonical capability definition and grant segment required');
   assert.equal(computerSql.indexOf(capabilityDefinition, definitionStart + 1), -1,
