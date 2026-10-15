@@ -12,7 +12,36 @@ METAENGINE must continuously develop the assigned goal through coordinating, com
 
 **The owner's 2026-10-15 request for 10 slots applies ONLY to the external DevFleet development wave. It is not a METAENGINE capacity policy.** Account for each execution backend's available resources independently, with queued logical work and dynamic allocation, without converting one backend's current capacity into an engine-wide agent limit. Per-request page/batch sizes are transport bounds, not graph-size limits. Explicit owner-set project policies remain possible and must not be silently overwritten.
 
-## Current checkpoint — 2026-10-15 / candidate, recovery and autonomy re-baseline
+## Current local checkpoint — 2026-10-15 / operational repair and installed acceptance
+
+**Local development checkout:** `C:/Users/User/Desktop/metaen/client-operational-repair-20261015`, based on `86e2187a9d96e21c92badfcc9d0b06410fc0e522` from `work/client-artifact-cardinality-repair-20261015` ([Draft #1311](https://github.com/PatrickFrome/Compute/pull/1311)), test identity `0.7.0-dev.1107139874561.1`. This source includes the earlier `4835901` recovery diagnostics and the subsequent capability/fixture repairs. The owner's current direction is to continue development locally in `metaen`; this checkpoint does not claim publication of the local follow-up or qualify changed source under the baseline's reserved package identity.
+
+The next acceptance target remains **one useful autonomous coding loop, independently verified and continued once after restart**, followed by sustained coordination, communication and recursive child work. Source regressions, generated fixtures and external DevFleet occupancy remain separate evidence from that installed result.
+
+| Evidence bound to the current baseline | Observed result | Remaining acceptance |
+|---|---|---|
+| Candidate source identity | Local Git contains `86e2187` and confirms `4835901` is its ancestor | Verify changes and record their new local source identity before attributing results to them |
+| Windows package qualification, readback at 2026-10-15 20:27 UTC (23:27 Moscow) | Normal installation and first-run steps passed; the real Owner-backed step was still running | Terminal Owner/PG17/GUI and overall workflow outcome; an in-progress step is not PASS |
+| Local installed Browser | Version remains `0.7.0-dev.37781000059.1`; the current candidate is not confirmed installed locally | Exact installed payload, ordinary window, protected Owner/Host/PG health and stable execution readiness |
+| Interrupted-start recovery | Source preserves a finite startup recovery category and health-failure witness | Resolve the historical `STARTING` record through independently verified child custody; an absent PID alone does not permit lock removal |
+| Authenticated autonomous development | No installed W30 lease → real edit/tests → W39 independent critic → checkpoint → restart continuation receipt established | Complete and read back one useful loop on the same installed source and authority chain |
+
+**Concrete production wiring gaps confirmed in this source:**
+
+- `apps/metaengine-browser/src/supervisor-device-identity.mjs` defines `bindHostOwnerGenesisW74`, but the production Browser/runtime modules contain no caller. The existing genesis implementation and its fixture tests therefore do not establish default installed Owner initialization.
+- `apps/metaengine-browser/src/final-runtime-activation.mjs` and `apps/metaengine-browser/src/host-agent-remote-composition.mjs` each construct `createHostPrivateCustodyW76({identity})`. In `host-private-custody-w76.mjs`, `readExistingGatewaySecret`, `readExistingOwnPostgresBirth` and `readExistingProtectedBackupRoot` all default to `null`; these production calls supply none of them. The corresponding credential, PostgreSQL and backup readers consequently return no trusted evidence. A successful ordinary launch would not close this separate Owner/context integration gap.
+
+### Ordered local work from this checkpoint
+
+1. Complete the current Owner/API/Edge diagnosis with disposable native fixtures and preserve exact terminal evidence. Qualify the candidate's actual installed payload and visible startup before reporting local installation success.
+2. Implement and verify interrupted-start custody/reconciliation without replaying ambiguous task effects or stopping attached PostgreSQL. Historical records with incomplete child custody remain explicit recovery blockers.
+3. Connect W74 initialization and W76 private readers to the existing authenticated Host/Guardian, own-PostgreSQL and protected credential/backup capabilities. Require matching Owner incarnation, generation, source and independent readback; retain UNKNOWN when those capabilities are unavailable.
+4. Run an authenticated goal through the existing Supervisor/W30 executor, real code edit/tests, W39 independent verification and own-PG checkpoint; restart and prove the next admitted task executes once.
+5. Extend the verified loop to communicating roles and recursive logical work under actual backend resource admission. Complete same-source package, restore/rollback and sustained-run evidence before marking installed continuity or R1/C1/C2 VERIFIED.
+
+The following checkpoints are retained as historical evidence. Their older heads, in-progress statuses and package identities do not describe the current local candidate.
+
+## Historical checkpoint — 2026-10-15 / candidate, recovery and autonomy re-baseline
 
 The next acceptance target is **one productive autonomous coding loop followed by a verified continuation after restart**, then sustained coordinating/communicating/recursive agents. DevFleet waves are external development capacity; they do not satisfy that target or impose a METAENGINE-wide ceiling. Existing owner-set project policies remain authoritative. The unbounded-default migration applies to new projects only; logical queues may exceed available physical execution slots.
 

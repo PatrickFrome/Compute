@@ -68,7 +68,7 @@ test('W59 candidate remains SOURCE-only and cannot grant installed/LIVE or reuse
   const candidate=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json')).test_candidate;
   if(candidate){
     assert.equal(candidate.classification,'ISOLATED_TEST_PACKAGE_ONLY');
-    assert.equal(candidate.branch,'work/client-artifact-cardinality-repair-20261015');
+    assert.equal(candidate.branch,'work/client-operational-repair-20261015');
     assert.equal(candidate.production_release_authorized,false);
     assert.equal(candidate.installed_mutation_authorized,false);
     assert.equal(observedVersion,candidate.version);
