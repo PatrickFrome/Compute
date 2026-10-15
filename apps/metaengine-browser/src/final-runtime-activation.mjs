@@ -155,6 +155,8 @@ export class FinalRuntimeActivation {
     if (protectedBackupRoot !== null &&
         (typeof protectedBackupRoot !== 'string' || protectedBackupRoot.length < 4))
       throw new Error('final_runtime_w67_backup_root_invalid');
+    if ((protectedBackupRoot === null) !== (readBackupOwnerIncarnation === null))
+      throw new Error('final_runtime_w67_backup_root_owner_custody_pair_required');
     this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
     this.#guardianOwnerReadback = readGuardianOwnerChallenge;
     this.#privateGatewayReadback = privateGatewayReadback;
