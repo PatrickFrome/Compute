@@ -1,0 +1,56 @@
+name: Client W68 installed EXE release-provenance SOURCE
+
+on:
+  push:
+    branches:
+      - work/metaengine-client-wave11-w68-20261015
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/installed-executable-provenance-w68.mjs'
+      - 'apps/metaengine-browser/src/client-package-identity-w68.mjs'
+      - 'apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs'
+      - 'apps/metaengine-browser/test/installer-provenance.test.mjs'
+      - 'apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs'
+      - '.github/workflows/client-wave11-w68-release-provenance.yml'
+permissions:
+  contents: read
+
+jobs:
+  release-provenance-source:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 16
+    steps:
+      - name: Checkout exact source branch SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Assert tested checkout is exact source
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "w68_source_head_mismatch:$actual" }
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Hermetic release-root cryptography, installer fixture and package-identity tests
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --test
+          test/installed-executable-provenance-w68.test.mjs
+          test/installer-provenance.test.mjs
+          test/browser-convergence-package-identity.test.mjs
+          test/emergency-maintenance-trust-root.test.mjs
+      - name: No generated package or existing profile mutation
+        shell: pwsh
+        run: |
+          $status = git status --porcelain
+          if ($status) { throw "w68_source_dirty_after_tests:$status" }
