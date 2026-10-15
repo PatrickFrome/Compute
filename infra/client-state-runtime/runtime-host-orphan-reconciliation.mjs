@@ -34,6 +34,19 @@ const parse = bytes => {
   catch { fail('recovery_evidence_invalid'); }
 };
 function inspectLockAndStatus(config, lock, status) {
+  // A crash before READY has no complete child-custody witness. Report this
+  // incident separately, without inferring that its children or effects ended.
+  // The category applies only to the same pinned attached owner, never an
+  // unrelated/malformed status. The lock remains subject to manual review.
+  if (config.postgres_mode === 'attached' && config.api_role_mode === 'direct'
+    && SHA.test(config.expected_bundle_sha256||'')
+    && PID(lock?.pid) && lock.schema === 'compute.runtime-host-lock.v1'
+    && UUID.test(lock.owner_nonce||'') && Object.keys(lock).sort().join(',') === 'owner_nonce,pid,schema'
+    && status?.schema === 'metaengine.client-state.runtime-status.v1'
+    && status.state === 'STARTING' && status.runtime_ready === false && status.host_pid === lock.pid
+    && status.bundle_sha256 === config.expected_bundle_sha256 && status.state_provider === 'LOCAL_POSTGRES'
+    && status.hosted_supabase_required === false && status.automatic_cloud_fallback === false
+    && status.authority_effect === false) fail('recovery_startup_custody_missing');
   if (config.postgres_mode !== 'attached' || config.api_role_mode !== 'direct'
     || !SHA.test(config.expected_bundle_sha256||'')
     || !PID(lock?.pid) || lock.schema !== 'compute.runtime-host-lock.v1'

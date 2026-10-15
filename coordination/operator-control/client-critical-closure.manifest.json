@@ -2,7 +2,7 @@
   "schema": "metaengine.client.critical-closure.v1",
   "classification": "SOURCE_REPAIRED_REVIEW_REQUIRED",
   "repository": "PatrickFrome/Compute",
-  "branch": "work/metaengine-test-candidate-20261015",
+  "branch": "work/autonomy-recovery-roadmap-20261015",
   "base_w73": "9e8ebcd09b46d0e8f5a09e9a0471d15a190baeea",
   "parent_heads": [
     {
@@ -323,7 +323,7 @@
     "apps/metaengine-browser/test/supervisor-bootstrap-ambiguity-repair-r4.test.mjs": "74d55ad5924f1c9a5f7ab8fe60ac0e8abedd3c48",
     "apps/metaengine-browser/test/supervisor-rollover-draft-hardening.test.mjs": "8f02d49595ef63032817c9eee3ad300171955b8b",
     "coordination/operator-control/DEVFLEET_WAVE13_AUTONOMY_10.json": "d0ad641974c9e257fc2a2bc043c250144974884e",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "2e7eec7e0842cb0ccdbeb31269f3b3fb631b778f",
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "f4e2ef16192882451ebd00218abcc99efee0633d",
     "infra/client-state-runtime/README-client-local-provider.md": "630854f33b331eed8cd0e0b74a5ba8961a8b9473",
     "infra/client-state-runtime/README-host-native-owner-w60.md": "d308afbc4f3ec05be6670a3db8d2c29a3c3a6ddc",
     "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "b8b1e6f8b0e95a687cc050d153808465ab961b61",
@@ -338,7 +338,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "917364c6092fc66ef6d2ed730ebf87e3548d8824",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "ef6c6e56a94665a57bfab2185e528641af1146f9",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -381,7 +381,12 @@
     "apps/metaengine-browser/test/release-physical-gate-chain.test.mjs": "56b57b958fc743e3545652ea361561d26966bb89",
     "infra/client-state-runtime/package-runtime-resources.mjs": "7824baa3146985f71d4afcfe6060a347c99a2f30",
     "infra/client-state-runtime/package-runtime-resources.test.mjs": "0d515c07f1872c5d8dc6daf95156b84a47b2013f",
-    "infra/client-state-runtime/attached-bundled-runtime.integration.test.mjs": "ad4b9c5f8a09fa5aa5d9c2c74357c33cd8390d85"
+    "infra/client-state-runtime/attached-bundled-runtime.integration.test.mjs": "ad4b9c5f8a09fa5aa5d9c2c74357c33cd8390d85",
+    "apps/metaengine-browser/src/local-runtime-host-controller.mjs": "e228ddff80a13490bd62c2f90505a8e8f743daf9",
+    "apps/metaengine-browser/test/local-runtime-host-controller.test.mjs": "877303b223316ab7553b9a7102b7a3e6aa1d8159",
+    "docs/CANONICAL_ROADMAP.md": "7692bd1802847150787a8acb51fa7a6ab54eea3e",
+    "infra/client-state-runtime/runtime-host-orphan-reconciliation.mjs": "2d9513156a931319c5c89af2eb64f7f0db9abca6",
+    "infra/client-state-runtime/runtime-host-orphan-reconciliation.test.mjs": "673b6c56670e6a7ef9d6ca6f5a548792de3dd1b8"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -432,5 +437,12 @@
     "installed_mutation_authorized": false,
     "exact_ci_required": true,
     "signing_required_for_release": true
+  },
+  "source_followup": {
+    "classification": "SOURCE_ONLY_NO_PACKAGE",
+    "source_parent": "765b4e063a3d468311889d3d5bf8698f36e17589",
+    "package_build_authorized": false,
+    "installed_mutation_authorized": false,
+    "automatic_recovery_authorized": false
   }
 }

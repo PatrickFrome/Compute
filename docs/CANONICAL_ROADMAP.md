@@ -2,7 +2,7 @@
 
 Status: **ARCHITECTURAL NORTH STAR / ANTI-DRIFT CONTRACT**
 
-This document defines the stable, human-readable Level-1 roadmap for METAENGINE H205F22 Compute Fabric. It is intentionally more stable than the executable Supabase dependency DAG.
+This document defines the stable, human-readable Level-1 roadmap for METAENGINE H205F22 Compute Fabric. It is intentionally more stable than the executable dependency DAG in METAENGINE's own PostgreSQL.
 
 ## Governance rule
 
@@ -13,7 +13,9 @@ Every implementation step, work claim, PR, evidence receipt, checkpoint and ampl
 3. Does it shorten or strengthen the path to a real Compute Fabric, or only add control-plane complexity?
 4. Does it preserve the historical H-series invariants associated with that milestone?
 
-The current Supabase `compute-fabric-roadmap-v1` remains the Level-2 execution DAG. Level-2 milestones are gates/submilestones and MUST NOT redefine, renumber or replace this Level-1 roadmap.
+The `compute-fabric-roadmap-v1` contract is the Level-2 execution DAG under METAENGINE's own PostgreSQL authority. Historical hosted definitions are not an active backend or a fallback. Level-2 milestones are gates/submilestones and MUST NOT redefine, renumber or replace this Level-1 roadmap. Moving a contract into own PostgreSQL requires explicit migration and independent readback; this document does not assert that installed adoption is complete.
+
+The binding product goal is continuous autonomous development by coordinating, communicating agents that may create further agents and subgoals. There is no fixed engine-wide agent/task/depth ceiling; owner policies and each backend's physical resource admission remain distinct. The current external DevFleet slot count does not define METAENGINE capacity. See the current evidence and ordered exit gates in `coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md`.
 
 If Level-1 and Level-2 appear to conflict, work must stop at `EVIDENCE_READY` and the Supervisor must reconcile the execution DAG back to this document before mainline sealing.
 
@@ -55,7 +57,7 @@ The most important near-term rule is:
 
 ## Level-2 execution DAG mapping
 
-The current Supabase roadmap is subordinate to this map:
+The Level-2 execution roadmap is subordinate to this map:
 
 | Level-2 milestone | Canonical Level-1 owner | Role |
 | --- | --- | --- |
@@ -120,4 +122,4 @@ Every meaningful semantic step must perform:
 
 `IMPLEMENT → VERIFY → ADVERSARIAL TEST → DEEP AMPLIFIER RESEARCH → EVIDENCE`
 
-Amplifier research may propose changes to implementation technique, but must not silently change this Level-1 roadmap. A proposed Level-1 roadmap change requires an explicit architecture decision, Supervisor review and a versioned amendment to this document plus the matching Supabase canonical roadmap definition.
+Amplifier research may propose changes to implementation technique, but must not silently change this Level-1 roadmap. A proposed Level-1 roadmap change requires an explicit architecture decision, Supervisor review and a versioned amendment to this document plus the matching own-PostgreSQL canonical roadmap definition.

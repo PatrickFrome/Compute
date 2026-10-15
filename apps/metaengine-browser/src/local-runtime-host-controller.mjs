@@ -289,7 +289,13 @@ export async function startConfiguredLocalRuntimeHost({
           if (value?.schema === 'compute.runtime-host-provider.v1') {
             finish(validProviderDescriptor(value, config) ? null : new Error('local_runtime_host_descriptor_invalid'), value);
           } else if (value?.schema === 'compute.runtime-host-failure.v1') {
-            finish(new Error('local_runtime_host_start_failed'));
+            // Propagate one fixed actionable category from the pinned child.
+            // Arbitrary error strings, paths and extra IPC fields stay private.
+            const startupRecovery = value.state === 'FAILED' && value.credentials_included === false
+              && Object.keys(value).sort().join(',') === 'credentials_included,reason,schema,state'
+              && value.reason === 'runtime_host_recovery_startup_custody_missing';
+            finish(new Error(startupRecovery ? 'local_runtime_host_startup_recovery_required'
+              : 'local_runtime_host_start_failed'));
           } else finish(new Error('local_runtime_host_message_invalid'));
         };
         const onError = () => finish(new Error('local_runtime_host_spawn_failed'));

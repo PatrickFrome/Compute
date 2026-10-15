@@ -65,6 +65,21 @@ test('exact departed attached host moves lock to unique quarantine, preserves by
   assert.deepEqual(f.seen.ports,[25432,25433,25434,25432,25433,25434]);
 });
 
+test('interrupted startup reports missing custody without probing, moving or rewriting the old owner',async t=>{
+  const f=await fixture(t,{status:{state:'STARTING',runtime_ready:false,children:undefined,
+    instance_id:undefined,endpoint:undefined,postgres_mode:undefined,api_role_mode:undefined}});
+  await expectedFailure(f,'recovery_startup_custody_missing');
+  assert.deepEqual(f.seen,{pids:[],ports:[]});
+});
+
+test('STARTING with a mismatched host or bundle never receives an owner-specific recovery diagnosis',async t=>{
+  for(const status of [{host_pid:20000111},{bundle_sha256:'b'.repeat(64)}]){
+    const f=await fixture(t,{status:{state:'STARTING',runtime_ready:false,...status}});
+    await expectedFailure(f,'recovery_lock_status_not_attested');
+    assert.deepEqual(f.seen,{pids:[],ports:[]});
+  }
+});
+
 test('never reclaims while old host, either child, or any API/edge endpoint might still exist',async t=>{
   for(const [kind,pid,port] of [
     ['host_alive',oldPid,null],['api_alive',apiPid,null],['edge_unknown',edgePid,null],

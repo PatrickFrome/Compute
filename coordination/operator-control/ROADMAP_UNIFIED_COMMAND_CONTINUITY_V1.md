@@ -1,10 +1,10 @@
 # METAENGINE Unified Command & Continuity Plane V1
 
 Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY UNQUALIFIED
-Date: 2026-10-12
+Date: 2026-10-15 (current audit; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
 Canonical development base at adoption: `2bc3f3c13a75ed9708d657ae37db5cac610cc13f`
-Branch: `work/unified-command-continuity-p0-v1`
+Adoption branch: `work/unified-command-continuity-p0-v1`
 
 ## Binding goal — continuous autonomous agent development
 
@@ -12,7 +12,34 @@ METAENGINE must continuously develop the assigned goal through coordinating, com
 
 **The owner's 2026-10-15 request for 10 slots applies ONLY to the external DevFleet development wave. It is not a METAENGINE capacity policy.** Account for each execution backend's available resources independently, with queued logical work and dynamic allocation, without converting one backend's current capacity into an engine-wide agent limit. Per-request page/batch sizes are transport bounds, not graph-size limits. Explicit owner-set project policies remain possible and must not be silently overwritten.
 
-## Current checkpoint — 2026-10-15 / direct critical closure
+## Current checkpoint — 2026-10-15 / candidate, recovery and autonomy re-baseline
+
+The next acceptance target is **one productive autonomous coding loop followed by a verified continuation after restart**, then sustained coordinating/communicating/recursive agents. DevFleet waves are external development capacity; they do not satisfy that target or impose a METAENGINE-wide ceiling. Existing owner-set project policies remain authoritative. The unbounded-default migration applies to new projects only; logical queues may exceed available physical execution slots.
+
+**Reviewed source baseline:** [Draft #1309](https://github.com/PatrickFrome/Compute/pull/1309), `765b4e063a3d468311889d3d5bf8698f36e17589`, test identity `0.7.0-dev.1028947361258.1`, descended from [#1308](https://github.com/PatrickFrome/Compute/pull/1308) `49d050ff127e22ca27fbe3514324ba99832afb24`. PR descriptions contain historical heads; current GitHub `head_sha` is the source identity. The present recovery/roadmap follow-up is SOURCE ONLY and does not rebuild or qualify that reserved package identity against changed source.
+
+| Evidence on baseline `765b4e0` | Observed result | Remaining acceptance |
+|---|---|---|
+| W71 existing worker / disposable PG17; W80 fixed sandbox edit / PG17 | SUCCESS: [W71](https://github.com/PatrickFrome/Compute/actions/runs/38773827425), [W80](https://github.com/PatrickFrome/Compute/actions/runs/38773827625) | Authenticated production P-256 device, W30 lease and W39 independent critic; useful next-task continuation |
+| W37 canonical context; R97 source UI; release-proof reader source | SUCCESS: [context](https://github.com/PatrickFrome/Compute/actions/runs/38773827544), [R97](https://github.com/PatrickFrome/Compute/actions/runs/38773827839), [proof source](https://github.com/PatrickFrome/Compute/actions/runs/38773827792) | Same installed Owner/source/proof/cursor identity; genuine signer/custody readback |
+| [Windows Package Smoke](https://github.com/PatrickFrome/Compute/actions/runs/38773827846) | Identity, staged PG17/grants, R97, NSIS build and basic installed payload steps completed; real installed Owner-backed UI was IN_PROGRESS at audit | Terminal Owner/GUI, journal restart, Guardian and sealed qualification; a built EXE is not a passed installed candidate |
+| Current-source qualification, native Windows ACL, SelfUpdate and installed-chat workflows | IN_PROGRESS at audit | Terminal exact-head jobs and required negative cases; no inheritance of parent greens |
+| [Client State Runtime Contracts](https://github.com/PatrickFrome/Compute/actions/runs/38773827333) | CANCELLED | A complete exact-head runtime result; cancellation is not PASS |
+| Local installed Browser | File version `0.7.0-dev.37781000059.1`; newer candidate installation is unconfirmed | Fresh protected Owner/Host/PG readback and stable ordinary window before installed acceptance |
+| DevFleet Direct connector | Read-only probe returned UNAVAILABLE / HTTP 404 | Restore native endpoint before claiming current slot occupancy or a new dispatch |
+
+**Recovery development begun:** a pinned attached Host left in `STARTING` lacks the child-custody evidence required for automatic orphan quarantine. This follow-up preserves a fixed `local_runtime_host_startup_recovery_required` category across the existing private IPC, instead of losing it as generic `start_failed`. Exact lock/status PID and bundle binding are required even for this diagnosis. Arbitrary child error text and extra fields stay private. Regression fixtures retain lock/status bytes, perform no process/port probes on incomplete custody, preserve ambiguity fences and never admit READY. This is diagnostic progress toward P2, not completed recovery or live readiness.
+
+### Ordered work from this checkpoint
+
+1. Finish the existing exact `765b4e0` package/Owner/GUI run and collect terminal receipts. Diagnose the first real failure if present; do not replace it with a filtered test, earlier EXE or a reused version. A later native-source change requires a separately frozen candidate.
+2. Complete interrupted-start custody and incident recovery: bind a durable startup phase to the exact owner nonce/instance/source, record child ownership before admitting recovery, independently verify process incarnation and endpoint absence, serialize the successor and preserve ambiguous outcomes. Historical STARTING records without this proof remain blocked; never remove their lock merely because the PID is absent.
+3. Wire authentic default Host/Guardian/private Gateway/own-PG/backup producers and genuine release signer/SLSA inputs. Optional callbacks, staging keys and generated profiles cannot substitute for installed authority.
+4. Run one authenticated goal through existing admission and W30 lease, real bounded code edit/tests, W39 independent verification and own-PG checkpoint. Restart the admitted executor/Host and prove the actual next task runs once.
+5. Extend that loop to communicating roles, recursive child creation and durable logical queues beyond one backend's physical capacity; measure useful verified completions and recovery rather than open chats. Keep one scheduler and own PostgreSQL authority.
+6. Qualify a uniquely identified package, restore/rollback and installed UI/Owner/Guardian on one final SHA; only then evaluate sustained autonomy and P5 canary promotion. R1/C1/C2 remain SOURCE/STAGING until their independent LIVE exit evidence is complete.
+
+## Historical checkpoint — 2026-10-15 / direct critical closure (#1308)
 
 **Current source work:** [Draft #1308](https://github.com/PatrickFrome/Compute/pull/1308), `work/metaengine-critical-closure-20261015`, based on W73 #1303 `9e8ebcd09b46d0e8f5a09e9a0471d15a190baeea`, with ancestry of latest W74 #1304 `5473a8e2d073687520591c25d2280a5809299695`, W76 #1306 `e44e69c3b80c63d6d9bead473b4c621b3bd4145e`, and W77 #1307 `f3ecdadaebaf412ac6b5ff470139326fce49a3a1`. All Wave12 published source parents remain ancestors. The immutable W43/W51/W59/W66/W73 ledgers are historical; `client-critical-closure.manifest.json` seals the current reviewed source. Wave13 prepares ten distinct external DevFleet assignments in `DEVFLEET_WAVE13_AUTONOMY_10.json`. Native read-only preflights returned UNAVAILABLE / HTTP 404 then 429 on 2026-10-15; **none of those new tasks has been sent or confirmed running**. No tab IDs, receipt or completion status is inferred, and no ambiguous historical send is retried. No parallel scheduler is introduced into METAENGINE.
 
@@ -104,7 +131,7 @@ In parallel: `Windows Host Agent + Guardian` provide trusted process/database/pa
 | P2 — Execution Continuity | Attest installed Owner, PostgreSQL/Guardian, reconcile WAKE_AMBIGUOUS, recover real task lease and restart | Physical Windows `Goal → ADMITTED → agent → artifact → critic → verified checkpoint` + restart | BLOCKED_ON_LIVE_EVIDENCE |
 | P3 — Fleet Coordination | Unbounded durable agent/task graph, recursive spawning, role scheduling, communication, dependencies, verifier and handoff; backend-specific resource accounting | Coordinated recursive growth beyond local backend capacity, crash/lost-ack/child-failure recovery, no duplicate scheduler/effect | SOURCE_PARTIAL / CONTINUOUS_PRODUCTION_LOOP_UNQUALIFIED |
 | P4 — Observatory/UI | One canonical snapshot + cursor-based deltas for Now/Missions/Fleet/Brain/Develop/System/Evidence, causality drill-down | UI and GPT agree on identical run_id, event_seq and proof identity | SOURCE_TESTED / PACKAGED_NATIVE_PENDING |
-| P5 — Self-improvement & verified promotion | Baseline→candidate→isolated eval→independent critic→bounded rollout→rollback; durable learning | Measured quality/speed improvement without unverified promotion | PLANNED |
+| P5 — Self-improvement & verified promotion | Baseline→candidate→isolated eval→independent critic→bounded rollout→rollback; durable learning | Measured quality/speed improvement without unverified promotion | SOURCE_PARTIAL / VERIFIED_PROMOTION_BLOCKED |
 
 ## P0 slice 1: own local DB context endpoint
 
@@ -114,7 +141,7 @@ Implement a pure source-typed `operator-unified-snapshot-core.mjs` and authentic
 
 Stage completion requires exact commit + source/tree identity, unit/falsification tests, own PostgreSQL disposable DB tests, Windows packaged UI/Owner/Guardian E2E where applicable, explicit adverse evidence cases, then independent live readback. Commit/PR is implementation, not installation. Installed version is not `READY` until exact EXE bytes and physical startup/effect proof are confirmed. No production DB migration/OS update until independent backup equality, role/ACL, permissions and no-unknown-effect gates are met.
 
-## Immediate next sequence
+## Historical immediate sequence — 2026-10-12 (superseded above)
 
 1. P0 slice 1 implementation + focused tests + local API regressions (no live owner alteration).
 2. P0 slice 2 source-backed task/fleet/session and host/guardian observation adapters, with bounded data/sensitivity and freshness checks.

@@ -225,6 +225,27 @@ test('unexpected host death blocks local readiness without a cloud fallback or r
   assert.equal(f.verifications(), 1);
 });
 
+test('only an exact trusted failure envelope exposes the fixed interrupted-start recovery category',async t=>{
+  const cases=[
+    [{schema:'compute.runtime-host-failure.v1',state:'FAILED',reason:'runtime_host_recovery_startup_custody_missing',credentials_included:false},'local_runtime_host_startup_recovery_required'],
+    [{schema:'compute.runtime-host-failure.v1',state:'FAILED',reason:'PRIVATE_FIXTURE_DATABASE_SECRET',credentials_included:false},'local_runtime_host_start_failed'],
+    [{schema:'compute.runtime-host-failure.v1',state:'FAILED',reason:'runtime_host_recovery_startup_custody_missing',credentials_included:true},'local_runtime_host_start_failed'],
+    [{schema:'compute.runtime-host-failure.v1',state:'FAILED',reason:'runtime_host_recovery_startup_custody_missing',credentials_included:false,private_path:'PRIVATE_FIXTURE_DATABASE_SECRET'},'local_runtime_host_start_failed'],
+  ];
+  for(const [message,reason] of cases){
+    const f=await fixture(t);
+    const child=new EventEmitter();
+    child.pid=23001;child.connected=true;child.stderr=new EventEmitter();
+    child.send=()=>queueMicrotask(()=>{child.connected=false;child.emit('exit',0);});
+    child.disconnect=()=>{child.connected=false;child.emit('exit',0);};
+    await assert.rejects(startConfiguredLocalRuntimeHost({...f,startupTimeoutMs:1000,stopTimeoutMs:100,
+      spawnImpl:()=>{queueMicrotask(()=>child.emit('message',message));return child;},
+    }),error=>error.message===reason&&!error.message.includes('PRIVATE_FIXTURE'));
+    assert.equal((await stopOwnedLocalRuntimeHost({timeoutMs:100})).cleanup_confirmed,true);
+    assert.notEqual(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE,'READY');
+  }
+});
+
 test('a ready IPC followed by exit before the startup continuation cannot publish a dead owned host', async t => {
   const f = await fixture(t);
   const child = new EventEmitter();

@@ -54,6 +54,16 @@ test('source closure has no authority to promote installed state or replay histo
   assert.equal(observed,c.version);
   assert.notEqual(observed,historical);
  }else assert.equal(observed,historical);
+ if(manifest.source_followup){
+  const f=manifest.source_followup;
+  assert.equal(f.classification,'SOURCE_ONLY_NO_PACKAGE');
+  assert.equal(f.package_build_authorized,false);
+  assert.equal(f.installed_mutation_authorized,false);
+  assert.equal(f.automatic_recovery_authorized,false);
+  assert.match(f.source_parent,/^[a-f0-9]{40}$/);
+  assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',f.source_parent,'HEAD']).status,0);
+  assert.equal(observed,JSON.parse(git('show',f.source_parent+':apps/metaengine-browser/package.json')).version);
+ }
 });
 
 test('current CI runs the complete Browser and Client suites and preserves physical qualification',()=>{
