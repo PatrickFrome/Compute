@@ -1,0 +1,148 @@
+name: Client W61 Own PG Birth, Claim and Restore
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/client-pg17-qualification-w45*'
+      - 'infra/client-state-runtime/own-postgres-birth-w61*'
+      - 'infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs'
+      - 'infra/client-state-runtime/db-api.mjs'
+      - '.github/workflows/client-own-pg-w61.yml'
+      - '.github/workflows/client-pg17-qualification-w45.yml'
+      - 'infra/client-state-runtime/operator-supervisor-continuity-lease-v1.sql'
+      - 'infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql'
+  workflow_dispatch:
+
+concurrency:
+  group: w61-exact-head-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-pg17-linux:
+    name: Exact-source disposable PG17 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout entire W45 source candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout frozen W26 source (read-only fixture input)
+        uses: actions/checkout@v4
+        with:
+          ref: 6498c1596432ea9d9987f343c92505b273d1ac11
+          path: w45-source-w26
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout frozen W39 source (read-only fixture input)
+        uses: actions/checkout@v4
+        with:
+          ref: ee39b256e2b54f5dfddf4bff021977c0185fb744
+          path: w45-source-w39
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout frozen W30 claim-planning source (read-only fixture input)
+        uses: actions/checkout@v4
+        with:
+          ref: ff9dab18d88a4d656fa91c5cc86f3392fde3f023
+          path: w45-source-w30
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact upstream inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C w45-source-w26 rev-parse HEAD)" = "6498c1596432ea9d9987f343c92505b273d1ac11"
+          test "$(git -C w45-source-w39 rev-parse HEAD)" = "ee39b256e2b54f5dfddf4bff021977c0185fb744"
+          test "$(git -C w45-source-w30 rev-parse HEAD)" = "ff9dab18d88a4d656fa91c5cc86f3392fde3f023"
+          echo "W45_SHA=$(git rev-parse HEAD)"
+          echo "W26_SHA=$(git -C w45-source-w26 rev-parse HEAD)"
+          echo "W39_SHA=$(git -C w45-source-w39 rev-parse HEAD)"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          fi
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install frozen local test dependency
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/client-state-runtime
+      - name: Syntax and metadata
+        run: |
+          node --check infra/client-state-runtime/own-postgres-birth-w61.mjs
+          node --check infra/client-state-runtime/db-api.mjs
+          node --check infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs
+          node --test infra/client-state-runtime/own-postgres-birth-w61.test.mjs
+          git diff --check
+      - name: Exact-head source contract regressions (never installed evidence)
+        run: |
+          node --test --test-concurrency=1 infra/client-state-runtime/operator-context-convergence-w37.test.mjs
+          node --test --test-concurrency=1 w45-source-w26/apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs
+          node --test --test-concurrency=1 w45-source-w39/infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs
+          node --test --test-concurrency=1 w45-source-w30/apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs
+      - name: Pull exact PostgreSQL 17.6 image digest
+        run: docker pull postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+      - name: Real PG17, disposable generated cluster (no live Owner)
+        env:
+          W45_PG17_DOCKER: '1'
+          W45_REQUIRE_REAL_PG17: '1'
+          W45_W26_ROOT: ${{ github.workspace }}/w45-source-w26
+          W45_W39_ROOT: ${{ github.workspace }}/w45-source-w39
+        run: node --test --test-concurrency=1 infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs
+
+  windows-source:
+    name: Explicit Windows unknown without pinned PG17 fixture
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/client-state-runtime
+      - run: node --test infra/client-state-runtime/own-postgres-birth-w61.test.mjs
+      - run: node --check infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs
+      - run: node --check infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs
+      - name: Report unsupported physical fixtures, never green PG17 qualification
+        run: |
+          node --test --test-concurrency=1 infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs
+          node --test --test-concurrency=1 infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs
+          echo "WINDOWS_PHYSICAL_PG17=UNKNOWN; WINDOWS_W47_RESTORE=UNKNOWN; no installed PGDATA or port touched"
+        shell: bash
+
+  w47-two-cluster-real-restore:
+    name: Pinned PG17 two-cluster W47 real restore (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify whole checkout exact source, syntax and staging-only scope
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          node --check infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs
+          git diff --check
+      - name: Pinned digest exact PostgreSQL17.6
+        run: docker pull postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+      - name: Two newly generated clusters, durable W47 effect barrier and restore/data equality
+        env:
+          W61_DOCKER_PG17: '1'
+          W61_REQUIRE_REAL_PG17: '1'
+          W61_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node --test --test-concurrency=1 infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs

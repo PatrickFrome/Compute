@@ -224,11 +224,40 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       for (let n = 0; n < tasks.length; n++) {
         await admin.unsafe('INSERT INTO destruktion_meta.project_task_h205f22 VALUES($1,$2)', [tasks[n], project]);
         await admin.unsafe("INSERT INTO destruktion_meta.devos_fleet_task_h205f22(task_id,workspace_id,role,task_spec,state,lease_generation,lease_agent_id) VALUES($1,$2,'IMPLEMENTER',$3::jsonb,'LEASED',1,$4)", [
-          tasks[n], ws, JSON.stringify({ fleet_coordination_v1: {
+          tasks[n], ws, admin.json({ fleet_coordination_v1: {
             version: 1, role: 'IMPLEMENTER', resource: 'HOST', slots: 2, dependencies: [] } }), 'agent_' + n]);
+      }
+      const fixtureReadback = await admin.unsafe(`SELECT task_id,task_spec::text AS serialized,
+        jsonb_typeof(task_spec) AS top_type,
+        jsonb_typeof(task_spec->'fleet_coordination_v1') AS tag_type,
+        task_spec#>>'{fleet_coordination_v1,resource}' AS resource,
+        task_spec#>>'{fleet_coordination_v1,slots}' AS slots
+        FROM destruktion_meta.devos_fleet_task_h205f22 WHERE workspace_id=$1`,[ws]);
+      // A missing coordination tag would silently admit all three as legacy.
+      // Prove the intended fixture actually reaches the authoritative trigger.
+      console.log('W61_W45_FIXTURE_READBACK', JSON.stringify(fixtureReadback));
+      assert.equal(fixtureReadback.length,3,'three generated tasks');
+      for(const record of fixtureReadback) {
+        assert.equal(record.top_type,'object','real JSONB object, not serialized JSON string');
+        assert.equal(record.tag_type,'object','resource coordination tag present');
+        assert.equal(record.resource,'HOST','real tagged Host resource');
+        assert.equal(record.slots,'2','real tagged Host cost');
       }
       const insert = n => admin.unsafe("INSERT INTO destruktion_meta.devos_fleet_claim_h205f22(task_id,workspace_id,lease_generation,agent_id,expires_at) VALUES($1,$2,1,$3,clock_timestamp()+interval '30 seconds') RETURNING claim_id", [tasks[n], ws, 'agent_' + n]);
       const attempts = await Promise.allSettled([insert(0), insert(1), insert(2)]);
+      if (attempts.filter(a => a.status === 'fulfilled').length !== 1) {
+        // Failure-only observability of REAL DB values; no generated Owner data is sensitive.
+        const claims = await admin.unsafe(`SELECT c.claim_id,c.state,c.expires_at,clock_timestamp() AS observed_at,
+          t.role,t.task_spec#>>'{fleet_coordination_v1,resource}' AS resource,
+          t.task_spec#>>'{fleet_coordination_v1,slots}' AS slots
+          FROM destruktion_meta.devos_fleet_claim_h205f22 c
+          JOIN destruktion_meta.devos_fleet_task_h205f22 t USING(task_id)
+          ORDER BY c.claim_id`);
+        const triggers = await admin.unsafe(`SELECT tgname,tgenabled,pg_get_triggerdef(oid) AS definition
+          FROM pg_trigger WHERE tgrelid='destruktion_meta.devos_fleet_claim_h205f22'::regclass`);
+        console.error('W61_PG17_HOST_CAP_FAILURE', JSON.stringify({claims,triggers,
+          outcomes:attempts.map(a=>a.status)}));
+      }
       assert.equal(attempts.filter(a => a.status === 'fulfilled').length, 1, 'HOST 2-slot capacity is strict under concurrent claims');
       assert(attempts.filter(a => a.status === 'rejected').every(a => isCode(a.reason, '55000')));
       const [active] = await admin.unsafe("SELECT count(*)::int AS count FROM destruktion_meta.devos_fleet_claim_h205f22 WHERE state='ACTIVE'");
