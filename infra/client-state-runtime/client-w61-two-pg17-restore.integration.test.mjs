@@ -94,7 +94,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     const targetVersion=Number((await dbsql(to,'SHOW server_version_num')).trim());
     assert(sourceVersion>=170000&&sourceVersion<180000);
     assert(targetVersion>=170000&&targetVersion<180000);
-    const birth=(await dbsql(from,OWN_PG_BIRTH_SQL_W61.replace(/\\s+/g,' '))).trim();
+    const birth=(await dbsql(from,OWN_PG_BIRTH_SQL_W61.replace(/\s+/g,' '))).trim();
     assert.match(birth,/w61_db/); // fixed PostgreSQL catalog source, not Owner attestation
     const sourceIdentity=(await dbsql(from,'SELECT system_identifier::text FROM pg_control_system()')).trim();
     const destIdentity=(await dbsql(to,'SELECT system_identifier::text FROM pg_control_system()')).trim();
@@ -115,7 +115,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     if(process.env.W61_SOURCE_SHA)assert.equal(sourceHead,process.env.W61_SOURCE_SHA);
     const ownerDigest=await hashFile(process.execPath);
     const pgDigest=(await docker('exec',from,'sha256sum','/usr/lib/postgresql/17/bin/postgres'))
-      .trim().split(/\\s+/)[0];
+      .trim().split(/\s+/)[0];
     assert.match(pgDigest,/^[a-f0-9]{64}$/);
     const rollbackPath=path.join(root,'rollback-preserved.bin');
     await fs.writeFile(rollbackPath,'GENERATED_ROLLBACK:'+rows,{flag:'wx',mode:0o600});
