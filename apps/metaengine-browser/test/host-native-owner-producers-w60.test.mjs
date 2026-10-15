@@ -112,8 +112,15 @@ test('W60: explicitly STAGING or replayed Host custody cannot promote Owner',asy
 });
 test('W60: validated Host birth can read, Guardian shape still has no bound epoch',async()=>{
   const r=make({...ident,readHostOwnerIncarnation:async()=>record()},{});
-  assert.equal((await r.readHostOwner())?.owner_id,'host-w60');
-  assert.equal((await r.readKernelProcess(1234))?.process_incarnation_id,'incarnation-w60');
+  // A Linux runner is never allowed to promote a mocked Windows census to
+  // trusted local Host birth; only the Windows lane exercises that contract.
+  if (process.platform === 'win32') {
+    assert.equal((await r.readHostOwner())?.owner_id,'host-w60');
+    assert.equal((await r.readKernelProcess(1234))?.process_incarnation_id,'incarnation-w60');
+  } else {
+    assert.equal(await r.readHostOwner(),null);
+    assert.equal(await r.readKernelProcess(1234),null);
+  }
   assert.equal(await r.readGuardianOwner('host-w60',3),null);
   assert.equal(await r.readOwnerSecretStore('host-w60',3),null);
   assert.equal(await r.readSignedInstalledExecutable('host-w60',3),null);
