@@ -37,8 +37,9 @@ function ownerValid(o, ownerId, epoch, now) {
     Number.isFinite(time(o.created_at)) && fresh(o.observed_at, now);
 }
 function sameOwner(a, b) {
-  return ['owner_id','device_id','project_id','pid','created_at','generation',
-    'epoch','process_incarnation_id','source_sha'].every(k => a[k] === b[k]);
+  return time(a.created_at) === time(b.created_at) &&
+    ['owner_id','device_id','project_id','pid','generation',
+      'epoch','process_incarnation_id','source_sha'].every(k => a[k] === b[k]);
 }
 function validRow(row, now) {
   return row && Number.isFinite(time(row.observed_at)) &&
