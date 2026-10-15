@@ -1,0 +1,41 @@
+name: Client Host Owner Producers W60
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/host-native-owner-producers-w60.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/host-agent-runtime.mjs'
+      - 'apps/metaengine-browser/src/host-agent-protocol.mjs'
+      - 'apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs'
+      - 'apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs'
+      - '.github/workflows/client-host-owner-w60.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  w60-real-main-producers:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          git diff --check
+      - name: Production main and Host Owner contract
+        shell: bash
+        run: |
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/host-native-owner-producers-w60.mjs
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
+            apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs \
+            apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs \
+            apps/metaengine-browser/test/operator-native-context-bridge.test.mjs
