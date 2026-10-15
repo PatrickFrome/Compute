@@ -1,0 +1,35 @@
+name: Client Native Supervisor W70
+on:
+  push:
+    branches:
+      - work/metaengine-client-wave11-w70-20261015
+  pull_request:
+    branches:
+      - work/metaengine-client-wave10-w59-20261015
+  workflow_dispatch:
+jobs:
+  selected-local-transport:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/metaengine-browser
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Inspect exact source identity
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          git diff --exit-code
+      - name: Install source-only test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Selected provider, Sentinel and strict transport regression
+        run: node --test test/native-supervisor-transport-w70.test.mjs test/explicit-local-supervisor-provider.test.mjs test/browser-sentinel.test.mjs test/local-provider-recovery-environment.test.mjs test/native-supervisor-local-provider-pin.test.mjs
