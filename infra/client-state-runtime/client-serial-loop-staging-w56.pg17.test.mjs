@@ -79,8 +79,8 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
   const env={...process.env,PGHOST:'127.0.0.1',PGPORT:String(await port()),
     PGUSER:'w56_temporary',PGDATABASE:'postgres',PGSSLMODE:'disable',
     PGCONNECT_TIMEOUT:'3',HOME:root};
-  const run=(name,args)=>execFileSync(path.join(BIN,name),args,{
-    env,encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:35_000}).trim();
+  const run=(name,args)=>(execFileSync(path.join(BIN,name+(process.platform==='win32'?'.exe':'')),args,{
+    env,encoding:'utf8',stdio:name==='pg_ctl'?'ignore':['ignore','pipe','pipe'],timeout:35_000}) ?? '').trim();
   const sql=s=>run('psql',['-X','-v','ON_ERROR_STOP=1','-A','-t','-c',s]);
   const lifecycle = createW64DisposablePgLifecycle({run,root,data,port:Number(env.PGPORT),pgUser:'w56_temporary'});
   try {
@@ -91,10 +91,13 @@ test('W56 REAL PG17: source red-to-green, independent process critic, crash/rest
     const seed=w80?path.join(root,'w80-seed'):sourceDir;
     await mkdir(seed);
     git(seed,'init','-q');
+    // The repair authority binds exact LF bytes. A generated repo must not
+    // inherit runner-wide autocrlf when its linked worktree is checked out.
+    await writeFile(path.join(seed,'.gitattributes'),'*.mjs text eol=lf\n');
     const src=path.join(sourceDir,'calc.mjs'),tst=path.join(sourceDir,'calc.test.mjs');
     await writeFile(path.join(seed,'calc.mjs'),'export const sum=(a,b)=>a-b;\n');
     await writeFile(path.join(seed,'calc.test.mjs'),"import test from 'node:test';import assert from 'node:assert/strict';import {sum} from './calc.mjs';test('goal',()=>assert.equal(sum(2,3),5));\n");
-    git(seed,'add','--','calc.mjs','calc.test.mjs');
+    git(seed,'add','--','.gitattributes','calc.mjs','calc.test.mjs');
     git(seed,'-c','user.email=w56@example.invalid','-c','user.name=W56 Fixture','commit','-qm','red test');
     if(w80){
       const bare=path.join(root,'repo.git');

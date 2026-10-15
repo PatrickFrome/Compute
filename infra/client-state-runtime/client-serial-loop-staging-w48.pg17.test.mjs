@@ -55,8 +55,12 @@ test('W48 real disposable PG17: write, crash-restart, exact digest readback, nex
   const data = path.join(root,'cluster');
   const marker = path.join(root,'w48-owned-marker.json');
   const exe = name => path.join(BIN,name + (process.platform==='win32'?'.exe':''));
-  const run = (name,args,env) => execFileSync(exe(name),args,{
-    env,encoding:'utf8',timeout:30_000,stdio:['ignore','pipe','pipe'] }).trim();
+  // Windows pg_ctl can leave an inherited pipe open even with postmaster -l.
+  // Its exit status and independent PID/SQL readbacks remain mandatory; only
+  // diagnostics go to the generated log instead of a parent-owned pipe.
+  const run = (name,args,env) => (execFileSync(exe(name),args,{
+    env,encoding:'utf8',timeout:30_000,
+    stdio:name==='pg_ctl'?'ignore':['ignore','pipe','pipe'] }) ?? '').trim();
   const safeSql = (sql,env) => run('psql',['-X','-v','ON_ERROR_STOP=1','-A','-t','-c',sql],env);
   const port = await freePort();
   const env = envForPg(root,port);

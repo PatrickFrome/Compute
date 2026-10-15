@@ -159,7 +159,9 @@ test('disposable PostgreSQL project lineage, history cursors, budget waits and i
     const next=await spawnGrowth(growthParent,[{role:'CODER',objective:`Recursive depth ${depth}`}]);
     assert.equal(next.children[0].depth,depth);
     await finish(growthParent);
-    growthParent=await lease(agents[0]);
+    // CODER proposals are canonicalized to IMPLEMENTER at admission. Keep the
+    // real role fence instead of pretending the original CODER session fits.
+    growthParent=await lease(agents[2]);
     assert.equal(growthParent.task_id,next.children[0].task_id);
   }
   const seenTasks=new Set();let taskAfter=0;

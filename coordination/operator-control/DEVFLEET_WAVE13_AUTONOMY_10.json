@@ -9,6 +9,7 @@
     "operation": "fleet_list",
     "status": "UNAVAILABLE",
     "http_status": 404,
+    "later_probe_http_status": 429,
     "message": "MCP SSE probe returned 404",
     "owned_tabs_verified": false,
     "assign_batch_called": false

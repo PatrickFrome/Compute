@@ -1,6 +1,8 @@
 // W64: lifecycle ONLY for newly generated, Owner-free disposable PG17 fixtures.
 // pg_ctl's -l is essential: an otherwise healthy postmaster inherits the stdout
 // pipe of execFileSync(pg_ctl), leaving Node waiting for EOF until ETIMEDOUT.
+// Windows callers also detach pg_ctl stdio: -l alone does not close every
+// descendant's inherited pipe. Exit status and all independent readbacks stay.
 // No installed PGDATA, caller-specified root, network service or LIVE authority.
 import assert from 'node:assert/strict';
 import { readFile, realpath } from 'node:fs/promises';
