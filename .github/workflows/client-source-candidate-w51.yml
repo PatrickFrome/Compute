@@ -1,12 +1,12 @@
 name: METAENGINE Client W51 Integrated Source Candidate
 
+# W82: Historical W51 is an ancestor seal, not an independent current-source
+# fanout for every application PR. W66/W73 validate both frozen and current seals.
+# Nonapplicable PRs MUST NOT be interpreted as successful W51 qualification.
 on:
   pull_request:
     paths:
       - '.github/workflows/client-source-candidate-w51.yml'
-      - 'apps/metaengine-browser/**'
-      - 'apps/me2-ui/**'
-      - 'infra/client-state-runtime/**'
       - 'coordination/operator-control/client-source-candidate-w51.manifest.json'
   workflow_dispatch:
 
