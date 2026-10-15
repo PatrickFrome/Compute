@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - name: Exact source and pure birth negative tests
         shell: bash
         env:
@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - name: Actual production Guardian MSVC compile/link, no service activation
         shell: powershell
         run: |
@@ -73,9 +73,14 @@ jobs:
           $dir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
           $probe = (Resolve-Path 'apps/metaengine-browser/test/native/guardian-owner-kernel-birth-w75.cpp').Path
           $exe = Join-Path $env:RUNNER_TEMP 'guardian-owner-kernel-birth-w75.exe'
+          $objects = Join-Path $env:RUNNER_TEMP 'guardian-owner-kernel-birth-w75-objects'
+          New-Item -ItemType Directory -Path $objects -Force | Out-Null
           $cmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" /Fe:"{4}" /link advapi32.lib' -f $vcvars,$dir,$src,$probe,$exe
-          & $env:ComSpec /d /s /c $cmd
-          if ($LASTEXITCODE -ne 0) { throw "kernel_birth_compile_exit_$LASTEXITCODE" }
+          Push-Location $objects
+          try {
+            & $env:ComSpec /d /s /c $cmd
+            if ($LASTEXITCODE -ne 0) { throw "kernel_birth_compile_exit_$LASTEXITCODE" }
+          } finally { Pop-Location }
           $result = & $exe
           if ($LASTEXITCODE -ne 0 -or $result -ne 'GUARDIAN_KERNEL_BIRTH_100NS_EXACT_PASS') { throw 'kernel_birth_real_process_negative_failed' }
       - name: W75 JS negative tests and exact source readback

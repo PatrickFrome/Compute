@@ -1,6 +1,7 @@
+const { LOCAL_SUPERVISOR_FIXTURE_BASE } = await import('./helpers/local-supervisor-transport-fixture.mjs');
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MetaOrchestratorNativeProvider } from '../src/meta-orchestrator-native-provider.mjs';
+const { MetaOrchestratorNativeProvider } = await import('../src/meta-orchestrator-native-provider.mjs');
 
 const workspace='2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const taskId='98903ffd-dc3f-4a3e-ab09-55931c5100a9';
@@ -14,8 +15,8 @@ test('effectful admission has a bounded AbortSignal and remains no-hidden-retry'
   const provider=new MetaOrchestratorNativeProvider({
     identity,
     workspace_id:workspace,
-    baseUrl:'https://provider.test',
-    runtimePath:'/native',
+    baseUrl:LOCAL_SUPERVISOR_FIXTURE_BASE,
+
     effectDeadlineMs:1500,
     fetchImpl:async(url,init)=>{
       calls.push({url,init});

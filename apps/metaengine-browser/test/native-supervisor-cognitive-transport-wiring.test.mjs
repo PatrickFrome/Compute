@@ -1,19 +1,20 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { BrowserCognitiveDeltaBus } from '../src/browser-cognitive-delta-bus.mjs';
-import {
+const { BrowserCognitiveDeltaBus } = await import('../src/browser-cognitive-delta-bus.mjs');
+const {
   BROWSER_COGNITIVE_ACK_SCHEMA,
   BROWSER_COGNITIVE_BATCH_SCHEMA,
-} from '../src/browser-cognitive-delta-transport.mjs';
-import {
+} = await import('../src/browser-cognitive-delta-transport.mjs');
+const {
   NATIVE_SUPERVISOR_BASE,
   NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
   createNativeSupervisorCognitiveTransport,
   dispatchRealtimeObservationEdge,
   sendNativeSupervisorCognitiveBatch,
-} from '../src/native-supervisor-client.mjs';
+} = await import('../src/native-supervisor-client.mjs');
 
 const STREAM_ID = '11111111-1111-4111-8111-111111111111';
 

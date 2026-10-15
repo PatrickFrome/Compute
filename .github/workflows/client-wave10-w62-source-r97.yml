@@ -14,6 +14,7 @@ on:
       - '.github/workflows/client-wave10-w62-source-r97.yml'
   pull_request:
     paths:
+      - 'coordination/operator-control/client-critical-closure.manifest.json'
       - 'apps/me2-ui/**'
       - 'apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs'
       - 'apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs'
@@ -45,7 +46,7 @@ jobs:
       - name: Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.21.0'
+          node-version: '24.19.0'
       - name: Frozen Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:

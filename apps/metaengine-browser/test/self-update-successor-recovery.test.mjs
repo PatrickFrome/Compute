@@ -199,9 +199,12 @@ test('main entry does not recreate successor receipt on recovery startup and pre
   const source = await fs.readFile(path.join(src, 'main-entry.mjs'), 'utf8');
   assert.match(source, /const resumeSuccessorQualification = shouldResumeSuccessorQualification/);
   assert.match(source, /updatedLaunch,\s*updateHandoff,\s*startupInspection: startupUpdateInspection/);
-  const persistAt = source.indexOf('persistUpdatedSuccessorReceipt(app');
-  const updatedGuardAt = source.lastIndexOf('if (updatedLaunch)', persistAt);
-  assert.ok(updatedGuardAt >= 0 && updatedGuardAt < persistAt, 'successor receipt remains --updated-only');
+  const persistCalls = [...source.matchAll(/persistUpdatedSuccessorReceipt\(app/g)];
+  assert.equal(persistCalls.length,2,'offline probe and normal successor are the only receipt producers');
+  for (const call of persistCalls) {
+    const updatedGuardAt = source.lastIndexOf('if (updatedLaunch',call.index);
+    assert.ok(updatedGuardAt >= 0 && updatedGuardAt < call.index,'successor receipt remains --updated-only');
+  }
   assert.match(source, /if \(resumeSuccessorQualification\)[\s\S]*qualifyUpdatedSuccessorWhenHealthy\(\{ app \}\)/);
   assert.doesNotMatch(source, /if \(updatedLaunch && updateHandoff\)[\s\S]*qualifyUpdatedSuccessorWhenHealthy/);
   assert.doesNotMatch(source, /TARGET_INSTALLED[\s\S]{0,300}(?:unlink|rmSync|writeFile)/i);

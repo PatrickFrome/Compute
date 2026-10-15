@@ -5,7 +5,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {verifyOwnerOnlyWindowsStorage} from './private-windows-storage-acl.mjs';
+import {NATIVE_BACKUP_ACL_SAMPLE_TIMEOUT_MS} from './host-agent-operation-deadlines.mjs';
 
 const run=promisify(execFile);
 const SCHEMA='metaengine.client-backup-acl-native-w58.v1';
@@ -70,7 +70,6 @@ Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 Write-Output 'W72_ACL_PHASE_START'
 $me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $allowed=@($me,'S-1-5-18','S-1-5-32-544')|Select-Object -Unique
-$required=@($me,'S-1-5-18')|Select-Object -Unique
 $items=@()
 # Explicit path/kind records avoid positional dependence. The historical nested arrays are valid in WinPS5.1.
 $pairs=@(
@@ -89,6 +88,8 @@ foreach($pair in $pairs){
   $sid=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if($sid -notin $allowed){throw 'owner'}
   $aces=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+  # Preserve the existing private-storage required-SID policy in each sample.
+  $required=if($pair.kind -eq 'DIRECTORY'){$allowed}else{@($me,'S-1-5-18')|Select-Object -Unique}
   foreach($ace in $aces){
     if($ace.IsInherited -or $ace.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow){throw 'inherited_or_deny'}
     if($ace.IdentityReference.Value -notin $allowed){throw 'broad'}
@@ -119,7 +120,7 @@ async function nativeAcl(root,file) {
     METAENGINE_W58_ROOT:root,METAENGINE_W58_FILE:file});
   const {stdout}=await run(exe,['-NoProfile','-NonInteractive','-NoLogo','-EncodedCommand',
     Buffer.from(powershell,'utf16le').toString('base64')],{
-    env,shell:false,windowsHide:true,timeout:120000,maxBuffer:8192});
+    env,shell:false,windowsHide:true,timeout:NATIVE_BACKUP_ACL_SAMPLE_TIMEOUT_MS,maxBuffer:8192});
   const data=JSON.parse(String(stdout).trim().split(/\r?\n/).at(-1));
   if(!/^S-1-\d+(?:-\d+)+$/.test(data?.service_sid||'')
     ||!/^S-1-\d+(?:-\d+)+$/.test(data?.root?.owner_sid||'')
@@ -150,8 +151,9 @@ export async function readClientBackupAclNativeW58({
     const root0=await physical(backupDirectory,'directory');
     const file0=await physical(archivePath,'file');
     // Never accept receipt.owner_dacl_verified or caller-supplied "verified".
-    await verifyOwnerOnlyWindowsStorage(backupDirectory,{operation:'VERIFY_DIRECTORY'});
-    await verifyOwnerOnlyWindowsStorage(archivePath,{operation:'VERIFY_PRIVATE_FILE'});
+    // Each native sample checks root AND file with the full private-storage
+    // SID/rights policy. Two earlier single-object PowerShell launches repeated
+    // those checks but added cold starts beyond the IPC request deadline.
     const a=await nativeAcl(backupDirectory,archivePath);
     if(afterFirstRead)await afterFirstRead();
     const b=await nativeAcl(backupDirectory,archivePath);

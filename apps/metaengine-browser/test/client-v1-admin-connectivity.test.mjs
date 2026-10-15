@@ -84,7 +84,7 @@ test('signed device authentication requires exact ADMIN grant before privileged 
 test('device private key stays in Electron safeStorage and is absent from snapshots', () => {
   assert.match(identity, /secureStorage\.encryptString/);
   assert.match(identity, /secureStorage\.decryptString/);
-  assert.match(identity, /const \{ encrypted_private_key_b64: _secret, \.\.\.safe \} = this\.#state/);
+  assert.match(identity, /const \{ encrypted_private_key_b64: _secret,\s*encrypted_host_owner_record_b64: _ownerSecret, \.\.\.safe \} = this\.#state/);
   const snapshotBlock = identity.slice(identity.indexOf('snapshot() {'), identity.indexOf('async bindEnrollmentRequest'));
   assert.match(snapshotBlock, /return structuredClone\(\{ \.\.\.safe, enrolled:/);
   assert.doesNotMatch(snapshotBlock, /return structuredClone\(this\.#state\)/);

@@ -1,15 +1,16 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
+const {
   NativeSupervisorCommandBatchFastlane,
   classifyBatchFastlaneWakeReason,
-} from '../src/native-supervisor-command-batch-fastlane.mjs';
-import { NativeSupervisorClient } from '../src/native-supervisor-client.mjs';
-import { SupervisorDeviceIdentity } from '../src/supervisor-device-identity.mjs';
+} = await import('../src/native-supervisor-command-batch-fastlane.mjs');
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client.mjs');
+const { SupervisorDeviceIdentity } = await import('../src/supervisor-device-identity.mjs');
 
 const secureStorage = {
   isEncryptionAvailable: () => true,

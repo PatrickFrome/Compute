@@ -1,6 +1,7 @@
+const { LOCAL_SUPERVISOR_FIXTURE_BASE } = await import('./helpers/local-supervisor-transport-fixture.mjs');
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MetaOrchestratorAdmissionOutcomeError, MetaOrchestratorNativeProvider } from '../src/meta-orchestrator-native-provider.mjs';
+const { MetaOrchestratorAdmissionOutcomeError, MetaOrchestratorNativeProvider } = await import('../src/meta-orchestrator-native-provider.mjs');
 
 const workspace='2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const roadmap='metaengine-development-os-v1';
@@ -14,7 +15,7 @@ function frontier(){return{schema:'metaengine.meta-orchestrator.frontier-admissi
 
 test('confirmed frontier is one effect request with bounded transport',async()=>{
   const calls=[];
-  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:'https://provider.test',runtimePath:'/native',fetchImpl:async(url,init)=>{calls.push({url,init});return json(200,frontier())},effectDeadlineMs:1500});
+  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:LOCAL_SUPERVISOR_FIXTURE_BASE,fetchImpl:async(url,init)=>{calls.push({url,init});return json(200,frontier())},effectDeadlineMs:1500});
   const out=await provider.admitFrontier({roadmap_id:roadmap,plan_generation:3,point_ids:points});
   assert.equal(out.atomic_transaction,true);
   assert.equal(calls.length,1);
@@ -24,24 +25,24 @@ test('confirmed frontier is one effect request with bounded transport',async()=>
 
 test('lost frontier response with all tasks visible reconciles present and never repeats POST',async()=>{
   const calls=[];
-  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:'https://provider.test',runtimePath:'/native',fetchImpl:async(url)=>{calls.push(url);if(url.endsWith('/admit-frontier'))throw new Error('connection_lost_after_commit');if(url.endsWith('/authoritative-inputs'))return json(200,inputs(points.map((p,i)=>task(p,tasks[i]))));throw new Error('unexpected')}});
+  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:LOCAL_SUPERVISOR_FIXTURE_BASE,fetchImpl:async(url)=>{calls.push(url);if(url.endsWith('/admit-frontier'))throw new Error('connection_lost_after_commit');if(url.endsWith('/authoritative-inputs'))return json(200,inputs(points.map((p,i)=>task(p,tasks[i]))));throw new Error('unexpected')}});
   const out=await provider.admitFrontier({roadmap_id:roadmap,plan_generation:3,point_ids:points});
   assert.equal(out.reconciled,true);
-  assert.deepEqual(calls,['https://provider.test/v1/meta/admit-frontier','https://provider.test/v1/meta/authoritative-inputs']);
+  assert.deepEqual(calls,[`${LOCAL_SUPERVISOR_FIXTURE_BASE}/v1/meta/admit-frontier`,`${LOCAL_SUPERVISOR_FIXTURE_BASE}/v1/meta/authoritative-inputs`]);
   assert.equal(provider.snapshot().last_frontier.state,'EFFECT_CONFIRMED');
 });
 
 test('zero tasks after lost response proves absence but provider performs no hidden retry',async()=>{
   const calls=[];
-  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:'https://provider.test',runtimePath:'/native',fetchImpl:async(url)=>{calls.push(url);if(url.endsWith('/admit-frontier'))throw new Error('connection_lost');if(url.endsWith('/authoritative-inputs'))return json(200,inputs());throw new Error('unexpected')}});
+  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:LOCAL_SUPERVISOR_FIXTURE_BASE,fetchImpl:async(url)=>{calls.push(url);if(url.endsWith('/admit-frontier'))throw new Error('connection_lost');if(url.endsWith('/authoritative-inputs'))return json(200,inputs());throw new Error('unexpected')}});
   await assert.rejects(()=>provider.admitFrontier({roadmap_id:roadmap,plan_generation:3,point_ids:points}),e=>e instanceof MetaOrchestratorAdmissionOutcomeError&&e.effect_state==='EFFECT_ABSENT'&&e.automatic_retry_allowed===true);
   assert.equal(calls.length,2);
 });
 
 test('partial readback is first-class ambiguous corruption signal and never fills missing point',async()=>{
   const calls=[];
-  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:'https://provider.test',runtimePath:'/native',fetchImpl:async(url)=>{calls.push(url);if(url.endsWith('/admit-frontier'))throw new Error('connection_lost');if(url.endsWith('/authoritative-inputs'))return json(200,inputs([task(points[0],tasks[0])]));throw new Error('unexpected')}});
+  const provider=new MetaOrchestratorNativeProvider({identity,workspace_id:workspace,baseUrl:LOCAL_SUPERVISOR_FIXTURE_BASE,fetchImpl:async(url)=>{calls.push(url);if(url.endsWith('/admit-frontier'))throw new Error('connection_lost');if(url.endsWith('/authoritative-inputs'))return json(200,inputs([task(points[0],tasks[0])]));throw new Error('unexpected')}});
   await assert.rejects(()=>provider.admitFrontier({roadmap_id:roadmap,plan_generation:3,point_ids:points}),e=>e instanceof MetaOrchestratorAdmissionOutcomeError&&e.effect_state==='AMBIGUOUS'&&e.automatic_retry_allowed===false);
-  assert.deepEqual(calls,['https://provider.test/v1/meta/admit-frontier','https://provider.test/v1/meta/authoritative-inputs']);
+  assert.deepEqual(calls,[`${LOCAL_SUPERVISOR_FIXTURE_BASE}/v1/meta/admit-frontier`,`${LOCAL_SUPERVISOR_FIXTURE_BASE}/v1/meta/authoritative-inputs`]);
   assert.equal(provider.snapshot().last_frontier.state,'AMBIGUOUS_PARTIAL_READBACK');
 });

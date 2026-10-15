@@ -1,12 +1,13 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import {
+const {
   ClientAdmissionRecoveryJournal,
   classifyAdmissionRecoveryObservation,
-} from '../src/client-admission-recovery-journal.mjs';
-import { NativeSupervisorClient } from '../src/native-supervisor-client.mjs';
+} = await import('../src/client-admission-recovery-journal.mjs');
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client.mjs');
 
 const WORKSPACE = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';

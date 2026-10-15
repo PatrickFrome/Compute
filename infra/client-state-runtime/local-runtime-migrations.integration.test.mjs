@@ -98,7 +98,9 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   const first = await applyLocalRuntimeMigrations({ sql, expectedMigrationSourcesSha256: plan.source_manifest_sha256 });
   assert.equal(first.source_manifest_sha256, plan.source_manifest_sha256);
   assert(first.migrations.every(row => row.status === 'APPLIED_LOCAL_ONLY'));
-  const publicNewRpc = plan.migrations.slice(-2).flatMap(row => row.signatures.filter(value => value.startsWith('public.')));
+  const projectRpcGroups = new Set(['20261009194157_managed_project_admission_v1.sql','20261010100000_project_continuity_history_v1.sql']);
+  const publicNewRpc = plan.migrations.filter(row => projectRpcGroups.has(row.source))
+    .flatMap(row => row.signatures.filter(value => value.startsWith('public.')));
   assert.equal(publicNewRpc.length, 10);
   for (const signature of publicNewRpc) {
     const [installed] = await sql.unsafe('SELECT pg_catalog.to_regprocedure($1::text) IS NOT NULL AS present', [signature]);
@@ -134,6 +136,8 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   const beforeAcl = await serviceGrants();
   const password = randomBytes(32).toString('hex'), login = 'migration_fixture_api';
   const receipt = await provisionLocalApiLogin({ sql, databaseName: 'postgres', login, password, roleMode: 'direct' });
+  const [privateMarker] = await sql.unsafe("SELECT has_function_privilege($1, 'destruktion_meta.project_unbounded_defaults_h205f22()', 'execute') AS permitted", [login]);
+  assert.equal(privateMarker.permitted, false);
   assert.equal(receipt.can_set_service_role, false);
   assert.equal(receipt.shared_service_role_grants_modified, false);
   assert.deepEqual(await serviceGrants(), beforeAcl, 'no service_role function grants change');
@@ -241,7 +245,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     assert.equal((await attachedHealth.json()).ok, true);
   }
   console.log(JSON.stringify({ schema: 'compute.local-runtime-migration-grants-evidence.v1', disposable: true,
-    exact_new_rpc_count: 10, migration_sources_sha256: plan.source_manifest_sha256, migration_groups: 5,
+    exact_new_rpc_count: publicNewRpc.length, migration_sources_sha256: plan.source_manifest_sha256, migration_groups: plan.migrations.length,
     repeated_apply_no_changes: true, partial_install_rejected: true, disabled_trigger_rejected: true,
     direct_role_zero_memberships: true, column_grants: true, rls_reads: true, direct_http_health_reads_insert: true, shared_service_role_modified: false,
     role_ddl_rollback: true, scram_api_credentials_exercised: true,

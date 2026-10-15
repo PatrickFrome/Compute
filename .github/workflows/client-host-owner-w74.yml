@@ -29,7 +29,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - name: Verify exact source and no dirty inherited profile
         shell: bash
         run: |
@@ -53,13 +53,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - name: Exact source
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Install existing pinned own-PG client only
         shell: bash
-        run: npm install --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund --package-lock=false
+        run: npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
       - name: Generated standalone Docker PostgreSQL 17 (no inherited Owner/DB)
         shell: bash
         env:

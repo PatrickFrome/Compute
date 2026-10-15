@@ -20,7 +20,6 @@ const CLAIM_FIELDS = Object.freeze([
   'owner_birth','issued_at_ms','expires_at_ms','worktree_sha256',
   'relative_path','preimage_sha256','postimage_sha256',
 ]);
-const alreadyAttempted = new Set();
 const same = (a,b) => process.platform === 'win32'
   ? a.toLowerCase() === b.toLowerCase() : a === b;
 const denied = reason => { throw new Error('fixed_sandbox_source_edit_' + reason); };
@@ -99,11 +98,9 @@ function identicalFile(a,b) {
 async function executeFixedSandboxSourceEdit(payload, {root, pinnedPublicKey} = {}) {
   // Registration comes ONLY from the trusted worker bootstrap, not REQUEST JSON.
   const claim = verifySignedClaim(payload,pinnedPublicKey);
-  const {realRoot,head} = await verifyDisposableLockedWorktree(root);
+  const {realRoot,head,gitDir} = await verifyDisposableLockedWorktree(root);
   if (head !== claim.source_sha || sha256(realRoot) !== claim.worktree_sha256)
     denied('source_or_worktree_changed');
-  if (alreadyAttempted.has(claim.effect_id)) denied('duplicate_or_ambiguous');
-  alreadyAttempted.add(claim.effect_id); // fail closed even on unknown write outcome
   const dest = path.join(realRoot,'calc.mjs');
   const st = await fs.lstat(dest);
   if (!st.isFile() || st.isSymbolicLink() || st.size > 4096) denied('file_type_or_size');
@@ -119,6 +116,25 @@ async function executeFixedSandboxSourceEdit(payload, {root, pinnedPublicKey} = 
   if (data.length !== Buffer.byteLength(BEFORE) || sha256(data) !== claim.preimage_sha256
       || data.toString('utf8') !== BEFORE) denied('stale_preimage');
   if (Date.now() > claim.expires_at_ms) denied('lease_expired');
+  // This fixed repair is single-use for the generated worktree, including
+  // across independent workers and process restart. An in-memory effect Set
+  // forgets an ambiguous attempt on restart and cannot serialize two workers.
+  // Reserve before the source write; never remove the marker on an error.
+  const attemptFile = path.join(gitDir,'metaengine-w80-source-edit-attempt.json');
+  let attempt;
+  try {
+    attempt = await fs.open(attemptFile,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0),0o600);
+  } catch (error) {
+    if (error.code === 'EEXIST') denied('duplicate_or_ambiguous');
+    throw error;
+  }
+  try {
+    await attempt.writeFile(JSON.stringify({schema:SCHEMA,state:'ATTEMPTED',
+      effect_id:claim.effect_id,claim_sha256:sha256(canonicalClaim(claim)),
+      automatic_retry_allowed:false}), 'utf8');
+    await attempt.sync();
+  } finally { await attempt.close(); }
   // Atomic replacement with a generated exclusive temporary file under the same
   // directly-pinned directory. Never follow untrusted relative parents.
   const tmpName = path.join(realRoot,'.w80-' + crypto.randomUUID() + '.tmp');

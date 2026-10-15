@@ -1,0 +1,145 @@
+{
+  "schema": "metaengine.devfleet.development-wave.v1",
+  "wave": 13,
+  "created_on": "2026-10-15",
+  "status": "PREPARED_NOT_SENT",
+  "external_devfleet_slots": 10,
+  "metaengine_global_agent_limit": null,
+  "native_preflight": {
+    "operation": "fleet_list",
+    "status": "UNAVAILABLE",
+    "http_status": 404,
+    "message": "MCP SSE probe returned 404",
+    "owned_tabs_verified": false,
+    "assign_batch_called": false
+  },
+  "source": {
+    "repository": "PatrickFrome/Compute",
+    "candidate_branch": "work/metaengine-critical-closure-20261015",
+    "required_seal": "coordination/operator-control/client-critical-closure.manifest.json",
+    "dispatch_base_sha": null,
+    "freeze_rule": "Before SEND, resolve the published candidate once, verify its current source seal and record that exact SHA in a separate dispatch receipt. Do not infer a SHA from a branch name or from this preparation file."
+  },
+  "shared_task_contract": [
+    "Главная цель: непрерывная автономная разработка заданной цели неограниченным числом общающихся, координирующихся и создающих новых чат-агентов. Число 10 относится только к этой внешней волне DevFleet, никогда к лимиту METAENGINE.",
+    "Перед кодом прочитай единственный living roadmap ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md и действительный текущий код. Начни с точно указанного в dispatch receipt опубликованного candidate SHA в отдельном чистом checkout; не меняй пользовательские dirty trees. Сохрани всех родителей при интеграции, не переписывай чужую ветку.",
+    "Развивай существующие Supervisor, DevelopmentPlane, Gateway, PostgreSQL17 intent/lease/event/effect/checkpoint ledger. Не создавай второй scheduler, executor, effect queue, trust root или shadow DB. Только собственный self-hosted PostgreSQL17; Supabase/cloud fallback запрещён.",
+    "Разделяй долговечных агентов/задачи и временные backend sessions. Ресурсные бюджеты конкретного backend, размер страницы или spawn batch не являются глобальным пределом графа. Явные политики владельца и emergency stop сохраняются.",
+    "SOURCE/STAGING fixtures не являются INSTALLED/LIVE доказательствами. Используй настоящие независимые producers существующего доверия; отсутствие signer/Owner/PG/Guardian означает UNKNOWN/BLOCKED, а не возможность сгенерировать доверенный ключ или verified=true.",
+    "Не повторяй неоднозначные SEND/CREATE или исторические W53/.59 эффекты. Устойчивый request/effect ID, collision fence и независимая reconciliation обязательны. Тайм-аут не разрешает повторное выполнение.",
+    "Разрешены source changes, отдельные disposable fixtures и Draft PR. Запрещены main merge, установка/release, изменения live PGDATA/Vault/Owner/ACL/credentials и installed Windows runtime. Не меняй package version; две burned версии остаются запрещёнными.",
+    "Верни Draft PR URL, точный final SHA, что фактически реализовано, реальные команды/результаты проверок, незакрытые producers и ограничения. Не называй родительский green или SKIP текущим PASS. Для смежных интерфейсов передай контракт/locator, не редактируй чужой ownership без координации."
+  ],
+  "assignments": [
+    {
+      "slot": 1,
+      "task_id": "W83",
+      "request_id": "metaengine-wave13-w83-20261015-9b80496d",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Настоящий default Owner genesis",
+      "owns": ["host-owner-genesis-custody-w74.mjs", "supervisor-device-identity.mjs", "genesis-specific tests and private own-PG adapter"],
+      "task": "Замкни настоящий default Host Owner genesis через существующий P-256 device/ADMIN project/epoch, Guardian native birth и реальный private own-PG transaction. Методы bindHostOwnerGenesisW74/establishHostOwnerW74 сейчас существуют, но сам факт их наличия не означает вызов в production composition. Проследи Browser→runtime-host→launcher→db-api process boundaries. Не передавай private callbacks/secret через public JSON/env и не устанавливай новый trust root. Предложи W84 минимальный приватный interface для активации. Докажи отказ при несовпадении двух native samples, revoke/epoch/source drift и конкурентном старте, используя disposable own-PG. Если подлинный installed producer недоступен, реализуй source wiring и точно отдели внешний blocker. Не редактируй final-runtime-activation/main composition — это W84."
+    },
+    {
+      "slot": 2,
+      "task_id": "W84",
+      "request_id": "metaengine-wave13-w84-20261015-61dce923",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Приватная custody в активированном Host",
+      "owns": ["final-runtime-activation.mjs", "host-agent-remote-composition.mjs", "native-supervisor-client-activated.mjs", "activation/composition tests"],
+      "task": "Проследи ESM activation hooks и фактическую production composition. Проведи подлинные existing Gateway secret, own-PG birth, protected backup root и Owner producer через уже существующую приватную границу: сейчас optional callbacks не доказывают их наличие. Согласуй genesis interface с W83, не дублируй его SQL/identity implementation. В нормальном default пути проверь, что реальные producers достигают W76 custody, а missing producer даёт UNKNOWN и ноль authority effects. Не читай live Vault/credentials и не открывай произвольный path/SQL/shell API. Проверь reconnect/restart, раздельный epoch, секреты вне snapshot/log/IPC public payload."
+    },
+    {
+      "slot": 3,
+      "task_id": "W85",
+      "request_id": "metaengine-wave13-w85-20261015-d1b9d798",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Непрерывное рекурсивное создание подзадач",
+      "owns": ["new project-continuity follow-up migration", "project-continuity admission/reconcile adapters and focused tests"],
+      "task": "Продолжи существующий own-PG project graph, а не новый planner. Root уже добавил отдельную migration 20261015123000_project_unbounded_defaults_v1.sql и native regression на 283 задачи/depth10; не переписывай этот файл или исторические migrations. Устрани зависание сохранённых BUDGET_WAIT/CAPACITY_WAIT proposals после изменения owner policy или смерти/закрытия parent worker: bounded reconciliation должна продолжать допустимые логические admissions из проверенного durable intent без нового model SEND и без присвоения physical lease. Сохрани parent lineage, request digest/idempotency, project generation/owner revoke, явный stop, независимые critic tasks и immutable root goal. Проверь многократную/конкурентную reconciliation, новый процесс и рост за 256/8/8. Новая admission не может опираться на только модельное утверждение или заново использовать закрытый worker lease как authority."
+    },
+    {
+      "slot": 4,
+      "task_id": "W86",
+      "request_id": "metaengine-wave13-w86-20261015-e4c35f28",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Межагентное общение и передача работы",
+      "owns": ["typed project activity/history messaging adapter", "client-project-continuity.mjs messaging additions", "message/handoff tests"],
+      "task": "Реализуй адресованные agent↔agent сообщения/вопросы/ответы/handoff поверх существующего own-PG project event/activity/history ledger и canonical cursor. Сначала проверь, что уже есть, не заводи параллельную mailbox DB или effect dispatcher. Долговечный agent/task ID должен переживать смену tab/session; получатель читает bounded pages, acknowledgement/cursor и message/request identity переживают restart без потери и двойного принятия. Текст сообщения и raw model claim всегда untrusted и не выдаёт control/effect authority. Проверь scope isolation, causal parent, stale generation, revoke, duplicate/collision и переход на нового worker без секретов в UI. Избегай изменения общего SQL reconciliation W85: новый migration/interface согласуй отдельно."
+    },
+    {
+      "slot": 5,
+      "task_id": "W87",
+      "request_id": "metaengine-wave13-w87-20261015-20b83c5a",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Настоящий продуктивный coding worker",
+      "owns": ["development-plane*.mjs", "development-plane-worker.cjs", "development-plane-fixed-sandbox-edit.cjs", "coding admission tests"],
+      "task": "Замкни authenticated goal→существующая W30 claim/lease→существующий DevelopmentPlane worker→ограниченный repository edit/test/result. W80 сейчас ремонтирует только фиксированный calc.mjs в сгенерированном worktree с fixture Ed25519, authorizeFixedSandboxSourceEdit default null; это не live P-256 authority. Root уже исправил restart/concurrent replay fence внутри validated disposable worktree; сохрани его. Включи существующую authority цепочку без нового signer/general shell/eval/executor. Работай в явно разрешённом disposable/source sandbox, не live repo installation. Передай W88 фактические result/artifact/lease locators для independent critic/checkpoint. Докажи denied wrong signature, stale lease/preimage/source/worktree и ambiguous outcome across fresh workers."
+    },
+    {
+      "slot": 6,
+      "task_id": "W88",
+      "request_id": "metaengine-wave13-w88-20261015-75fe4e03",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Критик, checkpoint и продолжение после падения",
+      "owns": ["development-checkpoint*.mjs", "operator-agent-completion-bound-w39 integration", "restart continuation adapters and focused tests"],
+      "task": "Проведи настоящий result W87 через существующий W39 independent critic, exact artifact/Git digests, own-PG durable checkpoint и recovery существующего следующего W30 lease после физического restart disposable worker/postmaster. Источник completion не может быть тем же model text/fixture row, а успешный process exit не заменяет artifact verification. Сохрани stable effect identity, UNKNOWN/AMBIGUOUS reconciliation, lease-generation/Owner fences, event order и no-repeat after lost ACK. Не меняй W87 executor или W85 project admission без согласования интерфейсов. Покажи фактически выполненный путь и внешние отсутствующие producers отдельно; не повышай STAGING в LIVE."
+    },
+    {
+      "slot": 7,
+      "task_id": "W89",
+      "request_id": "metaengine-wave13-w89-20261015-a3df0796",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Рост без глобального потолка агентов",
+      "owns": ["fleet-provisioner-core.mjs", "fleet-elastic-governor.mjs", "browser-brain-routing-v2.mjs", "browser-brain-cognition-fabric.mjs", "scale policy tests"],
+      "task": "Раздели долговечную логическую agent directory и локальные resource/cache/tab budgets. Сейчас provisioner декларирует hard_agent_cap=null, но governor по умолчанию ограничивает target24, policy max64, routing/cognition caches имеют собственные пределы. Проследи фактический scope: не удаляй слепо TabRegistry/backend safety limits и не выдавай размер cache за product capacity. Устрани тихую потерю зарегистрированных логических агентов/невозможность адресации после заполнения transient cache: нужна durable lookup/pagination и demand-driven backend placement через один существующий scheduler/own-PG authority. Ни 10, ни 24, ни 64 не могут стать engine-wide limit. Проверь смену backend/session, более 64 logical agents, fair progress и отсутствие lease overcommit на каждом backend. Не создавай новый scheduler или federation trust root."
+    },
+    {
+      "slot": 8,
+      "task_id": "W90",
+      "request_id": "metaengine-wave13-w90-20261015-8ec49d71",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Общая память и восстановление контекста агентов",
+      "owns": ["browser-context-pack.mjs", "browser-brain-working-memory.mjs", "browser-brain-episodic-memory.mjs", "durable context recovery adapter and tests"],
+      "task": "Обеспечь восстановление задачи/цели/lineage, решений, сообщений и verified artifact locators новым чат-агентом из canonical own-PG history/checkpoint, без зависимости от открытого старого чата или полной бесконечной истории в RAM. Развивай существующие context pack/Brain memory; не делай shadow authoritative store. Память и summary не являются evidence или effect authority. Согласуй cursor/message refs с W86 и checkpoint refs с W88. Проверь bounded context construction для большого графа, truncation с явными continuation locators, stale/cross-project/cross-generation данные, model prompt injection и restart. Не меняй snapshot cursor protocol чужих lanes или UI TSX без необходимости."
+    },
+    {
+      "slot": 9,
+      "task_id": "W91",
+      "request_id": "metaengine-wave13-w91-20261015-50d18bb2",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Физические chaos-проверки непрерывного цикла",
+      "owns": ["new cross-agent disposable integration/chaos fixtures", "focused CI workflow for those fixtures"],
+      "task": "Собери независимый adversarial harness поверх реальных существующих interfaces W83–W90. После изучения OpenHands/Temporal/LangGraph primary docs проверь главные failure boundaries: spawn commit/lost response, сообщения с duplicate ACK, worker kill до/после результата, critic failure, PG17 postmaster restart, новый agent после context loss, emergency stop, exhaustion одного backend при сохранении большого логического backlog. Реальные disposable processes/own-PG; mock-only coverage маркируй SOURCE, не physical PASS. Root поддерживает current source CI train/manifest: не редактируй их и не отключай failed gates; добавь отдельный bounded workflow при необходимости. Фиксируй discovered bugs адресно владельцам, не делай параллельные правки production files."
+    },
+    {
+      "slot": 10,
+      "task_id": "W92",
+      "request_id": "metaengine-wave13-w92-20261015-fbbab749",
+      "status": "PREPARED_NOT_SENT",
+      "tab_id": null,
+      "title": "Независимая приёмка цели автономности",
+      "owns": ["independent source/evidence critic report and falsification tests"],
+      "task": "Работай независимым критиком. Сначала прочитай существующие roadmap/code/real CI receipts; отдели implemented SOURCE, реально выполненный STAGING и INSTALLED/LIVE. Проверяй именно непрерывную разработку цели: новые логические агенты/подзадачи, общение, распределение, полезный код+tests, independent critic, checkpoint и следующий productive lease после restart. Требуй engine-wide limit=null: десять только external DevFleet. Проверяй exact published SHA/ancestry/blob seals и current terminal CI, не число вкладок/сводку другого агента. В начале дай воспроизводимые blocker locators W83–W91; после их PR повтори только затронутые проверки и передай root конкретный disposition. Не интегрируй/не переписывай чужие ветки, не меняй главный roadmap или root manifest и не запускай installed effects. Можно создать Draft PR только с независимыми meaningful falsification tests."
+    }
+  ],
+  "dispatch_rules": {
+    "verify_owned_tab_and_idle_or_terminal_state_before_send": true,
+    "never_overwrite_generating_work": true,
+    "durable_request_ids": true,
+    "automatic_retry_after_ambiguous_send": false,
+    "create_tabs_only_if_verified_shortfall": true,
+    "create_limit_per_native_call": 8,
+    "record_each_receipt_without_inventing_success": true,
+    "authority_effect_of_this_preparation_file": false
+  }
+}

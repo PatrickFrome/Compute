@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
 
-test('migration plan pins the six deployed sources and recognizes only the opt-in own-PG fleet guard', async () => {
+test('migration plan pins deployed sources, unbounded defaults and the opt-in own-PG fleet guard', async () => {
   const plan = await loadLocalRuntimeMigrationPlan();
   assert.match(plan.source_manifest_sha256, /^[a-f0-9]{64}$/);
   const mandatorySources = [
@@ -12,6 +12,7 @@ test('migration plan pins the six deployed sources and recognizes only the opt-i
     '20261009194157_managed_project_admission_v1.sql',
     '20261010100000_project_continuity_history_v1.sql',
     '20261012130000_project_verifier_reference_transport_v1.sql',
+    '20261015123000_project_unbounded_defaults_v1.sql',
   ];
   const sources = plan.migrations.map(row => row.source);
   assert.deepEqual(sources.slice(0, mandatorySources.length), mandatorySources);
@@ -21,10 +22,12 @@ test('migration plan pins the six deployed sources and recognizes only the opt-i
   assert.equal(project.signatures.filter(value => value.startsWith('public.')).length, 7);
   assert.equal(project.relations.length, 4);
   assert.equal(project.triggers.length, 3);
-  const verifier = plan.migrations.find(row => row.source === mandatorySources.at(-1));
+  const verifier = plan.migrations.find(row => row.source === '20261012130000_project_verifier_reference_transport_v1.sql');
   assert(verifier);
   assert.deepEqual(verifier.signatures,
     ['destruktion_meta.project_verifier_reference_transport_h205f22()']);
+  const unbounded = plan.migrations.find(row => row.source === mandatorySources.at(-1));
+  assert.deepEqual(unbounded.signatures, ['destruktion_meta.project_unbounded_defaults_h205f22()']);
   const extras = plan.migrations.slice(mandatorySources.length);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.

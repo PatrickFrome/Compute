@@ -1,5 +1,13 @@
 # Installed Client local provider
 
+> Historical installed-release analysis below describes the October 8 archive.
+> Current source has **no hosted fallback, even without a provider marker**.
+> It accepts only an awaited own-PG bootstrap and its exact loopback/instance pin.
+> `fallback-console-runtime.mjs` is retired and refuses construction without
+> probing a sentinel, unlocking a reserve or changing the endpoint. See the
+> current checkpoint in `coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md`.
+
+
 The installed `0.7.0-dev.37628000001.1` native-supervisor endpoint resolver supports
 the existing `METAENGINE_SUPERVISOR_BASE_URL` environment variable. Set it to:
 

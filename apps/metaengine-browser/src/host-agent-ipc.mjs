@@ -3,6 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { rm } from 'node:fs/promises';
+import { hostAgentOperationDeadlineMs } from './host-agent-operation-deadlines.mjs';
 import {
   HOST_AGENT_MAX_FRAME_BYTES,
   HOST_AGENT_PROTOCOL_SCHEMA,
@@ -240,7 +241,7 @@ export class HostAgentClient {
     }
   }
 
-  async request(op, payload = {}, { timeoutMs = 5000 } = {}) {
+  async request(op, payload = {}, { timeoutMs } = {}) {
     await this.connect();
     const requestId = `req:${crypto.randomUUID()}`;
     const frame = signHostAgentFrame({
@@ -251,7 +252,7 @@ export class HostAgentClient {
       op,
       payload,
     }, this.#sessionKey);
-    const timeout = Math.max(100, Math.min(60000, Number(timeoutMs) || 5000));
+    const timeout = hostAgentOperationDeadlineMs(op,timeoutMs);
     const promise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(requestId);

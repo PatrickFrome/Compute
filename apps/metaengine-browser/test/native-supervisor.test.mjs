@@ -1,12 +1,13 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
-import { NativeSupervisorClient } from '../src/native-supervisor-client.mjs';
-import { ENROLLMENT_SIGNATURE_PROFILE, SupervisorDeviceIdentity, SUPERVISOR_DEVICE_PROFILE } from '../src/supervisor-device-identity.mjs';
+const { captureSemanticFrame, executeSemanticCommand } = await import('../src/native-browser-control.mjs');
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client.mjs');
+const { ENROLLMENT_SIGNATURE_PROFILE, SupervisorDeviceIdentity, SUPERVISOR_DEVICE_PROFILE } = await import('../src/supervisor-device-identity.mjs');
 
 const secureStorage = {
   isEncryptionAvailable: () => true,

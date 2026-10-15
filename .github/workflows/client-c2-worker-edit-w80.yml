@@ -9,6 +9,9 @@ on:
       - 'apps/metaengine-browser/src/development-plane*'
       - 'infra/client-state-runtime/client-c2-worker-edit-w80*'
       - 'infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs'
+      - 'infra/client-state-runtime/project-continuity.integration.test.mjs'
+      - 'infra/client-state-runtime/local-runtime-migrations*'
+      - 'supabase/migrations/*project*'
       - '.github/workflows/client-c2-worker-edit-w80.yml'
   workflow_dispatch:
 
@@ -31,7 +34,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - name: Exact source W80 worker and negatives
         shell: pwsh
         env:
@@ -71,7 +74,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/client-state-runtime
       - name: Generated W80 signed-STAGING worker and real PG17 lifecycle
         shell: sh
@@ -79,7 +82,7 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -eu
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)" = "$EXPECTED_HEAD"
           test "$(id -u)" -eq 0
           chown -R postgres:postgres "$GITHUB_WORKSPACE"
           NODE_BIN="$(command -v node)"

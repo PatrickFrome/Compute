@@ -1,17 +1,18 @@
+const { LOCAL_SUPERVISOR_FIXTURE_BASE, localSupervisorFixtureHealth } = await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { persistPreInstallReceipt, persistUpdatedSuccessorReceipt } from '../src/self-update-handoff.mjs';
-import {
+const { persistPreInstallReceipt, persistUpdatedSuccessorReceipt } = await import('../src/self-update-handoff.mjs');
+const {
   inspectSignedNativeSupervisorStateRequest,
   installSignedSupervisorHeartbeatQualificationHook,
-} from '../src/self-update-signed-heartbeat.mjs';
-import { acceptedSignedSupervisorHeartbeatSnapshot } from '../src/self-update-successor-qualification.mjs';
+} = await import('../src/self-update-signed-heartbeat.mjs');
+const { acceptedSignedSupervisorHeartbeatSnapshot } = await import('../src/self-update-successor-qualification.mjs');
 
-const SUPERVISOR_BASE_URL = 'https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+const SUPERVISOR_BASE_URL = LOCAL_SUPERVISOR_FIXTURE_BASE;
 const STATE_URL = `${SUPERVISOR_BASE_URL}/v1/state`;
 const HEARTBEAT_URL = `${SUPERVISOR_BASE_URL}/v1/heartbeat`;
 
@@ -80,7 +81,7 @@ async function appFixture() {
   return { app, target };
 }
 
-test('only exact Supabase state or heartbeat endpoint with body-bound device signature shape is eligible', () => {
+test('only the pinned local state or heartbeat endpoint with body-bound device signature shape is eligible', () => {
   const body = JSON.stringify(heartbeat('0.6.3-dev.152.1'));
   const init = signedInit(body);
   assert.equal(inspectSignedNativeSupervisorStateRequest(STATE_URL, init).valid, true);
@@ -104,7 +105,8 @@ test('only a 202 response to an eligible heartbeat with fresh sentinel worker pr
 
   const wrappedAccepted = installSignedSupervisorHeartbeatQualificationHook({
     app,
-    fetchImpl: async () => new Response('', { status: 202 }),
+    fetchImpl: async url => String(url).endsWith('/health')
+      ? Response.json(localSupervisorFixtureHealth()) : new Response('', { status: 202 }),
   });
   const response = await wrappedAccepted(HEARTBEAT_URL, signedInit(body));
   assert.equal(response.status, 202);
@@ -122,7 +124,8 @@ test('202 state publication without sentinel worker proof remains non-qualifying
   const body = JSON.stringify(heartbeat(target, { sentinelWorkerHealthy: false }));
   const wrappedAccepted = installSignedSupervisorHeartbeatQualificationHook({
     app,
-    fetchImpl: async () => new Response('', { status: 202 }),
+    fetchImpl: async url => String(url).endsWith('/health')
+      ? Response.json(localSupervisorFixtureHealth()) : new Response('', { status: 202 }),
   });
   const response = await wrappedAccepted(STATE_URL, signedInit(body));
   assert.equal(response.status, 202);
