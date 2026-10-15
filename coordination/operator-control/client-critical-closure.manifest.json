@@ -2,7 +2,7 @@
   "schema": "metaengine.client.critical-closure.v1",
   "classification": "SOURCE_REPAIRED_REVIEW_REQUIRED",
   "repository": "PatrickFrome/Compute",
-  "branch": "work/metaengine-critical-closure-20261015",
+  "branch": "work/metaengine-test-candidate-20261015",
   "base_w73": "9e8ebcd09b46d0e8f5a09e9a0471d15a190baeea",
   "parent_heads": [
     {
@@ -194,7 +194,7 @@
   "current_tree_blobs": {
     ".github/CLIENT_CI_TRAIN_W82.md": "696349d7424522a87e3cb2ce350532c87c269092",
     ".github/client-ci-train-w82.test.mjs": "65eb75036876fd29c5a14b5c4af1d3327ec67845",
-    ".github/workflows/client-c2-existing-worker-w71.yml": "feb6edfd22808b7b6b303b8fb56dcf2a77bc5ab7",
+    ".github/workflows/client-c2-existing-worker-w71.yml": "81604399e47fe2127f06025528bf607bb098e7da",
     ".github/workflows/client-c2-worker-edit-w80.yml": "85df9c9a48bc999c22dd943be0a1c361567228da",
     ".github/workflows/client-candidate-acceptance-w65.yml": "be516923f7e4523b8f9c976f929afc70855ae865",
     ".github/workflows/client-current-native-acl-w72.yml": "dbb1627468e22e4283c1a53ef128ffc7753c4201",
@@ -225,8 +225,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "16b329c3ec1ab5aebda438cf73259431f56bd8e6",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "af21c8f4836b0db69995ea056d8262673ffb4e65",
-    "apps/metaengine-browser/package.json": "c7102ca747a612492bc93b917fd4c1da66892ba0",
+    "apps/metaengine-browser/package-lock.json": "5d848bdcd8338aa048348541c94337928f19641b",
+    "apps/metaengine-browser/package.json": "7f6b84801cb534ecae4ff1079dfa8561608dfe39",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "fb48143a65bae6044e984b89aae9dd4c59b88ac1",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "5c205488d854ccbbfeb71c7f9304f341d732aba0",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "a25d7f56eb5a916c9a211a68c3100d1ea30224b2",
@@ -338,7 +338,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "26aabdc6c1b6b440979e6690fc62cfcc50009815",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "e5b55e25654c1eda4ec69146dcd5a952d2ff46c7",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -404,5 +404,15 @@
     "current_windows_native_acl_and_reparse_negatives",
     "exact_source_native_pg17_restart_restore",
     "packaged_r97_and_signed_unique_version"
-  ]
+  ],
+  "test_candidate": {
+    "classification": "ISOLATED_TEST_PACKAGE_ONLY",
+    "branch": "work/metaengine-test-candidate-20261015",
+    "source_parent": "49d050ff127e22ca27fbe3514324ba99832afb24",
+    "version": "0.7.0-dev.876115728125.1",
+    "production_release_authorized": false,
+    "installed_mutation_authorized": false,
+    "exact_ci_required": true,
+    "signing_required_for_release": true
+  }
 }
