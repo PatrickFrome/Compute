@@ -1,0 +1,35 @@
+name: Client W58 Native Windows Backup ACL
+on:
+  push:
+    branches: [work/metaengine-client-wave9-w58-20261015]
+  workflow_dispatch:
+jobs:
+  native-acl:
+    name: Real Native ACL / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    permissions:
+      contents: read
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Native ACL and existing Host wire/readback regressions
+        shell: pwsh
+        run: |
+          node --version
+          node --check apps/metaengine-browser/src/client-backup-acl-native-w58.mjs
+          node --check apps/metaengine-browser/src/host-agent-runtime.mjs
+          node --test --test-concurrency=1 infra/client-state-runtime/client-backup-acl-native-w58.test.mjs infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs infra/client-state-runtime/upgrade-backup-gate.test.mjs infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs
+      - name: Linux absence is not Windows ACL proof
+        if: runner.os != 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host 'Linux native ACL qualification = UNSUPPORTED / UNKNOWN, not Windows PASS'
