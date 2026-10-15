@@ -55,18 +55,16 @@ test('Windows physically protected disposable directory and file permit native A
 });
 test('Windows inherited file DACL fails, even if inherited principals are otherwise allowed',{skip:!windows},async t=>{
   const o=await fixture(t);
-  await ps(`$a=Get-Acl -LiteralPath $env:W58_F
-$a.SetAccessRuleProtection($false,$true)
-Set-Acl -LiteralPath $env:W58_F -AclObject $a`,{W58_F:o.file});
+  // icacls modifies ONLY the uniquely generated fixture; no owner/group reapply.
+  await run(path.win32.join(process.env.SystemRoot,'System32','icacls.exe'),
+    [o.file,'/inheritance:e'],{windowsHide:true,timeout:15000});
   assert.equal((await read(o)).native_acl_verified,false);
 });
 test('Windows broad Everyone read ACE fails native policy',{skip:!windows},async t=>{
   const o=await fixture(t);
-  await ps(`$a=Get-Acl -LiteralPath $env:W58_F
-$s=[Security.Principal.SecurityIdentifier]::new('S-1-1-0')
-$r=[Security.AccessControl.FileSystemAccessRule]::new($s,[Security.AccessControl.FileSystemRights]::ReadData,[Security.AccessControl.AccessControlType]::Allow)
-[void]$a.AddAccessRule($r)
-Set-Acl -LiteralPath $env:W58_F -AclObject $a`,{W58_F:o.file});
+  // Add a real Everyone read ACE to the already private temporary file.
+  await run(path.win32.join(process.env.SystemRoot,'System32','icacls.exe'),
+    [o.file,'/grant','*S-1-1-0:(R)'],{windowsHide:true,timeout:15000});
   assert.equal((await read(o)).native_acl_verified,false);
 });
 test('Windows native identity substitution between descriptor reads fails closed',{skip:!windows},async t=>{
