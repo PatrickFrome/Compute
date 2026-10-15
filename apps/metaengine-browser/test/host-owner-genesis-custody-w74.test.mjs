@@ -63,7 +63,7 @@ function fixture() {
     get queries(){return queries;},
     driftEpoch(){epoch++}, driftProcess(){birth='pid:9102:created_100ns:134050012345678902'},
     revokeSource(){signed=()=>null}, markSourceInvalid(){signed=()=>({source_sha:sourceSha})},
-    dropRows(){rows=0}, corrupt(){corrupt=true},
+    dropRows(){rows=0}, corrupt(){corrupt=true}, replaceOwner(record){owner=record},
     replaceKernel(f){native=f}, setGuardian(f){guardianOverride=f},
     setIdentity(f){opts.identity=f},
   };
@@ -108,6 +108,18 @@ test('W74 denies Guardian PID/100ns birth drift, wrong device, lost epoch and un
   f.driftEpoch();assert.equal(await b.read(),null);
   assert.equal((await b.create())?.generation,2);
   f.driftProcess();assert.equal(await b.create(),null,'native birth mismatch blocks process takeover');
+});
+test('W74 never relabels protected STAGING or forged cached source into Owner',async()=>{
+  const fixtureOwner=fixture(), runtime=createHostOwnerGenesisCustodyW74(fixtureOwner.opts);
+  assert.equal((await runtime.create())?.generation,1);
+  const original=fixtureOwner.owner;
+  fixtureOwner.replaceOwner({...original,source:'PAGE_SELF_SIGNED'});
+  assert.equal(await runtime.create(),null,'protected source must stay canonical');
+  fixtureOwner.replaceOwner({...original,fixture_classification:'INSTALLED'});
+  assert.equal(await runtime.create(),null,'generated proof cannot relabel itself installed');
+  fixtureOwner.replaceOwner({...original,authority_effect:true});
+  assert.equal(await runtime.create(),null,'privilege-bearing cached record denied');
+  assert.equal(fixtureOwner.writes,1);
 });
 test('W74 rejects client-side self attestation and never uses constructor project text',async()=>{
   const f=fixture();

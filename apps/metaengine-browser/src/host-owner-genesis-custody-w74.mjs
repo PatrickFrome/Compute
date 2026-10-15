@@ -144,7 +144,14 @@ export function createHostOwnerGenesisCustodyW74({
         const row = await scope(tx,x);
         if (!row) return null;
         const previous = await readSealed();
-        if (previous && (previous.owner_id !== x.device.client_id ||
+        // A protected STAGING record is never silently upgraded to installed.
+        // Reject malformed/cross-device custody even with a fresh signed
+        // Guardian and own-PG scope: no untrusted cached generation takeover.
+        if (previous && (previous.schema !== 'metaengine.host.owner-incarnation.v1' ||
+            previous.source !== 'LOCAL_HOST_OWNER' ||
+            previous.authority_effect !== false ||
+            (staging ? previous.fixture_classification !== 'STAGING' : mark(previous)) ||
+            previous.owner_id !== x.device.client_id ||
             previous.device_id !== x.device.device_id)) return null;
         if (previous && same(previous,{
             pid:x.kernel.pid,process_incarnation_id:x.native.guardian_client_process_incarnation_id,
