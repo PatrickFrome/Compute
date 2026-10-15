@@ -1,6 +1,6 @@
 // W63: temporary fixture diagnostics are classification-only. Never log native paths or tokens.
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 import { parseWorktreePorcelainZ, samePhysicalWorkspacePath } from '../src/workspace-git-hardening.mjs';
 
@@ -44,4 +44,55 @@ export function sourceSyncFixtureDiagnostics({ repo, dir, work, sha, branch }) {
       detached: Boolean(r.detached), prunable: Boolean(r.prunable),
     })),
   });
+}
+
+/**
+ * Disposable fixture only. Git for Windows can expand a generated 8.3 TEMP
+ * component (e.g. short profile name) when registering worktree paths. Build
+ * fixture bindings from Git's exact registered spelling ONLY after independent
+ * OS file identities prove the generated root, repo and locked worktree are
+ * precisely the same directories. Never use this to normalize native Owner
+ * claims or arbitrary production paths.
+ */
+export function canonicalGeneratedGitFixtureW63({ dir, repo, work, sha, branch }) {
+  const stdout = execFileSync('git', ['worktree', 'list', '--porcelain', '-z'], {
+    cwd: repo, encoding: 'utf8', windowsHide: true,
+    maxBuffer: 65536, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const rows = parseWorktreePorcelainZ(stdout);
+  const branchRows = rows.filter(r => r.HEAD === sha &&
+    r.branch === 'refs/heads/' + branch && Boolean(r.locked) &&
+    !r.prunable && !r.detached);
+  if (branchRows.length !== 1) throw new Error('disposable_fixture_worktree_not_uniquely_locked');
+  const gitWork = branchRows[0].worktree;
+  if (typeof gitWork !== 'string' || !path.isAbsolute(gitWork))
+    throw new Error('disposable_fixture_git_path_not_absolute');
+  // Normalize Git's forward separators to the native absolute spelling, while
+  // retaining its Windows long-name components and exact inode identity.
+  const registeredWork = path.resolve(gitWork);
+  const registeredDir = path.dirname(registeredWork);
+  const registeredRepo = path.join(registeredDir, 'repo');
+  const rootRows = rows.filter(r => r.HEAD === sha &&
+    !r.detached && !r.prunable && !r.locked &&
+    samePhysicalWorkspacePath(r.worktree, registeredRepo));
+  if (rootRows.length !== 1 || !samePhysicalWorkspacePath(rootRows[0].worktree, registeredRepo))
+    throw new Error('disposable_fixture_git_root_not_registered');
+  const sameFileId = (expected, actual) => {
+    const left = statSync(expected, { bigint: true });
+    const right = statSync(actual, { bigint: true });
+    return left.isDirectory() && right.isDirectory() &&
+      left.ino !== 0n && left.dev === right.dev && left.ino === right.ino &&
+      !lstatSync(actual).isSymbolicLink();
+  };
+  if (![ [dir, registeredDir], [repo, registeredRepo], [work, registeredWork] ]
+    .every(([a, b]) => sameFileId(a, b))) {
+    throw new Error('disposable_fixture_git_path_not_same_physical_directory');
+  }
+  if (path.relative(registeredDir, registeredWork) !== 'work' ||
+      path.relative(registeredDir, registeredRepo) !== 'repo') {
+    throw new Error('disposable_fixture_git_path_outside_root');
+  }
+  // The native readback must retain its own strict realpath checks. Tests do
+  // not weaken those checks to make a short/long-name alias pass.
+  return Object.freeze({dir: registeredDir, repo: registeredRepo, work: registeredWork});
 }

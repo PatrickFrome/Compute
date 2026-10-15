@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createClientSourceSyncNativeServiceW55, createFixedGithubRefReaderW55 } from '../src/client-source-sync-native-w55.mjs';
 import { createShellFreeGitExecutor } from '../src/managed-task-project-runtime.mjs';
 import { samePhysicalWorkspacePath } from '../src/workspace-git-hardening.mjs';
-import { sourceSyncFixtureDiagnostics } from './source-sync-fixture-diagnostics-w63.mjs';
+import { sourceSyncFixtureDiagnostics, canonicalGeneratedGitFixtureW63 } from './source-sync-fixture-diagnostics-w63.mjs';
 
 const NOW = Date.parse('2026-10-15T01:00:00.000Z');
 const ISO = new Date(NOW).toISOString();
@@ -108,9 +108,9 @@ test('existing shell-free managed Git runner + native binding + current GitHub A
   // Canonicalize ONLY the uniquely generated test directory: hosted Windows
   // temp aliases are not trusted physical workspace paths.
   const generated=mkdtempSync(path.join(tmpdir(),'metaengine-w55-fixture-'));
-  const dir=realpathSync(generated);
+  let dir=realpathSync(generated);
   t.after(()=>rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
-  const repo=path.join(dir,'repo'), work=path.join(dir,'work');
+  let repo=path.join(dir,'repo'), work=path.join(dir,'work');
   mkdirSync(repo);
   git(repo,'init','-q');
   git(repo,'config','core.autocrlf','false');
@@ -124,6 +124,8 @@ test('existing shell-free managed Git runner + native binding + current GitHub A
   git(repo,'worktree','add','--lock','--reason',lock,'-b',BRANCH,work,sha);
   git(repo,'update-ref','refs/remotes/origin/'+BRANCH,sha);
   git(work,'branch','--set-upstream-to','origin/'+BRANCH);
+  // Fixture only: reconcile Git's short/long spelling by matching file IDs.
+  ({dir,repo,work}=canonicalGeneratedGitFixtureW63({dir,repo,work,sha,branch:BRANCH}));
   const binding=sourceBinding(repo,work,dir,sha);
   const gitRunner=createShellFreeGitExecutor({timeoutMs:10000});
   let ownerReads=0, nativeReads=0, githubHead=sha;
@@ -133,14 +135,20 @@ test('existing shell-free managed Git runner + native binding + current GitHub A
     return {ok:true,status:200,text:async()=>JSON.stringify({
       ref:'refs/heads/'+BRANCH,object:{type:'commit',sha:githubHead}})};
   };
+  const gitEffects=[];
   const service=createClientSourceSyncNativeServiceW55({...options,
     readVerifiedOwnerBinding:async()=>{ownerReads++;return binding;},
     nativeSupervisorClient:{snapshot:()=>{nativeReads++;return {workspace_bindings:snapshot(binding)};}},
-    managedProjectHost:{readSourceSyncGit:plan=>gitRunner.execute(plan)},
+    managedProjectHost:{readSourceSyncGit:async plan=>{
+      gitEffects.push(plan.effect);
+      try { return await gitRunner.execute(plan); }
+      catch (error) { gitEffects.push('FAILED:' + plan.effect + ':' + String(error?.message || '').slice(0, 64)); throw new Error('source_fixture_git_execution_failed'); }
+    }},
   });
   const clean=await service.read();
   assert.equal(clean.state,'SYNCED_SOURCE',clean.state === 'SYNCED_SOURCE' ? clean.reason :
-    clean.reason + ' ' + sourceSyncFixtureDiagnostics({repo,dir,work,sha,branch:BRANCH}));
+    clean.reason + ' stages=' + gitEffects.join(',') + ' ownerReads=' + ownerReads +
+    ' nativeReads=' + nativeReads + ' ' + sourceSyncFixtureDiagnostics({repo,dir,work,sha,branch:BRANCH}));
   assert.equal(clean.current_source_sha,sha);
   assert.match(clean.witness_sha256,/^[a-f0-9]{64}$/);
   assert.ok(ownerReads>=2 && nativeReads>=2 && seen.length===1);

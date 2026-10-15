@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sourceSyncFixtureDiagnostics } from './source-sync-fixture-diagnostics-w63.mjs';
+import { sourceSyncFixtureDiagnostics, canonicalGeneratedGitFixtureW63 } from './source-sync-fixture-diagnostics-w63.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { readClientSourceSyncPreflightW50 as preflight, CLIENT_SOURCE_SYNC_W50_PARENT } from '../src/client-source-sync-preflight-w50.mjs';
@@ -180,10 +180,10 @@ test('disposable actual Git worktree and current-ref adapter: clean, untracked, 
   // The Windows Actions temp directory may be a junction/alias; production
   // worktree trust rightly rejects aliases. Canonicalize ONLY this generated fixture.
   const generated = mkdtempSync(path.join(tmpdir(), 'metaengine-w50-fixture-'));
-  const dir = realpathSync(generated);
+  let dir = realpathSync(generated);
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
-  const repo = path.join(dir, 'repo');
-  const work = path.join(dir, 'work');
+  let repo = path.join(dir, 'repo');
+  let work = path.join(dir, 'work');
   mkdirSync(repo);
   const git = (cwd, ...args) => execFileSync('git', args, {
     cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 65536,
@@ -203,6 +203,9 @@ test('disposable actual Git worktree and current-ref adapter: clean, untracked, 
   git(repo, 'worktree', 'add', '--lock', '-b', branch, work, sha);
   git(repo, 'update-ref', 'refs/remotes/origin/' + branch, sha);
   git(work, 'branch', '--set-upstream-to', 'origin/' + branch);
+  // Git for Windows can serialize the long spelling of our disposable TEMP
+  // alias. Prove SAME physical inodes before binding the test to Git's paths.
+  ({dir, repo, work} = canonicalGeneratedGitFixtureW63({dir,repo,work,sha,branch}));
   const binding = {
     ...nativeBinding(), repo_root: repo, managed_root: dir, worktree_path: work,
     worktree_realpath: work, base_sha: sha, last_verified_head_sha: sha,
