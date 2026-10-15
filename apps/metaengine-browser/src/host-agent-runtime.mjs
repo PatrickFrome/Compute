@@ -44,6 +44,7 @@ export class HostAgentRuntime {
   #fastControl;
   #browserBoundary;
   #backupDirectory;
+  #backupOwnerIncarnation;
   #startedAt = null;
   #requests = 0;
   #browserPlanRequests = 0;
@@ -58,12 +59,14 @@ export class HostAgentRuntime {
     browserPlanExecute = null,
     browserPlanCancel = null,
     backupDirectory = null,
+    readBackupOwnerIncarnation = null,
     netModule,
   } = {}) {
     if (!developmentPlane || typeof developmentPlane.request !== 'function') throw new Error('host_agent_development_plane_required');
     if (!fastControl || typeof fastControl.invoke !== 'function') throw new Error('host_agent_fast_control_required');
     // Host-owned configured directory only. IPC must never select a filesystem path.
     this.#backupDirectory = backupDirectory;
+    this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
     this.#browserBoundary = bindBrowserBoundary({ browserClient, browserStatus, browserPlanExecute, browserPlanCancel });
@@ -93,6 +96,7 @@ export class HostAgentRuntime {
           return readClientBackupAclNativeW58({
             backupDirectory: root,
             archivePath: root ? path.win32.join(root,'postgresql-17-snapshot.dump') : null,
+            readOwnerIncarnation: this.#backupOwnerIncarnation,
           });
         },
         SOURCE_STATUS: async () => {
