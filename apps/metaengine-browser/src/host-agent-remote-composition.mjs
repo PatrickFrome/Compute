@@ -6,6 +6,7 @@ import {
 } from './browser-executor-ipc.mjs';
 import { createHostAgentSupervisorIdentity } from './host-agent-supervisor-identity.mjs';
 import { HostAgentRuntime } from './host-agent-runtime.mjs';
+import { createHostPrivateCustodyW76 } from './host-private-custody-w76.mjs';
 import { HostAgentClient } from './host-agent-ipc.mjs';
 import { NativeSupervisorRuntimeTransport } from './native-supervisor-runtime-transport.mjs';
 
@@ -32,6 +33,7 @@ export class HostAgentRemoteComposition {
   #fastControl;
   #backupDirectory;
   #backupOwnerIncarnation;
+  #privateCustody;
   #trustedHostOwnerReadback;
   #guardianOwnerReadback;
   #privateGatewayReadback;
@@ -92,12 +94,13 @@ export class HostAgentRemoteComposition {
       throw new Error('host_agent_w67_backup_root_owner_custody_pair_required');
     this.#backupDirectory = backupDirectory;
     this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
-    this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
+    this.#privateCustody = createHostPrivateCustodyW76({identity});
+    this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation ?? this.#privateCustody.readTrustedHostOwnerIncarnation;
     this.#guardianOwnerReadback = readGuardianOwnerChallenge || (
       typeof identity.readGuardianOwnerEvidenceW67 === 'function'
         ? () => identity.readGuardianOwnerEvidenceW67() : null);
-    this.#privateGatewayReadback = privateGatewayReadback;
-    this.#privatePostgresBirth = privatePostgresBirth;
+    this.#privateGatewayReadback = privateGatewayReadback ?? this.#privateCustody.readPrivateOwnerGatewayCredential;
+    this.#privatePostgresBirth = privatePostgresBirth ?? this.#privateCustody.readPrivateOwnPostgresBirth;
     this.#browserStatus = requireFunction(browserStatus, 'host_agent_remote_browser_status_required');
     this.#browserPlanExecute = requireFunction(browserPlanExecute, 'host_agent_remote_browser_execute_required');
     this.#browserPlanCancel = requireFunction(browserPlanCancel, 'host_agent_remote_browser_cancel_required');
@@ -250,6 +253,7 @@ export class HostAgentRemoteComposition {
   }
 
   async stop() {
+    this.#privateCustody.close();
     const cleanupErrors = await this.#closeParts();
     if (cleanupErrors.length > 0) {
       this.#state = 'FAILED';
