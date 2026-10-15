@@ -47,7 +47,7 @@ test('W43 protected integrated native, package, SQL, completion, critic and UI s
   const testOnly = JSON.parse(source('coordination/operator-control/client-critical-closure.manifest.json')).test_candidate;
   if(testOnly){
     assert.equal(testOnly.classification,'ISOLATED_TEST_PACKAGE_ONLY');
-    assert.equal(testOnly.branch,'work/metaengine-test-candidate-20261015');
+    assert.equal(testOnly.branch,'work/metaengine-edge-health-physical-20261015');
     assert.equal(testOnly.production_release_authorized,false);
     assert.equal(testOnly.installed_mutation_authorized,false);
     assert.equal(JSON.parse(git('show','49d050ff127e22ca27fbe3514324ba99832afb24:apps/metaengine-browser/package.json')).version,manifest.package_version_unchanged);

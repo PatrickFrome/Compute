@@ -17,6 +17,7 @@ import { initializeLocalVaultKey } from './local-vault-key.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
+import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES, probeNativeSupervisorRuntimeCapabilities } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
 
 const exec = promisify(execFile);
 const pgBinDirectory = process.env.LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR;
@@ -121,6 +122,37 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
   }), /migration_partial_install.*project_task_state_history_h205f22/);
 
+  // Physical installed Owner proof needs the REAL reviewed SQL capability RPC,
+  // not the synthetic catalog stubs used for unrelated RPC allowlist coverage.
+  // Copy only the function/revoke/grant/comment segment from the canonical
+  // immutable Computer Authority migration into this DISPOSABLE PG17 cluster.
+  const computerSql = await source('20261005080000_browser_computer_authority_plane_v1.sql');
+  const capabilityDefinition = 'create or replace function public.devos_runtime_capabilities_v1()';
+  const capabilityComment = 'comment on function public.devos_runtime_capabilities_v1() is';
+  const definitionStart = computerSql.indexOf(capabilityDefinition);
+  const commentStart = computerSql.indexOf(capabilityComment, definitionStart);
+  const definitionEnd = computerSql.indexOf("';", commentStart) + 1;
+  assert(definitionStart >= 0 && commentStart > definitionStart && definitionEnd > commentStart,
+    'canonical capability definition and grant segment required');
+  assert.equal(computerSql.indexOf(capabilityDefinition, definitionStart + 1), -1,
+    'canonical capability definition must be unique');
+  const reviewedCapabilitySql = computerSql.slice(definitionStart, definitionEnd + 1);
+  assert.match(reviewedCapabilitySql, /'computer_authority_plane_v1', true/);
+  assert.match(reviewedCapabilitySql, /grant execute on function public\.devos_runtime_capabilities_v1\(\) to service_role;/i);
+  await sql.unsafe(reviewedCapabilitySql);
+  const [capabilityRow] = await sql.unsafe('SELECT public.devos_runtime_capabilities_v1() AS capabilities');
+  assert.deepEqual(capabilityRow.capabilities, NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES,
+    'disposable SQL capability contract must EXACTLY match installed Edge source');
+  assert.deepEqual(await probeNativeSupervisorRuntimeCapabilities({ rpc: async (name, args) => {
+    assert.equal(name, 'devos_runtime_capabilities_v1');
+    assert.deepEqual(args, {});
+    return capabilityRow.capabilities;
+  } }), NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
+  const [capabilityOwnerGrant] = await sql.unsafe(
+    "SELECT has_function_privilege('service_role', 'public.devos_runtime_capabilities_v1()', 'EXECUTE') AS granted");
+  assert.equal(capabilityOwnerGrant.granted, true, 'canonical read-only service role grant required');
+  // Remaining allowlisted names still use catalog-only stubs; NEVER substitute
+  // a synthetic response for the attested capability RPC in any exported schema.
   for (const name of RPC_ALLOWLIST) {
     const [installed] = await sql.unsafe('SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=\'public\' AND p.proname=$1) AS present', [name]);
     if (!installed.present) await sql.unsafe('CREATE FUNCTION public.' + quoteIdentifier(name) + "() RETURNS jsonb LANGUAGE sql SECURITY DEFINER AS $$SELECT '{\"synthetic\":true}'::jsonb$$");

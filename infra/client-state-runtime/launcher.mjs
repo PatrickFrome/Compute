@@ -22,6 +22,8 @@ function runtimeError(code) {
 const HEALTH_FAILURE_SCHEMA = 'metaengine.client-state.health-failure.v1';
 const HEALTH_FAILURE_CODES = new Set([
   'health_http_failed', 'health_response_invalid', 'health_not_ready', 'health_capability_unattested',
+  'health_capability_rpc_unavailable', 'health_capability_runtime_not_deployed',
+  'health_capability_attestation_timeout', 'health_capability_source_mismatch', 'health_capability_db_read_failed',
   'health_timeout', 'health_connection_refused', 'health_network_failed', 'health_instance_mismatch',
   'postgres_identity_mismatch', 'postgres_cluster_identity_mismatch', 'postgres_data_directory_mismatch',
   'postgres_owned_pid_mismatch', 'postgres_incarnation_mismatch', 'postgres_identity_invalid',
@@ -34,6 +36,26 @@ const HEALTH_FAILURE_CODES = new Set([
   'postgres_inspection_database_missing',
 ]);
 
+// A remote/renderer-supplied health document is NEVER attestation. Decode only
+// exact public capability-health reason literals to finite local diagnostic
+// categories; no HTTP body, child stderr or arbitrary string reaches status/CI.
+const EDGE_UNATTESTED_REASON_CODES = Object.freeze({
+  CAPABILITY_RPC_UNAVAILABLE: 'health_capability_rpc_unavailable',
+  RUNTIME_NOT_DEPLOYED: 'health_capability_runtime_not_deployed',
+  ATTESTATION_TIMEOUT: 'health_capability_attestation_timeout',
+  DB_SOURCE_ATTESTATION_FAILED: 'health_capability_source_mismatch',
+  DB_SOURCE_READ_FAILED: 'health_capability_db_read_failed',
+});
+export function classifyEdgeCapabilityReadiness(body) {
+  const health = body?.capability_health;
+  if (body?.runtime_ready !== false || !health || typeof health !== 'object' || Array.isArray(health)
+    || health.schema !== 'metaengine.native-browser-supervisor.capability-health.v1'
+    || health.state !== 'UNATTESTED' || health.authority_effect !== false
+    || health.readiness_eligible !== false || typeof health.reason !== 'string'
+    || !Object.hasOwn(EDGE_UNATTESTED_REASON_CODES, health.reason)) return 'health_capability_unattested';
+  return EDGE_UNATTESTED_REASON_CODES[health.reason];
+}
+
 // Public diagnostic data contains finite categories only. Never forward an
 // exception message, endpoint, response body, configuration or child stderr.
 export function normalizeRuntimeHealthFailure(value) {
@@ -43,6 +65,7 @@ export function normalizeRuntimeHealthFailure(value) {
     || value.schema !== HEALTH_FAILURE_SCHEMA || !HEALTH_FAILURE_CODES.has(value.code)
     || !['api', 'edge', 'postgres'].includes(value.component)
     || value.code.startsWith('postgres_') !== (value.component === 'postgres')
+    || (value.code.startsWith('health_capability_') && value.component !== 'edge')
     || !Number.isSafeInteger(value.consecutive_failures) || value.consecutive_failures < 1 || value.consecutive_failures > 3
     || (value.http_status !== null && (!Number.isSafeInteger(value.http_status) || value.http_status < 100 || value.http_status > 599))
     || (value.code === 'health_http_failed') !== (value.http_status !== null)
@@ -445,7 +468,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
       const error = runtimeError(`${which}_health_failed`); error.healthFailureCode = 'health_not_ready'; throw error;
     }
     if (which === 'edge' && (body.runtime_ready !== true || body.capability_health?.state !== 'ATTESTED')) {
-      const error = runtimeError('edge_runtime_unattested'); error.healthFailureCode = 'health_capability_unattested'; throw error;
+      const error = runtimeError('edge_runtime_unattested'); error.healthFailureCode = classifyEdgeCapabilityReadiness(body); throw error;
     }
     return body;
   }
