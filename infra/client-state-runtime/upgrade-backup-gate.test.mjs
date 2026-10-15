@@ -24,9 +24,10 @@ async function fixture(t) {
     secrets_included_in_receipt:false,automatic_retry_allowed:false};
   return {archivePath,receipt,expected:{...expected,backupDirectory:root},tocReadback:toc};
 }
-test('valid pinned archive and independent TOC are verified, but not sufficient for installation',async t=>{
+test('pinned archive and TOC cannot substitute for native NTFS DACL and installed Owner',async t=>{
   const o=await fixture(t), r=await verifyInstalledUpgradeBackup(o);
-  assert.equal(r.backup_verified,true);assert.equal(r.upgrade_authorized,false);assert.equal(r.automatic_retry_allowed,false);
+  assert.equal(r.backup_verified,false);assert.equal(r.archive_integrity_verified,true);
+  assert.match(r.reason,/^NATIVE_BACKUP_ACL_/);assert.equal(r.upgrade_authorized,false);assert.equal(r.automatic_retry_allowed,false);
 });
 test('failed one-shot pg_dump has no acceptable receipt',async t=>{
   const o=await fixture(t);o.receipt=null;

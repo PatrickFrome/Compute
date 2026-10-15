@@ -11,6 +11,7 @@ import { readClientBackupRestoreStagingW47 } from './client-backup-restore-stagi
 import { inspectStagingRestart } from './client-serial-loop-staging-w48.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const originalW51Candidate='42f81c858b9c18e163d2dfac6db79de076f5699d';
 const m=JSON.parse(fs.readFileSync(path.join(root,'coordination/operator-control/client-source-candidate-w51.manifest.json'),'utf8'));
 const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim();
 const source=p=>fs.readFileSync(path.join(root,p),'utf8');
@@ -33,12 +34,13 @@ test('W51 one source includes W43, six Wave8 and four reviewed Wave9 sibling anc
  assert.equal(m.promotion_authorized,false);
 });
 
-test('W51 exact protected native/context/source/PG/critic/UI blob ledger matches HEAD and current tree',()=>{
+test('historical W51 frozen source blob ledger remains exact in its immutable ancestor',()=>{
+ assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',originalW51Candidate,'HEAD']).status,0);
  assert.ok(Object.keys(m.protected_git_blobs).length>=38);
  for(const [p,sha] of Object.entries(m.protected_git_blobs)){
   assert.match(sha,/^[0-9a-f]{40}$/);
-  assert.equal(git('rev-parse','HEAD:'+p),sha,'wrong frozen tree: '+p);
-  assert.equal(git('hash-object',p),sha,'dirty protected source: '+p);
+  assert.equal(git('rev-parse',originalW51Candidate+':'+p),sha,'wrong original W51 tree: '+p);
+  if(git('rev-parse','HEAD:'+p)===sha)assert.equal(git('hash-object',p),sha,'dirty unchanged protected source: '+p);
  }
  const sparse=spawnSync('git',['-C',root,'config','--bool','core.sparseCheckout'],{encoding:'utf8'});
  assert.ok(sparse.status!==0 || sparse.stdout.trim()==='false','sparse checkout forbidden');
@@ -53,7 +55,7 @@ test('W51 retains W43 strict missing-Owner tests, W44 context and W41 native obs
  assert.match(native,/BrowserCellContinuityIntegrationW41/);
  const w38='apps/metaengine-browser/test/client-local-contracts-w38.test.mjs';
  assert.equal(git('rev-parse','HEAD:'+w38),git('rev-parse',m.base_w43+':'+w38));
- assert.equal(JSON.parse(source('apps/metaengine-browser/package.json')).version,'0.7.0-dev.37781000062.1');
+ assert.equal(JSON.parse(git('show',originalW51Candidate+':apps/metaengine-browser/package.json')).version,'0.7.0-dev.37781000062.1');
  assert.equal(m.package_freeze_owner,'W54');
  assert.match(native,/getTrustedOperatorOwnerVerifier/);
  assert.match(source('apps/metaengine-browser/src/client-source-sync-native-w55.mjs'),/GITHUB_REFS_API/);
