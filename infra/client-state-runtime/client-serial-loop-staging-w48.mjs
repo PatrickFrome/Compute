@@ -108,16 +108,50 @@ export function sealStagingCheckpoint({ lease, effect, source, tests, artifact, 
   });
 }
 
+// A digest-shaped value is NOT proof of an immutable checkpoint. Recompute
+// the precise W48 canonical record before comparing with the PostgreSQL row.
+// Otherwise an edited source/critic/owner field could be paired with a stale
+// checkpoint_sha256 and incorrectly become NEXT_TASK_ELIGIBLE_STAGING_ONLY.
+export function verifyStagingCheckpointDigest(checkpoint) {
+  if (checkpoint?.schema !== W48_SCHEMA || checkpoint.state !== 'STAGING_REVIEW_REQUIRED'
+      || checkpoint.origin !== 'SYNTHETIC/STAGING'
+      || !UUID.test(hex(checkpoint.workspace_id)) || !UUID.test(hex(checkpoint.task_id))
+      || !UUID.test(hex(checkpoint.effect_id))
+      || !/^agent_[a-z0-9-]{8,64}$/.test(String(checkpoint.agent_id))
+      || !/^agent_[a-z0-9-]{8,64}$/.test(String(checkpoint.critic_agent_id))
+      || checkpoint.agent_id === checkpoint.critic_agent_id
+      || !safe(checkpoint.lease_generation) || !safe(checkpoint.owner_generation)
+      || !SHA.test(hex(checkpoint.base_sha)) || !SHA.test(hex(checkpoint.source_sha))
+      || checkpoint.base_sha === checkpoint.source_sha
+      || ![checkpoint.file_sha256, checkpoint.artifact_sha256,
+           checkpoint.critic_digest, checkpoint.checkpoint_sha256].every(x => DIGEST.test(hex(x)))
+      || checkpoint.critic_digest !== checkpoint.artifact_sha256
+      || !safe(checkpoint.ready_at_ms) || !safe(checkpoint.completed_at_ms)
+      || checkpoint.completed_at_ms < checkpoint.ready_at_ms
+      || checkpoint.completed_at_ms >= checkpoint.ready_at_ms + 86_400_000) return false;
+  const record = {
+    schema: W48_SCHEMA, origin: 'SYNTHETIC/STAGING',
+    workspace_id: checkpoint.workspace_id, task_id: checkpoint.task_id,
+    agent_id: checkpoint.agent_id, lease_generation: checkpoint.lease_generation,
+    owner_generation: checkpoint.owner_generation, effect_id: checkpoint.effect_id,
+    base_sha: checkpoint.base_sha, source_sha: checkpoint.source_sha,
+    file_sha256: checkpoint.file_sha256, artifact_sha256: checkpoint.artifact_sha256,
+    critic_agent_id: checkpoint.critic_agent_id, critic_digest: checkpoint.critic_digest,
+    ready_at_ms: checkpoint.ready_at_ms, completed_at_ms: checkpoint.completed_at_ms,
+  };
+  return sha256(JSON.stringify(record)) === checkpoint.checkpoint_sha256;
+}
+
 // Reconciliation is read-only. No "resume then replay" on crash/lost ACK.
 export function inspectStagingRestart({ checkpoint, pgReadback, effect, requested_task_id,
-  requested_lease_generation } = {}) {
+  requested_lease_generation, observed_at_ms = Date.now() } = {}) {
   if (effect?.state === 'PREPARED' || effect?.state === 'AMBIGUOUS' ||
       effect?.ack_durable !== true)
     return locked('PREPARED_OR_LOST_ACK_NEEDS_EXISTING_EFFECT_RECONCILIATION', 'AMBIGUOUS');
-  if (checkpoint?.state !== 'STAGING_REVIEW_REQUIRED' ||
-      !DIGEST.test(hex(checkpoint.checkpoint_sha256)) ||
-      !UUID.test(hex(checkpoint.task_id)))
+  if (!verifyStagingCheckpointDigest(checkpoint))
     return locked('CHECKPOINT_INVALID');
+  if (!safe(observed_at_ms) || observed_at_ms >= checkpoint.ready_at_ms + 86_400_000)
+    return locked('RESULT_READY_EXPIRED');
   if (!pgReadback || pgReadback.backend !== 'OWN_PG17_DISPOSABLE' ||
       pgReadback.origin !== 'SYNTHETIC/STAGING' ||
       pgReadback.checkpoint_sha256 !== checkpoint.checkpoint_sha256 ||
