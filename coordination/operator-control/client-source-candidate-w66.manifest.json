@@ -178,7 +178,7 @@
     "infra/client-state-runtime/operator-readonly-gateway.mjs": "816b3da164d012d6365483bb663f00a2ec32bb16",
     "infra/client-state-runtime/own-postgres-birth-w61.mjs": "4cef06ef8a8a6c9a8e25419879dc442623b707ef",
     "infra/client-state-runtime/own-postgres-birth-w61.test.mjs": "bbb06f95fb9a9c34c9d9f8be2d842e1918d317e5",
-    "infra/client-state-runtime/package.json": "491fb88065d21c6f8211e33cd5c8d972717891dd",
+    "infra/client-state-runtime/package.json": "87a3694093f9717fb1c1d322ecf617d289577b16",
     "infra/client-state-runtime/README-host-native-owner-w60.md": "d308afbc4f3ec05be6670a3db8d2c29a3c3a6ddc",
     "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34"
   },
