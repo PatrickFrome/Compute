@@ -21,6 +21,9 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Never qualify GitHub's synthetic PR merge as the submitted source SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -28,6 +31,7 @@ jobs:
         shell: bash
         run: |
           git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           git diff --check
       - name: Production main and Host Owner contract
         shell: bash
