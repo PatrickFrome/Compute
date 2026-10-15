@@ -9,6 +9,14 @@ export const OWN_PG_BIRTH_SQL_W61 = `SELECT
   pg_catalog.to_regnamespace('destruktion_meta') IS NOT NULL AS schema_present,
   pg_catalog.to_regclass('destruktion_meta.project_run_h205f22') IS NOT NULL AS project_table_present`;
 
+// Exact Owner project/device/client/epoch exists in the existing own ledger;
+// catalog presence and an OS Host declaration alone are not DB Owner binding.
+export const OWN_PG_OWNER_EPOCH_SQL_W61 = `SELECT count(*)::integer AS matches
+  FROM destruktion_meta.project_run_h205f22
+  WHERE project_id=$1::uuid AND device_id=$2::uuid
+    AND client_id=$3::text AND admin_grant_epoch=$4::bigint`;
+
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const SHA = /^[a-f0-9]{40}$/i;
 const time = x => x instanceof Date ? x.getTime() : typeof x === 'string' ? Date.parse(x) : NaN;
@@ -20,8 +28,8 @@ function ownerValid(o, ownerId, epoch, now) {
     o.schema === 'metaengine.host.owner-incarnation.v1' &&
     o.source === 'LOCAL_HOST_OWNER' && o.authority_effect === false &&
     o.owner_id === ownerId && o.epoch === epoch &&
-    ID.test(o.owner_id || '') && ID.test(o.device_id || '') &&
-    ID.test(o.project_id || '') && ID.test(o.process_incarnation_id || '') &&
+    ID.test(o.owner_id || '') && UUID.test(o.device_id || '') &&
+    UUID.test(o.project_id || '') && ID.test(o.process_incarnation_id || '') &&
     SHA.test(o.source_sha || '') &&
     Number.isSafeInteger(o.pid) && o.pid > 0 &&
     Number.isSafeInteger(o.generation) && o.generation > 0 &&
@@ -60,28 +68,37 @@ export function bindOwnPostgresBirthProviderW61({ transaction, trustedOwnerReadb
     try {
       const before = await trustedOwnerReadback();
       if (!ownerValid(before, ownerId, epoch, now())) return null;
-      const firstRows = await transaction(tx => tx.unsafe(OWN_PG_BIRTH_SQL_W61), { readOnly: true });
+      const observeBirth = async () => transaction(async tx => {
+        const identity = await tx.unsafe(OWN_PG_BIRTH_SQL_W61);
+        if (!Array.isArray(identity) || identity.length !== 1 ||
+            !validRow(identity[0], now())) return null;
+        const epochRows = await tx.unsafe(OWN_PG_OWNER_EPOCH_SQL_W61,
+          [before.project_id, before.device_id, before.owner_id, epoch]);
+        if (!Array.isArray(epochRows) || epochRows.length !== 1 ||
+            epochRows[0].matches !== 1) return null;
+        return identity[0];
+      }, { readOnly: true });
+      const firstRow = await observeBirth();
       const between = await trustedOwnerReadback();
       if (!ownerValid(between, ownerId, epoch, now()) || !sameOwner(before, between) ||
-          !Array.isArray(firstRows) || firstRows.length !== 1 || !validRow(firstRows[0], now())) return null;
+          !firstRow) return null;
       // Separate transaction: a restart or Owner handoff between reads is
       // observable, not silently hidden in a single repeatable-read snapshot.
-      const lastRows = await transaction(tx => tx.unsafe(OWN_PG_BIRTH_SQL_W61), { readOnly: true });
+      const lastRow = await observeBirth();
       const after = await trustedOwnerReadback();
       if (!ownerValid(after, ownerId, epoch, now()) || !sameOwner(before, after) ||
-          !Array.isArray(lastRows) || lastRows.length !== 1 ||
-          !validRow(lastRows[0], now()) || !samePostmaster(firstRows[0], lastRows[0])) return null;
+          !lastRow || !samePostmaster(firstRow, lastRow)) return null;
       return Object.freeze({
         schema: 'metaengine.own-pg.birth-w61.v1', source: 'OWN_PG_POSTMASTER_READBACK',
         owner_id: ownerId, owner_epoch: epoch, owner_generation: before.generation,
         owner_process_incarnation_id: before.process_incarnation_id,
         owner_device_id: before.device_id, owner_project_id: before.project_id,
         source_sha: before.source_sha.toLowerCase(),
-        postgres_started_at: new Date(time(lastRows[0].postgres_started_at)).toISOString(),
-        observed_at: new Date(time(lastRows[0].observed_at)).toISOString(),
-        database_name: lastRows[0].database_name,
-        server_version_num: lastRows[0].server_version_num,
-        schema_present: true, project_table_present: true,
+        postgres_started_at: new Date(time(lastRow.postgres_started_at)).toISOString(),
+        observed_at: new Date(time(lastRow.observed_at)).toISOString(),
+        database_name: lastRow.database_name,
+        server_version_num: lastRow.server_version_num,
+        schema_present: true, project_table_present: true, owner_epoch_bound: true,
         installed_owner_proven: false, upgrade_authorized: false,
         automatic_retry_allowed: false, authority_effect: false,
       });
