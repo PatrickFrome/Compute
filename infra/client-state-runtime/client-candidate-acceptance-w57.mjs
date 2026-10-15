@@ -124,6 +124,7 @@ function packageOk(p, sha) {
  * receipt can establish at most consistency of SOURCE/STAGING input shapes.
  */
 export function auditClientCandidateW57(input = {}) {
+  input = record(input) ? input : {};
   const sha = input?.candidate?.source_sha;
   const valid = goodSha(sha);
   const gates = {};
@@ -167,8 +168,9 @@ export function auditClientCandidateW57(input = {}) {
     'OBSOLETE_HOSTED_PROBE_NEEDS_REAL_OWN_PG_REPLACEMENT', !hosted);
   // No caller-provided verified=true, shape, fake issuer or CI record may alter this gate.
   gate('installed_and_live', false, 'AUTHENTIC_OWNER_GUARDIAN_AGENT_EFFECT_UNPROVEN', true);
-  const blocking = Object.values(gates).some(s => s === 'BLOCKED' ||
-    (s === 'UNKNOWN' && s !== gates.installed_and_live && s !== gates.native_owner));
+  const blocking = Object.entries(gates).some(([name, state]) =>
+    state === 'BLOCKED' || (state === 'UNKNOWN' &&
+      name !== 'installed_and_live' && name !== 'native_owner'));
   return Object.freeze({
     schema: 'metaengine.client.w57.critic.v1',
     source_sha: valid ? sha : null,
