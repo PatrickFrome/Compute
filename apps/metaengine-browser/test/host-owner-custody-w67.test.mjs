@@ -122,3 +122,15 @@ test('W67 missing signed Guardian/Owner/PG never upgrades enrolled device',async
     assert.equal(await identity.readHostOwnerIncarnation(),null);
   } finally {await fs.rm(dir,{recursive:true,force:true});}
 });
+
+// Regression fence: importing the previous launcher as a static test import
+// loaded native-supervisor-endpoints -> local-provider-bootstrap and could start
+// a configured Host in a user's profile. Keep W67 test imports side-effect free.
+test('W67 source fixture cannot import installed local-provider bootstrap',async()=>{
+  const source=await fs.readFile(new URL('../src/guardian-client-kernel-birth-w67.mjs',import.meta.url),'utf8');
+  assert.doesNotMatch(source,/^\\s*import\\s/m);
+  const fixture=await fs.readFile(new URL(import.meta.url),'utf8');
+  assert.doesNotMatch(fixture,/^\\s*import\\s+.*browser-guardian-machine-bootstrap-launcher/m);
+  assert.doesNotMatch(fixture,/^\\s*import\\s+.*native-supervisor-endpoints/m);
+  assert.doesNotMatch(fixture,/^\\s*import\\s+.*local-state-provider-bootstrap/m);
+});
