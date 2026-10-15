@@ -3,6 +3,9 @@
 // decimal text. Avoid floating-point rounding of Windows 100ns FILETIME.
 export function guardianClientKernelBirthW67(result) {
   try {
+    // This boolean is set only after the native Guardian independently
+    // reopened the authenticated pipe client process following its challenge.
+    if (result?.client_kernel_birth_rechecked !== true) return null;
     const ticksText = result?.client_creation_time_100ns;
     const pid = result?.client_pid;
     if (typeof ticksText !== 'string' || !/^[1-9][0-9]{16,18}$/.test(ticksText) ||

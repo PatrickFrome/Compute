@@ -58,6 +58,11 @@ private:
     PSECURITY_DESCRIPTOR security_descriptor_ = nullptr;
 };
 
+// Independently reopen the OS process (not a caller supplied timestamp), require
+// that it remains alive, and compare the FULL 100ns FILETIME without rounding.
+// A previously observed PID cannot prove its own incarnation.
+bool browserGuardianClientKernelBirthExact(DWORD pid, std::uint64_t creation_time_100ns) noexcept;
+
 // Read-only native boundary description. No enrollment persistence, WTS token
 // acquisition, process creation, service start, retry loop or scheduler lives here.
 const char* browserGuardianOwnerEnrollmentObserverContractJson() noexcept;
