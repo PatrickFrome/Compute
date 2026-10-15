@@ -74,19 +74,22 @@ export async function verifyInstalledUpgradeBackup({receipt, archivePath, tocRea
   // W58: POSIX mode and a self-asserted owner_dacl_verified are never NTFS
   // evidence. This default production path queries the actual Host/OS readback;
   // no caller can inject a verified=true ACL receipt here.
+  const restore = qualifyIndependentDisposableRestore({
+    receipt:restoreReceipt, backupReceipt:receipt, tocReadback, expected,
+  });
   const acl = await readClientBackupAclNativeW58({
     backupDirectory: expected.backupDirectory, archivePath,
   });
   if (acl.native_acl_verified !== true)
-    return {...fail('NATIVE_BACKUP_ACL_'+acl.reason),archive_integrity_verified:true};
+    return {...fail('NATIVE_BACKUP_ACL_'+acl.reason),archive_integrity_verified:true,
+      restore_verified:false,physical_restore_proven:false,
+      restore_receipt_consistent:restore.restore_receipt_consistent,
+      restore_reason:restore.reason};
   // Source/CI NTFS ACL proof does not attest an installed Owner incarnation.
   // W52/native Owner is separately required; keep installed backup UNKNOWN.
   // Only after independent archive bytes and TOC readback qualify the
   // standalone disposable-restore evidence. An archive header and listing
   // do NOT establish that it can reconstruct the actual user data.
-  const restore = qualifyIndependentDisposableRestore({
-    receipt:restoreReceipt, backupReceipt:receipt, tocReadback, expected,
-  });
   return {
     schema:'metaengine.installed-upgrade-backup-gate.v1',
     backup_verified:false,archive_integrity_verified:true,
