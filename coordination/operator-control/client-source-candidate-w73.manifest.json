@@ -181,6 +181,11 @@
       "pr": 1298,
       "wave": "W82_PUBLISHED_SOURCE_ONLY",
       "sha": "724a87f4a841dac92dcf9e334397903f5dd4d073"
+    },
+    {
+      "pr": 1307,
+      "wave": "W77_PROVENANCE_PRODUCTION_BLOCKED",
+      "sha": "c4732a9db6d9f03d722cbc724901d7af3329a972"
     }
   ],
   "pre_version_assembly_anchor": "61534c1228b81b063b48082c3cdbcbfd2921fe63",
@@ -195,7 +200,7 @@
     ".github/workflows/client-serial-loop-staging-w48.yml": "d2fc249424234d592e061a7cac69907c4cdb62d2",
     ".github/workflows/client-source-candidate-w66.yml": "b1acf9bf8271585c485c90106995f03b4a0e0f0f",
     ".github/workflows/client-wave10-w62-source-r97.yml": "a49556c5050d7df3a4a223205379981900e22dd0",
-    ".github/workflows/client-wave11-w68-release-provenance.yml": "c4a3f86b637e847d05e197ab2c8d002c81d17db1",
+    ".github/workflows/client-wave11-w68-release-provenance.yml": "7157a2f243390a999f81ccf9807e4a68846c857e",
     "apps/me2-ui/src/components/me2/shell/command-palette.tsx": "a73c3dcbb900dc7eae1db839e6668bbddd5c359e",
     "apps/me2-ui/src/components/me2/shell/topbar.tsx": "873213220b4953c7bacc18e9ad6f1998f3615415",
     "apps/me2-ui/src/lib/client-work-badge-text.contract.ts": "1dfa0020a223612a4c2fd81f9e3cab86eb5a17c5",
@@ -285,8 +290,8 @@
     "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34",
     "infra/client-state-runtime/upgrade-backup-gate.test.mjs": "fe6011a9871b9cfa2d349e0b107a1b4d608f7f8b",
     "infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs": "ecd535de5e25fa4c2017d09a050abc0d23f5face",
-    ".github/workflows/client-source-candidate-w73.yml": "777fce27a6d68357808869e5e3901967002c0190",
-    "infra/client-state-runtime/client-source-candidate-w73.test.mjs": "1efdbaa0c7d3c69693abb2e0e793f472d539354c",
+    ".github/workflows/client-source-candidate-w73.yml": "aefeda3060d6d96e53c678d8077922d2337d5193",
+    "infra/client-state-runtime/client-source-candidate-w73.test.mjs": "82f9f6c90faeee19b9ea820992fb4cfa812eeace",
     ".github/workflows/client-host-owner-w74.yml": "bd7c0ac888e290f2980d139eba84b3f29f4e1a56",
     "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs": "96942c26fadb13be1e63659fc488526d7bda93ad",
     "apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs": "0202d2288a25707d50a6a93a77da1be74d84256c",
@@ -317,9 +322,11 @@
     ".github/client-ci-train-w82.test.mjs": "95d14033fea4bfdb611b2db50bee9f2e1f49befd",
     ".github/workflows/client-source-candidate-w43.yml": "ed8a5a7e4232d093ce0deb0acc327e813e9cd4e2",
     ".github/workflows/client-source-candidate-w51.yml": "3ed0b0d4c492c942acf77a9a893739e46e10d683",
-    ".github/workflows/client-source-candidate-w59.yml": "22eea0dfea0f10879309ac083858405999eb1f81"
+    ".github/workflows/client-source-candidate-w59.yml": "22eea0dfea0f10879309ac083858405999eb1f81",
+    "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "13afed5bb813e87dc6be74dcf3697b00f1bfb73a",
+    "apps/metaengine-browser/test/release-proof-producer-w77.test.mjs": "b9f2d98097c139823ae4a61e174e9fb92f3bbd99"
   },
-  "candidate_sha_rule": "PR exact HEAD after Wave12 35 ancestor pins; history immutable; source cannot attest installed/LIVE",
+  "candidate_sha_rule": "PR exact HEAD; 36 real PR parent pins W43–W82 with W77, immutable ancestors, source STAGING only",
   "integrated_source_components": [
     "W58_NATIVE_ACL",
     "W60_DUAL_HOST_OWNER_OPERATIONS",
@@ -341,12 +348,13 @@
     "W79_PUBLISHED_SOURCE_ONLY",
     "W80_PUBLISHED_SOURCE_ONLY",
     "W81_PUBLISHED_SOURCE_ONLY",
-    "W82_PUBLISHED_SOURCE_ONLY"
+    "W82_PUBLISHED_SOURCE_ONLY",
+    "W77_PROVENANCE_SOURCE_ONLY"
   ],
   "wave11_pending_owned": [],
   "parent_checks_not_transitive": true,
   "proof_levels": {
-    "SOURCE": "SOURCE_MERGED_REVIEW_REQUIRED",
+    "SOURCE": "WAVE12_W74_THROUGH_W82_ALL_PUBLISHED_SOURCE_MERGED_UNQUALIFIED",
     "CI": "EXACT_W73_CURRENT_HEAD_TERMINAL_PENDING",
     "STAGING": "UNKNOWN_INTEGRATED_PG17_C2_WINDOWS_NATIVE",
     "INSTALLED": "UNKNOWN",
@@ -395,7 +403,7 @@
       "proof": "INTEGRATED_SOURCE_CI_PENDING"
     }
   ],
-  "manifest_generated_from_local_head": "c51cc3a6d5f4485a4db5513b5d023c3cd0ed54f3",
+  "manifest_generated_from_local_head": "c1276745f65533d08d7443553602e3dc7d815979",
   "base_w66": "61534c1228b81b063b48082c3cdbcbfd2921fe63",
   "wave12_integrated_pins": [
     {
@@ -445,10 +453,16 @@
       "wave": "W82",
       "sha": "724a87f4a841dac92dcf9e334397903f5dd4d073",
       "proof": "SOURCE_MERGED_EXACT_HEAD_CI_NOT_YET_TERMINAL"
+    },
+    {
+      "pr": 1307,
+      "wave": "W77",
+      "sha": "c4732a9db6d9f03d722cbc724901d7af3329a972",
+      "proof": "SOURCE_MERGED_EXACT_HEAD_CI_NOT_YET_TERMINAL"
     }
   ],
   "wave12_pending_owners": [
-    "W77_GENUINE_PROVENANCE_NOT_PUBLISHED",
+    "W77_EXTERNAL_AUTHENTICATED_SIGNED_SIDECAR_AND_SLSA_NOT_PRESENT",
     "W76_PRODUCTION_PRIVATE_BINDING_INCOMPLETE",
     "W78_SIGNED_IMMUTABLE_PACKAGE_NOT_FROZEN",
     "W80_AUTHENTICATED_REAL_C2_INCOMPLETE",

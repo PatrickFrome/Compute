@@ -119,6 +119,7 @@ jobs:
             apps/metaengine-browser/test/guardian-client-kernel-birth-w75.test.mjs \
             apps/metaengine-browser/test/host-private-custody-w76.test.mjs \
             apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs \
+            apps/metaengine-browser/test/release-proof-producer-w77.test.mjs \
             infra/client-state-runtime/client-c2-worker-edit-w80.test.mjs \
             infra/client-state-runtime/client-current-acl-critic-w81.test.mjs
           node --test .github/client-ci-train-w82.test.mjs
