@@ -1,0 +1,42 @@
+name: Client W48 Serial Staging Source and Disposable PG17
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/client-serial-loop-staging-w48*'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/fleet-dag*'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs'
+      - '.github/workflows/client-serial-loop-staging-w48.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-source:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact candidate and relevant source contracts
+        shell: pwsh
+        run: |
+          git rev-parse HEAD
+          node --check infra/client-state-runtime/client-serial-loop-staging-w48.mjs
+          node --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs
+  disposable-pg17:
+    runs-on: ubuntu-24.04
+    container:
+      image: postgres:17
+    steps:
+      - name: Install Git only in ephemeral CI container
+        run: apt-get update -qq && apt-get install -y -qq git ca-certificates
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run source and real temporary PG17 as unprivileged postgres user
+        run: |
+          git rev-parse HEAD
+          node --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs
+          test -x /usr/lib/postgresql/17/bin/initdb
+          runuser -u postgres -- env W48_PG17_BIN=/usr/lib/postgresql/17/bin "$(command -v node)" --test infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs

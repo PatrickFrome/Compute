@@ -1,0 +1,25 @@
+{
+  "schema": "metaengine.client-pg17-qualification-w45.parent-ledger.v1",
+  "classification": "SYNTHETIC_STAGING",
+  "w45_base": "2557acd2ee11464c6f3f63b2e3b22bba74df142f",
+  "main_inspected": "b26f2d4693e7bab3648e0930b7a9e2c75baef58e",
+  "integration_compute_unified_v1_inspected": "a23b647220c6bdeaa4340f804575dc2009e434cb",
+  "upstream_prs": {
+    "1216": "881eb2e29882419921978910ec6c3f184f197801",
+    "1221": "85a11b2aa8777f5981a6cd5c4ed30de877417875",
+    "1248": "ff9dab18d88a4d656fa91c5cc86f3392fde3f023",
+    "1257": "6498c1596432ea9d9987f343c92505b273d1ac11",
+    "1258": "ad25263d5c178074c030b98ba2ce5dcb9cbfdfc2",
+    "1262": "11c6f0e754d160f4d2c042da86c2cb88e4495298",
+    "1263": "ee39b256e2b54f5dfddf4bff021977c0185fb744",
+    "1264": "ea1703cb6c4d0d15f1c7cd4cb4faf22ec2ac959d",
+    "1265": "37ce5d8407a1c1fa9702aa3aeb05133131f7a11a",
+    "1266": "2557acd2ee11464c6f3f63b2e3b22bba74df142f",
+    "1267": "2e9018d14cfe55256ddc5a94693ff0a288b90318",
+    "1268": "33f97db8d03fb57c4a78fa2e5abcb08509725551"
+  },
+  "pg17_image_digest": "postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3",
+  "fixture_scope": "unique Docker-owned temporary PG17 container/anonymous data volume; generated roles/passwords; loopback ephemeral port",
+  "forbidden": ["installed_pgdata", "installed_owner_credentials", "installed_ports", "live_database", "hosted_postgres", "production_migration", "second_scheduler", "live_effect"],
+  "unknowns": ["native_installed_owner", "authentic_W39_project_snapshot_with_generated_project_data", "production_RLS_grants", "emergency_stop_executor_E2E", "physical_Windows_PG17", "signed_critic_acceptance"]
+}
