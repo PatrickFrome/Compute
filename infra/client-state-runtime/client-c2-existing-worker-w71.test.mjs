@@ -5,6 +5,8 @@ import {mkdtemp,mkdir,writeFile,readFile,rm,realpath} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
+import {sealStagingCheckpoint} from './client-serial-loop-staging-w48.mjs';
+import {inspectStagingNextLease} from './client-serial-loop-staging-w56.mjs';
 import {W71_EXISTING_ENTRYPOINTS,inspectW71GoalAdmission,
   probeW71ExistingC2,inspectW71LiveOnlyThroughW39
 } from './client-c2-existing-worker-w71.mjs';
@@ -123,4 +125,68 @@ test('W71 W39 readback stays UNKNOWN without genuine Owner/critic regardless of 
   DENIED(actual);
   assert.equal(actual.reason,'AUTHENTIC_OWNER_AND_INDEPENDENT_CRITIC_REQUIRED');
   assert.equal(actual.w39_state,'UNKNOWN');
+});
+
+test('W71 W30/W39 staging falsifies stop/lost ACK, duplicate edit, lease transfer, stale artifact+critic and epoch',()=>{
+  const workspace_id=randomUUID(),task_id=randomUUID(),next_task_id=randomUUID();
+  const lease={schema:'metaengine.client.serial-loop-staging-w48.v1',
+    state:'STAGING_LEASE_OBSERVED',origin:'SYNTHETIC/STAGING',
+    workspace_id,task_id,agent_id:'agent_implementer0001',
+    lease_generation:3,owner_generation:8};
+  const effect={effect_id:randomUUID(),operation:'FIXED_SANDBOX_SOURCE_EDIT',
+    task_id,lease_generation:3,state:'ACKED',ack_durable:true};
+  const artifact={origin:'SYNTHETIC/STAGING',file_sha256:'c'.repeat(64),
+    manifest_sha256:'d'.repeat(64),source_head_sha:'b'.repeat(40)};
+  const checkpoint=sealStagingCheckpoint({lease,effect,
+    source:{repo_scope:'UNIQUE_TEMP_GIT',base_sha:'a'.repeat(40),head_sha:'b'.repeat(40)},
+    tests:{before_exit_code:1,after_exit_code:0,build_exit_code:0,working_tree_clean:true},
+    artifact,critic:{source:'INDEPENDENT_DISPOSABLE_PROCESS',
+      agent_id:'agent_critic000001',verdict:'ACCEPT',
+      artifact_sha256:artifact.manifest_sha256,source_head_sha:artifact.source_head_sha},
+    ready_at_ms:Date.now()-10000,completed_at_ms:Date.now()-5000});
+  assert.equal(checkpoint.state,'STAGING_REVIEW_REQUIRED');
+  const pg={backend:'OWN_PG17_DISPOSABLE',origin:'SYNTHETIC/STAGING',
+    task_id,lease_generation:3,effect_id:effect.effect_id,
+    source_sha:checkpoint.source_sha,artifact_sha256:checkpoint.artifact_sha256,
+    checkpoint_sha256:checkpoint.checkpoint_sha256};
+  const nextLease={...lease,task_id:next_task_id,agent_id:'agent_implementer0002',
+    lease_generation:4};
+  const nextPg={backend:'OWN_PG17_DISPOSABLE',origin:'SYNTHETIC/STAGING',
+    state:'LEASED_STAGING_ONLY',row_count:1,workspace_id,task_id:next_task_id,
+    agent_id:nextLease.agent_id,lease_generation:4,owner_generation:8,
+    event_seq:9,after_checkpoint_sha256:checkpoint.checkpoint_sha256};
+  const check=(change={})=>inspectStagingNextLease({
+    completedCheckpoint:checkpoint,completedPgReadback:pg,completedEffect:effect,
+    nextLease,nextPgLeaseReadback:nextPg,...change});
+  const stage=check();
+  assert.equal(stage.state,'NEXT_LEASE_READBACK_STAGING_ONLY');
+  assert.equal(stage.permission_to_edit,false);
+  assert.equal(stage.permission_to_claim,false);
+  assert.equal(stage.live_completion_verified,false);
+  assert.equal(stage.authority_effect,false);
+  for(const bad of [
+    {completedEffect:{...effect,state:'AMBIGUOUS',ack_durable:false}},
+    {completedEffect:{...effect,state:'STOPPED'}},
+    {nextLease:{...nextLease,task_id}},
+    {nextLease:{...nextLease,agent_id:'agent_other000001'}},
+    {nextLease:{...nextLease,owner_generation:9}},
+    {nextLease:{...nextLease,lease_generation:5}},
+    {nextPgLeaseReadback:{...nextPg,row_count:2}},
+    {nextPgLeaseReadback:{...nextPg,event_seq:0}},
+    {nextPgLeaseReadback:{...nextPg,after_checkpoint_sha256:'e'.repeat(64)}},
+    {completedCheckpoint:{...checkpoint,artifact_sha256:'e'.repeat(64)}},
+    {completedCheckpoint:{...checkpoint,critic_digest:'e'.repeat(64)}},
+    {completedCheckpoint:{...checkpoint,owner_generation:9}},
+  ]){
+    const result=check(bad);
+    assert.equal(result.state,'UNKNOWN');
+    assert.equal(result.permission_to_edit,false);
+    assert.equal(result.permission_to_claim,false);
+    assert.equal(result.automatic_retry_allowed,false);
+    assert.equal(result.authority_effect,false);
+  }
+  // A caller's "verified" claim on a synthetically observed lease stays STAGING.
+  const forged=check({nextLease:{...nextLease,verified:true,permission_to_edit:true}});
+  assert.equal(forged.state,'NEXT_LEASE_READBACK_STAGING_ONLY');
+  assert.equal(forged.permission_to_edit,false);
 });
