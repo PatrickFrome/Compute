@@ -17,7 +17,13 @@ test('R98 Command Palette has no daemon AgentChat identity or polling path', () 
 test('R98 palette cannot resurrect removed daemon agent surfaces through search', () => {
   assert.doesNotMatch(palette, /setPage\("agents"\)/);
   assert.doesNotMatch(palette, /agentchat|AgentChat/i);
-  assert.match(palette, /Advanced surfaces · search/);
+  // R97 now exposes an explicit navigation-only entry to the existing native
+  // ChatGPT fleet. The former prose marker disappeared with the retired shell;
+  // assert the real source boundary rather than that obsolete label.
+  assert.match(palette, /<CommandGroup heading="Native Agent fleet">/);
+  assert.match(palette, /Open native ChatGPT agent fleet/);
+  assert.match(palette, /onSelect=\{\(\) => \{ setPage\("browser"\); setOpen\(false\); \}\}/);
+  assert.doesNotMatch(palette, /spawnAgent|createAgent|setPage\("agents"\)/);
 });
 
 test('R98 quarantined AgentChat hook remains non-authoritative while it has no palette consumer', () => {
