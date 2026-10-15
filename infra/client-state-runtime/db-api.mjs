@@ -80,11 +80,6 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       return number;
     } } },
   });
-  // Private service capability: never routable over HTTP, page or Gateway.
-  // Absent W60 authenticated Host producer: null, not a fabricated birth.
-  const readOwnPostgresBirth = bindOwnPostgresBirthProviderW61({
-    transaction, trustedOwnerReadback: trustedNativeOwnerBirthReadback,
-  });
   let signatures;
   let tableAccess;
   let activeRequests = 0;
@@ -98,6 +93,12 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
     await tx.unsafe("SELECT set_config('request.jwt.claims', $1, true), set_config('request.jwt.claim.role', 'service_role', true)", [CLAIMS]);
     return run(tx);
   });
+  // Private service capability: never routable over HTTP, page or Gateway.
+  // Absent W60 authenticated Host producer: null, not a fabricated birth.
+  const readOwnPostgresBirth = bindOwnPostgresBirthProviderW61({
+    transaction, trustedOwnerReadback: trustedNativeOwnerBirthReadback,
+  });
+
   try {
     if (!injectedSql) {
       const [role] = await sql.unsafe('SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = session_user');
