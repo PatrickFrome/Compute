@@ -112,6 +112,10 @@ test('W71 actual existing DevelopmentPlane worker rejects edit even with apparen
       expected_source_sha:head,owner_epoch:8,workspace_id,point_id,
       goal:{...admitted,admission:{...admitted.admission,task_id:randomUUID()}}});
     DENIED(badAdmission);assert.equal(badAdmission.reason,'ADMISSION_INVALID');
+    const nonDisposable=await probeW71ExistingC2({
+      sourceDir:root,expected_source_sha:head,owner_epoch:8});
+    DENIED(nonDisposable);
+    assert.equal(nonDisposable.reason,'NON_DISPOSABLE_SOURCE_PATH_FENCED');
     DENIED(await probeW71ExistingC2({sourceDir:dir,expected_source_sha:head,owner_epoch:0}));
   }finally{await rm(root,{recursive:true,force:true});}
 });
