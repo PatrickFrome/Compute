@@ -2120,6 +2120,16 @@ async function initNativeSupervisor() {
     const observeLocalTarget = createFleetTargetLocalObserver({
       lookupView: (tabId) => views.get(String(tabId)) || null,
     });
+    // Bind the existing signed, read-only Guardian pipe challenge into the
+    // private enrolled-device custody chain. No Owner is created by binding.
+    if (!identity.__w67GuardianBindingAttempted) {
+      identity.bindGuardianOwnerEvidenceW67(ensureGuardianBootstrapLauncher());
+      // This flag only avoids re-registering the same in-process read-only
+      // launcher, and is never used as an Owner or signature claim.
+      Object.defineProperty(identity, '__w67GuardianBindingAttempted', {
+        value: true, enumerable: false, configurable: false,
+      });
+    }
     nativeSupervisor = new NativeSupervisorClient({
       identity,
       // W60: production registers all typed native Owner producers. This cannot
@@ -2127,6 +2137,10 @@ async function initNativeSupervisor() {
       // privileged custody or pinned signed EXE remains explicit UNKNOWN.
       trustedNativeOwnerReaders: createHostNativeOwnerReadersW60({
         identity, guardianLauncher: ensureGuardianBootstrapLauncher(), app,
+        // W61 is only an in-process private own-PostgreSQL closure when the
+        // existing db-api Host has installed that capability. Missing PG is
+        // UNKNOWN; never manufacture postmaster birth from a socket health ping.
+        postgresBirth: (ownerId, epoch) => identity.readPrivateOwnPostgresBirthW67(ownerId, epoch),
       }),
       version: app.getVersion(),
       intervalMs: 2000,
