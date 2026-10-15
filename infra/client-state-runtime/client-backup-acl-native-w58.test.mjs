@@ -114,6 +114,33 @@ test('Windows junction reparse root cannot alias a protected archive',{skip:!win
   assert.equal(x.installed_owner_proven,false);
 });
 
+test('Windows Owner generation changes across two native ACL samples and remains UNKNOWN',{skip:!windows},async t=>{
+  const o=await fixture(t);
+  let generation=0;
+  const x=await readClientBackupAclNativeW58({
+    backupDirectory:o.root,archivePath:o.file,
+    readOwnerIncarnation:async()=>({
+      schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',
+      authority_effect:false,pid:1048,generation:++generation,
+      created_at:'2026-10-15T00:00:00.000Z',owner_id:'owner-w58-0001',
+      device_id:'device-w58-0001',process_incarnation_id:'incarnation-w58-0001',
+    }),
+  });
+  assert.equal(generation,2);
+  assert.equal(x.state,'UNKNOWN');
+  assert.equal(x.reason,'OWNER_INCAR_CHANGED_DURING_ACL_READ');
+  assert.equal(x.native_acl_verified,false);
+  assert.equal(x.installed_owner_proven,false);
+  assert.equal(x.upgrade_authorized,false);
+});
+test('Windows no native Owner reader never fabricates installed authority',{skip:!windows},async t=>{
+  const o=await fixture(t);
+  const x=await readClientBackupAclNativeW58({backupDirectory:o.root,archivePath:o.file});
+  assert.equal(x.native_acl_verified,true);
+  assert.equal(x.owner_incarnation_continuity_only,false);
+  assert.equal(x.installed_owner_proven,false);
+});
+
 test('Windows missing archive stays UNKNOWN',{skip:!windows},async t=>{
   const o=await fixture(t);
   await fs.unlink(o.file);
