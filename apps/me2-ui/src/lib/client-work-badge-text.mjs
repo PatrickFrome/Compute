@@ -41,4 +41,3 @@ export function projectClientWorkBadge({ connection = null, work = null } = {}) 
     authority_effect: false,
   });
 }
-

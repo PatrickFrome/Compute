@@ -39,6 +39,26 @@
       "pr": 1274,
       "wave": "W48",
       "sha": "67d67a0b7eca53d3a8bf42550affdd99404ccae7"
+    },
+    {
+      "pr": 1278,
+      "wave": "W54",
+      "sha": "415e4255e45aac2b78f092646190bef4418ac6d1"
+    },
+    {
+      "pr": 1282,
+      "wave": "W52",
+      "sha": "b88f595192e5f40c7b462a85efe37ff441d5a52f"
+    },
+    {
+      "pr": 1281,
+      "wave": "W55",
+      "sha": "08f1192eb9e1a4dd1a060f11219ff2a75dd203db"
+    },
+    {
+      "pr": 1280,
+      "wave": "W56",
+      "sha": "582b25b0e42480d648a9ede3abfbcc31633401ce"
     }
   ],
   "merged_source_head_before_w51_tests": "8f29d00328a87c9d7ed3b377534e5a7b99231b99",
@@ -46,9 +66,9 @@
   "protected_git_blobs": {
     "apps/metaengine-browser/src/main.mjs": "c930cbd15e3d19539664524f9a3d470297be4e5d",
     "apps/metaengine-browser/src/operator-native-context-bridge.mjs": "b77511c535d0d4aaf4607dfc1693cec19a7b7a8b",
-    "apps/metaengine-browser/src/operator-canonical-native-w44.mjs": "1f2a4b30eb2021d8e56731f1da7f421c918da2fa",
-    "apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs": "59029e1afc7767d21ee3ed8c1c077f9fdbb87a1f",
-    "apps/metaengine-browser/src/native-supervisor-client.mjs": "f4bd2f19fb946b71b8ad0a08d2332dd4da777eea",
+    "apps/metaengine-browser/src/operator-canonical-native-w44.mjs": "f6c89742d822528d00ce299ad1ececfc02a5136c",
+    "apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs": "d2956a87bd26a5033cfec602969e884c20fbfddd",
+    "apps/metaengine-browser/src/native-supervisor-client.mjs": "52710624d6fc25398ce4f1fc3b7fbb80ff2c1ff7",
     "apps/metaengine-browser/src/browsercell-continuity-integration-w41.mjs": "8b880d08f1396e0474b1f34d673d48e728edea98",
     "apps/metaengine-browser/src/supervisor-continuity-lease.mjs": "a8c92bd3546cf0d16bdea89bcaf620fe18847447",
     "apps/metaengine-browser/src/browser-sentinel.mjs": "c3c7cd19f90194b9ad8f4fe18994c10195d960c6",
@@ -66,24 +86,33 @@
     "infra/client-state-runtime/client-candidate-acceptance-w49.mjs": "96d8855731e85fc8157fc11f940c220aa5e27005",
     "infra/client-state-runtime/client-backup-restore-staging-w47.mjs": "ca52e2c7eb7934c62955479fd0e61c64f51f7401",
     "infra/client-state-runtime/upgrade-backup-gate.mjs": "848573dbbaa6097f7ce4e30cf99d48046080e4ef",
-    "infra/client-state-runtime/client-serial-loop-staging-w48.mjs": "e631e8fca50f4437a5a70017907b97b11e6fd2f2",
+    "infra/client-state-runtime/client-serial-loop-staging-w48.mjs": "335df55d9b61992bb836706241d272f0b7a0622f",
     "infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs": "e7f411ed60a8a07fc81bdbd0078ce1b929672078",
     "infra/client-state-runtime/package.json": "68273289079b11b211e125336cab1c1047bfc9d3",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "6c78f5ffa874ae1e5c3e4420f71c05f4ea5dd9bd"
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "6c78f5ffa874ae1e5c3e4420f71c05f4ea5dd9bd",
+    "apps/me2-ui/src/lib/client-work-badge-text.mjs": "96097f731f3e90f5a9482bcd1202bbcf1ddb1656",
+    "apps/me2-ui/src/components/me2/shell/topbar.tsx": "c072a5183ddfeec90d94a9445fda5f8cc48426f8",
+    "apps/metaengine-browser/src/native-owner-verifier-w52.mjs": "5ae017dee407fe5f13b74f95a0d7bfe17826dda1",
+    "apps/metaengine-browser/src/client-source-sync-native-w55.mjs": "29c10b49bf4f4b5024bc0c208f35910aa8278409",
+    "apps/metaengine-browser/src/managed-task-project-host.mjs": "f7c7594f987e7c8f37f0223d54a43ef1780c2e69",
+    "apps/metaengine-browser/src/managed-task-project-runtime.mjs": "3bad470520f0dfd76c5b5286a1ea8c616418249c",
+    "apps/metaengine-browser/src/workspace-git-hardening.mjs": "3fc226b694e7e012e50c40c0c481d4b908fdd1d5",
+    "apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs": "049e1e67bbc9ad1a050182d1409eaab07a575ee3",
+    "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs": "79d113caa9adeb696459cadb646620a8d06d2324",
+    "apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs": "b863b55f880e0519c1921d39feee5631f499ff08",
+    "infra/client-state-runtime/client-serial-loop-staging-w56.mjs": "6f8213a46f242fb8d371cdd9907fc15ffb80f6a1",
+    "infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs": "b9161e85c9600171d2b0e8daaba11d394ac97cdc"
   },
   "resolution": [
     "W44 W49 W50 W45 W47 W48 ancestry-preserving merges on W43, with all original commits as Git ancestors",
     "Unioned W44/W49/W47 test and integration registries without dropping W37/W39/W42 tests",
     "Preserved both W43 and W49 roadmap text, W57 owns later acceptance changes",
     "W48 shares existing W30 leased executor and remains SYNTHETIC/STAGING",
-    "W50 source sync is read-only SOURCE, not installed proof"
+    "W50 source sync is read-only SOURCE, not installed proof",
+    "W54 #1278 visual/Local-only SelfUpdate, W52 #1282 six-producer native Owner, W55 #1281 trusted source/current-ref and Windows Git, W56 #1280 checkpoint and disposable PG17 next-lease, all real Git ancestors. No second scheduler."
   ],
   "wave9_repairs_not_present_at_generation": [
-    "W52",
-    "W53",
-    "W54",
-    "W55",
-    "W56"
+    "W53"
   ],
   "package_freeze_owner": "W54",
   "package_version_policy": "No W46 identity reuse; W51 does not package or reserve a version",
@@ -96,5 +125,13 @@
   },
   "authority_effect": false,
   "automatic_retry_allowed": false,
-  "promotion_authorized": false
+  "promotion_authorized": false,
+  "wave9_sibling_integrated_head_before_manifest_refresh": "58d783147bb8286eff230889e3f5b6ab01eabf74",
+  "wave9_missing_or_unqualified": {
+    "W53": "NOT_PUBLISHED_AT_W51_REFREEZE",
+    "W54_PACKAGE": "HELD_UNFROZEN_VERSION_AND_UNSIGNED",
+    "W52_LIVE_OWNER": "UNPROVEN",
+    "W55_INSTALLED_SOURCE": "UNPROVEN",
+    "W56_REAL_PG17": "PENDING_EXACT_HEAD_CI"
+  }
 }

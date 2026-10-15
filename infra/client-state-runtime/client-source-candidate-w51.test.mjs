@@ -15,17 +15,18 @@ const m=JSON.parse(fs.readFileSync(path.join(root,'coordination/operator-control
 const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim();
 const source=p=>fs.readFileSync(path.join(root,p),'utf8');
 
-test('W51 one source has actual W43 and six Wave8 upstream PR ancestors',()=>{
+test('W51 one source includes W43, six Wave8 and four reviewed Wave9 sibling ancestors',()=>{
  assert.equal(m.schema,'metaengine.client.source-candidate-w51.v1');
  assert.equal(m.classification,'SOURCE_ONLY_STAGING_REVIEW_REQUIRED');
  assert.equal(m.branch,'work/metaengine-client-wave9-w51-20261015');
- assert.deepEqual(m.parent_heads.map(x=>x.pr),[1273,1275,1272,1276,1269,1271,1274]);
- assert.equal(new Set(m.parent_heads.map(x=>x.sha)).size,7);
+ assert.deepEqual(m.parent_heads.map(x=>x.pr),[1273,1275,1272,1276,1269,1271,1274,1278,1282,1281,1280]);
+ assert.equal(new Set(m.parent_heads.map(x=>x.sha)).size,11);
  for(const parent of m.parent_heads){
   assert.match(parent.sha,/^[0-9a-f]{40}$/);
   assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',parent.sha,'HEAD']).status,0,'missing real parent '+parent.pr);
  }
  assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',m.merged_source_head_before_w51_tests,'HEAD']).status,0);
+ assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',m.wave9_sibling_integrated_head_before_manifest_refresh,'HEAD']).status,0);
  assert.equal(m.evidence_status.CI,'UNKNOWN_PENDING');
  assert.equal(m.authority_effect,false);
  assert.equal(m.automatic_retry_allowed,false);
@@ -33,7 +34,7 @@ test('W51 one source has actual W43 and six Wave8 upstream PR ancestors',()=>{
 });
 
 test('W51 exact protected native/context/source/PG/critic/UI blob ledger matches HEAD and current tree',()=>{
- assert.ok(Object.keys(m.protected_git_blobs).length>=24);
+ assert.ok(Object.keys(m.protected_git_blobs).length>=38);
  for(const [p,sha] of Object.entries(m.protected_git_blobs)){
   assert.match(sha,/^[0-9a-f]{40}$/);
   assert.equal(git('rev-parse','HEAD:'+p),sha,'wrong frozen tree: '+p);
@@ -54,6 +55,10 @@ test('W51 retains W43 strict missing-Owner tests, W44 context and W41 native obs
  assert.equal(git('rev-parse','HEAD:'+w38),git('rev-parse',m.base_w43+':'+w38));
  assert.equal(JSON.parse(source('apps/metaengine-browser/package.json')).version,'0.7.0-dev.37781000062.1');
  assert.equal(m.package_freeze_owner,'W54');
+ assert.match(native,/getTrustedOperatorOwnerVerifier/);
+ assert.match(source('apps/metaengine-browser/src/client-source-sync-native-w55.mjs'),/GITHUB_REFS_API/);
+ assert.match(source('apps/me2-ui/src/lib/client-work-badge-text.mjs'),/Recovery required/);
+ assert.match(source('infra/client-state-runtime/client-serial-loop-staging-w56.mjs'),/SYNTHETIC\/STAGING/);
 });
 
 test('W51 unioned W37 W39 W42 W44 W49 W47 and PG17 test registrations',()=>{
@@ -92,5 +97,5 @@ test('W51 preserves both parent roadmap entries without self-declared READY',()=
  assert.match(text,/W43 one-source Client convergence checkpoint/);
  assert.match(text,/Independent W49 outcome: BLOCKED/);
  assert.doesNotMatch(text,/^<<<<<<< |^=======|^>>>>>>> /m);
- assert.deepEqual(m.wave9_repairs_not_present_at_generation,['W52','W53','W54','W55','W56']);
+ assert.deepEqual(m.wave9_repairs_not_present_at_generation,['W53']);
 });

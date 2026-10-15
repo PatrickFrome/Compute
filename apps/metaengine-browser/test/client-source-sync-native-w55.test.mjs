@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -104,11 +104,15 @@ test('absent verified Owner and unavailable native managed provider cannot be by
   assert.equal((await noNative.read()).state,'UNKNOWN');
 });
 test('existing shell-free managed Git runner + native binding + current GitHub API: clean, dirty, moved remote', async t => {
-  const dir=mkdtempSync(path.join(tmpdir(),'metaengine-w55-fixture-'));
+  // Canonicalize ONLY the uniquely generated test directory: hosted Windows
+  // temp aliases are not trusted physical workspace paths.
+  const generated=mkdtempSync(path.join(tmpdir(),'metaengine-w55-fixture-'));
+  const dir=realpathSync(generated);
   t.after(()=>rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
   const repo=path.join(dir,'repo'), work=path.join(dir,'work');
   mkdirSync(repo);
   git(repo,'init','-q');
+  git(repo,'config','core.autocrlf','false');
   git(repo,'config','user.name','W55 Fixture');
   git(repo,'config','user.email','w55@example.invalid');
   writeFileSync(path.join(repo,'README.md'),'generated\n');

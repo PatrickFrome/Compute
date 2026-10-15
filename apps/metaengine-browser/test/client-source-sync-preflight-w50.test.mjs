@@ -173,10 +173,13 @@ test('failed trusted observation forbids invoking GitHub', async () => {
 });
 
 test('disposable actual Git worktree and current-ref adapter: clean, untracked, then moved source', async (t) => {
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { execFileSync } = await import('node:child_process');
-  const dir = mkdtempSync(path.join(tmpdir(), 'metaengine-w50-fixture-'));
+  // The Windows Actions temp directory may be a junction/alias; production
+  // worktree trust rightly rejects aliases. Canonicalize ONLY this generated fixture.
+  const generated = mkdtempSync(path.join(tmpdir(), 'metaengine-w50-fixture-'));
+  const dir = realpathSync(generated);
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const repo = path.join(dir, 'repo');
   const work = path.join(dir, 'work');

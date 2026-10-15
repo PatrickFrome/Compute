@@ -40,7 +40,7 @@ jobs:
           test "$(git config --bool core.sparseCheckout || echo false)" = false
           test -z "$(git status --porcelain)"
           npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
-      - name: Frozen W43 baseline and W51 seven-parent integrated ledger
+      - name: Frozen W43 baseline and W51 eleven-parent integrated ledger
         shell: bash
         run: |
           node --test --test-concurrency=1 \
@@ -60,6 +60,9 @@ jobs:
             apps/metaengine-browser/test/browsercell-cdp-continuity-readback.test.mjs \
             apps/metaengine-browser/test/browsercell-continuity-integration-w41.test.mjs \
             apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs \
+            apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs \
+            apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs \
+            apps/metaengine-browser/test/client-visual-readiness-w54.test.mjs \
             apps/metaengine-browser/test/supervisor-continuity-lease.test.mjs \
             apps/metaengine-browser/test/supervisor-continuity-pg17-chaos.test.mjs \
             apps/metaengine-browser/test/fleet-dag-claim-plan.test.mjs \
@@ -72,7 +75,8 @@ jobs:
         run: |
           node --test --test-concurrency=1 \
             infra/client-state-runtime/client-backup-restore-staging-w47.test.mjs \
-            infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs
+            infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs \
+            infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs
 
   frozen-me2-seven-views:
     runs-on: ubuntu-24.04

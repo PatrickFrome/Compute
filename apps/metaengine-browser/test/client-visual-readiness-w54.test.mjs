@@ -79,4 +79,3 @@ test('W54 visual renderer consumes the fail-closed projection, never paints ADMI
   assert.match(topbar, /\{badge\.label\}/);
   assert.doesNotMatch(topbar, />\{connection\?\.admin_ready && connection\?\.local_runtime_ready \? "Connected"/);
 });
-
