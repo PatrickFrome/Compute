@@ -107,6 +107,17 @@ test('clean exact current source produces bounded digest witness, never installe
   assert.equal(result.witness_sha256, (await check()).result.witness_sha256);
   assert.equal(JSON.stringify(result).includes(WORKTREE), false);
 });
+test('Windows Git canonical path casing is not a different physical worktree', async () => {
+  const upper = inventory().replace(WORKTREE, WORKTREE.toUpperCase());
+  const { result } = await check({ inventory: upper });
+  if (process.platform === 'win32') {
+    assert.equal(result.state, 'SYNCED_SOURCE', result.reason);
+  } else {
+    assert.equal(result.state, 'UNSYNCED');
+    assert.equal(result.reason, 'WORKTREE_MISSING_DETACHED_OR_UNLOCKED');
+  }
+});
+
 test('never issue Git or GitHub reads without complete trusted native binding', async () => {
   const f = fixture().f;
   delete f.readTrustedBinding;
@@ -210,7 +221,7 @@ test('disposable actual Git worktree and current-ref adapter: clean, untracked, 
     },
   });
   const success = await read();
-  assert.equal(success.state, 'SYNCED_SOURCE');
+  assert.equal(success.state, 'SYNCED_SOURCE', `real git preflight: ${success.state}/${success.reason}`);
   assert.equal(success.current_source_sha, sha);
   writeFileSync(path.join(work, 'untracked-source.mjs'), 'export const x = 1;\n');
   assert.equal((await read()).reason, 'WORKTREE_DIRTY_TRACKED_OR_UNTRACKED');

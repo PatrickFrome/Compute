@@ -62,6 +62,15 @@ function assertGitPlan(plan) {
   const argv = plan.argv;
   if (plan.effect === 'WORKTREE_INVENTORY_READ' &&
       argv.length === 4 && argv.every((arg, index) => arg === ['worktree', 'list', '--porcelain', '-z'][index])) return;
+  // W55 observational plans, fixed by the W50 preflight. No arbitrary Git argv.
+  const reads = {
+    WORKTREE_STATUS_READ: ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+    WORKTREE_UPSTREAM_READ: ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+    WORKTREE_ORIGIN_READ: ['remote', 'get-url', 'origin'],
+  };
+  const fixed = reads[plan.effect];
+  if (fixed && argv.length === fixed.length && argv.every((arg, i) => arg === fixed[i])
+    && plan.authority_effect === false && plan.automatic_retry_allowed === false) return;
   if (plan.effect === 'WORKTREE_CREATE_LOCKED' && argv.length === 9 &&
       argv[0] === 'worktree' && argv[1] === 'add' && argv[2] === '--lock' && argv[3] === '--reason' &&
       argv[4] === `METAENGINE:${plan.workspace_id}:task:${plan.task_id}:lease:${plan.lease_generation}` &&
@@ -84,6 +93,11 @@ export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = 
         // environment fence to inventory and creation, or inherited GIT_DIR /
         // GIT_WORK_TREE could redirect the effect away from the admitted repo.
         const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+        // Even observational Git must not update index locks or enable prompts.
+        if (plan.effect.endsWith('_READ')) {
+          env.GIT_OPTIONAL_LOCKS = '0'; env.GIT_TERMINAL_PROMPT = '0';
+          env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
+        }
         const child = spawnProcess('git', plan.argv.map(String), { cwd: plan.cwd, shell: false, windowsHide: true, env });
         const out = []; const err = []; let bytes = 0; let timer; let failure = null;
         const stop = (reason) => { if (failure) return; failure = new Error(reason); child.kill(); };

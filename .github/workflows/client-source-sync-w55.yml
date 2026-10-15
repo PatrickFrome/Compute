@@ -1,0 +1,46 @@
+name: Client Source Sync W55 (source only)
+on:
+  push:
+    branches:
+      - work/metaengine-client-wave9-w55-20261015
+  pull_request:
+    paths:
+      - apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs
+      - apps/metaengine-browser/src/client-source-sync-native-w55.mjs
+      - apps/metaengine-browser/src/managed-task-project-host.mjs
+      - apps/metaengine-browser/src/managed-task-project-runtime.mjs
+      - apps/metaengine-browser/src/workspace-git-hardening.mjs
+      - apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs
+      - apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs
+      - .github/workflows/client-source-sync-w55.yml
+permissions:
+  contents: read
+jobs:
+  exact-source-sync:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact source checkout
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node -e "const p=require('node:child_process');const h=p.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();if(h!==process.env.SOURCE_SHA)process.exit(1);console.log('W55 exact '+h)"
+      - name: Syntax, real disposable Git and source/native provider contracts
+        run: |
+          node --check apps/metaengine-browser/src/client-source-sync-native-w55.mjs
+          node --check apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs
+          node --check apps/metaengine-browser/src/managed-task-project-host.mjs
+          node --check apps/metaengine-browser/src/managed-task-project-runtime.mjs
+          node --test --test-concurrency=1 apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-observer.test.mjs
+      - name: Diff integrity
+        run: git diff --check ${{ github.event.pull_request.base.sha || 'HEAD^' }} HEAD

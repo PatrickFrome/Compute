@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { normalizeWorkspaceBindingSnapshot } from './workspace-binding-observer.mjs';
-import { planWorkspaceInventory, verifyWorkspaceInventory, parseWorktreePorcelainZ } from './workspace-git-hardening.mjs';
+import { planWorkspaceInventory, verifyWorkspaceInventory, parseWorktreePorcelainZ, samePhysicalWorkspacePath } from './workspace-git-hardening.mjs';
 
 export const CLIENT_SOURCE_SYNC_W50_SCHEMA = 'metaengine.client.source-sync-w50.v1';
 export const CLIENT_SOURCE_SYNC_W50_PARENT = '2e9018d14cfe55256ddc5a94693ff0a288b90318';
@@ -94,7 +94,7 @@ function trustedShape(binding) {
       || typeof binding.managed_root !== 'string' || !path.isAbsolute(binding.managed_root)
       || typeof binding.worktree_path !== 'string' || !path.isAbsolute(binding.worktree_path)
       || typeof binding.worktree_realpath !== 'string'
-      || path.resolve(binding.worktree_realpath) !== path.resolve(binding.worktree_path)) return false;
+      || !samePhysicalWorkspacePath(binding.worktree_realpath, binding.worktree_path)) return false;
   const relative = path.relative(binding.managed_root, binding.worktree_path);
   if (!relative || relative === '..' || relative.startsWith('..' + path.sep)
       || path.isAbsolute(relative)) return false;
@@ -111,7 +111,7 @@ function inventoryHead(binding, stdout) {
   if (!cleanOutput(stdout)) return null;
   try {
     const records = parseWorktreePorcelainZ(stdout);
-    const matches = records.filter(r => r.worktree && path.resolve(r.worktree) === path.resolve(binding.worktree_path));
+    const matches = records.filter(r => samePhysicalWorkspacePath(r.worktree, binding.worktree_path));
     if (matches.length !== 1 || matches[0].detached || matches[0].prunable || !matches[0].locked) return null;
     return SHA.test(String(matches[0].HEAD || '')) ? matches[0].HEAD : null;
   } catch { return null; }
@@ -138,10 +138,14 @@ export async function readClientSourceSyncPreflightW50({
     const status1 = await readGit(planFixedGit(binding, 'STATUS'));
     if (!cleanOutput(status1)) return fail('UNKNOWN', 'GIT_STATUS_UNAVAILABLE');
     if (status1.length) return fail('UNSYNCED', 'WORKTREE_DIRTY_TRACKED_OR_UNTRACKED');
-    const upstream = await readGit(planFixedGit(binding, 'UPSTREAM'));
+    let upstream;
+    try { upstream = await readGit(planFixedGit(binding, 'UPSTREAM')); }
+    catch { return fail('UNKNOWN', 'UPSTREAM_MISSING_OR_ALTERNATE'); }
     if (!cleanOutput(upstream) || upstream.trim() !== 'origin/' + binding.branch_name)
       return fail('UNKNOWN', 'UPSTREAM_MISSING_OR_ALTERNATE');
-    const origin = await readGit(planFixedGit(binding, 'ORIGIN'));
+    let origin;
+    try { origin = await readGit(planFixedGit(binding, 'ORIGIN')); }
+    catch { return fail('UNKNOWN', 'REPOSITORY_ORIGIN_UNTRUSTED'); }
     if (!remoteMatches(origin)) return fail('UNKNOWN', 'REPOSITORY_ORIGIN_UNTRUSTED');
     // Source-of-truth read via fixed GitHub repository ref reader, not origin/*
     // refs and never a Git fetch. A positive cached observation is forbidden.
