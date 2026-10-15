@@ -29,6 +29,7 @@ import { AgentObservationPlane } from './agent-observation-plane.mjs';
 import { projectNativeRuntimeObservation, projectClientWorkReadiness } from './client-work-readiness.mjs';
 import { TabNetworkActivityRegistry } from './tab-network-activity.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
+import { createHostNativeOwnerReadersW60 } from './host-native-owner-producers-w60.mjs';
 import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
@@ -2121,6 +2122,12 @@ async function initNativeSupervisor() {
     });
     nativeSupervisor = new NativeSupervisorClient({
       identity,
+      // W60: production registers all typed native Owner producers. This cannot
+      // mint Owner authority from device enrollment/Guardian liveness; missing
+      // privileged custody or pinned signed EXE remains explicit UNKNOWN.
+      trustedNativeOwnerReaders: createHostNativeOwnerReadersW60({
+        identity, guardianLauncher: ensureGuardianBootstrapLauncher(), app,
+      }),
       version: app.getVersion(),
       intervalMs: 2000,
       commandBatchSize: 64,

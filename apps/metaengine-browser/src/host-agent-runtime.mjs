@@ -2,6 +2,7 @@ import path from 'node:path';
 import { readClientBackupAclNativeW58 } from './client-backup-acl-native-w58.mjs';
 import { createHostAgentServer } from './host-agent-ipc.mjs';
 import { hostAgentProtocolManifest } from './host-agent-protocol.mjs';
+import { readWindowsKernelProcessW60 } from './host-native-owner-producers-w60.mjs';
 
 export const HOST_AGENT_RUNTIME_SCHEMA = 'metaengine.host-agent.runtime.v1';
 
@@ -97,6 +98,27 @@ export class HostAgentRuntime {
             backupDirectory: root,
             archivePath: root ? path.win32.join(root,'postgresql-17-snapshot.dump') : null,
             readOwnerIncarnation: this.#backupOwnerIncarnation,
+          });
+        },
+        // Existing session-HMAC pipe + nonce replay fence is the only wire.
+        // No requested PID/path/credential: the Host samples ITS OWN kernel
+        // birth, and never declares Owner-binding based on a running process.
+        OWNER_NATIVE_READBACK: async (payload) => {
+          this.#requests += 1;
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+              Object.keys(payload).length !== 0)
+            throw new Error('host_owner_native_payload_denied');
+          const kernel = await readWindowsKernelProcessW60(process.pid);
+          return Object.freeze({
+            schema: 'metaengine.host.owner-native-readback.w60.v1',
+            state: kernel ? 'KERNEL_PROCESS_OBSERVED' : 'UNKNOWN',
+            kernel: kernel ? Object.freeze({pid:kernel.pid,
+              created_at:kernel.created_at,observed_at:kernel.observed_at,
+              source:'OS_PROCESS_INVENTORY',authority_effect:false}) : null,
+            owner_binding_proven: false,
+            signed_installed_exe_proven: false,
+            credential_exposed: false,
+            authority_effect: false,
           });
         },
         SOURCE_STATUS: async () => {
