@@ -42,7 +42,7 @@ jobs:
           test "$(git config --bool core.sparseCheckout || echo false)" = false
           test -z "$(git status --porcelain)"
           npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
-      - name: Frozen W43/W51 historical baselines and W59 current eighteen-parent ledger
+      - name: Frozen W43/W51 historical baselines and W59 current nineteen-parent ledger
         shell: bash
         run: |
           node --test --test-concurrency=1 \

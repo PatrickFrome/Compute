@@ -94,7 +94,12 @@
     {
       "pr": 1290,
       "wave": "W60_SOURCE",
-      "sha": "1282713ed226aa87d62fed987e9e8b0f9f49b8dd"
+      "sha": "45f9d3f045c1c3d16447864df467eb3bf36bad53"
+    },
+    {
+      "wave": "W63_SOURCE_SYNC_WINDOWS_LINUX_GREEN",
+      "pr": 1286,
+      "sha": "6a124ad0032a5beaa583de978d9bf37b4be35f34"
     }
   ],
   "pre_version_assembly_anchor": "994e2ac7a04b0a6018c188b1ceb60c5c7cfc0bf9",
@@ -113,7 +118,7 @@
     "apps/metaengine-browser/src/client-backup-acl-native-w58.mjs": "5b6cd2312e52cb247bfac26308d7bc94ba39f1d7",
     "apps/metaengine-browser/test/client-local-contracts-w38.test.mjs": "5c4d976bfc75dceb093c793619e41e641b14e299",
     "apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs": "049e1e67bbc9ad1a050182d1409eaab07a575ee3",
-    "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs": "79d113caa9adeb696459cadb646620a8d06d2324",
+    "apps/metaengine-browser/test/client-source-sync-native-w55.test.mjs": "acf84ea9fad6a5700465b6722e36ab51ac195b60",
     "apps/me2-ui/src/components/me2/shell/topbar.tsx": "c072a5183ddfeec90d94a9445fda5f8cc48426f8",
     "apps/me2-ui/src/lib/client-work-badge-text.mjs": "96097f731f3e90f5a9482bcd1202bbcf1ddb1656",
     "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34",
@@ -143,13 +148,12 @@
     "apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs": "ca4c1d0594ac88740795d4082dd3a703ea32ff3f",
     "apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs": "bc679700720b2e76a7225b617be8b806baf27f53",
     "infra/client-state-runtime/README-host-native-owner-w60.md": "d308afbc4f3ec05be6670a3db8d2c29a3c3a6ddc",
-    ".github/workflows/client-host-owner-w60.yml": "30bd94ead8c8ffe84a25050ff9d8291a1e11b715"
+    ".github/workflows/client-host-owner-w60.yml": "18e046498eafefa410a2ad82e751bd8a071e7f60",
+    "apps/metaengine-browser/test/source-sync-fixture-diagnostics-w63.mjs": "91d92be41a4add219e2538673d62665369e62a75"
   },
   "candidate_sha_rule": "Use only exact GitHub PR head at test time; own source commit cannot self-reference.",
   "freeze_owner": "W62",
-  "wave10_unpublished_repair_omissions": [
-    "W63"
-  ],
+  "wave10_unpublished_repair_omissions": [],
   "unbound_historical_effects": [
     "W53_AMBIGUOUS_UNKNOWN",
     "HISTORICAL_59_AMBIGUOUS_UNKNOWN"
@@ -169,7 +173,22 @@
     "W62": "TYPED_ME2_SOURCE_ONLY_NOT_PACKAGE_FREEZE",
     "W61": "OWN_PG_BIRTH_AND_DISPOSABLE_RESTORE_SOURCE_NOT_INSTALLED",
     "W64": "PG17_PROCESS_LIFECYCLE_FIX_NOT_REAL_AGENT",
-    "W60": "HOST_DIAGNOSTICS_ONLY_NO_AUTHENTIC_CUSTODIAL_OWNER_OR_SIGNED_INSTALL"
+    "W60": "HOST_DIAGNOSTIC_SOURCE_PLUS_EXACT_HEAD_CI_CHECKOUT_FIX_NO_GENUINE_NATIVE_OWNER",
+    "W63": "W50_W55_WINDOWS_UBUNTU_SOURCE_ONLY_PASS_EXACT_W63_HEAD_INTEGRATED_HEAD_PENDING"
   },
-  "package_freeze_status": "W62_SOURCE_ONLY_NO_DISTINCT_PACKAGE"
+  "package_freeze_status": "W62_SOURCE_ONLY_NO_DISTINCT_PACKAGE",
+  "w63_source_sync_frozen_ci": {
+    "ref": "6a124ad0032a5beaa583de978d9bf37b4be35f34",
+    "scope": "SOURCE_ONLY_PARENT_NOT_INTEGRATED_SHA",
+    "W55": {
+      "run": 38668631525,
+      "windows_job": 116206245138,
+      "linux_job": 116206245089
+    },
+    "W50": {
+      "run": 38668631262,
+      "windows_job": 116206244074,
+      "linux_job": 116206244236
+    }
+  }
 }
