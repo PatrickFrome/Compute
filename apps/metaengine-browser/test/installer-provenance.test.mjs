@@ -216,6 +216,8 @@ test('verify discovers payload dir contents by provenance name', () => {
       installer_bytes: installer.bytes.length,
       source_head: HEAD,
       run_id: '4242',
+      signed: false,
+      promotion_authorized: false,
     }));
     const { json } = runCli(['verify', '--dir', payload, '--expect-head', HEAD]);
     assert.equal(json.schema, 'metaengine.browser.installer-provenance-acquired.v1');
@@ -283,6 +285,8 @@ test('verify fails with installer_missing when payload renamed', () => {
       installer_sha256: installer.sha256,
       installer_bytes: installer.bytes.length,
       source_head: HEAD,
+      signed: false,
+      promotion_authorized: false,
     }));
     const { code } = runCli(['verify', '--dir', payload, '--expect-head', HEAD], { expectCode: 1 });
     assert.equal(code, 'installer_missing');
@@ -313,6 +317,8 @@ test('verify rejects provenance with missing digest field', () => {
       schema: 'metaengine.browser.installer-provenance.v1',
       installer_name: INSTALLER_NAME,
       installer_bytes: installer.bytes.length,
+      signed: false,
+      promotion_authorized: false,
     }));
     const { code } = runCli(['verify', '--installer', installer.filePath, '--provenance', provenancePath, '--expect-head', HEAD], { expectCode: 1 });
     assert.equal(code, 'provenance_field_invalid');
