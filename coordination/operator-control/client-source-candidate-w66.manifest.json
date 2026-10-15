@@ -231,7 +231,7 @@
     "infra/client-state-runtime/client-serial-loop-staging-w56.mjs": "6f8213a46f242fb8d371cdd9907fc15ffb80f6a1",
     "infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs": "af2fbcc34a94f3d248c0e48bedba2180f173d24a",
     "infra/client-state-runtime/client-source-candidate-w51.test.mjs": "afbdfeadae606b38083cda5515a720166f7555a5",
-    "infra/client-state-runtime/client-source-candidate-w59.test.mjs": "82906153447c482b8fe5bc490763ec57e0bb7b35",
+    "infra/client-state-runtime/client-source-candidate-w59.test.mjs": "b0ac9c5f9293256b23af2827526167407d2a230a",
     "infra/client-state-runtime/client-source-candidate-w66.test.mjs": "44a4048d503c0a4a4d2acd570d5838fff7a546bb",
     "infra/client-state-runtime/client-w61-two-pg17-restore.integration.test.mjs": "6c11865c4886149ab085c5de01eb12a1f8cbc583",
     "infra/client-state-runtime/client-winps-fixture-w65.mjs": "4cddb8206bac1bb0586bfb64c96819acd5009818",

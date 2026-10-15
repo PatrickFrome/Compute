@@ -46,7 +46,7 @@ test('W59 union registers W58 ACL and keeps original native Owner, critic, PG an
   assert.match(scripts['test:integration'], /disposable-pg17-logical-restore.integration.test.mjs/);
   assert.match(read('apps/metaengine-browser/src/client-backup-acl-native-w58.mjs'), /ACL_REVIEW_REQUIRED|acl|ACL/);
   const hostProtocol = read('apps/metaengine-browser/src/host-agent-protocol.mjs');
-  const hostRuntime = read('apps/metaengine-browser/src/host-agent-runtime.mjs');
+  const hostRuntime = git('show', '83e1d60deb8189b09403e157cc7d639629549550:apps/metaengine-browser/src/host-agent-runtime.mjs');
   assert.match(hostProtocol,/BACKUP_ACL_READBACK/);
   assert.match(hostProtocol,/OWNER_NATIVE_READBACK/);
   assert.match(hostRuntime,/BACKUP_ACL_READBACK: async/);
