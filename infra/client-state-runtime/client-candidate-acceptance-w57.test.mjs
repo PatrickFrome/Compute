@@ -198,3 +198,14 @@ test('fully missing evidence stays blocked without throwing', () => {
   assert.equal(out.source_sha,null);
   assert.equal(out.gates.installed_and_live,'UNKNOWN');
 });
+
+
+test('missing, null and primitive inputs never escape fail-closed or produce REVIEW_REQUIRED', () => {
+  for (const value of [null, undefined, 7, false, 'verified', []]) {
+    const out = auditClientCandidateW57(value);
+    assert.equal(out.state, 'BLOCKED');
+    assert.equal(out.effect_authority, false);
+    assert.equal(out.gates.one_source, 'UNKNOWN');
+    assert.equal(out.gates.installed_and_live, 'UNKNOWN');
+  }
+});
