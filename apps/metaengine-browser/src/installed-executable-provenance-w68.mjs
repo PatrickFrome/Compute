@@ -111,6 +111,8 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
     const second = await nativeRead(exe);
     const exeAfter = await io.lstat(exe);
     const afterDir = await io.lstat(base);
+    const sidecarsAfter = await Promise.all(Object.values(NAMES).map(name => io.lstat(path.join(base, name))));
+    if (!sidecarsAfter.every((stat, index) => sameStat([envelopeFile, bundleFile, evidenceFile][index].stat, stat))) return null;
     if (!second || second.native_signature_verified !== true || second.exact_bytes_verified !== true ||
         second.installed_exe_sha256 !== first.installed_exe_sha256 ||
         second.signer_thumbprint !== first.signer_thumbprint ||

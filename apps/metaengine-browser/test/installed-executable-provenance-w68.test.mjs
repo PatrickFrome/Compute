@@ -200,6 +200,22 @@ test('changed native signer between before and after readback is a TOCTOU refusa
   });
 });
 
+test('sidecar digest/path drift during second native observation is refused', async () => {
+  await withFixture(async f => {
+    let count=0;
+    const native = async () => {
+      count++;
+      if (count === 2) fs.appendFileSync(f.files.evidence,' ');
+      return { native_signature_verified:true,exact_bytes_verified:true,
+        installed_exe_sha256:f.m.exe_sha256,signer_thumbprint:SIGNER };
+    };
+    assert.equal(await verifyStagingInstalledExecutableW68({
+      executable:f.exe,version:VERSION,testTrustRoot:f.root,testNativeRead:native,
+    }),null);
+    assert.equal(count,2);
+  });
+});
+
 test('production reader has no caller-supplied signer/root/path and returns null without native packaged evidence', async () => {
   assert.equal(await readVerifiedInstalledExecutableW68({
     isPackaged:true,getVersion:()=>VERSION,
