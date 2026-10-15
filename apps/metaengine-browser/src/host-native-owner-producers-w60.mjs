@@ -140,6 +140,7 @@ export function createHostNativeOwnerReadersW60({
           g.guardian_client_kernel_birth_verified !== true ||
           g.guardian_client_pid !== owner.pid ||
           Date.parse(g.guardian_client_created_at) !== Date.parse(owner.created_at) ||
+          g.guardian_client_process_incarnation_id !== owner.process_incarnation_id ||
           !/^pid:[0-9]+:created_100ns:[1-9][0-9]{16,18}$/.test(
             g.guardian_client_process_incarnation_id || '') ||
           !HEX64.test(g.guardian_enrollment_evidence_sha256 || '') ||
