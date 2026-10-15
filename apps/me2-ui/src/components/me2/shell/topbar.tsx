@@ -5,12 +5,14 @@
 import { useMe2 } from "@/components/me2/store";
 import { useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 import { capabilityLabel } from "@/lib/client-readiness-labels";
+import { projectClientWorkBadge } from "@/lib/client-work-badge-text.mjs";
 
 export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOpen?: boolean; onOpenFleet?: () => void }) {
   const page = useMe2((s) => s.page);
   const runtime = useClientRuntimeStatus();
   const connection = runtime.readback?.connection;
   const work = runtime.readback?.work;
+  const badge = projectClientWorkBadge({ connection, work });
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const mainWorkspace = page === "browser";
@@ -81,11 +83,11 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
           onClick={() => setPage("system")}
           data-testid="admin-connection-badge"
           data-cloud-state={connection?.cloud_control_state || "UNAVAILABLE"}
-          data-admin-ready={connection?.admin_ready === true ? "true" : "false"}
-          data-work-state={work?.state || "UNAVAILABLE"}
-          data-work-reason={work?.reason || ""}
+          data-admin-ready={badge.admin_ready ? "true" : "false"}
+          data-work-state={badge.state}
+          data-work-reason={badge.reason || ""}
           className={`flex h-7 max-w-[184px] items-center border px-2 font-bold tracking-[0.04em] ${
-            work?.continuous_autonomy_ready === true
+            badge.autonomous_ready_color
               ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
               : connection?.admin_ready === true
                 ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
@@ -94,7 +96,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
            title={work ? `${work.detail} Continuous autonomy: ${capabilityLabel(work, 'continuous_autonomy')}` : "Connection status is unavailable. Open Settings for details."}
            aria-label={`Connection: ${connection?.admin_ready && connection?.local_runtime_ready ? "Connected" : "Pending"}. Execution: ${work?.label || "Unavailable"}. Open Settings.`}
         >
-          <span className="truncate">{work?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || work?.reason === "AGENT_ORIGIN_UNPROVEN" ? "Check sessions" : connection?.admin_ready && connection?.local_runtime_ready ? "Connected" : connection?.local_runtime_ready ? "Local runtime" : runtime.state === "LOADING" ? "Connecting…" : "Check connection"}</span>
+          <span className="truncate">{badge.label}</span>
         </button>
       </div>
     </header>
