@@ -56,11 +56,21 @@ function ownerBinding(raw, at) {
     !/^[a-f0-9]{40}$/i.test(raw.source_sha || '') ||
     !timestamp(raw.owner_created_at) || !timestamp(raw.postgres_started_at) ||
     !fresh(raw.owner_observed_at, at)) return null;
+  const hasProvenSource = typeof raw.proof_identity === 'string' &&
+    /^[a-f0-9]{64}$/i.test(raw.proof_identity) &&
+    typeof raw.installed_exe_sha256 === 'string' &&
+    /^[a-f0-9]{64}$/i.test(raw.installed_exe_sha256);
+  if ((raw.proof_identity !== undefined || raw.installed_exe_sha256 !== undefined) &&
+    !hasProvenSource) return null;
   const base = canonicalGatewayUrl(raw.gateway_base_url);
   return base ? Object.freeze({ base, ownerId: raw.owner_id, apiKey: raw.api_key,
     epoch: raw.owner_epoch, generation: raw.owner_generation, pid: raw.owner_pid,
     birth: timestamp(raw.owner_created_at), incarnation: raw.process_incarnation_id,
-    postgresBirth: timestamp(raw.postgres_started_at), sourceSha: raw.source_sha.toLowerCase() }) : null;
+    postgresBirth: timestamp(raw.postgres_started_at), sourceSha: raw.source_sha.toLowerCase(),
+    installedExeSha256: hasProvenSource ? raw.installed_exe_sha256.toLowerCase() : null,
+    proofIdentity: hasProvenSource ? raw.proof_identity.toLowerCase() : null,
+    projectId: typeof raw.project_id === 'string' && OWNER_ID.test(raw.project_id) ? raw.project_id : null,
+  }) : null;
 }
 function sameBinding(a, b) {
   return Boolean(a && b && Object.keys(a).every(key => a[key] === b[key]));
@@ -84,7 +94,7 @@ function projectPlane(plane, name, now) {
   return { source: SOURCES[name], state: plane.state,
     fresh: trusted, proof: trusted ? 'TRUSTED_READBACK' : 'NONE', observed_at };
 }
-function projectContext(raw, ownerId, ownerEpoch, now) {
+function projectContext(raw, binding, now) {
   if (!raw || raw.schema !== GATEWAY_SCHEMA || raw.version !== 1 ||
     raw.operation !== 'context' || raw.storage !== 'OWN_POSTGRES_ONLY' ||
     raw.scope !== 'READ_ONLY' || raw.authority_effect !== false ||
@@ -102,7 +112,7 @@ function projectContext(raw, ownerId, ownerEpoch, now) {
   // manufacture event_seq=0, proof hashes, or run identity.
   if (raw.run?.state === 'AVAILABLE') {
     const run = raw.run;
-    if (run.owner_id !== ownerId || run.owner_epoch !== ownerEpoch || !OWNER_ID.test(run.run_id || '') ||
+    if (run.owner_id !== binding.ownerId || run.owner_epoch !== binding.epoch || !OWNER_ID.test(run.run_id || '') ||
       !OWNER_ID.test(run.project_id || '') ||
       !Number.isSafeInteger(run.owner_epoch) || run.owner_epoch < 0 ||
       typeof run.cursor !== 'string' || !DECIMAL.test(run.cursor) ||
@@ -111,11 +121,44 @@ function projectContext(raw, ownerId, ownerEpoch, now) {
     event_seq = Number(run.cursor);
   } else if (raw.run?.state !== 'UNKNOWN' || raw.run?.proof !== 'NONE' ||
     raw.run?.run_id !== null || raw.run?.cursor !== null) return null;
+  // Only the independent native installed-EXE verifier and the own-PG Gateway
+  // source witness together can certify one source/cursor generation. A hash
+  // of arbitrary caller data, the response's proof flag or env source SHA is
+  // not an attestation. No physical verifier => explicit UNKNOWN facets.
+  const installed = raw.installed_source;
+  const exactSource = Boolean(run_id && event_seq !== null && binding.proofIdentity &&
+    binding.installedExeSha256 && binding.projectId === raw.run?.project_id &&
+    installed && installed.owner_id === binding.ownerId &&
+    installed.owner_epoch === binding.epoch &&
+    installed.owner_generation === binding.generation &&
+    installed.process_incarnation_id === binding.incarnation &&
+    installed.source_sha === binding.sourceSha &&
+    installed.installed_exe_sha256 === binding.installedExeSha256 &&
+    installed.proof_identity === binding.proofIdentity &&
+    fresh(installed.observed_at, now) &&
+    raw.context.planes.continuity?.details?.project_id === binding.projectId &&
+    raw.context.planes.continuity?.details?.owner_generation === binding.generation &&
+    raw.context.planes.continuity?.details?.through_seq === event_seq &&
+    Number.isSafeInteger(raw.context.planes.continuity?.details?.next_seq) &&
+    raw.context.planes.continuity.details.next_seq <= event_seq &&
+    planes.continuity.state === 'AVAILABLE' &&
+    planes.continuity.proof === 'TRUSTED_READBACK');
+  if (exactSource) planes.source = { source: SOURCES.source, state: 'AVAILABLE',
+    proof: 'TRUSTED_READBACK', fresh: true, observed_at: installed.observed_at };
+  // Preserve negative forensic evidence (STALE/UNVERIFIED/AMBIGUOUS), but
+  // strip any positive Source claim not cross-certified by both native and PG.
+  else if (planes.source.state === 'READY' || planes.source.state === 'AVAILABLE')
+    planes.source = { source: SOURCES.source, state: 'UNKNOWN',
+      proof: 'NONE', fresh: false, observed_at: null };
   return Object.freeze({ schema: CONTEXT_SCHEMA, scope: 'READ_ONLY',
     storage: 'OWN_POSTGRES_ONLY', authority_effect: false, scheduler_authority: false,
     automatic_retry_allowed: false, remote_fallback_allowed: false,
     cloud_database_dependency: false, generated_at: timestamp(context.generated_at),
-    planes, run_id, event_seq, proof_identity: null });
+    planes, run_id, event_seq,
+    owner_id: exactSource ? binding.ownerId : null,
+    owner_epoch: exactSource ? binding.epoch : null,
+    source_sha: exactSource ? binding.sourceSha : null,
+    proof_identity: exactSource ? binding.proofIdentity : null });
 }
 async function boundedJson(response) {
   if (!response?.ok || response.status !== 200 || response.redirected === true) return null;
@@ -175,7 +218,7 @@ export function createOperatorNativeContextReader({ getTrustedBinding = () => nu
         catch { return unknownNativeOperatorContext('OWNER_NOT_READY'); }
         if (!sameBinding(binding, confirmed))
           return unknownNativeOperatorContext('OWNER_NOT_READY');
-        const context = projectContext(raw, binding.ownerId, binding.epoch, at);
+        const context = projectContext(raw, binding, at);
         return context || unknownNativeOperatorContext('GATEWAY_RESPONSE_INVALID');
       } catch { return unknownNativeOperatorContext('GATEWAY_UNAVAILABLE'); }
     })().finally(() => { inFlight = null; });

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createNativeOwnerVerifierW52, missingNativeOwnerProtocolsW52 } from './native-owner-verifier-w52.mjs';
 import {
   NativeSupervisorClient as CoreNativeSupervisorClient,
   NATIVE_SUPERVISOR_BASE,
@@ -447,6 +448,14 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #resolveBrowserCell = null;
   #resolveContinuityView = null;
   #continuityReadback = null;
+  #trustedNativeOwnerVerifier = null;
+  #nativeOwnerProtocolGaps = null;
+
+  // Read-only Owner evidence, not a status/READY projection. The exact native
+  // Host, kernel, Guardian, signed EXE, secret-store and own-PG protocols must
+  // be provided by trusted in-process main/Host code, never renderer/HTTP.
+  getTrustedOperatorOwnerVerifier() { return this.#trustedNativeOwnerVerifier; }
+  getTrustedOperatorOwnerProtocolGaps() { return this.#nativeOwnerProtocolGaps; }
 
   constructor(options = {}) {
     const rawFetch = options.fetchImpl ?? globalThis.fetch;
@@ -553,6 +562,8 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     });
     if (!options.identity) throw new Error('native_supervisor_identity_required');
     if (typeof sourceGetState !== 'function') throw new Error('native_supervisor_state_provider_required');
+    this.#nativeOwnerProtocolGaps = missingNativeOwnerProtocolsW52(options.trustedNativeOwnerReaders);
+    this.#trustedNativeOwnerVerifier = createNativeOwnerVerifierW52(options.trustedNativeOwnerReaders);
     this.#workspaceIdentity = options.identity;
     this.#workspaceFetch = createBoundedSupervisorFetch(stateSingleWriterFetch, { deadlineMs: options.requestDeadlineMs });
     this.#commandTargetProjection = () => commandTargetProjection;

@@ -46,6 +46,28 @@ export async function createManagedTaskProjectHost({
   const pending = new Set();
   let state = 'READY'; let commands = 0; let failures = 0; let closing = null; let repositoryState = 'NOT_CHECKED';
   return Object.freeze({
+    // Native-only source observer hook for W55/W51. This shares the existing
+    // configured managed Git runner, without exposing a command/IPC route.
+    async readSourceSyncGit(plan) {
+      if (state !== 'READY' || !['WORKTREE_INVENTORY_READ', 'WORKTREE_STATUS_READ',
+        'WORKTREE_UPSTREAM_READ', 'WORKTREE_ORIGIN_READ'].includes(plan?.effect)
+        || plan.authority_effect !== false || plan.automatic_retry_allowed !== false)
+        fail('source_sync_read_denied');
+      // The current private repository configuration is the path authority.
+      // Never execute a page-supplied cwd or even another managed project.
+      const config = await readManagedTaskProjectRepository({ userDataPath, platform, verifyStorage });
+      if (config?.repo_id !== 'PatrickFrome/Compute') fail('source_sync_repository_unbound');
+      const samePath = (a, b) => platform === 'win32'
+        ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+        : path.resolve(a) === path.resolve(b);
+      const inventory = plan.effect === 'WORKTREE_INVENTORY_READ';
+      const child = path.relative(config.managed_root, plan.cwd);
+      if (typeof plan.cwd !== 'string' || !path.isAbsolute(plan.cwd)
+        || (inventory ? !samePath(plan.cwd, config.repo_root)
+          : !child || child === '..' || child.startsWith('..' + path.sep) || path.isAbsolute(child))
+        || !samePath(await fs.realpath(plan.cwd), plan.cwd)) fail('source_sync_path_unbound');
+      return gitExecutor.execute(plan);
+    },
     async executeCommand(command) {
       if (!MANAGED_PROJECT_COMMAND_ACTIONS.includes(command?.action)) return executeCommand(command);
       if (state !== 'READY') fail('closed');
