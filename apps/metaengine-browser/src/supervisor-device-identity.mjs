@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { HostAgentClient } from './host-agent-ipc.mjs';
 
 export const SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 export const ENROLLMENT_SIGNATURE_PROFILE = 'METAENGINE_NATIVE_ENROLLMENT_V1';
@@ -79,6 +80,9 @@ export class SupervisorDeviceIdentity {
   #state = null;
   #privateKey = null;
   #initialization = null;
+  #w67HostAgent = null;
+  #w67PrivateGatewayReadback = null;
+  #w67PrivatePostgresBirth = null;
 
   constructor({ statePath, secureStorage }) {
     if (!statePath) throw new Error('supervisor_device_state_path_required');
@@ -162,6 +166,109 @@ export class SupervisorDeviceIdentity {
     if (!this.#state) return null;
     const { encrypted_private_key_b64: _secret, ...safe } = this.#state;
     return structuredClone({ ...safe, enrolled: Boolean(this.#state.device_id) });
+  }
+
+  // This capability is bound ONLY by the already-running in-process Host
+  // composition to its own authenticated HostAgentClient. No renderer, public
+  // IPC, URL/path selector or caller-provided proof enters this interface.
+  // Binding does not create an Owner; the Host must independently read its
+  // real custody/PG source. An absent Host/Guardian/installed proof is UNKNOWN.
+  bindHostCustodyW67({ hostAgentClient, privateGatewayReadback = null,
+    privatePostgresBirth = null } = {}) {
+    if (!(hostAgentClient instanceof HostAgentClient) || this.#w67HostAgent)
+      throw new Error('w67_authenticated_host_client_required');
+    if (privateGatewayReadback != null && typeof privateGatewayReadback !== 'function')
+      throw new Error('w67_private_gateway_provider_invalid');
+    if (privatePostgresBirth != null && typeof privatePostgresBirth !== 'function')
+      throw new Error('w67_private_postgres_provider_invalid');
+    this.#w67HostAgent = hostAgentClient;
+    this.#w67PrivateGatewayReadback = privateGatewayReadback;
+    this.#w67PrivatePostgresBirth = privatePostgresBirth;
+    return () => {
+      if (this.#w67HostAgent !== hostAgentClient) return;
+      this.#w67HostAgent = null;
+      this.#w67PrivateGatewayReadback = null;
+      this.#w67PrivatePostgresBirth = null;
+    };
+  }
+
+  async readHostOwnerIncarnation() {
+    const client = this.#w67HostAgent;
+    if (!client || !this.#state?.device_id) return null;
+    try {
+      const response = await client.request('OWNER_NATIVE_READBACK', {}, { timeoutMs: 1500 });
+      const owner = response?.owner;
+      const kernel = response?.kernel;
+      // An authenticated IPC frame only proves its sender, NOT Owner. Host
+      // custody must supply a distinct, native/PG owner binding; W60's current
+      // process diagnostic explicitly has owner_binding_proven=false.
+      if (response?.schema !== 'metaengine.host.owner-native-readback.w60.v1' ||
+          response.owner_binding_proven !== true ||
+          owner?.schema !== 'metaengine.host.owner-incarnation.v1' ||
+          owner.source !== 'LOCAL_HOST_OWNER' || owner.authority_effect !== false ||
+          owner.fixture_classification != null || owner.synthetic === true ||
+          owner.staging === true || owner.untrusted === true ||
+          owner.device_id !== this.#state.device_id ||
+          owner.owner_id !== this.#state.client_id ||
+          !Number.isSafeInteger(owner.pid) || owner.pid < 1 ||
+          !Number.isSafeInteger(owner.epoch) || owner.epoch < 1 ||
+          !Number.isSafeInteger(owner.generation) || owner.generation < 1 ||
+          !/^[A-Za-z0-9_.:-]{1,128}$/.test(owner.project_id || '') ||
+          !/^[A-Za-z0-9_.:-]{8,128}$/.test(owner.process_incarnation_id || '') ||
+          !/^[0-9a-f]{40}$/i.test(owner.source_sha || '') ||
+          !Number.isFinite(Date.parse(owner.created_at)) ||
+          !Number.isFinite(Date.parse(owner.observed_at)) ||
+          Date.parse(owner.observed_at) < Date.now() - 30000 ||
+          Date.parse(owner.observed_at) > Date.now() + 5000 ||
+          kernel?.pid !== owner.pid ||
+          Date.parse(kernel.created_at) !== Date.parse(owner.created_at) ||
+          kernel.source !== 'OS_PROCESS_INVENTORY') return null;
+      // Re-evaluate identity after the HMAC response; local reenrollment
+      // invalidates the prior Host generation without exposing private keys.
+      if (this.#state.device_id !== owner.device_id ||
+          this.#state.client_id !== owner.owner_id ||
+          this.#w67HostAgent !== client) return null;
+      return Object.freeze({ ...owner });
+    } catch { return null; }
+  }
+
+  async readPrivateOwnerGatewayCredential(ownerId, generation) {
+    const reader = this.#w67PrivateGatewayReadback;
+    if (!reader || !this.#w67HostAgent) return null;
+    const owner = await this.readHostOwnerIncarnation();
+    if (!owner || owner.owner_id !== ownerId || owner.generation !== generation) return null;
+    try {
+      const secret = await reader(ownerId, generation);
+      const latest = await this.readHostOwnerIncarnation();
+      if (!latest || latest.owner_id !== ownerId || latest.generation !== generation ||
+          latest.epoch !== owner.epoch || latest.process_incarnation_id !== owner.process_incarnation_id ||
+          secret?.owner_id !== ownerId || secret?.owner_generation !== generation ||
+          secret?.source !== 'NATIVE_OWNER_SECRET_STORE' ||
+          !/^[A-Za-z0-9_-]{32,256}$/.test(secret.api_key || '') ||
+          secret.fixture_classification != null || secret.staging === true) return null;
+      // Only a private in-process callback receives this; never through the
+      // Host IPC, Guardian status, diagnostics, environment or renderer.
+      return Object.freeze({ ...secret, authority_effect: false });
+    } catch { return null; }
+  }
+
+  async readPrivateOwnPostgresBirthW67(ownerId, epoch) {
+    const reader = this.#w67PrivatePostgresBirth;
+    if (!reader || !this.#w67HostAgent) return null;
+    const owner = await this.readHostOwnerIncarnation();
+    if (!owner || owner.owner_id !== ownerId || owner.epoch !== epoch) return null;
+    try {
+      const result = await reader(ownerId, epoch);
+      const latest = await this.readHostOwnerIncarnation();
+      if (!result || result.source !== 'OWN_PG_POSTMASTER_READBACK' ||
+          result.owner_id !== ownerId || result.owner_epoch !== epoch ||
+          result.owner_process_incarnation_id !== owner.process_incarnation_id ||
+          result.owner_project_id !== owner.project_id ||
+          result.source_sha?.toLowerCase() !== owner.source_sha.toLowerCase() ||
+          latest?.generation !== owner.generation || latest?.epoch !== epoch ||
+          latest?.process_incarnation_id !== owner.process_incarnation_id) return null;
+      return Object.freeze({ ...result, authority_effect: false });
+    } catch { return null; }
   }
 
   async bindEnrollmentRequest(requestId) {
