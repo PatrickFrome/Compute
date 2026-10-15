@@ -1,0 +1,108 @@
+name: Client Native Supervisor W79 — full transport and SelfUpdate contracts
+on:
+  push:
+    branches: [work/metaengine-client-wave12-w79-20261015]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: client-native-w79-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  transport-and-selfupdate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: apps/metaengine-browser
+    steps:
+      - name: Checkout exact source without checkout credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Check exact head
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Node 24 pinned runner series
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Isolate all process profile roots
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP ("metaengine-w79-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
+          foreach ($name in @('home','appdata','localappdata','config','tmp')) {
+            $target = Join-Path $root $name
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+          }
+          $values = @{
+            HOME = (Join-Path $root 'home')
+            USERPROFILE = (Join-Path $root 'home')
+            APPDATA = (Join-Path $root 'appdata')
+            LOCALAPPDATA = (Join-Path $root 'localappdata')
+            XDG_CONFIG_HOME = (Join-Path $root 'config')
+            TMPDIR = (Join-Path $root 'tmp')
+            METAENGINE_STATE_PROVIDER = ''
+            METAENGINE_SUPERVISOR_BASE_URL = ''
+            METAENGINE_LOCAL_PROVIDER_BOOT_STATE = ''
+            METAENGINE_LOCAL_STATE_INSTANCE_ID = ''
+            SUPABASE_URL = ''
+            SUPABASE_SERVICE_ROLE_KEY = ''
+            DATABASE_URL = ''
+            GITHUB_TOKEN = ''
+            GH_TOKEN = ''
+          }
+          foreach ($kv in $values.GetEnumerator()) {
+            [System.IO.File]::AppendAllText($env:GITHUB_ENV, "$($kv.Key)=$($kv.Value)`n")
+          }
+      - name: Install source tests without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Selected provider, Sentinel, singleton and protected attachment
+        run: >-
+          node --test
+          test/native-supervisor-transport-w70.test.mjs
+          test/explicit-local-supervisor-provider.test.mjs
+          test/browser-sentinel.test.mjs
+          test/local-provider-recovery-environment.test.mjs
+          test/native-supervisor-local-provider-pin.test.mjs
+          test/native-supervisor-local-provider-pin-w40.test.mjs
+          test/native-supervisor-endpoints.test.mjs
+          test/persistent-local-provider-boot.test.mjs
+          test/local-provider-singleton-admission.test.mjs
+          test/native-supervisor-local-readiness-loss.test.mjs
+          test/local-runtime-host-controller.test.mjs
+          test/host-resilience-runtime.test.mjs
+      - name: Actual command/lease/lost ACK/enrollment and result transport
+        run: >-
+          node --test
+          test/native-supervisor-command-fastlane.test.mjs
+          test/native-supervisor-command-batch-fastlane.test.mjs
+          test/native-supervisor-bounded-fetch.test.mjs
+          test/native-supervisor-bootstrap-heartbeat.test.mjs
+          test/native-supervisor-heartbeat-contract-coherence.test.mjs
+          test/native-supervisor-result-batch.test.mjs
+          test/native-supervisor-enrollment-correlation.test.mjs
+          test/native-supervisor-lease-retry-backoff.test.mjs
+          test/native-supervisor-state-single-writer.test.mjs
+          test/native-supervisor-nonce-concurrency-contract.test.mjs
+          test/native-supervisor-batch-deadline-contract.test.mjs
+          test/native-supervisor-effect-intent-route.test.mjs
+          test/native-supervisor-control-plane-wedge-hardening.test.mjs
+          test/browser-guardian-enrollment-ticket-client.test.mjs
+          test/client-admission-recovery.test.mjs
+          test/meta-orchestrator-effect-deadline.test.mjs
+      - name: Complete SelfUpdate source/contract test gate (no package or install)
+        run: |
+          npm run check
+          npm test

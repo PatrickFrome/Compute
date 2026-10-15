@@ -110,6 +110,27 @@ export function localProviderRuntimeBootRequired(argv = process.argv) {
 
 // These exact entrypoint modes do not load the Browser runtime. They must
 // remain offline even when the owner selected a stopped local server.
-export const persistentLocalProviderBootstrap = localProviderRuntimeBootRequired()
+export let persistentLocalProviderBootstrap = localProviderRuntimeBootRequired()
   ? await bootstrapPersistentLocalProvider()
   : Object.freeze({ state: 'OFFLINE_DIAGNOSTIC', persistent: false, network_started: false, authority_effect: false });
+
+// Only the admitted packaged primary calls this *after* the existing protected
+// attached-Keeper configuration was written. A second local health check must
+// update the in-process binding consumed by the endpoint's static import; an
+// inherited READY environment marker is never an acceptable substitute.
+// This zero-argument entry point cannot select a profile, endpoint or fetcher.
+export async function revalidatePersistentLocalProviderAfterAttach() {
+  persistentLocalProviderBootstrap = Object.freeze({
+    state: 'ATTACH_REVALIDATING', persistent: false, authority_effect: false,
+  });
+  try {
+    const observed = await bootstrapPersistentLocalProvider();
+    persistentLocalProviderBootstrap = observed;
+    return observed;
+  } catch (error) {
+    persistentLocalProviderBootstrap = Object.freeze({
+      state: 'BLOCKED', persistent: false, authority_effect: false,
+    });
+    throw error;
+  }
+}
