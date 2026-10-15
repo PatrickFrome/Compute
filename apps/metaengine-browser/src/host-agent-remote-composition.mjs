@@ -91,7 +91,9 @@ export class HostAgentRemoteComposition {
     this.#backupDirectory = backupDirectory;
     this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
     this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
-    this.#guardianOwnerReadback = readGuardianOwnerChallenge;
+    this.#guardianOwnerReadback = readGuardianOwnerChallenge || (
+      typeof identity.readGuardianOwnerEvidenceW67 === 'function'
+        ? () => identity.readGuardianOwnerEvidenceW67() : null);
     this.#privateGatewayReadback = privateGatewayReadback;
     this.#privatePostgresBirth = privatePostgresBirth;
     this.#browserStatus = requireFunction(browserStatus, 'host_agent_remote_browser_status_required');
