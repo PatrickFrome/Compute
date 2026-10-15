@@ -13,7 +13,12 @@ import {verifyInstalledUpgradeBackup} from './upgrade-backup-gate.mjs';
 const sha=x=>createHash('sha256').update(x).digest('hex');
 const toc='1; 1 100 TABLE DATA public generated_only postgres\n';
 async function fixture(t,{cross=true}={}){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-w47-generated-'));
+  // Hosted Windows runner temp aliases can resolve to a different canonical
+  // path than os.tmpdir(). Keep production privateJournal's no-alias fence:
+  // only canonicalize this newly generated, disposable test directory.
+  const generated=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-w47-generated-'));
+  const root=await fs.realpath(generated);
+  assert.equal(path.resolve(root),await fs.realpath(root));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const intent=buildBackupEffectIntent({
     intentId:randomUUID(),ownerPid:12345,keeperPid:23456,
