@@ -69,7 +69,7 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -eu
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)" = "$EXPECTED_HEAD"
           test "$(id -u)" -eq 0
           test -n "$GITHUB_WORKSPACE"
           test "$(realpath "$GITHUB_WORKSPACE")" = "$(pwd -P)"
