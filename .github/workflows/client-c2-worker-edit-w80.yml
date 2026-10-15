@@ -7,7 +7,8 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/development-plane*'
-      - 'infra/client-state-runtime/client-c2-worker-edit-w80.test.mjs'
+      - 'infra/client-state-runtime/client-c2-worker-edit-w80*'
+      - 'infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs'
       - '.github/workflows/client-c2-worker-edit-w80.yml'
   workflow_dispatch:
 
@@ -52,6 +53,7 @@ jobs:
           }
           if (!(Test-Path (Join-Path $candidate 'initdb.exe'))) { throw 'W80_WINDOWS_INITDB_MISSING' }
           $env:W48_PG17_BIN = $candidate
+          $env:W80_GENERATED_WORKER = '1'
           node --test --test-concurrency=1 infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -81,7 +83,7 @@ jobs:
           test "$(id -u)" -eq 0
           chown -R postgres:postgres "$GITHUB_WORKSPACE"
           NODE_BIN="$(command -v node)"
-          runuser -u postgres -- env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR=/usr/lib/postgresql/17/bin NODE_BIN="$NODE_BIN" sh -ec '
+          runuser -u postgres -- env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR=/usr/lib/postgresql/17/bin W80_GENERATED_WORKER=1 NODE_BIN="$NODE_BIN" sh -ec '
             cd "$GITHUB_WORKSPACE"
             test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
             test -z "${PGDATA+x}${PGPASSWORD+x}${DATABASE_URL+x}${SUPABASE_URL+x}${METAENGINE_REPO_ROOT+x}"

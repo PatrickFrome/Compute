@@ -8,6 +8,7 @@ import {Worker} from 'node:worker_threads';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {DevelopmentPlane} from '../../apps/metaengine-browser/src/development-plane.mjs';
+import {runW80GeneratedFixtureEdit} from './client-c2-worker-edit-w80.mjs';
 import fixed from '../../apps/metaengine-browser/src/development-plane-fixed-sandbox-edit.cjs';
 const {SCHEMA,BEFORE,AFTER,CLAIM_FIELDS,sha256}=fixed;
 const workerPath=fileURLToPath(new URL('../../apps/metaengine-browser/src/development-plane-worker.cjs',import.meta.url));
@@ -151,4 +152,20 @@ test('W80 rejects reparse/symlink/foreign Git and unrelated user worktree', {tim
   await withPlane(foreign,x=>assert.rejects(x.request('FIXED_SANDBOX_SOURCE_EDIT',{task_id:randomUUID()}),
    /non_disposable_root/));
  }finally{await rm(f.root,{recursive:true,force:true});}
+});
+
+test('W80 own-PG bridge executes inside existing worker and binds receipt to same generated task/effect', {timeout:40000},async()=>{
+ const f=await fixture();
+ try{
+   const task_id=randomUUID(),workspace_id=randomUUID(),run_id=randomUUID(),effect_id=randomUUID();
+   const r=await runW80GeneratedFixtureEdit({sourceDir:f.work,head:f.head,
+     task_id,run_id,workspace_id,effect_id,lease_generation:3,owner_generation:8,owner_epoch:8});
+   assert.equal(r.state,'SOURCE_EDIT_APPLIED_STAGING');
+   assert.equal(r.task_id,task_id);assert.equal(r.run_id,run_id);
+   assert.equal(r.effect_id,effect_id);assert.equal(r.lease_generation,3);
+   assert.equal(r.owner_generation,8);assert.equal(r.owner_epoch,8);
+   assert.equal(r.postimage_sha256,sha256(AFTER));
+   assert.equal(await readFile(path.join(f.work,'calc.mjs'),'utf8'),AFTER);
+   assert.equal(r.authority_effect,false);assert.equal(r.live_completion_verified,false);
+ } finally {await rm(f.root,{recursive:true,force:true});}
 });
