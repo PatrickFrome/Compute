@@ -1,0 +1,39 @@
+name: Client Source Sync W50 (source only)
+on:
+  push:
+    branches:
+      - work/metaengine-client-wave8-w50-20261015
+  pull_request:
+    paths:
+      - apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs
+      - apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs
+      - .github/workflows/client-source-sync-w50.yml
+permissions:
+  contents: read
+jobs:
+  exact-source-sync:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact event source
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node -e "const p=require('node:child_process'); const h=p.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(); if(h!==process.env.SOURCE_SHA)process.exit(1); console.log('W50 exact SHA '+h)"
+      - name: Syntax and focused source readback regressions
+        run: |
+          node --check apps/metaengine-browser/src/client-source-sync-preflight-w50.mjs
+          node --check apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs
+          node --test --test-concurrency=1 apps/metaengine-browser/test/client-source-sync-preflight-w50.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-observer.test.mjs
+      - name: Whitespace and patch integrity
+        run: git diff --check ${{ github.event.pull_request.base.sha || 'HEAD^' }} HEAD

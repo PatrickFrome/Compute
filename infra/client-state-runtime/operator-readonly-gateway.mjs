@@ -14,6 +14,32 @@ const MAX_AGE_MS = 30_000;
 const MAX_FUTURE_MS = 5_000;
 const MAX_RESPONSE_BYTES = 32 * 1024;
 const MAX_EVENTS = 64;
+const GIT_SHA = /^[a-f0-9]{40}$/i;
+function projectedInstalledSource(raw, now, identity, ownerId) {
+  // Only a separately wired native executable verifier may supply this receipt.
+  // A run row, caller flag, Git HEAD or source label cannot manufacture it.
+  if (raw == null) return null;
+  if (raw.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
+    raw.exact_bytes_verified !== true || raw.authority_effect !== false ||
+    !identity || raw.owner_id !== ownerId || raw.owner_epoch !== identity.owner_epoch ||
+    !Number.isSafeInteger(raw.owner_generation) || raw.owner_generation < 1 ||
+    !/^[A-Za-z0-9_.:-]{8,128}$/.test(raw.process_incarnation_id || '') ||
+    !GIT_SHA.test(raw.source_sha || '') || !HASH.test(raw.proof_identity || '') ||
+    !HASH.test(raw.installed_exe_sha256 || '') ||
+    !isFresh(raw.observed_at, now)) throw new GatewayError(503, 'installed_source_unverified');
+  return { owner_id: raw.owner_id, owner_epoch: raw.owner_epoch,
+    owner_generation: raw.owner_generation,
+    process_incarnation_id: raw.process_incarnation_id,
+    source_sha: raw.source_sha.toLowerCase(),
+    proof_identity: raw.proof_identity.toLowerCase(),
+    installed_exe_sha256: raw.installed_exe_sha256.toLowerCase(),
+    observed_at: canonicalTime(raw.observed_at) };
+}
+function sameInstalledSource(a, b) {
+  if (!a || !b) return a === null && b === null;
+  return ['owner_id','owner_epoch','owner_generation','process_incarnation_id',
+    'source_sha', 'proof_identity', 'installed_exe_sha256'].every(k => a[k] === b[k]);
+}
 // A fresh envelope does not prove the individual planes are fresh.
 const PLANE_SOURCES = Object.freeze({
   database: 'LOCAL_POSTGRES', client: 'NATIVE_BROWSER_READBACK',
@@ -86,6 +112,21 @@ function projectPlane(plane, name, now) {
   if (Number.isSafeInteger(plane.age_ms) && plane.age_ms >= 0) safe.age_ms = plane.age_ms;
   if (plane.details && typeof plane.details === 'object') {
     const details = {};
+    // W44 own-PG continuity witness: project only fixed verified cursor
+    // scalars; never allow arbitrary ledger fields or SQL payloads.
+    if (name === 'continuity' && plane.state === 'AVAILABLE' && freshWitness &&
+      validId(plane.details.project_id) &&
+      ['after_seq', 'next_seq', 'through_seq', 'owner_generation'].every(k => validSeq(plane.details[k])) &&
+      plane.details.after_seq <= plane.details.next_seq &&
+      plane.details.next_seq <= plane.details.through_seq &&
+      plane.details.has_more === (plane.details.next_seq < plane.details.through_seq)) {
+      details.project_id = plane.details.project_id;
+      details.after_seq = plane.details.after_seq;
+      details.next_seq = plane.details.next_seq;
+      details.through_seq = plane.details.through_seq;
+      details.owner_generation = plane.details.owner_generation;
+      details.has_more = plane.details.has_more;
+    }
     for (const name of ['catalog_rpc_available', 'catalog_rpc_expected',
       'catalog_tables_available', 'catalog_tables_expected']) {
       if (validSeq(plane.details[name])) details[name] = plane.details[name];
@@ -222,6 +263,7 @@ function validateEventBatch(raw, identity, after, limit, now) {
 export async function startOperatorReadOnlyGateway({
   apiKey, ownerId, upstreamBaseUrl, port = 0, host = '127.0.0.1',
   readRunIdentity = null, readInspect = null, readRunStatus = null, readEvents = null,
+  readInstalledSource = null,
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('operator_gateway_loopback_required');
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error('operator_gateway_port_invalid');
@@ -235,7 +277,7 @@ export async function startOperatorReadOnlyGateway({
     !/^[1-9][0-9]*$/.test(upstream.port) || Number(upstream.port) > 65535 ||
     upstream.pathname !== '/' || upstream.search || upstream.hash ||
     upstream.username || upstream.password) throw new Error('operator_gateway_upstream_loopback_required');
-  for (const callback of [readRunIdentity, readInspect, readRunStatus, readEvents]) {
+  for (const callback of [readRunIdentity, readInspect, readRunStatus, readEvents, readInstalledSource]) {
     if (callback !== null && typeof callback !== 'function') throw new Error('operator_gateway_readback_invalid');
   }
   const base = upstream.origin;
@@ -301,6 +343,8 @@ export async function startOperatorReadOnlyGateway({
         throw new GatewayError(503, 'owner_identity_mismatch');
       }
       const identity = readIdentity(readRunIdentity ? await readRunIdentity({ ownerId }) : null, now, ownerId);
+      const installedSource = operation === 'context' && readInstalledSource
+        ? projectedInstalledSource(await readInstalledSource({ ownerId }), now, identity, ownerId) : null;
       // Do not report a successful GET on a raced Owner restart, run change or
       // cursor advance. Re-check both native Owner identity and own-PG generation
       // after the asynchronous readback, then atomically commit the high watermark.
@@ -311,6 +355,11 @@ export async function startOperatorReadOnlyGateway({
         }
         const finalIdentity = readIdentity(readRunIdentity
           ? await readRunIdentity({ ownerId }) : null, Date.now(), ownerId);
+        const finalInstalledSource = operation === 'context' && readInstalledSource
+          ? projectedInstalledSource(await readInstalledSource({ ownerId }), Date.now(), finalIdentity, ownerId) : null;
+        if (!sameInstalledSource(installedSource, finalInstalledSource)) {
+          throw new GatewayError(503, 'installed_source_generation_changed');
+        }
         if (!sameGatewayRunIdentity(identity, finalIdentity)) {
           throw new GatewayError(503, 'run_generation_changed');
         }
@@ -322,6 +371,7 @@ export async function startOperatorReadOnlyGateway({
       if (operation === 'context') {
         const context = validateContext(await localGet(base, apiKey, '/operator/v1/context'), now);
         await checkedSend({ ...gatewayEnvelope(operation, now), context,
+          installed_source: installedSource,
           run: identity ? { ...identity, state: 'AVAILABLE' } : unknown('run_identity', now) });
         return;
       }
