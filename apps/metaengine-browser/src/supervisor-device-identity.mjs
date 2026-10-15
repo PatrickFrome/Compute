@@ -83,6 +83,7 @@ export class SupervisorDeviceIdentity {
   #w67HostAgent = null;
   #w67PrivateGatewayReadback = null;
   #w67PrivatePostgresBirth = null;
+  #w67GuardianObservation = null;
 
   constructor({ statePath, secureStorage }) {
     if (!statePath) throw new Error('supervisor_device_state_path_required');
@@ -166,6 +167,37 @@ export class SupervisorDeviceIdentity {
     if (!this.#state) return null;
     const { encrypted_private_key_b64: _secret, ...safe } = this.#state;
     return structuredClone({ ...safe, enrolled: Boolean(this.#state.device_id) });
+  }
+
+  // Bound from the existing main/Guardian bootstrap launcher, which performs
+  // the signed read-only pipe challenge under the *enrolled device* key. This
+  // method adds no new Guardian, root, effectful probe or owner declaration.
+  bindGuardianOwnerEvidenceW67(guardianLauncher) {
+    if (this.#w67GuardianObservation || !guardianLauncher ||
+        typeof guardianLauncher.status !== 'function')
+      throw new Error('w67_guardian_native_launcher_required');
+    this.#w67GuardianObservation = () => guardianLauncher.status();
+    return () => { this.#w67GuardianObservation = null; };
+  }
+
+  async readGuardianOwnerEvidenceW67() {
+    const reader = this.#w67GuardianObservation;
+    if (!reader || !this.#state?.device_id) return null;
+    try {
+      const before = this.#state.device_id;
+      const g = await reader();
+      if (this.#state?.device_id !== before ||
+          g?.schema !== 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' ||
+          g.state !== 'READY' || g.owner_binding_proven !== true ||
+          g.device_binding_proven !== true ||
+          g.guardian_client_kernel_birth_verified !== true ||
+          !Number.isSafeInteger(g.guardian_client_pid) ||
+          !Number.isFinite(Date.parse(g.guardian_client_created_at)) ||
+          !/^[0-9a-f]{64}$/i.test(g.guardian_enrollment_evidence_sha256 || '') ||
+          this.#state.key_fingerprint_sha256 !==
+            g.guardian_device_key_fingerprint_sha256) return null;
+      return Object.freeze({ ...g });
+    } catch { return null; }
   }
 
   // This capability is bound ONLY by the already-running in-process Host

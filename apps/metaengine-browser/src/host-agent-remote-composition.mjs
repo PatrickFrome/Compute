@@ -6,6 +6,7 @@ import {
 } from './browser-executor-ipc.mjs';
 import { createHostAgentSupervisorIdentity } from './host-agent-supervisor-identity.mjs';
 import { HostAgentRuntime } from './host-agent-runtime.mjs';
+import { HostAgentClient } from './host-agent-ipc.mjs';
 import { NativeSupervisorRuntimeTransport } from './native-supervisor-runtime-transport.mjs';
 
 export const HOST_AGENT_REMOTE_COMPOSITION_SCHEMA = 'metaengine.host-agent.remote-composition.v1';
@@ -31,6 +32,12 @@ export class HostAgentRemoteComposition {
   #fastControl;
   #backupDirectory;
   #backupOwnerIncarnation;
+  #trustedHostOwnerReadback;
+  #guardianOwnerReadback;
+  #privateGatewayReadback;
+  #privatePostgresBirth;
+  #ownerNativeClient = null;
+  #ownerCustodyUnbind = null;
   #browserStatus;
   #browserPlanExecute;
   #browserPlanCancel;
@@ -55,6 +62,10 @@ export class HostAgentRemoteComposition {
     fastControl,
     backupDirectory = null,
     readBackupOwnerIncarnation = null,
+    readTrustedHostOwnerIncarnation = null,
+    readGuardianOwnerChallenge = null,
+    privateGatewayReadback = null,
+    privatePostgresBirth = null,
     browserStatus,
     browserPlanExecute,
     browserPlanCancel,
@@ -77,8 +88,16 @@ export class HostAgentRemoteComposition {
     this.#hostSessionKey = String(hostSessionKey);
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
+    if ((backupDirectory === null) !== (readBackupOwnerIncarnation === null))
+      throw new Error('host_agent_w67_backup_root_owner_custody_pair_required');
     this.#backupDirectory = backupDirectory;
     this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
+    this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
+    this.#guardianOwnerReadback = readGuardianOwnerChallenge || (
+      typeof identity.readGuardianOwnerEvidenceW67 === 'function'
+        ? () => identity.readGuardianOwnerEvidenceW67() : null);
+    this.#privateGatewayReadback = privateGatewayReadback;
+    this.#privatePostgresBirth = privatePostgresBirth;
     this.#browserStatus = requireFunction(browserStatus, 'host_agent_remote_browser_status_required');
     this.#browserPlanExecute = requireFunction(browserPlanExecute, 'host_agent_remote_browser_execute_required');
     this.#browserPlanCancel = requireFunction(browserPlanCancel, 'host_agent_remote_browser_cancel_required');
@@ -141,9 +160,24 @@ export class HostAgentRemoteComposition {
         fastControl: this.#fastControl,
         backupDirectory: this.#backupDirectory,
         readBackupOwnerIncarnation: this.#backupOwnerIncarnation,
+        readTrustedHostOwnerIncarnation: this.#trustedHostOwnerReadback,
+        readGuardianOwnerChallenge: this.#guardianOwnerReadback,
         browserClient: this.#browserClient,
       });
       await this.#hostRuntime.start();
+      // The same one-shot Host HMAC session is consumed by a private main-only
+      // Owner capability. No public Host IPC operation ever returns a secret.
+      if (typeof this.#identity.bindHostCustodyW67 === 'function') {
+        this.#ownerNativeClient = new HostAgentClient({
+          endpoint: this.#hostEndpoint, sessionKey: hostSessionKey,
+        });
+        await this.#ownerNativeClient.connect();
+        this.#ownerCustodyUnbind = this.#identity.bindHostCustodyW67({
+          hostAgentClient: this.#ownerNativeClient,
+          privateGatewayReadback: this.#privateGatewayReadback,
+          privatePostgresBirth: this.#privatePostgresBirth,
+        });
+      }
       this.#state = 'READY';
       return this.snapshot();
     } catch (error) {
@@ -159,6 +193,12 @@ export class HostAgentRemoteComposition {
 
   async #closeParts() {
     const errors = [];
+    // Invalidate Owner and private credential capabilities *before* stopping
+    // the Host, even if cleanup itself later becomes ambiguous.
+    try { this.#ownerCustodyUnbind?.(); } catch (error) { errors.push(`owner_unbind:${clipError(error)}`); }
+    this.#ownerCustodyUnbind = null;
+    try { this.#ownerNativeClient?.close(); } catch (error) { errors.push(`owner_client:${clipError(error)}`); }
+    this.#ownerNativeClient = null;
 
     if (this.#hostRuntime) {
       try {
@@ -239,6 +279,8 @@ export class HostAgentRemoteComposition {
       signer_session_key_exposed: false,
       browser_session_key_exposed: false,
       host_session_key_exposed: false,
+      private_owner_credential_exposed: false,
+      native_owner_hmac_readback_bound: this.#ownerNativeClient != null,
       session_keys_one_shot: true,
       session_keys_consumed: this.#sessionKeysConsumed,
       restart_requires_new_composition: true,
