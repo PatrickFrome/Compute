@@ -99,7 +99,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
     assert(sourceVersion>=170000&&sourceVersion<180000);
     assert(targetVersion>=170000&&targetVersion<180000);
     const birth=(await dbsql(from,OWN_PG_BIRTH_SQL_W61.replace(/\s+/g,' '))).trim();
-    assert.match(birth,/w61_db\\|17[0-9]+\\|t\\|t/);
+    assert.match(birth,/w61_db\|17[0-9]+\|t\|t/);
     // Fixed W61 SQL with only generated test selectors; no Host/native claims.
     const scopedSql=OWN_PG_OWNER_EPOCH_SQL_W61
       .replace('$1::uuid',`'${fixtureProject}'::uuid`)
