@@ -1,7 +1,8 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

@@ -20,11 +20,14 @@ const validKernel = x => x && Number.isSafeInteger(x.pid) && x.pid > 0 &&
 
 // One exact project is looked up from the authenticated own-PG catalog, NEVER
 // from a constructor, renderer, URL, userData or an arbitrary SQL selector.
-export const W74_OWNER_SCOPE_SQL = `SELECT project_id,device_id,client_id,admin_grant_epoch,
+export const W74_OWNER_SCOPE_READ_SQL = `SELECT project_id,device_id,client_id,admin_grant_epoch,
  pg_catalog.clock_timestamp() AS observed_at
  FROM destruktion_meta.project_run_h205f22
  WHERE device_id=$1::uuid AND client_id=$2::text AND admin_grant_epoch=$3::bigint
- LIMIT 2 FOR SHARE`;
+ LIMIT 2`;
+// Row locks belong only to the serializable generation transition. PostgreSQL
+// rejects SELECT FOR SHARE on persistent tables in a READ ONLY transaction.
+export const W74_OWNER_SCOPE_SQL = `${W74_OWNER_SCOPE_READ_SQL} FOR SHARE`;
 export const W74_SCOPE_LOCK_SQL = `SELECT pg_catalog.pg_advisory_xact_lock(
  pg_catalog.hashtextextended($1::text,0))`;
 
@@ -61,11 +64,13 @@ export function createHostOwnerGenesisCustodyW74({
     const second = await readGuardian();
     if (!same(native,second,['guardian_client_pid','guardian_client_created_at',
       'guardian_client_process_incarnation_id','guardian_device_key_fingerprint_sha256',
-      'guardian_enrollment_evidence_sha256','state','guardian_client_kernel_birth_rechecked']) ||
+      'guardian_enrollment_evidence_sha256','schema','state',
+      'owner_binding_proven','device_binding_proven',
+      'guardian_client_kernel_birth_verified','guardian_client_kernel_birth_rechecked']) ||
         native?.schema !== 'metaengine.browser-guardian.machine-bootstrap-launcher.v1' ||
         native?.state !== 'READY' || native?.guardian_client_kernel_birth_rechecked !== true || native?.owner_binding_proven !== true ||
         native?.device_binding_proven !== true || native?.guardian_client_kernel_birth_verified !== true ||
-        mark(native) || native.guardian_device_key_fingerprint_sha256 !== device.key_fingerprint_sha256 ||
+        mark(native) || mark(second) || native.guardian_device_key_fingerprint_sha256 !== device.key_fingerprint_sha256 ||
         !HEX.test(native.guardian_enrollment_evidence_sha256 || '')) return null;
     const m = INCARNATION.exec(native.guardian_client_process_incarnation_id || '');
     if (!m || Number(m[1]) !== native.guardian_client_pid ||
@@ -84,13 +89,19 @@ export function createHostOwnerGenesisCustodyW74({
     if (!source || source.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
         !SHA.test(source.source_sha || '') ||
         source.exact_bytes_verified !== true || source.native_signature_verified !== true ||
+        // W68 verifies a release-root Ed25519 signature binding the exact
+        // installed EXE and SLSA digests. No unsigned "valid signer" shortcut.
+        source.release_root_signature_verified !== true ||
+        source.slsa_evidence_digest_bound !== true ||
+        source.authority_effect !== false ||
+        !fresh(source.observed_at,now()) ||
         !HEX.test(source.installed_exe_sha256 || '') ||
         !HEX.test(source.proof_identity || '') ||
         (!staging && mark(source))) return null;
     return {device,admin,native,kernel,source};
   };
-  const scope = async (tx, x) => {
-    const rows = await tx.unsafe(W74_OWNER_SCOPE_SQL, [
+  const scope = async (tx, x, {lock = false} = {}) => {
+    const rows = await tx.unsafe(lock ? W74_OWNER_SCOPE_SQL : W74_OWNER_SCOPE_READ_SQL, [
       x.device.device_id,x.device.client_id,x.admin.admin_grant_epoch]);
     if (!Array.isArray(rows) || rows.length !== 1) return null;
     const row = rows[0];
@@ -98,7 +109,9 @@ export function createHostOwnerGenesisCustodyW74({
         row.client_id !== x.device.client_id ||
         Number(row.admin_grant_epoch) !== x.admin.admin_grant_epoch ||
         !fresh(row.observed_at,now())) return null;
-    return row;
+    // postgres.js returns int8 as text by default. Normalize only the already
+    // checked epoch so the independent post-commit fence compares like types.
+    return {...row,admin_grant_epoch:Number(row.admin_grant_epoch)};
   };
   const evidenceMatch = (record,x,row) =>
     !!record && (staging ? record.fixture_classification === 'STAGING' : !mark(record)) &&
@@ -136,10 +149,17 @@ export function createHostOwnerGenesisCustodyW74({
       // never accepted unless the independently current DB epoch still agrees.
       const candidate = await transaction(async tx => {
         await tx.unsafe(W74_SCOPE_LOCK_SQL,[x.device.device_id+':'+x.device.client_id]);
-        const row = await scope(tx,x);
+        const row = await scope(tx,x,{lock:true});
         if (!row) return null;
         const previous = await readSealed();
-        if (previous && (previous.owner_id !== x.device.client_id ||
+        // A protected STAGING record is never silently upgraded to installed.
+        // Reject malformed/cross-device custody even with a fresh signed
+        // Guardian and own-PG scope: no untrusted cached generation takeover.
+        if (previous && (previous.schema !== 'metaengine.host.owner-incarnation.v1' ||
+            previous.source !== 'LOCAL_HOST_OWNER' ||
+            previous.authority_effect !== false ||
+            (staging ? previous.fixture_classification !== 'STAGING' : mark(previous)) ||
+            previous.owner_id !== x.device.client_id ||
             previous.device_id !== x.device.device_id)) return null;
         if (previous && same(previous,{
             pid:x.kernel.pid,process_incarnation_id:x.native.guardian_client_process_incarnation_id,
@@ -179,8 +199,14 @@ export function createHostOwnerGenesisCustodyW74({
       if (!candidate) return null;
       const after = await check();
       if (!after || x.admin.admin_grant_epoch !== after.admin.admin_grant_epoch ||
+          !same(x.device,after.device,['client_id','device_id','key_fingerprint_sha256']) ||
           !same(x.native,after.native,['guardian_client_pid','guardian_client_process_incarnation_id']) ||
           !same(x.source,after.source,['source_sha','installed_exe_sha256','proof_identity'])) return null;
+      // A second independent own-PG transaction catches epoch revocation or
+      // project replacement that occurred after the write transaction committed.
+      const postScope = await transaction(tx=>scope(tx,after),{readOnly:true});
+      if (!postScope || postScope.project_id !== candidate.project_id ||
+          postScope.admin_grant_epoch !== candidate.epoch) return null;
       const verified = await readSealed();
       if (!same(candidate,verified,identityKeys)) return null;
       if (staging) return Object.freeze({...candidate,fixture_classification:'STAGING'});

@@ -1,7 +1,7 @@
 name: Client W72 Native Windows ACL (current source)
 on:
   push:
-    branches: [work/metaengine-client-wave11-w72-20261015, work/metaengine-client-wave12-w81-20261015]
+    branches: [work/metaengine-client-wave11-w72-20261015, work/metaengine-client-wave12-w81-20261015, work/metaengine-critical-closure-20261015]
   pull_request:
     paths:
       - '.github/workflows/client-current-native-acl-w72.yml'
@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.19.0'
       - name: Exact source and clean checkout
         shell: bash
         env:

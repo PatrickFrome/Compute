@@ -1,13 +1,14 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 
-import {
+const {
   BROWSER_GUARDIAN_ENROLLMENT_TICKET_PATH,
   browserGuardianEnrollmentTicketClientContract,
   requestBrowserGuardianEnrollmentTicket,
-} from '../src/browser-guardian-enrollment-ticket-client.mjs';
-import { NATIVE_SUPERVISOR_RUNTIME_PATH } from '../src/native-supervisor-endpoints.mjs';
+} = await import('../src/browser-guardian-enrollment-ticket-client.mjs');
+const { NATIVE_SUPERVISOR_RUNTIME_PATH } = await import('../src/native-supervisor-endpoints.mjs');
 
 const DEVICE_ID = '11111111-1111-4111-8111-111111111111';
 const CLIENT_ID = 'client-guardian-ticket-test';

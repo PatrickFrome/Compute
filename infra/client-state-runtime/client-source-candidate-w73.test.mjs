@@ -8,6 +8,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const git=(...a)=>execFileSync('git',['-C',root,...a],{encoding:'utf8'}).trim();
 const m=JSON.parse(read('coordination/operator-control/client-source-candidate-w73.manifest.json'));
+const historicalW73='9e8ebcd09b46d0e8f5a09e9a0471d15a190baeea';
 const w66='61534c1228b81b063b48082c3cdbcbfd2921fe63';
 const w67='0752bf4f3e317db9f4caeb40d7b10e2f7edc3e66';
 test('W73 truly merges W66 and final W67 as Git ancestors, retaining frozen history',()=>{
@@ -25,15 +26,17 @@ test('W73 truly merges W66 and final W67 as Git ancestors, retaining frozen hist
     assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',sha,'HEAD']).status,0);
   assert.equal(git('rev-parse',w66+':coordination/operator-control/client-source-candidate-w66.manifest.json'),'8337b889acb89d6f652c65f1b1ef44d25b17a796');
 });
-test('W73 100+ protected blobs equal committed HEAD and exact local bytes',()=>{
+test('W73 immutable 100+ blob ledger stays anchored to the published W73 ancestor',()=>{
   const entries=Object.entries(m.current_tree_blobs);
   assert.ok(entries.length>=125);
   for(const [p,sha] of entries){
     assert.ok(!p.startsWith('/')&&!p.includes('..')&&!p.includes('\\'));
     assert.match(sha,/^[a-f0-9]{40}$/);
-    assert.equal(git('rev-parse','HEAD:'+p),sha,'stale HEAD blob '+p);
-    assert.equal(git('hash-object',p),sha,'dirty current blob '+p);
+    assert.equal(git('rev-parse',historicalW73+':'+p),sha,'historical W73 blob '+p);
   }
+  const manifestPath='coordination/operator-control/client-source-candidate-w73.manifest.json';
+  assert.equal(git('hash-object',manifestPath),git('rev-parse',historicalW73+':'+manifestPath),
+    'the historical W73 manifest must never be rewritten');
   for(const p of ['apps/metaengine-browser/src/host-agent-runtime.mjs','apps/metaengine-browser/src/host-native-owner-producers-w60.mjs'])
     assert.notEqual(m.current_tree_blobs[p],git('rev-parse',w66+':'+p),'final W67 100ns missing');
 });

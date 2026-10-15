@@ -1,7 +1,8 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
 
 const ALWAYS_ON_CONTROL_ERROR = 'FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED';
 

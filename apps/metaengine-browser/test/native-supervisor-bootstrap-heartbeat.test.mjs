@@ -1,11 +1,12 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
+const {
   buildBootstrapHeartbeatPayload,
   sendBootstrapHeartbeat,
   NATIVE_SUPERVISOR_BASE,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
-} from '../src/native-supervisor-client.mjs';
+} = await import('../src/native-supervisor-client.mjs');
 
 test('bootstrap heartbeat canonicalizes stale authority to always-on CONTROL without command authority', () => {
   const payload = buildBootstrapHeartbeatPayload({

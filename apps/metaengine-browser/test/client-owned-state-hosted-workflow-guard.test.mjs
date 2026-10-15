@@ -5,6 +5,7 @@ import test from 'node:test';
 const workflow = readFileSync(new URL('../../../.github/workflows/client-v1-supabase-edge-live-probe.yml', import.meta.url), 'utf8');
 const producerGuard = "github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'";
 const guard = "github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')";
+const selfUpdateGuard = `${guard.slice(0, -1)} && github.head_ref != 'work/metaengine-critical-closure-20261015')`;
 const guardedJobs = [
   ['client-v1-supabase-edge-live-probe.yml', 'public-health'],
   ['browser-windows-installed-chat-qualification.yml', 'windows-installed-chat-qualification'],
@@ -18,12 +19,29 @@ const guardedJobs = [
 for (const [file, job] of guardedJobs) {
   test(`local-only PR holds hosted/default-cloud physical job ${file}:${job}`, () => {
     const source = readFileSync(new URL(`../../../.github/workflows/${file}`, import.meta.url), 'utf8');
-    const escaped = (file === 'browser-windows-package-smoke.yml' ? producerGuard : guard).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    assert.match(source, new RegExp(`^  ${job}:\\r?\\n(?:    #[^\\n]*\\r?\\n)?    if: ${escaped}\\r?\\n`, 'm'));
+    const expectedGuard = file === 'browser-windows-package-smoke.yml' ? producerGuard
+      : file === 'metaengine-browser-self-update-e2e.yml' ? selfUpdateGuard : guard;
+    const escaped = expectedGuard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(source, new RegExp(`^  ${job}:\\r?\\n(?:    #[^\\n]*\\r?\\n)*    if: ${escaped}\\r?\\n`, 'm'));
     assert.match(source, /^on:\r?\n/m);
     assert.match(source, /^  pull_request:\r?\n/m);
   });
 }
+
+test('critical source closure holds the historical hosted upgrade while its contract job stays enabled', () => {
+  const source = readFileSync(new URL('../../../.github/workflows/metaengine-browser-self-update-e2e.yml', import.meta.url), 'utf8');
+  const job = source.split('  windows-published-n-to-one-build-target:')[1].split('\n    needs:')[0];
+  const condition = job.match(/^    if: (.+)$/m)?.[1];
+  assert.equal(condition, selfUpdateGuard);
+  const permits = new Function('github', `return ${condition};`);
+  assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/metaengine-critical-closure-20261015' }), false);
+  assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/another-candidate' }), true);
+  assert.equal(permits({ event_name: 'push', head_ref: '' }), true);
+  assert.equal(permits({ event_name: 'workflow_dispatch', head_ref: '' }), true);
+  const contract = source.split('  contract:')[1].split('\n  windows-published-n-to-one-build-target:')[0];
+  assert.doesNotMatch(contract, /github\.head_ref/);
+  assert.match(contract, /npm test/);
+});
 
 test('client-owned state PR skips every historical hosted live-probe step at the job boundary', () => {
   assert.match(workflow, new RegExp(`  public-health:\\r?\\n(?:    #[^\\n]*\\r?\\n)?    if: ${guard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n    runs-on:`));

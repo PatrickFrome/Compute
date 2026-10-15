@@ -1,10 +1,11 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
-import { classifyNativeSupervisorCommand } from '../src/native-supervisor-command-lanes.mjs';
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
+const { classifyNativeSupervisorCommand } = await import('../src/native-supervisor-command-lanes.mjs');
 
 const baseSource = await readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
 

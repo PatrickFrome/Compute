@@ -12,9 +12,27 @@ const exec=promisify(execFile);
 const IMAGE='postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3';
 const enabled=process.env.W74_DOCKER_PG17==='1';
 const required=process.env.W74_REQUIRE_REAL_PG17==='1';
-const docker=(...args)=>exec('docker',args,{windowsHide:true,shell:false,timeout:90000});
+const docker=(...args)=>exec('docker',args,{windowsHide:true,shell:false,
+  timeout:['port','exec','inspect'].includes(args[0])?5000:90000});
 const at=()=>new Date().toISOString();
 const ticks=date=>(BigInt(Date.parse(date))*10000n+116444736000000000n).toString();
+
+async function readyGeneratedPort(cid) {
+  const deadline=Date.now()+30000;
+  for(let i=0;i<80&&Date.now()<deadline;i++) {
+    try {
+      const out=(await docker('port',cid,'5432/tcp')).stdout.trim();
+      const m=/^127\.0\.0\.1:([0-9]+)$/.exec(out);
+      const port=Number(m?.[1]);
+      assert(Number.isSafeInteger(port)&&port>=1024&&port<=65535,'generated Docker localhost port');
+      const ready=(await docker('exec',cid,'pg_isready','-h','127.0.0.1',
+        '-U','w74_fixture','-d','w74_fixture')).stdout;
+      if(ready.includes('accepting connections'))return port;
+    } catch {}
+    await new Promise(r=>setTimeout(r,200));
+  }
+  throw new Error('w74_generated_pg17_readiness_deadline');
+}
 
 test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (STAGING only)',{
   timeout:180000,skip:!enabled&&!required?'DISPOSABLE_REAL_PG17_NOT_REQUESTED':false,
@@ -37,21 +55,7 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
       '--env','POSTGRES_PASSWORD='+password,
       '--publish','127.0.0.1::5432',IMAGE)).stdout.trim();
     assert.match(cid,/^[a-f0-9]{64}$/,'new physical container id');
-    let port=null;
-    for(let i=0;i<80;i++){
-      try{
-        const out=(await docker('port',cid,'5432/tcp')).stdout.trim();
-        const m=/^127\.0\.0\.1:([0-9]+)$/.exec(out);
-        if(!m)throw Error('UNBOUND_PORT');
-        port=Number(m[1]);
-        const ready=(await docker('exec',cid,'pg_isready','-h','127.0.0.1',
-          '-U','w74_fixture','-d','w74_fixture')).stdout;
-        if(ready.includes('accepting connections'))break;
-      }catch{}
-      await new Promise(r=>setTimeout(r,200));
-    }
-    assert(Number.isSafeInteger(port)&&port>=1024&&port<=65535,
-      'generated Docker localhost port');
+    let port=await readyGeneratedPort(cid);
     sql=postgres({host:'127.0.0.1',port,user:'w74_fixture',
       database:'w74_fixture',password,ssl:false,max:1,connect_timeout:5});
     const version=Number((await sql.unsafe("SELECT current_setting('server_version_num')::int AS version"))[0].version);
@@ -72,6 +76,7 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
       guardian_enrollment_evidence_sha256:'c'.repeat(64),
       owner_binding_proven:true,device_binding_proven:true,
       guardian_client_kernel_birth_verified:true,
+      guardian_client_kernel_birth_rechecked:true,
     });
     let adminEpoch=7,record=null;
     const transaction=(fn,opts)=>sql.begin(async tx=>{
@@ -90,7 +95,9 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
       readSourceProof:async()=>({source:'INSTALLED_EXE_NATIVE_VERIFIER',
         source_sha:'a'.repeat(40),exact_bytes_verified:true,
         native_signature_verified:true,proof_identity:'d'.repeat(64),
-        installed_exe_sha256:'e'.repeat(64),fixture_classification:'STAGING'}),
+        installed_exe_sha256:'e'.repeat(64),release_root_signature_verified:true,
+        slsa_evidence_digest_bound:true,observed_at:at(),authority_effect:false,
+        fixture_classification:'STAGING'}),
       readSealed:async()=>record,
       writeSealed:async(next,previous)=>{
         assert.equal(record,previous);record=next;
@@ -111,14 +118,14 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
     assert.equal((await custody.create())?.generation,1,'no duplicate genesis');
     await sql.end({timeout:5});sql=null;
     await docker('restart',cid);
+    // Docker re-allocates ephemeral published ports at start. Re-observe the
+    // same owned container instead of reconnecting forever to its old port.
+    port=await readyGeneratedPort(cid);
     // Restart has no effect on Host authority by itself; reconnect must still
     // validate the same single project and exact Owner epoch, not old receipt.
     sql=postgres({host:'127.0.0.1',port,user:'w74_fixture',
       database:'w74_fixture',password,ssl:false,max:1,connect_timeout:5});
-    for(let i=0;i<60;i++){
-      try{await sql.unsafe('SELECT 1');break;}
-      catch{await new Promise(r=>setTimeout(r,200));}
-    }
+    await sql.unsafe('SELECT 1');
     assert.equal((await custody.create())?.generation,1,'fresh PG after restart');
     await sql.unsafe('DELETE FROM destruktion_meta.project_run_h205f22');
     assert.equal(await custody.create(),null,'deleted authoritative scope is never replayed');

@@ -67,7 +67,7 @@ function blankFrame() {
 // A harness whose tab registry, frames and typed commands are fully scripted
 // per tab. blankRounds: how many NEW_TAB rounds capture as permanently blank
 // before a committed root tab appears (R82-BLANK-TAB retry path).
-function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
+function harness({ rootDraftLength = 0, blankRounds = 0, generatingAfterSubmit = true } = {}) {
   const tabs = new Map([['tab1', { frame: conversationFrame(''), url: CONVERSATION }]]);
   const closed = [];
   const typed = [];
@@ -128,14 +128,16 @@ function harness({ rootDraftLength = 0, blankRounds = 0 } = {}) {
       drafts.delete(command.payload.tab_id);
       if (text.startsWith(SEED_HEAD)) {
         // The seed provably creates the conversation on this surface.
-        const url = `https://chatgpt.com/c/r82seed-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
+        const url = `https://chatgpt.com/c/8282abcd-0000-4000-8000-${String(newTabIndex).padStart(12, '0')}`;
         tab.url = url;
         tab.frame = { ...conversationFrame(''), url };
       } else if (tab) {
         // A submit on the conversation surface lands the message in the
-        // transcript (the readback marker source) with an unproven effect
-        // state, driving the readback lane like the live executor does.
-        tab.frame = { ...structuredClone(tab.frame), text_excerpt: text };
+        // A transcript marker remains untrusted. A separate fresh CAPTURE of
+        // the exact conversation must observe generation to prove this send.
+        tab.frame = { ...structuredClone(tab.frame), text_excerpt: text,
+          semantic_targets:[...tab.frame.semantic_targets,
+            ...(generatingAfterSubmit ? [{role:'button',name:'Stop generating',semantic_ref:'stop'}] : [])] };
       }
       return { effect_state: 'SENT_READBACK_PENDING', replace_verified: true, automatic_retry_allowed: false, authority_effect: true };
     }
@@ -219,7 +221,7 @@ test('R82-BLANK-TAB: a never-committed rollover tab is closed and retried, and a
       'the rollover message must be typed and submitted');
     assert.equal(String(snap.keepalive.state).startsWith('ROLLOVER'), false,
       `the rollover must bind the new conversation, got ${snap.keepalive.state}`);
-    assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/r82seed-0000-4000-8000-000000000003');
+    assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/8282abcd-0000-4000-8000-000000000003');
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
   }
@@ -246,4 +248,20 @@ test('R82-DRAFT-CANARY (regression guard): a normal-size root draft still runs t
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
   }
+});
+
+test('R82 a transcript marker after an unconfirmed rollover Send remains ambiguous',async t=>{
+  let now=Date.now();t.mock.method(Date,'now',()=>now);
+  const h=harness({rootDraftLength:120,generatingAfterSubmit:false});
+  const {runtime,dir}=await makeRuntime(h);
+  try {
+    await runtime.start();
+    for(let i=0;i<3;i++){now+=60_001;await runtime.cycle({force:true});}
+    const snapshot=runtime.snapshot();
+    assert.equal(snapshot.keepalive.state,'ROLLOVER_AMBIGUOUS');
+    assert.equal(snapshot.keepalive.conversation_url,CONVERSATION);
+    assert.equal(h.typed.filter(row=>row.tab_id==='tabroll_1').length,2,
+      'only the seed and original rollover message were dispatched');
+    assert.equal(h.closed.includes('tabroll_1'),false,'a possibly landed Send is not closed or replayed');
+  } finally {await fs.rm(dir,{recursive:true,force:true});}
 });

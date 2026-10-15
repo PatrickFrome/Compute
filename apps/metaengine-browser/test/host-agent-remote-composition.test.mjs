@@ -6,14 +6,16 @@ import path from 'node:path';
 import test from 'node:test';
 import { HostAgentClient, hostAgentEndpoint } from '../src/host-agent-ipc.mjs';
 import { createHostAgentSessionKey } from '../src/host-agent-protocol.mjs';
-import { HostAgentRemoteComposition } from '../src/host-agent-remote-composition.mjs';
-import { NATIVE_SUPERVISOR_BASE } from '../src/native-supervisor-endpoints.mjs';
+const fixtureProvider = await import('./helpers/local-supervisor-transport-fixture.mjs');
+const { HostAgentRemoteComposition } = await import('../src/host-agent-remote-composition.mjs');
+const { NATIVE_SUPERVISOR_BASE } = await import('../src/native-supervisor-endpoints.mjs');
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 const DEVICE_ID = '22222222-2222-4222-8222-222222222222';
 
 function browserIdentity(signCalls) {
   return {
+    snapshot:()=>({client_id:CLIENT_ID,device_id:DEVICE_ID}),
     async ensure() {
       return {
         profile: 'A2_DEVICE_HTTP_SIGNATURE_V1',

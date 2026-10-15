@@ -32,7 +32,8 @@ test('W59 complementary physical PG and legacy qualification requires explicit f
     'coordination/operator-control/client-source-candidate-w59.manifest.json',
     'coordination/operator-control/client-source-candidate-w51.manifest.json',
     'coordination/operator-control/client-source-candidate-w66.manifest.json',
-    'coordination/operator-control/client-source-candidate-w73.manifest.json'
+    'coordination/operator-control/client-source-candidate-w73.manifest.json',
+    'coordination/operator-control/client-critical-closure.manifest.json'
   ].sort());
   assert.match(workflow('client-source-candidate-w59'), /postgres:17/);
   assert.match(workflow('client-source-candidate-w59'), /w61-generated-two-cluster-restore/);

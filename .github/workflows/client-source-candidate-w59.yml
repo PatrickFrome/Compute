@@ -13,6 +13,7 @@ on:
       - 'coordination/operator-control/client-source-candidate-w51.manifest.json'
       - 'coordination/operator-control/client-source-candidate-w66.manifest.json'
       - 'coordination/operator-control/client-source-candidate-w73.manifest.json'
+      - 'coordination/operator-control/client-critical-closure.manifest.json'
   workflow_dispatch:
 
 permissions:

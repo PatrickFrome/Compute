@@ -2,8 +2,34 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import http from 'node:http';
 import { promisify } from 'node:util';
-import test from 'node:test';
-import { MetaOrchestratorNativeProvider } from '../src/meta-orchestrator-native-provider.mjs';
+import test, { after } from 'node:test';
+
+const requests = [];
+const server = http.createServer(async (req,res)=>{
+  if (req.url.endsWith('/health')) {
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify(localSupervisorFixtureHealth()));
+    return;
+  }
+  let body='';
+  for await (const chunk of req) body+=chunk;
+  requests.push({method:req.method,path:req.url,signature:req.headers['x-test-signature'],body});
+  res.writeHead(200,{'content-type':'application/json'});
+  res.end(JSON.stringify(inputs()));
+});
+await new Promise((resolve,reject)=>{
+  server.once('error',reject);
+  server.listen(0,'127.0.0.1',resolve);
+});
+after(()=>new Promise((resolve,reject)=>{
+  server.close(error=>error?reject(error):resolve());
+  server.closeAllConnections();
+}));
+process.env.METAENGINE_TEST_LOCAL_SUPERVISOR_PORT=String(server.address().port);
+const { LOCAL_SUPERVISOR_FIXTURE_BASE, localSupervisorFixtureHealth } =
+  await import('./helpers/local-supervisor-transport-fixture.mjs');
+delete process.env.METAENGINE_TEST_LOCAL_SUPERVISOR_PORT;
+const { MetaOrchestratorNativeProvider } = await import('../src/meta-orchestrator-native-provider.mjs');
 
 const execute = promisify(execFile);
 const workspace = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
@@ -29,19 +55,6 @@ function inputs() {
 }
 
 test('Meta authoritative read reaches the local HTTP supervisor with the canonical signed path', async (t) => {
-  const requests = [];
-  const server = http.createServer(async (req, res) => {
-    let body = '';
-    for await (const chunk of req) body += chunk;
-    requests.push({ method: req.method, path: req.url, signature: req.headers['x-test-signature'], body });
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(inputs()));
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-    server.closeAllConnections();
-  }));
   const id = identity();
   const provider = new MetaOrchestratorNativeProvider({
     identity: id, workspace_id: workspace,
@@ -57,11 +70,11 @@ test('Meta authoritative read reaches the local HTTP supervisor with the canonic
   assert.equal(provider.snapshot().authority_effect, false);
 });
 
-test('Meta provider shares HTTPS and localhost normalization with supervisor endpoint policy', async () => {
-  for (const baseUrl of ['http://localhost:15433/native/', ' https://provider.test/native/ ']) {
+test('Meta provider normalizes only the already pinned canonical loopback endpoint', async () => {
+  for (const baseUrl of [LOCAL_SUPERVISOR_FIXTURE_BASE+'/', ' '+LOCAL_SUPERVISOR_FIXTURE_BASE+' ']) {
     const calls = [];
     const provider = new MetaOrchestratorNativeProvider({
-      identity: identity(), workspace_id: workspace, baseUrl, runtimePath: '/native',
+      identity: identity(), workspace_id: workspace, baseUrl,
       fetchImpl: async (url) => {
         calls.push(url);
         return new Response(JSON.stringify(inputs()), { status: 200 });
@@ -75,6 +88,9 @@ test('Meta provider shares HTTPS and localhost normalization with supervisor end
 test('Meta provider rejects remote plaintext and ambiguous endpoint material before signing or network', () => {
   for (const baseUrl of [
     '', 'not a URL', 'http://provider.test/native', 'http://127.0.0.1.example/native',
+    'http://localhost:15433/native/', 'https://provider.test/native/',
+    LOCAL_SUPERVISOR_FIXTURE_BASE.replace('127.0.0.1','localhost'),
+    LOCAL_SUPERVISOR_FIXTURE_BASE.replace('/a2-browser-native-supervisor-v1','/native'),
     'http://localhost.example/native', 'ftp://127.0.0.1/native',
     'https://provider.test/native?key=1', 'https://provider.test/native#fragment',
     'http://user:password@127.0.0.1:15433/native', 'https://user:password@provider.test/native',
@@ -88,11 +104,17 @@ test('Meta provider rejects remote plaintext and ambiguous endpoint material bef
     assert.equal(calls, 0);
     assert.equal(id.signed.length, 0);
   }
+  const id=identity();let calls=0;
+  assert.throws(()=>new MetaOrchestratorNativeProvider({
+    identity:id,workspace_id:workspace,baseUrl:LOCAL_SUPERVISOR_FIXTURE_BASE,
+    runtimePath:'/other',fetchImpl:async()=>{calls++;},
+  }),/meta_native_endpoint_invalid/);
+  assert.equal(calls,0);assert.equal(id.signed.length,0);
 });
 
 test('LOCAL_POSTGRES module default constructs Meta provider and uses only the pinned local endpoint', async () => {
   const moduleUrl = new URL('../src/meta-orchestrator-native-provider.mjs', import.meta.url).href;
-  const local = `http://127.0.0.1:15433${runtimePath}`;
+  const local = LOCAL_SUPERVISOR_FIXTURE_BASE;
   const code = `
     const { MetaOrchestratorNativeProvider } = await import(${JSON.stringify(moduleUrl)});
     const calls = [];
@@ -113,7 +135,6 @@ test('LOCAL_POSTGRES module default constructs Meta provider and uses only the p
       ...process.env,
       METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES',
       METAENGINE_SUPERVISOR_BASE_URL: local,
-      METAENGINE_LOCAL_STATE_INSTANCE_ID: '28da46b7-6e1d-4c6a-b638-f4dc4bd8ee59',
     },
     windowsHide: true, timeout: 15000,
   });

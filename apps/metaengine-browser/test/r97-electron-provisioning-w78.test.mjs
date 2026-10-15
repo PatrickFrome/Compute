@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile, realpath, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { checkR97ElectronInputs, verifyR97ElectronBinary, PIN } from '../scripts/qualify-r97-electron-w78.mjs';
 
 async function fixture(fn) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'w78-r97-electron-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'w78-r97-electron-')));
   const bin = path.join(root, 'node_modules', 'electron');
   const app = { devDependencies: { electron: PIN.version } };
   const lock = { lockfileVersion: 3, packages: {
@@ -40,6 +40,14 @@ test('W78 blocks unreviewed mirror, skip-download and path override', async () =
   await fixture(async ({ root }) => {
     for (const key of ['ELECTRON_MIRROR','ELECTRON_CUSTOM_DIR','ELECTRON_SKIP_BINARY_DOWNLOAD','ELECTRON_OVERRIDE_DIST_PATH'])
       await assert.rejects(checkR97ElectronInputs(root, { [key]:'1' }), /w78_electron_override_forbidden/);
+  });
+});
+
+test('W78 canonical generated root does not permit a caller path alias', async () => {
+  await fixture(async ({ root }) => {
+    const alias = path.join(root, 'linked-root');
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(checkR97ElectronInputs(alias, {}), /w78_path_alias_forbidden/);
   });
 });
 

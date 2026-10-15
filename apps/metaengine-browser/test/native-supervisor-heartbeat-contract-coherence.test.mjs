@@ -1,12 +1,13 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { sendBootstrapHeartbeat } from '../src/native-supervisor-client.mjs';
-import {
+const { sendBootstrapHeartbeat } = await import('../src/native-supervisor-client.mjs');
+const {
   nativeSupervisorRuntimeUrl,
   nativeSupervisorSigningPath,
-} from '../src/native-supervisor-endpoints.mjs';
-import { inspectSignedNativeSupervisorStateRequest } from '../src/self-update-signed-heartbeat.mjs';
+} = await import('../src/native-supervisor-endpoints.mjs');
+const { inspectSignedNativeSupervisorStateRequest } = await import('../src/self-update-signed-heartbeat.mjs');
 
 const STATE_ROUTE = '/v1/state';
 const HEARTBEAT_ROUTE = '/v1/heartbeat';

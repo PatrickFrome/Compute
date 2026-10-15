@@ -1,8 +1,9 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createChatCommandRoutes,CHAT_COMMAND_ACTIONS,normalizeChatCommand } from '../supabase/a2-browser-native-supervisor-v1/chat-command-routes.mjs';
-import { controlActionDescriptor } from '../src/control-actions-manifest.mjs';
-import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
+const { controlActionDescriptor } = await import('../src/control-actions-manifest.mjs');
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
 import { pairing,commandId } from './fixtures/github-chat-relay.mjs';
 
 const body={request_id:commandId,relay_id:pairing.relay_id,operator_user_id:18,action:'NEW_TAB',payload:{url:'https://example.test'}};

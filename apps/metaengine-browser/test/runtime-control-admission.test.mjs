@@ -237,7 +237,7 @@ test('repository keeps one signed heartbeat route and materializes the same Deve
     fs.readFile(new URL('src/main.mjs', root), 'utf8'),
   ]);
   assert.match(base, /#signedRequest\('\/v1\/state'/);
-  assert.match(core, /NATIVE_SUPERVISOR_BASE}\/v1\/state/);
+  assert.match(core, /nativeSupervisorRuntimeUrl\('\/v1\/state'\)/);
   assert.doesNotMatch(`${base}\n${core}\n${edge}`, /\/v1\/heartbeat/);
   assert.match(edge, /runtime_control:await runtimeControl\(\)/);
   assert.match(main, /development_plane: normalizeDevelopmentPlaneProjection\(/);

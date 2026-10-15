@@ -1,3 +1,4 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -5,29 +6,29 @@ import path from 'node:path';
 import test from 'node:test';
 import { EventEmitter } from 'node:events';
 
-import { persistSelfUpdateSessionContinuity, loadSelfUpdateSessionContinuity } from '../src/self-update-session-continuity.mjs';
-import { persistPreInstallReceipt, persistUpdatedSuccessorReceipt } from '../src/self-update-handoff.mjs';
-import {
+const { persistSelfUpdateSessionContinuity, loadSelfUpdateSessionContinuity } = await import('../src/self-update-session-continuity.mjs');
+const { persistPreInstallReceipt, persistUpdatedSuccessorReceipt } = await import('../src/self-update-handoff.mjs');
+const {
   probeUpdatedSuccessorQualification,
   recordAcceptedSignedSupervisorHeartbeat,
   startSuccessorQualificationReprobeLoop,
-} from '../src/self-update-successor-qualification.mjs';
-import {
+} = await import('../src/self-update-successor-qualification.mjs');
+const {
   reconcileStaleSelfUpdateSessionContinuity,
   recoverStuckSelfUpdateContinuity,
-} from '../src/self-update-continuity-watchdog.mjs';
-import {
+} = await import('../src/self-update-continuity-watchdog.mjs');
+const {
   shouldResumeSuccessorQualification,
   selfUpdateRecoveryDiagnosticSnapshot,
-} from '../src/self-update-successor-recovery.mjs';
-import { readSelfUpdateTransaction } from '../src/self-update-transaction-journal.mjs';
-import {
+} = await import('../src/self-update-successor-recovery.mjs');
+const { readSelfUpdateTransaction } = await import('../src/self-update-transaction-journal.mjs');
+const {
   beginSelfUpdateTransaction,
   transitionSelfUpdateTransaction,
-} from '../src/self-update-transaction-journal.mjs';
-import { attemptSelfUpdateOldParentHandoff, readSelfUpdateOldParentHandoff } from '../src/self-update-old-parent-handoff.mjs';
-import { SelfUpdateRuntime as SelfUpdateRuntimeV8 } from '../src/self-update-runtime-v8.mjs';
-import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
+} = await import('../src/self-update-transaction-journal.mjs');
+const { attemptSelfUpdateOldParentHandoff, readSelfUpdateOldParentHandoff } = await import('../src/self-update-old-parent-handoff.mjs');
+const { SelfUpdateRuntime: SelfUpdateRuntimeV8 } = await import('../src/self-update-runtime-v8.mjs');
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
 
 const UNRESOLVED_PRIOR = 'self_update_transaction_unresolved_prior:SUCCESSOR_BOOTED';
 

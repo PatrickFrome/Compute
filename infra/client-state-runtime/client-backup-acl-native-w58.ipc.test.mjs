@@ -65,7 +65,7 @@ Set-Acl -LiteralPath $env:METAENGINE_W58_TEST_FILE -AclObject $a`;
   await host.start();
   const client=new HostAgentClient({endpoint,sessionKey});
   t.after(async()=>{client.close();await host.close();});
-  const result=await client.request('BACKUP_ACL_READBACK',{}, {timeoutMs:60000});
+  const result=await client.request('BACKUP_ACL_READBACK',{});
   assert.equal(result.state,'NATIVE_ACL_VERIFIED',JSON.stringify(result));
   assert.equal(result.native_acl_verified,true);
   assert.equal(result.installed_owner_proven,false);

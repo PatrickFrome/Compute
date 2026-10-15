@@ -1,7 +1,8 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
+const { NativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
 
 const COMMAND_ID = '11111111-1111-4111-8111-111111111111';
 

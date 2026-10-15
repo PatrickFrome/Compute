@@ -27,8 +27,7 @@ function providerBase(value){
   try{
     const parsed=new URL(raw);
     if(parsed.username||parsed.password)throw new Error('endpoint_credentials_denied');
-    // Keep Meta reads/admission on the same HTTPS-or-loopback transport policy
-    // as the native client, including the explicit LOCAL_POSTGRES default.
+    // Meta reads/admission use the native client's one attested loopback pin.
     return resolveNativeSupervisorBase(raw);
   }catch{throw new Error('meta_native_endpoint_invalid')}
 }
@@ -68,7 +67,7 @@ export class MetaOrchestratorNativeProvider{
     this.#effectFetch=createBoundedSupervisorFetch(fetchImpl,{deadlineMs:this.#effectDeadlineMs});
     this.#workspaceId=workspaceId(workspace_id);
     this.#runtimePath=String(runtimePath||'');
-    if(!this.#runtimePath.startsWith('/'))throw new Error('meta_native_endpoint_invalid');
+    if(this.#runtimePath!==NATIVE_SUPERVISOR_RUNTIME_PATH)throw new Error('meta_native_endpoint_invalid');
     this.#baseUrl=providerBase(baseUrl);
   }
 

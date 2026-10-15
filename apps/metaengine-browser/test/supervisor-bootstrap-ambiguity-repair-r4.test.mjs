@@ -109,15 +109,15 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
   return { runtime, actions, statePath, closedTabs };
 }
 
-test('bare bootstrap root transcript marker resolves ambiguity without a write effect', async () => {
+test('an unbound root transcript marker preserves the ambiguous wake without a write effect', async () => {
   const { runtime, actions } = await makeRuntime({
     tabs: [{ tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false }],
     frame: composerFrame({ marker: true }),
   });
   const snap = await runtime.start();
-  assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.equal(snap.keepalive.pending_wake, null);
-  assert.equal(snap.keepalive.active_wake?.wake_id, WAKE_ID);
+  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
+  assert.equal(snap.keepalive.pending_wake?.wake_id, WAKE_ID);
+  assert.equal(snap.keepalive.active_wake, null);
   assert.equal(actions.includes('TYPED_CLICK'), false);
   assert.equal(actions.includes('SEMANTIC_TYPE'), false);
   assert.equal(actions.includes('NEW_TAB'), false);

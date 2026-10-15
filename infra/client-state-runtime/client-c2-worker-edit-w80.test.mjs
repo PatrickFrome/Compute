@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,generateKeyPairSync,sign,createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,writeFile,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,symlink,realpath} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {Worker} from 'node:worker_threads';
@@ -23,7 +23,7 @@ function git(cwd,...args){return execFileSync('git',args,{cwd,encoding:'utf8',
   env:{PATH:process.env.PATH,HOME:cwd,USERPROFILE:cwd,GIT_CONFIG_NOSYSTEM:'1',
     GIT_CONFIG_GLOBAL:'NUL'},timeout:10_000}).trim();}
 async function fixture(){
- const root=await mkdtemp(path.join(os.tmpdir(),'metaengine-w56-own-pg17-'));
+ const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'metaengine-w56-own-pg17-')));
  const seed=path.join(root,'seed');
  await mkdir(seed);
  git(seed,'init','-q');
@@ -35,7 +35,7 @@ async function fixture(){
  const work=path.join(root,'unique-git');
  git(root,'--git-dir',bare,'worktree','add','--detach',work,'HEAD');
  git(root,'--git-dir',bare,'worktree','lock',work);
- return {root,work,head:git(work,'rev-parse','HEAD')};
+ return {root,work:await realpath(work),head:git(work,'rev-parse','HEAD')};
 }
 const keys=generateKeyPairSync('ed25519');
 const publicPem=keys.publicKey.export({type:'spki',format:'pem'}).toString();
@@ -167,5 +167,35 @@ test('W80 own-PG bridge executes inside existing worker and binds receipt to sam
    assert.equal(r.postimage_sha256,sha256(AFTER));
    assert.equal(await readFile(path.join(f.work,'calc.mjs'),'utf8'),AFTER);
    assert.equal(r.authority_effect,false);assert.equal(r.live_completion_verified,false);
+ } finally {await rm(f.root,{recursive:true,force:true});}
+});
+
+test('W80 a fresh worker cannot replay an effect after source reset', {timeout:40000},async()=>{
+ const f=await fixture();
+ try {
+  const claim=baseClaim(f);
+  const authorization=()=>signClaim(claim);
+  await withPlane(harness(f.work,{authorized:authorization}),
+    plane=>plane.request('FIXED_SANDBOX_SOURCE_EDIT',{task_id:claim.task_id}));
+  await writeFile(path.join(f.work,'calc.mjs'),BEFORE);
+  // The second worker has no shared JS heap or in-memory attempted-effect Set.
+  await withPlane(harness(f.work,{authorized:authorization}),
+    plane=>assert.rejects(plane.request('FIXED_SANDBOX_SOURCE_EDIT',{task_id:claim.task_id}),
+      /duplicate_or_ambiguous/));
+  assert.equal(await readFile(path.join(f.work,'calc.mjs'),'utf8'),BEFORE);
+ } finally {await rm(f.root,{recursive:true,force:true});}
+});
+
+test('W80 independent workers with different effects admit exactly one fixed repair', {timeout:40000},async()=>{
+ const f=await fixture();
+ try {
+  const claims=[baseClaim(f),baseClaim(f)];
+  const results=await Promise.allSettled(claims.map(claim=>
+    withPlane(harness(f.work,{authorized:()=>signClaim(claim)}),
+      plane=>plane.request('FIXED_SANDBOX_SOURCE_EDIT',{task_id:claim.task_id}))));
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  const failure=results.find(r=>r.status==='rejected');
+  assert.match(failure.reason.message,/duplicate_or_ambiguous|stale_preimage|file_changed/);
+  assert.equal(await readFile(path.join(f.work,'calc.mjs'),'utf8'),AFTER);
  } finally {await rm(f.root,{recursive:true,force:true});}
 });

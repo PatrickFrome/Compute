@@ -1,8 +1,9 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { NativeSupervisorClient, NATIVE_SUPERVISOR_RUNTIME_PATH } from '../src/native-supervisor-client.mjs';
+const { NativeSupervisorClient, NATIVE_SUPERVISOR_RUNTIME_PATH } = await import('../src/native-supervisor-client.mjs');
 import { readProjectHistoryPage, readProjectOverview } from '../../me2-ui/src/lib/client-project-history.ts';
 
 const projectId = '11111111-1111-4111-8111-111111111111';

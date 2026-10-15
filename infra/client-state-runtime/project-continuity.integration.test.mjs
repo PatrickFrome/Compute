@@ -16,6 +16,7 @@ const exec = promisify(execFile);
 const bin = process.env.LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR;
 const source = name => fs.readFile(new URL('../../supabase/migrations/' + name, import.meta.url), 'utf8');
 const migration = '20261010100000_project_continuity_history_v1.sql';
+const unboundedMigration = '20261015123000_project_unbounded_defaults_v1.sql';
 async function freePort() { const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port; }
 
 test('disposable PostgreSQL project lineage, history cursors, budget waits and independent verification', { skip: !bin, timeout: 240000 }, async t => {
@@ -82,6 +83,13 @@ test('disposable PostgreSQL project lineage, history cursors, budget waits and i
   await sql.unsafe("insert into destruktion_meta.client_v1_goal_request_h205f22(request_id,workspace_id,roadmap_id,request_sha256,plan_generation,alignment_epoch,baseline_sha,plan_sha256,point_id,task_id,task_spec_sha256,submission_receipt) values($1,$2,'metaengine-client-v1',$3,1,1,$4,$3,'continuity.root',$5,$6,$7::jsonb)",[request,workspace,'b'.repeat(64),base,rootTask,rootDigest,sql.json({schema:'metaengine.client-v1.goal-submit.v2',authority_effect:false,automatic_retry_allowed:false})]);
   const registered = await route('register',{request_id:request}), project = registered.project_id;
   assert.equal((await route('register',{request_id:request})).replayed,true);
+  // Upgrade an existing bounded project without changing its policy. Only
+  // registrations after this additive migration get unbounded defaults.
+  const [oldPolicy] = await sql.unsafe('select max_depth,max_tasks,max_children,policy_generation from destruktion_meta.project_run_h205f22 where project_id=$1',[project]);
+  assert.deepEqual([Number(oldPolicy.max_depth),Number(oldPolicy.max_tasks),Number(oldPolicy.max_children)],[8,256,8]);
+  await sql.unsafe(await source(unboundedMigration));
+  const [preservedPolicy] = await sql.unsafe('select max_depth,max_tasks,max_children,policy_generation from destruktion_meta.project_run_h205f22 where project_id=$1',[project]);
+  assert.deepEqual(preservedPolicy,oldPolicy);
   const lease = async (agent) => { const [row] = await sql.unsafe('select public.devos_fleet_lease_v1($1,$2,$3,$4,$5,4,900) value',[workspace,agent.agent_id,agent.role,agent.tab_id,agent.target_id]); assert.equal(row.value.leased,true); const value=row.value; const [claim] = await sql.unsafe("select * from destruktion_meta.devos_fleet_claim_h205f22 where task_id=$1 and state='ACTIVE'",[value.task_id]); await sql.unsafe('select public.devos_fleet_mark_running_v1($1,$2,$3,$4,$5,4,$6::jsonb)',[value.task_id,agent.agent_id,value.lease_generation,agent.tab_id,agent.target_id,sql.json({})]); return {task_id:value.task_id,claim_id:Number(claim.claim_id),lease_generation:Number(value.lease_generation),agent}; };
   const parent = await lease(agents[0]);
   await route('policy',{project_id:project,expected_generation:1,max_depth:0,max_tasks:null,max_children:null});
@@ -131,7 +139,43 @@ test('disposable PostgreSQL project lineage, history cursors, budget waits and i
   await sql.unsafe("update destruktion_meta.devos_fleet_task_h205f22 set state='FAILED',error_code='FIXTURE_CHILD_FAILED' where task_id=$1",[grandLease.task_id]);
   assert.equal((await route('snapshot',{task_id:rootTask})).state,'BLOCKED');
   const [immutable]=await sql.unsafe('select task_spec_sha256 from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[rootTask]); assert.equal(immutable.task_spec_sha256,rootDigest);
+  // A new project grows well beyond the old defaults and the six physical
+  // agents. Spawn creates READY logical tasks, never physical agent leases.
+  const growthRequest=crypto.randomUUID();
+  const [growthRoot]=await sql.unsafe("select public.devos_fleet_enqueue_v1($1,'continuity.growth','CODER',$2,$3::jsonb,'growth',null,50) value",[workspace,base,sql.json({objective:'Unbounded logical growth',claim_class:'MUTATING'})]);
+  await sql.unsafe("insert into destruktion_meta.client_v1_goal_request_h205f22(request_id,workspace_id,roadmap_id,request_sha256,plan_generation,alignment_epoch,baseline_sha,plan_sha256,point_id,task_id,task_spec_sha256,submission_receipt) values($1,$2,'metaengine-client-v1',$3,1,1,$4,$3,'continuity.growth',$5,$6,$7::jsonb)",[growthRequest,workspace,'c'.repeat(64),base,growthRoot.value.task_id,growthRoot.value.task_spec_sha256,sql.json({schema:'metaengine.client-v1.goal-submit.v2',authority_effect:false,automatic_retry_allowed:false})]);
+  const growthProject=(await route('register',{request_id:growthRequest})).project_id;
+  const initialGrowth=await route('snapshot',{project_id:growthProject});
+  assert.deepEqual([initialGrowth.policy.max_depth,initialGrowth.policy.max_tasks,initialGrowth.policy.max_children],[null,null,null]);
+  let growthParent=await lease(agents[0]);
+  assert.equal(growthParent.task_id,growthRoot.value.task_id);
+  const spawnGrowth=async(parent,children)=>route('spawn',{project_id:growthProject,parent_task_id:parent.task_id,claim_id:parent.claim_id,lease_generation:parent.lease_generation,request_id:crypto.randomUUID(),children});
+  for(let batch=0;batch<34;batch++) {
+    const queued=await spawnGrowth(growthParent,Array.from({length:8},(_,i)=>({role:'RESEARCHER',objective:`Queued research ${batch*8+i}`})));
+    assert.equal(queued.leases_allocated,false);
+    assert(queued.children.every(row=>row.status==='ADMITTED'));
+  }
+  for(let depth=1;depth<=10;depth++) {
+    const next=await spawnGrowth(growthParent,[{role:'CODER',objective:`Recursive depth ${depth}`}]);
+    assert.equal(next.children[0].depth,depth);
+    await finish(growthParent);
+    // CODER proposals are canonicalized to IMPLEMENTER at admission. Keep the
+    // real role fence instead of pretending the original CODER session fits.
+    growthParent=await lease(agents[2]);
+    assert.equal(growthParent.task_id,next.children[0].task_id);
+  }
+  const seenTasks=new Set();let taskAfter=0;
+  for(;;) {
+    const page=await route('snapshot',{project_id:growthProject,task_after_seq:taskAfter,limit:128});
+    assert.equal(page.total_tasks,283);
+    for(const row of page.tasks){assert(!seenTasks.has(row.task_id));seenTasks.add(row.task_id);}
+    if(!page.task_cursor.has_more)break;
+    assert(page.task_cursor.next_seq>taskAfter);taskAfter=page.task_cursor.next_seq;
+  }
+  assert.equal(seenTasks.size,283);
+  const [queuedOnly]=await sql.unsafe("select count(*)::int n from destruktion_meta.project_task_h205f22 x join destruktion_meta.devos_fleet_task_h205f22 t using(task_id) where x.project_id=$1 and t.role='RESEARCHER' and t.state='READY' and t.lease_agent_id is null",[growthProject]);
+  assert.equal(queuedOnly.n,272);
   const [privileges]=await sql.unsafe("select has_function_privilege('anon','public.h205f22_project_register_v1(uuid,uuid,uuid,text,bigint)','execute') anon,has_function_privilege('service_role','public.h205f22_project_reconcile_v1(uuid,uuid,uuid,text,bigint)','execute') service"); assert.equal(privileges.anon,false);assert.equal(privileges.service,true);
   await sql.unsafe('update public.compute_fabric_a2_browser_device_h205f22 set admin_grant_epoch=2 where device_id=$1',[device]); await assert.rejects(route('snapshot',{task_id:rootTask}),/GRANT_REVOKED/);
-  console.log(JSON.stringify({schema:'compute.project-continuity-evidence.v1',postgres:17,disposable:true,migration_sha256:crypto.createHash('sha256').update(await source(migration)).digest('hex'),lineage_depth:2,independent_verifier:true,root_completed_after_descendants:true,commit_ordered_cursor:true,aborted_event_rolled_back:true,root_task_spec_immutable:true,authority_effect:false}));
+  console.log(JSON.stringify({schema:'compute.project-continuity-evidence.v1',postgres:17,disposable:true,migration_sha256:crypto.createHash('sha256').update(await source(migration)).digest('hex'),unbounded_migration_sha256:crypto.createHash('sha256').update(await source(unboundedMigration)).digest('hex'),logical_tasks:283,lineage_depth:10,physical_agents:agents.length,independent_verifier:true,root_completed_after_descendants:true,commit_ordered_cursor:true,aborted_event_rolled_back:true,root_task_spec_immutable:true,authority_effect:false}));
 });

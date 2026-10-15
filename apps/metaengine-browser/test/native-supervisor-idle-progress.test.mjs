@@ -1,8 +1,9 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { NativeSupervisorClient as BaseNativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
-import { createFleetTargetLocalObserver } from '../src/fleet-target-local-observer.mjs';
+const { NativeSupervisorClient: BaseNativeSupervisorClient } = await import('../src/native-supervisor-client-base.mjs');
+const { createFleetTargetLocalObserver } = await import('../src/fleet-target-local-observer.mjs');
 
 const subject = process.env.METAENGINE_IDLE_PROGRESS_SUBJECT || '../src/native-supervisor-client-core-base.mjs';
 const { NativeSupervisorClient } = await import(new URL(subject, import.meta.url));

@@ -1,8 +1,9 @@
+await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs/promises';
 
-import { compileMetaObjectivePlan, META_OBJECTIVE_MAX_NODES } from '../src/meta-objective-compiler.mjs';
+const { compileMetaObjectivePlan, META_OBJECTIVE_MAX_NODES } = await import('../src/meta-objective-compiler.mjs');
 import { createMetaSupervisorRoutes } from '../supabase/a2-browser-native-supervisor-v1/meta-routes.mjs';
 import { createDevosSupervisorRoutes, projectDevosWorkGraph } from '../supabase/a2-browser-native-supervisor-v1/devos-routes.mjs';
 
