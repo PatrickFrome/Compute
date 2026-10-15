@@ -72,7 +72,7 @@ $me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $allowed=@($me,'S-1-5-18','S-1-5-32-544')|Select-Object -Unique
 $required=@($me,'S-1-5-18')|Select-Object -Unique
 $items=@()
-# Object records, not nested PowerShell array expressions (the latter flatten).
+# Explicit path/kind records avoid positional dependence. The historical nested arrays are valid in WinPS5.1.
 $pairs=@(
   [pscustomobject]@{path=$env:METAENGINE_W58_ROOT;kind='DIRECTORY'},
   [pscustomobject]@{path=$env:METAENGINE_W58_FILE;kind='FILE'}
