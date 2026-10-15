@@ -95,6 +95,25 @@ test('UNC, ADS, alternate archive root and path traversal never qualify',{skip:!
     assert.equal(x.native_acl_verified,false,p);
   }
 });
+
+test('Windows root broad read ACE fails even when archive DACL remains private',{skip:!windows},async t=>{
+  const o=await fixture(t);
+  await run(path.win32.join(process.env.SystemRoot,'System32','icacls.exe'),
+    [o.root,'/grant','*S-1-1-0:(R)'],{windowsHide:true,timeout:15000});
+  assert.equal((await read(o)).native_acl_verified,false);
+});
+test('Windows junction reparse root cannot alias a protected archive',{skip:!windows},async t=>{
+  const o=await fixture(t);
+  const junction=o.root+'-junction';
+  try{await fs.symlink(o.root,junction,'junction');}
+  catch{t.skip('Windows runner cannot create a disposable junction');return;}
+  t.after(()=>fs.rm(junction,{force:true}).catch(()=>{}));
+  const x=await readClientBackupAclNativeW58({
+    backupDirectory:junction,archivePath:path.join(junction,name)});
+  assert.equal(x.native_acl_verified,false);
+  assert.equal(x.installed_owner_proven,false);
+});
+
 test('Windows missing archive stays UNKNOWN',{skip:!windows},async t=>{
   const o=await fixture(t);
   await fs.unlink(o.file);
