@@ -6,6 +6,12 @@ import assert from 'node:assert/strict';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
+export function isW64PostmasterBirthWithinStartupEnvelope(pidBirthSeconds, sqlBirthMs) {
+  return Number.isSafeInteger(pidBirthSeconds) && pidBirthSeconds > 0 &&
+    Number.isFinite(sqlBirthMs) && sqlBirthMs >= pidBirthSeconds * 1000 &&
+    sqlBirthMs < (pidBirthSeconds + 2) * 1000;
+}
+
 export function createW64DisposablePgLifecycle({ run, root, data, port, pgUser }) {
   assert.equal(path.dirname(data), root, 'fixture PGDATA must be directly inside its unique root');
   assert.ok(Number.isSafeInteger(port) && port > 1024 && port < 65536);
@@ -33,9 +39,16 @@ export function createW64DisposablePgLifecycle({ run, root, data, port, pgUser }
     const fields = run('psql', ['-X', '-v', 'ON_ERROR_STOP=1', '-A', '-t', '-c', sql]).split('|');
     assert.equal(fields.length, 4, 'unbound PG identity result');
     assert.equal(await realpath(fields[0]), await realpath(data), 'SQL connected to foreign PGDATA');
-    assert.equal(Number(fields[1]), birth.birthSec, 'postmaster birth changed during read');
+    // postmaster.pid records time(NULL) near process creation, while SQL reports
+    // the later startup timestamp; crossing a wall-clock second is legitimate.
+    // Still bind to the identical PID before/after and reject >1s drift.
+    const pgBirthSecond = Number(fields[1]);
     assert.equal(Number(fields[3]), port, 'connected to wrong PostgreSQL port');
     const birthMs = Number(fields[2]) * 1000;
+    assert.ok(Number.isSafeInteger(pgBirthSecond) &&
+      pgBirthSecond === Math.floor(birthMs / 1000) &&
+      isW64PostmasterBirthWithinStartupEnvelope(birth.birthSec, birthMs),
+      'postmaster birth changed beyond bounded startup envelope');
     assert.ok(Number.isFinite(birthMs) && birthMs > 0);
     assert.deepEqual(await ownedPid(), birth, 'PID/birth changed after independent readback');
     return Object.freeze({ ...birth, birthMs, port, log });
