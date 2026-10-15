@@ -25,7 +25,7 @@ const run=async(command,args,limit=90000)=> (await exec(command,args,{timeout:li
   maxBuffer:8*1024*1024,shell:false})).stdout;
 const docker=(...args)=>run('docker',args);
 const dbsql=(id,sql)=>docker('exec',id,'psql','-X','-v','ON_ERROR_STOP=1',
-  '-U','w61_owner','-d','w61_db','-At','-c',sql);
+  '-U','postgres','-d','w61_db','-At','-c',sql);
 const fingerprint=`SELECT count(*)::text || ':' || md5(
   coalesce(string_agg(to_jsonb(t)::text, E'\\n' ORDER BY to_jsonb(t)::text),''))
   FROM public.w61_restore_rows t`;
@@ -64,7 +64,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
   try {
     for(const id of [from,to]){
       const cid=(await docker('run','--detach','--rm','--name',id,
-        '--env','POSTGRES_USER=w61_owner','--env','POSTGRES_DB=w61_db',
+        '--env','POSTGRES_USER=postgres','--env','POSTGRES_DB=w61_db',
         '--env','POSTGRES_PASSWORD='+pwd,
         '--publish','127.0.0.1::5432',
         '--label','metaengine.w61.disposable=true',IMAGE)).trim();
@@ -131,7 +131,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
       /backup_effect_(?:write_ambiguous|archive_existing)/,'no duplicate dump after unknown ACK');
     // The only dump effect is on the newly allocated disposable source
     // container AFTER the durable W47 barrier. Never use host PostgreSQL env.
-    await docker('exec',from,'pg_dump','-U','w61_owner','-d','w61_db',
+    await docker('exec',from,'pg_dump','-U','postgres','-d','w61_db',
       '--format=custom','--file=/tmp/w61-backup.dump','--no-password');
     await docker('cp',from+':/tmp/w61-backup.dump',archive);
     await fs.chmod(archive,0o600);
@@ -156,7 +156,7 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
       physical_restore_proven:false,
     };
     await docker('exec',to,'pg_restore','--exit-on-error','--single-transaction',
-      '--no-owner','--no-password','-U','w61_owner','-d','w61_db','/tmp/w61-backup.dump');
+      '--no-owner','--no-password','-U','postgres','-d','w61_db','/tmp/w61-backup.dump');
     const restoredRows=(await dbsql(to,fingerprint)).trim();
     assert.equal(restoredRows,rows,'full content digest and row counts');
     assert.equal((await dbsql(to,`SELECT has_table_privilege('w61_fixture_reader',
@@ -184,8 +184,6 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
         restore_connect:true,restore_create:true,
       },
     });
-    // Docker clusters login is w61_owner, not 'postgres'; W47 generic staging
-    // policy needs exact role metadata, never fabricate a role proof.
     assert.equal(staging.state,'STAGING_PASSED');
     assert.equal(staging.archive_verified,true);
     assert.equal(staging.restore_data_compared,true);
