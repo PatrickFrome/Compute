@@ -1,0 +1,46 @@
+name: METAENGINE Client W57 Independent Candidate Critic
+on:
+  pull_request:
+    paths:
+      - "infra/client-state-runtime/client-candidate-acceptance-w57.mjs"
+      - "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs"
+      - "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md"
+      - ".github/workflows/client-candidate-acceptance-w57.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-source-critic:
+    name: exact-source-critic (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout exact pull request source, not synthetic merge
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Require single exact source identity
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --check
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: W57 independent adversarial source checks and W49 prior critic
+        run: |
+          node --check infra/client-state-runtime/client-candidate-acceptance-w57.mjs
+          node --check infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs
+          node --test infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs infra/client-state-runtime/client-candidate-acceptance-w49.test.mjs
+      - name: Declare explicit qualification boundary
+        run: |
+          echo "SOURCE/STAGING receipt consistency only. Real Owner, signed EXE, PostgreSQL, Agent and installed LIVE remain UNKNOWN."
