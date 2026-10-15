@@ -88,6 +88,8 @@ export class HostAgentRemoteComposition {
     this.#hostSessionKey = String(hostSessionKey);
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
+    if ((backupDirectory === null) !== (readBackupOwnerIncarnation === null))
+      throw new Error('host_agent_w67_backup_root_owner_custody_pair_required');
     this.#backupDirectory = backupDirectory;
     this.#backupOwnerIncarnation = readBackupOwnerIncarnation;
     this.#trustedHostOwnerReadback = readTrustedHostOwnerIncarnation;
