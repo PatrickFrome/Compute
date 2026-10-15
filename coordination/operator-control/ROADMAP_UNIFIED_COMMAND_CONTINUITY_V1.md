@@ -188,4 +188,3 @@ Next: the coordinator independently validates the new branch, then connects a tr
 6. **P5 Independent live acceptance:** verified physical Owner/Guardian/PG installed readback, signed binary, real native Agent origin, no unknown effects, actual rollback rehearsal and independent receipt/checkpoint validation. Only a separately authorized Host can install or promote; W49 never does.
 
 **Independent W49 outcome: BLOCKED.** Parent branch ancestry, 84 hermetic tests and agent-slot counts are not substitutes for canonical C1/C2/R1, own PG17 and installed/LIVE evidence. Preserve AMBIGUOUS/no-retry and UNKNOWN when witness absent.
-

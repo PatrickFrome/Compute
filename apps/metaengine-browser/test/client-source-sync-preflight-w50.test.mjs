@@ -175,6 +175,9 @@ test('disposable actual Git worktree and current-ref adapter: clean, untracked, 
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
   git(repo, 'init', '-q');
+  // Normalize generated fixtures independently of Windows CI global Git config.
+  // Changes only this freshly created disposable repository, never user settings.
+  git(repo, 'config', 'core.autocrlf', 'false');
   git(repo, 'config', 'user.name', 'Source Fixture');
   git(repo, 'config', 'user.email', 'fixture@example.invalid');
   writeFileSync(path.join(repo, 'README.md'), 'generated W50 fixture\n');
@@ -210,7 +213,7 @@ test('disposable actual Git worktree and current-ref adapter: clean, untracked, 
     },
   });
   const success = await read();
-  assert.equal(success.state, 'SYNCED_SOURCE');
+  assert.equal(success.state, 'SYNCED_SOURCE', success.reason);
   assert.equal(success.current_source_sha, sha);
   writeFileSync(path.join(work, 'untracked-source.mjs'), 'export const x = 1;\n');
   assert.equal((await read()).reason, 'WORKTREE_DIRTY_TRACKED_OR_UNTRACKED');

@@ -69,7 +69,7 @@
     "infra/client-state-runtime/client-serial-loop-staging-w48.mjs": "e631e8fca50f4437a5a70017907b97b11e6fd2f2",
     "infra/client-state-runtime/client-pg17-qualification-w45.integration.test.mjs": "e7f411ed60a8a07fc81bdbd0078ce1b929672078",
     "infra/client-state-runtime/package.json": "68273289079b11b211e125336cab1c1047bfc9d3",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "c3d5c8506b3a2e29238b226d8b5e6c0243194f0e"
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "6c78f5ffa874ae1e5c3e4420f71c05f4ea5dd9bd"
   },
   "resolution": [
     "W44 W49 W50 W45 W47 W48 ancestry-preserving merges on W43, with all original commits as Git ancestors",
