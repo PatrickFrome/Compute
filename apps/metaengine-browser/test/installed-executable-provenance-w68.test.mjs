@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   INSTALLED_RELEASE_ENVELOPE_W68, INSTALLED_RELEASE_MANIFEST_W68,
+  INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68,
   readVerifiedInstalledExecutableW68, verifyStagingInstalledExecutableW68,
 } from '../src/installed-executable-provenance-w68.mjs';
 
@@ -52,7 +53,8 @@ function makeFixture() {
     slsa_evidence_sha256: digest(fs.readFileSync(files.evidence)),
   };
   function sign(manifest = m, key = privateKey) {
-    const signature = crypto.sign(null, Buffer.from(JSON.stringify(manifest)), key).toString('base64');
+    const signedBytes = Buffer.concat([Buffer.from(INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68), Buffer.from(JSON.stringify(manifest))]);
+    const signature = crypto.sign(null, signedBytes, key).toString('base64');
     fs.writeFileSync(files.manifest, JSON.stringify({
       schema: INSTALLED_RELEASE_ENVELOPE_W68, manifest, signature_base64:signature,
     }));
@@ -117,6 +119,15 @@ test('tamper SLSA bundle or evidence bytes fails even with verified:true JSON', 
     const evidence=JSON.parse(fs.readFileSync(f.files.evidence));
     evidence.source_sha='c'.repeat(40);
     fs.writeFileSync(f.files.evidence,JSON.stringify(evidence));
+    assert.equal(await f.verify(),null);
+  });
+});
+
+test('even a same-root signature without release-domain separation is not a release signature', async () => {
+  await withFixture(async f => {
+    const doc = JSON.parse(fs.readFileSync(f.files.manifest,'utf8'));
+    doc.signature_base64=crypto.sign(null,Buffer.from(JSON.stringify(f.m)),f.privateKey).toString('base64');
+    fs.writeFileSync(f.files.manifest,JSON.stringify(doc));
     assert.equal(await f.verify(),null);
   });
 });

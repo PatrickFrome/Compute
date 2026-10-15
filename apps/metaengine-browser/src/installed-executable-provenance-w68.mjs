@@ -11,6 +11,9 @@ import { readWindowsSignedExecutableW60 } from './host-native-owner-producers-w6
 
 export const INSTALLED_RELEASE_ENVELOPE_W68 = 'metaengine.browser.installed-release-envelope.v1';
 export const INSTALLED_RELEASE_MANIFEST_W68 = 'metaengine.browser.installed-release-manifest.v1';
+// Purpose separation prevents reuse of an emergency command signature as a
+// release authorization under the same pre-existing Ed25519 trust root.
+export const INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68 = 'METAENGINE_INSTALLED_RELEASE_MANIFEST_V1\u0000';
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const THUMBPRINT = /^[a-f0-9]{40}$/;
@@ -26,7 +29,10 @@ const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const exact = (obj, fields) => isObject(obj) &&
   Object.keys(obj).sort().join('\0') === [...fields].sort().join('\0');
 const clean = (value, re) => typeof value === 'string' && re.test(value);
-const canon = data => Buffer.from(JSON.stringify(data), 'utf8');
+const canon = data => Buffer.concat([
+  Buffer.from(INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68, 'utf8'),
+  Buffer.from(JSON.stringify(data), 'utf8'),
+]);
 
 function sameStat(a, b) {
   return a.isFile() && b.isFile() && !a.isSymbolicLink() && !b.isSymbolicLink() &&
