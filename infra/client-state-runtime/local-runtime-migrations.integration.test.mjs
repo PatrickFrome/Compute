@@ -135,6 +135,55 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   const serviceGrants = () => sql.unsafe(`SELECT p.oid::text AS oid, a.privilege_type, a.is_grantable FROM pg_catalog.pg_proc p,
     LATERAL pg_catalog.aclexplode(p.proacl) a WHERE a.grantee=(SELECT oid FROM pg_catalog.pg_roles WHERE rolname='service_role') ORDER BY p.oid,a.privilege_type`);
   const beforeAcl = await serviceGrants();
+  // Opt-in generated, SCHEMA-ONLY PG17 archive for an installed Owner QA run.
+  // This is an independently disposable cluster created above, not a profile
+  // backup, and is never taken from any existing user PostgreSQL installation.
+  const generatedSchemaDirectory = process.env.LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY;
+  if (generatedSchemaDirectory !== undefined) {
+    assert(attachedBundle, 'schema export requires the exact verified offline runtime bundle');
+    assert(process.platform === 'win32', 'physical installed Owner qualification requires Windows PG17');
+    assert(path.isAbsolute(generatedSchemaDirectory), 'schema export root must be absolute');
+    const directory = await fs.realpath(generatedSchemaDirectory);
+    const temporaryRoot = await fs.realpath(os.tmpdir());
+    const relative = path.relative(temporaryRoot, directory);
+    assert(relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep)
+      && !path.isAbsolute(relative), 'schema fixture must be under the OS temporary root');
+    const dirInfo = await fs.lstat(directory);
+    assert(dirInfo.isDirectory() && !dirInfo.isSymbolicLink(), 'schema fixture root must be physical');
+    const archive = path.join(directory, 'generated-empty-schema-pg17.dump');
+    await assert.rejects(fs.lstat(archive), { code: 'ENOENT' });
+    const privateEnv = { ...process.env, PGHOST: '127.0.0.1', PGPORT: String(port),
+      PGUSER: owner, PGPASSWORD: ownerPassword, PGDATABASE: 'postgres' };
+    // Source data may have been exercised above, but --schema-only ensures
+    // none of those rows or sequence values is copied into the archive.
+    await exec(path.join(bin, 'pg_dump.exe'), ['--format=custom', '--schema-only',
+      '--no-owner', '--no-acl', '--host=127.0.0.1', '--port=' + port,
+      '--username=' + owner, '--dbname=postgres', '--file=' + archive], {
+      env: privateEnv, windowsHide: true, shell: false, timeout: 180000, maxBuffer: 1024 * 1024,
+    });
+    const stat = await fs.lstat(archive);
+    assert(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1
+      && stat.size > 1000 && stat.size < 64 * 1024 * 1024, 'generated schema archive invalid');
+    const { stdout: toc } = await exec(path.join(bin, 'pg_restore.exe'), ['--list', archive], {
+      windowsHide: true, shell: false, timeout: 30000, maxBuffer: 4 * 1024 * 1024,
+    });
+    const plan = schemaOnlyRestorePlan(toc);
+    // The emitted dump precedes creation of any ephemeral, role-scoped
+    // API test policies: pg_dump does NOT include CREATE ROLE statements.
+    // A second disposable cluster can therefore restore the exact schema
+    // without importing credentials or phantom fixture login authority.
+    assert(!(await sql.unsafe("SELECT count(*)::int AS count FROM pg_catalog.pg_roles WHERE rolname IN ('migration_fixture_api','attached_migration_fixture_api')"))[0].count,
+      'schema-only export must precede fixture API login publication');
+    assert(plan.selected.some(row => / TABLE (?:public|destruktion_meta) /.test(row)),
+      'generated schema has no reviewed application table');
+    const sha256 = (await import('node:crypto')).createHash('sha256').update(await fs.readFile(archive)).digest('hex');
+    await fs.writeFile(path.join(directory, 'generated-empty-schema-pg17.sha256'), sha256 + '\n', { flag: 'wx', mode: 0o600 });
+    console.log(JSON.stringify({ schema: 'metaengine.browser.generated-empty-pg17-schema-qa.v1',
+      source_data_rows_exported: 0, schema_only: true, disposable: true,
+      reviewed_migrations_applied: true, bundle_sha256: attachedBundleSha256,
+      schema_archive_sha256: sha256, schema_archive_bytes: stat.size,
+      selected_toc_entries: plan.selected.length, authority_effect: false }));
+  }
   const password = randomBytes(32).toString('hex'), login = 'migration_fixture_api';
   const receipt = await provisionLocalApiLogin({ sql, databaseName: 'postgres', login, password, roleMode: 'direct' });
   const [privateMarker] = await sql.unsafe("SELECT has_function_privilege($1, 'destruktion_meta.project_unbounded_defaults_h205f22()', 'execute') AS permitted", [login]);
@@ -244,49 +293,6 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     const attachedHealth = await request('/health');
     assert.equal(attachedHealth.status, 200, await attachedHealth.clone().text());
     assert.equal((await attachedHealth.json()).ok, true);
-  }
-  // Opt-in generated, SCHEMA-ONLY PG17 archive for an installed Owner QA run.
-  // This is an independently disposable cluster created above, not a profile
-  // backup, and is never taken from any existing user PostgreSQL installation.
-  const generatedSchemaDirectory = process.env.LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY;
-  if (generatedSchemaDirectory !== undefined) {
-    assert(attachedBundle, 'schema export requires the exact verified offline runtime bundle');
-    assert(process.platform === 'win32', 'physical installed Owner qualification requires Windows PG17');
-    assert(path.isAbsolute(generatedSchemaDirectory), 'schema export root must be absolute');
-    const directory = await fs.realpath(generatedSchemaDirectory);
-    const temporaryRoot = await fs.realpath(os.tmpdir());
-    const relative = path.relative(temporaryRoot, directory);
-    assert(relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep)
-      && !path.isAbsolute(relative), 'schema fixture must be under the OS temporary root');
-    const dirInfo = await fs.lstat(directory);
-    assert(dirInfo.isDirectory() && !dirInfo.isSymbolicLink(), 'schema fixture root must be physical');
-    const archive = path.join(directory, 'generated-empty-schema-pg17.dump');
-    await assert.rejects(fs.lstat(archive), { code: 'ENOENT' });
-    const privateEnv = { ...process.env, PGHOST: '127.0.0.1', PGPORT: String(port),
-      PGUSER: owner, PGPASSWORD: ownerPassword, PGDATABASE: 'postgres' };
-    // Source data may have been exercised above, but --schema-only ensures
-    // none of those rows or sequence values is copied into the archive.
-    await exec(path.join(bin, 'pg_dump.exe'), ['--format=custom', '--schema-only',
-      '--no-owner', '--no-acl', '--host=127.0.0.1', '--port=' + port,
-      '--username=' + owner, '--dbname=postgres', '--file=' + archive], {
-      env: privateEnv, windowsHide: true, shell: false, timeout: 180000, maxBuffer: 1024 * 1024,
-    });
-    const stat = await fs.lstat(archive);
-    assert(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1
-      && stat.size > 1000 && stat.size < 64 * 1024 * 1024, 'generated schema archive invalid');
-    const { stdout: toc } = await exec(path.join(bin, 'pg_restore.exe'), ['--list', archive], {
-      windowsHide: true, shell: false, timeout: 30000, maxBuffer: 4 * 1024 * 1024,
-    });
-    const plan = schemaOnlyRestorePlan(toc);
-    assert(plan.selected.some(row => / TABLE (?:public|destruktion_meta) /.test(row)),
-      'generated schema has no reviewed application table');
-    const sha256 = (await import('node:crypto')).createHash('sha256').update(await fs.readFile(archive)).digest('hex');
-    await fs.writeFile(path.join(directory, 'generated-empty-schema-pg17.sha256'), sha256 + '\n', { flag: 'wx', mode: 0o600 });
-    console.log(JSON.stringify({ schema: 'metaengine.browser.generated-empty-pg17-schema-qa.v1',
-      source_data_rows_exported: 0, schema_only: true, disposable: true,
-      reviewed_migrations_applied: true, bundle_sha256: attachedBundleSha256,
-      schema_archive_sha256: sha256, schema_archive_bytes: stat.size,
-      selected_toc_entries: plan.selected.length, authority_effect: false }));
   }
   console.log(JSON.stringify({ schema: 'compute.local-runtime-migration-grants-evidence.v1', disposable: true,
     exact_new_rpc_count: publicNewRpc.length, migration_sources_sha256: plan.source_manifest_sha256, migration_groups: plan.migrations.length,
