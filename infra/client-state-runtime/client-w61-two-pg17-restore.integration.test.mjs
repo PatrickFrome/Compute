@@ -165,6 +165,14 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
       'public.w61_restore_rows','INSERT')::text`)).trim(),'false','no privilege elevation');
     assert.equal(await hashFile(archive),archiveDigest,'archive immutable across restore');
     assert.equal(await hashFile(rollbackPath),rollbackDigest,'rollback immutable across restore');
+    const roleSql = `SELECT current_user || ':' ||
+      has_database_privilege(current_user,current_database(),'CONNECT')::text || ':' ||
+      has_table_privilege(current_user,'public.w61_restore_rows','SELECT')::text || ':' ||
+      has_database_privilege(current_user,current_database(),'CREATE')::text`;
+    const sourceRole=(await dbsql(from,roleSql)).trim().split(':');
+    const restoreRole=(await dbsql(to,roleSql)).trim().split(':');
+    assert.deepEqual(sourceRole,['postgres','true','true','true'],'source role rights measured in PG17');
+    assert.deepEqual(restoreRole,['postgres','true','true','true'],'destination role rights measured in PG17');
     const staging=await sealClientBackupRestoreStagingW47({
       journalDirectory:root,intent,archiveReceipt,tocReadback:toc,
       rollbackSha256:rollbackDigest,
@@ -179,9 +187,9 @@ test('W61 generated W47 intent/barrier -> real dump -> independent single-transa
         pg_pid:dstHostPid,fingerprint:restoredRows,
       },
       roleReadback:{
-        source_role:'postgres',restore_role:'postgres',
-        source_connect:true,source_select:true,
-        restore_connect:true,restore_create:true,
+        source_role:sourceRole[0],restore_role:restoreRole[0],
+        source_connect:sourceRole[1]==='true',source_select:sourceRole[2]==='true',
+        restore_connect:restoreRole[1]==='true',restore_create:restoreRole[3]==='true',
       },
     });
     assert.equal(staging.state,'STAGING_PASSED');
