@@ -1,0 +1,37 @@
+name: Client Native Owner Verifier W52
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-owner-verifier-w52.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs'
+      - 'infra/client-state-runtime/README-native-owner-verifier-w52.md'
+      - '.github/workflows/native-owner-verifier-w52.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  w52-real-client-negative-protocol:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source and whitespace
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          git diff --check
+      - name: Existing native client, W44 factory and Guardian status negative tests
+        shell: bash
+        run: |
+          node --check apps/metaengine-browser/src/native-owner-verifier-w52.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs \
+            apps/metaengine-browser/test/operator-native-context-bridge.test.mjs
