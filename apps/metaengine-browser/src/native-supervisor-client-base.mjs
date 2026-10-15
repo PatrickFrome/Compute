@@ -37,7 +37,7 @@ import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-resul
 // native-supervisor-endpoints.mjs (single source of truth, optional
 // METAENGINE_SUPERVISOR_BASE_URL env override). Re-exported here for backwards
 // compatibility with existing importers and tests.
-import { NATIVE_SUPERVISOR_BASE } from './native-supervisor-endpoints.mjs';
+import { NATIVE_SUPERVISOR_BASE, nativeSupervisorRuntimeUrl } from './native-supervisor-endpoints.mjs';
 import { localStateProviderConnectionReady } from './local-state-provider-policy.mjs';
 export { NATIVE_SUPERVISOR_BASE };
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -1270,7 +1270,7 @@ export class NativeSupervisorClient {
   async #enrollmentRequest(path, payload) {
     const bodyText = JSON.stringify(payload);
     const headers = await this.#identity.enrollmentHeaders(bodyText);
-    return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'POST', headers, body: bodyText, cache: 'no-store' });
+    return this.#fetch(nativeSupervisorRuntimeUrl(path), { method: 'POST', headers, body: bodyText, cache: 'no-store' });
   }
 
   async #recoverDeviceBindingAfterAuthDenial(response) {
@@ -1356,7 +1356,7 @@ export class NativeSupervisorClient {
     const init = { method, headers, cache: 'no-store' };
     if (method !== 'GET') init.body = bodyText;
     if (signal) init.signal = signal;
-    const response = await this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
+    const response = await this.#fetch(nativeSupervisorRuntimeUrl(path), init);
     // Authentication runs before every privileged route on the Edge. A 401 with
     // one of these exact server reasons therefore proves the requested Browser/
     // scheduler effect was not admitted. Recover only the credential binding;

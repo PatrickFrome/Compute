@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { nativeSupervisorRuntimeUrl } from './native-supervisor-endpoints.mjs';
 import { createNativeOwnerVerifierW52, missingNativeOwnerProtocolsW52 } from './native-owner-verifier-w52.mjs';
 import {
   NativeSupervisorClient as CoreNativeSupervisorClient,
@@ -208,7 +209,7 @@ export async function sendNativeSupervisorCognitiveBatch({ identity, fetchImpl, 
   const bodyText = JSON.stringify(batch);
   const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH}`;
   const headers = await identity.deviceHeaders('POST', requestPath, bodyText);
-  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}${NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH}`, {
+  const response = await fetchImpl(nativeSupervisorRuntimeUrl(NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH), {
     method: 'POST',
     headers,
     body: bodyText,
@@ -763,7 +764,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
       const bodyText = JSON.stringify(payload);
       const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
-      const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
+      const response = await this.#workspaceFetch(nativeSupervisorRuntimeUrl(path), {
         method: 'POST', headers, body: bodyText, cache: 'no-store',
       });
       if (response.status !== 202) throw new Error(`native_supervisor_realtime_state_http_${response.status}`);
@@ -867,7 +868,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         const path = '/v1/devos/workspace-snapshot';
         const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
         const headers = await this.#workspaceIdentity.deviceHeaders('GET', requestPath, '');
-        const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'GET', headers, cache: 'no-store' });
+        const response = await this.#workspaceFetch(nativeSupervisorRuntimeUrl(path), { method: 'GET', headers, cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
         if (response.status === 404) {
           this.#workspaceObservation = unavailableWorkspaceBindingSnapshot('ROUTE_UNAVAILABLE', 'WORKSPACE_SNAPSHOT_ROUTE_UNAVAILABLE');
@@ -900,7 +901,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     const readRequestId = randomUUID().toLowerCase();
     const bodyText = '{}';
     const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
-    const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
+    const response = await this.#workspaceFetch(nativeSupervisorRuntimeUrl(path), {
       method: 'POST',
       headers,
       body: bodyText,
@@ -965,7 +966,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     const payload = Object.freeze({ confirm: true, expected_generation_floor: floor });
     const bodyText = JSON.stringify(payload);
     const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
-    const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
+    const response = await this.#workspaceFetch(nativeSupervisorRuntimeUrl(path), {
       method: 'POST',
       headers,
       body: bodyText,
