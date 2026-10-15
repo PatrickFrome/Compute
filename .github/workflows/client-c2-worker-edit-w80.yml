@@ -1,0 +1,92 @@
+name: Client W80 Fixed C2 Sandbox Edit and Own PG17 Source
+
+on:
+  push:
+    branches:
+      - 'work/metaengine-client-wave12-w80-20261015'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/development-plane*'
+      - 'infra/client-state-runtime/client-c2-worker-edit-w80.test.mjs'
+      - '.github/workflows/client-c2-worker-edit-w80.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: w80-c2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-physical-pg17:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source W80 worker and negatives
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'W80_HEAD_MISMATCH' }
+          node --check apps/metaengine-browser/src/development-plane-fixed-sandbox-edit.cjs
+          node --check apps/metaengine-browser/src/development-plane-worker.cjs
+          node --check apps/metaengine-browser/src/development-plane.mjs
+          node --test --test-concurrency=1 infra/client-state-runtime/client-c2-worker-edit-w80.test.mjs infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+      - name: Physical Windows PostgreSQL 17 is required, not silently skipped
+        shell: pwsh
+        run: |
+          $candidate = 'C:\Program Files\PostgreSQL\17\bin'
+          if (!(Test-Path (Join-Path $candidate 'pg_ctl.exe'))) {
+            throw 'W80_WINDOWS_PG17_NATIVE_MISSING; physical PG gate remains UNKNOWN'
+          }
+          if (!(Test-Path (Join-Path $candidate 'initdb.exe'))) { throw 'W80_WINDOWS_INITDB_MISSING' }
+          $env:W48_PG17_BIN = $candidate
+          node --test --test-concurrency=1 infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  linux-physical-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container:
+      image: postgres:17
+    steps:
+      - run: apt-get update -qq && apt-get install -y -qq git ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/client-state-runtime
+      - name: Generated W80 signed-STAGING worker and real PG17 lifecycle
+        shell: sh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(id -u)" -eq 0
+          chown -R postgres:postgres "$GITHUB_WORKSPACE"
+          NODE_BIN="$(command -v node)"
+          runuser -u postgres -- env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR=/usr/lib/postgresql/17/bin NODE_BIN="$NODE_BIN" sh -ec '
+            cd "$GITHUB_WORKSPACE"
+            test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+            test -z "${PGDATA+x}${PGPASSWORD+x}${DATABASE_URL+x}${SUPABASE_URL+x}${METAENGINE_REPO_ROOT+x}"
+            "$NODE_BIN" --test --test-concurrency=1 infra/client-state-runtime/client-c2-worker-edit-w80.test.mjs infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs
+            "$NODE_BIN" --test --test-concurrency=1 infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
+            "$NODE_BIN" --test --test-concurrency=1 infra/client-state-runtime/project-continuity.integration.test.mjs
+          '
+          echo "STAGING physical PG17 readback does not imply native installed Owner or LIVE C2."

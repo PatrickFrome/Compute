@@ -8,6 +8,10 @@ const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
 const { DevOSRepoSearchIndex } = require('./devos-repo-search-index.cjs');
+const { executeFixedSandboxSourceEdit } = require('./development-plane-fixed-sandbox-edit.cjs');
+// The key is pinned outside untrusted request JSON. Electron's default worker
+// has no provider: no authorized key means deny. W74 Host custody must supply it.
+const w80Key = (() => { try { return require('node:worker_threads').workerData?.w80?.trustedSourceEditPublicKey ?? null; } catch { return null; } })();
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const VERSION = '0.4.0';
@@ -23,6 +27,7 @@ const CAPABILITIES = Object.freeze([
   'VERIFICATION_SANDBOX_PLAN_CREATE',
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
   'ADVISORY_EVIDENCE_VERIFY',
+  'FIXED_SANDBOX_SOURCE_EDIT',
 ]);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
@@ -103,6 +108,8 @@ async function execute(capability, payload) {
     verification_sandbox_planning: true,
     verification_sandbox_prepare_only: true,
     verification_sandbox_execution: false,
+    fixed_sandbox_source_edit_registered: true,
+    fixed_sandbox_source_edit_default_authorized: false,
     sandbox_backend_bound: false,
     advisory_evidence_verification: true,
     advisory_evidence_network_dispatch: false,
@@ -118,6 +125,8 @@ async function execute(capability, payload) {
     signed_attestation_required_before_promotion: true,
   };
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
+  if (capability === 'FIXED_SANDBOX_SOURCE_EDIT')
+    return executeFixedSandboxSourceEdit(payload, { root:repoRoot, pinnedPublicKey:w80Key });
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
   if (capability === 'DEVOS_REPO_READ_MODEL') return createDevOSRepoReadModel({ repoRoot, source: await requireCurrentSource() });
   if (capability === 'DEVOS_REPO_SEARCH') {
