@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <string>
+#include <cstdint>
 
 namespace metaengine::guardian {
 
@@ -23,6 +24,9 @@ struct OwnerEnrollmentObservation {
     bool token_user_readback = false;
     bool token_session_id_readback = false;
     DWORD client_pid = 0;
+    // Sampled by native Guardian from the authenticated named-pipe client PID.
+    // A PID alone is never an Owner incarnation.
+    std::uint64_t client_creation_time_100ns = 0;
     DWORD session_id = 0;
     std::wstring user_sid;
     DWORD win32_error = ERROR_SUCCESS;
