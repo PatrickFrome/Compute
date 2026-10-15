@@ -1,0 +1,91 @@
+name: Client W71 Existing C2 Worker and Disposable PG17
+
+on:
+  push:
+    branches:
+      - 'work/metaengine-client-wave11-w71-20261015'
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/client-c2-existing-worker-w71*'
+      - '.github/workflows/client-c2-existing-worker-w71.yml'
+      - 'infra/client-state-runtime/client-serial-loop-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: w71-existing-c2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-source:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exact source, no installed runtime
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'W71_HEAD_MISMATCH' }
+          node --check infra/client-state-runtime/client-c2-existing-worker-w71.mjs
+          node --check infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs
+          node --test --test-concurrency=1 infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs infra/client-state-runtime/client-serial-loop-development-worker-w64.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+      - name: Windows physical PostgreSQL is not established here
+        run: echo "W71_WINDOWS_PHYSICAL_PG17=UNKNOWN; source only"
+
+  linux-physical-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: postgres:17
+    steps:
+      - name: Install Git in isolated PG17 container
+        run: apt-get update -qq && apt-get install -y -qq git ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Own generated fixture and runner permissions, not installed Owner
+        shell: sh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(id -u)" -eq 0
+          test -n "$GITHUB_WORKSPACE"
+          test "$(realpath "$GITHUB_WORKSPACE")" = "$(pwd -P)"
+          chown -R postgres:postgres "$GITHUB_WORKSPACE"
+          test "$(stat -c %U "$GITHUB_WORKSPACE/.git")" = postgres
+          test -x /usr/lib/postgresql/17/bin/initdb
+      - name: Real DevelopmentPlane source and two immediate physical PostgreSQL restarts
+        shell: sh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -eu
+          NODE_BIN="$(command -v node)"
+          runuser -u postgres -- env GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin NODE_BIN="$NODE_BIN" sh -ec '
+            cd "$GITHUB_WORKSPACE"
+            test "$(id -un)" = postgres
+            test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+            test -z "$(git status --porcelain)"
+            "$NODE_BIN" --test --test-concurrency=1 infra/client-state-runtime/client-c2-existing-worker-w71.test.mjs infra/client-state-runtime/client-serial-loop-development-worker-w64.test.mjs infra/client-state-runtime/operator-agent-completion-bound-w39.test.mjs
+            "$NODE_BIN" --test --test-concurrency=1 infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
+          '
