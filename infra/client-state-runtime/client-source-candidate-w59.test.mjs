@@ -24,12 +24,12 @@ test('W59 retains W51 W57 W58, all prior PRs as real ancestors, and original fro
   }
   assert.equal(spawnSync('git', ['-C', root, 'merge-base', '--is-ancestor', manifest.pre_version_assembly_anchor, 'HEAD']).status, 0);
 });
-test('W59 exact-current source ledger includes changed W58 protected ACL rather than recycling W51 frozen hashes', () => {
+test('W59 historical SHA retains sealed W58 ACL blobs; W66 seals CURRENT changed blobs separately', () => {
   assert.ok(Object.keys(manifest.current_tree_blobs).length >= 30);
   for (const [p, sha] of Object.entries(manifest.current_tree_blobs)) {
     assert.match(sha, /^[0-9a-f]{40}$/);
-    assert.equal(git('rev-parse', 'HEAD:' + p), sha, 'source changed without renewed current candidate blob ledger: ' + p);
-    assert.equal(git('hash-object', p), sha, 'dirty integrated source: ' + p);
+    assert.equal(git('rev-parse', '83e1d60deb8189b09403e157cc7d639629549550:' + p), sha,
+      'historical W59 ancestor blob drifted: ' + p);
   }
   const old = JSON.parse(read('coordination/operator-control/client-source-candidate-w51.manifest.json'));
   assert.notEqual(manifest.current_tree_blobs['infra/client-state-runtime/upgrade-backup-gate.mjs'], old.protected_git_blobs['infra/client-state-runtime/upgrade-backup-gate.mjs']);
