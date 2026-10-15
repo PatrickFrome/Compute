@@ -50,12 +50,16 @@ test('Windows authenticated Host wire executes real fixed-root ACL provider, nev
   await protectOwnerOnlyWindowsDirectory(root);
   const file=path.join(root,'postgresql-17-snapshot.dump');
   await fs.writeFile(file,Buffer.concat([Buffer.from('PGDMP'),Buffer.alloc(2048,42)]));
-  const script=`$a=Get-Acl -LiteralPath $env:METAENGINE_W58_TEST_FILE
+  const script=`$ErrorActionPreference='Stop'
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+$a=Get-Acl -LiteralPath $env:METAENGINE_W58_TEST_FILE
 $a.SetAccessRuleProtection($true,$true)
 Set-Acl -LiteralPath $env:METAENGINE_W58_TEST_FILE -AclObject $a`;
-  await run(path.win32.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe'),
+  const psRoot=path.win32.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0');
+  await run(path.win32.join(psRoot,'powershell.exe'),
     ['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
-    {env:{...process.env,METAENGINE_W58_TEST_FILE:file},windowsHide:true,timeout:120000});
+    {env:{...process.env,METAENGINE_W58_TEST_FILE:file,PSModulePath:path.win32.join(psRoot,'Modules')},
+     windowsHide:true,timeout:120000});
   const sessionKey=createHostAgentSessionKey(),endpoint=hostAgentEndpoint({userDataPath:root});
   const host=new HostAgentRuntime({endpoint,sessionKey,backupDirectory:root,
     developmentPlane:{request:async()=>({state:'UNKNOWN'})},
