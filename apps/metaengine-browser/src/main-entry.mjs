@@ -1,5 +1,6 @@
 import { app, BaseWindow, dialog } from 'electron';
 import { secondaryDiagnosticRefusal, SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE } from './secondary-diagnostic-refusal.mjs';
+import { projectPackagedOwnerAdmissionDiagnostic } from './packaged-owner-admission-diagnostic.mjs';
 import {
   acquirePrimaryInstance,
   METAENGINE_BROWSER_APP_ID,
@@ -151,6 +152,9 @@ if (guard.installer_shutdown_control) {
   // database. Only an admitted primary may validate/probe its runtime provider.
   // Await this before importing HostResilience or self-update modules: their
   // static dependencies resolve and pin the supervisor endpoint at evaluation.
+  let ownerAdmissionPhase = 'BOOTSTRAP_IMPORT';
+  let observedOwnerBootstrapState = null;
+  let observedAttachedDescriptorState = 'NOT_ATTEMPTED';
   try {
     const providerBoot = await import('./local-state-provider-bootstrap.mjs');
     const { requirePackagedLocalProviderAdmission } = await import('./local-state-provider-policy.mjs');
@@ -158,21 +162,28 @@ if (guard.installer_shutdown_control) {
     // HostResilience/main (whose static imports can resolve a cloud endpoint).
     // Packaged Browser never silently selects the legacy hosted default.
     let bootstrapState = providerBoot.persistentLocalProviderBootstrap.state;
+    observedOwnerBootstrapState = bootstrapState;
+    ownerAdmissionPhase = 'OWNER_BOOTSTRAP_OBSERVED';
     if (app.isPackaged && browserRuntimeNeeded && interactiveNormalLaunch
       && !bypassSingleInstance && bootstrapState === 'NO_OWNER_CONFIG') {
       // Existing Keeper installations are attached from a protected,
       // path-only descriptor. There is no interactive database wizard: a
       // missing descriptor remains a hard admission failure below.
+      ownerAdmissionPhase = 'ATTACHED_DESCRIPTOR_READBACK';
       const { autoConnectInstalledAttachedProvider } = await import('./local-restored-pg17-setup.mjs');
       const setup = await autoConnectInstalledAttachedProvider({
         env: process.env, platform: process.platform, resourcesPath: process.resourcesPath,
         appDataDirectory: process.env.APPDATA,
       });
+      observedAttachedDescriptorState = setup.state;
       if (setup.state === 'CONFIGURED' && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
+        ownerAdmissionPhase = 'ATTACHED_OWNER_REVALIDATION';
         const readyProvider = await providerBoot.revalidatePersistentLocalProviderAfterAttach();
         bootstrapState = readyProvider.state;
+        observedOwnerBootstrapState = bootstrapState;
       }
     }
+    ownerAdmissionPhase = 'PACKAGED_OWNER_ADMISSION';
     requirePackagedLocalProviderAdmission({
       isPackaged: app.isPackaged,
       browserRuntimeNeeded,
@@ -186,6 +197,11 @@ if (guard.installer_shutdown_control) {
       schema: 'metaengine.browser.provider-startup.v1',
       state: 'LOCAL_PROVIDER_STARTUP_BLOCKED',
       reason,
+      ...projectPackagedOwnerAdmissionDiagnostic({
+        phase: ownerAdmissionPhase,
+        bootstrapState: observedOwnerBootstrapState,
+        attachmentState: observedAttachedDescriptorState,
+      }),
       browser_runtime_started: false,
       automatic_cloud_fallback: false,
       authority_effect: false,
