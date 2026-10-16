@@ -4,7 +4,10 @@ import { ownedLocalRuntimeHostReady, startConfiguredLocalRuntimeHost, stopOwnedL
 
 const CONFIG_MAX_BYTES = 16384;
 const RUNTIME_MAX_BYTES = 65536;
-const HEALTH_TIMEOUT_MS = 3000;
+// The local /health endpoint performs a bounded PostgreSQL capability read with
+// statement_timeout=10s. Preserve a 2s transport margin; a shorter Browser
+// admission deadline can reject a still-valid local Owner under contention.
+const HEALTH_TIMEOUT_MS = 12000;
 
 async function readBoundedJson(file, maximumBytes) {
   const stat = await fs.lstat(file);
