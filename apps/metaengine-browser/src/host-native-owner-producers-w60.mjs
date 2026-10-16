@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { loadPackagedEmergencyMaintenanceTrustRoot } from './emergency-maintenance-trust-root.mjs';
 
 const run = promisify(execFile);
@@ -16,6 +17,9 @@ const at = () => new Date().toISOString();
 const fixtures = x => x?.fixture_classification != null || x?.synthetic === true || x?.staging === true;
 const safe = f => Promise.resolve().then(f).catch(() => null);
 const frozen = x => x ? Object.freeze(x) : null;
+const ABSENT_PROCESS_ERROR = 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand';
+const ABSENT_PROCESS_TYPE = 'Microsoft.PowerShell.Commands.ProcessCommandException';
+const ABSENT_PROCESS_FIELDS = ['pid','state','native_error_id','native_error_category','native_error_type','native_target_pid'];
 
 // Fixed PowerShell, numeric PID only. Unlike Get-Process from a status screenshot,
 // StartTime is read from the Windows kernel at the time of each observation.
@@ -23,7 +27,19 @@ const frozen = x => x ? Object.freeze(x) : null;
 // ambiguity: $args[0] is not populated consistently on Windows PowerShell 5.1.
 const processScript = pid => [
   '$ErrorActionPreference = "Stop"',
-  '$p = Get-Process -Id ' + String(pid) + ' -ErrorAction Stop',
+  '$requestedPid = ' + String(pid),
+  // Only this exact native ObjectNotFound error proves absence. Permission,
+  // command, startup and timeout failures must still leave custody UNKNOWN.
+  'try { $p = Get-Process -Id $requestedPid -ErrorAction Stop } catch { '
+    + 'if ($_.FullyQualifiedErrorId -ceq "' + ABSENT_PROCESS_ERROR + '" '
+    + '-and [string]$_.CategoryInfo.Category -ceq "ObjectNotFound" '
+    + '-and $_.Exception.GetType().FullName -ceq "' + ABSENT_PROCESS_TYPE + '" '
+    + '-and $_.TargetObject -is [int] -and $_.TargetObject -eq $requestedPid) { '
+    + '@{ pid = [int]$requestedPid; state = "NOT_RUNNING"; '
+    + 'native_error_id = [string]$_.FullyQualifiedErrorId; '
+    + 'native_error_category = [string]$_.CategoryInfo.Category; '
+    + 'native_error_type = $_.Exception.GetType().FullName; '
+    + 'native_target_pid = [int]$_.TargetObject } | ConvertTo-Json -Compress; exit 0 }; throw }',
   '$start = $p.StartTime.ToUniversalTime().ToString("o")',
   '$exe = $p.Path',
   '@{ pid = [int]$p.Id; created_at = $start; exe_path = $exe } | ConvertTo-Json -Compress',
@@ -39,11 +55,32 @@ const signatureScript = executable => [
 
 export async function readWindowsKernelProcessW60(pid, { platform = process.platform, exec = run } = {}) {
   if (platform !== 'win32' || !pos(pid) || pid > 0x7fffffff) return null;
+  // Match the existing native KnownFolder rail: a nonstandard Windows system
+  // drive stays UNKNOWN until it has an independent native root resolver.
+  // Environment and PATH cannot select another executable or module provider.
+  const root = 'C:\\Windows';
+  const declaredRoot = String(process.env.SystemRoot || process.env.SYSTEMROOT || '');
+  if (declaredRoot.toLowerCase() !== root.toLowerCase() ||
+      (process.env.WINDIR && process.env.WINDIR.toLowerCase() !== root.toLowerCase())) return null;
+  const system32 = path.win32.join(root,'System32');
+  const powershell = path.win32.join(system32,'WindowsPowerShell','v1.0','powershell.exe');
+  const env = {SystemRoot:root,SYSTEMROOT:root,WINDIR:root,PATH:system32,
+    PSModulePath:path.win32.join(system32,'WindowsPowerShell','v1.0','Modules')};
   return safe(async () => {
-    const { stdout } = await exec('powershell.exe',
+    const { stdout } = await exec(powershell,
       ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command', processScript(pid)],
-      { timeout: 15000, windowsHide: true, maxBuffer: 4096 });
+      { env, shell:false, timeout: 15000, windowsHide: true, maxBuffer: 4096 });
     const x = JSON.parse(stdout.trim());
+    if (x?.state === 'NOT_RUNNING') {
+      if (Object.keys(x).length !== ABSENT_PROCESS_FIELDS.length ||
+          !ABSENT_PROCESS_FIELDS.every(key => Object.hasOwn(x,key)) ||
+          x.pid !== pid || x.native_target_pid !== pid ||
+          x.native_error_id !== ABSENT_PROCESS_ERROR ||
+          x.native_error_category !== 'ObjectNotFound' ||
+          x.native_error_type !== ABSENT_PROCESS_TYPE) return null;
+      return frozen({pid,source:'OS_PROCESS_INVENTORY',state:'NOT_RUNNING',
+        native_verified:true,authority_effect:false,observed_at:at()});
+    }
     if (x.pid !== pid || !Number.isFinite(Date.parse(x.created_at)) ||
       typeof x.exe_path !== 'string' || !x.exe_path) return null;
     return frozen({pid, created_at:new Date(x.created_at).toISOString(),exe_path:x.exe_path,
