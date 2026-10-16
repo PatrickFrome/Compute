@@ -394,8 +394,9 @@
     "apps/metaengine-browser/test/browser-sentinel-heartbeat-publication.test.mjs": "950515630d823d1e247ecbaa9a55a49ac82ea177",
     "apps/metaengine-browser/test/managed-task-project-sqlite-journal.test.mjs": "b64e452a005feaa6df69b1a99ee7227c2428c41a",
     "apps/metaengine-browser/test/installer-artifact-layout.test.mjs": "d37427d9a505d9046b02f5e78a7745c889db2365",
-    "apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1": "78801fee30724582574aef6423b959ab61ca0bf3",
-    "apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs": "49f65b66c746faa7f927e63fdd402f03d3a048db",
+    "apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1": "0438b0d8640c4bca56e1416635a23c0ca999aed6",
+    "apps/metaengine-browser/scripts/install-package-bounded.ps1": "ac1e7a4dfc37395c74841d940990cc9f22a322a3",
+    "apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs": "814f00a00eaf32a2fafb4b8b0bb336fedccf9cda",
     "apps/metaengine-browser/src/local-restored-pg17-auto-prepare.mjs": "08a3c31cb562eea439e21fc3c6c9acf8db8104ea",
     "apps/metaengine-browser/test/local-attached-reboot-replacement.test.mjs": "0a3bc14b35f100c1841632c3a48fc8bd775eb9a8"
   },

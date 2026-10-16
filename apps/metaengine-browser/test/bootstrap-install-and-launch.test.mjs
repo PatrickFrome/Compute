@@ -125,9 +125,19 @@ test('bootstrap refuses an unbound bounded-installer receipt before launching GU
   });
 
 test('bootstrap rejects out-of-range install deadline before any effect', { skip: !windows }, async t => {
-  const f = await bootstrapFixture(t, { timeout: 601 });
+  const f = await bootstrapFixture(t, { timeout: 1801 });
   assert.notEqual(f.result.status, 0);
   assert.equal(f.calls, null);
   assert.equal(f.proof, null);
   assert.deepEqual(f.launches, []);
 });
+
+test('bootstrap forwards a slow-machine install deadline through the bounded helper before one launch',
+  { skip: !windows }, async t => {
+    const f = await bootstrapFixture(t, { timeout: 1800 });
+    assert.equal(f.result.status, 0, f.result.stderr);
+    assert.deepEqual(f.calls, { path: f.installer, digest: f.digest, timeout: 1800 });
+    assert.equal(f.proof.installer_timeout_seconds, 1800);
+    assert.equal(f.proof.installer_process_tree_scoped_job, true);
+    assert.deepEqual(f.launches, [f.installed]);
+  });
