@@ -137,6 +137,9 @@ test('requires local mode, explicit PostgreSQL ownership, loopback URL and disti
     pgBinDir: here, pgDataDir: here, denoPath: process.execPath,
   };
   assert.equal(normalizeLauncherConfig(good).apiPort, 15432);
+  // SQL inside /health has a 10s server-side statement deadline. The outer
+  // request must permit it to return a bounded failure/attested success.
+  assert.equal(normalizeLauncherConfig(good).healthProbeTimeoutMs, 12000);
   for (const mutation of [
     { mode: undefined }, { postgresMode: undefined },
     { databaseUrl: 'postgresql://test:secret@host.supabase.co:15434/test' },
@@ -146,6 +149,8 @@ test('requires local mode, explicit PostgreSQL ownership, loopback URL and disti
     { inspectDatabaseUrl: 'postgresql://test:secret@127.0.0.1:15435/postgres' },
     { apiPort: 15434 }, { edgePort: 15432 }, { apiKey: 'insecure' },
     { denoDir: 'relative-cache' }, { expectedStartupSourceSha256: 'bad' },
+    { healthProbeTimeoutMs: 2999 }, { healthProbeTimeoutMs: 12001 },
+    { healthProbeTimeoutMs: Infinity }, { healthProbeTimeoutMs: '12000' },
   ]) assert.throws(() => normalizeLauncherConfig({ ...good, ...mutation }));
 });
 
@@ -409,6 +414,21 @@ test('a PostgreSQL incarnation change fails closed instead of adopting another s
   assert(alive(process.pid));
 });
 
+test('SQL-health response beyond legacy 3s does not falsely stop an attested host', { timeout: 20000 }, async t => {
+  const { input, hooks, events, control } = await controlledSetup(t);
+  input.healthProbeTimeoutMs = 6000; // bounded fixture, lower than installed 12s
+  const runtime = await launchClientStateRuntime(input, hooks);
+  t.after(() => runtime.stop());
+  await control({ api: { delay_ms: 3500 } });
+  // Wait for an actual monitor cycle and the SQL-like delayed response.
+  await new Promise(resolve => setTimeout(resolve, 4500));
+  assert.equal(runtime.stopped, false);
+  assert.equal(events.filter(event => event.event === 'health_failure').length, 0);
+  assert.equal(events.some(event => event.event === 'ready'), true);
+  await runtime.stop();
+  assert.equal((await runtime.finished).reason, 'requested');
+});
+
 for (const scenario of [
   { name: 'HTTP overload', role: 'api', control: { http_status: 503 }, code: 'health_http_failed', status: 503, count: 3 },
   { name: 'lost capability attestation', role: 'edge', control: { unattested: true }, code: 'health_capability_unattested', count: 3 },
@@ -419,6 +439,9 @@ for (const scenario of [
 ]) {
   test(`health monitor reports ${scenario.name} before stopping without private response content`, { timeout: 30000 }, async t => {
     const { input, hooks, events, control } = await controlledSetup(t);
+    // Keep the short deadline only for the intentional simulated timeout;
+    // the installed default permits the DB's own 10s statement deadline.
+    if (scenario.name === 'network timeout') input.healthProbeTimeoutMs = 3000;
     const rejections = [];
     const onUnhandled = error => rejections.push(error);
     process.on('unhandledRejection', onUnhandled);

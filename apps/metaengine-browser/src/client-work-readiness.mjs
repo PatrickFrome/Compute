@@ -33,7 +33,7 @@ function hasExactAgentOrigin(agent) {
     && SHA256.test(String(proof?.conversation_url_sha256 || ''));
 }
 
-export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fleet = {}, development = {}, guardian = {}, isCurrentBinding = () => false, now = Date.now() } = {}) {
+export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fleet = {}, development = {}, guardian = {}, runtimeBootstrapState = null, isCurrentBinding = () => false, now = Date.now() } = {}) {
   const runtime = snapshot.continuous_service?.runtime_control || {};
   const keepalive = snapshot.lifecycle?.keepalive || {};
   const heartbeatMs = Date.parse(snapshot.last_heartbeat_at || '');
@@ -52,7 +52,17 @@ export function projectClientWorkReadiness({ connection = {}, snapshot = {}, fle
   let label;
   let detail;
   if (connection.local_runtime_ready !== true) {
-    reason = 'LOCAL_RUNTIME_STARTING'; label = 'Starting'; detail = 'Native Browser is starting.';
+    // The local-provider bootstrap is an existing main-process diagnostic, not
+    // authority. Missing readiness never proves that a stopped host is starting.
+    if (runtimeBootstrapState === 'BLOCKED') {
+      reason = 'LOCAL_RUNTIME_BOOT_BLOCKED'; label = 'Runtime blocked';
+      detail = 'Local runtime bootstrap failed. Inspect the existing runtime status before attempting recovery.';
+    } else if (runtimeBootstrapState === 'ATTACH_REVALIDATING' || runtimeBootstrapState === 'STARTING') {
+      reason = 'LOCAL_RUNTIME_STARTING'; label = 'Starting'; detail = 'Local runtime admission is in progress.';
+    } else {
+      reason = 'LOCAL_RUNTIME_UNAVAILABLE'; label = 'Runtime unavailable';
+      detail = 'A ready local runtime has not been verified. Check the current runtime state.';
+    }
   } else if (connection.admin_ready !== true || connection.cloud_control_state !== 'CONNECTED') {
     reason = 'ADMIN_CONNECTION_UNAVAILABLE'; label = 'Reconnecting'; detail = 'Waiting for the Native Supervisor connection.';
   } else if (!heartbeatFresh) {
