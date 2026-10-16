@@ -5,7 +5,7 @@ param(
   [string]$InstalledExePath = '',
   [string]$ProofPath = '',
   [switch]$PhysicalProof,
-  [ValidateRange(1,1800)][int]$InstallTimeoutSeconds = 1200,
+  [ValidateRange(1,1800)][int]$InstallTimeoutSeconds = 1800,
   [int]$StartupTimeoutSeconds = 70
 )
 

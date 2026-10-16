@@ -10,7 +10,8 @@ const windows = process.platform === 'win32';
 const quote = value => `'${String(value).replaceAll("'", "''")}'`;
 const script = new URL('../scripts/bootstrap-install-and-launch.ps1', import.meta.url);
 
-async function bootstrapFixture(t, { failure = '', digestMismatch = false, timeout = 7, receiptPatch = '' } = {}) {
+async function bootstrapFixture(t, { failure = '', digestMismatch = false, timeout = 7,
+  omitInstallTimeoutParameter = false, receiptPatch = '' } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-bootstrap-bounded-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const installer = path.join(root, 'candidate.exe');
@@ -42,6 +43,8 @@ $receipt = [ordered]@{
 ${receiptPatch}
 $receipt | ConvertTo-Json -Compress
 `);
+  const invocation = `& ${quote(path.join(root, 'bootstrap-install-and-launch.ps1'))} -InstallerPath ${quote(installer)} -ExpectedInstallerSha256 ${quote(digestMismatch ? '0'.repeat(64) : digest.toUpperCase())} -ExpectedVersion '0.7.0-dev.1107139874561.1' -InstalledExePath ${quote(installed)} -ProofPath ${quote(proof)}`
+    + (omitInstallTimeoutParameter ? '' : ` -InstallTimeoutSeconds ${timeout}`);
   await fs.writeFile(path.join(root, 'invoke.ps1'), `
 $ErrorActionPreference = 'Stop'
 $global:BootstrapProcessReads = 0
@@ -59,7 +62,7 @@ function Start-Process {
   $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
   return $process
 }
-& ${quote(path.join(root, 'bootstrap-install-and-launch.ps1'))} -InstallerPath ${quote(installer)} -ExpectedInstallerSha256 ${quote(digestMismatch ? '0'.repeat(64) : digest.toUpperCase())} -ExpectedVersion '0.7.0-dev.1107139874561.1' -InstalledExePath ${quote(installed)} -ProofPath ${quote(proof)} -InstallTimeoutSeconds ${timeout}
+${invocation}
 `);
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', path.join(root, 'invoke.ps1')], { encoding: 'utf8', timeout: 45_000, windowsHide: true });
@@ -72,7 +75,7 @@ function Start-Process {
     try { return (await fs.readFile(launches, 'utf8')).trim().split(/\r?\n/).filter(Boolean); }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   };
-  return { result, digest, installer, installed, proof: await readJson(proof),
+  return { result, digest, installer, installed, invocation, proof: await readJson(proof),
     calls: await readJson(calls), launches: await readLaunches() };
 }
 
@@ -139,5 +142,18 @@ test('bootstrap forwards a slow-machine install deadline through the bounded hel
     assert.deepEqual(f.calls, { path: f.installer, digest: f.digest, timeout: 1800 });
     assert.equal(f.proof.installer_timeout_seconds, 1800);
     assert.equal(f.proof.installer_process_tree_scoped_job, true);
+    assert.deepEqual(f.launches, [f.installed]);
+  });
+
+test('bootstrap uses default 1800-second install deadline when InstallTimeoutSeconds is omitted',
+  { skip: !windows }, async t => {
+    const f = await bootstrapFixture(t, { omitInstallTimeoutParameter: true });
+    assert.doesNotMatch(f.invocation, /-InstallTimeoutSeconds\b/);
+    assert.equal(f.result.status, 0, f.result.stderr);
+    assert.deepEqual(f.calls, { path: f.installer, digest: f.digest, timeout: 1800 });
+    assert.equal(f.proof.installer_timeout_seconds, 1800);
+    assert.equal(f.proof.installer_process_tree_scoped_job, true);
+    assert.equal(f.proof.installer_effect_attempted, true);
+    assert.equal(f.proof.automatic_retry_allowed, false);
     assert.deepEqual(f.launches, [f.installed]);
   });

@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory=$true)][string]$InstallerPath,
   [Parameter(Mandatory=$true)][string]$ExpectedSha256,
-  [ValidateRange(1,1800)][int]$TimeoutSeconds = 1200
+  [ValidateRange(1,1800)][int]$TimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Stop'
