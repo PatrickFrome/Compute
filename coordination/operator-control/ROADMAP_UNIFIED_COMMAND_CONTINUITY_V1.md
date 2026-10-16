@@ -3,6 +3,37 @@
 Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY UNQUALIFIED
 Date: 2026-10-15 (current audit; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
+
+## Architectural adoption — Autonomous Development Fabric V1 (2026-10-17)
+
+**ACCEPTED DESIGN / FIRST SOURCE SLICE IN PROGRESS / INSTALLED-LIVE UNQUALIFIED.**
+The binding architecture decision record is
+[`docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md`](../../docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md).
+This is one ADR beneath the existing canonical Level-1 roadmap, **not a
+replacement roadmap**.
+
+The development center of gravity changes to a durable, authenticated,
+independently verified Goal → PG17 claim/lease → worktree edit/tests → Critic →
+checkpoint → continued task after restart. The existing Supervisor remains
+the sole physical scheduler, with Host/Guardian custody unchanged. Logical
+tasks/agents and their future task-bound mailboxes outlive physical Browser
+tabs; finite provider slots never become a global limit on durable work.
+No Supabase, cloud execution, second scheduler, automatic replay of
+AMBIGUOUS effects, or agent-controlled trust promotion.
+
+**First vertical source implementation:** distinguish KNOWN vs UNKNOWN own-DB
+task demand in the existing Fleet governor. Missing/malformed backlog must not
+be converted into a zero-load retirement/provisioning effect. A physical
+FLEET_RECONCILE is permitted only for KNOWN demand; large logical backlog
+remains independent of physical tab capacity. This is advisory projection and
+gating, **not** an implemented logical-agent registry or a new authority.
+
+**Next evidence gates:** (1) exact installed Owner/Guardian/PG17; (2) one real
+bounded serial coding loop with independent Critic and restart readback;
+(3) durable logical-agent/session binding and causal mailboxes; (4) browser/UI
+lifecycle independence and measured elastic fleet; (5) governed RSI rollout.
+Source/unit tests alone do not qualify installed autonomous execution.
+
 Canonical development base at adoption: `2bc3f3c13a75ed9708d657ae37db5cac610cc13f`
 Adoption branch: `work/unified-command-continuity-p0-v1`
 

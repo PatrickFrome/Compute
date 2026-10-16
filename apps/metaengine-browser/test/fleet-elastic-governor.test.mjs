@@ -158,7 +158,10 @@ test('malformed backlog fails safe to zero demand, never to growth', () => {
   assert.equal(plan.active, false);
   assert.equal(plan.ready, 0);
   assert.equal(plan.running, 0);
-  assert.equal(plan.idle_cycles, 1);
+  assert.equal(plan.idle_cycles, 0);
+  assert.equal(plan.logical_work.state, 'UNKNOWN');
+  assert.equal(plan.target_agents, 0);
+  assert.deepEqual([...plan.retire_agent_ids], []);
 });
 
 test('governor plan is exported through the DevOS task cycle surface', () => {

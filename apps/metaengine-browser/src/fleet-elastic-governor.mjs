@@ -73,6 +73,8 @@ export const ELASTIC_FLEET_CONTRACT = Object.freeze({
   never_retire_states: Object.freeze(['ACTIVE', 'PROVISIONING_AMBIGUOUS']),
   warm_floor_enforced: true,
   second_scheduler_loop: false,
+  logical_work_readback: 'KNOWN_OR_UNKNOWN',
+  unknown_backlog_mutation_authority: false,
   worker_telemetry_capacity_authority: false,
   tab_census_capacity_authority: true,
   authority_effect: false,
@@ -145,9 +147,42 @@ function normalizeTabCensus(tabCensus) {
   return Object.freeze({ fleet_tabs: fleetTabs, fleet_tab_ceiling: ceiling });
 }
 
-export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idleCycles = 0, maxTargetAgents = null, tabCensus = null, experience = null } = {}) {
-  const ready = nonNegative(backlog?.ready);
-  const running = nonNegative(backlog?.running);
+// A logical PostgreSQL task backlog is not a collection of physical browser
+// tabs. No model/page/UI value may promote an absent or invalid readback into
+// zero demand (which would trigger the idle retire path).
+export function projectLogicalWorkDemand(backlog = null) {
+  const unknown = Object.freeze({
+    schema: 'metaengine.browser.logical-work-demand.v1',
+    state: 'UNKNOWN',
+    ready: null, running: null, total: null,
+    logical_work_is_physical_slots: false,
+    authority_effect: false,
+  });
+  if (!backlog || typeof backlog !== 'object' || Array.isArray(backlog)) return unknown;
+  const hasReady = Object.hasOwn(backlog, 'ready');
+  const hasRunning = Object.hasOwn(backlog, 'running');
+  if (!hasReady && !hasRunning) return unknown;
+  const count = (key, present) => {
+    if (!present) return 0;
+    const value = backlog[key];
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  };
+  const ready = count('ready', hasReady);
+  const running = count('running', hasRunning);
+  if (ready === null || running === null || !Number.isSafeInteger(ready + running)) return unknown;
+  return Object.freeze({
+    schema: 'metaengine.browser.logical-work-demand.v1',
+    state: 'KNOWN',
+    ready, running, total: ready + running,
+    logical_work_is_physical_slots: false,
+    authority_effect: false,
+  });
+}
+
+export function planElasticFleetCapacity({ backlog = null, fleetSnapshot = {}, idleCycles = 0, maxTargetAgents = null, tabCensus = null, experience = null } = {}) {
+  const logicalWork = projectLogicalWorkDemand(backlog);
+  const ready = logicalWork.ready ?? 0;
+  const running = logicalWork.running ?? 0;
   const policy = fleetSnapshot?.policy || {};
   const warm = Math.max(0, nonNegative(policy.warm_agents ?? DEFAULT_WARM_AGENTS));
   const burst = Math.max(1, nonNegative(policy.spawn_burst_limit ?? DEFAULT_SPAWN_BURST_LIMIT) || DEFAULT_SPAWN_BURST_LIMIT);
@@ -181,7 +216,11 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
   let target;
   let retireAgentIds = [];
 
-  if (demand > 0) {
+  if (logicalWork.state === 'UNKNOWN') {
+    // UNKNOWN is not zero backlog: freeze fleet mutation and idle hysteresis.
+    // The existing Supervisor cycle skips FLEET_RECONCILE for this plan.
+    target = live;
+  } else if (demand > 0) {
     nextIdleCycles = 0;
     target = Math.max(warm, Math.min(Math.max(live, warm) + Math.min(ready, burst), warm + demand, ceiling));
   } else {
@@ -209,6 +248,11 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
     spawn_burst_limit: burst,
     ready,
     running,
+    logical_work: Object.freeze({
+      ...logicalWork,
+      physical_target_agents: target,
+      physical_slots_are_not_logical_queue_limit: true,
+    }),
     idle_cycles: nextIdleCycles,
     idle_cycles_required: IDLE_CYCLES_REQUIRED,
     idle_cycles_required_effective: idleRequired,
