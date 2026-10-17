@@ -196,7 +196,7 @@
     ".github/client-ci-train-w82.test.mjs": "65eb75036876fd29c5a14b5c4af1d3327ec67845",
     ".github/workflows/client-c2-existing-worker-w71.yml": "81604399e47fe2127f06025528bf607bb098e7da",
     ".github/workflows/client-c2-worker-edit-w80.yml": "85df9c9a48bc999c22dd943be0a1c361567228da",
-    ".github/workflows/client-candidate-acceptance-w65.yml": "be516923f7e4523b8f9c976f929afc70855ae865",
+    ".github/workflows/client-candidate-acceptance-w65.yml": "6b632fe562e40f99c47bd022497346ae1ce5931f",
     ".github/workflows/client-current-native-acl-w72.yml": "dbb1627468e22e4283c1a53ef128ffc7753c4201",
     ".github/workflows/client-host-owner-w60.yml": "ba463a952c601658879feecd9c4253955bf53123",
     ".github/workflows/client-host-owner-w67.yml": "f823d12134a0f6bd5a777f4ece13e0ca519953ca",
