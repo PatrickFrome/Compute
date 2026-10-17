@@ -6,6 +6,11 @@ on:
       - 'physical/build-slsa-provenance-v1'
     paths:
       - 'apps/metaengine-browser/**'
+      - 'apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs'
+      - 'apps/metaengine-browser/scripts/qualify-installed-client-launch.mjs'
+      - 'apps/metaengine-browser/test/installed-owner-consumer.test.mjs'
+      - 'infra/client-state-runtime/**'
+      - 'supabase/migrations/**'
       - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
   pull_request:
     paths:
@@ -13,6 +18,11 @@ on:
       - 'apps/metaengine-browser/test/shell-first-startup-boundary.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
+      - 'apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs'
+      - 'apps/metaengine-browser/scripts/qualify-installed-client-launch.mjs'
+      - 'apps/metaengine-browser/test/installed-owner-consumer.test.mjs'
+      - 'infra/client-state-runtime/**'
+      - 'supabase/migrations/**'
       - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
 
 permissions:
@@ -24,7 +34,7 @@ jobs:
     # Chromium proxy isolation does not constrain Node supervisor transport.
     if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')
     runs-on: windows-2025
-    timeout-minutes: 28
+    timeout-minutes: 80
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -50,11 +60,14 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund --no-package-lock
 
+      - name: Install frozen disposable runtime fixture dependency
+        working-directory: infra/client-state-runtime
+        run: npm ci --no-audit --no-fund
       - name: Prove shell-first source boundary
         working-directory: apps/metaengine-browser
         run: |
           node --check src/main.mjs
-          node --test test/shell-first-startup-boundary.test.mjs
+          node --test test/shell-first-startup-boundary.test.mjs test/installed-owner-consumer.test.mjs
 
       - name: Acquire one-built exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
@@ -100,127 +113,84 @@ jobs:
             promotion_authorized=$false
             authority_effect=$false
           } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\shell-first-dirty-profile-proof.json" -Encoding utf8
-      - name: Install candidate and resolve exact packaged profile
+      - name: Install candidate for isolated Owner qualification
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $install = Start-Process -FilePath "$env:RUNNER_TEMP\shell-first-candidate.exe" -ArgumentList '/S' -PassThru -Wait
+          $installer = "$env:RUNNER_TEMP\shell-first-candidate.exe"
+          $binding = Get-Content $env:ME2_INSTALLER_BINDING_PATH -Raw | ConvertFrom-Json
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$binding.installer_sha256) { throw 'shell_first_installer_binding_changed' }
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "shell_first_installer_exit_$($install.ExitCode)" }
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
-          if (-not (Test-Path $app -PathType Leaf)) { throw 'shell_first_installed_browser_missing' }
-
-          $profileOut = "$env:RUNNER_TEMP\shell-first-profile.out"
-          $profileErr = "$env:RUNNER_TEMP\shell-first-profile.err"
-          $prior = $env:METAENGINE_PROFILE_PROBE_WRITE
-          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
-          try {
-            $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
-            $null = $probe.Handle
-            if (-not $probe.WaitForExit(15000)) {
-              try { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue } catch {}
-              throw 'shell_first_profile_probe_timeout'
-            }
-            if ($probe.ExitCode -ne 0) { throw "shell_first_profile_probe_exit_$($probe.ExitCode)" }
-          } finally {
-            $env:METAENGINE_PROFILE_PROBE_WRITE = $prior
-          }
-          $row = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ($row.schema -ne 'metaengine.browser.profile-probe.v1' -or -not [string]$row.user_data_path) { throw 'shell_first_profile_probe_invalid' }
-          [string]$row.user_data_path | Set-Content "$env:RUNNER_TEMP\shell-first-user-data.txt" -Encoding utf8
 
       - name: Prove dirty Fleet state and offline remote cannot close local shell
-        working-directory: apps/metaengine-browser
+        working-directory: infra/client-state-runtime
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
-          $userData = (Get-Content "$env:RUNNER_TEMP\shell-first-user-data.txt" -Raw).Trim()
-          if (-not $userData) { throw 'shell_first_user_data_missing' }
-          $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
-          # The Browser persists Fleet state with a tmp+rename pair next to
-          # fleetStatePath() in apps/metaengine-browser/src/main.mjs. The filename
-          # moved from metaengine-fleet-state-v1.json to -v2.json in 90b9082a,
-          # which silently turned a v1-only occupation into a no-op: Fleet
-          # persistence then succeeded, no SUBSYSTEM_DEGRADED/FLEET evidence was
-          # ever emitted, and this proof failed deterministically. Occupy BOTH
-          # generations; keep this list in sync with fleetStatePath().
-          $fleetTempDirs = @(
-            (Join-Path $userData 'metaengine-fleet-state-v1.json.tmp'),
-            (Join-Path $userData 'metaengine-fleet-state-v2.json.tmp')
-          )
-          Remove-Item $journal -Force -ErrorAction SilentlyContinue
-          Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
-          foreach ($t in $fleetTempDirs) {
-            Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Path $t -Force | Out-Null
+          $head = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $version = [string](node -p "require('../../apps/metaengine-browser/package.json').version")
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $bundle = Join-Path $installRoot 'resources\client-state-runtime'
+          $manifest = Get-Content (Join-Path $bundle 'offline-runtime-bundle.json') -Raw | ConvertFrom-Json
+          $bundleSha = [string]$manifest.bundle_sha256
+          if ($bundleSha -notmatch '^[a-f0-9]{64}$') { throw 'owner_consumer_bundle_digest_invalid' }
+          # Every run generates empty schema from reviewed source on a NEW cluster.
+          # No user Keeper, Owner, credential file or profile is imported.
+          $nodeTemp = (node -p "require('node:os').tmpdir()").Trim()
+          if (-not [IO.Path]::IsPathRooted($nodeTemp)) { throw 'owner_consumer_os_temp_invalid' }
+          $schema = Join-Path $nodeTemp ('owner-consumer-schema-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $schema -ErrorAction Stop | Out-Null
+          $evidence = Join-Path $env:RUNNER_TEMP ('owner-consumer-evidence-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $evidence -ErrorAction Stop | Out-Null
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $bundleSha
+          $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
+          $env:LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY = $schema
+          npm run test:attached-onboarding
+          if ($LASTEXITCODE -ne 0) { throw 'owner_consumer_generated_schema_failed' }
+          $dump = Join-Path $schema 'generated-empty-schema-pg17.dump'
+          $schemaSha = (Get-Content (Join-Path $schema 'generated-empty-schema-pg17.sha256') -Raw).Trim()
+          if ($schemaSha -notmatch '^[a-f0-9]{64}$' -or $schemaSha -ne (Get-FileHash $dump -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'owner_consumer_schema_pin_drift' }
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP = $dump
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP_SHA256 = $schemaSha
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT = $installRoot
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_SOURCE_HEAD = $head
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_VERSION = $version
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_EVIDENCE_DIRECTORY = $evidence
+          $env:LOCAL_STATE_TEST_ATTACHED_CONSUMER = 'SHELL_FIRST_DIRTY_PROFILE'
+          node --test --test-concurrency=1 attached-bundled-runtime.integration.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'owner_consumer_physical_qualification_failed' }
+          $positive = Get-Content (Join-Path $evidence 'installed-owner-consumer-proof.json') -Raw | ConvertFrom-Json
+          if ($positive.schema -ne 'metaengine.browser.installed-owner-consumer-proof.v1' -or $positive.state -ne 'PASSED_ISOLATED_REAL_RUNTIME' -or $positive.consumer -ne 'SHELL_FIRST_DIRTY_PROFILE' -or $positive.source_head -ne $head -or $positive.package_version -ne $version -or $positive.bundle_sha256 -ne $bundleSha -or $positive.disposable_pg_cleanup_confirmed -ne $true -or $positive.fixture_directory_removed -ne $true -or $positive.process_cleanup_confirmed -ne $true -or $positive.runtime_ports_closed -ne $true -or $positive.attached_postgres_incarnation_preserved -ne $true -or $positive.installed_source_bytes_verified -ne $true -or $positive.live_agent_execution -ne $false -or $positive.production_ready -ne $false -or $positive.authority_effect -ne $false) { throw 'owner_consumer_receipt_invalid' }
+          $binding = Get-Content $env:ME2_INSTALLER_BINDING_PATH -Raw | ConvertFrom-Json
+          $proof = @{
+            schema='metaengine.browser.shell-first-dirty-profile-proof.v2'
+            source_head=$head
+            package_version=$version
+            installer_sha256=[string]$binding.installer_sha256
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            producer_event=[string]$binding.producer_event
+            producer_completed_at_acquire=[bool]$binding.producer_completed_at_acquire
+            producer_terminal_success=$false
+            owner_consumer=$positive
+            schema_archive_sha256=$schemaSha
+            generated_schema_owner_qualified=$true
+            fixture_disposable_pg_cleanup_confirmed=$true
+            live_agent_execution=$false
+            production_ready=$false
+            promotion_authorized=$false
+            automatic_retry_allowed=$false
+            authority_effect=$false
           }
-
-          $out = "$env:RUNNER_TEMP\shell-first-normal.out"
-          $err = "$env:RUNNER_TEMP\shell-first-normal.err"
-          Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
-          $priorSentinel = $env:METAENGINE_DISABLE_CRASH_SENTINEL
-          $priorLogin = $env:METAENGINE_DISABLE_LOGIN_START
-          $env:METAENGINE_DISABLE_CRASH_SENTINEL = '1'
-          $env:METAENGINE_DISABLE_LOGIN_START = '1'
-          $browser = $null
-          try {
-            # A dead loopback proxy makes remote ChatGPT/Supabase transport fail,
-            # while the directories occupying the fleet-state tmp files
-            # deterministically make Fleet persistence fail. Neither may destroy
-            # the local shell.
-            $browser = Start-Process -FilePath $app -ArgumentList '--proxy-server=http://127.0.0.1:9' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-            $null = $browser.Handle
-            $deadline = [DateTime]::UtcNow.AddSeconds(50)
-            $stable = $null
-            while ([DateTime]::UtcNow -lt $deadline) {
-              $browser.Refresh()
-              if ($browser.HasExited) {
-                Get-Content $err -ErrorAction SilentlyContinue
-                throw "shell_first_primary_exited_early:$($browser.ExitCode)"
-              }
-              if (Test-Path $journal -PathType Leaf) {
-                try {
-                  $row = Get-Content $journal -Raw | ConvertFrom-Json
-                  $stable = $row.events | Where-Object { $_.boot_id -eq $row.current_boot_id -and $_.state -eq 'PRIMARY_WINDOW_STABLE' } | Select-Object -Last 1
-                  if ($stable) { break }
-                } catch {}
-              }
-              Start-Sleep -Milliseconds 250
-            }
-            if (-not $stable) {
-              Get-Content $err -ErrorAction SilentlyContinue
-              if (Test-Path $journal) { Get-Content $journal -Raw | Write-Host }
-              throw 'shell_first_stable_window_timeout'
-            }
-            if ($stable.details.visible -ne $true) { throw 'shell_first_window_not_visible' }
-
-            Start-Sleep -Seconds 3
-            $browser.Refresh()
-            if ($browser.HasExited) { throw 'shell_first_primary_died_after_degraded_boot' }
-            $stderr = Get-Content $err -Raw -ErrorAction SilentlyContinue
-            if ($stderr -notmatch '"state":"SUBSYSTEM_DEGRADED"' -or $stderr -notmatch '"subsystem":"FLEET"') {
-              Write-Host $stderr
-              throw 'shell_first_fleet_degradation_evidence_missing'
-            }
-            $proofPath = "$env:RUNNER_TEMP\shell-first-dirty-profile-proof.json"
-            $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
-            $proof.stable_visible = $true
-            $proof.fleet_degraded = $true
-            $proof.remote_transport_required_for_shell = $false
-            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
-            Write-Host ($proof | ConvertTo-Json -Compress -Depth 6)
-          } finally {
-            $env:METAENGINE_DISABLE_CRASH_SENTINEL = $priorSentinel
-            $env:METAENGINE_DISABLE_LOGIN_START = $priorLogin
-            if ($browser -and -not $browser.HasExited) {
-              try { Stop-Process -Id $browser.Id -Force -ErrorAction SilentlyContinue } catch {}
-            }
-            foreach ($t in $fleetTempDirs) {
-              Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue
-            }
-          }
-
+          if ($positive.fleet_degraded -ne $true -or $positive.current_os_window_visible -ne $true) { throw 'shell_first_readback_invalid' }
+          $proof.stable_visible = $positive.stable_window_verified
+          $proof.fleet_degraded = $positive.fleet_degraded
+          $proof.remote_transport_required_for_shell = $false
+          $proof | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\shell-first-dirty-profile-proof.json" -Encoding utf8
       - name: Require exact Package Smoke producer terminal success
         env:
           ME2_GITHUB_TOKEN: ${{ github.token }}
