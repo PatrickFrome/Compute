@@ -161,14 +161,21 @@ export function livenessBrief(): string {
 }
 
 // ── P7: cumulative autonomy/risk budget ───────────────────────────
-export function budgetStatus(): {
+// AUDIT FIXPACK2 (2026-10-18): the falsifier gate emits realistic TASK_FAILED /
+// POOL_LEASE_REAPED events with the reserved synthetic marker agent_id='eval-budget'
+// on every run (boot auto-eval included). Left unfiltered, eval noise alone drove the
+// production budget toward WARN/BREACH (~+3 per boot). Default view EXCLUDES the
+// synthetic marker; the eval check opts back in via { includeEval: true } to keep
+// verifying the weighting arithmetic against the raw bus.
+export function budgetStatus(opts?: { includeEval?: boolean }): {
   state: "OK" | "WARN" | "BREACH"; score: number; warn: number; breach: number; window_h: number;
   contributors: Array<{ type: string; count: number; weight: number; subtotal: number }>;
 } {
   const since = new Date(Date.now() - BUDGET_WINDOW_MS).toISOString();
+  const evalFilter = opts?.includeEval ? "" : " AND agent_id IS NOT 'eval-budget'";
   const rows = db.query(
-    `SELECT type, COUNT(*) c FROM events WHERE ts>=? AND type IN (${Object.keys(BUDGET_WEIGHTS).map(() => "?").join(",")}) GROUP BY type`,
-  ).all(since, ...Object.keys(BUDGET_WEIGHTS)) as Array<{ type: string; c: number }>;
+    `SELECT type, COUNT(*) c FROM events WHERE ts>=?${evalFilter} AND type IN (${Object.keys(BUDGET_WEIGHTS).map(() => "?").join(",")}) GROUP BY type`,
+  ).all(since, ...Object.keys(BUDGET_WEIGHTS)) as Array<{ type: string; c: number }>; // NULL-safe: IS NOT keeps NULL-agent rows counted
   const contributors = rows.map((r) => ({ type: r.type, count: r.c, weight: BUDGET_WEIGHTS[r.type] ?? 1, subtotal: r.c * (BUDGET_WEIGHTS[r.type] ?? 1) }))
     .sort((a, b) => b.subtotal - a.subtotal);
   const score = contributors.reduce((a, c) => a + c.subtotal, 0);

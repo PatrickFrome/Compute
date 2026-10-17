@@ -1364,8 +1364,19 @@ if (!PROBE_MODE) {
 }
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
-// R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
-if (!PROBE_MODE) setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
+// R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама.
+// AUDIT FIXPACK2 (2026-10-18): boot-eval в production больше не молчит при FAIL —
+// вердикт выводится громко и уходит в hash-chain (EVAL_PROD_BOOT_FAIL), иначе
+// деградация живого инстанса не доезжает ни до одного потребителя.
+if (!PROBE_MODE) setTimeout(() => {
+  try {
+    const rep = evalRun(VERSION);
+    if (rep && rep.verdict !== "PASS") {
+      console.error(`[eval] BOOT EVAL ${rep.verdict}: failed=${rep.failed} warned=${rep.warned} — живой инстанс деградировал, см. GET /eval и eval_runs`);
+      try { emit("EVAL_PROD_BOOT_FAIL", { verdict: rep.verdict, failed: rep.failed, warned: rep.warned, dataset_version: rep.dataset_version }, null, null); } catch { /* шина не критична */ }
+    }
+  } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); }
+}, 2_500);
 // R31 D4: legacy daemon DB maintenance mutates SQLite; Browser probe stays read-only.
 if (!PROBE_MODE) {
   try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }

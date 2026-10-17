@@ -585,6 +585,9 @@ export const EVAL_DATASET: EvalCheck[] = [
     expect: "scale(2) создаёт живых воркеров на каноническом теге (идемпотентно); второй acquire той же задачи = null; просроченный lease → задача FAILED pool_lease_expired; scale ограничен POOL_MAX",
     run: () => {
       // 1) scale idempotent + канон-модель воркеров (живые агенты реестра, drift остаётся 0)
+      // AUDIT FIXPACK2: чек гейта больше не перманентно перезаписывает операторский scale —
+      // исходный размер пула фиксируется и восстанавливается в конце прогона.
+      const prevScale = poolStatus().live;
       poolScale(2, "eval");
       const again = poolScale(2, "eval");
       const st = poolStatus();
@@ -595,12 +598,12 @@ export const EVAL_DATASET: EvalCheck[] = [
       const agentId = st.workers.find((w) => w.state === "IDLE")?.agent_id ?? st.workers[0]?.agent_id ?? "";
       const c = agentId ? poolEvalLeaseCycle(t.id, agentId) : { acquired: false, second_attempt: false, reaped: false };
       updateTask(t.id, { status: "ARCHIVED" }); // самоочистка (listTasks ARCHIVED не показывает)
-      // 3) потолок масштабирования + возврат к 2
+      // 3) потолок масштабирования + возврат к исходному scale оператора
       const sMax = poolScale(POOL_MAX + 9, "eval");
-      poolScale(2, "eval");
+      poolScale(prevScale, "eval");
       const boundOk = sMax.scale === POOL_MAX;
       const ok = liveOk && canonOk && c.acquired && c.second_attempt && c.reaped && boundOk;
-      return { ok, evidence: `live=${st.live}/2 идемпотент=${again.created === 0}, канон=${canonOk ? "ok" : "FAIL"}, lease: acquired=${c.acquired} second=${c.second_attempt} reaped=${c.reaped}, потолок=${sMax.scale}/${POOL_MAX}` };
+      return { ok, evidence: `live=${st.live}/2 идемпотент=${again.created === 0}, канон=${canonOk ? "ok" : "FAIL"}, lease: acquired=${c.acquired} second=${c.second_attempt} reaped=${c.reaped}, потолок=${sMax.scale}/${POOL_MAX}, scale восстановлен в ${prevScale}` };
     },
   },
   {
@@ -837,20 +840,23 @@ export const EVAL_DATASET: EvalCheck[] = [
   {
     id: "autonomy.budget",
     plane: "autonomy",
-    title: "Autonomy v4 (P7): risk budget — синтетические деструктивные события дают точный взвешенный вклад",
+    title: "Autonomy v4 (P7): risk budget — синтетика гейта изолирована от production, взвешенный вклад точен",
     critical: true,
-    expect: "emit TASK_FAILED(вес 1) + POOL_LEASE_REAPED(вес 2) → score вырос ≥3, contributors содержат оба типа, state ∈ OK/WARN/BREACH, пороги согласованы (warn<breach)",
+    expect: "emit TASK_FAILED(вес 1) + POOL_LEASE_REAPED(вес 2) → includeEval-взгляд вырос ≥3, contributors содержат оба типа; production-взгляд (по умолчанию) синтетику agent_id='eval-budget' НЕ видит: score не изменился; пороги согласованы (warn<breach)",
     run: () => {
-      const before = budgetStatus().score;
+      const before = budgetStatus().score; // production-взгляд: синтетика исключена
       emit("TASK_FAILED", { error: "eval-budget-synthetic", cause: "eval" }, "eval-budget", null);
       emit("POOL_LEASE_REAPED", { task_id: "tk_eval-budget", slot: 1, eval: true }, "eval-budget", null);
-      const b = budgetStatus();
+      const b = budgetStatus({ includeEval: true }); // честная арифметика весов по сырому логу
       const grew = b.score >= before + 3;
       const types = new Set(b.contributors.map((c) => c.type));
       const both = types.has("TASK_FAILED") && types.has("POOL_LEASE_REAPED");
       const stateOk = b.state === "OK" || b.state === "WARN" || b.state === "BREACH";
-      return { ok: grew && both && stateOk && b.warn < b.breach,
-        evidence: `score ${before}→${b.score} (+≥3), оба типа в вкладах=${both}, state=${b.state}, пороги ${b.warn}/${b.breach}` };
+      // изоляция: production-бюджет не должен увидеть синтетические события
+      const bProd = budgetStatus();
+      const isolated = bProd.score === before;
+      return { ok: grew && both && stateOk && isolated && b.warn < b.breach,
+        evidence: `includeEval ${before}→${b.score} (+≥3), оба типа=${both}, изоляция prod=${isolated} (score остался ${bProd.score}), state=${b.state}, пороги ${b.warn}/${b.breach}` };
     },
   },
   {
