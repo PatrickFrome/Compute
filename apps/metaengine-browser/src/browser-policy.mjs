@@ -52,7 +52,9 @@ export const SECURITY_POLICY = Object.freeze({
   remote_code_has_node: false,
   remote_preload_present: false,
   arbitrary_permission_grants: false,
-  downloads_enabled: false,
+  // Automatic (unsolicited) downloads are disabled; explicit user-initiated
+  // downloads still exist and are handled by VerifiedDownloadManager.
+  automatic_downloads_enabled: false,
   cookie_transfer_to_compute_space: false,
   raw_cdp_exposed: false,
   page_data_authority: false,

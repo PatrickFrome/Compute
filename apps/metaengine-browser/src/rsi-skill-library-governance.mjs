@@ -243,32 +243,56 @@ export function verifyRsiSkillLifecycleEvidence(evidence, library) {
     || evidence.lifecycle_evidence_is_activation_authority !== false
   ) throw new Error('rsi_skill_governance_lifecycle_evidence_policy_invalid');
 
-  const canonical = createRsiSkillLifecycleEvidence({
-    library,
-    evidence_id: evidence.evidence_id,
-    skill_digest: evidence.skill_digest,
-    window_seq: evidence.window_seq,
-    generation_start: evidence.generation_start,
-    generation_end: evidence.generation_end,
-    invocation_count: evidence.invocation_count,
-    helpful_count: evidence.helpful_count,
-    harmful_count: evidence.harmful_count,
-    neutral_count: evidence.neutral_count,
-    insufficient_evidence_count: evidence.insufficient_evidence_count,
-    router_engagement_count: evidence.router_engagement_count,
-    false_positive_injection_count: evidence.false_positive_injection_count,
-    hard_invariant_violation_count: evidence.hard_invariant_violation_count,
-    measured_net_delta: evidence.measured_net_delta,
-    authoring_prior: evidence.authoring_prior,
-    authoring_provenance_digest: evidence.authoring_provenance_digest,
-    evidence_refs: evidence.evidence_refs,
-    external_evaluator: true,
-    authored_by_candidate: false,
-  });
-  if (canonical.evidence_digest !== exactDigest(evidence.evidence_digest, 'lifecycle_evidence')) {
+  const checkedLibrary = verifyRsiVerifiedSkillLibrary(library);
+
+  // Strict path: the row is still bound to the current library snapshot, so the
+  // full canonical reconstruction applies.
+  if (evidence.library_digest === checkedLibrary.library_digest) {
+    const canonical = createRsiSkillLifecycleEvidence({
+      library,
+      evidence_id: evidence.evidence_id,
+      skill_digest: evidence.skill_digest,
+      window_seq: evidence.window_seq,
+      generation_start: evidence.generation_start,
+      generation_end: evidence.generation_end,
+      invocation_count: evidence.invocation_count,
+      helpful_count: evidence.helpful_count,
+      harmful_count: evidence.harmful_count,
+      neutral_count: evidence.neutral_count,
+      insufficient_evidence_count: evidence.insufficient_evidence_count,
+      router_engagement_count: evidence.router_engagement_count,
+      false_positive_injection_count: evidence.false_positive_injection_count,
+      hard_invariant_violation_count: evidence.hard_invariant_violation_count,
+      measured_net_delta: evidence.measured_net_delta,
+      authoring_prior: evidence.authoring_prior,
+      authoring_provenance_digest: evidence.authoring_provenance_digest,
+      evidence_refs: evidence.evidence_refs,
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    if (canonical.evidence_digest !== exactDigest(evidence.evidence_digest, 'lifecycle_evidence')) {
+      throw new Error('rsi_skill_governance_lifecycle_evidence_digest_mismatch');
+    }
+    return canonical;
+  }
+
+  // Historical-snapshot path: lifecycle windows are append-only and stay digest-bound
+  // to the library snapshot they were observed against. After an append-only library
+  // update that snapshot no longer exists, so reconstruction-against-current cannot
+  // apply. Verify the row's own self-consistency plus skill linkage into the current
+  // library (skill identity is stable across append-only updates) instead of failing.
+  const selfClone = structuredClone(evidence);
+  delete selfClone.evidence_digest;
+  if (digest(selfClone) !== exactDigest(evidence.evidence_digest, 'lifecycle_evidence')) {
     throw new Error('rsi_skill_governance_lifecycle_evidence_digest_mismatch');
   }
-  return canonical;
+  const historicalEntry = checkedLibrary.entries.find((row) => row.skill_digest === evidence.skill_digest);
+  if (!historicalEntry
+    || historicalEntry.skill_id !== evidence.skill_id
+    || historicalEntry.skill_version !== evidence.skill_version) {
+    throw new Error('rsi_skill_governance_lifecycle_evidence_skill_linkage_mismatch');
+  }
+  return evidence;
 }
 
 function summarizeSkill(entry, windows, config) {
