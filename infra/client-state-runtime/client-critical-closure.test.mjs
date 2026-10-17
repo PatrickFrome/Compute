@@ -13,7 +13,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomous-development-fabric-v1-20261017',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874566.1',
+  package_version:'0.7.0-dev.1107139874567.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -98,14 +98,25 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.1107139874565.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
- }]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+ },{
+  // ba224d5f8 held 1107139874564 and introduced 1107139874565; the amended
+  // attribution commit 21d770f91 introduced 1107139874566 (whose single-use
+  // reservation was consumed by the pre-amend head f89df12bb).
   schema:'metaengine.client.package-version-successor.v1',
   source_parent:'ba224d5f8b3c19b1d53c5f535cd49abe46f85f68',
   baseline_source_parent:candidate.source_parent,
   prior_version:'0.7.0-dev.1107139874565.1',
   distinct_version:'0.7.0-dev.1107139874566.1',
+  preceding_version_burned:true,production_ready:false,
+  promotion_authorized:false,authority_effect:false,
+ }]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  schema:'metaengine.client.package-version-successor.v1',
+  source_parent:'21d770f91351a5a8845f1049dd34d6a49d3f9e2d',
+  baseline_source_parent:candidate.source_parent,
+  prior_version:'0.7.0-dev.1107139874566.1',
+  distinct_version:'0.7.0-dev.1107139874567.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
  });
