@@ -358,9 +358,20 @@ export function nextReadyTaskAny(): TaskRow | null {
   return (db.query(`SELECT * FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? ORDER BY created_at LIMIT 1`).get(Date.now()) as TaskRow | null) ?? null;
 }
 export function updateTask(id: string, patch: Partial<TaskRow>) {
+  // Аудит 2026-10-18 (MEDIUM): имена колонок интерполировались в SQL без валидации —
+  // любой будущий вызывающий с внешним ключом = SQL-инъекция. Fail-closed белый список
+  // колонок tasks (schema store.ts + ALTER-миграции ниже); неизвестный ключ — throws.
+  const TASK_COLUMNS = new Set([
+    "id", "title", "spec", "role", "parent_id", "status", "agent_id",
+    "max_steps", "steps", "result", "error", "created_at", "updated_at",
+    "reflection", "objective_id", "review", "not_before_ms", "park_count",
+  ]);
   const cols = Object.keys(patch);
   if (!cols.length) return;
-  const set = cols.map((c) => `${c}=?`).join(",");
+  for (const c of cols) {
+    if (!TASK_COLUMNS.has(c)) throw new Error(`updateTask_unknown_column:${c}`);
+  }
+  const set = cols.map((c) => `"${c}"=?`).join(",");
   db.query(`UPDATE tasks SET ${set}, updated_at=? WHERE id=?`).run(...(Object.values(patch) as unknown[]), nowIso(), id);
 }
 export function cancelTask(id: string) {
@@ -464,7 +475,10 @@ function inferLane(action: string): Lane {
   if (LANE_OF[action]) return LANE_OF[action]; // явные переопределения реестра v0.5.0
   if (action.endsWith("_RESET") || action.startsWith("FLUSH") || action.endsWith("_FLUSH") || action.startsWith("FENCE")) return "EMERGENCY";
   if (action.endsWith("_CANCEL") || action.endsWith("_RETIRE") || action.endsWith("_PAUSE") || action.endsWith("_RESUME")) return "CONTROL";
-  if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_RETRY") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
+  // Аудит 2026-10-18 (MEDIUM): TASK_SCHEDULE уходил в READ_ONLY (_SCHEDULE отсутствовал
+  // в суффиксах) — планирование мутирует шину, но бюджетировалось как чтение. Выровнено
+  // с fallback каталога actionCatalog() (commands.ts), где _SCHEDULE уже был MUTATION.
+  if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_RETRY") || action.endsWith("_SCHEDULE") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
   return "READ_ONLY";
 }
 

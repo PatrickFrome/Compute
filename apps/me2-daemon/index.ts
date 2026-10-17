@@ -56,11 +56,10 @@ import { fleetList, fleetBeat, fleetSelfTick, fleetGc, fleetTick } from "./src/f
 import { suCheckAsync, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
-import { senseNow, senseList, senseAct } from "./src/sense";
+import { senseNow, senseList, senseAct, senseDiffs } from "./src/sense";
 import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict, benchSuspend, benchResetRings } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
-import { senseDiffs } from "./src/sense";
 import { hygieneStatus, hygieneCheckpoint, hygieneVacuum, startHygieneLoop } from "./src/dbhygiene";
 import { gateCheck, approvalsStatus, approvalRequest, approvalDecide, policySet } from "./src/approvals";
 import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
@@ -83,6 +82,8 @@ import {
   agentChatSupervisorTick, supervisorEnsure, SUPERVISOR_TICK_MS, interchatDeliver, chatSetObjective,
   meshHeartbeatApply,
 } from "./src/agentchat";
+// Аудит 2026-10-18 (C2): аутентификация REST/WS-плоскости + ограниченный CORS
+import { authorizeRequest, authorizeHandshake, corsHeadersFor } from "./src/auth";
 
 // R51 (фаза C): порты вынесены в src/ports.ts (env ME2_WS_PORT/ME2_REST_PORT для gate-probe)
 // ME2_BOOT_MODE=probe — инкарнация «только контракт»: REST+socket+eval подняты,
@@ -187,8 +188,11 @@ if (!PROBE_MODE) {
 }
 
 // ── REST API (:3041) ──────────────────────────────────────────────
+// Аудит 2026-10-18 (C2): `Access-Control-Allow-Origin: *` снят со всех ответов —
+// кросс-доменное чтение разрешается только через белый список ME2_ALLOWED_ORIGINS
+// (см. corsHeadersFor); штатные потребители UI/gate читают same-origin.
 function json(res: ServerResponse, code: number, body: unknown) {
-  res.writeHead(code, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+  res.writeHead(code, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -215,8 +219,20 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       setMeta("public_origin_last", `${cand} @ ${new Date().toISOString()}`);
     }
   } catch { /* капча не критична */ }
-  const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+  const cors = corsHeadersFor(req);
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
+
+  // ── Аудит 2026-10-18 (C2): единый auth-гейт REST-плоскости ──
+  // Публичные: /health, /ui, /hooks/github (HMAC внутри). Остальное —
+  // bearer ME2_API_TOKEN для удалённых пиров, loopback — без токена (CSRF-гейт Origin внутри).
+  const auth = authorizeRequest(req);
+  if (!auth.ok) {
+    return json(res, auth.status, {
+      ok: false,
+      error: auth.error,
+      hint: "локальные клиенты (loopback) разрешены; для удалённого доступа задайте ME2_API_TOKEN на daemon и шлите Authorization: Bearer <token>",
+    });
+  }
 
   if (PROBE_MODE) {
     const method = String(req.method || "GET").toUpperCase();
@@ -257,7 +273,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R49 (фаза A): GET /ui — самодостаточная Mission Control (0 сборки, 0 зависимостей).
     // Читает read-only REST того же origin; операции — socket agentchat:op (REST-операций нет).
     if (path === "/ui" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(missionUiHtml());
     }
     if (path === "/budget" && req.method === "GET") return json(res, 200, { ok: true, ...budgetWindow() });
@@ -389,16 +405,21 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // Вне шины (47-инвариант); манифест non-bypass 34.
     if (path === "/sandbox" && req.method === "GET") return json(res, 200, sandboxStatus());
     if (path === "/sandbox" && req.method === "POST") {
+      // Аудит 2026-10-18 (HIGH): был ДВОЙНОЙ обработчик POST /sandbox — этот блок
+      // перехватывал все op, и R17-плоскость (create/exec/snapshot/restore/destroy,
+      // ниже по файлу) была мёртвым кодом. Теперь единый диспетчер op ОБЕИХ плоскостей.
       try {
-        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; net?: "deny" | "allow"; auto_sandbox?: boolean; strict?: boolean };
-        if (body?.op === "probe") {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; timeoutSec?: number; id?: string; net?: "deny" | "allow"; auto_sandbox?: boolean; strict?: boolean; snapshotFile?: string; newId?: string };
+        const op = String(body?.op ?? "");
+        // — sandbox2-плоскость (R64 P0-2) —
+        if (op === "probe") {
           return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", op: "probe", ...(await sandboxProbe("rest")) });
         }
-        if (body?.op === "run") {
+        if (op === "run") {
           if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
           return json(res, 200, await runSandboxedAsync(body.cmd, body.cwd, { net: body.net, timeout: body.timeout_ms, source: "rest" }));
         }
-        if (body?.op === "config") {
+        if (op === "config") {
           const patch: Record<string, unknown> = {};
           if (typeof body.auto_sandbox === "boolean") patch.auto_sandbox = body.auto_sandbox;
           if (typeof body.strict === "boolean") patch.strict = body.strict;
@@ -408,7 +429,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           try { emit("SANDBOX_CONFIG", { patch, effective: { auto_sandbox: cfg.auto_sandbox, net: cfg.net, strict: cfg.strict } }, null, null); } catch { /* chain не критичен */ }
           return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json sandbox" });
         }
-        return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe", "run", "config"] });
+        // — R17-плоскость (M5 Sandbox Plane; тело перенесено из второго обработчика без изменений семантики) —
+        if (op === "create") return json(res, 201, { ok: true, sandbox: createSandbox(String(body.id ?? "")) });
+        if (op === "exec") return json(res, 200, { ok: true, run: execInSandbox(String(body.id ?? ""), String(body.cmd ?? ""), Number(body.timeoutSec ?? 30)) });
+        if (op === "snapshot") return json(res, 200, { ok: true, snapshot: snapshotSandbox(String(body.id ?? "")) });
+        if (op === "restore") return json(res, 201, { ok: true, sandbox: restoreSnapshot(String(body.snapshotFile ?? ""), body.newId ? String(body.newId) : undefined) });
+        if (op === "destroy") return json(res, 200, { ok: true, ...destroySandbox(String(body.id ?? "")) });
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe", "run", "config", "create", "exec", "snapshot", "restore", "destroy"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
       }
@@ -532,27 +559,15 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/spans" && req.method === "GET") return json(res, 200, otelStatus());
     if (path === "/spans/otlp" && req.method === "GET") {
       const limit = Number(url.searchParams.get("limit") ?? 200);
-      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify(toOtlp(limit)));
     }
 
     // ── R17: M5 Sandbox Plane (create/exec/snapshot/restore/destroy — op-switch) ──
+    // Аудит 2026-10-18 (HIGH): POST /sandbox объединён с sandbox2-диспетчером выше
+    // (второй обработчик был мёртвым кодом — перехватывался первым). GET /sandboxes — read-only перечень.
     if (path === "/sandboxes" && req.method === "GET") {
       return json(res, 200, { ok: true, ...listSandboxes(), snapshots: listSnapshots().snapshots });
-    }
-    if (path === "/sandbox" && req.method === "POST") {
-      const body = await readBody(req);
-      const op = String(body.op ?? "");
-      try {
-        if (op === "create") return json(res, 201, { ok: true, sandbox: createSandbox(String(body.id ?? "")) });
-        if (op === "exec") return json(res, 200, { ok: true, run: execInSandbox(String(body.id ?? ""), String(body.cmd ?? ""), Number(body.timeoutSec ?? 30)) });
-        if (op === "snapshot") return json(res, 200, { ok: true, snapshot: snapshotSandbox(String(body.id ?? "")) });
-        if (op === "restore") return json(res, 201, { ok: true, sandbox: restoreSnapshot(String(body.snapshotFile ?? ""), body.newId ? String(body.newId) : undefined) });
-        if (op === "destroy") return json(res, 200, { ok: true, ...destroySandbox(String(body.id ?? "")) });
-        return json(res, 400, { ok: false, error: "op_required: create|exec|snapshot|restore|destroy" });
-      } catch (e) {
-        return json(res, 400, { ok: false, error: (e as Error).message });
-      }
     }
 
     // ── R17: LIVE Roadmap M1–M7 (вердикт из реального состояния, evidence в каждой фазе) ──
@@ -1030,7 +1045,21 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
     if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
     // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
-    if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
+    if (path === "/eval" && req.method === "GET") {
+      // Аудит 2026-10-18 (HIGH): gate-скрипт scripts/probe.sh (`bun run check`) ожидает
+      // GET /eval?run=1 — «прогнать hermetic-датасет и вернуть вердикт», но run-параметр
+      // игнорировался, а POST в probe-режиме запрещён → gate не мог пройти никогда.
+      // run=1 теперь честно исполняет датасет (локальный SQLite, без сети/LLM —
+      // контракт src/eval.ts) в обеих инкарнациях; POST /eval/run остаётся полной поверхностью.
+      if (url.searchParams.get("run") === "1") {
+        benchResetRings();
+        benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
+        let report: ReturnType<typeof evalRun>;
+        try { report = evalRun(VERSION); } finally { benchSuspend(false); }
+        return json(res, 200, { ok: true, ran: true, last: report, ...(PROBE_MODE ? { browser_probe: PROBE_POLICY } : {}) });
+      }
+      return json(res, 200, evalStatus(VERSION));
+    }
     if (path === "/eval/run" && req.method === "POST") {
       benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
       benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
@@ -1095,7 +1124,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/mcp" && req.method === "POST") {
       const body = await readBody(req);
       const out = await mcpHandle(body);
-      if (!out) { res.writeHead(202, { "Access-Control-Allow-Origin": "*" }); return res.end(); }
+      if (!out) { res.writeHead(202, { "Content-Type": "application/json" }); return res.end(); }
       return json(res, out.status, out.json);
     }
     if (path === "/mcp" && req.method === "GET")
@@ -1127,9 +1156,31 @@ const restServer = createServer(async (req, res) => {
 const wsHttpServer = createServer();
 const io = new Server(wsHttpServer, {
   path: "/",
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  // Аудит 2026-10-18 (C2): CORS `*` снят — reflect-origin только из белого списка
+  // ME2_ALLOWED_ORIGINS (или loopback-origin); non-browser клиенты без Origin
+  // допускаются и дальше гейтятся io.use-аутентификацией ниже.
+  cors: {
+    origin: (origin, cb) => {
+      const allowed = (process.env.ME2_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      cb(null, !origin || allowed.includes(origin) || isLoopbackOriginStr(origin));
+    },
+    methods: ["GET", "POST"],
+  },
   pingTimeout: 60_000,
   pingInterval: 25_000,
+});
+
+function isLoopbackOriginStr(origin: string): boolean {
+  try { return ["127.0.0.1", "::1", "localhost", "[::1]"].includes(new URL(origin).hostname); } catch { return false; }
+}
+
+// Аудит 2026-10-18 (C2): socket.io-каналы (command/agentchat:op/tokens:op — RCE-плоскость)
+// были открыты любому подключившемуся. Гейт: bearer ME2_API_TOKEN (handshake.auth.token)
+// для удалённых пиров; loopback — без токена, но с CSRF-гейтом Origin (как в REST).
+io.use((socket, next) => {
+  const verdict = authorizeHandshake({ headers: socket.handshake.headers as Record<string, unknown>, address: socket.handshake.address, auth: socket.handshake.auth });
+  if (verdict.ok) return next();
+  next(new Error(verdict.error));
 });
 
 onEvent((e) => {
@@ -1393,7 +1444,7 @@ if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && existsSync("/home
   try {
     if (/^SUPABASE_DB_URL=/m.test(readFileSync("/home/z/.a2/supabase-cloud.env", "utf8"))) {
       process.env.ME2_SQL_MIRROR = "1";
-      console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
+      console.log("[me2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
     }
   } catch { /* честный отказ: гейт остаётся выключенным */ }
 }
@@ -1402,7 +1453,7 @@ if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && existsSync("/home
 // «рестарт без start.sh → зеркало молча OFF» даже без SUPABASE_DB_URL в env-файле.
 if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && sqlmirrorGatePersisted(db)) {
   process.env.ME2_SQL_MIRROR = "1";
-  console.log("e2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
+  console.log("[me2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
 }
 // Browser probe mode must not even construct SqlMirror: its constructor persists
 // the operator gate and subscribes to token changes. Keep an inert structural
@@ -1445,6 +1496,6 @@ try {
     rs.writeHead(200, { "Content-Type": "application/json" });
     rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: LEGACY_MIRROR_PORT, ts: nowIso() }));
   }).listen(LEGACY_MIRROR_PORT);
-  console.log(`e2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
+  console.log(`[me2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
 } catch (e) { console.error(`[me2-daemon] legacy mirror :${LEGACY_MIRROR_PORT} failed: ${String(e).slice(0, 100)}`); }
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

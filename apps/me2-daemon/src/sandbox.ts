@@ -11,6 +11,7 @@
 // Провайдеры: local=READY, vercel=NEEDS_KEYS (интерфейс тот же — подключение
 // сводится к HTTP-вызовам, см. README-TAURI.md / DEVOS-ANALYSIS §Sandbox).
 import { spawnSync } from "node:child_process";
+import { childEnv } from "./childenv";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -136,7 +137,9 @@ export function execInSandbox(rawId: string, rawCmd: string, timeoutSec = 30): {
     : ["bash", "-c", cmd];
   const p = spawnSync(argv[0], argv.slice(1), {
     cwd: meta.root, timeout, encoding: "utf8",
-    env: { ...process.env, ME2_SANDBOX: id, ME2_SANDBOX_ROOT: meta.root },
+    // Аудит 2026-10-18 (HIGH): {...process.env} раскладывал ВСЕ секреты daemon'а
+    // в окружение sandbox-процесса. Канон src/exec.ts §4 — белый список src/childenv.ts.
+    env: childEnv({ ME2_SANDBOX: id, ME2_SANDBOX_ROOT: meta.root }),
   });
   const ms = Date.now() - t0;
   const timedOut = p.error?.message?.includes("ETIMEDOUT") ?? (p.status === null && !p.error);

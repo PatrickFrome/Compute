@@ -5,7 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, normalize, dirname, relative, isAbsolute, sep } from "node:path";
 import {
   listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
@@ -15,6 +15,7 @@ import { isQuotaError, parkTaskQuota, PARK_MAX } from "./src/quota";
 import { recordSpan } from "./src/otel";
 import { reviewTask } from "./src/reviewer";
 import { isPoolAgent, poolAcquire, poolRelease, type PoolLeaseRow } from "./src/pool";
+import { childEnv } from "./src/childenv";
 
 const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
@@ -66,10 +67,33 @@ function taskDir(taskId: string) {
   return dir;
 }
 function safeJoin(cwd: string, p: string) {
+  // Аудит 2026-10-18 (MEDIUM): resolve/normalize НЕ следят за symlink — ссылка внутри
+  // task-каталога могла вести наружу (обход workspace-джойнов). Канон src/exec.ts §5:
+  // realpath-канонизация ОБОИХ сторон + префикс-проверка; несуществующий путь
+  // (ленивое создание файлов) канонизируем по ближайшему живому предку.
+  const rootReal = safeRealpath(resolve(cwd));
   const full = resolve(cwd, normalize(p || "."));
-  const pathFromRoot = relative(resolve(cwd), full);
+  const fullReal = safeRealpath(full);
+  const pathFromRoot = relative(rootReal, fullReal);
   if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) throw new Error("path_escape_blocked");
   return full;
+}
+
+function safeRealpath(p: string): string {
+  let cur = resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync(cur);
+      return tail.length ? real + sep + tail.reverse().join(sep) : real;
+    } catch {
+      // ENOENT (файл ещё не создан) и др.: поднимаемся к ближайшему живому предку
+      const parent = resolve(cur, "..");
+      if (parent === cur) return resolve(p); // достигли корня ФС — дальше канонизировать некуда
+      tail.push(cur.slice(parent.length).replace(/^[/\\]/, ""));
+      cur = parent;
+    }
+  }
 }
 
 type WrittenArtifact = { path: string; sha256: string };
@@ -101,10 +125,14 @@ function unverifiedWrittenArtifacts(calls: ToolCallRecord[]): string[] {
 
 async function runShell(cwd: string, command: string): Promise<string> {
   return new Promise((res) => {
-    const proc = spawn("bash", ["-lc", command], { cwd, timeout: SHELL_TIMEOUT_MS }, );
+    // Аудит 2026-10-18 (HIGH): spawn без env наследовал полный process.env daemon'а —
+    // секреты vault'а попадали в окружение shell-тула (канон src/exec.ts §4 —
+    // белый список src/childenv.ts). (LOW) stdout/stderr копились без предела —
+    // «yes» давал memory-DoS; накопление капится MAX_TOOL_OUTPUT (финальный текст и так обрезается).
+    const proc = spawn("bash", ["-lc", command], { cwd, timeout: SHELL_TIMEOUT_MS, env: childEnv() });
     let out = "", err = "";
-    proc.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-    proc.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+    proc.stdout.on("data", (d: Buffer) => { if (out.length < MAX_TOOL_OUTPUT) out += d.toString(); });
+    proc.stderr.on("data", (d: Buffer) => { if (err.length < MAX_TOOL_OUTPUT) err += d.toString(); });
     proc.on("error", (e) => res(`ERROR: ${e.message}`));
     proc.on("close", (code) => {
       const text = `exit=${code}\nstdout:\n${out}\nstderr:\n${err}`.trim();

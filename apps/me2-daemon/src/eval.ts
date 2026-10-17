@@ -169,15 +169,24 @@ export const EVAL_DATASET: EvalCheck[] = [
     critical: true, expect: "seq>0 и hash непуст",
     run: () => {
       const seq = lastSeq(); const h = lastEventHash();
-      return { ok: seq > 0 && !!h, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}` };
+      // Аудит 2026-10-18 (HIGH, gate): probe-инкарнация стартует с ПУСТОЙ шиной
+      // по дизайну (никаких boot-emit'ов, R99) — пустая цепочка в probe валидна.
+      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const ok = probe ? true : (seq > 0 && !!h);
+      return { ok, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}${probe && seq === 0 ? " (probe: пустая шина ожидаема)" : ""}` };
     },
   },
   {
     id: "meta.boot_version", plane: "state", title: "meta: boot+version записаны",
-    critical: true, expect: "getMeta('boot') и getMeta('version') непусты",
+    // Аудит 2026-10-18 (HIGH, gate): в probe-инкарнации бут сознательно НЕ мутирует meta
+    // (index.ts: setMeta только вне probe) — ожидание в probe инвертировано, иначе
+    // `bun run check` (который обязан быть hermetic) не мог пройти никогда.
+    critical: true, expect: "getMeta('boot') и getMeta('version') непусты (в probe — сознательно отсутствуют)",
     run: () => {
       const b = getMeta("boot"); const v = getMeta("version");
-      return { ok: !!b && !!v, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}` };
+      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const ok = probe ? (!b && !v) : (!!b && !!v);
+      return { ok, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}${probe ? " (probe: ожидаемо отсутствуют)" : ""}` };
     },
   },
   {
@@ -204,10 +213,14 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — память —
   {
     id: "memory.rows", plane: "memory", title: "Память непуста (persistence-пруф)",
-    critical: true, expect: "memoryStatus().rows > 0",
+    // Аудит 2026-10-18 (HIGH, gate): probe-инкарнация не пишет boot-строку памяти
+    // (read-only контракт R99) — в probe ожидаемо 0 строк.
+    critical: true, expect: "memoryStatus().rows > 0 (в probe — сознательно 0)",
     run: () => {
       const m = memoryStatus();
-      return { ok: m.rows > 0, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})` };
+      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const ok = probe ? m.rows === 0 : m.rows > 0;
+      return { ok, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})${probe ? " (probe: ожидаемо 0)" : ""}` };
     },
   },
   {
@@ -255,13 +268,16 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — флот —
   {
     id: "fleet.self_alive", plane: "fleet", title: "Self-нода флота жива (не LOST)",
-    critical: true, expect: "self ≠ null и freshness ∈ {ACTIVE, STALE}",
+    // Аудит 2026-10-18 (HIGH, gate): fleetSelfTick отключён в probe-инкарнации
+    // (без authority-эффектов) — в probe self-нода ожидаемо null.
+    critical: true, expect: "self ≠ null и freshness ∈ {ACTIVE, STALE} (в probe — сознательно null)",
     run: () => {
       const f = fleetList();
       const s = f.self;
-      const ok = !!s && (s.freshness === "ACTIVE" || s.freshness === "STALE");
+      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const ok = probe ? !s : (!!s && (s.freshness === "ACTIVE" || s.freshness === "STALE"));
       const selfAge = f.nodes.find((n) => n.id === s?.id)?.age_s;
-      return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : "self=null" };
+      return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : `self=null${probe ? " (probe: ожидаемо)" : ""}` };
     },
   },
   {

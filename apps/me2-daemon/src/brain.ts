@@ -91,14 +91,22 @@ export function brainThoughts(limit = 10): Array<{ key: string; content: string;
 }
 
 /** Self-probe: живость цикла событий + память (аналог wake-probe старой системы). */
+// Аудит 2026-10-18 (MEDIUM): прежний «замер» eventloop_ms был фиктивным — Date.now()
+// вокруг синхронного кода всегда ~0 и лаг цикла событий не измерял. Честный замер:
+// непрерывный сэмплер планирует setImmediate и меряет фактическую задержку его вызова
+// (event-loop lag); brainSelfProbe возвращает последний завершённый замер.
+let eventLoopLagMs = 0;
+const eventLoopLagTimer = setInterval(() => {
+  const scheduled = Date.now();
+  setImmediate(() => { eventLoopLagMs = Date.now() - scheduled; });
+}, 1_000);
+eventLoopLagTimer.unref?.(); // сэмплер не должен удерживать процесс живым
+
 export function brainSelfProbe(): { eventloop_ms: number; db_probe_ms: number; memory_rows: number; llm: "ready" } {
-  const t0 = Date.now();
-  setImmediate(() => { /* замер читается сразу после возврата — eventloop не заблокирован */ });
-  const eventloopMs = Date.now() - t0;
   const t1 = Date.now();
   const st = memoryStatus();
   const dbMs = Date.now() - t1;
-  return { eventloop_ms: eventloopMs, db_probe_ms: dbMs, memory_rows: st.rows, llm: "ready" };
+  return { eventloop_ms: eventLoopLagMs, db_probe_ms: dbMs, memory_rows: st.rows, llm: "ready" };
 }
 
 export function brainStatus() {

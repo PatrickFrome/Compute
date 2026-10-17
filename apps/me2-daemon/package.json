@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun --hot index.ts",
     "start": "bun index.ts",
-    "check": "bash scripts/probe.sh"
+    "check": "bash scripts/probe.sh",
+    "test": "bun test test/"
   },
   "dependencies": {
     "socket.io": "^4.8.1"

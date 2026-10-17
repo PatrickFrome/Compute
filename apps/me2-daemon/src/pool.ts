@@ -256,7 +256,11 @@ export function startPoolLoops(): void {
   if (!hbTimer) hbTimer = setInterval(() => {
     try {
       const n = Date.now() + POOL_LEASE_TTL_MS;
-      db.query(`UPDATE pool_leases SET expires_at=?, hb_at=? WHERE done=0`).run(n, nowIso());
+      // Аудит 2026-10-18 (MEDIUM): heartbeat продлевал ВСЕ done=0 lease'ы, включая
+      // чужие/зомби (lease воркера другой инкарнации получал бесконечный TTL —
+      // reaper никогда бы его не забрал). Продлеваем только lease'ы актуального
+      // пула этой инкарнации (пул/воркеры переучреждаются на каждом буте).
+      db.query(`UPDATE pool_leases SET expires_at=?, hb_at=? WHERE done=0 AND agent_id IN (SELECT agent_id FROM pool_workers)`).run(n, nowIso());
     } catch { /* heartbeat не роняет демон */ }
   }, HB_EVERY_MS);
   if (!reapTimer) reapTimer = setInterval(() => { try { poolReap(); } catch { /* noop */ } }, REAP_EVERY_MS);
