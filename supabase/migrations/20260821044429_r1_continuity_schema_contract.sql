@@ -1,3 +1,9 @@
+-- R1 continuity schema contract.
+-- Owns the destruktion_meta schema bootstrap as well: 20260821044158 no longer carries
+-- object DDL (fresh-replay repair 2026-10-17), and `if not exists` keeps re-application
+-- idempotent for environments where the schema was created out-of-band.
+create schema if not exists destruktion_meta;
+
 create table if not exists destruktion_meta.compute_continuity_domain_h205f22 (
   domain_key text primary key,
   provider_kind text not null,
@@ -124,3 +130,7 @@ create index if not exists compute_continuity_restore_object_domain_idx on destr
 create index if not exists compute_continuity_restore_domain_idx on destruktion_meta.compute_continuity_restore_drill_h205f22(domain_key);
 create index if not exists compute_continuity_graph_snapshot_object_idx on destruktion_meta.compute_continuity_recovery_graph_snapshot_h205f22(base_object_id);
 create index if not exists compute_continuity_checkpoint_parent_idx on destruktion_meta.compute_continuity_checkpoint_ledger_h205f22(parent_continuity_checkpoint_id);
+
+-- Moved from 20260821044158_r1_continuity_plane_adoption (fresh-replay repair 2026-10-17):
+-- the ledger comment must run after the table exists.
+comment on table destruktion_meta.compute_continuity_checkpoint_ledger_h205f22 is 'H205F22 R1 append-only continuity step ledger. This is not the supervisor mainline checkpoint seal.';

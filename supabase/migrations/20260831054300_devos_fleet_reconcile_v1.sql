@@ -1,3 +1,9 @@
+-- SUPERSEDED (supersession note added 2026-10-17): this early revision of
+-- devos_fleet_reconcile_v1 is fully replaced by the same-named function in
+-- 20260831120500_devos_fleet_reconcile_v1.sql (different body, signature and
+-- search_path). The later `create or replace function` wins on any replay that
+-- runs both files; this file is retained only for migration-history accuracy.
+-- Do not edit either body in place: ship a new migration instead.
 -- DevOS fleet lease reconciliation. Branch-local source checkpoint only until explicitly deployed.
 -- Expired work is fenced as AMBIGUOUS; it is never returned to READY automatically.
 

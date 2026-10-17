@@ -1,3 +1,7 @@
+-- CANONICAL REVISION (supersession note added 2026-10-17): this file replaces the
+-- earlier 20260831054300_devos_fleet_reconcile_v1.sql (different body, signature and
+-- search_path). Being later in the migration order, its `create or replace function`
+-- deterministically wins on any fresh replay of both files.
 create or replace function public.devos_fleet_reconcile_v1(p_workspace uuid)
 returns jsonb
 language plpgsql
