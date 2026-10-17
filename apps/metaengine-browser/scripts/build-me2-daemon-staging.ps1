@@ -4,6 +4,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+function Get-Sha256([string]$Path) {
+  $stream = [IO.File]::OpenRead($Path)
+  $hash = [Security.Cryptography.SHA256]::Create()
+  try { return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+  finally { $hash.Dispose(); $stream.Dispose() }
+}
 
 $browserRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $browserRoot '..\..'))
@@ -89,7 +95,7 @@ try {
 }
 
 if (-not (Test-Path $exePath -PathType Leaf)) { throw 'me2_daemon_executable_missing' }
-$sha = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sha = Get-Sha256 $exePath
 $bytes = (Get-Item $exePath).Length
 if ($bytes -lt 1048576) { throw "me2_daemon_executable_too_small:$bytes" }
 
