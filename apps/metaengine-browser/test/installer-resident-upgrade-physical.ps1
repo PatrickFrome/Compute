@@ -44,12 +44,15 @@ function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds 
   } while ([DateTime]::UtcNow -lt $deadline)
   # Failure attribution: dump every live child of the parent so a missing or
   # differently-shaped sentinel worker is diagnosable from the CI log alone.
+  # Write-Host, not Write-Output: this function's success stream is captured
+  # by the assignment and a terminating error would discard it.
   $parent = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
   if (-not $parent) { throw "sentinel_child_missing_parent_gone:$ParentPid" }
-  Write-Output "--- sentinel attribution: live children of parent $ParentPid ---"
+  Write-Host "--- sentinel attribution: live children of parent $ParentPid ---"
   Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentPid" -ErrorAction SilentlyContinue | ForEach-Object {
-    Write-Output ("pid={0} exe={1} cmd={2}" -f $_.ProcessId, $_.ExecutablePath, $_.CommandLine)
+    Write-Host ("pid={0} exe={1} cmd={2}" -f $_.ProcessId, $_.ExecutablePath, $_.CommandLine)
   }
+  Write-Host "--- sentinel attribution: parent process alive, exe=$($parent.Path) ---"
   throw "sentinel_child_missing_for_parent:$ParentPid"
 }
 
