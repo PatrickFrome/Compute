@@ -5,6 +5,14 @@
 -- migrations until the exact-head Browser + Edge + Realtime load/replay gates pass
 -- and a controlled Supabase change window is explicitly approved.
 --
+-- AUDIT FIXPACK2 (2026-10-18) — SCHEMA DIVERGENCE WARNING vs the canonical chain:
+-- the deployed acceptor is supabase/migrations/20261007061415_cognitive_delta_live_acceptor_v1.sql,
+-- whose public.compute_fabric_a2_browser_cognitive_cursor_h205f22 uses device_id uuid
+-- plus additional columns (last_after_sequence, last_batch_sha256, last_broadcast_id).
+-- THIS staging copy declares device_id text and lacks those columns — the two schemas
+-- are incompatible. Do NOT apply this file to any environment that runs the canonical
+-- migration; reconcile this copy with the canonical contract before any change window.
+--
 -- Design goal: keep the hot observation path O(1) durable state per Browser stream,
 -- never persist every DOM/process event, and broadcast one already-sanitized batch.
 -- DB cursor acceptance is delivery durability only; it is never command authority.

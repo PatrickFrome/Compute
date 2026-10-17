@@ -4,6 +4,12 @@
 -- После запуска daemon-модуль evidence.ts перейдёт DEGRADED → LIVE
 -- и дольёт накопленный outbox (эндпоинт /evidence покажет method).
 -- ─────────────────────────────────────────────────────────────────────
+-- AUDIT FIXPACK2 (2026-10-18): the canonical copy of this DDL now lives in the
+-- migration chain as supabase/migrations/20261018010000_me2_evidence_plane_v1.sql
+-- (fresh projects get the surface from `supabase db push`). This file remains the
+-- evidence.ts DDL self-heal payload (MIGRATION_PATH) and must be kept
+-- byte-compatible with the canonical migration — do not edit one without the other.
+-- ─────────────────────────────────────────────────────────────────────
 
 create table if not exists public.me2_evidence (
   seq          bigint primary key,
