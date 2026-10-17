@@ -60,7 +60,20 @@ const HOSTILE_PATTERNS: Array<[RegExp, string]> = [
   [/>\s*\/dev\/sd[a-z]/, "write_to_disk"],
   [/\bsudo\b/, "sudo"],
   [/\b(curl|wget|nc|ncat|ssh|scp|telnet)\b/, "net_binary (egress-политика — слайс P0-2)"],
+  // R71 (аудит): скрытое исполнение через аргументы БЕЛОСПИСОЧНЫХ бинарей.
+  // find -exec/-execdir запускает любой бинарь в обход allowlist сегментов;
+  // awk/perl system()/popen() — произвольный shell из «скрипта»-аргумента;
+  // git ext::/shell:: — shell-транспорт git (произвольная команда вместо сети).
+  [/\s(-exec|-execdir)\s/, "hidden_exec (find -exec/-execdir)"],
+  [/\b(system|popen)\s*\(/, "hidden_exec (system/popen в аргументе скрипта)"],
+  [/\bext::|\bshell::/, "hidden_exec (git ext::/shell:: транспорт)"],
 ];
+
+/** R71 (аудит): бинари, которые сами исполняют произвольный код из аргумента
+ *  (скрипт-параметр). В тир-1 (prlimit БЕЗ Landlock/сетки) это произвольное
+ *  исполнение кода на хосте, поэтому такие команды прогоняются ТОЛЬКО через
+ *  OS-сандбокс (ns+seccomp, net=deny). */
+const CODE_EXEC_BINARIES: ReadonlySet<string> = new Set(["node", "bun", "npm", "npx", "tsc", "awk", "sed"]);
 
 const CMD_MAX_LEN = 1000;
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -98,8 +111,10 @@ export function planExec(rawCmd: string, rawCwd: string, rawTimeout?: number): E
   }
   for (const [re, name] of HOSTILE_PATTERNS) if (re.test(cmd)) return { ok: false, reason: "cmd_denied", detail: name };
   if (cmd.includes("$(") || cmd.includes("`")) return { ok: false, reason: "substitution_denied", detail: "$()/backticks скрывают бинарь от анализа сегментов (честное ограничение P0-a)" };
-  // сегменты: split по разделителям shell; каждый обязан начинаться бинарем из белого списка
-  const segments = cmd.split(/(?:\|\||&&|;|\||\n)/).map((s) => s.trim()).filter((s) => s.length > 0);
+  // сегменты: split по разделителям shell; каждый обязан начинаться бинарем из белого списка.
+  // R71 (аудит): одиночный «&» добавлен — без него «echo hi & <люба_команда>» проходит
+  // планировщик (первый токен «echo»), а bash -c исполняет ВСЮ строку, включая фоновую часть.
+  const segments = cmd.split(/(?:\|\||&&|&|;|\||\n)/).map((s) => s.trim()).filter((s) => s.length > 0);
   if (!segments.length) return { ok: false, reason: "cmd_required" };
   const binaries: string[] = [];
   for (const seg of segments) {
@@ -108,8 +123,22 @@ export function planExec(rawCmd: string, rawCwd: string, rawTimeout?: number): E
     if (!ALLOWED_BINARIES.has(first)) {
       return { ok: false, reason: "binary_not_allowed", detail: `«${first}» вне белого списка (${[...ALLOWED_BINARIES].length} бинарей; полный список: GET /exec)` };
     }
+    // R71 (аудит): абсолютные пути в аргументах вне управляемых корней — отказ.
+    // Иначе cat/head/sed/awk читают /home/z/.a2/*.env (файлы vault'а), а «echo x > /abs/path»
+    // пишет ВНЕ песочницы: prlimit файловую систему не ограничивает.
+    const roots = execRoots();
+    for (const tok of seg.split(/\s+/).slice(1)) {
+      const bare = tok.replace(/^["']|["']$/g, "");
+      if (!bare.startsWith("/")) continue;
+      if (/(^|\s)[<>]$/.test(seg.slice(0, seg.indexOf(tok)))) continue; // цель редиректа обрабатывается ниже
+      const insideRoot = roots.some((r) => bare === r.slice(0, -1) || bare.startsWith(r));
+      if (!insideRoot) return { ok: false, reason: "abs_path_denied", detail: `абсолютный путь «${bare.slice(0, 120)}» вне управляемых корней (чтение/запись мимо песочницы)` };
+    }
     binaries.push(first);
   }
+  // R71 (аудит): запрет абсолютных целей редиректа (> /abs/path) — запись вне корней;
+  // относительные цели остаются в cwd (управляемый корень) и разрешены.
+  if (/(^|\s)[<>]\s*\//.test(cmd)) return { ok: false, reason: "redirect_denied", detail: "редирект в абсолютный путь вне управляемых корней (prlimit ФС не ограничивает)" };
   const timeout = Math.min(Math.max(Number(rawTimeout) || DEFAULT_TIMEOUT_MS, 1_000), MAX_TIMEOUT_MS);
   return { ok: true, segments, binaries, cwd: real, timeout_ms: timeout };
 }
@@ -269,6 +298,10 @@ export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeou
   if (!plan.ok) return deniedVerdict(rawCmd, rawCwd, plan.reason ?? "plan_denied", plan.detail, source, t0);
 
   // ── R63 P0-b: тир-3 классификатор (канон D02: allowlist → sandbox-ability → classifier) ──
+  // R71 (аудит): node/bun/npm/npx/tsc/awk/sed исполняют произвольный код из аргумента.
+  // В тир-1 (prlimit без Landlock/сетки) это произвольное исполнение на хосте — поэтому
+  // такие команды принудительно идут через OS-сандбокс (net=deny), а не через spawnPlanned(false).
+  const needsSandbox = plan.binaries!.some((b) => CODE_EXEC_BINARIES.has(b)) && opts.sandbox !== true;
   const gate = await classifyGate(
     { cmd: String(rawCmd), cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! },
     plan.timeout_ms,
@@ -280,7 +313,7 @@ export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeou
   // (a) вердикт «sandbox» от классификатора (sandbox.auto_sandbox=true) →
   // (b) явный sandbox:true оператора + fs-риск (FS_RULES) → конфайнмент вместо
   //     дёрганья оператора; внешние состояния (git push, npm i) sandbox НЕ гасит → очередь.
-  if (gate.verdict === "sandbox") {
+  if (gate.verdict === "sandbox" || needsSandbox) {
     return spawnPlanned(rawCmd, plan, source, t0, true);
   }
   if (gate.verdict === "ask" && opts.sandbox === true && FS_RULES.has(gate.result.rule ?? "")) {

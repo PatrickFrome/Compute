@@ -10,6 +10,7 @@
  * Запуск long-run: setsid nohup bun index.ts > daemon.log 2>&1 &
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createHash } from "node:crypto"; // R71 (аудит): timing-safe сравнение REST-токена
 import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -215,8 +216,11 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       setMeta("public_origin_last", `${cand} @ ${new Date().toISOString()}`);
     }
   } catch { /* капча не критична */ }
-  const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+  const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, x-me2-token" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
+  // R71 (аудит): bearer-гейт ДО любого обработчика (fail-closed на чувствительных путях).
+  const authz = restAuthorized(req, path);
+  if (!authz.ok) return json(res, authz.status ?? 401, { ok: false, error: authz.error, path });
 
   if (PROBE_MODE) {
     const method = String(req.method || "GET").toUpperCase();
@@ -1030,7 +1034,20 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
     if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
     // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
-    if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
+    // R71 (аудит): контракт probe-гейта (scripts/probe.sh) — GET /eval?run=1 обязан
+    // запустить прогон и вернуть вердикт. Раньше query игнорировался, а в PROBE_MODE
+    // ни POST /eval/run (read-only), ни boot-автозапуск (!PROBE_MODE ниже) не срабатывали
+    // → унифицированный гейт структурно не мог пройти («eval не дал вердикт за 30с»).
+    if (path === "/eval" && req.method === "GET") {
+      if (url.searchParams.get("run") === "1") {
+        benchResetRings();
+        benchSuspend(true);
+        let report: ReturnType<typeof evalRun>;
+        try { report = evalRun(VERSION); } finally { benchSuspend(false); }
+        return json(res, 200, report);
+      }
+      return json(res, 200, evalStatus(VERSION));
+    }
     if (path === "/eval/run" && req.method === "POST") {
       benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
       benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
@@ -1123,6 +1140,42 @@ const restServer = createServer(async (req, res) => {
   }
 });
 
+// ── R71 (аудит): аутентификация REST-плоскости ──────────────────────────────
+// Модель угроз: REST исторически считался «локальным», но фактически публикуется
+// наружу через preview-прокси (см. host_candidates из x-forwarded-host), а CORS=*
+// позволяет запросы из любого браузера. Без токена mutating-эндпойнты (/exec,
+// /tokens, /commands, /agentchat…) доступны любому, кто достал до порта.
+// ME2_REST_TOKEN включает bearer-гейт:
+//  - все НЕ-GET запросы требуют Authorization: Bearer <token> / x-me2-token;
+//  - чувствительные GET (/exec, /tokens, /sqlmirror, /file, /sandbox) — тоже;
+//  - при ПУСТОМ токене mint-канал /sqlmirror/ui-token закрыт (fail-closed);
+//  - сравнение — через sha256-дайджесты (timing-safe по построению длин).
+// Probe-режим (CI-гейт probe.sh) остаётся без токена — он не несёт секрета и
+// read-only, чувствительные GET там уже заблокированы PROBE_BLOCKED_GET_PATHS.
+const REST_TOKEN = process.env.ME2_REST_TOKEN ?? "";
+const SENSITIVE_GET_PREFIXES = ["/exec", "/tokens", "/sqlmirror", "/file", "/sandbox"];
+const sha256hex = (s: string) => createHash("sha256").update(s).digest("hex");
+const REST_TOKEN_HASH = REST_TOKEN ? sha256hex(REST_TOKEN) : "";
+function restAuthorized(req: IncomingMessage, path: string): { ok: boolean; status?: number; error?: string } {
+  if (PROBE_MODE) return { ok: true };
+  const sensitiveGet = req.method === "GET" && SENSITIVE_GET_PREFIXES.some((p) => path === p || path.startsWith(p + "/"));
+  const mutating = req.method !== "GET" && req.method !== "OPTIONS";
+  if (!sensitiveGet && !mutating) return { ok: true };
+  if (!REST_TOKEN) {
+    // Fail-closed только там, где без токена выдаётся живой облачный bearer.
+    if (path === "/sqlmirror/ui-token" || path.startsWith("/sqlmirror/ui-token/")) {
+      return { ok: false, status: 403, error: "ui_token_disabled_no_rest_token" };
+    }
+    return { ok: true };
+  }
+  const h = String(req.headers.authorization ?? "");
+  const bearer = h.startsWith("Bearer ") ? h.slice(7) : "";
+  const alt = String(req.headers["x-me2-token"] ?? "");
+  const given = bearer || alt;
+  if (given && REST_TOKEN_HASH && sha256hex(given) === REST_TOKEN_HASH) return { ok: true };
+  return { ok: false, status: 401, error: "rest_token_required" };
+}
+
 // ── socket.io (:3040, path '/' — требование gateway) ──────────────
 const wsHttpServer = createServer();
 const io = new Server(wsHttpServer, {
@@ -1130,6 +1183,17 @@ const io = new Server(wsHttpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   pingTimeout: 60_000,
   pingInterval: 25_000,
+});
+
+// R71 (аудит): socket.io — второй неаутентифицированный канал команд (command,
+// agentchat:op, heartbeat). При установленном ME2_REST_TOKEN handshake обязан нести
+// auth.token; при пустом токене поведение прежнее (совместимость), но mint ui-token
+// уже закрыт на REST (fail-closed выше) — см. отчёт аудита, рекомендация SEC-3.
+io.use((socket, next) => {
+  if (PROBE_MODE || !REST_TOKEN) return next();
+  const given = String((socket.handshake.auth as Record<string, unknown> | undefined)?.token ?? "");
+  if (given && REST_TOKEN_HASH && sha256hex(given) === REST_TOKEN_HASH) return next();
+  next(new Error("rest_token_required"));
 });
 
 onEvent((e) => {

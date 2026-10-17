@@ -2,6 +2,19 @@
 /.audit-local/
 /supabase/.temp/
 
+# R71 (аудит): приватные данные и артефакты не должны попадать в git.
+# 1) data/ — SQLite me2.db содержит token vault (tokens-таблица) и шину событий:
+#    за коммит БД в публичный репозиторий утекли SUPABASE_SERVICE_ROLE_JWT,
+#    SUPABASE_JWT_SECRET, GITHUB_TOKEN_ADMIN, VERCEL_AI_GATEWAY_API_KEY.
+# 2) *.log — daemon.log пишется рядом с кодом и тоже попал в историю.
+# 3) .next/ — build-артефакты Next.js (~129МБ в git, включая node_modules standalone).
+# NB: gitignore не чистит уже закоммиченное — см. отчёт аудита (раздел «Устранение»):
+# git rm --cached + git filter-repo + ротация всех перечисленных секретов.
+/apps/me2-daemon/data/
+/apps/me2-daemon/*.log
+/apps/me2-daemon/data/*.db*
+/apps/me2-ui/.next/
+
 # Generated installer inputs and output artifacts.
 /apps/metaengine-browser/me2-ui-dist/
 /apps/metaengine-browser/me2-daemon-dist/
