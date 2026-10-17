@@ -49,7 +49,7 @@ jobs:
 
       - name: Install test-package dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
 
       - name: Parse exact source before packaging
         working-directory: apps/metaengine-browser

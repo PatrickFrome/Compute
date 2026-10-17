@@ -33,7 +33,7 @@ jobs:
           node-version: '24'
       - name: Install dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Parse and contract gates
         working-directory: apps/metaengine-browser
         run: |
@@ -87,7 +87,7 @@ jobs:
           node-version: '24'
       - name: Install physical-test dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Bind physical harness to live 0.7.0 line and exact run identity
         working-directory: apps/metaengine-browser
         shell: powershell

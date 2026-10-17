@@ -24,7 +24,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run exact Browser contract suite
         working-directory: apps/metaengine-browser
         run: |
@@ -60,7 +60,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Pin rebuild version
         working-directory: apps/metaengine-browser
         shell: pwsh

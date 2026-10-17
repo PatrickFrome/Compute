@@ -32,7 +32,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Static convergence boundaries
         shell: pwsh
         run: |
@@ -129,7 +129,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Electron shell process smoke
         working-directory: apps/metaengine-browser
         run: npm run smoke
@@ -151,7 +151,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Pin chaos candidate version
         working-directory: apps/metaengine-browser
         shell: pwsh

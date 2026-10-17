@@ -968,6 +968,101 @@ test('runtime relation graph constrains verified-skill routing without widening 
     const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
     await runtime.start();
     await runtime.adoptVerifiedSkillLibrary({ library, external_library_owner: true, authored_by_candidate: false });
+
+    // Both skills need at least one credited lifecycle window: skills without evidence
+    // stay DORMANT_CAP (active_for_composition=false) and the router never selects them,
+    // so the ANTAGONISTIC suppression invariant below could not fire. Credits go through
+    // the same public receipt-bound browser-outcome loop used by the integrated test.
+    const creditWindow = async (label, targetSkill) => {
+      const candidate = await runtime.proposeCandidate({
+        candidate_id: `candidate.runtime.relation.${label}`,
+        parent_sha: source,
+        candidate_sha: 'd'.repeat(40),
+        mutation_surface: 'BROWSER_RUNTIME',
+        hypothesis: `relation fixture window for ${label}`,
+      });
+      await runtime.beginEvaluation(candidate.candidate_id);
+      const commandId = label === 'first'
+        ? 'a1111111-1111-4111-8111-111111111111'
+        : 'a2222222-2222-4222-8222-222222222222';
+      const effectKey = `effect-relation-${label}`;
+      await runtime.bindBrowserCommandAttribution({
+        command_id: commandId,
+        action: 'SCROLL',
+        platform: 'CHATGPT',
+        effect_key: effectKey,
+        task_id: `task.runtime.relation.${label}`,
+        task_signature_digest: d('9'),
+        environment_fingerprint: 'env.browser.chatgpt.v1',
+        model_family: 'GPT_5_6_SOL',
+        candidate_id: candidate.candidate_id,
+        proposal_digest: d('a'),
+        skill_digests: [targetSkill.capsule.skill_digest],
+        trajectory_id: `trajectory.relation.${label}`,
+        step_index: 1,
+        step_count: 1,
+        external_planner: true,
+        authored_by_candidate: false,
+      });
+      const episode = await runtime.ingestBrowserOutcome({
+        readback: {
+          schema: 'metaengine.rsi.result-receipt-readback.v1',
+          command_id: commandId,
+          found: true,
+          terminal: true,
+          status: 'COMPLETED',
+          receipt: {
+            schema: 'metaengine.native-supervisor.command-receipt.v2',
+            command_id: commandId,
+            action: 'SCROLL',
+            platform: 'CHATGPT',
+            result: { moved: true },
+            effect_outcome: 'CONFIRMED',
+            lane: 'MUTATION',
+            effect_key: effectKey,
+            execution_ms: 7.2,
+            recorded_at: '2026-09-18T18:10:00.000Z',
+            authority_effect: false,
+          },
+          error: null,
+          execution_authority: false,
+          production_mutation_authority: false,
+          promotion_authority: false,
+          self_update_authority: false,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        },
+      });
+      const credited = await runtime.recordBrowserStepCredit({
+        episode,
+        task_anchor: {
+          task_id: `task.runtime.relation.${label}`,
+          task_signature_digest: d('9'),
+          challenge_family: 'BROWSER_INTERACTION',
+          hidden_manifest_digest: d('b'),
+          external_writer: true,
+          authored_by_candidate: false,
+        },
+        credit_id: `credit.runtime.relation.${label}`,
+        credit_sign: 'POSITIVE',
+        credit_score: 0.7,
+        method: 'EXTERNAL_STEP_EVALUATOR',
+        evaluator_digest: d('c'),
+        evaluation_digest: d('d'),
+        lesson_digests: [d('e')],
+        evidence_refs: [`evidence:runtime:relation:${label}`],
+        skill_generation: 1,
+        skill_authoring_prior: 'VERIFIED_DIRECT_SKILL',
+        skill_authoring_provenance_digest: d('f'),
+        external_credit_assigner: true,
+        authored_by_candidate: false,
+      });
+      assert.equal(credited.skill_lifecycle.state, 'APPLIED');
+    };
+    await creditWindow('first', first);
+    await creditWindow('second', second);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count, 2);
+
     const relation = await runtime.recordSkillRelation({
       relation_id: 'relation.runtime.first-antagonistic-second',
       from_skill_digest: first.capsule.skill_digest,

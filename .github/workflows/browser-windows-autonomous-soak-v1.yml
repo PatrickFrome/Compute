@@ -48,7 +48,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Parse exact source
         working-directory: apps/metaengine-browser
         run: npm run check
@@ -85,7 +85,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Parse endurance source
         working-directory: apps/metaengine-browser
         run: >-
@@ -125,7 +125,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Run seeded autonomous fleet chaos
         working-directory: apps/metaengine-browser
         env:
@@ -153,7 +153,7 @@ jobs:
           node-version: '24'
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Run fleet scale and mesh convergence contracts
         working-directory: apps/metaengine-browser
         env:
@@ -190,7 +190,7 @@ jobs:
           node-version: '24'
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
       - name: Parse packaged session soak harness before expensive build
         working-directory: apps/metaengine-browser
         shell: pwsh

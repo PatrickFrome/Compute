@@ -87,6 +87,8 @@ export function createRsiShadowComparisonBinding({
     comparison_can_activate_profile:false,
     comparison_can_authorize_canary:false,
     external_canary_gate_still_required:true,
+    browser_authority:false,
+    task_authority:false,
     execution_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
@@ -101,6 +103,11 @@ export function createRsiShadowComparisonBinding({
 export function verifyRsiShadowComparisonBinding(binding,{selection,qualification}={}){
   if(!binding||binding.schema!==RSI_SHADOW_COMPARISON_BINDING_SCHEMA||binding.version!==1)throw new Error('rsi_shadow_comparison_binding_invalid');
   assertZero(binding,'binding');
+  // The row must first be self-consistent: its claimed binding_digest must cover the
+  // exact field content it carries. Without this check, tampering champion/challenger
+  // (or any other core field) while keeping the original digest passes silently,
+  // because the canonical reconstruction below matches the un-tampered claimed digest.
+  verifyDigestObject(binding,'binding_digest','binding');
   if(binding.comparison_mode!=='READ_ONLY_DUAL_PLAN'||binding.context_source!=='BASELINE_PLAN'
     ||binding.champion_challenger_roles_fixed!==true||binding.same_verified_context_required!==true
     ||binding.external_comparator_owner!==true||binding.authored_by_candidate!==false

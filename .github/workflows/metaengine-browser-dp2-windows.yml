@@ -24,7 +24,7 @@ jobs:
           node-version: '24'
       - name: Install browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Stamp monotonic development version
         if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
         working-directory: apps/metaengine-browser

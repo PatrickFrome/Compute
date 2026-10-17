@@ -738,6 +738,10 @@ async function handleCommand(command, payload = {}) {
   if (command === 'BACK') { const navigated = Boolean(selectedView?.webContents.navigationHistory.canGoBack()); if (navigated) selectedView.webContents.navigationHistory.goBack(); return { ok: true, navigated }; }
   if (command === 'FORWARD') { const navigated = Boolean(selectedView?.webContents.navigationHistory.canGoForward()); if (navigated) selectedView.webContents.navigationHistory.goForward(); return { ok: true, navigated }; }
   if (command === 'RELOAD') {
+    // No selected surface means there is nothing to reload: refuse instead of the
+    // previous silent no-op that still reported reload_initiated:true (a false
+    // CONFIRMED on the supervisor effect plane). Mirrors the NAVIGATE guard.
+    if (!selectedView) throw new Error('no_selected_tab');
     // P0 repair (point 1): RELOAD is refused on a ChatGPT auth-redirect surface.
     // A reload there re-enters the redirect and multiplies login tabs; the page
     // is healthy, the session is not, and only a human sign-in changes that.

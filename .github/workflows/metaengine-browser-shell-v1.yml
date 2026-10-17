@@ -29,7 +29,7 @@ jobs:
 
       - name: Install shell dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Materialize Electron binary without launching Chromium
         working-directory: apps/metaengine-browser
@@ -175,7 +175,7 @@ jobs:
 
       - name: Install shell dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Materialize Electron binary
         working-directory: apps/metaengine-browser
@@ -294,7 +294,7 @@ jobs:
 
       - name: Install shell dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Materialize Electron binary
         working-directory: apps/metaengine-browser

@@ -11,7 +11,7 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import { createRsiSkillLibraryGovernance, createRsiSkillLifecycleEvidence } from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiSkillRelationEdge,
   createRsiSkillRelationGraph,
@@ -44,6 +44,34 @@ function verifiedSkill({id,source,impl,role='ANALYZER',capabilities=['READ_VERIF
   return {capsule,evidence};
 }
 
+function routerWindow(label, library, skillDigest, { helpful, harmful, neutral = 0, delta }){
+  // One credited lifecycle window per skill: without evidence every skill stays
+  // DORMANT_CAP (active_for_composition=false) and the router cannot select anything,
+  // so the selection/exploration/veto invariants below could not be exercised.
+  return createRsiSkillLifecycleEvidence({
+    library,
+    evidence_id:`runtime.skill.router.window.${label}`,
+    skill_digest:skillDigest,
+    window_seq:1,
+    generation_start:1,
+    generation_end:1,
+    invocation_count:1,
+    helpful_count:helpful,
+    harmful_count:harmful,
+    neutral_count:neutral,
+    insufficient_evidence_count:0,
+    router_engagement_count:1,
+    false_positive_injection_count:0,
+    hard_invariant_violation_count:0,
+    measured_net_delta:delta,
+    authoring_prior:'VERIFIED_DIRECT_SKILL',
+    authoring_provenance_digest:d('f'),
+    evidence_refs:[`fixture:router-window:${label}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+}
+
 function fixture(){
   const good=verifiedSkill({id:'skill.router.good',source:'b',impl:'b'});
   const bad=verifiedSkill({id:'skill.router.bad',source:'c',impl:'c'});
@@ -60,7 +88,15 @@ function fixture(){
   const governance=createRsiSkillLibraryGovernance({
     governance_id:'runtime.skill.router.governance',
     library,
-    lifecycle_evidence:[],
+    lifecycle_evidence:[
+      routerWindow('good',library,good.capsule.skill_digest,{helpful:1,harmful:0,delta:0.7}),
+      // Neutral lifecycle window for 'bad': a harmful window would trip the governance
+      // quarantine (harmful_rate >= quarantine_harmful_rate) and remove the skill from
+      // the eligible set, so the router-level exact negative-transfer veto (driven by
+      // the two NEGATIVE episodes below) could never be exercised.
+      routerWindow('bad',library,bad.capsule.skill_digest,{helpful:0,harmful:0,neutral:1,delta:0}),
+      routerWindow('explore',library,explore.capsule.skill_digest,{helpful:1,harmful:0,delta:0.5}),
+    ],
     max_active_skills:3,
     exploration_slots:3,
     external_library_owner:true,
@@ -212,7 +248,9 @@ test('persisted contextual evidence is digest-verified, exact-source fenced, and
       source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,
       external_evaluator:true,authored_by_candidate:false,
     });
-    assert.throws(()=>verifyRsiSkillContextEvidence({...row,credit_sign:'NEGATIVE'}),/evidence_digest_mismatch/);
+    // Tamper a semantically-valid field: credit_sign tampering is caught even earlier
+    // by the sign/score consistency rule; ANY field change must still break the digest.
+    assert.throws(()=>verifyRsiSkillContextEvidence({...row,trajectory_id:'trajectory.router.tampered'}),/evidence_digest_mismatch/);
 
     assert.throws(()=>createRsiSkillRoutingPlan({
       library,governance,

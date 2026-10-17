@@ -208,7 +208,14 @@ test('durable curation queue is idempotent, single-assignment and remembers reje
     assert.deepEqual(restored.snapshot().rejected_revision_buffer,[successor.skill_digest]);
 
     const raw=await fs.readFile(statePath,'utf8');
-    assert.doesNotMatch(raw,/raw_page_text|raw_user_input/);
+    // Persisted state may carry boolean privacy DECLARATIONS embedded in skill capsules
+    // (raw_page_text_stored:false) — the invariant forbids raw text CONTENT. Strip the
+    // known declaration fields before matching so the check stays content-focused.
+    const withoutDeclarations=raw.replace(
+      /"(?:raw_page_text_stored|raw_user_input_stored|raw_prompt_text_stored|raw_model_transcript_stored|secret_material_stored)":(?:false|true)/g,
+      '',
+    );
+    assert.doesNotMatch(withoutDeclarations,/raw_page_text|raw_user_input/);
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 

@@ -1760,11 +1760,12 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
   const entry=phase30Entry(good,'tamper-good');
 
   const forgedEntry=structuredClone(entry);
+  // Keep the original recipe/watch_out digests (format-valid): canonical re-derivation
+  // runs before the digest comparison, so nulling them would surface a field validation
+  // error instead of the intended entry_digest_mismatch for the self-rehashed forgery.
   forgedEntry.outcome_class='NO_MATERIAL_IMPROVEMENT';
   forgedEntry.learning_kind='LOW_YIELD_CONSTRAINT';
   forgedEntry.low_yield_constraint_digest=labelDigest('forged-low-yield');
-  forgedEntry.recipe_digest=null;
-  forgedEntry.watch_out_digest=null;
   const core=structuredClone(forgedEntry);delete core.entry_digest;
   forgedEntry.entry_digest=dg(core);
   assert.throws(()=>verifyRsiGenerationScopedOutcomeEntry(forgedEntry,{
@@ -1897,7 +1898,7 @@ test('Phase30 rejected and no-material evidence remain counterevidence and canno
   assert.equal(archive.snapshot().archive_can_change_budget,false);
 });
 
-function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION'} = {}) {
+function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION', sharedOverrides={}} = {}) {
   const shared={
     evaluator_root_digest:labelDigest(`${prefix}-evaluator-root`),
     evaluator_generation_digest:labelDigest(`${prefix}-generation`),
@@ -1913,6 +1914,10 @@ function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVIS
     hidden_holdout_root_digest:labelDigest(`${prefix}-holdout`),
     safety_suite_root_digest:labelDigest(`${prefix}-safety`),
     security_suite_root_digest:labelDigest(`${prefix}-security`),
+    // Cross-generation fixtures reuse the base prefix's evaluator root so that
+    // normalizeSourceRows reaches the cross_generation_forbidden check (it validates
+    // evaluator root equality before generation equality).
+    ...sharedOverrides,
   };
   const a=phase30OutcomeEvidence(`${prefix}-a`,{state,sharedEvaluation:shared});
   const b=phase30OutcomeEvidence(`${prefix}-b`,{state,sharedEvaluation:shared});
@@ -2011,7 +2016,11 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
 
 test('Phase31 forbids mixed evaluator generations epochs learning kinds and duplicate candidate evidence',()=>{
   const rows=phase31SourceRows('cross-generation');
-  const other=phase31SourceRows('cross-generation-other');
+  // Same evaluator root as 'cross-generation', different generation digest:
+  // isolates the cross-generation invariant instead of tripping evaluator_root_mismatch.
+  const other=phase31SourceRows('cross-generation-other',{
+    sharedOverrides:{evaluator_root_digest:labelDigest('cross-generation-evaluator-root')},
+  });
   assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden/);
 
   const epochA=phase31SourceRows('cross-epoch');
@@ -2233,10 +2242,14 @@ function phase32Fixture(label='phase32',{
   consumerGenerationAnchor=null,
   consumerEpochSeq=null,
   consumerEpochDigest=null,
+  // Reuse another label's Phase31 source evidence so the canonical proposal (and its
+  // evaluator generation/epoch identity) stays identical while consumer-local assets
+  // stay fresh — required to exercise the identity-drift invariants.
+  sourcePrefix=null,
   handoffOverrides={},
 }={}){
-  const rows=phase31SourceRows(`${label}-source`,{state});
-  const proposal=phase31Proposal(rows,`${label}-proposal`);
+  const rows=phase31SourceRows(`${sourcePrefix||label}-source`,{state});
+  const proposal=phase31Proposal(rows,`${sourcePrefix||label}-proposal`);
   const validations=[
     phase31Validation(proposal,`${label}-transfer-a`),
     phase31Validation(proposal,`${label}-transfer-b`),
@@ -2272,7 +2285,9 @@ function phase32Fixture(label='phase32',{
     authored_by_candidate:false,
     ...handoffOverrides,
   });
-  return {rows,proposal,validations,admission,handoff};
+  // source_rows alias: verifyRsiValidatedKnowledgeConsumerHandoff(handoff, {source_rows})
+  // re-derives the canonical handoff from the exact Phase31 source evidence.
+  return {rows, source_rows:rows, proposal, validations, admission, handoff};
 }
 
 function phase32Receipt(fx,label='phase32',overrides={}){
@@ -2836,15 +2851,21 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
 
 test('Phase32 hardened consumer identity detects generation and epoch identity drift',()=>{
   const fx=phase32Fixture('identity-drift');
+  // Same canonical Phase31 source evidence (sourcePrefix), so the consumer generation
+  // digest matches the proposal while the sequence/anchor drift — the exact condition
+  // rsi_consumer_evaluator_generation_identity_drift exists to reject.
   assert.throws(()=>phase32Fixture('identity-drift-generation',{
+    sourcePrefix:'identity-drift',
     consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1,
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-anchor',{
+    sourcePrefix:'identity-drift',
     consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationAnchor:labelDigest('phase32-wrong-generation-anchor'),
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-epoch',{
+    sourcePrefix:'identity-drift',
     consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
@@ -3353,7 +3374,10 @@ function phase34Fixture(label='phase34'){
   const p33Certificate=createRsiExactSkillPrecommitCertificate(p33Args);
   assert.equal(p33Certificate.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
   const currentGovernance=createRsiSkillLibraryGovernance({
-    governance_id:'phase34.governance.'+label,
+    // Must match the runtime store's derived governance id (rsi-runtime-skill-lifecycle.mjs
+    // #governanceId: 'runtime.skill.governance.' + source_sha.slice(0,16)) so that
+    // prepareLibraryAdmissionAttempt does not reject with current_governance_drift.
+    governance_id:'runtime.skill.governance.'+SOURCE.slice(0,16),
     library:p33.skillFx.currentLibrary,
     lifecycle_evidence:[],
     max_active_skills:64,
@@ -3393,13 +3417,16 @@ function phase34Fixture(label='phase34'){
     admission_proposal_args:proposalArgs,
     predecessor_source_qualification:sourceQualification,
     admission_epoch_digest:labelDigest(label+'-admission-epoch'),
-    library_owner_identity_digest:labelDigest(label+'-library-owner-id'),
-    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
-    source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
-    least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
-    governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
-    benchmark_security_attestor_identity_digest:labelDigest(label+'-benchmark-security-attestor-id'),
-    harness_security_attestor_identity_digest:labelDigest(label+'-harness-security-attestor-id'),
+    // Phase34 principals must be identity-separated from every Phase33 reviewer
+    // (rsi_phase34_cross_stage_reviewer_separation_required): the 'p34-' prefix
+    // guarantees these digest labels never collide with phase33CertificateArgs.
+    library_owner_identity_digest:labelDigest(label+'-p34-library-owner-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-p34-statistical-acceptor-id'),
+    source_qualification_owner_identity_digest:labelDigest(label+'-p34-source-qualification-owner-id'),
+    least_privilege_reviewer_identity_digest:labelDigest(label+'-p34-least-privilege-reviewer-id'),
+    governance_reviewer_identity_digest:labelDigest(label+'-p34-governance-reviewer-id'),
+    benchmark_security_attestor_identity_digest:labelDigest(label+'-p34-benchmark-security-attestor-id'),
+    harness_security_attestor_identity_digest:labelDigest(label+'-p34-harness-security-attestor-id'),
     benchmark_ancestry_attestation_digest:labelDigest(label+'-benchmark-ancestry-attestation'),
     clean_room_requalification_digest:labelDigest(label+'-clean-room-requalification'),
     harness_integrity_attestation_digest:labelDigest(label+'-harness-integrity-attestation'),
@@ -3907,10 +3934,18 @@ test('Phase34B preparation fail-closes on stale predecessor and duplicate effect
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const statePath=path.join(dir,'skill-lifecycle.json');
   const fx=phase34bLifecycleFixture('cas-guard');
-  const other=phase34bLifecycleFixture('cas-guard-other');
+  // Stale predecessor: same entry set under a different library_id → different
+  // library_digest, so the certificate's current_library_digest CAS must reject.
+  const otherLibrary=createRsiVerifiedSkillLibrary({
+    library_id:'rsi.skill.library.phase32.exact.stale-other',
+    entries:fx.currentLibrary.entries.map(row=>({capsule:row.capsule,evidence:row.evidence})),
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.notEqual(otherLibrary.library_digest,fx.currentLibrary.library_digest);
   const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
   await store.init();
-  await store.adoptVerifiedLibrary({library:other.currentLibrary,external_library_owner:true,authored_by_candidate:false});
+  await store.adoptVerifiedLibrary({library:otherLibrary,external_library_owner:true,authored_by_candidate:false});
   await assert.rejects(()=>store.prepareLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.stale',
     admission_certificate:fx.certificate,admission_certificate_args:fx.fx.certificateArgs,

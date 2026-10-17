@@ -64,6 +64,9 @@ export function createRsiMetaProfileShadowSelection({
     selection_can_grant_skill_activity:false,
     continuous_shadow_review_required:true,
     canary_gate_still_required:true,
+    // Full zero-authority surface: downstream canary verification (assertZero with the
+    // extended authority list) requires browser/task authority to be declared false.
+    browser_authority:false,task_authority:false,
     execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
