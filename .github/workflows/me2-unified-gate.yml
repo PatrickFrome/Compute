@@ -78,6 +78,18 @@ jobs:
           grep -q 'ME2_BROWSER_PROBE_READ_ONLY' /tmp/me2-r109-denied.json
           echo "standalone Browser compatibility probe: PASS"
 
+  contract-drift:
+    # AUDIT FIXPACK2 (2026-10-18), priority 9: cross-app literals (workspace UUID,
+    # project URL, enrollment endpoints, canonical SQL surfaces) and known
+    # divergences (emergency lease, cognitive cursor, evidence self-heal) are now
+    # registry-verified instead of held together by 94+ hand-maintained copies.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Verify contract registry invariants (scripts/contract-registry.json)
+        run: node scripts/check-contract-drift.mjs
+
   ui-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10

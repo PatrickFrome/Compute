@@ -1,0 +1,50 @@
+{
+  "schema": "metaengine.contract.registry.v1",
+  "updated": "2026-10-18",
+  "maintainer": "audit fixpack2 (2026-10-18), priority 9",
+  "purpose": "Single hand-editable source of truth for cross-app literals and contracts that were previously duplicated across 94+ files with no registry. scripts/check-contract-drift.mjs verifies the invariants below; me2-unified-gate runs it in CI. Extend it whenever a new cross-app literal appears.",
+  "canonical": {
+    "workspace_uuid": "2de9f84b-7c0a-4091-911c-894ff1d6eaf4",
+    "supabase_project_host": "xpeibufgzjknrhbhpffp.supabase.co",
+    "github_repo": "PatrickFrome/Compute",
+    "integration_branch": "integration/metaengine-development-os-v1",
+    "supervisor_plane": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1",
+    "device_enrollment_request": "/v1/device/enrollment/request",
+    "device_enrollment_request_legacy_alias": "/v1/device/enroll",
+    "ports": {
+      "daemon_rest": 3041,
+      "daemon_ws": 3040,
+      "screencast": 3043,
+      "legacy_mirror": 3021,
+      "native_supervisor_local_edge": 3031
+    },
+    "sql": {
+      "emergency_lease": "supabase/migrations/20260921000000_browser_emergency_lane_and_lease_v1.sql",
+      "cognitive_cursor_acceptor": "supabase/migrations/20261007061415_cognitive_delta_live_acceptor_v1.sql",
+      "evidence_plane": "supabase/migrations/20261018010000_me2_evidence_plane_v1.sql",
+      "devos_roadmap_baseline_sync": "supabase/migrations/20261018000000_devos_roadmap_baseline_sync_rpc_v1.sql"
+    }
+  },
+  "known_divergences": [
+    {
+      "file": "apps/metaengine-browser/supabase/command-fabric-lease-emergency-v1.sql",
+      "reason": "staged qualification artifact (rollback-only); leases a narrower emergency subset with advisory key 'workspace:client:emergency' while the canonical migration leases the whole EMERGENCY lane with key 'workspace:client'. Same RPC name, different behavior - must never be applied outside its qualification window",
+      "requires_banner": "20260921000000"
+    },
+    {
+      "file": "sql/browser_cognitive_delta_ingest_v1.sql",
+      "reason": "source-only staging copy; declares cursor device_id text while the canonical live acceptor declares device_id uuid plus 3 extra columns - schemas are incompatible",
+      "requires_banner": "20261007061415"
+    },
+    {
+      "file": "apps/me2-daemon/supabase-migration-me2-evidence.sql",
+      "reason": "evidence.ts DDL self-heal payload (MIGRATION_PATH); canonical copy promoted into the migration chain, must stay byte-compatible",
+      "requires_banner": "20261018010000"
+    },
+    {
+      "file": "supabase/functions/a2-browser-supervisor-v1/index.ts",
+      "reason": "legacy edge fn completes supervisor commands via direct REST PATCH to compute_fabric_a2_browser_supervisor_command_h205f22 instead of the atomic h205f22_a2_browser_supervisor_complete_v4 RPC used by v3/v4 - mixed write contracts against one table",
+      "requires_banner": null
+    }
+  ]
+}
