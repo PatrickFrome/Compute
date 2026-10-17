@@ -63,6 +63,32 @@ function sh(args: string[], cwd: string, timeoutMs = FS_TIMEOUT_MS): { ok: boole
   }
 }
 
+/** AUDIT FIXPACK2 (2026-10-18): async-близнец sh() — tar/git/du в Bun.spawn без заморозки
+ * event-loop. Вызовы sh() на REST-путях (снапшот/restore/destroy/список с du) блокировали
+ * демона целиком до FS_TIMEOUT_MS=30с на операцию; во время фриза не тикали heartbeat/reaper
+ * и отваливались WS-пинги. */
+async function shAsync(args: string[], cwd: string, timeoutMs = FS_TIMEOUT_MS): Promise<{ ok: boolean; out: string; err: string; code: number }> {
+  try {
+    const p = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => { try { p.kill(9); } catch { /* уже мёртв */ } }, timeoutMs);
+    try {
+      const [out, err, code] = await Promise.all([
+        new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited,
+      ]);
+      return { ok: code === 0, out: out.trim(), err: (err || "").trim(), code };
+    } finally { clearTimeout(timer); }
+  } catch (e) {
+    return { ok: false, out: "", err: e instanceof Error ? e.message : String(e), code: -1 };
+  }
+}
+
+/** AUDIT FIXPACK2: NaN-safe clamp таймаута (Number("abc") = NaN проходил Math.max и
+ * падал RangeError'ом изнутри spawn — сырой 500 клиенту). */
+function clampTimeoutSec(raw: number, fallback = 30): number {
+  const n = Number(raw);
+  return Math.min(Math.max(Number.isFinite(n) ? n : fallback, 1), EXEC_TIMEOUT_MS / 1000);
+}
+
 function readMeta(id: string): SandboxMeta {
   const root = join(SB_ROOT, id);
   const p = join(root, ".me2-sandbox.json");
@@ -128,7 +154,7 @@ export function execInSandbox(rawId: string, rawCmd: string, timeoutSec = 30): {
   if (meta.status === "BROKEN") throw new Error("SANDBOX_BROKEN: " + id);
 
   const t0 = Date.now();
-  const timeout = Math.min(Math.max(timeoutSec, 1), EXEC_TIMEOUT_MS / 1000) * 1000;
+  const timeout = clampTimeoutSec(timeoutSec) * 1000;
   const usePrlimit = sandboxCaps().rlimit;
   // NB: RLIMIT_NPROC — per-UID (душит чужие процессы) — НЕ используем.
   // Безопасная изоляция: адресное пространство 1GiB, 256 fd, без core-дампов.
@@ -161,6 +187,56 @@ export function execInSandbox(rawId: string, rawCmd: string, timeoutSec = 30): {
   };
 }
 
+export async function execInSandboxAsync(rawId: string, rawCmd: string, timeoutSec = 30): Promise<{
+  id: string; cmd: string; exitCode: number; ok: boolean; ms: number;
+  stdout: string; stderr: string; truncated: boolean; timedOut: boolean; limit: string;
+}> {
+  // AUDIT FIXPACK2: async-близнец execInSandbox для REST-путей — Bun.spawn вместо
+  // spawnSync (exec до 120с замораживал весь демон: пул-таймеры, lease-heartbeat, WS).
+  const id = safeId(rawId);
+  const meta = readMeta(id);
+  const cmd = String(rawCmd ?? "").trim();
+  if (!cmd) throw new Error("cmd_required");
+  if (cmd.length > 500) throw new Error("cmd_too_long (max 500)");
+  for (const re of DENY_PATTERNS) if (re.test(cmd)) throw new Error("CMD_DENIED_HOSTILE");
+  if (meta.status === "BROKEN") throw new Error("SANDBOX_BROKEN: " + id);
+
+  const t0 = Date.now();
+  const timeout = clampTimeoutSec(timeoutSec) * 1000;
+  const usePrlimit = sandboxCaps().rlimit;
+  const argv = usePrlimit
+    ? ["prlimit", "--as=1073741824", "--nofile=256", "--core=0", "bash", "-c", cmd]
+    : ["bash", "-c", cmd];
+  const p = Bun.spawn(argv, {
+    cwd: meta.root, stdout: "pipe", stderr: "pipe",
+    env: childEnv({ ME2_SANDBOX: id, ME2_SANDBOX_ROOT: meta.root }),
+  });
+  let timedOut = false;
+  const killer = setTimeout(() => { timedOut = true; try { p.kill(9); } catch { /* уже мёртв */ } }, timeout);
+  let stdout = "";
+  let stderr = "";
+  try {
+    [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  } catch { /* трубы умерли — работаем с тем, что есть */ }
+  const code = await p.exited;
+  clearTimeout(killer);
+  const ms = Date.now() - t0;
+  const truncated = stdout.length > STDOUT_CAP || stderr.length > STDERR_CAP;
+  meta.cmds++;
+  meta.lastCmd = cmd.slice(0, 120);
+  meta.lastExit = code ?? -1;
+  writeMeta(meta);
+  recordSpan("sandbox.exec", {
+    "me2.sandbox": id, "me2.exit": code ?? -1, "me2.prlimit": usePrlimit,
+    "me2.cmd": cmd.slice(0, 100),
+  }, t0, code === 0 ? {} : { status: "ERROR", message: stderr.slice(0, 200) || `exit ${code}` });
+  return {
+    id, cmd, exitCode: code ?? -1, ok: code === 0, ms,
+    stdout: stdout.slice(0, STDOUT_CAP), stderr: stderr.slice(0, STDERR_CAP),
+    truncated, timedOut, limit: usePrlimit ? "as=1GiB nofile=256 core=0" : "none (prlimit отсутствует)",
+  };
+}
+
 export function snapshotSandbox(rawId: string): SnapshotInfo {
   const id = safeId(rawId);
   const meta = readMeta(id);
@@ -180,6 +256,31 @@ export function snapshotSandbox(rawId: string): SnapshotInfo {
     file, sandboxId: id, bytes: buf.length, sha256: sha, createdAt: new Date().toISOString(),
   };
   // метаданные рядом с архивом → listSnapshots не пересчитывает hash
+  writeFileSync(file + ".json", JSON.stringify(info, null, 2));
+  meta.snapshots.push(info.file);
+  writeMeta(meta);
+  recordSpan("sandbox.snapshot", { "me2.sandbox": id, "me2.bytes": buf.length }, t0);
+  return info;
+}
+
+export async function snapshotSandboxAsync(rawId: string): Promise<SnapshotInfo> {
+  const id = safeId(rawId);
+  const meta = readMeta(id);
+  mkdirSync(SB_SNAPSHOTS, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const file = join(SB_SNAPSHOTS, `${id}__${ts}.tar.gz`);
+  const t0 = Date.now();
+  const r = await shAsync(
+    ["tar", "--exclude=.git", "--exclude=node_modules", "--exclude=.next", "-czf", file, "."],
+    meta.root,
+    FS_TIMEOUT_MS,
+  );
+  if (!r.ok) throw new Error("TAR_FAIL[" + r.code + "]: " + (r.err || r.out).slice(0, 220));
+  const buf = readFileSync(file);
+  const sha = createHash("sha256").update(buf).digest("hex");
+  const info: SnapshotInfo = {
+    file, sandboxId: id, bytes: buf.length, sha256: sha, createdAt: new Date().toISOString(),
+  };
   writeFileSync(file + ".json", JSON.stringify(info, null, 2));
   meta.snapshots.push(info.file);
   writeMeta(meta);
@@ -234,6 +335,27 @@ export function restoreSnapshot(snapshotFile: string, newId?: string): SandboxMe
   return meta;
 }
 
+export async function restoreSnapshotAsync(snapshotFile: string, newId?: string): Promise<SandboxMeta> {
+  const file = String(snapshotFile ?? "");
+  if (!file.startsWith(SB_SNAPSHOTS + "/") || !file.endsWith(".tar.gz")) throw new Error("BAD_SNAPSHOT_PATH");
+  if (!existsSync(file)) throw new Error("SNAPSHOT_NOT_FOUND");
+  const base = file.split("/").pop()!.split("__")[0] ?? "restored";
+  const id = safeId(newId ?? `${base}-r${Date.now().toString(36).slice(-4)}`);
+  mkdirSync(SB_ROOT, { recursive: true });
+  const root = join(SB_ROOT, id);
+  if (existsSync(root)) throw new Error("SANDBOX_EXISTS: " + id);
+  mkdirSync(root, { recursive: true });
+  const r = await shAsync(["tar", "-xzf", file, "-C", root], root);
+  if (!r.ok) { rmSync(root, { recursive: true, force: true }); throw new Error("UNTAR_FAIL: " + (r.err || r.out).slice(0, 200)); }
+  const head = sh(["git", "rev-parse", "--short=10", "HEAD"], root).out || "(no-git)";
+  const meta: SandboxMeta = {
+    id, root, status: "RESTORED", provider: "local", createdAt: new Date().toISOString(),
+    head, cmds: 0, lastCmd: null, lastExit: null, snapshots: [],
+  };
+  writeMeta(meta);
+  return meta;
+}
+
 export function destroySandbox(rawId: string): { destroyed: string } {
   const id = safeId(rawId);
   const meta = readMeta(id);
@@ -241,6 +363,16 @@ export function destroySandbox(rawId: string): { destroyed: string } {
   sh(["git", "-C", REPO_ROOT, "worktree", "remove", "--force", meta.root], REPO_ROOT); // worktree-песочницы
   rmSync(meta.root, { recursive: true, force: true });                                  // restored-копии
   sh(["git", "-C", REPO_ROOT, "worktree", "prune"], REPO_ROOT);
+  return { destroyed: id };
+}
+
+export async function destroySandboxAsync(rawId: string): Promise<{ destroyed: string }> {
+  const id = safeId(rawId);
+  const meta = readMeta(id);
+  if (meta.root.startsWith(SB_ROOT) === false) throw new Error("ESCALATION_BLOCKED");
+  await shAsync(["git", "-C", REPO_ROOT, "worktree", "remove", "--force", meta.root], REPO_ROOT); // worktree-песочницы
+  rmSync(meta.root, { recursive: true, force: true });                                            // restored-копии
+  await shAsync(["git", "-C", REPO_ROOT, "worktree", "prune"], REPO_ROOT);
   return { destroyed: id };
 }
 
@@ -252,6 +384,28 @@ export function listSandboxes(): { sandboxes: SandboxMeta[]; providers: Record<s
     try {
       const m = readMeta(d.name);
       const du = sh(["du", "-sk", m.root], "/tmp");
+      const diskKb = du.ok ? Number((du.out.split("\t")[0] ?? "0")) || 0 : undefined;
+      rows.push({ ...m, diskKb });
+    } catch {
+      rows.push({ id: d.name, root: join(SB_ROOT, d.name), status: "BROKEN", provider: "local", createdAt: "?", head: "?", cmds: 0, lastCmd: null, lastExit: null, snapshots: [] });
+    }
+  }
+  return {
+    sandboxes: rows.sort((a, b) => a.id.localeCompare(b.id)),
+    providers: { local: "READY", vercel: "NEEDS_KEYS (SANDBOX_VERCEL_TOKEN не задан)" },
+  };
+}
+
+/** AUDIT FIXPACK2: async-близнец для REST-путей — du -sk на каждый сандбокс больше
+ * не замораживает демон (6 сандбоксов × до 30с = до 3 минут фриза). */
+export async function listSandboxesAsync(): Promise<{ sandboxes: SandboxMeta[]; providers: Record<string, string> }> {
+  mkdirSync(SB_ROOT, { recursive: true });
+  const rows: SandboxMeta[] = [];
+  for (const d of readdirSync(SB_ROOT, { withFileTypes: true })) {
+    if (!d.isDirectory() || d.name.startsWith(".")) continue;
+    try {
+      const m = readMeta(d.name);
+      const du = await shAsync(["du", "-sk", m.root], "/tmp");
       const diskKb = du.ok ? Number((du.out.split("\t")[0] ?? "0")) || 0 : undefined;
       rows.push({ ...m, diskKb });
     } catch {

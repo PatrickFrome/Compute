@@ -45,7 +45,7 @@ import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
 import { listWorktrees, repoHead, rerereStatus, rerereEnable, rerereRemaining } from "./src/worktrees";
 import {
-  listSandboxes, listSnapshots, createSandbox, execInSandbox, snapshotSandbox, restoreSnapshot, destroySandbox, sandboxCaps,
+  listSandboxes, listSandboxesAsync, listSnapshots, createSandbox, execInSandbox, execInSandboxAsync, snapshotSandbox, snapshotSandboxAsync, restoreSnapshot, restoreSnapshotAsync, destroySandbox, destroySandboxAsync, sandboxCaps,
 } from "./src/sandbox";
 import { roadmapVerdict } from "./src/roadmap";
 import {
@@ -53,7 +53,7 @@ import {
 } from "./src/memory";
 import { brainThink, brainStatus } from "./src/brain";
 import { fleetList, fleetBeat, fleetSelfTick, fleetGc, fleetTick } from "./src/fleet";
-import { suCheckAsync, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
+import { suCheckAsync, suApplyAsync, suCached, selfupdateStatus } from "./src/selfupdate";
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
 import { senseNow, senseList, senseAct, senseDiffs } from "./src/sense";
@@ -430,11 +430,14 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json sandbox" });
         }
         // — R17-плоскость (M5 Sandbox Plane; тело перенесено из второго обработчика без изменений семантики) —
+        // AUDIT FIXPACK2 (2026-10-18): exec/snapshot/restore/destroy/список переведены на
+        // async-варианты — spawnSync до 120с замораживал весь демон (пул-таймеры, lease-heartbeat,
+        // WS-пинги), что развязывалось с lease TTL 90с и валило живые задачи pool_lease_expired.
         if (op === "create") return json(res, 201, { ok: true, sandbox: createSandbox(String(body.id ?? "")) });
-        if (op === "exec") return json(res, 200, { ok: true, run: execInSandbox(String(body.id ?? ""), String(body.cmd ?? ""), Number(body.timeoutSec ?? 30)) });
-        if (op === "snapshot") return json(res, 200, { ok: true, snapshot: snapshotSandbox(String(body.id ?? "")) });
-        if (op === "restore") return json(res, 201, { ok: true, sandbox: restoreSnapshot(String(body.snapshotFile ?? ""), body.newId ? String(body.newId) : undefined) });
-        if (op === "destroy") return json(res, 200, { ok: true, ...destroySandbox(String(body.id ?? "")) });
+        if (op === "exec") return json(res, 200, { ok: true, run: await execInSandboxAsync(String(body.id ?? ""), String(body.cmd ?? ""), Number(body.timeoutSec ?? 30)) });
+        if (op === "snapshot") return json(res, 200, { ok: true, snapshot: await snapshotSandboxAsync(String(body.id ?? "")) });
+        if (op === "restore") return json(res, 201, { ok: true, sandbox: await restoreSnapshotAsync(String(body.snapshotFile ?? ""), body.newId ? String(body.newId) : undefined) });
+        if (op === "destroy") return json(res, 200, { ok: true, ...(await destroySandboxAsync(String(body.id ?? ""))) });
         return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe", "run", "config", "create", "exec", "snapshot", "restore", "destroy"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
@@ -567,7 +570,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // Аудит 2026-10-18 (HIGH): POST /sandbox объединён с sandbox2-диспетчером выше
     // (второй обработчик был мёртвым кодом — перехватывался первым). GET /sandboxes — read-only перечень.
     if (path === "/sandboxes" && req.method === "GET") {
-      return json(res, 200, { ok: true, ...listSandboxes(), snapshots: listSnapshots().snapshots });
+      return json(res, 200, { ok: true, ...(await listSandboxesAsync()), snapshots: listSnapshots().snapshots });
     }
 
     // ── R17: LIVE Roadmap M1–M7 (вердикт из реального состояния, evidence в каждой фазе) ──
@@ -647,7 +650,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     }
 
     // ── R19: ME7 SELF-UPDATE (барьеры: dirty/diverged → отказ, ff-only) ──
-    if (path === "/selfupdate" && req.method === "GET") return json(res, 200, selfupdateStatus(VERSION));
+    // AUDIT FIXPACK2: await — статус/apply идут через async-гит (без заморозки event-loop)
+    if (path === "/selfupdate" && req.method === "GET") return json(res, 200, await selfupdateStatus(VERSION));
     if (path === "/selfupdate" && req.method === "POST") {
       const body = await readBody(req);
       const op = String(body.op ?? "check");
@@ -657,7 +661,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           // R30 C4: authority-гейт — selfupdate меняет живой код daemon (один approve = один apply)
           const g = gateCheck("authority_effect", "selfupdate:apply", "Self-update daemon (apply) — смена живого кода");
           if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "authority_effect", approval_id: g.approval_id ?? null });
-          return json(res, 200, suApply(VERSION));
+          return json(res, 200, await suApplyAsync(VERSION));
         }
         return json(res, 400, { ok: false, error: "op_required: check|apply" });
       } catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
