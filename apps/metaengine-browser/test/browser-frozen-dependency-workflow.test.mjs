@@ -11,7 +11,8 @@ const workflows = path.join(repoRoot, '.github', 'workflows');
 const cases = [
   ['browser-windows-package-smoke.yml', 1],
   ['browser-windows-installed-chat-qualification.yml', 1],
-  ['browser-final-runtime-activation-v1.yml', 1],
+  ['browser-final-runtime-activation-v1.yml', 2],
+  ['browser-shell-first-dirty-profile-v1.yml', 2],
   ['browser-windows-autonomous-soak-v1.yml', 5],
   ['metaengine-browser-self-update-e2e.yml', 2],
 ];

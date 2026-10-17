@@ -410,9 +410,11 @@
     "apps/metaengine-browser/test/persistent-local-provider-boot.test.mjs": "667d6b7a8d54b4d761437b45f7621604faeb88c8",
     "docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md": "1d67b9dc30e522a4536563fbc203b1c6bd945e42",
     ".github/workflows/browser-final-runtime-activation-v1.yml": "97a6134f26f81be4423c7619fb408fd440d50b53",
-    ".github/workflows/browser-shell-first-dirty-profile-v1.yml": "39451a691ce88b11762fe8c8d4dddcea80748a90",
+    ".github/workflows/browser-shell-first-dirty-profile-v1.yml": "d29f24df774e976e44a5287e9c68e4fa6ed9d6cb",
     "apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs": "fb5fc10cf9f0303a436059d06c56dd99ce735acb",
-    "apps/metaengine-browser/test/installed-owner-consumer.test.mjs": "51ba6759a365fa56927a8f67a325657c9b2c594a"
+    "apps/metaengine-browser/test/installed-owner-consumer.test.mjs": "51ba6759a365fa56927a8f67a325657c9b2c594a",
+    "apps/metaengine-browser/test/installer-bootstrap-contract.test.mjs": "d975915f9236d78e4fee7cf5907aad8975a5eaf5",
+    "apps/metaengine-browser/test/browser-frozen-dependency-workflow.test.mjs": "f70e347fa6772321a1136c61b0f19128424ab3bb"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
