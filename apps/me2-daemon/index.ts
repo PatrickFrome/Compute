@@ -192,9 +192,29 @@ function json(res: ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
   res.end(JSON.stringify(body));
 }
+// R70-аудит-2: капа тела запроса (DoS-гигиена неаутентифицированного REST).
+// Дефолт 1 МиБ; оператор поднимает через ME2_MAX_BODY_BYTES. Тело больше капы
+// НЕ буферизуется (читается и отбрасывается), ответ — 413 payload_too_large.
+const ME2_MAX_BODY_BYTES = Number(process.env.ME2_MAX_BODY_BYTES ?? 1_048_576);
+function tooLargeError(msg: string): Error & { statusCode?: number } {
+  const e = new Error(msg) as Error & { statusCode?: number };
+  e.statusCode = 413;
+  return e;
+}
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const declared = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(declared) && declared > ME2_MAX_BODY_BYTES) {
+    throw tooLargeError(`payload_too_large (content-length ${declared} > ${ME2_MAX_BODY_BYTES} bytes)`);
+  }
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let total = 0;
+  for await (const c of req) {
+    total += (c as Buffer).length;
+    if (total <= ME2_MAX_BODY_BYTES) chunks.push(c as Buffer); // переполнение читаем, но не буферизуем
+  }
+  if (total > ME2_MAX_BODY_BYTES) {
+    throw tooLargeError(`payload_too_large (body ${total} > ${ME2_MAX_BODY_BYTES} bytes)`);
+  }
   if (!chunks.length) return {};
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; }
   catch { return {}; }
@@ -1119,7 +1139,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 405, { ok: false, error: "MCP: POST /mcp (Streamable HTTP JSON-RPC); stdio: bun mcp-stdio.ts" });
     return json(res, 404, { ok: false, error: `no route ${req.method} ${path}` });
   } catch (e) {
-    return json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+    const code = (e as { statusCode?: number }).statusCode ?? 500;
+    return json(res, code, { ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 }
 

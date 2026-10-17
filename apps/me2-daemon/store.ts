@@ -416,6 +416,18 @@ export function enqueueCommand(input: {
   const laneSpec = LANES[lane];
 
   // idempotency: повтор с тем же ключом возвращает исходную команду
+  // R70-аудит-2: капа payload'а на входе. Раньше JSON.stringify молча резался до 8000
+  // символов (insertCommand), что портило JSON: runCommand гарантированно падал на
+  // JSON.parse («Unterminated string»), а клиент получал 400 с бессмысленной ошибкой.
+  // Теперь честный отказ на входе — до записи в шину и до списания бюджета.
+  const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
+  if (payloadJson && payloadJson.length > 8000) {
+    return { ok: false, error: `payload_too_large (${payloadJson.length} > 8000 chars)` };
+  }
+  // R70-аудит-2: дедуп по ключу. REJECTED-строки ключ НЕ хранят (ниже — idempotency_key: null),
+  // поэтому transient-отказ (budget_exceeded) больше не отравляет ключ: повтор создаёт
+  // свежую команду, а не возвращает ok:true со старым REJECTED. UNIQUE-констрейнт схемы
+  // при этом не мешает (в SQLite несколько NULL в UNIQUE-колонке допустимы).
   if (input.idempotency_key) {
     const dup = db.query(`SELECT * FROM commands WHERE idempotency_key=?`).get(input.idempotency_key) as CommandRow | undefined;
     if (dup) return { ok: true, command: dup, deduped: true };
@@ -425,7 +437,9 @@ export function enqueueCommand(input: {
   if (lane !== "EMERGENCY") {
     const b = budgetWindow();
     if (b.used + cost > b.limit) {
-      insertCommand({ action, lane, status: "REJECTED", payload: input.payload ?? null, idempotency_key: input.idempotency_key ?? null, cost, error: "budget_exceeded" });
+      // R70-аудит-2: REJECTED-строка не хранит idempotency_key (NULL) — иначе UNIQUE-констрейнт
+      // блокировал бы повторный enqueue с этим ключом навсегда (500 на retry).
+      insertCommand({ action, lane, status: "REJECTED", payload: input.payload ?? null, idempotency_key: null, cost, error: "budget_exceeded" });
       return { ok: false, error: `budget_exceeded (used ${b.used}/${b.limit} per ${BUDGET_WINDOW_MS / 1000}s)` };
     }
   }
@@ -451,6 +465,7 @@ function insertCommand(c: {
       .run(row.id, row.action, row.lane, row.status, row.payload, row.result, row.idempotency_key, row.cost, row.run_after, row.created_at, row.leased_at, row.completed_at, row.error);
   } catch (e) {
     // UNIQUE idempotency_key — гонка двух одинаковых команд: вернуть существующую
+    // (REJECTED-строки ключ не хранят — см. enqueueCommand, R70-аудит-2)
     if (c.idempotency_key) {
       const dup = db.query(`SELECT * FROM commands WHERE idempotency_key=?`).get(c.idempotency_key) as CommandRow | undefined;
       if (dup) return dup;
