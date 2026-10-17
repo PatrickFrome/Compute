@@ -31,9 +31,9 @@ const guardian = {status:async()=>({
 const app={isPackaged:false,getVersion:()=> '0.7.0-dev.1.1'};
 const proc = (pid=1234,birth=iso)=>({pid,created_at:birth,exe_path:process.execPath});
 const absent = (pid=1234)=>({pid,state:'NOT_RUNNING',
-  native_error_id:'ERROR_INVALID_PARAMETER_87',
+  native_error_id:'SYSTEM_DIAGNOSTICS_PROCESS_ID_NOT_FOUND',
   native_error_category:'ObjectNotFound',
-  native_error_type:'kernel32.OpenProcess',native_target_pid:pid});
+  native_error_type:'System.ArgumentException',native_target_pid:pid});
 const fakeExec = (x=proc())=>async (program,args,options)=>{
   assert.equal(program,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
   assert.equal(options.shell,false);
@@ -141,7 +141,7 @@ test('W60: actual disposable Windows child is PRESENT before exit and verified a
       const pending=promisify(execFile)(...args);
       pending.child.stdin?.end();
       try { return await pending; } catch(error) {
-        const stages=['W60_SHELL_STARTED','W60_PROCESS_OPENED',
+        const stages=['W60_SHELL_STARTED','W60_MANAGED_API_READY','W60_PROCESS_OPENED',
           'W60_PROCESS_FIELDS_READ','W60_RESULT_WRITTEN'];
         const observed=stages.filter(stage=>String(error.stderr||'').includes(stage));
         const allowedCodes=['EPERM','EACCES','ENOENT','ETIMEDOUT','ABORT_ERR'];
@@ -384,8 +384,8 @@ test('W60: the existing W68 production export supplies release proof under befor
       exec:async(program,args,options)=>{
         assert.equal(program,'C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe');
         assert.equal(options.shell,false);
-        assert.match(args.at(-1),/MetaengineWinProcessW60/);
-        assert.match(args.at(-1),/OpenProcess/);
+        assert.match(args.at(-1),/System.Diagnostics.Process/);
+        assert.match(args.at(-1),/GetProcessById/);
         assert.doesNotMatch(args.at(-1),/Get-Process -Id/);
         return {stdout:JSON.stringify({pid:1234,created_at:birth,exe_path:process.execPath})};
       }});
