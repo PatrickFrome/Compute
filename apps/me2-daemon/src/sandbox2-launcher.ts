@@ -20,16 +20,17 @@
 //        — на ребёнка (tier-2 prlimit-семантика сохранена без бинарника prlimit);
 //     4. prctl(NO_NEW_PRIVS) + prctl(SECCOMP_MODE_FILTER, BPF) — deny-лист
 //        (src/seccomp-filter.ts, общий с eval — инварианты из ОДНОГО источника);
-//     5. verdict JSON (какие слои применены — родитель решает strict fail-closed);
+//     5. verdict JSON + обязательная проверка слоёв ПЕРЕД запуском payload;
 //     6. spawnSync ребёнка (stdio inherit → родительские пайпы), exit-код — наружу.
 //
-// Fail-closed: родитель запускает ребёнка ТОЛЬКО при строгих слоях; отсутствие/
+// Fail-closed: launcher запускает ребёнка ТОЛЬКО при строгих слоях; отсутствие/
 // нечитаемость verdict-файла = sandbox_failed (команда не исполнена).
 // Zero-authority: launcher не трогает шину 47/47, DB не открывает (ro-мир).
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { buildSeccompFilter, type NetMode } from "./seccomp-filter";
+import { strictCheck } from "./sandbox-enforcement";
 
 interface LauncherProfile {
   verdict_path: string;
@@ -208,7 +209,15 @@ try {
 }
 layers.seccomp = seccompStatus;
 layers.net = profile.net;
-writeVerdict(seccompStatus);
+const verdictWritten = writeVerdict(seccompStatus);
+
+// A failed parent readback cannot undo an already executed command. The
+// launcher must refuse the payload before spawn if any required layer failed.
+const admission = strictCheck(layers, profile.net);
+if (!admission.ok || !verdictWritten) {
+  console.error("ME2_SANDBOX2 launcher: payload refused", admission.failed.join(","), verdictWritten ? "" : "verdict_write_failed");
+  process.exit(126);
+}
 
 // ── 6. EXEC ребёнка (stdio → родительские пайпы) ──────────────────────
 if (!Array.isArray(profile.cmd) || !profile.cmd.length) {

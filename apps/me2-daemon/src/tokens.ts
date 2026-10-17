@@ -212,5 +212,5 @@ export function tokensStatus() {
   };
 }
 
-// bootstrap при импорте модуля — потребители могут читать tokenGet сразу
-try { tokensEnsure(); } catch (e) { console.error(`[tokens] bootstrap failed: ${String(e).slice(0, 160)}`); }
+// Bootstrap is explicit in index.ts after the incarnation guard, outside probe
+// mode. Importing a reader must never copy protected owner secrets into SQLite.

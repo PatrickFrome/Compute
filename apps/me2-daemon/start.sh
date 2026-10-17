@@ -2,8 +2,8 @@
 # ME2 daemon start — надёжный: убивает старые по pidfile, ждёт освобождения портов, стартует setsid.
 #
 # Аудит 2026-10-18 (C2): REST/WS-плоскость аутентифицирована.
-#   - loopback-клиенты (UI, probe.sh, gate) работают без токена;
-#   - для удалённого доступа задайте ME2_API_TOKEN (экспортируется ДО запуска daemon):
+#   - все непубличные клиенты, включая loopback, предъявляют bearer;
+#   - задайте ME2_API_TOKEN (экспортируется ДО запуска daemon):
 #       export ME2_API_TOKEN="$(openssl rand -hex 32)"
 #     клиенты шлют Authorization: Bearer <token> (или handshake.auth.token для socket.io);
 #   - кросс-доменное чтение из браузера: ME2_ALLOWED_ORIGINS="https://ui.example.org" (запятая-разделённый

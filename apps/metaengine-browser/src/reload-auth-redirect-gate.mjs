@@ -35,3 +35,17 @@ export function assertReloadAllowed({ action, url } = {}) {
   }
   return true;
 }
+
+// Report initiation only after a live selected WebContents actually accepted
+// reload(). A missing or destroyed tab is not an observable reload effect.
+export function initiateSelectedTabReload({ tab, view, invalidatePerception } = {}) {
+  const contents = view?.webContents;
+  if (!tab?.tab_id || !contents || typeof contents.isDestroyed !== 'function'
+      || contents.isDestroyed() || typeof contents.reload !== 'function') {
+    throw new Error('no_selected_tab');
+  }
+  assertReloadAllowed({ action: 'RELOAD', url: tab.url });
+  contents.reload();
+  invalidatePerception?.(tab.tab_id);
+  return { ok: true, reload_initiated: true };
+}

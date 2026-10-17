@@ -84,12 +84,17 @@ import {
 } from "./src/agentchat";
 // Аудит 2026-10-18 (C2): аутентификация REST/WS-плоскости + ограниченный CORS
 import { authorizeRequest, authorizeHandshake, corsHeadersFor } from "./src/auth";
+import { readJsonBody as readBody, readBoundedBody, RequestBodyError, MAX_REQUEST_BODY_BYTES } from "./src/request-body";
 
 // R51 (фаза C): порты вынесены в src/ports.ts (env ME2_WS_PORT/ME2_REST_PORT для gate-probe)
 // ME2_BOOT_MODE=probe — инкарнация «только контракт»: REST+socket+eval подняты,
 // LLM-приводы (worker/GLM-проба/demand/cron/supervisor-тики/selfupdate) отключены —
 // gate в CI проверяет здоровье без сетевых зависимостей и без расхода квот.
-const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe";
+const QUALIFICATION_MODE = process.env.ME2_BOOT_MODE === "qualification";
+const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe" || QUALIFICATION_MODE;
+if (QUALIFICATION_MODE && (!process.env.ME2_DATA_DIR || !process.env.ME2_LOCK_FILE || !process.env.ME2_CONTOUR_HOME || !process.env.ME2_REPO_ROOT)) {
+  throw new Error("qualification_requires_explicit_isolated_paths");
+}
 const PROBE_BLOCKED_GET_PATHS = new Set([
   "/providers", "/llm", "/glm", "/agents", "/agentchat", "/pool",
   "/governor", "/demand", "/tokens",
@@ -100,8 +105,10 @@ const PROBE_BLOCKED_GET_PATHS = new Set([
   "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile",
 ]);
 const PROBE_POLICY = Object.freeze({
-  boot_mode: "probe",
-  read_only: true,
+  boot_mode: QUALIFICATION_MODE ? "qualification" : "probe",
+  read_only: !QUALIFICATION_MODE,
+  disposable_qualification: QUALIFICATION_MODE,
+  evaluation_mutation_enabled: QUALIFICATION_MODE,
   model_execution_enabled: false,
   provider_api_enabled: false,
   agentchat_mutation_enabled: false,
@@ -125,29 +132,34 @@ benchBootStart(BOOT_T0); // B3: baseline boot-длительности стар�
 // Модульные CREATE TABLE IF NOT EXISTS при импортах — идемпотентный DDL, не считаются.
 // Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear
 // зомби-lease) и убить lease живого демона, после чего сам умер на EADDRINUSE. Lockfile
-// O_EXCL + kill-0: дубль честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
+// O_EXCL grants fresh custody. An existing lock, including a dead PID, requires
+// explicit reconciliation: a read/dead-check/unlink sequence is not an atomic CAS.
 // R51 (фаза C): путь lockfile переопределяется env ME2_LOCK_FILE — изолированный gate-probe
 // рядом с production-daemon'ом получает собственный lock (в CI дефолт не используется вторым).
 const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || join(tmpdir(), "me2-daemon.lock");
 let poolBootAllowed = true;
 try {
   if (existsSync(ME2_LOCK_FILE)) {
-    const oldPid = Number(readFileSync(ME2_LOCK_FILE, "utf8").trim());
-    let alive = false;
-    try { process.kill(oldPid, 0); alive = true; } catch { alive = false; }
-    if (alive && oldPid !== process.pid) {
-      console.error(`[guard] me2-daemon уже жив (pid ${oldPid}) — дубль-инкарнация pid ${process.pid} уходит, мутации БД запрещены`);
-      process.exit(13);
+    const ownerText = readFileSync(ME2_LOCK_FILE, "utf8").trim();
+    const oldPid = Number(ownerText);
+    if (!/^[1-9][0-9]*$/.test(ownerText) || !Number.isSafeInteger(oldPid)) throw new Error("incarnation_lock_evidence_invalid");
+    try { process.kill(oldPid, 0); } catch (e) {
+      if (e instanceof Error && "code" in e && e.code === "ESRCH") {
+        throw new Error("incarnation_lock_recovery_required");
+      }
+      throw e;
     }
-    unlinkSync(ME2_LOCK_FILE);
+    throw new Error("incarnation_lock_owner_present");
   }
   const lfd = openSync(ME2_LOCK_FILE, "wx");
   writeSync(lfd, String(process.pid));
   closeSync(lfd);
   process.on("exit", () => { try { if (readFileSync(ME2_LOCK_FILE, "utf8").trim() === String(process.pid)) unlinkSync(ME2_LOCK_FILE); } catch { /* best effort */ } });
 } catch (e) {
-  poolBootAllowed = false; // не смогли доказать единственность — консервативно без boot-мутаций
-  console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — boot-мутации пула отключены`);
+  // Disabling only poolRestore still allowed seed/token/agent mutations and
+  // startMasterLoop. An exclusive-create loser must stop before those effects.
+  console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — startup refused before boot mutations`);
+  process.exit(13);
 }
 // ── конец стража инкарнации; дальше — только каноническая инкарнация ─────
 
@@ -230,29 +242,23 @@ function json(res: ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  if (!chunks.length) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; }
-  catch { return {}; }
-}
-
 async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const cors = corsHeadersFor(req);
+  for (const [name, value] of Object.entries(cors)) res.setHeader(name, value);
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
 
   // ── Аудит 2026-10-18 (C2): единый auth-гейт REST-плоскости ──
   // Публичные: /health, /ui, /hooks/github (HMAC внутри). Остальное —
-  // bearer ME2_API_TOKEN для удалённых пиров, loopback — без токена (CSRF-гейт Origin внутри).
+  // Все непубличные клиенты предъявляют bearer, включая локальные proxy/CLI.
   const auth = authorizeRequest(req);
   if (!auth.ok) {
+    req.resume();
     return json(res, auth.status, {
       ok: false,
       error: auth.error,
-      hint: "локальные клиенты (loopback) разрешены; для удалённого доступа задайте ME2_API_TOKEN на daemon и шлите Authorization: Bearer <token>",
+      hint: "задайте ME2_API_TOKEN на daemon и предъявляйте Authorization: Bearer <token>",
     });
   }
 
@@ -261,7 +267,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
   // трафика — Host, с которым платформенный preview-прокси стучится через Caddy
   // (x-forwarded-host / host). Нужно для боевого URL GitHub-webhook без ручного ввода
   // оператора. Список кандидатов (кап 20) в meta.
-  if (!PROBE_MODE) try {
+  if (!PROBE_MODE && auth.via === "token") try {
     const hh = String(req.headers.host ?? "");
     const xfh = String(req.headers["x-forwarded-host"] ?? "");
     const cand = ((xfh || hh).split(",")[0] ?? "").trim();
@@ -274,7 +280,9 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
   if (PROBE_MODE) {
     const method = String(req.method || "GET").toUpperCase();
-    if (method !== "GET" || PROBE_BLOCKED_GET_PATHS.has(path)) {
+    const qualificationEval = QUALIFICATION_MODE && method === "POST" && path === "/eval/run";
+    if ((!qualificationEval && method !== "GET") || PROBE_BLOCKED_GET_PATHS.has(path)) {
+      req.resume();
       return json(res, 403, {
         ok: false,
         error: "ME2_BROWSER_PROBE_READ_ONLY",
@@ -286,6 +294,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
   }
 
   try {
+    // Validate before endpoint catches can collapse body errors into HTTP 400.
+    if (req.method !== "GET" && req.method !== "HEAD" && path !== "/hooks/github") await readBody(req);
     if (path === "/health") {
       return json(res, 200, {
         ok: true, service: "me2-daemon", version: VERSION, boot: BOOT_TS,
@@ -324,8 +334,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // R68: P0-e webhooks-in (push) — HMAC-верифицированный вход внешних событий.
     // Секрет НЕ логируем и НЕ возвращаем; подпись — над RAW-телом (важно для HMAC).
     if (path === "/hooks/github" && req.method === "POST") {
-      const chunks: Buffer[] = [];
-      for await (const c of req) chunks.push(c as Buffer);
+      const rawBody = await readBoundedBody(req);
       const h = req.headers;
       const out = handleGithubWebhook(
         {
@@ -335,7 +344,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           peer: req.socket?.remoteAddress ?? "-",
           userAgent: typeof h["user-agent"] === "string" ? h["user-agent"] : null,
         },
-        Buffer.concat(chunks),
+        rawBody,
       );
       return json(res, out.status, out.body);
     }
@@ -1087,22 +1096,10 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
     if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
     // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
-    if (path === "/eval" && req.method === "GET") {
-      // Аудит 2026-10-18 (HIGH): gate-скрипт scripts/probe.sh (`bun run check`) ожидает
-      // GET /eval?run=1 — «прогнать hermetic-датасет и вернуть вердикт», но run-параметр
-      // игнорировался, а POST в probe-режиме запрещён → gate не мог пройти никогда.
-      // run=1 теперь честно исполняет датасет (локальный SQLite, без сети/LLM —
-      // контракт src/eval.ts) в обеих инкарнациях; POST /eval/run остаётся полной поверхностью.
-      if (url.searchParams.get("run") === "1") {
-        benchResetRings();
-        benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
-        let report: ReturnType<typeof evalRun>;
-        try { report = evalRun(VERSION); } finally { benchSuspend(false); }
-        return json(res, 200, { ok: true, ran: true, last: report, ...(PROBE_MODE ? { browser_probe: PROBE_POLICY } : {}) });
-      }
-      return json(res, 200, evalStatus(VERSION));
-    }
+    // GET is observation only, including the historical ?run=1 spelling.
+    if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
     if (path === "/eval/run" && req.method === "POST") {
+      if (!QUALIFICATION_MODE) return json(res, 403, { ok: false, error: "eval_requires_disposable_qualification" });
       benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
       benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
       let report: ReturnType<typeof evalRun>;
@@ -1173,7 +1170,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 405, { ok: false, error: "MCP: POST /mcp (Streamable HTTP JSON-RPC); stdio: bun mcp-stdio.ts" });
     return json(res, 404, { ok: false, error: `no route ${req.method} ${path}` });
   } catch (e) {
-    return json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+    return json(res, e instanceof RequestBodyError ? e.statusCode : 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -1204,21 +1201,17 @@ const io = new Server(wsHttpServer, {
   cors: {
     origin: (origin, cb) => {
       const allowed = (process.env.ME2_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      cb(null, !origin || allowed.includes(origin) || isLoopbackOriginStr(origin));
+      cb(null, !origin || allowed.includes(origin));
     },
     methods: ["GET", "POST"],
   },
   pingTimeout: 60_000,
   pingInterval: 25_000,
+  maxHttpBufferSize: MAX_REQUEST_BODY_BYTES,
 });
 
-function isLoopbackOriginStr(origin: string): boolean {
-  try { return ["127.0.0.1", "::1", "localhost", "[::1]"].includes(new URL(origin).hostname); } catch { return false; }
-}
-
 // Аудит 2026-10-18 (C2): socket.io-каналы (command/agentchat:op/tokens:op — RCE-плоскость)
-// были открыты любому подключившемуся. Гейт: bearer ME2_API_TOKEN (handshake.auth.token)
-// для удалённых пиров; loopback — без токена, но с CSRF-гейтом Origin (как в REST).
+// Every private connection needs ME2_API_TOKEN (handshake.auth.token), including loopback.
 io.use((socket, next) => {
   const verdict = authorizeHandshake({ headers: socket.handshake.headers as Record<string, unknown>, address: socket.handshake.address, auth: socket.handshake.auth });
   if (verdict.ok) return next();
@@ -1406,19 +1399,8 @@ if (!PROBE_MODE) {
 }
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
-// R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама.
-// AUDIT FIXPACK2 (2026-10-18): boot-eval в production больше не молчит при FAIL —
-// вердикт выводится громко и уходит в hash-chain (EVAL_PROD_BOOT_FAIL), иначе
-// деградация живого инстанса не доезжает ни до одного потребителя.
-if (!PROBE_MODE) setTimeout(() => {
-  try {
-    const rep = evalRun(VERSION);
-    if (rep && rep.verdict !== "PASS") {
-      console.error(`[eval] BOOT EVAL ${rep.verdict}: failed=${rep.failed} warned=${rep.warned} — живой инстанс деградировал, см. GET /eval и eval_runs`);
-      try { emit("EVAL_PROD_BOOT_FAIL", { verdict: rep.verdict, failed: rep.failed, warned: rep.warned, dataset_version: rep.dataset_version }, null, null); } catch { /* шина не критична */ }
-    }
-  } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); }
-}, 2_500);
+// The eval dataset creates synthetic tasks and changes pool state. It runs only
+// in an explicitly isolated qualification process, never on production boot.
 // R31 D4: legacy daemon DB maintenance mutates SQLite; Browser probe stays read-only.
 if (!PROBE_MODE) {
   try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
@@ -1428,9 +1410,8 @@ if (!PROBE_MODE) {
 // восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
 if (poolBootAllowed && !PROBE_MODE) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
-  // AUDIT FIXPACK2: осиротевшие RUNNING-команды предыдущей инкарнации — в очередь
-  // (раньше молча терялись навсегда: crash между claim и завершением хендлера)
-  try { const rc = reconcileOrphanRunningCommands(); if (rc.requeued) console.log(`[commands] requeued ${rc.requeued} orphaned RUNNING command(s) from previous incarnation`); } catch (e) { console.error(`[commands] reconcile failed: ${String(e)}`); }
+  // A lost completion receipt is not proof that the handler had no effect.
+  try { const rc = reconcileOrphanRunningCommands(); if (rc.ambiguous) console.log(`[commands] fenced ${rc.ambiguous} orphaned RUNNING command(s); automatic retry forbidden`); } catch (e) { console.error(`[commands] reconcile failed: ${String(e)}`); }
   try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
   try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
   // Legacy daemon supervisor is isolated from Browser production authority.

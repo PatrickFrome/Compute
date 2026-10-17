@@ -21,7 +21,6 @@
 //   6. Вердикт — данные: журнал exec_runs (SQLite) + событие TERMINAL_RUN /
 //      EXEC_DENIED в hash-chain (emit) + span. Zero-authority: инструмент не
 //      пишет в шину 47/47 — отдельное REST-семейство /exec (P1-инвариант).
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { db, emit, VERSION } from "../store";
@@ -168,10 +167,6 @@ function journal(cmd: string, cwd: string, ok: boolean, exitCode: number | null,
 /** TERMINAL_RUN: план → тир-3 классификатор (R63 P0-b) → prlimit+bash (async spawn,
  *  event-loop не блокируется — канон exthost/R25) → вердикт. Никогда не бросает.
  *  Порядок канона Cursor (корпус R61 D02): allowlist → sandbox-ability → classifier. */
-function killTree(child: ReturnType<typeof spawn>): void {
-  try { child.kill("SIGTERM"); } catch { /* уже мёртв */ }
-  setTimeout(() => { try { if (child.exitCode === null && !child.killed) child.kill("SIGKILL"); } catch { /* гонка на выходе */ } }, 800).unref();
-}
 
 /** Планирование + журнал отказа (общий для tier-1 отказов и гейта). */
 function deniedVerdict(rawCmd: string, rawCwd: string, planReason: string, planDetail: string | undefined, source: string, t0: number, review?: ReviewResult, queueId?: number): ExecVerdict {
@@ -188,11 +183,10 @@ function deniedVerdict(rawCmd: string, rawCwd: string, planReason: string, planD
 
 /** Тело исполнения для ПРОШЕДШЕГО план (и, в runTerminalAsync, гейт) — spawn-часть.
  *  R64 P0-2: sandbox=true → исполнение через OS-сандбокс (ns+seccomp, strict fail-closed). */
-async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, t0: number, sandbox = false): Promise<ExecVerdict> {
-  if (sandbox) {
+async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, _t0: number, _sandbox = true): Promise<ExecVerdict> {
     // канон Cursor: sandbox blocks unauthorized file access and network —
     // план tier-1 уже отработал; вердикт сандбокса мапится в ExecVerdict
-    const s2 = await runSandboxedAsync(rawCmd, plan.cwd!, { timeout: plan.timeout_ms, source: source === "rest" ? "exec-sandbox" : source });
+    const s2 = await runSandboxedAsync(rawCmd, plan.cwd!, { timeout: plan.timeout_ms, net: "deny", source: source === "rest" ? "exec-sandbox" : source });
     // NB семантика: strict-провал (слои не применились) = sandbox_failed (риск);
     // exit≠0 ВНУТРИ корректного сандбокса — обычный отказ исполнения (сандбокс
     // сделал свою работу: EROFS/EPERM — канон «sandbox blocks access»), не риск.
@@ -209,58 +203,6 @@ async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, t0: 
       sandbox_layers: s2.sandbox.layers,
       sandbox_net: s2.sandbox.net,
     };
-  }
-  const usePrlimit = sandboxCaps().rlimit;
-  // NB: RLIMIT_NPROC per-UID не трогаем (урок R17); изоляция: as/nofile/core + таймаут→kill.
-  // --as=4GiB (не 1GiB как в sandbox.ts): V8 (node/bun) резервирует большой виртуальный
-  // диапазон под CodeRange и падает с "out of memory" под 1GiB; VA ≠ RSS — резидентная
-  // память по-прежнему ограничена таймаутом/nofile/core (живая проба R62).
-  const argv = usePrlimit
-    ? ["prlimit", "--as=4294967296", "--nofile=256", "--core=0", "bash", "-c", String(rawCmd)]
-    : ["bash", "-c", String(rawCmd)];
-  // env-белый-список: строится с нуля — process.env НЕ раскладывается (секретов нет по построению).
-  const childEnv: NodeJS.ProcessEnv = {
-    PATH: "/home/z/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    HOME: "/tmp",
-    TMPDIR: "/tmp",
-    LANG: "C.UTF-8",
-    TERM: "dumb",
-    ME2_EXEC: "1",
-    ME2_HOST_VERSION: VERSION,
-  };
-  const verdict = await new Promise<ExecVerdict>((resolve) => {
-    let settled = false;
-    let out = "", err = "", timedOut = false;
-    const child = spawn(argv[0]!, argv.slice(1), { cwd: plan.cwd, env: childEnv });
-    const finish = (code: number | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      killTree(child);
-      const ms = Date.now() - t0;
-      const ok = code === 0 && !timedOut;
-      counter.runs++;
-      journal(String(rawCmd), String(plan.cwd), ok, code, ok ? null : timedOut ? "timeout" : `exit_${code}`, ms, timedOut, usePrlimit, source, out.slice(0, 400), err.slice(0, 400));
-      try { emit(ok ? "TERMINAL_RUN" : "EXEC_DENIED", { cmd: String(rawCmd).slice(0, 120), cwd: plan.cwd, exit: code, ms, timed_out: timedOut, sandboxed: usePrlimit, source }, null, null); } catch { /* шина */ }
-      try { recordSpan("exec.run", { "me2.exec.ok": ok ? 1 : 0, "me2.exit": code ?? -1, "me2.ms": ms, "me2.prlimit": usePrlimit, "me2.cmd": String(rawCmd).slice(0, 100) }, t0, ok ? {} : { status: "ERROR", message: (err || `exit ${code}`).slice(0, 200) }); } catch { /* телеметрия */ }
-      resolve({
-        ok, schema: EXEC_SCHEMA,
-        planned: { segments: plan.segments!, binaries: plan.binaries! },
-        cmd: String(rawCmd), cwd: plan.cwd!,
-        exit: code, stdout_tail: out.slice(0, STDOUT_CAP), stderr_tail: err.slice(0, STDERR_CAP),
-        duration: ms, timed_out: timedOut, sandboxed: usePrlimit,
-        env_keys: Object.keys(childEnv), limit: usePrlimit ? "as=4GiB nofile=256 core=0" : "none (prlimit отсутствует)",
-      });
-    };
-    const timer = setTimeout(() => { timedOut = true; finish(null); }, plan.timeout_ms!);
-    child.on("error", (e) => { err += String(e).slice(0, 200); timedOut = false; finish(-1); });
-    child.stdout!.setEncoding("utf8");
-    child.stdout!.on("data", (d: string) => { out = (out + d).slice(-STDOUT_CAP); });
-    child.stderr!.setEncoding("utf8");
-    child.stderr!.on("data", (d: string) => { err = (err + d).slice(-STDERR_CAP); });
-    child.on("close", (code) => finish(code));
-  });
-  return verdict;
 }
 
 export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeout: number | undefined, source = "rest", opts: { sandbox?: boolean } = {}): Promise<ExecVerdict> {
@@ -334,7 +276,7 @@ export function execStatus(): ExecStatus {
     const rows = db.query(`SELECT id, cmd, ok, exit_code, reason, ms, source, at FROM exec_runs ORDER BY at DESC LIMIT 10`).all() as Array<{ id: number; cmd: string; ok: number; exit_code: number | null; reason: string | null; ms: number | null; source: string; at: number }>;
     for (const r of rows) recent.push({ id: r.id, cmd: r.cmd, ok: r.ok === 1, exit: r.exit_code, reason: r.reason, ms: r.ms, source: r.source, at: r.at });
   } catch { /* журнал может отсутствовать в probe */ }
-  const probe = process.env.ME2_BOOT_MODE === "probe";
+  const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
   const cfg = classifierConfig();
   const s2caps = probeSandboxCaps();
   const s2cfg = sandboxStatus();

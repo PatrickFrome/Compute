@@ -149,7 +149,7 @@ export async function runRpcReconcileAsync(force = false): Promise<RpcReconcileR
     const c = cache.data;
     return c.ok && "mode" in c && (c.mode === "live" || c.mode === "live-rest") ? { ...c, cached: true } : c;
   }
-  if (process.env.ME2_BOOT_MODE === "probe") return rpcReconcileProbeOffline();
+  if (["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "")) return rpcReconcileProbeOffline();
   if (busy) return busy;
   busy = new Promise<RpcReconcileResult>((resolve) => {
     const outDir = mkdtempSync(join(tmpdir(), "me2-rpc-reconcile."));

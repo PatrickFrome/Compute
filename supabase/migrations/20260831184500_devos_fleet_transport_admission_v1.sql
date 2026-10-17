@@ -116,13 +116,12 @@ grant execute on function destruktion_meta.devos_fleet_claim_transport_admission
 -- AUDIT FIXPACK2 (2026-10-18), fresh-project replayability: the trigger target
 -- destruktion_meta.devos_fleet_claim_h205f22 is created much later in this chain
 -- (20260929010000_client_v1_fresh_project_bootstrap_v1); a fresh `supabase db push`
--- would fail here. Skip trigger attach when the claim table is absent; the live cloud
--- is unaffected (the table exists, the guard passes).
+-- cannot safely skip an admission fence. This historical chain requires its
+-- declared predecessor schema; fail closed instead of certifying an unfenced DB.
 do $guard$
 begin
   if to_regclass('destruktion_meta.devos_fleet_claim_h205f22') is null then
-    raise notice 'skip devos_fleet_claim_transport_admission_trg: devos_fleet_claim_h205f22 is created later in the chain (20260929010000)';
-    return;
+    raise exception 'devos_transport_admission_dependency_required: devos_fleet_claim_h205f22' using errcode = '55000';
   end if;
   drop trigger if exists devos_fleet_claim_transport_admission_trg on destruktion_meta.devos_fleet_claim_h205f22;
   create trigger devos_fleet_claim_transport_admission_trg

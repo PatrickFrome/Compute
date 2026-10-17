@@ -159,7 +159,7 @@ export async function runRlsAuditAsync(force = false): Promise<RlsAuditResult> {
     const c = cache.data;
     return c.ok && "mode" in c && (c.mode === "live" || c.mode === "live-rest") ? { ...c, cached: true } : c;
   }
-  if (process.env.ME2_BOOT_MODE === "probe") return rlsAuditProbeOffline();
+  if (["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "")) return rlsAuditProbeOffline();
   if (busy) return busy;
   busy = new Promise<RlsAuditResult>((resolve) => {
     const outDir = mkdtempSync(join(tmpdir(), "me2-rls-audit."));

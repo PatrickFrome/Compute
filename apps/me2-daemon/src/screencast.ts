@@ -18,7 +18,7 @@
  * Access-Control-Allow-Origin: * — любой сайт мог fetch()"ить JPEG-кадры живого
  * Chromium оператора (drive-by эксфильтрация экрана), а любой сетевой пир —
  * тянуть MJPEG-поток. Теперь каждая просьба проходит тот же гейт, что :3041
- * (auth.ts: loopback | bearer ME2_API_TOKEN | Origin-allowlist), CORS —
+ * (auth.ts: bearer ME2_API_TOKEN + Origin-allowlist), CORS —
  * reflect-origin только из ME2_ALLOWED_ORIGINS (паритет с fixpack C2).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -300,16 +300,15 @@ export function startScreencastServer() {
     port: SC_PORT,
     idleTimeout: 0, // MJPEG живёт долго; кадры/каденс задаёт клиент
     async fetch(req, server) {
-      // AUDIT FIXPACK2: гейт идентичен :3041 — loopback без токена, удалённые пиры
-      // только с bearer ME2_API_TOKEN, чужой Origin отклоняется (CSRF/drive-by).
+      // The same bearer gate protects all peers, including local proxies.
       const reqHeaders = Object.fromEntries(req.headers.entries());
-      const verdict = authorizeHandshake({ headers: reqHeaders, address: server.requestIP(req)?.address ?? undefined });
       const cors = corsHeadersFor({ headers: reqHeaders });
+      if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+      const verdict = authorizeHandshake({ headers: reqHeaders, address: server.requestIP(req)?.address ?? undefined });
       if (!verdict.ok) {
         return new Response(JSON.stringify({ ok: false, error: verdict.error }), { status: verdict.status, headers: { "Content-Type": "application/json", ...cors } });
       }
       const url = new URL(req.url);
-      if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
       try {
         if (url.pathname === "/screencast.jpg") return await snapshotJpeg(parseOpts(url), cors);
         if (url.pathname === "/stream") return streamMjpeg(parseOpts(url), cors);

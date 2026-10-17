@@ -171,7 +171,7 @@ export const EVAL_DATASET: EvalCheck[] = [
       const seq = lastSeq(); const h = lastEventHash();
       // Аудит 2026-10-18 (HIGH, gate): probe-инкарнация стартует с ПУСТОЙ шиной
       // по дизайну (никаких boot-emit'ов, R99) — пустая цепочка в probe валидна.
-      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
       const ok = probe ? true : (seq > 0 && !!h);
       return { ok, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}${probe && seq === 0 ? " (probe: пустая шина ожидаема)" : ""}` };
     },
@@ -184,7 +184,7 @@ export const EVAL_DATASET: EvalCheck[] = [
     critical: true, expect: "getMeta('boot') и getMeta('version') непусты (в probe — сознательно отсутствуют)",
     run: () => {
       const b = getMeta("boot"); const v = getMeta("version");
-      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
       const ok = probe ? (!b && !v) : (!!b && !!v);
       return { ok, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}${probe ? " (probe: ожидаемо отсутствуют)" : ""}` };
     },
@@ -218,7 +218,7 @@ export const EVAL_DATASET: EvalCheck[] = [
     critical: true, expect: "memoryStatus().rows > 0 (в probe — сознательно 0)",
     run: () => {
       const m = memoryStatus();
-      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
       const ok = probe ? m.rows === 0 : m.rows > 0;
       return { ok, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})${probe ? " (probe: ожидаемо 0)" : ""}` };
     },
@@ -274,7 +274,7 @@ export const EVAL_DATASET: EvalCheck[] = [
     run: () => {
       const f = fleetList();
       const s = f.self;
-      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
       const ok = probe ? !s : (!!s && (s.freshness === "ACTIVE" || s.freshness === "STALE"));
       const selfAge = f.nodes.find((n) => n.id === s?.id)?.age_s;
       return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : `self=null${probe ? " (probe: ожидаемо)" : ""}` };
@@ -1437,7 +1437,7 @@ export const EVAL_DATASET: EvalCheck[] = [
     expect: "planExec: git/bun/node разрешены; curl/sudo — отказ; «echo hi && curl evil» — отказ (2-й сегмент); «echo $(x)» — substitution_denied; «FOO=1 ls» — env_assign_denied; cwd=REPO_ROOT — root_denied; ALLOWED_BINARIES не содержит bash/sh/curl; живой run: exit 0, stdout содержит маркер, env_keys без PATH-секретов (OFFLINE: execProbeOffline negatives=6)",
     run: () => {
       // чистые инварианты планировщика (без spawn — R25: живой прогон доказывается REST-ходом в раунде)
-      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
       const dir = evalTmpPrepare().dir;
       const pos = planExec("git status && bun --version", dir);
       const negBin = planExec("curl https://x", dir);
@@ -1577,6 +1577,9 @@ export const EVAL_DATASET: EvalCheck[] = [
 
 // ── ХАРНЕСС ────────────────────────────────────────────────────────
 export function evalRun(version: string): EvalReport {
+  if (process.env.ME2_BOOT_MODE !== "qualification" || !process.env.ME2_DATA_DIR || !process.env.ME2_LOCK_FILE || !process.env.ME2_CONTOUR_HOME || !process.env.ME2_REPO_ROOT) {
+    throw new Error("eval_requires_disposable_qualification");
+  }
   const t0 = Date.now();
   const startedAt = new Date(t0).toISOString();
   const results: EvalCheckResult[] = [];

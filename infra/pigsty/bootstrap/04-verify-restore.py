@@ -36,8 +36,13 @@ def q(sql, bindings=None):
     argv = ["psql", conninfo, "-X", "-At", "-v", "ON_ERROR_STOP=1"]
     for name, value in (bindings or {}).items():
         argv += ["-v", f"{name}={value}"]
-    argv += ["-c", sql]
-    r = subprocess.run(argv, capture_output=True, text=True)
+    # -c sends raw SQL directly to the server and does not expand psql's
+    # :"identifier" variables. Read stdin as a psql script to quote bindings.
+    argv += ["-f", "-"]
+    try:
+        r = subprocess.run(argv, input=sql + "\n", capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return None
     if r.returncode != 0:
         return None
     return r.stdout.strip()

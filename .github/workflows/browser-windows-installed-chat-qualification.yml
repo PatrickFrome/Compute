@@ -141,6 +141,7 @@ jobs:
           METAENGINE_INSTALL_QUALIFIER_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/metaengine-client-installed-qualification-h205f22
         run: |
           $ErrorActionPreference = 'Stop'
+          . .\scripts\installed-qualification-http-policy.ps1
           $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
           $installer = Join-Path $env:RUNNER_TEMP ([string]$proof.installer_name)
@@ -216,7 +217,7 @@ jobs:
           $oidcUri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=$([uri]::EscapeDataString($audience))"
           $oidcEnvelope = Invoke-RestMethod -Method Get -Uri $oidcUri -Headers @{
             Authorization = "bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
-          }
+          } -TimeoutSec 10
           $qualificationOidc = [string]$oidcEnvelope.value
           if (-not $qualificationOidc -or ($qualificationOidc -split '\.').Count -ne 3) {
             throw 'installed_qualification_oidc_token_invalid'
@@ -244,7 +245,6 @@ jobs:
           $qualificationReadback = $null
           $qualificationNextAttempt = [DateTime]::UtcNow
           $qualificationTransientAttempts = 0
-          $qualificationMaxAttempts = 10
 
           $normalOut = "$env:RUNNER_TEMP\installed-chat-normal.out"
           $normalErr = "$env:RUNNER_TEMP\installed-chat-normal.err"
@@ -277,37 +277,28 @@ jobs:
               }
 
               if (-not $qualificationApproved -and [DateTime]::UtcNow -ge $qualificationNextAttempt) {
-                # PS 5.1 Invoke-WebRequest throws on every non-2xx (there is no
-                # -SkipHttpErrorCheck), so the HTTP status must be recovered from
-                # the WebException instead of aborting the qualification probe on
-                # the first 402/429/5xx (observed: Supabase edge quota 402).
+                # The legacy hosted request has a whole-response timeout and
+                # byte cap. A quota 402 remains a blocker and cannot establish
+                # own-PG17 Owner custody.
                 $qualificationStatus = -1
                 $qualificationRawContent = $null
                 $qualificationTransportError = ''
                 try {
-                  $qualificationResponse = Invoke-WebRequest -UseBasicParsing -Method Post `
+                  $qualificationResponse = Invoke-InstalledQualificationHttpRequest `
                     -Uri $env:METAENGINE_INSTALL_QUALIFIER_URL `
-                    -Headers @{ Authorization = "Bearer $qualificationOidc" } `
-                    -ContentType 'application/json' `
-                    -Body $qualificationBody
+                    -Bearer $qualificationOidc `
+                    -Body $qualificationBody `
+                    -Deadline $deadline
                   $qualificationStatus = [int]$qualificationResponse.StatusCode
                   $qualificationRawContent = [string]$qualificationResponse.Content
                 } catch {
                   $qualificationTransportError = [string]$_.Exception.Message
-                  $qualificationException = $_.Exception
-                  $qualificationFaultedResponse = $qualificationException.Response
-                  while (-not $qualificationFaultedResponse -and $qualificationException.InnerException) {
-                    $qualificationException = $qualificationException.InnerException
-                    $qualificationFaultedResponse = $qualificationException.Response
-                  }
-                  if ($qualificationFaultedResponse) {
-                    try { $qualificationStatus = [int]$qualificationFaultedResponse.StatusCode } catch { $qualificationStatus = -1 }
-                  }
                 }
                 $qualificationPayload = $null
                 if ($qualificationRawContent) {
                   try { $qualificationPayload = $qualificationRawContent | ConvertFrom-Json } catch { $qualificationPayload = $null }
                 }
+                if ([DateTime]::UtcNow -ge $deadline) { throw 'installed_qualification_oidc_deadline_exhausted' }
                 if ($qualificationStatus -eq 200 `
                     -and $qualificationPayload `
                     -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
@@ -325,17 +316,14 @@ jobs:
                     -and $qualificationPayload.reason -eq 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
                   # Enrollment request not visible yet; keep the fast poll.
                   $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
-                } elseif (@(402, 429, 500, 502, 503, 504) -contains $qualificationStatus) {
-                  # Hosted-qualifier transient failures (edge-function quota 402,
-                  # throttle 429, upstream 5xx): bounded backoff instead of the
-                  # historical immediate failure. Budget: 10 attempts x
-                  # (<=20s wait + request) fits the 180s qualification deadline
-                  # and the 75-minute job timeout.
+                } elseif ($qualificationStatus -eq 402) {
+                  throw 'installed_qualification_oidc_blocked:HOSTED_QUALIFIER_QUOTA_402'
+                } elseif (@(429, 500, 502, 503, 504) -contains $qualificationStatus) {
+                  # Bounded retries stay inside the remaining wall-clock
+                  # budget, including the WinPS request/DNS reserve.
                   $qualificationTransientAttempts++
-                  if ($qualificationTransientAttempts -ge $qualificationMaxAttempts) {
-                    throw "installed_qualification_oidc_failed:transient_status_$($qualificationStatus)_after_$($qualificationTransientAttempts)_attempts"
-                  }
-                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds([Math]::Min(15 * $qualificationTransientAttempts, 20))
+                  $qualificationDelaySeconds = Get-InstalledQualificationRetryDelaySeconds -Status $qualificationStatus -TransientAttempts $qualificationTransientAttempts -Deadline $deadline
+                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds($qualificationDelaySeconds)
                 } else {
                   # Other 4xx, malformed 2xx payloads and transport-level
                   # failures fail fast with the canonical error name.
