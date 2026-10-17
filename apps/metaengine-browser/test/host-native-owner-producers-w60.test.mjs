@@ -31,9 +31,9 @@ const guardian = {status:async()=>({
 const app={isPackaged:false,getVersion:()=> '0.7.0-dev.1.1'};
 const proc = (pid=1234,birth=iso)=>({pid,created_at:birth,exe_path:process.execPath});
 const absent = (pid=1234)=>({pid,state:'NOT_RUNNING',
-  native_error_id:'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand',
+  native_error_id:'ERROR_INVALID_PARAMETER_87',
   native_error_category:'ObjectNotFound',
-  native_error_type:'Microsoft.PowerShell.Commands.ProcessCommandException',native_target_pid:pid});
+  native_error_type:'kernel32.OpenProcess',native_target_pid:pid});
 const fakeExec = (x=proc())=>async (program,args,options)=>{
   assert.equal(program,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
   assert.equal(options.shell,false);
@@ -384,7 +384,9 @@ test('W60: the existing W68 production export supplies release proof under befor
       exec:async(program,args,options)=>{
         assert.equal(program,'C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe');
         assert.equal(options.shell,false);
-        assert.match(args.at(-1),/Get-Process -Id/);
+        assert.match(args.at(-1),/MetaengineWinProcessW60/);
+        assert.match(args.at(-1),/OpenProcess/);
+        assert.doesNotMatch(args.at(-1),/Get-Process -Id/);
         return {stdout:JSON.stringify({pid:1234,created_at:birth,exe_path:process.execPath})};
       }});
     const invoke=async(value=proof(),during=null,error=false,finalReadChange=null)=>{

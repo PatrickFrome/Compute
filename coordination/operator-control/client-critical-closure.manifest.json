@@ -225,8 +225,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "16b329c3ec1ab5aebda438cf73259431f56bd8e6",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "a9bcbb43cf4185362d1edd17f4fa1ca54a829eda",
-    "apps/metaengine-browser/package.json": "7b029c6a69e27a2c531325cd6ad284ca922e6911",
+    "apps/metaengine-browser/package-lock.json": "01b7c8e2af290e6739e71cfd41a182539744e2e4",
+    "apps/metaengine-browser/package.json": "aed4aab76c7de22265527f5fe93ab8f96b76737e",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "fb48143a65bae6044e984b89aae9dd4c59b88ac1",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "5c205488d854ccbbfeb71c7f9304f341d732aba0",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "a25d7f56eb5a916c9a211a68c3100d1ea30224b2",
@@ -247,7 +247,7 @@
     "apps/metaengine-browser/src/host-agent-protocol.mjs": "67e2403ffa5ff8fbfc7da643120e2082707e6c6a",
     "apps/metaengine-browser/src/host-agent-remote-composition.mjs": "17f368dafafc3f412f14f4dc29d279c60c4d514f",
     "apps/metaengine-browser/src/host-agent-runtime.mjs": "84ef40518d14ae989c21fedd64732ba45594c379",
-    "apps/metaengine-browser/src/host-native-owner-producers-w60.mjs": "199a21525509ea77297ac6fee7b842d77d8b3797",
+    "apps/metaengine-browser/src/host-native-owner-producers-w60.mjs": "5a1a643b02bef0e2252625f083e63cee6fabfba1",
     "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs": "fff8f770e0b403fdbe21601fa65addfbd5300c07",
     "apps/metaengine-browser/src/host-private-custody-w76.mjs": "57005c3521f3bf73eee6ef56cf7bfd3a21395755",
     "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs": "a6d404763ced2ef34d229489d25660a7a3e473b1",
@@ -280,7 +280,7 @@
     "apps/metaengine-browser/test/helpers/local-supervisor-transport-fixture.mjs": "cac9101e7889e0526ef3bd2c154bc32d4771b4d4",
     "apps/metaengine-browser/test/host-agent-operation-deadlines.test.mjs": "7c0ebeff414a65d3b6cf66ea0027fd981825802a",
     "apps/metaengine-browser/test/host-agent-remote-composition.test.mjs": "5c99d95af16f77a8902441657e765a30ee88a4b0",
-    "apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs": "86a33c1753aa570f40e3ee15e20f16892a65b7e4",
+    "apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs": "8ce4dcbb4b93690d31f9efc0c251692c1b56ad74",
     "apps/metaengine-browser/test/host-owner-custody-w67.test.mjs": "ad7d33620436e2cf45785062ea9398ac8f028f10",
     "apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs": "10029b458bdb53814ad0c4311e4ab172436d999e",
     "apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs": "bc679700720b2e76a7225b617be8b806baf27f53",
@@ -338,7 +338,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "6cd84113b07c57b4e6adb998bdd9cc9491d7ff93",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "267149821de739d6351f4c816b6b2d10a6850206",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -415,7 +415,9 @@
     "apps/metaengine-browser/test/installed-owner-consumer.test.mjs": "51ba6759a365fa56927a8f67a325657c9b2c594a",
     "apps/metaengine-browser/test/installer-bootstrap-contract.test.mjs": "d975915f9236d78e4fee7cf5907aad8975a5eaf5",
     "apps/metaengine-browser/test/browser-frozen-dependency-workflow.test.mjs": "f70e347fa6772321a1136c61b0f19128424ab3bb",
-    "apps/metaengine-browser/test/host-native-command-input-w60.test.mjs": "f51696717f7efc0f0b3d7481b7b82b57e6975ddf"
+    "apps/metaengine-browser/test/host-native-command-input-w60.test.mjs": "67c007198b55a9d2fecbda353b8b15334fd5b940",
+    "apps/metaengine-browser/src/win32-kernel-process-query-w60.mjs": "212bbb4f8f6065abca9154dc5f6c6f441c60382c",
+    "apps/metaengine-browser/test/win32-kernel-process-query-w60.test.mjs": "0622f5662fa29efdc6dca4271dde6b2942259074"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -455,7 +457,8 @@
     "0.7.0-dev.1100413719281.1",
     "0.7.0-dev.1102139874561.1",
     "0.7.0-dev.1106139874561.1",
-    "0.7.0-dev.1107139874561.1"
+    "0.7.0-dev.1107139874561.1",
+    "0.7.0-dev.876000886467.1"
   ],
   "verification_workflow": ".github/workflows/client-source-candidate-w73.yml",
   "physical_pg_complement": ".github/workflows/client-source-candidate-w59.yml",
@@ -501,7 +504,7 @@
     "classification": "SOURCE_ONLY_NO_CURRENT_PACKAGE",
     "branch": "work/autonomous-development-fabric-v1-20261017",
     "source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "package_version": "0.7.0-dev.876000886467.1",
+    "package_version": "0.7.0-dev.875758155169.1",
     "historical_package_version": "0.7.0-dev.202610152359.1",
     "package_build_authorized": false,
     "package_version_reuse_authorized": false,
@@ -512,6 +515,17 @@
     "installed_mutation_authorized": false,
     "promotion_authorized": false,
     "automatic_effect_retry_allowed": false,
+    "authority_effect": false
+  },
+  "current_package_transition": {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "104d4b0a0d5e0bc1dce0eefcad9f75a81214974f",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.876000886467.1",
+    "distinct_version": "0.7.0-dev.875758155169.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
     "authority_effect": false
   }
 }

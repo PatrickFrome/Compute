@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { processScript, ABSENT_PROCESS_ERROR, ABSENT_PROCESS_TYPE, ABSENT_PROCESS_FIELDS } from './win32-kernel-process-query-w60.mjs';
 
 const execAsync = promisify(execFile);
 // These are fixed read-only commands: no command ever consumes stdin. Native
@@ -27,37 +28,7 @@ const fresh = x => Number.isFinite(Date.parse(x)) &&
   Date.parse(x) >= Date.now() - 30000 && Date.parse(x) <= Date.now() + 5000;
 const safe = f => Promise.resolve().then(f).catch(() => null);
 const frozen = x => x ? Object.freeze(x) : null;
-const ABSENT_PROCESS_ERROR = 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand';
-const ABSENT_PROCESS_TYPE = 'Microsoft.PowerShell.Commands.ProcessCommandException';
-const ABSENT_PROCESS_FIELDS = ['pid','state','native_error_id','native_error_category','native_error_type','native_target_pid'];
 
-// Fixed PowerShell, numeric PID only. Unlike Get-Process from a status screenshot,
-// StartTime is read from the Windows kernel at the time of each observation.
-// Numeric-only interpolation avoids PowerShell's -Command trailing-argument
-// ambiguity: $args[0] is not populated consistently on Windows PowerShell 5.1.
-const processScript = pid => [
-  '$ErrorActionPreference = "Stop"',
-  '$requestedPid = ' + String(pid),
-  '[Console]::Error.WriteLine("W60_SHELL_STARTED")',
-  // Only this exact native ObjectNotFound error proves absence. Permission,
-  // command, startup and timeout failures must still leave custody UNKNOWN.
-  'try { $p = Get-Process -Id $requestedPid -ErrorAction Stop } catch { '
-    + 'if ($_.FullyQualifiedErrorId -ceq "' + ABSENT_PROCESS_ERROR + '" '
-    + '-and [string]$_.CategoryInfo.Category -ceq "ObjectNotFound" '
-    + '-and $_.Exception.GetType().FullName -ceq "' + ABSENT_PROCESS_TYPE + '" '
-    + '-and $_.TargetObject -is [int] -and $_.TargetObject -eq $requestedPid) { '
-    + '@{ pid = [int]$requestedPid; state = "NOT_RUNNING"; '
-    + 'native_error_id = [string]$_.FullyQualifiedErrorId; '
-    + 'native_error_category = [string]$_.CategoryInfo.Category; '
-    + 'native_error_type = $_.Exception.GetType().FullName; '
-    + 'native_target_pid = [int]$_.TargetObject } | ConvertTo-Json -Compress; exit 0 }; throw }',
-  '[Console]::Error.WriteLine("W60_PROCESS_OPENED")',
-  '$start = $p.StartTime.ToUniversalTime().ToString("o")',
-  '$exe = $p.Path',
-  '[Console]::Error.WriteLine("W60_PROCESS_FIELDS_READ")',
-  '@{ pid = [int]$p.Id; created_at = $start; exe_path = $exe } | ConvertTo-Json -Compress',
-  '[Console]::Error.WriteLine("W60_RESULT_WRITTEN")',
-].join('; ');
 const signatureScript = executable => [
   '$ErrorActionPreference = "Stop"',
   // A single, PowerShell-literal-escaped trusted native EXE path; no command

@@ -22,7 +22,9 @@ test('W60 default native command closes only its own stdin and retains fail-clos
       assert.equal(options.maxBuffer,4096);
       assert.equal(options.windowsHide,true);
       assert.equal(options.env.PATH,'C:\\\\Windows\\\\System32');
-      assert.match(args.at(-1),/Get-Process -Id/);
+      assert.match(args.at(-1),/MetaengineWinProcessW60/);
+      assert.match(args.at(-1),/OpenProcess/);
+      assert.doesNotMatch(args.at(-1),/Get-Process -Id/);
       const value=fail?Promise.reject(Object.assign(Error('private failure'),{
         code:'ETIMEDOUT',killed:true,stdout:'{"pid":1234,"state":"NOT_RUNNING"}'
       })):Promise.resolve({stdout:JSON.stringify({
