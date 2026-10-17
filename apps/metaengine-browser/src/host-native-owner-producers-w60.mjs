@@ -6,7 +6,16 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-const run = promisify(execFile);
+const execAsync = promisify(execFile);
+// These are fixed read-only commands: no command ever consumes stdin. Native
+// Windows PowerShell may wait for redirected input to close under a CI parent.
+// End only this child's pipe, never the Host's input. The original finite
+// timeout/maxBuffer and rejection semantics remain authoritative.
+const run = (...args) => {
+  const pending = execAsync(...args);
+  pending.child.stdin?.end();
+  return pending;
+};
 const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const HEX40 = /^[a-f0-9]{40}$/i;
 const HEX64 = /^[a-f0-9]{64}$/i;
@@ -29,6 +38,7 @@ const ABSENT_PROCESS_FIELDS = ['pid','state','native_error_id','native_error_cat
 const processScript = pid => [
   '$ErrorActionPreference = "Stop"',
   '$requestedPid = ' + String(pid),
+  '[Console]::Error.WriteLine("W60_SHELL_STARTED")',
   // Only this exact native ObjectNotFound error proves absence. Permission,
   // command, startup and timeout failures must still leave custody UNKNOWN.
   'try { $p = Get-Process -Id $requestedPid -ErrorAction Stop } catch { '
@@ -41,9 +51,12 @@ const processScript = pid => [
     + 'native_error_category = [string]$_.CategoryInfo.Category; '
     + 'native_error_type = $_.Exception.GetType().FullName; '
     + 'native_target_pid = [int]$_.TargetObject } | ConvertTo-Json -Compress; exit 0 }; throw }',
+  '[Console]::Error.WriteLine("W60_PROCESS_OPENED")',
   '$start = $p.StartTime.ToUniversalTime().ToString("o")',
   '$exe = $p.Path',
+  '[Console]::Error.WriteLine("W60_PROCESS_FIELDS_READ")',
   '@{ pid = [int]$p.Id; created_at = $start; exe_path = $exe } | ConvertTo-Json -Compress',
+  '[Console]::Error.WriteLine("W60_RESULT_WRITTEN")',
 ].join('; ');
 const signatureScript = executable => [
   '$ErrorActionPreference = "Stop"',

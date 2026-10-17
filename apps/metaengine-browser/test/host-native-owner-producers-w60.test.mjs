@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { once } from 'node:events';
 import path from 'node:path';
 import { createHostNativeOwnerReadersW60, readWindowsKernelProcessW60,
@@ -133,6 +134,27 @@ test('W60: actual disposable Windows child is PRESENT before exit and verified a
   } finally {clearTimeout(timer);}
   const pid=child.pid;
   const present=await readWindowsKernelProcessW60(pid);
+  if (!present) {
+    // A second READ-ONLY diagnostic never replaces the failed observation.
+    // Only fixed categories/stages are printed, no stdout, paths or stderr.
+    await readWindowsKernelProcessW60(pid,{exec:async(...args)=>{
+      const pending=promisify(execFile)(...args);
+      pending.child.stdin?.end();
+      try { return await pending; } catch(error) {
+        const stages=['W60_SHELL_STARTED','W60_PROCESS_OPENED',
+          'W60_PROCESS_FIELDS_READ','W60_RESULT_WRITTEN'];
+        const observed=stages.filter(stage=>String(error.stderr||'').includes(stage));
+        const allowedCodes=['EPERM','EACCES','ENOENT','ETIMEDOUT','ABORT_ERR'];
+        t.diagnostic(JSON.stringify({schema:'metaengine.w60.native-probe-diagnostic.v1',
+          last_stage:observed.at(-1)||'SHELL_NOT_OBSERVED',
+          killed:error.killed===true,
+          code:allowedCodes.includes(error.code)?error.code:'COMMAND_FAILED',
+          exit_code:Number.isSafeInteger(error.code)?error.code:null,
+          authority_effect:false}));
+        throw error;
+      }
+    }});
+  }
   assert.equal(present?.state,'PRESENT');
   assert.equal(present?.pid,pid);
   const exited=once(child,'exit');

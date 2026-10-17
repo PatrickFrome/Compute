@@ -427,3 +427,50 @@ Newly published **DRAFT** #1287 W59 `8ec70b6fafb1689be0ba2075f0e54e6c505d5106` i
 Further actual heads independently re-read at this checkpoint: #1285 W61 `7d246704509b1d99a788242c64a51e1c30454586` (claims generated typed JSONB Host-cap fixture + two-cluster restore, own-PG birth still depends on authentic Host), #1286 W63 `6a124ad0032a5beaa583de978d9bf37b4be35f34` (Windows Git fixture), #1288 W64 `a5f3cc47b3b32d52a52c73e281a72142587ad7af` (PG pipe/inheritance lifecycle corrected at a prior exact SHA, latest job queued), #1290 W60 `b4701788dd41273386b7593d26b13ee59ed2f9e4` (six read methods composition source; authentic Owner custody, Guardian issuer, release signer/secret and independent birth still fail CLOSED). W62's own PR says Windows Bun source typing CI SUCCESS at previous SHA but **57 SelfUpdate failures**, current physical R97/NSIS/SLSA and distinct package freeze are still blocked. These distinct PR heads/earlier greens **cannot be promoted as integrated final SHA evidence**. C2 STAGING/SYNTHETIC and genuine native installed Agent origin remain separate.
 
 W65 local generated Windows regression reproduction at **pinned historical W58** `41d755bb9ecd53bd509163f9219473c32d7439b6` using native WindowsPowerShell 5.1 instead of the originally failing inherited `pwsh` context: **29 upgrade/restore tests: 28 PASS, 1 symlink-privilege SKIP, 0 FAIL**; **15 native ACL/Host IPC tests: 14 PASS, 1 symlink-privilege SKIP, 0 FAIL**. Independent W65 exact local current-source helper/falsifier: **36/36 PASS, 0 SKIP**. These reproduce a *Windows fixture environment* issue but are not GitHub push+PR terminal proof, no signed/installed Owner proof and no real PG17 restore. W65 current-head GitHub workflow `38668467063` with Windows native ACL job `116205721437`, Windows critic `116205721527`, Ubuntu critic `116205721193` was **QUEUED** at this observation; mandatory final decision remains **BLOCKED pending actual terminal exact-head push and PR receipts**, and run state must be re-read before promotion.
+
+
+## ADF-1 current Windows CI and native readback follow-up — 2026-10-17
+
+This is a continuation of the accepted Autonomous Development Fabric V1 ADR.
+Current published source inspected: PR #1312,
+`716f3b576b4643ff771912827df1a902a8865bf1`, directly above #1311.
+These terminal receipts qualify only that SHA, never an untested successor.
+
+| Exact-head CI | Terminal result | Scope |
+| --- | --- | --- |
+| [Package Smoke 39016558468](https://github.com/PatrickFrome/Compute/actions/runs/39016558468) | SUCCESS | Isolated Windows package/Owner fixture, not user installation or production signer |
+| [Final Runtime Activation 39016558501](https://github.com/PatrickFrome/Compute/actions/runs/39016558501) | SUCCESS | Disposable own-PG17 Owner consumer |
+| [Shell First 39016558515](https://github.com/PatrickFrome/Compute/actions/runs/39016558515) | SUCCESS | Isolated Owner/profile lifecycle |
+| [W60 39016558503](https://github.com/PatrickFrome/Compute/actions/runs/39016558503) | FAILURE | Windows kernel probe timed out twice; Ubuntu source passed |
+| [W67 39016558552](https://github.com/PatrickFrome/Compute/actions/runs/39016558552) | FAILURE | Same two Windows native probes |
+| [Installed Chat 39016558522](https://github.com/PatrickFrome/Compute/actions/runs/39016558522) | FAILURE | Legacy hosted enrollment qualifier returned HTTP 402 |
+| [Windows Soak 39016558480](https://github.com/PatrickFrome/Compute/actions/runs/39016558480) | FAILURE | Installed no-Owner consumer did not prove stable visible UI; seeded/source jobs passed |
+
+W72 current native Windows ACL and R97 Visual are terminal SUCCESS at that SHA;
+historical W58/W65 failures remain separate evidence, not a replacement for
+current native gates. Full Self Update and integrated source are still RED.
+The historical Installed Chat hosted route is obsolete for own-PG acceptance:
+do not contact/retry it or request its secrets/payment. Replacement must retain
+real installed Chat/preconnect/enrollment checks under existing local authority.
+
+Follow-up SOURCE implementation, based on unpublished contract repair
+`74b9e6cf907e51b69cc8ee2c9a27a4ae05505e41`:
+- Fixed native read commands explicitly end their OWN child's stdin pipe.
+  Existing pinned Windows executable/environment, 15s deadline, exact typed
+  absence errors, source fences and fail-closed null semantics are unchanged.
+- W60 physical failure diagnostics identify only fixed interpreter/read/result
+  stages and error categories. Raw stdout/stderr, executable paths and credentials
+  are never printed. A diagnostic read never replaces the original failed proof.
+- The default execution regression and real disposable child/private HMAC IPC
+  tests are registered in both existing W60/W67 CI workflows; no new scheduler.
+- Local Windows W60/protocol/regression suite: 37/37 PASS. W67/W74/W75/W76
+  custody/100ns/anti-forgery regressions: 21/21 PASS. Source syntax checks: 190 PASS.
+  Local success does not establish the runner-specific cause or terminal CI repair.
+
+ADF-1 / R1 / C1 / C2 remain BLOCKED for installed/live acceptance. Next: obtain
+exact successor Windows W60/W67 terminal receipts; replace legacy Installed Chat
+and no-Owner soak consumers using genuine disposable local Owner composition;
+then qualify a distinct immutable package and one real Critic-verified coding
+task with durable restart. No installed Browser/Guardian/PG mutation, effect
+replay, production signing, package-version reuse or main merge is authorized
+by these source receipts.
