@@ -5,8 +5,15 @@
 // the spawn is throttled via /tmp/me2-daemon-last-spawn.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const DAEMON_DIR = "/home/z/my-project/mini-services/me2-daemon";
+// Resolve the monorepo daemon (apps/me2-daemon) relative to THIS file instead of
+// the old hardcoded /home/z/my-project/mini-services/me2-daemon, which pointed at
+// a checkout that does not exist in this repo. ME2_DAEMON_DIR keeps an operator
+// override for non-monorepo layouts.
+const DAEMON_DIR = process.env.ME2_DAEMON_DIR
+  || join(dirname(fileURLToPath(import.meta.url)), "../../me2-daemon");
 // R34-фикс: порт здоровья был 3021 (устаревший) при фактическом REST :3041 — watchdog вечно
 // считал daemon «нездоровым» и спавнил дубли каждые 8с (дубль-инкарнации ловятся стражем
 // /tmp/me2-daemon.lock, но это был источник инцидента убийства lease в 04:17:43).
@@ -61,5 +68,5 @@ export function startWatchdog(): void {
   void loop();
   const timer = setInterval(() => void loop(), 5000);
   if (typeof timer.unref === "function") timer.unref();
-  console.log("[me2-watchdog] active — guarding me2-daemon on :3020/:3021");
+  console.log("[me2-watchdog] active — guarding me2-daemon health on :3041");
 }

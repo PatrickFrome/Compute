@@ -16,7 +16,9 @@ import { recordSpan } from "./src/otel";
 import { reviewTask } from "./src/reviewer";
 import { isPoolAgent, poolAcquire, poolRelease, type PoolLeaseRow } from "./src/pool";
 
-const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
+// R51-совместимый env-оверрайд: CI/контурные инкарнации задают ME2_WORKSPACE_ROOT,
+// дефолт сохраняет прежнее поведение однопользовательской машины.
+const WORKSPACE_ROOT = process.env.ME2_WORKSPACE_ROOT || "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
 const MAX_TOOL_OUTPUT = 4000;
 const SHELL_TIMEOUT_MS = 30_000;

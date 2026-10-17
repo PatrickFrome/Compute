@@ -30,6 +30,19 @@ const interactiveNormalLaunch = browserRuntimeNeeded && !updatedLaunch;
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
+// Blocking modal diagnostics hang an unattended CI runner forever (nobody can
+// click OK), turning a precise stderr diagnosis into a dead wait followed by a
+// generic timeout (e.g. soak_normal_ui_not_stable_visible, CI run 39026176014).
+// On hosted CI — or when headless diagnostics are explicitly requested — the
+// structured stderr JSON emitted next to each call site is the diagnostic
+// surface; the modal remains the desktop behavior and is unchanged there.
+const headlessDiagnostics = process.env.GITHUB_ACTIONS === 'true'
+  || process.env.METAENGINE_HEADLESS_DIAGNOSTICS === '1';
+const showErrorBoxUnlessHeadless = (title, message) => {
+  if (headlessDiagnostics) return;
+  try { dialog.showErrorBox(title, message); } catch {}
+};
+
 if (guard.installer_shutdown_control) {
   // The guard owns this control process's bounded signal/re-notify and exit.
   // It must reach an existing primary even with a stopped or invalid provider,
@@ -63,7 +76,7 @@ if (guard.installer_shutdown_control) {
       // Electron documents showErrorBox as safe before app.ready on Windows;
       // this is intentionally a local diagnostic surface, not execution
       // authority. Never auto-kill a potentially live old primary here.
-      dialog.showErrorBox(
+      showErrorBoxUnlessHeadless(
         'METAENGINE Browser — existing instance did not open',
         [
           'Another METAENGINE Browser process already owns the single-instance lock,',
@@ -207,7 +220,7 @@ if (guard.installer_shutdown_control) {
       authority_effect: false,
     }));
     try {
-      dialog.showErrorBox(
+      showErrorBoxUnlessHeadless(
         'METAENGINE Browser — local runtime unavailable',
         `The selected local state runtime could not be verified.\nStart or repair that runtime and open the Browser again.\n\nDiagnostic: ${reason}`,
       );
@@ -774,7 +787,7 @@ if (guard.installer_shutdown_control) {
           error,
         );
         try {
-          dialog.showErrorBox(
+          showErrorBoxUnlessHeadless(
             'METAENGINE Browser — startup bootstrap error',
             [
               'Electron became ready, but the Browser bootstrap continuation failed.',

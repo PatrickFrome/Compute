@@ -298,7 +298,23 @@ jobs:
                     throw "installed_qualification_oidc_unexpected:$($qualificationResponse.StatusCode):$($qualificationPayload.reason)"
                   }
                 } catch {
-                  throw "installed_qualification_oidc_failed:$($_.Exception.Message)"
+                  # Transient transport failures (timeouts, 408/429/5xx) retry
+                  # inside the existing deadline instead of killing the whole
+                  # qualification on the first flake (run 39026176013 died on a
+                  # single HTTP response). Permanent failures — including HTTP
+                  # 402 (hosted Supabase project paused / quota exhausted) —
+                  # fail closed immediately: a cloud qualifier is not a
+                  # qualification, and no retry can resurrect a paused platform.
+                  $statusCode = $null
+                  try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
+                  if ($statusCode -eq 402) {
+                    throw 'installed_qualification_oidc_http_402_payment_required: hosted Supabase qualifier is paused/exhausted; replace this cloud dependency with the local Host/Guardian Owner + own PostgreSQL 17 qualification path'
+                  }
+                  $isTransient = ($null -eq $statusCode) -or ($statusCode -eq 408) -or ($statusCode -eq 429) -or ($statusCode -ge 500)
+                  if (-not $isTransient) { throw "installed_qualification_oidc_failed:$($_.Exception.Message)" }
+                  Write-Host "installed_qualification_oidc_transient_http:$statusCode; retrying within the existing deadline"
+                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(15)
+                  continue
                 }
                 $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
               }

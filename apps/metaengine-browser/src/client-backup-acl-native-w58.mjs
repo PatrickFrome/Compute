@@ -172,5 +172,17 @@ export async function readClientBackupAclNativeW58({
       root_file_id_sha256:hash(fingerprint(root0)),archive_file_id_sha256:hash(fingerprint(file0)),
       native_dacl_sha256:a.descriptor,installed_owner_proven:false,backup_verified:false,
       upgrade_authorized:false,automatic_retry_allowed:false,authority_effect:false});
-  }catch(error){return unknown('NATIVE_ACL_UNVERIFIED',safePhase(error));}
+  }catch(error){
+    // Fail closed, but keep the reason discriminable. A blanket
+    // NATIVE_ACL_UNVERIFIED for >=6 distinct causes made CI logs
+    // undiagnosable (run 39026175976). Phases stay bounded; no OS error
+    // text, stderr, paths or ACL SDDL is ever serialized.
+    const phase=safePhase(error);
+    const reason=error?.message==='PHYSICAL_ALIAS'?'NATIVE_ACL_PHYSICAL_ALIAS'
+      :error?.message==='REPARSE_ANCESTOR'?'NATIVE_ACL_REPARSE_ANCESTOR'
+      :error?.code==='ETIMEDOUT'?'NATIVE_ACL_CHILD_TIMEOUT'
+      :error instanceof SyntaxError?'NATIVE_ACL_READBACK_INVALID'
+      :'NATIVE_ACL_UNVERIFIED';
+    return unknown(reason,phase);
+  }
 }

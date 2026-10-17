@@ -21,6 +21,7 @@ jobs:
       matrix:
         os: [windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,8 +42,15 @@ jobs:
         run: |
           node --check infra/client-state-runtime/client-candidate-acceptance-w65.mjs
           node --test infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs infra/client-state-runtime/client-winps-fixture-w65.test.mjs
+  # The pinned historical W58 source is KNOWN-RED on hosted Windows runners
+  # (8.3 TEMP aliasing + WinPS module autoload). This job is an expected-failure
+  # reproduction, not a current-source gate: the job FAILS if the historical
+  # failure does NOT reproduce (stale pin) or loses its known diagnostic
+  # markers, and PASSES only when the designed failure reproduces exactly.
+  # The current source SHA is qualified by client-backup-acl-native-w58.yml
+  # and client-current-native-acl-w72.yml, not here.
   historical-w58-windows:
-    name: W58 pinned historical native ACL reproduction (Windows)
+    name: W58 pinned historical native ACL reproduction (Windows, expected failure)
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
@@ -59,10 +67,30 @@ jobs:
           if ((git rev-parse HEAD) -ne '41d755bb9ecd53bd509163f9219473c32d7439b6') { throw 'W58_SOURCE_PIN_CHANGED' }
           Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
           Get-Command Get-Acl,Set-Acl | Select-Object Name,Source
-      - name: Windows W58 actual native ACL and upgrade restore negatives
+      - name: Run pinned historical W58 tests and capture the result
         shell: powershell
         run: |
-          node --test --test-concurrency=1 infra/client-state-runtime/client-backup-acl-native-w58.test.mjs infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs infra/client-state-runtime/upgrade-backup-gate.test.mjs infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs
+          $out = Join-Path $env:RUNNER_TEMP 'w58-historical-repro.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'w58-historical-repro.err.txt'
+          $tests = @('infra/client-state-runtime/client-backup-acl-native-w58.test.mjs',
+            'infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs',
+            'infra/client-state-runtime/upgrade-backup-gate.test.mjs',
+            'infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs')
+          $p = Start-Process -FilePath 'node' -ArgumentList (@('--test','--test-concurrency=1') + $tests)`
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP 'w58-historical-exit.txt') -Value $p.ExitCode -Encoding ascii
+          exit 0
+      - name: Expected-failure contract — the pinned historical failure MUST reproduce
+        shell: powershell
+        run: |
+          $exit = [int](Get-Content (Join-Path $env:RUNNER_TEMP 'w58-historical-exit.txt') -Raw)
+          $log = (Get-Content (Join-Path $env:RUNNER_TEMP 'w58-historical-repro.txt') -Raw)`
+            + (Get-Content (Join-Path $env:RUNNER_TEMP 'w58-historical-repro.err.txt') -Raw)
+          if ($exit -eq 0) { throw 'W58_HISTORICAL_PIN_NO_LONGER_FAILS: pinned 41d755bb source passes on this runner image; update the falsifier pin.' }
+          foreach ($marker in @('NATIVE_ACL_UNVERIFIED','restore proof rejects')) {
+            if (-not $log.Contains($marker)) { throw "W58_HISTORICAL_REPRO_MARKER_MISSING:$marker" }
+          }
+          Write-Host "Historical W58 failure reproduced as designed (node exit $exit). Current-source SHA stays the fixed reference."
       - name: No installed or final-SHA conclusion
         if: always()
         shell: powershell

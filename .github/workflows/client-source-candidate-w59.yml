@@ -129,6 +129,7 @@ jobs:
 
   disposable-pg17:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     container:
       image: postgres:17
     steps:

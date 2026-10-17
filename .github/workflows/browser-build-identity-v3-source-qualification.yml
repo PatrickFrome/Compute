@@ -33,7 +33,6 @@ on:
       - 'apps/me2-ui/.gitattributes'
       - 'apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1'
       - '.github/workflows/browser-build-identity-v3-source-qualification.yml'
-      - '.github/workflows/browser-lockfile-refresh-v3.yml'
 
 permissions:
   contents: read

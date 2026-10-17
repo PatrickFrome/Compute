@@ -17,8 +17,10 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-// R51 (фаза C): env-оверрайд для изолированного gate-probe (дефолт — production :3043)
-const SC_PORT = Number(process.env.ME2_SCREENCEAST_PORT ?? 3043);
+// R51 (фаза C): env-оверрайд для изолированного gate-probe (дефолт — production :3043).
+// Основное имя — ME2_SCREENCAST_PORT; прежняя опечатка ME2_SCREENCEAST_PORT
+// читается как legacy-fallback, чтобы не молча ломать уже развёрнутые env.
+const SC_PORT = Number(process.env.ME2_SCREENCAST_PORT ?? process.env.ME2_SCREENCEAST_PORT ?? 3043);
 const CDP_TTL_MS = 15_000;
 const CORS = {
   "Access-Control-Allow-Origin": "*",

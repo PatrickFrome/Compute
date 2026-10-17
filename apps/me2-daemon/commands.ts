@@ -354,7 +354,7 @@ const handlers: Record<string, Handler> = {
 
   BROWSER_SCREENSHOT: async (p) => {
     const rel = String(p.path ?? `br-${Date.now()}.png`).replace(/\.\.\/|^[/.]+/g, "");
-    const dir = "/home/z/my-project/download";
+    const dir = process.env.ME2_DOWNLOAD_DIR || "/home/z/my-project/download";
     const full = `${dir}/${rel}`;
     const r = await ab(["screenshot", full]);
     let bytes = 0;

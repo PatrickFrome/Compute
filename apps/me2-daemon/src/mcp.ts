@@ -21,7 +21,7 @@
  */
 
 import { knownActions, runOne } from "../commands";
-import { enqueueCommand, getMeta } from "../store";
+import { enqueueCommand, getMeta, VERSION } from "../store";
 import { senseNow, senseAct } from "./sense";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvStatus } from "./obsv";
 import { fleetList } from "./fleet";
@@ -199,7 +199,9 @@ export async function mcpHandle(body: unknown): Promise<{ status: number; json: 
         responses.push(rpcResult(id, {
           protocolVersion: clientProto || MCP_PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { ...MCP_SERVER_INFO, version: getMeta("version") ?? "0.23.0" },
+          // getMeta("version") не пишется в probe-режиме: без честного
+          // VERSION-fallback MCP отчитывался бы устаревшей 0.23.0.
+          serverInfo: { ...MCP_SERVER_INFO, version: getMeta("version") ?? VERSION },
         }));
       } else if (method === "notifications/initialized" || method.startsWith("notifications/")) {
         // уведомления не отвечают (Streamable HTTP: 202 Accepted)

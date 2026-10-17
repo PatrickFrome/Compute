@@ -76,7 +76,13 @@ import { mirrorSeq, EPOCH_STRIDE } from "./sqlmirror";
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 33;
+export const EVAL_DATASET_VERSION = 34;
+
+// Boot-mode-aware expectations (v33→v34): probe-инкарнация (ME2_BOOT_MODE=probe,
+// см. index.ts) с disposable DATA_DIR сознательно НЕ пишет meta boot/version,
+// boot-строку памяти, флот-ноду и boot-события. Для неё честное ожидание —
+// консистентное свежее состояние и живая схема, а не полнобутовое.
+const PROBE_BOOT = process.env.ME2_BOOT_MODE === "probe";
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -166,17 +172,29 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — state —
   {
     id: "events.hashchain", plane: "state", title: "Event-log hash-chain жив",
-    critical: true, expect: "seq>0 и hash непуст",
+    critical: true, expect: PROBE_BOOT
+      ? "probe: схема жива, свежая цепь консистентна (seq=0, hash=null)"
+      : "seq>0 и hash непуст",
     run: () => {
       const seq = lastSeq(); const h = lastEventHash();
+      if (PROBE_BOOT) {
+        // Disposable probe-БД: бут-события не эмитятся (по дизайну probe-режима).
+        // Контракт = readback-агенты живы и возвращают согласованное свежее состояние.
+        return { ok: seq === 0 && !h, evidence: `probe-fresh: seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}` };
+      }
       return { ok: seq > 0 && !!h, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}` };
     },
   },
   {
     id: "meta.boot_version", plane: "state", title: "meta: boot+version записаны",
-    critical: true, expect: "getMeta('boot') и getMeta('version') непусты",
+    critical: true, expect: PROBE_BOOT
+      ? "probe: meta не тронут (boot=null, version=null) — запись гейтится !PROBE_MODE"
+      : "getMeta('boot') и getMeta('version') непусты",
     run: () => {
       const b = getMeta("boot"); const v = getMeta("version");
+      if (PROBE_BOOT) {
+        return { ok: !b && !v, evidence: `probe-fresh: boot=${b ?? "null"}, version=${v ?? "null"}` };
+      }
       return { ok: !!b && !!v, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}` };
     },
   },
@@ -204,9 +222,14 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — память —
   {
     id: "memory.rows", plane: "memory", title: "Память непуста (persistence-пруф)",
-    critical: true, expect: "memoryStatus().rows > 0",
+    critical: true, expect: PROBE_BOOT
+      ? "probe: свежая disposable-БД пуста (rows=0); boot-строка гейтится !PROBE_MODE"
+      : "memoryStatus().rows > 0",
     run: () => {
       const m = memoryStatus();
+      if (PROBE_BOOT) {
+        return { ok: m.rows === 0, evidence: `probe-fresh: rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})` };
+      }
       return { ok: m.rows > 0, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})` };
     },
   },
@@ -255,10 +278,15 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — флот —
   {
     id: "fleet.self_alive", plane: "fleet", title: "Self-нода флота жива (не LOST)",
-    critical: true, expect: "self ≠ null и freshness ∈ {ACTIVE, STALE}",
+    critical: true, expect: PROBE_BOOT
+      ? "probe: флот-нода не регистрируется (self=null) — гейтится !PROBE_MODE"
+      : "self ≠ null и freshness ∈ {ACTIVE, STALE}",
     run: () => {
       const f = fleetList();
       const s = f.self;
+      if (PROBE_BOOT) {
+        return { ok: !s, evidence: `probe-fresh: self=null, nodes=${f.nodes.length}` };
+      }
       const ok = !!s && (s.freshness === "ACTIVE" || s.freshness === "STALE");
       const selfAge = f.nodes.find((n) => n.id === s?.id)?.age_s;
       return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : "self=null" };

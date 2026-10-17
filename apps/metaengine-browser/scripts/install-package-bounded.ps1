@@ -7,8 +7,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($ExpectedSha256 -notmatch '^[a-f0-9]{64}$') { throw 'package_installer_digest_invalid' }
+# Test-Path BEFORE Resolve-Path: otherwise a missing installer dies with a
+# generic ItemNotFound from Resolve-Path and the coded diagnostic below is
+# unreachable (compare bootstrap-install-and-launch.ps1, which orders it correctly).
+if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw 'package_installer_missing' }
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
-if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'package_installer_missing' }
 # Hash through the built-in cryptography API: isolated PowerShell hosts may
 # have no module autoloading and therefore no Get-FileHash command.
 $stream = [System.IO.File]::OpenRead($installer)

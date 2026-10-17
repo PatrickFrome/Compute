@@ -42,7 +42,7 @@ function Complete-CapturedProcessOutput($Capture) {
   [System.IO.File]::WriteAllText($Capture.ErrPath, [string]$stderr, [System.Text.UTF8Encoding]::new($false))
 }
 
-function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) {
+function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label, [int[]]$AllowedExitCodes = @(0)) {
   $process = $Capture.Process
   try {
     if (-not $process.WaitForExit($TimeoutMs)) {
@@ -55,10 +55,11 @@ function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) 
     $process.WaitForExit()
     Complete-CapturedProcessOutput $Capture
     $exitCode = [int]$process.ExitCode
-    if ($exitCode -ne 0) {
+    if ($AllowedExitCodes -notcontains $exitCode) {
       Get-Content $Capture.ErrPath -ErrorAction SilentlyContinue
       throw "${Label}_exit_$exitCode"
     }
+    return $exitCode
   } finally {
     try { $process.Dispose() } catch {}
   }
@@ -300,7 +301,18 @@ $first.Refresh()
 if ($first.HasExited -or $firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
 $secondOut = Join-Path $temp 'singleton-second.out'; $secondErr = Join-Path $temp 'singleton-second.err'
 $second = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-single-instance-probe' -OutPath $secondOut -ErrPath $secondErr
-Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary'
+# Since secondary-diagnostic-refusal.mjs, a second instance deliberately exits
+# with code 6 after emitting {"state":"PRIMARY_INSTANCE_REQUIRED",...} to
+# stderr. The old silent exit(0) let a secondary masquerade as a qualified
+# primary, so exit 6 IS the shipped contract; a silent exit 0 would now be
+# the regression. Assert the full refusal payload, not just the exit code.
+$secondaryExit = Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary' -AllowedExitCodes @(6)
+$refusal = Read-LastJsonLine $secondErr 10
+if ($secondaryExit -ne 6 -or [string]$refusal.schema -ne 'metaengine.browser.secondary-diagnostic-refusal.v1' `
+  -or [string]$refusal.state -ne 'PRIMARY_INSTANCE_REQUIRED' -or $refusal.primary_instance -ne $false `
+  -or [string]$refusal.requested_probe -ne '--metaengine-single-instance-probe') {
+  throw "singleton_secondary_refusal_invalid:$secondaryExit"
+}
 $first.Refresh()
 if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
 try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}

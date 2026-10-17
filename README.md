@@ -7,7 +7,7 @@ Authoritative repository for the recovered METAENGINE / H205F22 Compute Fabric.
 The project uses two linked roadmap layers:
 
 - **Level-1 canonical architecture:** `docs/CANONICAL_ROADMAP.md` — stable roadmap `R1`, `C1…C17`, `F1+`. This is the architectural north star used to detect roadmap drift.
-- **Level-2 execution DAG:** Supabase `compute-fabric-roadmap-v1` — implementation gates, dependencies and work claims used to execute Level-1 safely.
+- **Level-2 execution DAG:** the project's **own PostgreSQL 17** (`compute-fabric-roadmap-v1`) — implementation gates, dependencies and work claims used to execute Level-1 safely. Historical hosted-Supabase definitions of this DAG are **not** an active backend or a fallback; per `coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md` and the 2026-10-17 ADR (`docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md`), hosted Supabase and any cloud fallback are **prohibited** for durable authority. Supabase-named paths (`supabase/`, `apps/metaengine-browser/supabase/`) are historical implementation naming.
 
 Level-2 may refine Level-1 but must not silently redefine, renumber or replace it.
 
@@ -26,7 +26,7 @@ The primary execution spine is:
 - The Supervisor chat is the only mainline controller / checkpoint sealer and the only authority that can advance milestones to `VERIFIED` after a valid seal.
 - Synthetic/control-plane/schema evidence never counts as live runtime evidence.
 
-Current last verified supervision baseline recorded by the recovery effort: **CP071 — COMPUTE_FABRIC_SUPERVISION_PLANE_V1**. Always read the current Supabase semantic head before relying on this historical baseline.
+Current last verified supervision baseline recorded by the recovery effort: **CP071 — COMPUTE_FABRIC_SUPERVISION_PLANE_V1** (historical baseline; read the current semantic head from the own-PostgreSQL authority before relying on it).
 
 Workstreams:
 - `work/w1-linux-worker-safety` → canonical **C1**

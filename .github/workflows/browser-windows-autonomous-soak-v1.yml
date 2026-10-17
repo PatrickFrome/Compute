@@ -9,7 +9,6 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/**'
-      - 'apps/metaengine-browser/ui/**'
       - 'apps/metaengine-browser/test/**'
       - 'apps/metaengine-browser/native/**'
       - 'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'
@@ -349,7 +348,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/test apps/metaengine-browser/scripts apps/metaengine-browser/package.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/native apps/metaengine-browser/test apps/metaengine-browser/scripts apps/metaengine-browser/package.json)"
 
       - name: Upload optimized exact-head installer and soak evidence
         if: always()

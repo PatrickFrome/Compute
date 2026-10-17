@@ -146,7 +146,7 @@ function seed() {
   const t1 = createTask({
     id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     title: "ME2 smoke: осмотреть workspace, создать hello.txt с версией daemon",
-    spec: "Это smoke-задача рантайма ME2. Шаги: 1) list_dir . 2) write_file hello.txt с текстом 'ME2 daemon v0.3.0 live at <текущая дата>' 3) finish с результатом.",
+    spec: `Это smoke-задача рантайма ME2. Шаги: 1) list_dir . 2) write_file hello.txt с текстом 'ME2 daemon v${VERSION} live at <текущая дата>' 3) finish с результатом.`,
     role: "IMPLEMENTER", max_steps: 4,
   });
   const t2 = createTask({
@@ -1030,7 +1030,20 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
     if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
     // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
-    if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
+    // ?run=1 — контракт probe-гейта (scripts/probe.sh): probe-инкарнация
+    // работает с disposable DATA_DIR и никогда не поднимает boot-eval
+    // (индекс 1317 гейтится !PROBE_MODE), а POST в probe-режиме отвергается
+    // 403-политикой выше. Без синхронного запуска evalRun на GET-поверхности
+    // evalStatus().last навсегда остаётся null — гейт честно падает по
+    // «eval не дал вердикт за 30с» (run=1 игнорировался до этого фикса).
+    if (path === "/eval" && req.method === "GET") {
+      const runRequested = url.searchParams.get("run") === "1";
+      if (!runRequested) return json(res, 200, evalStatus(VERSION));
+      benchResetRings(); // R62: свежее окно измерения, как и у POST /eval/run
+      benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
+      try { evalRun(VERSION); } finally { benchSuspend(false); }
+      return json(res, 200, evalStatus(VERSION));
+    }
     if (path === "/eval/run" && req.method === "POST") {
       benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
       benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
@@ -1393,7 +1406,7 @@ if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && existsSync("/home
   try {
     if (/^SUPABASE_DB_URL=/m.test(readFileSync("/home/z/.a2/supabase-cloud.env", "utf8"))) {
       process.env.ME2_SQL_MIRROR = "1";
-      console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
+      console.log("[me2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
     }
   } catch { /* честный отказ: гейт остаётся выключенным */ }
 }
@@ -1402,7 +1415,7 @@ if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && existsSync("/home
 // «рестарт без start.sh → зеркало молча OFF» даже без SUPABASE_DB_URL в env-файле.
 if (!PROBE_MODE && process.env.ME2_SQL_MIRROR === undefined && sqlmirrorGatePersisted(db)) {
   process.env.ME2_SQL_MIRROR = "1";
-  console.log("e2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
+  console.log("[me2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
 }
 // Browser probe mode must not even construct SqlMirror: its constructor persists
 // the operator gate and subscribes to token changes. Keep an inert structural
@@ -1445,6 +1458,6 @@ try {
     rs.writeHead(200, { "Content-Type": "application/json" });
     rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: LEGACY_MIRROR_PORT, ts: nowIso() }));
   }).listen(LEGACY_MIRROR_PORT);
-  console.log(`e2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
+  console.log(`[me2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
 } catch (e) { console.error(`[me2-daemon] legacy mirror :${LEGACY_MIRROR_PORT} failed: ${String(e).slice(0, 100)}`); }
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

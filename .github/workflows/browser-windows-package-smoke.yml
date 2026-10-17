@@ -41,6 +41,7 @@ permissions:
 jobs:
   package_identity_preflight:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       package_version: ${{ steps.identity.outputs.package_version }}
       source_head: ${{ steps.identity.outputs.source_head }}

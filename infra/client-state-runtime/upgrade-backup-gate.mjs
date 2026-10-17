@@ -12,6 +12,14 @@ const fail = reason => ({
   schema:'metaengine.installed-upgrade-backup-gate.v1',
   backup_verified:false, upgrade_authorized:false,
   automatic_retry_allowed:false, authority_effect:false, reason,
+  // Full result shape on EVERY early return. Consumers and negative tests
+  // always read the archive/restore fields; a fail-closed early exit must
+  // never surface as `undefined` downstream (this exact shape gap produced
+  // "actual: undefined" assertion failures in CI run 39026175976 on the
+  // pinned historical W58 source).
+  archive_integrity_verified:false, native_acl_verified:false,
+  restore_verified:false, physical_restore_proven:false,
+  restore_receipt_consistent:false, restore_reason:'RESTORE_NOT_EVALUATED',
 });
 const canonical = s => process.platform === 'win32' ? s.toLowerCase() : s;
 

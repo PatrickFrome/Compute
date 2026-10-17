@@ -73,7 +73,17 @@ try {
     }
     Start-Sleep -Milliseconds 250
   }
-  if (-not $stable -or $stable.details.visible -ne $true) { throw 'soak_normal_ui_not_stable_visible' }
+  if (-not $stable) {
+    # Surface the exact blocking diagnostic instead of a generic timeout:
+    # the stderr JSON (e.g. LOCAL_PROVIDER_STARTUP_BLOCKED / owner admission
+    # phase) and the journal states actually reached in this boot.
+    $errTail = (Get-Content $normalErr -ErrorAction SilentlyContinue | Select-Object -Last 5) -join ' | '
+    if (Test-Path $journal -PathType Leaf) {
+      try { $journalTail = ((Get-Content $journal -Raw | ConvertFrom-Json).events | Select-Object -Last 5 | ForEach-Object { $_.state }) -join ',' } catch { $journalTail = 'journal_unreadable' }
+    } else { $journalTail = 'journal_missing' }
+    throw "soak_normal_ui_not_stable_visible:normal_err=[$errTail];journal_states=[$journalTail]"
+  }
+  if ($stable.details.visible -ne $true) { throw 'soak_normal_ui_stable_not_visible' }
 
   $startup = Get-Content $journal -Raw | ConvertFrom-Json
   $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1

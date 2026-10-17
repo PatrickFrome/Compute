@@ -357,11 +357,22 @@ export function nextReadyTask(agentRole: string): TaskRow | null {
 export function nextReadyTaskAny(): TaskRow | null {
   return (db.query(`SELECT * FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? ORDER BY created_at LIMIT 1`).get(Date.now()) as TaskRow | null) ?? null;
 }
+let taskColumns: Set<string> | null = null;
 export function updateTask(id: string, patch: Partial<TaskRow>) {
-  const cols = Object.keys(patch);
+  // Значения параметризованы, но имена колонок интерполируются в SQL.
+  // Белый список РЕАЛЬНЫХ колонок (PRAGMA отражает таблицу после всех
+  // миграций): любой будущий вызов с пользовательскими ключами получит
+  // честное «колонка неизвестна — патч отклонён», а не SQL-инъекцию.
+  if (!taskColumns) {
+    taskColumns = new Set(
+      (db.query(`PRAGMA table_info(tasks)`).all() as Array<{ name: string }>).map((r) => r.name),
+    );
+  }
+  const cols = Object.keys(patch).filter((c) => taskColumns!.has(c));
   if (!cols.length) return;
   const set = cols.map((c) => `${c}=?`).join(",");
-  db.query(`UPDATE tasks SET ${set}, updated_at=? WHERE id=?`).run(...(Object.values(patch) as unknown[]), nowIso(), id);
+  const values = cols.map((c) => (patch as Record<string, unknown>)[c]);
+  db.query(`UPDATE tasks SET ${set}, updated_at=? WHERE id=?`).run(...values, nowIso(), id);
 }
 export function cancelTask(id: string) {
   const t = getTask(id);
