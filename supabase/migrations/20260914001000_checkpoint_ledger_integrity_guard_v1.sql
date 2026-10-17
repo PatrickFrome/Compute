@@ -2,6 +2,12 @@
 -- New rows must seal the exact jsonb state text they persist. Historical rows are
 -- not rewritten or backfilled here; append-only semantics make any discrepancy
 -- explicit evidence debt instead of silently normalizing it away.
+--
+-- Guarded: destruktion_meta.checkpoint_ledger is an infra object restored by
+-- infra/pigsty/bootstrap/05-reconstruct-cloud-era-objects.sql, not by this
+-- migration chain. Per the documented fresh-project contract
+-- (supabase/operations/20261005191500) the trigger DDL below skips with NOTICE
+-- when the ledger table is absent instead of failing the fresh run.
 
 create or replace function destruktion_meta.checkpoint_ledger_integrity_guard_v1()
 returns trigger
@@ -29,15 +35,23 @@ revoke all on function destruktion_meta.checkpoint_ledger_integrity_guard_v1() f
 revoke all on function destruktion_meta.checkpoint_ledger_integrity_guard_v1() from anon;
 revoke all on function destruktion_meta.checkpoint_ledger_integrity_guard_v1() from authenticated;
 
-drop trigger if exists checkpoint_ledger_insert_integrity_v1 on destruktion_meta.checkpoint_ledger;
-create trigger checkpoint_ledger_insert_integrity_v1
-before insert on destruktion_meta.checkpoint_ledger
-for each row execute function destruktion_meta.checkpoint_ledger_integrity_guard_v1();
+do $guard$
+begin
+  if to_regclass('destruktion_meta.checkpoint_ledger') is null then
+    raise notice 'skip: destruktion_meta.checkpoint_ledger not present (restored by infra/pigsty/bootstrap/05, not this chain)';
+  else
+    drop trigger if exists checkpoint_ledger_insert_integrity_v1 on destruktion_meta.checkpoint_ledger;
+    create trigger checkpoint_ledger_insert_integrity_v1
+    before insert on destruktion_meta.checkpoint_ledger
+    for each row execute function destruktion_meta.checkpoint_ledger_integrity_guard_v1();
 
-drop trigger if exists checkpoint_ledger_immutable_v1 on destruktion_meta.checkpoint_ledger;
-create trigger checkpoint_ledger_immutable_v1
-before update or delete on destruktion_meta.checkpoint_ledger
-for each row execute function destruktion_meta.checkpoint_ledger_integrity_guard_v1();
+    drop trigger if exists checkpoint_ledger_immutable_v1 on destruktion_meta.checkpoint_ledger;
+    create trigger checkpoint_ledger_immutable_v1
+    before update or delete on destruktion_meta.checkpoint_ledger
+    for each row execute function destruktion_meta.checkpoint_ledger_integrity_guard_v1();
+  end if;
+end
+$guard$;
 
 comment on function destruktion_meta.checkpoint_ledger_integrity_guard_v1() is
   'METAENGINE mainline checkpoint ledger guard: verifies state_hash at insert and rejects UPDATE/DELETE. Historical rows are never rewritten by this migration.';

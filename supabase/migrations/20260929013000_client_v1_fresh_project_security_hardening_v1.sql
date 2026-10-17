@@ -13,8 +13,20 @@ grant execute on function public.h205f22_a2_supervisor_mesh_heartbeat_v1(text,te
   to service_role;
 
 -- Platform event-trigger helper must never be callable through the exposed API.
-revoke all on function public.rls_auto_enable()
-  from public, anon, authenticated;
+-- Guarded: public.rls_auto_enable() is defined nowhere in this chain (live-only
+-- platform helper). Per the documented fresh-project contract
+-- (supabase/operations/20261005191500) a missing function skips with NOTICE
+-- instead of failing the fresh migration run.
+do $guard$
+begin
+  if to_regprocedure('public.rls_auto_enable()') is null then
+    raise notice 'skip: public.rls_auto_enable() is defined nowhere in this chain (live-only object)';
+  else
+    revoke all on function public.rls_auto_enable()
+      from public, anon, authenticated;
+  end if;
+end
+$guard$;
 
 -- Trigger function uses only explicitly qualified realtime.send plus pg_catalog helpers.
 alter function public.glm_browser_pulse_notify_v1()
