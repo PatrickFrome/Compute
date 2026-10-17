@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         Path(args.output).write_bytes(_canonical_bytes(result) + b"\n")
         return 0
-    except (ReplicationError, Exception) as exc:
+    except Exception as exc:
         # Preserve known contract errors while preventing provider CLI details from
         # being promoted into an evidence file. stderr is operational only.
         if isinstance(exc, ReplicationError):

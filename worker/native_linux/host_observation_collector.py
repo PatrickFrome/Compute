@@ -227,9 +227,13 @@ def collect_observation(source: dict[str, str]) -> dict[str, Any]:
 
 
 def main() -> int:
-    payload = json.load(sys.stdin)
-    source = _validate_input(payload)
-    observation = collect_observation(source)
+    try:
+        payload = json.load(sys.stdin)
+        source = _validate_input(payload)
+        observation = collect_observation(source)
+    except (OSError, ValueError) as exc:  # json.JSONDecodeError is a ValueError subclass
+        print(f"W1_HOST_OBSERVATION_REJECTED:{exc}", file=sys.stderr)
+        return 1
     json.dump(observation, sys.stdout, sort_keys=True, indent=2)
     sys.stdout.write("\n")
     return 0

@@ -74,8 +74,12 @@ def compose(bundle: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    raw = json.load(sys.stdin)
-    result = compose(raw)
+    try:
+        raw = json.load(sys.stdin)
+        result = compose(raw)
+    except (OSError, ValueError) as exc:  # json.JSONDecodeError is a ValueError subclass
+        print(f"W1_ADMISSION_COMPOSITION_INPUT_REJECTED:{exc}", file=sys.stderr)
+        return 1
     json.dump(result, sys.stdout, sort_keys=True, indent=2)
     sys.stdout.write("\n")
     return 0

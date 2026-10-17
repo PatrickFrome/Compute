@@ -29,53 +29,89 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 -- 1. Схема: недостающие колонки + индексы
 -- ---------------------------------------------------------------------------
--- канонический uuid-default (реконструкция создала таблицу без default)
-ALTER TABLE destruktion_meta.devos_fleet_task_h205f22
-  ALTER COLUMN task_id SET DEFAULT gen_random_uuid();
+-- Каждый блок обёрнут в guard: bootstrap-шаг 05 создаёт таблицы, но 09 не
+-- должен hard-fail-ить, если его запускают на кластере без реконструкции
+-- (например, restore-каталог без 05) — вместо ошибки печатается NOTICE+skip.
 
-ALTER TABLE destruktion_meta.devos_fleet_task_h205f22
-  ADD COLUMN IF NOT EXISTS idempotency_key text;
+DO $guard$
+BEGIN
+  IF to_regclass('destruktion_meta.devos_fleet_task_h205f22') IS NULL THEN
+    RAISE NOTICE 'skip 09 §1 (task-plane DDL): destruktion_meta.devos_fleet_task_h205f22 missing — run 05-reconstruct-cloud-era-objects.sql';
+  ELSE
+    -- канонический uuid-default (реконструкция создала таблицу без default)
+    ALTER TABLE destruktion_meta.devos_fleet_task_h205f22
+      ALTER COLUMN task_id SET DEFAULT gen_random_uuid();
 
-CREATE UNIQUE INDEX IF NOT EXISTS devos_fleet_task_ws_idem_uq_v9
-  ON destruktion_meta.devos_fleet_task_h205f22 (workspace_id, idempotency_key)
-  WHERE idempotency_key IS NOT NULL;
+    ALTER TABLE destruktion_meta.devos_fleet_task_h205f22
+      ADD COLUMN IF NOT EXISTS idempotency_key text;
 
-CREATE INDEX IF NOT EXISTS devos_fleet_task_ready_pick_idx_v9
-  ON destruktion_meta.devos_fleet_task_h205f22 (workspace_id, role, priority, created_at)
-  WHERE state = 'READY';
+    CREATE UNIQUE INDEX IF NOT EXISTS devos_fleet_task_ws_idem_uq_v9
+      ON destruktion_meta.devos_fleet_task_h205f22 (workspace_id, idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
 
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS task_id uuid;
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS point_id text;
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS lease_generation bigint;
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS base_sha text;
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS claim_class text;
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS expires_at timestamptz;
-ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
-  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT clock_timestamp();
+    CREATE INDEX IF NOT EXISTS devos_fleet_task_ready_pick_idx_v9
+      ON destruktion_meta.devos_fleet_task_h205f22 (workspace_id, role, priority, created_at)
+      WHERE state = 'READY';
+  END IF;
+END
+$guard$;
 
--- канонический инвариант: один активный claim на агента (workspace)
-CREATE UNIQUE INDEX IF NOT EXISTS devos_fleet_claim_agent_active_uq_v9
-  ON destruktion_meta.devos_fleet_claim_h205f22 (workspace_id, agent_id)
-  WHERE state = 'ACTIVE';
+DO $guard$
+BEGIN
+  IF to_regclass('destruktion_meta.devos_fleet_claim_h205f22') IS NULL THEN
+    RAISE NOTICE 'skip 09 §1 (claim-plane DDL): destruktion_meta.devos_fleet_claim_h205f22 missing — run 05-reconstruct-cloud-era-objects.sql';
+  ELSE
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS task_id uuid;
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS point_id text;
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS lease_generation bigint;
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS base_sha text;
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS claim_class text;
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+    ALTER TABLE destruktion_meta.devos_fleet_claim_h205f22
+      ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT clock_timestamp();
+
+    -- канонический инвариант: один активный claim на агента (workspace)
+    CREATE UNIQUE INDEX IF NOT EXISTS devos_fleet_claim_agent_active_uq_v9
+      ON destruktion_meta.devos_fleet_claim_h205f22 (workspace_id, agent_id)
+      WHERE state = 'ACTIVE';
+  END IF;
+END
+$guard$;
 
 -- runtime-control seeding (lease_v1/enqueue_v1 требуют каноническую строку;
 -- default-политика: admission открыт, refill включён, floor=0)
-INSERT INTO destruktion_meta.devos_fleet_runtime_control_h205f22
-  (workspace_id, generation_floor, refill_enabled, supervisor_admission_enabled, authority_effect)
-VALUES ('2de9f84b-7c0a-4091-911c-894ff1d6eaf4', 0, true, true, false)
-ON CONFLICT (workspace_id) DO NOTHING;
+DO $guard$
+BEGIN
+  IF to_regclass('destruktion_meta.devos_fleet_runtime_control_h205f22') IS NULL THEN
+    RAISE NOTICE 'skip 09 §1 (runtime-control seeding): destruktion_meta.devos_fleet_runtime_control_h205f22 missing — run 05-reconstruct-cloud-era-objects.sql';
+  ELSE
+    INSERT INTO destruktion_meta.devos_fleet_runtime_control_h205f22
+      (workspace_id, generation_floor, refill_enabled, supervisor_admission_enabled, authority_effect)
+    VALUES ('2de9f84b-7c0a-4091-911c-894ff1d6eaf4', 0, true, true, false)
+    ON CONFLICT (workspace_id) DO NOTHING;
+  END IF;
+END
+$guard$;
 
-ALTER TABLE destruktion_meta.devos_fleet_event_h205f22
-  ADD COLUMN IF NOT EXISTS idempotency_key text;
-CREATE UNIQUE INDEX IF NOT EXISTS devos_fleet_event_idem_uq_v9
-  ON destruktion_meta.devos_fleet_event_h205f22 (idempotency_key)
-  WHERE idempotency_key IS NOT NULL;
+DO $guard$
+BEGIN
+  IF to_regclass('destruktion_meta.devos_fleet_event_h205f22') IS NULL THEN
+    RAISE NOTICE 'skip 09 §1 (event-plane DDL): destruktion_meta.devos_fleet_event_h205f22 missing — run 05-reconstruct-cloud-era-objects.sql';
+  ELSE
+    ALTER TABLE destruktion_meta.devos_fleet_event_h205f22
+      ADD COLUMN IF NOT EXISTS idempotency_key text;
+    CREATE UNIQUE INDEX IF NOT EXISTS devos_fleet_event_idem_uq_v9
+      ON destruktion_meta.devos_fleet_event_h205f22 (idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
+  END IF;
+END
+$guard$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Хелпер событий (сигнатура ровно та, что дергает reconcile_v1)

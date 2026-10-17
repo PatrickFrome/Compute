@@ -164,10 +164,14 @@ def evaluate(observation: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    observation = json.load(sys.stdin)
-    if not isinstance(observation, dict):
-        raise ValueError("observation must be an object")
-    decision = evaluate(observation)
+    try:
+        observation = json.load(sys.stdin)
+        if not isinstance(observation, dict):
+            raise ValueError("observation must be an object")
+        decision = evaluate(observation)
+    except (OSError, ValueError) as exc:  # json.JSONDecodeError is a ValueError subclass
+        print(f"W1_HOST_SAFETY_INPUT_REJECTED:{exc}", file=sys.stderr)
+        return 1
     json.dump(decision, sys.stdout, sort_keys=True, indent=2)
     sys.stdout.write("\n")
     return 0 if decision["outcome"] == "SAFETY_ELIGIBLE_NON_PERSISTENT" else 2
