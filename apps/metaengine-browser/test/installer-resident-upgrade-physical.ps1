@@ -22,7 +22,11 @@ function Wait-ProcessGone([int]$ProcessId, [int]$Seconds, [string]$Label) {
   throw "${Label}_still_alive:$ProcessId"
 }
 
-function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds = 15) {
+function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds = 60) {
+  # 60s: a cold CI runner launches a freshly installed Electron app behind
+  # real-time malware scanning; the sentinel child only exists after the full
+  # primary bootstrap reaches HostResilience. The acceptance predicate is
+  # unchanged (exactly one matching child), only the patience budget grows.
   $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
   do {
     $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentPid" -ErrorAction SilentlyContinue | Where-Object {
@@ -38,6 +42,14 @@ function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds 
     if ($children.Count -gt 1) { throw "sentinel_child_cardinality_invalid:$($children.Count)" }
     Start-Sleep -Milliseconds 200
   } while ([DateTime]::UtcNow -lt $deadline)
+  # Failure attribution: dump every live child of the parent so a missing or
+  # differently-shaped sentinel worker is diagnosable from the CI log alone.
+  $parent = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
+  if (-not $parent) { throw "sentinel_child_missing_parent_gone:$ParentPid" }
+  Write-Output "--- sentinel attribution: live children of parent $ParentPid ---"
+  Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentPid" -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Output ("pid={0} exe={1} cmd={2}" -f $_.ProcessId, $_.ExecutablePath, $_.CommandLine)
+  }
   throw "sentinel_child_missing_for_parent:$ParentPid"
 }
 

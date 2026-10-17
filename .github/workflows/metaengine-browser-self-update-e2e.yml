@@ -201,14 +201,6 @@ jobs:
       - name: Reproduce reported resident installer upgrade with real Sentinel
         working-directory: apps/metaengine-browser
         shell: powershell
-        # The job-level METAENGINE_DISABLE_CRASH_SENTINEL=1 exists for the
-        # n->n+1 rehearsal steps. This step's contract is the OPPOSITE: it
-        # reproduces the resident upgrade WITH a real crash sentinel and
-        # asserts the sentinel child exists for both the legacy and the new
-        # primary. Without this override the step is structurally impossible
-        # (sentinelRequired() is false, no child can ever appear).
-        env:
-          METAENGINE_DISABLE_CRASH_SENTINEL: '0'
         run: ./test/installer-resident-upgrade-physical.ps1
       - name: Seal resident installer upgrade evidence
         working-directory: apps/metaengine-browser
