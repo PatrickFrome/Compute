@@ -13,18 +13,23 @@
  *
  * Реестр шины не трогаем (47/47): это enrichment-сервер, как :3041 REST.
  * События в hash-chain не пишем (зрители = спам); наблюдаемость — /stats.
+ *
+ * AUDIT FIXPACK2 (2026-10-18): сервер раньше был БЕЗ аутентификации и с
+ * Access-Control-Allow-Origin: * — любой сайт мог fetch()"ить JPEG-кадры живого
+ * Chromium оператора (drive-by эксфильтрация экрана), а любой сетевой пир —
+ * тянуть MJPEG-поток. Теперь каждая просьба проходит тот же гейт, что :3041
+ * (auth.ts: loopback | bearer ME2_API_TOKEN | Origin-allowlist), CORS —
+ * reflect-origin только из ME2_ALLOWED_ORIGINS (паритет с fixpack C2).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { authorizeHandshake, corsHeadersFor } from "./auth";
 
 // R51 (фаза C): env-оверрайд для изолированного gate-probe (дефолт — production :3043)
 const SC_PORT = Number(process.env.ME2_SCREENCEAST_PORT ?? 3043);
 const CDP_TTL_MS = 15_000;
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,OPTIONS",
-  "Access-Control-Allow-Headers": "*",
-};
+// AUDIT FIXPACK2: статический ACAO:* удалён — CORS выдаётся per-request через
+// corsHeadersFor (reflect только разрешённых origins; по умолчанию кросс-домен закрыт).
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -143,7 +148,7 @@ function parseOpts(url: URL): ClientOpts {
 }
 
 // ── /screencast.jpg — одиночный кадр ───────────────────────────────
-async function snapshotJpeg(o: ClientOpts): Promise<Response> {
+async function snapshotJpeg(o: ClientOpts, cors: Record<string, string>): Promise<Response> {
   let lastErr = "capture failed";
   for (let tryN = 0; tryN < 2; tryN++) {
     const info = await discoverCdp(tryN > 0); // 2-я попытка — форс-редискавери (badlist отсеет мёртвую цель)
@@ -165,18 +170,18 @@ async function snapshotJpeg(o: ClientOpts): Promise<Response> {
       framesTotal++;
       const buf = Buffer.from(String(shot.data ?? ""), "base64");
       if (!buf.length) throw new Error("empty jpeg");
-      return new Response(buf, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store", ...CORS } });
+      return new Response(buf, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store", ...cors } });
     } catch (e) {
       lastErr = e instanceof Error ? e.message : "capture failed";
       cdpCache.info = null;
     } finally { try { ws.close(); } catch { /* noop */ } }
   }
-  return new Response(`screencast: ${lastErr}`, { status: 502, headers: CORS });
+  return new Response(`screencast: ${lastErr}`, { status: 502, headers: cors });
 }
 
 // ── /stream — MJPEG multipart, per-client CDP-сессия ───────────────
 const BOUNDARY = "me2frame";
-function streamMjpeg(o: ClientOpts): Response {
+function streamMjpeg(o: ClientOpts, cors: Record<string, string>): Response {
   const encoder = new TextEncoder();
   let closed = false;
   let counted = false;
@@ -266,19 +271,19 @@ function streamMjpeg(o: ClientOpts): Response {
     cancel() { teardown(); },
   });
   return new Response(stream, {
-    headers: { "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`, "Cache-Control": "no-store", Connection: "close", ...CORS },
+    headers: { "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`, "Cache-Control": "no-store", Connection: "close", ...cors },
   });
 }
 
 // ── /stats ─────────────────────────────────────────────────────────
-async function statsJson(): Promise<Response> {
+async function statsJson(cors: Record<string, string>): Promise<Response> {
   const info = cdpCache.info ?? (await discoverCdp());
   const body = {
     ok: true, service: "me2-screencast", port: SC_PORT,
     cdp: info ? { port: info.port, target: info.targetUrl } : null,
     streams: activeStreams, frames: framesTotal, ts: new Date().toISOString(),
   };
-  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", ...CORS } });
+  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", ...cors } });
 }
 
 const DOC = `<!doctype html><meta charset="utf-8"><title>ME2 screencast :${SC_PORT}</title>
@@ -294,18 +299,26 @@ export function startScreencastServer() {
   Bun.serve({
     port: SC_PORT,
     idleTimeout: 0, // MJPEG живёт долго; кадры/каденс задаёт клиент
-    async fetch(req) {
+    async fetch(req, server) {
+      // AUDIT FIXPACK2: гейт идентичен :3041 — loopback без токена, удалённые пиры
+      // только с bearer ME2_API_TOKEN, чужой Origin отклоняется (CSRF/drive-by).
+      const reqHeaders = Object.fromEntries(req.headers.entries());
+      const verdict = authorizeHandshake({ headers: reqHeaders, address: server.requestIP(req)?.address ?? undefined });
+      const cors = corsHeadersFor({ headers: reqHeaders });
+      if (!verdict.ok) {
+        return new Response(JSON.stringify({ ok: false, error: verdict.error }), { status: verdict.status, headers: { "Content-Type": "application/json", ...cors } });
+      }
       const url = new URL(req.url);
-      if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+      if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
       try {
-        if (url.pathname === "/screencast.jpg") return await snapshotJpeg(parseOpts(url));
-        if (url.pathname === "/stream") return streamMjpeg(parseOpts(url));
-        if (url.pathname === "/stats") return await statsJson();
-        return new Response(DOC, { headers: { "Content-Type": "text/html; charset=utf-8", ...CORS } });
+        if (url.pathname === "/screencast.jpg") return await snapshotJpeg(parseOpts(url), cors);
+        if (url.pathname === "/stream") return streamMjpeg(parseOpts(url), cors);
+        if (url.pathname === "/stats") return await statsJson(cors);
+        return new Response(DOC, { headers: { "Content-Type": "text/html; charset=utf-8", ...cors } });
       } catch (e) {
-        return new Response(`screencast error: ${e instanceof Error ? e.message : String(e)}`, { status: 500, headers: CORS });
+        return new Response(`screencast error: ${e instanceof Error ? e.message : String(e)}`, { status: 500, headers: cors });
       }
     },
   });
-  console.log(`[me2-daemon] screencast :${SC_PORT} (snapshot /stream /stats via CDP)`);
+  console.log(`[me2-daemon] screencast :${SC_PORT} (auth-gated; snapshot /stream /stats via CDP)`);
 }
