@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -14,8 +14,9 @@ import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 const exec = promisify(execFile);
 const bin = process.env.LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR;
 const python = process.env.LOCAL_STATE_TEST_PYTHON;
+const pythonAvailable = Boolean(python && spawnSync(python, ['--version'], { encoding: 'utf8', windowsHide: true }).status === 0);
 
-test('disposable PG17 refuses missing migration fences and preprocesses quoted restore identifiers', { skip: !bin || !python, timeout: 180000 }, async t => {
+test('disposable PG17 refuses missing migration fences', { skip: !bin, timeout: 180000 }, async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-report-fences-')));
   const data = path.join(root, 'pgdata');
   const password = randomBytes(32).toString('hex');
@@ -44,10 +45,12 @@ test('disposable PG17 refuses missing migration fences and preprocesses quoted r
   sql = postgres({ host: '127.0.0.1', port, database: 'postgres', username: 'report_fixture_owner', password, max: 1, prepare: false, onnotice: () => {} });
   assert.match((await sql`SELECT version()`)[0].version, /PostgreSQL 17\./);
   await sql.unsafe('CREATE SCHEMA destruktion_meta; CREATE SCHEMA "quoted""schema"; CREATE TABLE "quoted""schema"."quoted""table"(n integer); INSERT INTO "quoted""schema"."quoted""table" SELECT generate_series(1,7);');
-  const environment = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, PGPASSWORD: password, PGCONNECT_TIMEOUT: '5' };
-  const queryFixture = new URL('../pigsty/bootstrap/tests/query_fixture.py', import.meta.url);
-  const query = await exec(python, [fileURLToPath(queryFixture), `host=127.0.0.1 port=${port} dbname=postgres user=report_fixture_owner`], { env: environment, windowsHide: true, timeout: 40000 });
-  assert.equal(query.stdout.trim(), 'quoted_identifier_count=7');
+  if (pythonAvailable) {
+    const environment = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, PGPASSWORD: password, PGCONNECT_TIMEOUT: '5' };
+    const queryFixture = new URL('../pigsty/bootstrap/tests/query_fixture.py', import.meta.url);
+    const query = await exec(python, [fileURLToPath(queryFixture), `host=127.0.0.1 port=${port} dbname=postgres user=report_fixture_owner`], { env: environment, windowsHide: true, timeout: 40000 });
+    assert.equal(query.stdout.trim(), 'quoted_identifier_count=7');
+  }
 
   const readGuard = async filename => {
     const text = await fs.readFile(new URL('../../supabase/migrations/' + filename, import.meta.url), 'utf8');
