@@ -44,14 +44,21 @@ test('W43 protected integrated native, package, SQL, completion, critic and UI s
     if (baselineRef === 'HEAD') assert.equal(git('hash-object', filename), expected, 'uncommitted source drift: ' + filename);
   }
   const version = JSON.parse(source('apps/metaengine-browser/package.json')).version;
-  const testOnly = JSON.parse(source('coordination/operator-control/client-critical-closure.manifest.json')).test_candidate;
+  const closure = JSON.parse(source('coordination/operator-control/client-critical-closure.manifest.json'));
+  const testOnly = closure.test_candidate;
   if(testOnly){
     assert.equal(testOnly.classification,'ISOLATED_TEST_PACKAGE_ONLY');
     assert.equal(testOnly.branch,'work/client-operational-repair-20261015');
     assert.equal(testOnly.production_release_authorized,false);
     assert.equal(testOnly.installed_mutation_authorized,false);
     assert.equal(JSON.parse(git('show','49d050ff127e22ca27fbe3514324ba99832afb24:apps/metaengine-browser/package.json')).version,manifest.package_version_unchanged);
-    assert.equal(version,testOnly.version);
+    // The earlier disposable version stays historical; only current_source_candidate
+    // can authorize the version of the new source-only branch.
+    assert.equal(version,closure.current_source_candidate?.package_version ?? testOnly.version);
+    if (closure.current_source_candidate) {
+      assert.equal(closure.current_source_candidate.historical_package_version,testOnly.version);
+      assert.equal(closure.current_source_candidate.production_ready,false);
+    }
     assert.notEqual(version,manifest.package_version_unchanged);
   }else assert.equal(version, manifest.package_version_unchanged);
   assert.equal(manifest.package_version_owner, 'W46');
