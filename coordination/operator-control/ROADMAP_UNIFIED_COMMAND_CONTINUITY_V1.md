@@ -3,6 +3,37 @@
 Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY UNQUALIFIED
 Date: 2026-10-15 (current audit; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
+
+## Architectural adoption — Autonomous Development Fabric V1 (2026-10-17)
+
+**ACCEPTED DESIGN / FIRST SOURCE SLICE IN PROGRESS / INSTALLED-LIVE UNQUALIFIED.**
+The binding architecture decision record is
+[`docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md`](../../docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md).
+This is one ADR beneath the existing canonical Level-1 roadmap, **not a
+replacement roadmap**.
+
+The development center of gravity changes to a durable, authenticated,
+independently verified Goal → PG17 claim/lease → worktree edit/tests → Critic →
+checkpoint → continued task after restart. The existing Supervisor remains
+the sole physical scheduler, with Host/Guardian custody unchanged. Logical
+tasks/agents and their future task-bound mailboxes outlive physical Browser
+tabs; finite provider slots never become a global limit on durable work.
+No Supabase, cloud execution, second scheduler, automatic replay of
+AMBIGUOUS effects, or agent-controlled trust promotion.
+
+**First vertical source implementation:** distinguish KNOWN vs UNKNOWN own-DB
+task demand in the existing Fleet governor. Missing/malformed backlog must not
+be converted into a zero-load retirement/provisioning effect. A physical
+FLEET_RECONCILE is permitted only for KNOWN demand; large logical backlog
+remains independent of physical tab capacity. This is advisory projection and
+gating, **not** an implemented logical-agent registry or a new authority.
+
+**Next evidence gates:** (1) exact installed Owner/Guardian/PG17; (2) one real
+bounded serial coding loop with independent Critic and restart readback;
+(3) durable logical-agent/session binding and causal mailboxes; (4) browser/UI
+lifecycle independence and measured elastic fleet; (5) governed RSI rollout.
+Source/unit tests alone do not qualify installed autonomous execution.
+
 Canonical development base at adoption: `2bc3f3c13a75ed9708d657ae37db5cac610cc13f`
 Adoption branch: `work/unified-command-continuity-p0-v1`
 
@@ -12,7 +43,36 @@ METAENGINE must continuously develop the assigned goal through coordinating, com
 
 **The owner's 2026-10-15 request for 10 slots applies ONLY to the external DevFleet development wave. It is not a METAENGINE capacity policy.** Account for each execution backend's available resources independently, with queued logical work and dynamic allocation, without converting one backend's current capacity into an engine-wide agent limit. Per-request page/batch sizes are transport bounds, not graph-size limits. Explicit owner-set project policies remain possible and must not be silently overwritten.
 
-## Current checkpoint — 2026-10-15 / candidate, recovery and autonomy re-baseline
+## Current local checkpoint — 2026-10-15 / operational repair and installed acceptance
+
+**Local development checkout:** `C:/Users/User/Desktop/metaen/client-operational-repair-20261015`, based on `86e2187a9d96e21c92badfcc9d0b06410fc0e522` from `work/client-artifact-cardinality-repair-20261015` ([Draft #1311](https://github.com/PatrickFrome/Compute/pull/1311)), test identity `0.7.0-dev.1107139874561.1`. This source includes the earlier `4835901` recovery diagnostics and the subsequent capability/fixture repairs. The owner's current direction is to continue development locally in `metaen`; this checkpoint does not claim publication of the local follow-up or qualify changed source under the baseline's reserved package identity.
+
+The next acceptance target remains **one useful autonomous coding loop, independently verified and continued once after restart**, followed by sustained coordination, communication and recursive child work. Source regressions, generated fixtures and external DevFleet occupancy remain separate evidence from that installed result.
+
+| Evidence bound to the current baseline | Observed result | Remaining acceptance |
+|---|---|---|
+| Candidate source identity | Local Git contains `86e2187` and confirms `4835901` is its ancestor | Verify changes and record their new local source identity before attributing results to them |
+| Windows package qualification, readback at 2026-10-15 20:27 UTC (23:27 Moscow) | Normal installation and first-run steps passed; the real Owner-backed step was still running | Terminal Owner/PG17/GUI and overall workflow outcome; an in-progress step is not PASS |
+| Local installed Browser | Version remains `0.7.0-dev.37781000059.1`; the current candidate is not confirmed installed locally | Exact installed payload, ordinary window, protected Owner/Host/PG health and stable execution readiness |
+| Interrupted-start recovery | Source preserves a finite startup recovery category and health-failure witness | Resolve the historical `STARTING` record through independently verified child custody; an absent PID alone does not permit lock removal |
+| Authenticated autonomous development | No installed W30 lease → real edit/tests → W39 independent critic → checkpoint → restart continuation receipt established | Complete and read back one useful loop on the same installed source and authority chain |
+
+**Concrete production wiring gaps confirmed in this source:**
+
+- `apps/metaengine-browser/src/supervisor-device-identity.mjs` defines `bindHostOwnerGenesisW74`, but the production Browser/runtime modules contain no caller. The existing genesis implementation and its fixture tests therefore do not establish default installed Owner initialization.
+- `apps/metaengine-browser/src/final-runtime-activation.mjs` and `apps/metaengine-browser/src/host-agent-remote-composition.mjs` each construct `createHostPrivateCustodyW76({identity})`. In `host-private-custody-w76.mjs`, `readExistingGatewaySecret`, `readExistingOwnPostgresBirth` and `readExistingProtectedBackupRoot` all default to `null`; these production calls supply none of them. The corresponding credential, PostgreSQL and backup readers consequently return no trusted evidence. A successful ordinary launch would not close this separate Owner/context integration gap.
+
+### Ordered local work from this checkpoint
+
+1. Complete the current Owner/API/Edge diagnosis with disposable native fixtures and preserve exact terminal evidence. Qualify the candidate's actual installed payload and visible startup before reporting local installation success.
+2. Implement and verify interrupted-start custody/reconciliation without replaying ambiguous task effects or stopping attached PostgreSQL. Historical records with incomplete child custody remain explicit recovery blockers.
+3. Connect W74 initialization and W76 private readers to the existing authenticated Host/Guardian, own-PostgreSQL and protected credential/backup capabilities. Require matching Owner incarnation, generation, source and independent readback; retain UNKNOWN when those capabilities are unavailable.
+4. Run an authenticated goal through the existing Supervisor/W30 executor, real code edit/tests, W39 independent verification and own-PG checkpoint; restart and prove the next admitted task executes once.
+5. Extend the verified loop to communicating roles and recursive logical work under actual backend resource admission. Complete same-source package, restore/rollback and sustained-run evidence before marking installed continuity or R1/C1/C2 VERIFIED.
+
+The following checkpoints are retained as historical evidence. Their older heads, in-progress statuses and package identities do not describe the current local candidate.
+
+## Historical checkpoint — 2026-10-15 / candidate, recovery and autonomy re-baseline
 
 The next acceptance target is **one productive autonomous coding loop followed by a verified continuation after restart**, then sustained coordinating/communicating/recursive agents. DevFleet waves are external development capacity; they do not satisfy that target or impose a METAENGINE-wide ceiling. Existing owner-set project policies remain authoritative. The unbounded-default migration applies to new projects only; logical queues may exceed available physical execution slots.
 
@@ -367,3 +427,50 @@ Newly published **DRAFT** #1287 W59 `8ec70b6fafb1689be0ba2075f0e54e6c505d5106` i
 Further actual heads independently re-read at this checkpoint: #1285 W61 `7d246704509b1d99a788242c64a51e1c30454586` (claims generated typed JSONB Host-cap fixture + two-cluster restore, own-PG birth still depends on authentic Host), #1286 W63 `6a124ad0032a5beaa583de978d9bf37b4be35f34` (Windows Git fixture), #1288 W64 `a5f3cc47b3b32d52a52c73e281a72142587ad7af` (PG pipe/inheritance lifecycle corrected at a prior exact SHA, latest job queued), #1290 W60 `b4701788dd41273386b7593d26b13ee59ed2f9e4` (six read methods composition source; authentic Owner custody, Guardian issuer, release signer/secret and independent birth still fail CLOSED). W62's own PR says Windows Bun source typing CI SUCCESS at previous SHA but **57 SelfUpdate failures**, current physical R97/NSIS/SLSA and distinct package freeze are still blocked. These distinct PR heads/earlier greens **cannot be promoted as integrated final SHA evidence**. C2 STAGING/SYNTHETIC and genuine native installed Agent origin remain separate.
 
 W65 local generated Windows regression reproduction at **pinned historical W58** `41d755bb9ecd53bd509163f9219473c32d7439b6` using native WindowsPowerShell 5.1 instead of the originally failing inherited `pwsh` context: **29 upgrade/restore tests: 28 PASS, 1 symlink-privilege SKIP, 0 FAIL**; **15 native ACL/Host IPC tests: 14 PASS, 1 symlink-privilege SKIP, 0 FAIL**. Independent W65 exact local current-source helper/falsifier: **36/36 PASS, 0 SKIP**. These reproduce a *Windows fixture environment* issue but are not GitHub push+PR terminal proof, no signed/installed Owner proof and no real PG17 restore. W65 current-head GitHub workflow `38668467063` with Windows native ACL job `116205721437`, Windows critic `116205721527`, Ubuntu critic `116205721193` was **QUEUED** at this observation; mandatory final decision remains **BLOCKED pending actual terminal exact-head push and PR receipts**, and run state must be re-read before promotion.
+
+
+## ADF-1 current Windows CI and native readback follow-up — 2026-10-17
+
+This is a continuation of the accepted Autonomous Development Fabric V1 ADR.
+Current published source inspected: PR #1312,
+`716f3b576b4643ff771912827df1a902a8865bf1`, directly above #1311.
+These terminal receipts qualify only that SHA, never an untested successor.
+
+| Exact-head CI | Terminal result | Scope |
+| --- | --- | --- |
+| [Package Smoke 39016558468](https://github.com/PatrickFrome/Compute/actions/runs/39016558468) | SUCCESS | Isolated Windows package/Owner fixture, not user installation or production signer |
+| [Final Runtime Activation 39016558501](https://github.com/PatrickFrome/Compute/actions/runs/39016558501) | SUCCESS | Disposable own-PG17 Owner consumer |
+| [Shell First 39016558515](https://github.com/PatrickFrome/Compute/actions/runs/39016558515) | SUCCESS | Isolated Owner/profile lifecycle |
+| [W60 39016558503](https://github.com/PatrickFrome/Compute/actions/runs/39016558503) | FAILURE | Windows kernel probe timed out twice; Ubuntu source passed |
+| [W67 39016558552](https://github.com/PatrickFrome/Compute/actions/runs/39016558552) | FAILURE | Same two Windows native probes |
+| [Installed Chat 39016558522](https://github.com/PatrickFrome/Compute/actions/runs/39016558522) | FAILURE | Legacy hosted enrollment qualifier returned HTTP 402 |
+| [Windows Soak 39016558480](https://github.com/PatrickFrome/Compute/actions/runs/39016558480) | FAILURE | Installed no-Owner consumer did not prove stable visible UI; seeded/source jobs passed |
+
+W72 current native Windows ACL and R97 Visual are terminal SUCCESS at that SHA;
+historical W58/W65 failures remain separate evidence, not a replacement for
+current native gates. Full Self Update and integrated source are still RED.
+The historical Installed Chat hosted route is obsolete for own-PG acceptance:
+do not contact/retry it or request its secrets/payment. Replacement must retain
+real installed Chat/preconnect/enrollment checks under existing local authority.
+
+Follow-up SOURCE implementation, based on unpublished contract repair
+`74b9e6cf907e51b69cc8ee2c9a27a4ae05505e41`:
+- Fixed native read commands explicitly end their OWN child's stdin pipe.
+  Existing pinned Windows executable/environment, 15s deadline, exact typed
+  absence errors, source fences and fail-closed null semantics are unchanged.
+- W60 physical failure diagnostics identify only fixed interpreter/read/result
+  stages and error categories. Raw stdout/stderr, executable paths and credentials
+  are never printed. A diagnostic read never replaces the original failed proof.
+- The default execution regression and real disposable child/private HMAC IPC
+  tests are registered in both existing W60/W67 CI workflows; no new scheduler.
+- Local Windows W60/protocol/regression suite: 37/37 PASS. W67/W74/W75/W76
+  custody/100ns/anti-forgery regressions: 21/21 PASS. Source syntax checks: 190 PASS.
+  Local success does not establish the runner-specific cause or terminal CI repair.
+
+ADF-1 / R1 / C1 / C2 remain BLOCKED for installed/live acceptance. Next: obtain
+exact successor Windows W60/W67 terminal receipts; replace legacy Installed Chat
+and no-Owner soak consumers using genuine disposable local Owner composition;
+then qualify a distinct immutable package and one real Critic-verified coding
+task with durable restart. No installed Browser/Guardian/PG mutation, effect
+replay, production signing, package-version reuse or main merge is authorized
+by these source receipts.

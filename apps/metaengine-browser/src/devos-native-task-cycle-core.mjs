@@ -550,7 +550,12 @@ export class DevOsNativeTaskCycle {
     const fleetExperience = deriveFleetExperienceSignal({ riverSnapshot: state?.rsi_outcome_river || null, fleetSnapshot });
     const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state), experience: fleetExperience });
     this.#elasticIdleCycles = capacity.idle_cycles;
-    await this.#executeCommand({ action: 'FLEET_RECONCILE', platform: null, payload: capacity });
+    // An absent/malformed authoritative backlog cannot mean idle. Do not
+    // grow or retire physical sessions until the existing DB-cycle readback
+    // supplies a valid logical work count. No second scheduler or retry path.
+    if (capacity.logical_work.state === 'KNOWN') {
+      await this.#executeCommand({ action: 'FLEET_RECONCILE', platform: null, payload: capacity });
+    }
 
     const postState = await this.#getState();
     // Closed-loop audit fix (fleet scale): dispatch/observation budgets scale

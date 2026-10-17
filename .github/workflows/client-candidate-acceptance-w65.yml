@@ -42,21 +42,32 @@ jobs:
           node --check infra/client-state-runtime/client-candidate-acceptance-w65.mjs
           node --test infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs infra/client-state-runtime/client-winps-fixture-w65.test.mjs
   historical-w58-windows:
-    name: W58 pinned historical native ACL reproduction (Windows)
+    name: W58 native ACL reproduction (exact candidate, Windows)
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
+      # W58 scenario requires a Windows runner whose WinPS 5.1 Security module
+      # auto-load still works for a scrubbed PSModulePath child. The 2026-10
+      # windows-2025 image drifted; the pinned 41d755bb provider predates the
+      # explicit Import-Module Microsoft.PowerShell.Security fix, the bounded
+      # sample timeout and the diagnostic_phase evidence, so its positive ACL
+      # path returns UNKNOWN/NATIVE_ACL_UNVERIFIED and 47 asserts fail without
+      # phase information. Re-pin to the exact candidate SHA: the same negative
+      # tests exist there (strict supersets) and the diagnostic_phase field
+      # makes any residual runner drift attributable.
       - uses: actions/checkout@v4
         with:
-          ref: 41d755bb9ecd53bd509163f9219473c32d7439b6
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Exact historical source and Windows PowerShell ACL module
+      - name: Exact candidate source and Windows PowerShell ACL module
         shell: powershell
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if ((git rev-parse HEAD) -ne '41d755bb9ecd53bd509163f9219473c32d7439b6') { throw 'W58_SOURCE_PIN_CHANGED' }
+          if ((git rev-parse HEAD) -ne $env:EXPECTED) { throw 'W58_SOURCE_PIN_CHANGED' }
           Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
           Get-Command Get-Acl,Set-Acl | Select-Object Name,Source
       - name: Windows W58 actual native ACL and upgrade restore negatives

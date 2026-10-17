@@ -15,6 +15,11 @@ on:
       - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
       - 'apps/me2-ui/**'
       - 'apps/me2-daemon/**'
+      - 'apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs'
+      - 'apps/metaengine-browser/scripts/qualify-installed-client-launch.mjs'
+      - 'apps/metaengine-browser/test/installed-owner-consumer.test.mjs'
+      - 'infra/client-state-runtime/**'
+      - 'supabase/migrations/**'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'
 
 concurrency:
@@ -56,13 +61,16 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
 
+      - name: Install frozen disposable runtime fixture dependency
+        working-directory: infra/client-state-runtime
+        run: npm ci --no-audit --no-fund
       - name: Parse activation and proven Browser sources
         working-directory: apps/metaengine-browser
         run: npm run check
 
       - name: Prove activation contract and VEF fail-closed semantics
         working-directory: apps/metaengine-browser
-        run: node --test test/final-runtime-activation-contract.test.mjs
+        run: node --test test/final-runtime-activation-contract.test.mjs test/installed-owner-consumer.test.mjs
 
       - name: Acquire provenanced exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
@@ -84,103 +92,89 @@ jobs:
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\final-runtime-candidate.exe"
 
       - name: Install and prove all Final runtime modules READY
-        working-directory: apps/metaengine-browser
+        working-directory: infra/client-state-runtime
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $head = '${{ github.event.pull_request.head.sha || github.sha }}'
-          $version = [string](node -p "require('./package.json').version")
           $installer = "$env:RUNNER_TEMP\final-runtime-candidate.exe"
-          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          $binding = Get-Content $env:ME2_INSTALLER_BINDING_PATH -Raw | ConvertFrom-Json
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$binding.installer_sha256) { throw 'final_runtime_installer_binding_changed' }
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "final_runtime_installer_exit_$($install.ExitCode)" }
-
+          $ErrorActionPreference = 'Stop'
+          $head = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $version = [string](node -p "require('../../apps/metaengine-browser/package.json').version")
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
-          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
-          if (-not (Test-Path $app -PathType Leaf)) { throw "final_runtime_packaged_browser_missing:$app" }
-
-          $out = "$env:RUNNER_TEMP\final-runtime-normal.out"
-          $err = "$env:RUNNER_TEMP\final-runtime-normal.err"
-          Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
-          $process = $null
-          $ready = $null
-          try {
-            $process = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-            $null = $process.Handle
-            $deadline = [DateTime]::UtcNow.AddSeconds(70)
-            while ([DateTime]::UtcNow -lt $deadline) {
-              if ($process.HasExited) {
-                Get-Content $out -ErrorAction SilentlyContinue
-                Get-Content $err -ErrorAction SilentlyContinue
-                throw "final_runtime_primary_exited_early:$($process.ExitCode)"
-              }
-              if (Test-Path $out -PathType Leaf) {
-                foreach ($line in @(Get-Content $out -ErrorAction SilentlyContinue)) {
-                  if (-not $line.Trim().StartsWith('{')) { continue }
-                  try { $row = $line | ConvertFrom-Json } catch { continue }
-                  if ($row.schema -eq 'metaengine.browser.final-runtime-activation.lifecycle.v1' -and $row.state -eq 'READY') {
-                    $ready = $row
-                    break
-                  }
-                }
-              }
-              if ($ready) { break }
-              Start-Sleep -Milliseconds 250
-            }
-            if (-not $ready) {
-              Get-Content $out -ErrorAction SilentlyContinue
-              Get-Content $err -ErrorAction SilentlyContinue
-              throw 'final_runtime_activation_ready_not_observed'
-            }
-
-            $activation = $ready.activation
-            if (-not $activation) { throw 'final_runtime_activation_projection_missing' }
-            if ($activation.host_agent_state -ne 'READY') { throw "final_runtime_host_agent_not_ready:$($activation.host_agent_state)" }
-            if ($activation.signer_state -ne 'READY') { throw "final_runtime_signer_not_ready:$($activation.signer_state)" }
-            if ($activation.browser_execution_via_typed_ipc -ne $true) { throw 'final_runtime_typed_browser_executor_not_active' }
-            if ($activation.verified_execution_outcomes_active -ne $true) { throw 'final_runtime_vef_not_active' }
-            if ($activation.fast_control_read_side_active -ne $true) { throw 'final_runtime_fast_control_read_not_active' }
-            if ($activation.fast_control_production_mutation_authority -ne $false) { throw 'final_runtime_unproven_mutation_authority_enabled' }
-            if ($activation.production_authority_fabricated -ne $false) { throw 'final_runtime_production_authority_fabricated' }
-            if ($activation.second_scheduler -ne $false) { throw 'final_runtime_second_scheduler_detected' }
-            if ($activation.automatic_effect_retry_allowed -ne $false) { throw 'final_runtime_automatic_effect_retry_enabled' }
-
-            $installerFile = Get-Item $installer
-            $digest = (Get-FileHash $installerFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            if (-not $env:ME2_INSTALLER_BINDING_PATH) { throw 'final_runtime_package_binding_path_missing' }
-            $binding = Get-Content $env:ME2_INSTALLER_BINDING_PATH -Raw | ConvertFrom-Json
-            @{
-              schema='metaengine.browser.final-runtime-activation-proof.v1'
-              source_head=$head
-              package_version=$version
-              installer_sha256=$digest
-              producer_run_id=[int64]$binding.producer_run_id
-              producer_run_number=[int64]$binding.producer_run_number
-              producer_run_attempt=[int64]$binding.producer_run_attempt
-              producer_completed_at_acquire=[bool]$binding.producer_completed_at_acquire
-              activation=$activation
-              exact_head_verified=$true
-              installed_runtime_verified=$true
-              browser_identity_signer_active=$true
-              typed_browser_executor_active=$true
-              host_agent_active=$true
-              verified_execution_framework_active=$true
-              fast_control_read_side_active=$true
-              fast_control_production_mutation_authority=$false
-              native_supervisor_single_scheduler=$true
-              second_scheduler=$false
-              automatic_effect_retry_allowed=$false
-              signed=$false
-              published=$false
-              promotion_authorized=$false
-              authority_effect=$false
-            } | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\final-runtime-activation-proof.json" -Encoding utf8
-            Write-Host ($ready | ConvertTo-Json -Compress -Depth 10)
-          } finally {
-            if ($process -and -not $process.HasExited) {
-              try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
-            }
+          $bundle = Join-Path $installRoot 'resources\client-state-runtime'
+          $manifest = Get-Content (Join-Path $bundle 'offline-runtime-bundle.json') -Raw | ConvertFrom-Json
+          $bundleSha = [string]$manifest.bundle_sha256
+          if ($bundleSha -notmatch '^[a-f0-9]{64}$') { throw 'owner_consumer_bundle_digest_invalid' }
+          # Every run generates empty schema from reviewed source on a NEW cluster.
+          # No user Keeper, Owner, credential file or profile is imported.
+          $nodeTemp = (node -p "require('node:os').tmpdir()").Trim()
+          if (-not [IO.Path]::IsPathRooted($nodeTemp)) { throw 'owner_consumer_os_temp_invalid' }
+          $schema = Join-Path $nodeTemp ('owner-consumer-schema-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $schema -ErrorAction Stop | Out-Null
+          $evidence = Join-Path $env:RUNNER_TEMP ('owner-consumer-evidence-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $evidence -ErrorAction Stop | Out-Null
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $bundleSha
+          $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
+          $env:LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY = $schema
+          npm run test:attached-onboarding
+          if ($LASTEXITCODE -ne 0) { throw 'owner_consumer_generated_schema_failed' }
+          $dump = Join-Path $schema 'generated-empty-schema-pg17.dump'
+          $schemaSha = (Get-Content (Join-Path $schema 'generated-empty-schema-pg17.sha256') -Raw).Trim()
+          if ($schemaSha -notmatch '^[a-f0-9]{64}$' -or $schemaSha -ne (Get-FileHash $dump -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'owner_consumer_schema_pin_drift' }
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP = $dump
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP_SHA256 = $schemaSha
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT = $installRoot
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_SOURCE_HEAD = $head
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_VERSION = $version
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_EVIDENCE_DIRECTORY = $evidence
+          $env:LOCAL_STATE_TEST_ATTACHED_CONSUMER = 'FINAL_RUNTIME_ACTIVATION'
+          node --test --test-concurrency=1 attached-bundled-runtime.integration.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'owner_consumer_physical_qualification_failed' }
+          $positive = Get-Content (Join-Path $evidence 'installed-owner-consumer-proof.json') -Raw | ConvertFrom-Json
+          if ($positive.schema -ne 'metaengine.browser.installed-owner-consumer-proof.v1' -or $positive.state -ne 'PASSED_ISOLATED_REAL_RUNTIME' -or $positive.consumer -ne 'FINAL_RUNTIME_ACTIVATION' -or $positive.source_head -ne $head -or $positive.package_version -ne $version -or $positive.bundle_sha256 -ne $bundleSha -or $positive.disposable_pg_cleanup_confirmed -ne $true -or $positive.fixture_directory_removed -ne $true -or $positive.process_cleanup_confirmed -ne $true -or $positive.runtime_ports_closed -ne $true -or $positive.attached_postgres_incarnation_preserved -ne $true -or $positive.installed_source_bytes_verified -ne $true -or $positive.live_agent_execution -ne $false -or $positive.production_ready -ne $false -or $positive.authority_effect -ne $false) { throw 'owner_consumer_receipt_invalid' }
+          $binding = Get-Content $env:ME2_INSTALLER_BINDING_PATH -Raw | ConvertFrom-Json
+          $proof = @{
+            schema='metaengine.browser.final-runtime-activation-proof.v1'
+            source_head=$head
+            package_version=$version
+            installer_sha256=[string]$binding.installer_sha256
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            producer_event=[string]$binding.producer_event
+            producer_completed_at_acquire=[bool]$binding.producer_completed_at_acquire
+            producer_terminal_success=$false
+            owner_consumer=$positive
+            schema_archive_sha256=$schemaSha
+            generated_schema_owner_qualified=$true
+            fixture_disposable_pg_cleanup_confirmed=$true
+            live_agent_execution=$false
+            production_ready=$false
+            promotion_authorized=$false
+            automatic_retry_allowed=$false
+            authority_effect=$false
           }
-
+          $activation = $positive.activation
+          if ($activation.host_agent_state -ne 'READY' -or $activation.signer_state -ne 'READY' -or $activation.fast_control_production_mutation_authority -ne $false -or $activation.authority_effect -ne $false) { throw 'final_runtime_activation_readback_invalid' }
+          $proof.activation = $activation
+          $proof.exact_head_verified = $true
+          $proof.installed_runtime_verified = $positive.real_local_runtime_attested
+          $proof.browser_identity_signer_active = ($activation.signer_state -eq 'READY')
+          $proof.typed_browser_executor_active = $activation.browser_execution_via_typed_ipc
+          $proof.host_agent_active = ($activation.host_agent_state -eq 'READY')
+          $proof.verified_execution_framework_active = $activation.verified_execution_outcomes_active
+          $proof.fast_control_read_side_active = $activation.fast_control_read_side_active
+          $proof.fast_control_production_mutation_authority = $false
+          $proof.native_supervisor_single_scheduler = $true
+          $proof.second_scheduler = $false
+          $proof.signed = $false
+          $proof.published = $false
+          $proof | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\final-runtime-activation-proof.json" -Encoding utf8
       - name: Require bound Package Smoke producer terminal success
         working-directory: apps/metaengine-browser
         shell: powershell

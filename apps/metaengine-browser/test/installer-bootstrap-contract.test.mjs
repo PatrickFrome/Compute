@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const builder = JSON.parse(fs.readFileSync(new URL('../electron-builder.test.json', import.meta.url), 'utf8'));
 const bootstrap = fs.readFileSync(new URL('../scripts/bootstrap-install-and-launch.ps1', import.meta.url), 'utf8');
+const boundedInstaller = fs.readFileSync(new URL('../scripts/install-package-bounded.ps1', import.meta.url), 'utf8');
 const exactUpgradeBootstrap = fs.readFileSync(new URL('../scripts/verify-exact-upgrade-bootstrap.ps1', import.meta.url), 'utf8');
 
 test('manual Windows installer stays assisted and offers Browser run after finish', () => {
@@ -14,7 +15,20 @@ test('manual Windows installer stays assisted and offers Browser run after finis
 });
 
 test('bootstrap installs silently then proves one exact packaged normal launch', () => {
-  assert.match(bootstrap, /Start-Process -FilePath \$InstallerPath -ArgumentList ['"]\/S['"] -PassThru -Wait/);
+  // The current bootstrap uses a fixed-binary SHA-pinned and bounded installer,
+  // not a non-terminating direct Start-Process -Wait.
+  assert.match(bootstrap, /\$boundedInstaller = Join-Path \$PSScriptRoot ['"]install-package-bounded\.ps1['"]/);
+  assert.match(bootstrap, /& \$boundedInstaller -InstallerPath \$InstallerPath/);
+  assert.match(bootstrap, /-ExpectedSha256 \$expectedInstallerHash -TimeoutSeconds \$InstallTimeoutSeconds/);
+  assert.match(bootstrap, /\$install\.process_tree_scoped_job -ne \$true/);
+  assert.match(bootstrap, /\$install\.descendant_cleanup_on_job_close -ne \$true/);
+  assert.match(bootstrap, /state = 'EFFECT_UNKNOWN'/);
+  assert.match(bootstrap, /automatic_retry_allowed = \$false/);
+  assert.doesNotMatch(bootstrap, /Start-Process -FilePath \$InstallerPath -ArgumentList ['"]\/S['"]/);
+  assert.match(boundedInstaller, /AssignProcessToJobObject/);
+  assert.match(boundedInstaller, /KILL_ON_JOB_CLOSE/);
+  assert.match(boundedInstaller, /TerminateJobObject\(job,124\)/);
+  assert.match(boundedInstaller, /GetExitCodeProcess/);
   assert.match(bootstrap, /Start-Process -FilePath \$InstalledExePath -PassThru/);
   assert.match(bootstrap, /silent_install_then_exact_normal_launch = \$true/);
   assert.match(bootstrap, /bootstrap_normal_browser_exited_early/);

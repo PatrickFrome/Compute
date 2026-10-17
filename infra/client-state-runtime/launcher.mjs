@@ -105,6 +105,11 @@ export function normalizeLauncherConfig(input) {
   if (!input.pgBinDir || !input.pgDataDir || !input.denoPath) throw runtimeError('local_runtime_paths_required');
   const timeoutMs = Number(input.startupTimeoutMs ?? 60000);
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300000) throw runtimeError('startup_timeout_invalid');
+  // API /health runs a SQL transaction with statement_timeout=10s. A 3s
+  // outer deadline can kill an otherwise responsive attached runtime under
+  // transient PostgreSQL contention. Keep a finite 2s transport margin.
+  const healthProbeTimeoutMs = input.healthProbeTimeoutMs ?? 12000;
+  if (!Number.isSafeInteger(healthProbeTimeoutMs) || healthProbeTimeoutMs < 3000 || healthProbeTimeoutMs > 12000) throw runtimeError('health_probe_timeout_invalid');
   const apiKey = input.apiKey || randomBytes(32).toString('hex');
   if (!/^[a-f0-9]{64}$/i.test(apiKey)) throw runtimeError('local_api_key_invalid');
   if (input.denoDir !== undefined && (typeof input.denoDir !== 'string' || !path.isAbsolute(input.denoDir))) throw runtimeError('deno_cache_absolute_path_required');
@@ -133,6 +138,7 @@ export function normalizeLauncherConfig(input) {
     denoLockPath: path.resolve(input.denoLockPath || path.join(here, 'deno.lock')),
     startupManifestPath: input.startupManifestPath ? path.resolve(input.startupManifestPath) : null,
     startupTimeoutMs: timeoutMs,
+    healthProbeTimeoutMs,
     healthIntervalMs: Math.max(100, Number(input.healthIntervalMs) || 2000),
     instanceId: input.instanceId || randomUUID(),
   };
@@ -439,7 +445,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   async function health(which) {
     const endpoint = which === 'api' ? `http://127.0.0.1:${config.apiPort}/health` : `http://127.0.0.1:${config.edgePort}/a2-browser-native-supervisor-v1/health`;
     let response;
-    try { response = await fetch(endpoint, { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(3000) }); }
+    try { response = await fetch(endpoint, { headers: { apikey: config.apiKey }, signal: AbortSignal.timeout(config.healthProbeTimeoutMs) }); }
     catch (cause) {
       const error = runtimeError(`${which}_health_failed`);
       error.healthFailureCode = cause?.name === 'TimeoutError' || cause?.name === 'AbortError' ? 'health_timeout'

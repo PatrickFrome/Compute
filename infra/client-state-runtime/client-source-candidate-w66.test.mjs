@@ -101,13 +101,18 @@ test('W66 retains source registration and cannot qualify staging, package or liv
   assert.equal(manifest.package_version_change_authorized, false);
   const historicalVersion=JSON.parse(git('show',w59+':apps/metaengine-browser/package.json')).version;
   const observedVersion=JSON.parse(read('apps/metaengine-browser/package.json')).version;
-  const candidate=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json')).test_candidate;
+  const closure=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json'));
+  const candidate=closure.test_candidate;
   if(candidate){
     assert.equal(candidate.classification,'ISOLATED_TEST_PACKAGE_ONLY');
-    assert.equal(candidate.branch,'work/client-artifact-cardinality-repair-20261015');
+    assert.equal(candidate.branch,'work/client-operational-repair-20261015');
     assert.equal(candidate.production_release_authorized,false);
     assert.equal(candidate.installed_mutation_authorized,false);
-    assert.equal(observedVersion,candidate.version);
+    assert.equal(observedVersion,closure.current_source_candidate?.package_version ?? candidate.version);
+    if (closure.current_source_candidate) {
+      assert.equal(closure.current_source_candidate.historical_package_version,candidate.version);
+      assert.equal(closure.current_source_candidate.production_ready,false);
+    }
     assert.notEqual(observedVersion,historicalVersion);
   }else assert.equal(observedVersion,historicalVersion);
   const roadmap = read('coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md');

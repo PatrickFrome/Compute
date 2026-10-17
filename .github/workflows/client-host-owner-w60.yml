@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/host-native-owner-producers-w60.mjs'
+      - 'apps/metaengine-browser/test/host-native-command-input-w60.test.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/src/host-agent-runtime.mjs'
       - 'apps/metaengine-browser/src/host-agent-protocol.mjs'
@@ -39,6 +40,7 @@ jobs:
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/host-native-owner-producers-w60.mjs
           node --test --test-concurrency=1 \
+            apps/metaengine-browser/test/host-native-command-input-w60.test.mjs \
             apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
             apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs \
             apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs \

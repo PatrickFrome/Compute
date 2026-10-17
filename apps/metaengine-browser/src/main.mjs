@@ -3001,6 +3001,9 @@ ipcMain.handle('metaengine:client:activate-guardian', async (event) => {
 function readClientWorkReadiness() {
   return projectClientWorkReadiness({
     connection: nativeSupervisor?.connectionStatus?.() || {},
+    // Bootstrap owns this in-process diagnostic. It never grants execution
+    // authority and no renderer-provided state is accepted here.
+    runtimeBootstrapState: process.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE || null,
     snapshot: nativeSupervisor?.snapshot?.() || {},
     fleet: fleet?.snapshot?.() || {},
     development: developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot?.() || {},

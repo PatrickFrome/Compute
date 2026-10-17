@@ -41,6 +41,8 @@ export class AgentToolbelt {
   #maxCommandsPerLease;
   // key `${task_id}:${lease_generation}` → served/issued request rows.
   #byLease = new Map();
+  // One overflow result per lease; budget denials cannot grow its request map.
+  #budgetWitnesses = new Map();
   // request_id → terminal result row (bounded LRU across ALL leases).
   #results = new Map();
   #counters = { requests_parsed: 0, requests_issued: 0, requests_unavailable: 0, results_terminal: 0, issue_errors: 0, route_unavailable_streak: 0 };
@@ -82,16 +84,33 @@ export class AgentToolbelt {
     const rows = this.#leaseRows(key);
     const issued = [];
     const unavailable = [];
+    const deny = (requestId, reason, { effectUnknown = false } = {}) => {
+      unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason });
+      if (reason === 'BUDGET_EXHAUSTED' && this.#budgetWitnesses.has(key)) return;
+      const row = {
+        request_id: requestId,
+        action: null,
+        status: 'UNAVAILABLE',
+        summary: `reason=${reason}${effectUnknown ? '; effect=UNKNOWN; readback_required=true; automatic_retry_allowed=false' : ''}`,
+        at: new Date().toISOString(),
+        for_agent: agentId,
+        command_id: null,
+      };
+      if (reason === 'BUDGET_EXHAUSTED') this.#budgetWitnesses.set(key, row);
+      else rows.set(requestId, row);
+      this.#rememberResult(row);
+      this.#counters.requests_unavailable += 1;
+    };
     const list = Array.isArray(requests) ? requests : [];
     this.#counters.requests_parsed += list.length;
     for (const request of list) {
-      if (rows.size >= this.#maxCommandsPerLease) { unavailable.push({ request_id: clip(request?.request_id, 64), status: 'UNAVAILABLE', reason: 'BUDGET_EXHAUSTED' }); continue; }
       const requestId = String(request?.request_id || '');
       const action = String(request?.action || '').toUpperCase();
-      if (!requestId || rows.has(requestId)) continue;
-      if (!AGENT_TOOL_ACTIONS.includes(action)) { unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'ACTION_NOT_ALLOWED' }); continue; }
+      if (!requestId || rows.has(requestId) || this.#budgetWitnesses.get(key)?.request_id === requestId) continue;
+      if (rows.size >= this.#maxCommandsPerLease) { deny(requestId, 'BUDGET_EXHAUSTED'); continue; }
+      if (!AGENT_TOOL_ACTIONS.includes(action)) { deny(requestId, 'ACTION_NOT_ALLOWED'); continue; }
       if (['PROJECT_SPAWN', 'PROJECT_HISTORY'].includes(action)) {
-        if (!this.#projectRuntime) { unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'PROJECT_RUNTIME_UNAVAILABLE' }); continue; }
+        if (!this.#projectRuntime) { deny(requestId, 'PROJECT_RUNTIME_UNAVAILABLE'); continue; }
         try {
           const results = await this.#projectRuntime.serveToolRequests({ lease, requests: [request] });
           for (const result of results) {
@@ -99,7 +118,7 @@ export class AgentToolbelt {
             rows.set(requestId, row); this.#rememberResult(row);
             issued.push({ request_id: requestId, action, project_result: true });
           }
-        } catch { unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'PROJECT_REQUEST_FENCED_OR_AMBIGUOUS' }); }
+        } catch { deny(requestId, 'PROJECT_REQUEST_FENCED_OR_AMBIGUOUS', { effectUnknown: true }); }
         continue;
       }
       const payload = { ...(request?.payload || {}) };
@@ -119,8 +138,9 @@ export class AgentToolbelt {
         if (!response.ok || body?.accepted !== true || !body?.command_id) {
           const reason = response.status === 404 ? 'EDGE_ROUTE_UNAVAILABLE' : clip(body?.error || body?.reason || `HTTP_${response.status}`, 120);
           if (response.status === 404) this.#counters.route_unavailable_streak += 1;
-          unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason });
-          this.#counters.requests_unavailable += 1;
+          // A server error or malformed success may follow a committed issue.
+          // Report uncertainty rather than claiming that no command exists.
+          deny(requestId, reason, { effectUnknown: response.ok === true || response.status >= 500 });
           continue;
         }
         this.#counters.route_unavailable_streak = 0;
@@ -138,20 +158,8 @@ export class AgentToolbelt {
       } catch (error) {
         this.#counters.issue_errors += 1;
         this.#lastError = clip(error?.message || error, 240);
-        unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason: 'ISSUE_TRANSPORT_ERROR' });
+        deny(requestId, 'ISSUE_TRANSPORT_ERROR', { effectUnknown: true });
       }
-    }
-    // Unavailable requests are recorded as terminal UNAVAILABLE results so
-    // the agent sees the outcome on its next task message.
-    for (const row of unavailable) {
-      this.#rememberResult({
-        request_id: row.request_id,
-        action: null,
-        status: 'UNAVAILABLE',
-        summary: `reason=${row.reason}`,
-        at: new Date().toISOString(),
-        for_agent: agentId,
-      });
     }
     return { issued, unavailable };
   }
@@ -215,9 +223,11 @@ export class AgentToolbelt {
   }
 
   resultsForLease(lease, { limit = 8 } = {}) {
-    const rows = this.#byLease.get(leaseKey(lease));
+    const key = leaseKey(lease);
+    const rows = this.#byLease.get(key);
     if (!rows) return [];
-    return [...rows.values()].filter(row => ['COMPLETED', 'FAILED', 'UNAVAILABLE'].includes(row.status))
+    const budget = this.#budgetWitnesses.get(key);
+    return [...rows.values(), ...(budget ? [budget] : [])].filter(row => ['COMPLETED', 'FAILED', 'UNAVAILABLE'].includes(row.status))
       .slice(0, limit).map(row => ({ request_id: row.request_id, status: row.status, summary: row.summary }));
   }
 
@@ -225,8 +235,10 @@ export class AgentToolbelt {
     let pending = 0;
     let issued = 0;
     for (const rows of this.#byLease.values()) {
-      issued += rows.size;
-      for (const row of rows.values()) if (row.status === 'PENDING') pending += 1;
+      for (const row of rows.values()) {
+        if (row.status !== 'UNAVAILABLE') issued += 1;
+        if (row.status === 'PENDING') pending += 1;
+      }
     }
     return Object.freeze({
       schema: AGENT_TOOL_PROTOCOL_SCHEMA,

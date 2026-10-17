@@ -29,6 +29,47 @@ function input() {
   };
 }
 
+test('blocked local bootstrap reports unavailable execution rather than incorrectly promising startup', () => {
+  const value = input();
+  value.connection.local_runtime_ready = false;
+  value.runtimeBootstrapState = 'BLOCKED';
+  value.snapshot.lifecycle.keepalive.state = 'WAKE_AMBIGUOUS';
+  const result = projectClientWorkReadiness(value);
+  assert.equal(result.state, 'BLOCKED');
+  assert.equal(result.reason, 'LOCAL_RUNTIME_BOOT_BLOCKED');
+  assert.equal(result.capabilities.chat_dispatch.ready, false);
+  assert.equal(result.capabilities.coding_execution.ready, false);
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.equal(result.recovery.supervisor_readback_required, true);
+  assert.equal(result.recovery.next_step, 'INSPECT_EXISTING_CONVERSATIONS');
+  assert.equal(result.authority_effect, false);
+});
+
+test('missing or untrusted bootstrap state is unavailable, never invented STARTING or READY', () => {
+  for (const state of [null, 'FAILED', 'READY', 'SENTINEL_PRIVATE_BOOT_ERROR']) {
+    const value = input();
+    value.connection.local_runtime_ready = false;
+    value.runtimeBootstrapState = state;
+    const result = projectClientWorkReadiness(value);
+    assert.equal(result.reason, 'LOCAL_RUNTIME_UNAVAILABLE');
+    assert.equal(result.execution_ready, false);
+    assert.doesNotMatch(JSON.stringify(result), /SENTINEL_PRIVATE/);
+  }
+});
+
+test('only an explicit ongoing bootstrap receives the starting label without execution permission', () => {
+  for (const state of ['ATTACH_REVALIDATING', 'STARTING']) {
+    const value = input();
+    value.connection.local_runtime_ready = false;
+    value.runtimeBootstrapState = state;
+    const result = projectClientWorkReadiness(value);
+    assert.equal(result.reason, 'LOCAL_RUNTIME_STARTING');
+    assert.equal(result.state, 'BLOCKED');
+    assert.equal(result.execution_ready, false);
+    assert.equal(result.automatic_retry_allowed, false);
+  }
+});
+
 test('positive readiness requires current admission and exact Agent origin; completion is still unproven', () => {
   const result = projectClientWorkReadiness(input());
   assert.equal(result.state, 'READY');
