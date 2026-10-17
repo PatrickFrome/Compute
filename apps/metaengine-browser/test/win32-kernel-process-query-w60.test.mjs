@@ -34,7 +34,8 @@ test('W60 only confirms absence from the scoped managed exception; access and un
   assert.match(script,/System\.Management\.Automation\.MethodInvocationException/);
   assert.match(script,/\$inner.GetType\(\).FullName -ceq "System.ArgumentException"/);
   assert.match(script,/\[string\]::IsNullOrEmpty\(\[string\]\$inner.ParamName\)/);
-  assert.match(script,/native_error_category = "ObjectNotFound"/);
+  assert(script.includes('"native_error_category":"ObjectNotFound"'));
+  assert.doesNotMatch(script,/ConvertTo-Json/);
   assert.match(script,/\s+throw\s/);
   assert.doesNotMatch(script,/\$requestedPid = 1337/);
 });

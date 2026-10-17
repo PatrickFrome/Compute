@@ -72,9 +72,22 @@ export async function readWindowsKernelProcessW60(pid, { platform = process.plat
       return frozen({pid,source:'OS_PROCESS_INVENTORY',state:'NOT_RUNNING',
         native_verified:true,authority_effect:false,observed_at:at()});
     }
+    // The physical Windows reader sends UTF-8 Base64 to avoid dynamically
+    // loading PowerShell's ConvertTo-Json module after reading kernel fields.
+    // Never accept two conflicting path fields or non-canonical Base64.
+    let exePath = x.exe_path;
+    if (Object.hasOwn(x, 'exe_path_base64')) {
+      if (Object.hasOwn(x, 'exe_path') || typeof x.exe_path_base64 !== 'string' ||
+          x.exe_path_base64.length > 4096 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(x.exe_path_base64)) return null;
+      const bytes = Buffer.from(x.exe_path_base64,'base64');
+      if (bytes.length < 1 || bytes.length > 2048 ||
+          bytes.toString('base64') !== x.exe_path_base64) return null;
+      exePath = new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+      if (exePath.includes(String.fromCharCode(0))) return null;
+    }
     if (x.pid !== pid || !Number.isFinite(Date.parse(x.created_at)) ||
-      typeof x.exe_path !== 'string' || !x.exe_path) return null;
-    return frozen({pid, created_at:new Date(x.created_at).toISOString(),exe_path:x.exe_path,
+      typeof exePath !== 'string' || !exePath) return null;
+    return frozen({pid, created_at:new Date(x.created_at).toISOString(),exe_path:exePath,
       source:'OS_PROCESS_INVENTORY',state:'PRESENT',authority_effect:false,observed_at:at()});
   });
 }

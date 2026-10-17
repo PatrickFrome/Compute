@@ -24,11 +24,9 @@ export const processScript = pid => {
     '  $err = $_.Exception',
     '  $inner = $err.InnerException',
     '  if ($err.GetType().FullName -ceq "System.Management.Automation.MethodInvocationException" -and $null -ne $inner -and $inner.GetType().FullName -ceq "System.ArgumentException" -and [string]::IsNullOrEmpty([string]$inner.ParamName)) {',
-    '    @{ pid = [int]$requestedPid; state = "NOT_RUNNING";',
-    '      native_error_id = "SYSTEM_DIAGNOSTICS_PROCESS_ID_NOT_FOUND";',
-    '      native_error_category = "ObjectNotFound";',
-    '      native_error_type = "System.ArgumentException";',
-    '      native_target_pid = [int]$requestedPid } | ConvertTo-Json -Compress;',
+    // Avoid PowerShell cmdlet/module autoload in the trusted OS readback.
+    // Every output field here is a source-owned literal or validated integer.
+    "    [Console]::Out.WriteLine('{\"pid\":' + [string]$requestedPid + ',\"state\":\"NOT_RUNNING\",\"native_error_id\":\"SYSTEM_DIAGNOSTICS_PROCESS_ID_NOT_FOUND\",\"native_error_category\":\"ObjectNotFound\",\"native_error_type\":\"System.ArgumentException\",\"native_target_pid\":' + [string]$requestedPid + '}')",
     '    [Console]::Error.WriteLine("W60_RESULT_WRITTEN"); exit 0',
     '  }',
     '  throw',
@@ -42,7 +40,10 @@ export const processScript = pid => {
     '  $exe = $p.MainModule.FileName',
     '  if (-not $exe -or -not $start) { throw "PROCESS_FIELDS_UNVERIFIED" }',
     '  [Console]::Error.WriteLine("W60_PROCESS_FIELDS_READ")',
-    '  @{ pid = [int]$requestedPid; created_at = $start; exe_path = $exe } | ConvertTo-Json -Compress',
+    // PowerShell ConvertTo-Json cmdlet autoload can block on hosted runners.
+    // Transport path bytes as canonical UTF-8 Base64; let Node validate them.
+    '  $exeB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($exe))',
+    "  [Console]::Out.WriteLine('{\"pid\":' + [string]$requestedPid + ',\"created_at\":\"' + $start + '\",\"exe_path_base64\":\"' + $exeB64 + '\"}')",
     '  [Console]::Error.WriteLine("W60_RESULT_WRITTEN")',
     '} finally { if ($null -ne $p) { $p.Dispose() } }',
   ].join('\n');

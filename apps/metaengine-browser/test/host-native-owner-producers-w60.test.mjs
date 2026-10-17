@@ -78,6 +78,22 @@ test('W60: genuine fixed kernel census is not a forged caller process field', as
   assert.equal(k?.authority_effect,false);
   assert.ok(!('process_incarnation_id' in k));
 });
+test('W60: source-owned Base64 executable transport rejects malformed or conflicting paths',async()=>{
+  const exe='C:\\Windows\\System32\\safe-physical.exe';
+  const encoded=Buffer.from(exe,'utf8').toString('base64');
+  const expected={pid:1234,created_at:iso,exe_path_base64:encoded};
+  const positive=await readWindowsKernelProcessW60(1234,{platform:'win32',exec:fakeExec(expected)});
+  assert.equal(positive?.state,'PRESENT');
+  assert.equal(positive?.exe_path,exe);
+  for(const row of [
+    {...expected,exe_path_base64:'!'},
+    {...expected,exe_path_base64:'AA=='},
+    {...expected,exe_path_base64:'//8='},
+    {...expected,exe_path:'C:\\Windows\\forged.exe'},
+    {...expected,pid:1235},
+  ]) assert.equal(await readWindowsKernelProcessW60(1234,{platform:'win32',exec:fakeExec(row)}),null);
+});
+
 test('W60: kernel read rejects nonnumeric, negative, oversized and non-Windows', async()=>{
   for(const id of ['1234',0,-1,2147483648,NaN]) assert.equal(
     await readWindowsKernelProcessW60(id,{platform:'win32',exec:fakeExec()}),null);
