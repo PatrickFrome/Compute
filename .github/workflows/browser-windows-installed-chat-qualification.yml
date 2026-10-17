@@ -243,6 +243,8 @@ jobs:
           $qualificationApproved = $false
           $qualificationReadback = $null
           $qualificationNextAttempt = [DateTime]::UtcNow
+          $qualificationTransientAttempts = 0
+          $qualificationMaxAttempts = 10
 
           $normalOut = "$env:RUNNER_TEMP\installed-chat-normal.out"
           $normalErr = "$env:RUNNER_TEMP\installed-chat-normal.err"
@@ -275,32 +277,72 @@ jobs:
               }
 
               if (-not $qualificationApproved -and [DateTime]::UtcNow -ge $qualificationNextAttempt) {
+                # PS 5.1 Invoke-WebRequest throws on every non-2xx (there is no
+                # -SkipHttpErrorCheck), so the HTTP status must be recovered from
+                # the WebException instead of aborting the qualification probe on
+                # the first 402/429/5xx (observed: Supabase edge quota 402).
+                $qualificationStatus = -1
+                $qualificationRawContent = $null
+                $qualificationTransportError = ''
                 try {
                   $qualificationResponse = Invoke-WebRequest -UseBasicParsing -Method Post `
                     -Uri $env:METAENGINE_INSTALL_QUALIFIER_URL `
                     -Headers @{ Authorization = "Bearer $qualificationOidc" } `
                     -ContentType 'application/json' `
                     -Body $qualificationBody
-                  $qualificationPayload = $qualificationResponse.Content | ConvertFrom-Json
-                  if ([int]$qualificationResponse.StatusCode -eq 200 `
-                      -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
-                      -and $qualificationPayload.accepted -eq $true `
-                      -and $qualificationPayload.oidc_verified -eq $true `
-                      -and $qualificationPayload.github_run_verified -eq $true `
-                      -and $qualificationPayload.nonce_bound -eq $true `
-                      -and [string]$qualificationPayload.source_head -eq '${{ github.event.pull_request.head.sha || github.sha }}' `
-                      -and [string]$qualificationPayload.run_id -eq '${{ github.run_id }}' `
-                      -and [int]$qualificationPayload.run_attempt -eq [int]'${{ github.run_attempt }}') {
-                    $qualificationApproved = $true
-                    $qualificationReadback = $qualificationPayload
-                  } elseif ([int]$qualificationResponse.StatusCode -ne 202 `
-                      -or $qualificationPayload.reason -ne 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
-                    throw "installed_qualification_oidc_unexpected:$($qualificationResponse.StatusCode):$($qualificationPayload.reason)"
-                  }
+                  $qualificationStatus = [int]$qualificationResponse.StatusCode
+                  $qualificationRawContent = [string]$qualificationResponse.Content
                 } catch {
-                  throw "installed_qualification_oidc_failed:$($_.Exception.Message)"
+                  $qualificationTransportError = [string]$_.Exception.Message
+                  $qualificationException = $_.Exception
+                  $qualificationFaultedResponse = $qualificationException.Response
+                  while (-not $qualificationFaultedResponse -and $qualificationException.InnerException) {
+                    $qualificationException = $qualificationException.InnerException
+                    $qualificationFaultedResponse = $qualificationException.Response
+                  }
+                  if ($qualificationFaultedResponse) {
+                    try { $qualificationStatus = [int]$qualificationFaultedResponse.StatusCode } catch { $qualificationStatus = -1 }
+                  }
                 }
-                $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
+                $qualificationPayload = $null
+                if ($qualificationRawContent) {
+                  try { $qualificationPayload = $qualificationRawContent | ConvertFrom-Json } catch { $qualificationPayload = $null }
+                }
+                if ($qualificationStatus -eq 200 `
+                    -and $qualificationPayload `
+                    -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
+                    -and $qualificationPayload.accepted -eq $true `
+                    -and $qualificationPayload.oidc_verified -eq $true `
+                    -and $qualificationPayload.github_run_verified -eq $true `
+                    -and $qualificationPayload.nonce_bound -eq $true `
+                    -and [string]$qualificationPayload.source_head -eq '${{ github.event.pull_request.head.sha || github.sha }}' `
+                    -and [string]$qualificationPayload.run_id -eq '${{ github.run_id }}' `
+                    -and [int]$qualificationPayload.run_attempt -eq [int]'${{ github.run_attempt }}') {
+                  $qualificationApproved = $true
+                  $qualificationReadback = $qualificationPayload
+                } elseif ($qualificationStatus -eq 202 `
+                    -and $qualificationPayload `
+                    -and $qualificationPayload.reason -eq 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
+                  # Enrollment request not visible yet; keep the fast poll.
+                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
+                } elseif (@(402, 429, 500, 502, 503, 504) -contains $qualificationStatus) {
+                  # Hosted-qualifier transient failures (edge-function quota 402,
+                  # throttle 429, upstream 5xx): bounded backoff instead of the
+                  # historical immediate failure. Budget: 10 attempts x
+                  # (<=20s wait + request) fits the 180s qualification deadline
+                  # and the 75-minute job timeout.
+                  $qualificationTransientAttempts++
+                  if ($qualificationTransientAttempts -ge $qualificationMaxAttempts) {
+                    throw "installed_qualification_oidc_failed:transient_status_$($qualificationStatus)_after_$($qualificationTransientAttempts)_attempts"
+                  }
+                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds([Math]::Min(15 * $qualificationTransientAttempts, 20))
+                } else {
+                  # Other 4xx, malformed 2xx payloads and transport-level
+                  # failures fail fast with the canonical error name.
+                  $qualificationDetail = $qualificationTransportError
+                  if (-not $qualificationDetail) { $qualificationDetail = "unexpected_status_$($qualificationStatus)" }
+                  throw "installed_qualification_oidc_failed:$qualificationDetail"
+                }
               }
 
               if (Test-Path $normalOut -PathType Leaf) {
