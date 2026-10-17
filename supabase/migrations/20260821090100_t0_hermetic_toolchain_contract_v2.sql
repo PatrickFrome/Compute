@@ -3,6 +3,27 @@
 -- Applied to recovery project xpeibufgzjknrhbhpffp under roadmap evidence receipt #1.
 -- Noncanonical and authority-free by design: no worker admission, no mainline checkpoint,
 -- and no shared cache reuse is enabled by this file.
+--
+-- AUDIT FIXPACK2 (2026-10-18), fresh-project replayability: the INSERT below and the final
+-- selftest call assume destruktion_meta.compute_fabric_toolchain_contract_h205f22 exists,
+-- but no migration in this chain ever created it (the live cloud carried it from the
+-- pre-canonical era; infra/pigsty/bootstrap/05 carries the reconstruction snapshot).
+-- Port the canonical reconstruction DDL here so a fresh `supabase db push` survives.
+-- Idempotent by design; on the live cloud this is a no-op.
+
+create table if not exists destruktion_meta.compute_fabric_toolchain_contract_h205f22 (
+  contract_key text primary key,
+  schema_version integer not null,
+  hash_algorithm text not null default 'SHA256',
+  environment_mode text not null default 'DECLARED_COMPLETE',
+  required_environment_keys text[] not null default '{}',
+  contract jsonb not null default '{}'::jsonb,
+  contract_sha256 text,
+  enabled boolean not null default true,
+  canonical boolean not null default false,
+  authority_effect boolean not null default false
+);
+grant all on destruktion_meta.compute_fabric_toolchain_contract_h205f22 to service_role;
 
 create or replace function destruktion_meta.compute_fabric_canonical_json_h205f22(p_value jsonb)
 returns text

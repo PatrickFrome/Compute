@@ -51,13 +51,31 @@ begin
 end
 $function$;
 
-drop trigger if exists devos_fence_ready_base_drift_h205f22
-  on destruktion_meta.metaengine_devos_roadmap_authority_h205f22;
-create trigger devos_fence_ready_base_drift_h205f22
-after update of baseline_sha on destruktion_meta.metaengine_devos_roadmap_authority_h205f22
-for each row execute function destruktion_meta.devos_fence_ready_base_drift_h205f22();
+-- AUDIT FIXPACK2 (2026-10-18), fresh-project replayability: both the trigger target
+-- (metaengine_devos_roadmap_authority_h205f22, created in 20260929133000) and the
+-- devos fleet task plane (20260929010000) appear later in this chain. A fresh
+-- `supabase db push` would fail here; skip instead. Live cloud is unaffected.
+do $guard$
+begin
+  if to_regclass('destruktion_meta.metaengine_devos_roadmap_authority_h205f22') is null then
+    raise notice 'skip devos_fence_ready_base_drift trigger+backfill: metaengine_devos_roadmap_authority_h205f22 is created later in the chain (20260929133000)';
+    return;
+  end if;
 
-do $block$
+  drop trigger if exists devos_fence_ready_base_drift_h205f22
+    on destruktion_meta.metaengine_devos_roadmap_authority_h205f22;
+  create trigger devos_fence_ready_base_drift_h205f22
+  after update of baseline_sha on destruktion_meta.metaengine_devos_roadmap_authority_h205f22
+  for each row execute function destruktion_meta.devos_fence_ready_base_drift_h205f22();
+
+  -- the %rowtype declaration below resolves devos_fleet_task_h205f22 at block compile
+  -- time, so this backfill needs its own existence check before it can run
+  if to_regclass('destruktion_meta.devos_fleet_task_h205f22') is null then
+    raise notice 'skip devos base-drift backfill: devos_fleet_task_h205f22 is created later in the chain (20260929010000)';
+    return;
+  end if;
+
+  do $block$
 declare
   v_base text;
   v_epoch bigint;
@@ -101,3 +119,5 @@ begin
   end if;
 end
 $block$;
+end
+$guard$;
