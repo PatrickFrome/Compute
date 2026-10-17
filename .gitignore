@@ -2,6 +2,17 @@
 /.audit-local/
 /supabase/.temp/
 
+# Runtime state of the me2-daemon: SQLite (может содержать vault-токены —
+# аудит 2026-10-18, C1: секреты не должны попадать в git), WAL/SHM и логи.
+/apps/me2-daemon/data/*.db
+/apps/me2-daemon/data/*.db-wal
+/apps/me2-daemon/data/*.db-shm
+/apps/me2-daemon/daemon.log
+/apps/me2-daemon/*.log
+
+# Dependencies are installed, not committed (audit 2026-10-18: hygiene).
+node_modules/
+
 # Generated installer inputs and output artifacts.
 /apps/metaengine-browser/me2-ui-dist/
 /apps/metaengine-browser/me2-daemon-dist/
@@ -9,3 +20,7 @@
 /apps/metaengine-browser/devos-source-snapshot/
 /apps/metaengine-browser/dist-test/
 /apps/metaengine-browser/client-state-runtime-dist-before-*/
+
+# Next.js build output is generated (audit 2026-10-18: hygiene —
+# артефакты сборки, включая вложенные node_modules, не должны быть в git).
+/apps/me2-ui/.next/
