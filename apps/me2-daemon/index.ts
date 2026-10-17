@@ -116,6 +116,41 @@ const REST_PORT = ports.REST_PORT;
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
+
+// ── E3 (R34): СТРАЖ ИНКАРНАЦИИ — ДО любых boot-мутаций ──────────────────────
+// AUDIT FIXPACK2 (2026-10-18): блок поднят из конца файла. Раньше setMeta(boot/version),
+// memWrite(incarnation-row), seed() и migrateAgentsToActiveInference() (ПЕРЕЗАПИСЫВАЕТ
+// строки агентов!) выполнялись ДО гварда — второй нестрайт-инстанс мутировал общую SQLite
+// перед exit(13), хотя собственный комментарий гварда обещал "умирает ДО любых мутаций".
+// Модульные CREATE TABLE IF NOT EXISTS при импортах — идемпотентный DDL, не считаются.
+// Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear
+// зомби-lease) и убить lease живого демона, после чего сам умер на EADDRINUSE. Lockfile
+// O_EXCL + kill-0: дубль честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
+// R51 (фаза C): путь lockfile переопределяется env ME2_LOCK_FILE — изолированный gate-probe
+// рядом с production-daemon'ом получает собственный lock (в CI дефолт не используется вторым).
+const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || join(tmpdir(), "me2-daemon.lock");
+let poolBootAllowed = true;
+try {
+  if (existsSync(ME2_LOCK_FILE)) {
+    const oldPid = Number(readFileSync(ME2_LOCK_FILE, "utf8").trim());
+    let alive = false;
+    try { process.kill(oldPid, 0); alive = true; } catch { alive = false; }
+    if (alive && oldPid !== process.pid) {
+      console.error(`[guard] me2-daemon уже жив (pid ${oldPid}) — дубль-инкарнация pid ${process.pid} уходит, мутации БД запрещены`);
+      process.exit(13);
+    }
+    unlinkSync(ME2_LOCK_FILE);
+  }
+  const lfd = openSync(ME2_LOCK_FILE, "wx");
+  writeSync(lfd, String(process.pid));
+  closeSync(lfd);
+  process.on("exit", () => { try { if (readFileSync(ME2_LOCK_FILE, "utf8").trim() === String(process.pid)) unlinkSync(ME2_LOCK_FILE); } catch { /* best effort */ } });
+} catch (e) {
+  poolBootAllowed = false; // не смогли доказать единственность — консервативно без boot-мутаций
+  console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — boot-мутации пула отключены`);
+}
+// ── конец стража инкарнации; дальше — только каноническая инкарнация ─────
+
 if (!PROBE_MODE) {
   setMeta("boot", BOOT_TS);
   setMeta("version", VERSION);
@@ -1388,34 +1423,8 @@ if (!PROBE_MODE) setTimeout(() => {
 if (!PROBE_MODE) {
   try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
 }
-
-// E3 (R34): страж инкарнации — второй экземпляр daemon'а не имеет права мутировать общую SQLite.
-// Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear зомби-lease)
-// и убить lease живого демона, после чего сам умер на EADDRINUSE. Lockfile O_EXCL + kill-0: дубль
-// честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
-// R51 (фаза C): путь lockfile переопределяется env ME2_LOCK_FILE — изолированный gate-probe
-// рядом с production-daemon'ом получает собственный lock (в CI дефолт не используется вторым).
-const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || join(tmpdir(), "me2-daemon.lock");
-let poolBootAllowed = true;
-try {
-  if (existsSync(ME2_LOCK_FILE)) {
-    const oldPid = Number(readFileSync(ME2_LOCK_FILE, "utf8").trim());
-    let alive = false;
-    try { process.kill(oldPid, 0); alive = true; } catch { alive = false; }
-    if (alive && oldPid !== process.pid) {
-      console.error(`[guard] me2-daemon уже жив (pid ${oldPid}) — дубль-инкарнация pid ${process.pid} уходит, мутации БД запрещены`);
-      process.exit(13);
-    }
-    unlinkSync(ME2_LOCK_FILE);
-  }
-  const lfd = openSync(ME2_LOCK_FILE, "wx");
-  writeSync(lfd, String(process.pid));
-  closeSync(lfd);
-  process.on("exit", () => { try { if (readFileSync(ME2_LOCK_FILE, "utf8").trim() === String(process.pid)) unlinkSync(ME2_LOCK_FILE); } catch { /* best effort */ } });
-} catch (e) {
-  poolBootAllowed = false; // не смогли доказать единственность — консервативно без boot-мутаций
-  console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — boot-мутации пула отключены`);
-}
+// (AUDIT FIXPACK2: страж инкарнации перенесён в начало boot-последовательности —
+// перед setMeta/seed/tokensEnsure/migrateAgentsToActiveInference; см. шапку файла)
 // восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
 if (poolBootAllowed && !PROBE_MODE) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }

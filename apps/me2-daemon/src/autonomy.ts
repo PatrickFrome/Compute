@@ -30,6 +30,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { db, getMeta } from "../store";
 import { verifyChain } from "../evidence";
+import { REPO_ROOT } from "./worktrees";
+
+// AUDIT FIXPACK2 (2026-10-18): recoveryHierarchy L4 ссылался на неопределённый REPO —
+// execFileSync гарантированно кидал ReferenceError, гард гасил его в catch и L4 ВСЕГДА
+// рапортовал "git недоступен из runtime". Мёртвый уровень иерархии восстановления теперь
+// читает реальный git HEAD репозитория (тот же REPO_ROOT, что worktrees/sandbox).
 
 // R51: исходники резолвятся относительно пакета (укладка-независимо: sandbox, monorepo apps/, CI)
 const PKG_SRC = dirname(fileURLToPath(import.meta.url));
@@ -279,7 +285,7 @@ export function recoveryHierarchy(): Array<{ level: string; component: string; s
   // L4: immutable bootstrap — git HEAD (источник истины вне живого процесса)
   let l4 = "n/a";
   try {
-    const head = execFileSync("git", ["log", "-1", "--format=%h %s"], { cwd: REPO, timeout: 4000 }).toString().trim();
+    const head = execFileSync("git", ["log", "-1", "--format=%h %s"], { cwd: REPO_ROOT, timeout: 4000 }).toString().trim();
     l4 = head.slice(0, 80);
   } catch { l4 = "git недоступен из runtime (bootstrap только через клон ветки)"; }
   rows.push({ level: "L4", component: "bootstrap: ветка sandbox/me2-os (GitHub)", status: l4, recovers: "полная потеря песочницы (env-recovery из капсулы/ветки)" });
