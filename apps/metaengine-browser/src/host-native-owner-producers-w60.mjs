@@ -5,7 +5,6 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { loadPackagedEmergencyMaintenanceTrustRoot } from './emergency-maintenance-trust-root.mjs';
 
 const run = promisify(execFile);
 const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -14,7 +13,9 @@ const HEX64 = /^[a-f0-9]{64}$/i;
 const valid = x => x && typeof x === 'object' && !Array.isArray(x);
 const pos = x => Number.isSafeInteger(x) && x > 0;
 const at = () => new Date().toISOString();
-const fixtures = x => x?.fixture_classification != null || x?.synthetic === true || x?.staging === true;
+const fixtures = x => x?.fixture_classification != null || x?.synthetic === true || x?.staging === true || x?.untrusted === true;
+const fresh = x => Number.isFinite(Date.parse(x)) &&
+  Date.parse(x) >= Date.now() - 30000 && Date.parse(x) <= Date.now() + 5000;
 const safe = f => Promise.resolve().then(f).catch(() => null);
 const frozen = x => x ? Object.freeze(x) : null;
 const ABSENT_PROCESS_ERROR = 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand';
@@ -53,8 +54,7 @@ const signatureScript = executable => [
   '@{ status = [string]$s.Status; thumbprint = [string]$s.SignerCertificate.Thumbprint } | ConvertTo-Json -Compress',
 ].join('; ');
 
-export async function readWindowsKernelProcessW60(pid, { platform = process.platform, exec = run } = {}) {
-  if (platform !== 'win32' || !pos(pid) || pid > 0x7fffffff) return null;
+function trustedWindowsShellW60() {
   // Match the existing native KnownFolder rail: a nonstandard Windows system
   // drive stays UNKNOWN until it has an independent native root resolver.
   // Environment and PATH cannot select another executable or module provider.
@@ -66,10 +66,17 @@ export async function readWindowsKernelProcessW60(pid, { platform = process.plat
   const powershell = path.win32.join(system32,'WindowsPowerShell','v1.0','powershell.exe');
   const env = {SystemRoot:root,SYSTEMROOT:root,WINDIR:root,PATH:system32,
     PSModulePath:path.win32.join(system32,'WindowsPowerShell','v1.0','Modules')};
+  return {powershell,env};
+}
+
+export async function readWindowsKernelProcessW60(pid, { platform = process.platform, exec = run } = {}) {
+  if (platform !== 'win32' || !pos(pid) || pid > 0x7fffffff) return null;
+  const shell = trustedWindowsShellW60();
+  if (!shell) return null;
   return safe(async () => {
-    const { stdout } = await exec(powershell,
+    const { stdout } = await exec(shell.powershell,
       ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command', processScript(pid)],
-      { env, shell:false, timeout: 15000, windowsHide: true, maxBuffer: 4096 });
+      { env:shell.env, shell:false, timeout: 15000, windowsHide: true, maxBuffer: 4096 });
     const x = JSON.parse(stdout.trim());
     if (x?.state === 'NOT_RUNNING') {
       if (Object.keys(x).length !== ABSENT_PROCESS_FIELDS.length ||
@@ -94,10 +101,12 @@ export async function readWindowsSignedExecutableW60(executable, {
   if (platform !== 'win32' || typeof executable !== 'string' ||
     executable.length > 2048 || !/^[A-Za-z]:\\/.test(executable) ||
     executable.startsWith('\\\\') || executable.includes('\0')) return null;
+  const shell = trustedWindowsShellW60();
+  if (!shell) return null;
   return safe(async () => {
-    const { stdout } = await exec('powershell.exe',
+    const { stdout } = await exec(shell.powershell,
       ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',signatureScript(executable)],
-      { timeout: 3500, windowsHide: true, maxBuffer: 4096 });
+      { env:shell.env, shell:false, timeout: 3500, windowsHide: true, maxBuffer: 4096 });
     const sig = JSON.parse(stdout.trim());
     if (sig.status !== 'Valid' || !HEX40.test(sig.thumbprint || '')) return null;
     const bytes = await readFile(executable);
@@ -130,10 +139,7 @@ export function createHostNativeOwnerReadersW60({
   const ownExe = process.execPath;
   const platform = process.platform;
 
-  async function ownerRecord() {
-    // Device enrollment alone is not an Owner binding. This operation can
-    // only be fulfilled by the existing Host custody's authenticated record.
-    const x = await safe(() => identity.readHostOwnerIncarnation());
+  function validOwnerRecord(x) {
     const observed = Date.parse(x?.observed_at);
     if (!valid(x) || fixtures(x) || x.schema !== 'metaengine.host.owner-incarnation.v1' ||
       x.source !== 'LOCAL_HOST_OWNER' || x.authority_effect !== false ||
@@ -142,16 +148,22 @@ export function createHostNativeOwnerReadersW60({
       typeof x.process_incarnation_id !== 'string' || x.process_incarnation_id.length < 8 ||
       !Number.isFinite(Date.parse(x.created_at)) || !Number.isFinite(observed) ||
       observed < Date.now() - 30000 || observed > Date.now() + 5000 ||
-      x.device_id !== identity.snapshot()?.device_id) return null;
+      x.device_id !== identity.snapshot()?.device_id) return false;
+    return true;
+  }
+
+  async function ownerRecord() {
+    // Device enrollment alone is not an Owner binding. This operation can
+    // only be fulfilled by the existing Host custody's authenticated record.
+    const x = await safe(() => identity.readHostOwnerIncarnation());
+    if (!validOwnerRecord(x)) return null;
     const k = await readWindowsKernelProcessW60(x.pid,{platform,exec});
     if (!k || k.created_at !== new Date(x.created_at).toISOString() ||
       k.exe_path.toLowerCase() !== ownExe.toLowerCase() || x.pid !== processId) return null;
     const again = await safe(() => identity.readHostOwnerIncarnation());
-    if (!valid(again) || fixtures(again) || !['owner_id','project_id','device_id','pid',
-      'created_at','process_incarnation_id','generation','epoch'].every(key=>x[key]===again[key]) ||
-      !Number.isFinite(Date.parse(again.observed_at)) ||
-      Date.parse(again.observed_at) < Date.now() - 30000 ||
-      Date.parse(again.observed_at) > Date.now() + 5000) return null;
+    if (!validOwnerRecord(again) || !['owner_id','project_id','device_id','pid',
+      'created_at','process_incarnation_id','generation','epoch','source_sha']
+      .every(key=>x[key]===again[key])) return null;
     return frozen({...x,observed_at:at()});
   }
   const readers = {
@@ -194,25 +206,31 @@ export function createHostNativeOwnerReadersW60({
     async readSignedInstalledExecutable(ownerId, generation) {
       const owner = await ownerRecord();
       if (!owner || owner.owner_id !== ownerId || owner.generation !== generation ||
-        !app.isPackaged || platform !== 'win32') return null;
-      const root = await safe(() => loadPackagedEmergencyMaintenanceTrustRoot());
-      const native = await readWindowsSignedExecutableW60(ownExe,{platform,exec});
-      // An arbitrary Valid Authenticode signature is NOT the METAENGINE signer.
-      // Existing trusted root must explicitly pin signer + source + exact bytes.
-      if (!root || !native ||
-        !HEX40.test(root.build_sha || '') || !HEX64.test(root.installed_exe_sha256 || '') ||
-        !HEX40.test(root.installed_signer_thumbprint || '') ||
-        native.signer_thumbprint !== root.installed_signer_thumbprint.toLowerCase() ||
-        native.installed_exe_sha256 !== root.installed_exe_sha256.toLowerCase()) return null;
-      // Existing release trust must carry its *own* signed proof identity;
-      // hashing this module's chosen Owner fields would manufacture provenance.
-      if (!HEX64.test(root.installed_proof_identity || '')) return null;
-      const proof = root.installed_proof_identity.toLowerCase();
-      return frozen({source:'INSTALLED_EXE_NATIVE_VERIFIER',owner_id:owner.owner_id,
+        !HEX40.test(owner.source_sha || '') || !app.isPackaged || platform !== 'win32') return null;
+      // W68 owns the existing release-root signature and exact EXE/SLSA byte
+      // verification. Lazy import avoids a static W60 -> W68 -> W60 cycle;
+      // its production API accepts only the native app, never injected roots,
+      // paths, signers or this producer's diagnostic exec callback.
+      const proof = await safe(async () => {
+        const { readVerifiedInstalledExecutableW68 } = await import('./installed-executable-provenance-w68.mjs');
+        return readVerifiedInstalledExecutableW68(app);
+      });
+      if (!valid(proof) || fixtures(proof) || proof.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
+        proof.release_root_signature_verified !== true || proof.slsa_evidence_digest_bound !== true ||
+        proof.native_signature_verified !== true || proof.exact_bytes_verified !== true ||
+        proof.authority_effect !== false || !HEX40.test(proof.source_sha || '') ||
+        proof.source_sha.toLowerCase() !== owner.source_sha.toLowerCase() ||
+        !HEX64.test(proof.installed_exe_sha256 || '') || !HEX64.test(proof.proof_identity || '') ||
+        !fresh(proof.observed_at)) return null;
+      const after = await ownerRecord();
+      if (!after || !['owner_id','device_id','project_id','pid','created_at',
+        'generation','epoch','process_incarnation_id','source_sha'].every(k=>owner[k]===after[k]) ||
+        !fresh(proof.observed_at)) return null;
+      // Preserve W68's signed proof identity and observation, adding only the
+      // independently rechecked current Owner binding. No provenance is minted.
+      return frozen({...proof,owner_id:owner.owner_id,
         owner_epoch:owner.epoch,owner_generation:owner.generation,
-        process_incarnation_id:owner.process_incarnation_id,source_sha:root.build_sha.toLowerCase(),
-        installed_exe_sha256:native.installed_exe_sha256,proof_identity:proof,
-        exact_bytes_verified:true,native_signature_verified:true,observed_at:at(),authority_effect:false});
+        process_incarnation_id:owner.process_incarnation_id});
     },
     async readOwnerSecretStore(ownerId,generation) {
       const owner = await ownerRecord();

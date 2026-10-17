@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
 import { createHostNativeOwnerReadersW60, readWindowsKernelProcessW60,
@@ -261,4 +261,165 @@ test('W60: HOST secret is never returned without current Owner incarnation',asyn
   }});
   assert.equal(await r.readOwnerSecretStore('host-w60',3),null);
   assert.equal(called,0);
+});
+
+test('W60: Authenticode uses the same pinned OS executable and environment as the kernel probe',async()=>{
+  const previous=['PATH','PSModulePath'].map(key=>[key,process.env[key]]);
+  try {
+    process.env.PATH='C:\\untrusted-native-bin';
+    process.env.PSModulePath='C:\\untrusted-native-modules';
+    let calls=0;
+    const result=await readWindowsSignedExecutableW60('C:\\generated-w60.exe',{
+      platform:'win32',readFile:async()=>Buffer.from('fixture bytes'),
+      exec:async(program,args,options)=>{
+        calls++;
+        assert.equal(program,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+        assert.equal(options.shell,false);
+        assert.deepEqual(options.env,{
+          SystemRoot:'C:\\Windows',SYSTEMROOT:'C:\\Windows',WINDIR:'C:\\Windows',
+          PATH:'C:\\Windows\\System32',
+          PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules',
+        });
+        assert.equal(options.windowsHide,true);
+        assert.match(args.at(-1),/Get-AuthenticodeSignature -LiteralPath/);
+        return {stdout:JSON.stringify({status:'Valid',thumbprint:'a'.repeat(40)})};
+      },
+    });
+    assert.equal(calls,1);
+    assert.equal(result?.native_signature_verified,true);
+  } finally {
+    for(const [key,value] of previous) {
+      if(value===undefined)delete process.env[key];else process.env[key]=value;
+    }
+  }
+});
+
+test('W60: Authenticode refuses unverified system roots before executing or reading EXE bytes',async()=>{
+  const previous=['SystemRoot','SYSTEMROOT','WINDIR'].map(key=>[key,process.env[key]]);
+  let calls=0,reads=0;
+  try {
+    for(const root of ['', 'C:\\attacker', 'D:\\Windows', 'C:\\Windows\\..\\Windows']) {
+      process.env.SystemRoot=root;process.env.SYSTEMROOT=root;process.env.WINDIR=root;
+      assert.equal(await readWindowsSignedExecutableW60('C:\\generated-w60.exe',{
+        platform:'win32',exec:async()=>{calls++;return {stdout:JSON.stringify({status:'Valid',thumbprint:'a'.repeat(40)})};},
+        readFile:async()=>{reads++;return Buffer.from('fixture bytes');},
+      }),null);
+    }
+    assert.equal(calls,0);
+    assert.equal(reads,0);
+  } finally {
+    for(const [key,value] of previous) {
+      if(value===undefined)delete process.env[key];else process.env[key]=value;
+    }
+  }
+});
+
+test('W60: the existing W68 production export supplies release proof under before/after Owner fences',()=>{
+  // A separate interpreter installs test-only ESM hooks before importing W60.
+  // No production root/path/signer/reader injection is added; no native process,
+  // installed profile, release sidecar, Owner service or database is consulted.
+  const target=new URL('../src/host-native-owner-producers-w60.mjs',import.meta.url).href;
+  const verifier=new URL('../src/installed-executable-provenance-w68.mjs',import.meta.url).href;
+  const code=`
+    import assert from 'node:assert/strict';
+    import {registerHooks,syncBuiltinESMExports} from 'node:module';
+    import childProcess from 'node:child_process';
+    childProcess.execFile=()=>{throw Error('unexpected_native_process')};
+    childProcess.spawn=()=>{throw Error('unexpected_native_process')};
+    syncBuiltinESMExports();
+    Object.defineProperty(process,'platform',{value:'win32'});
+    Object.defineProperty(process,'execPath',{value:'C:\\\\fixture\\\\browser.exe'});
+    process.env.SystemRoot='C:\\\\Windows';process.env.SYSTEMROOT='C:\\\\Windows';process.env.WINDIR='C:\\\\Windows';
+    const replacement='data:text/javascript,'+encodeURIComponent(
+      'export async function readVerifiedInstalledExecutableW68(app){'+
+      'globalThis.fixture.calls++;if(globalThis.fixture.error)throw Error("unavailable");'+
+      'globalThis.fixture.during?.();return globalThis.fixture.proof;}');
+    registerHooks({resolve(specifier,context,next){
+      const resolved=next(specifier,context);
+      return resolved.url===${JSON.stringify(verifier)}?{url:replacement,shortCircuit:true}:resolved;
+    }});
+    const {createHostNativeOwnerReadersW60}=await import(${JSON.stringify(target)});
+    const source='a'.repeat(40), birth='2026-10-15T00:00:00.000Z';
+    const original={schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',
+      authority_effect:false,owner_id:'host-w60',device_id:'device-w60',project_id:'project-w60',
+      pid:1234,created_at:birth,process_incarnation_id:'incarnation-w60',generation:3,epoch:2,source_sha:source};
+    const proof=()=>({source:'INSTALLED_EXE_NATIVE_VERIFIER',source_sha:source,
+      package_version:'0.7.0-dev.1.1',installed_exe_sha256:'b'.repeat(64),signer_thumbprint:'c'.repeat(40),
+      proof_identity:'d'.repeat(64),release_root_signature_verified:true,slsa_evidence_digest_bound:true,
+      independent_slsa_crypto_verified_at_runtime:false,native_signature_verified:true,
+      exact_bytes_verified:true,observed_at:new Date().toISOString(),authority_effect:false});
+    let owner={...original},reads=0,fourthReadChange=null,sourceReadback=[];
+    const identity={ensure:async()=>{},snapshot:()=>({device_id:'device-w60'}),
+      readHostOwnerIncarnation:async()=>{
+        reads++;
+        const record={...owner,observed_at:new Date().toISOString(),
+          ...(reads===4?fourthReadChange:{})};
+        sourceReadback.push(record.source_sha);
+        return record;
+      }};
+    const readers=createHostNativeOwnerReadersW60({identity,guardianLauncher:{status:async()=>null},
+      app:{isPackaged:true,getVersion:()=> '0.7.0-dev.1.1'},processId:1234,
+      exec:async(program,args,options)=>{
+        assert.equal(program,'C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe');
+        assert.equal(options.shell,false);
+        assert.match(args.at(-1),/Get-Process -Id/);
+        return {stdout:JSON.stringify({pid:1234,created_at:birth,exe_path:process.execPath})};
+      }});
+    const invoke=async(value=proof(),during=null,error=false,finalReadChange=null)=>{
+      owner={...original};reads=0;fourthReadChange=finalReadChange;sourceReadback=[];
+      globalThis.fixture={proof:value,during,error,calls:0};
+      const result=await readers.readSignedInstalledExecutable('host-w60',3);
+      assert.equal(globalThis.fixture.calls,1,'must use the existing W68 production export');
+      return result;
+    };
+    const verified=await invoke();
+    assert.ok(verified,'root-authenticated W68 proof must not require nonexistent trust-root fields');
+    assert.ok(reads>=4,'must recheck authenticated Owner after W68 completes');
+    for(const key of ['source_sha','installed_exe_sha256','proof_identity','observed_at',
+      'release_root_signature_verified','slsa_evidence_digest_bound'])
+      assert.equal(verified[key],globalThis.fixture.proof[key],key);
+    assert.equal(verified.owner_id,original.owner_id);
+    assert.equal(verified.owner_epoch,original.epoch);
+    assert.equal(verified.owner_generation,original.generation);
+    assert.equal(verified.process_incarnation_id,original.process_incarnation_id);
+    assert.equal(verified.authority_effect,false);
+    assert.ok(Object.isFrozen(verified));
+    for(const change of [{fixture_classification:'STAGING'},{synthetic:true},{staging:true},{untrusted:true},
+      {release_root_signature_verified:false},{slsa_evidence_digest_bound:false},
+      {native_signature_verified:false},{exact_bytes_verified:false},{authority_effect:true},
+      {source:'PUBLIC_JSON'},{source_sha:'e'.repeat(40)},{installed_exe_sha256:'invalid'},
+      {proof_identity:'invalid'},{observed_at:new Date(Date.now()-60000).toISOString()}])
+      assert.equal(await invoke({...proof(),...change}),null,JSON.stringify(change));
+    assert.equal(await invoke(null),null);
+    assert.equal(await invoke(proof(),null,true),null);
+    for(const change of [{owner_id:'other-owner'},{device_id:'other-device'},{project_id:'other-project'},
+      {pid:4321},{created_at:'2026-10-15T01:00:00.000Z'},{process_incarnation_id:'other-incarnation'},
+      {generation:4},{epoch:3},{source_sha:'e'.repeat(40)},{untrusted:true}])
+      assert.equal(await invoke(proof(),()=>{owner={...owner,...change};}),null,JSON.stringify(change));
+    // First Owner observation is A,A; the post-W68 observation is A,B.
+    // Comparing only the two outer A records would accept a proof for A.
+    // Revalidate all custody and freshness fields on that fourth read too.
+    const acceptedFinalDrifts=[];
+    for(const change of [{source_sha:'e'.repeat(40)},{schema:'wrong-schema'},
+      {source:'PUBLIC_JSON'},{authority_effect:true},{owner_id:'other-owner'},
+      {device_id:'other-device'},{project_id:'other-project'},{pid:4321},
+      {created_at:'2026-10-15T01:00:00.000Z'},{process_incarnation_id:'other-incarnation'},
+      {generation:4},{epoch:3},{observed_at:'malformed'},
+      {observed_at:new Date(Date.now()-60000).toISOString()},
+      {observed_at:new Date(Date.now()+60000).toISOString()},
+      {fixture_classification:'STAGING'},{synthetic:true},{staging:true},{untrusted:true}]) {
+      const result=await invoke(proof(),null,false,change);
+      assert.equal(reads,4,'must reach the final authenticated Owner read');
+      assert.deepEqual(sourceReadback,[source,source,source,change.source_sha??source]);
+      if(result!==null)acceptedFinalDrifts.push(Object.keys(change)[0]+':'+String(Object.values(change)[0]));
+    }
+    assert.deepEqual(acceptedFinalDrifts,[],
+      'any invalid fourth authenticated Owner read must invalidate proof A');
+    process.stdout.write('W60_W68_OWNER_FENCES_PASS');
+  `;
+  const result=spawnSync(process.execPath,['--input-type=module','--eval',code],{
+    encoding:'utf8',windowsHide:true,timeout:15000,
+  });
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(result.stdout.trim(),'W60_W68_OWNER_FENCES_PASS');
 });
