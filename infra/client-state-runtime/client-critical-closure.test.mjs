@@ -13,7 +13,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomous-development-fabric-v1-20261017',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874563.1',
+  package_version:'0.7.0-dev.1107139874564.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -68,14 +68,24 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.1107139874562.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
- }]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+ },{
+  // b0c2eb619 held 864629885843 and introduced 1107139874562; the follow-up
+  // distinct-package-identity commit 4f506c8e7 introduced 1107139874563.
   schema:'metaengine.client.package-version-successor.v1',
   source_parent:'b0c2eb6199b6e75271f3fe4183930fec2d13075d',
   baseline_source_parent:candidate.source_parent,
   prior_version:'0.7.0-dev.1107139874562.1',
   distinct_version:'0.7.0-dev.1107139874563.1',
+  preceding_version_burned:true,production_ready:false,
+  promotion_authorized:false,authority_effect:false,
+ }]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  schema:'metaengine.client.package-version-successor.v1',
+  source_parent:'4f506c8e7b703f81e8bab40cdcc6e20762d5228c',
+  baseline_source_parent:candidate.source_parent,
+  prior_version:'0.7.0-dev.1107139874563.1',
+  distinct_version:'0.7.0-dev.1107139874564.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
  });
