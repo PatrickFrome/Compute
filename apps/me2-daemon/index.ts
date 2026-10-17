@@ -26,7 +26,7 @@ import { ciPollMs, ciStatus, ciTick } from "./src/ci";
 import { hooksStatus, handleGithubWebhook } from "./src/hooks";
 import { sqlmirrorGatePersisted } from "./src/sqlmirror";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
-import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
+import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf, reconcileOrphanRunningCommands } from "./commands";
 import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
@@ -206,19 +206,6 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
-  // R69.1: капчу публичного origin из живого трафика — Host, с которым платформенный
-  // preview-прокси стучится через Caddy (x-forwarded-host / host). Нужно для боевого
-  // URL GitHub-webhook без ручного ввода оператора. Список кандидатов (кап 20) в meta.
-  if (!PROBE_MODE) try {
-    const hh = String(req.headers.host ?? "");
-    const xfh = String(req.headers["x-forwarded-host"] ?? "");
-    const cand = ((xfh || hh).split(",")[0] ?? "").trim();
-    if (cand && !cand.startsWith("localhost") && !cand.startsWith("127.0.0.1") && !cand.startsWith("[::1]")) {
-      const seen = new Set<string>(JSON.parse(getMeta("host_candidates") || "[]") as string[]);
-      if (!seen.has(cand) && seen.size < 20) { seen.add(cand); setMeta("host_candidates", JSON.stringify([...seen])); }
-      setMeta("public_origin_last", `${cand} @ ${new Date().toISOString()}`);
-    }
-  } catch { /* капча не критична */ }
   const cors = corsHeadersFor(req);
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
 
@@ -233,6 +220,22 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       hint: "локальные клиенты (loopback) разрешены; для удалённого доступа задайте ME2_API_TOKEN на daemon и шлите Authorization: Bearer <token>",
     });
   }
+
+  // R69.1 (AUDIT FIXPACK2: перенесено ЗА auth-гейт — раньше любой неаутентифицированный
+  // пир выполнял ДВЕ записи в SQLite на каждый запрос: капча публичного origin из живого
+  // трафика — Host, с которым платформенный preview-прокси стучится через Caddy
+  // (x-forwarded-host / host). Нужно для боевого URL GitHub-webhook без ручного ввода
+  // оператора. Список кандидатов (кап 20) в meta.
+  if (!PROBE_MODE) try {
+    const hh = String(req.headers.host ?? "");
+    const xfh = String(req.headers["x-forwarded-host"] ?? "");
+    const cand = ((xfh || hh).split(",")[0] ?? "").trim();
+    if (cand && !cand.startsWith("localhost") && !cand.startsWith("127.0.0.1") && !cand.startsWith("[::1]")) {
+      const seen = new Set<string>(JSON.parse(getMeta("host_candidates") || "[]") as string[]);
+      if (!seen.has(cand) && seen.size < 20) { seen.add(cand); setMeta("host_candidates", JSON.stringify([...seen])); }
+      setMeta("public_origin_last", `${cand} @ ${new Date().toISOString()}`);
+    }
+  } catch { /* капча не критична */ }
 
   if (PROBE_MODE) {
     const method = String(req.method || "GET").toUpperCase();
@@ -1416,6 +1419,9 @@ try {
 // восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
 if (poolBootAllowed && !PROBE_MODE) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
+  // AUDIT FIXPACK2: осиротевшие RUNNING-команды предыдущей инкарнации — в очередь
+  // (раньше молча терялись навсегда: crash между claim и завершением хендлера)
+  try { const rc = reconcileOrphanRunningCommands(); if (rc.requeued) console.log(`[commands] requeued ${rc.requeued} orphaned RUNNING command(s) from previous incarnation`); } catch (e) { console.error(`[commands] reconcile failed: ${String(e)}`); }
   try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
   try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
   // Legacy daemon supervisor is isolated from Browser production authority.
@@ -1499,6 +1505,17 @@ try {
   setMirrorFeedProvider(() => sqlMirror.readFeed(20));
   if (!PROBE_MODE) { exthostStartEventLoop(); console.log("[me2-daemon] exthost event loop on (30с, activation bus:*, caps-медиация зеркала)"); }
 } catch (e) { console.error(`[me2-daemon] exthost init failed: ${String(e)}`); }
+// AUDIT FIXPACK2 (2026-10-18): .listen() без 'error'-хендлера — EADDRINUSE на любом из
+// портов падал необработанным исключением и убивал демона на старте (инкарнационный
+// lockfile защищает от дублей-по-pidfile, но не от конфликтов портов с ЧУЖИМИ сервисами:
+// код ниже сам документирует живой next-server на :3021). Теперь ошибка порта = честный
+// лог + деградация, а не крэш-петля fork-шума через watchdog.
+wsHttpServer.on("error", (e: NodeJS.ErrnoException) => {
+  console.error(`[me2-daemon] WS :${WS_PORT} listen error: ${e.code ?? ""} ${e.message} — WS-плоскость недоступна, REST продолжает`);
+});
+restServer.on("error", (e: NodeJS.ErrnoException) => {
+  console.error(`[me2-daemon] REST :${REST_PORT} listen error: ${e.code ?? ""} ${e.message} — фатально для API, но процесс не падает (watchdog решит)`);
+});
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
 
@@ -1507,10 +1524,17 @@ restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] 
 // watchdog vechno "nezdorov" -> spawn dubley kazhdye 8s (ikh lovit strazh inkarnatsii, no eto fork-shum).
 const LEGACY_MIRROR_PORT = Number(process.env.ME2_LEGACY_MIRROR_PORT ?? 3021);
 try {
-  createServer((_rq, rs) => {
+  const legacyMirror = createServer((_rq, rs) => {
     rs.writeHead(200, { "Content-Type": "application/json" });
     rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: LEGACY_MIRROR_PORT, ts: nowIso() }));
-  }).listen(LEGACY_MIRROR_PORT);
+  });
+  // AUDIT FIXPACK2: порт :3021 в production занят легаси next-server — конфликт должен
+  // деградировать в лог, а не в необработанное исключение (async-событие 'error',
+  // try/catch вокруг .listen() его НЕ ловит).
+  legacyMirror.on("error", (e: NodeJS.ErrnoException) => {
+    console.error(`[me2-daemon] legacy mirror :${LEGACY_MIRROR_PORT} unavailable: ${e.code ?? ""} ${e.message.slice(0, 100)} (ok — легаси-watchdog обслуживается живым next-server)`);
+  });
+  legacyMirror.listen(LEGACY_MIRROR_PORT);
   console.log(`[me2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
 } catch (e) { console.error(`[me2-daemon] legacy mirror :${LEGACY_MIRROR_PORT} failed: ${String(e).slice(0, 100)}`); }
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

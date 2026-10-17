@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, normalize, dirname, relative, isAbsolute, sep } from "node:path";
 import {
-  listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
+  listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, nowIso, type AgentRow, type TaskRow,
 } from "./store";
 import { chat, webSearch as providerWebSearch } from "./providers";
 import { isQuotaError, parkTaskQuota, PARK_MAX } from "./src/quota";
@@ -403,6 +403,11 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         emit("STEP_DONE", { step, parse: "retry", raw: reply.slice(0, 300) }, agent.id, task.id);
         messages.push({ role: "assistant", content: reply.slice(0, 2000) });
         messages.push({ role: "user", content: `observation: формат неверен. Ответь РОВНО ОДНИМ JSON-объектом вида {"thought":"...","action":{"tool":"...","args":{...}}}` });
+        // AUDIT FIXPACK2 (2026-10-18): parse-retry — это живой прогресс, а не ступор.
+        // Обновляем updated_at, иначе 3 невалидных ответа LLM подряд (по таймауту провайдера
+        // до 120с) = 6 минут без записи прогресса > STALE_MS 5 мин — watchdog валил ЖИВУЮ
+        // задачу (stale_worker_watchdog), агент выжигал остаток бюджета шагов в TASK_LEASE_VOID.
+        try { updateTask(task.id, { updated_at: nowIso() } as Partial<TaskRow>); } catch { /* touch не критичен */ }
         continue;
       }
       const tool = parsed.action.tool;
@@ -532,7 +537,15 @@ export function watchdogStaleTasks(): { reaped: number; ids: string[] } {
       updateTask(t.id, { status: "FAILED", error: "stale_worker_watchdog", reflection: refl });
       emit("TASK_FAILED", { error: "stale_worker_watchdog", agent: t.agent_id, stale_s: Math.round((Date.now() - upd) / 1000) }, t.agent_id, t.id);
       recordSpan("watchdog.stale_worker", { "me2.task_id": t.id }, Date.now(), { status: "ERROR", message: "stale_worker_watchdog" });
-      if (t.agent_id) { try { setAgentStatus(t.agent_id, "IDLE"); } catch { /* noop */ } }
+      if (t.agent_id) {
+        try { setAgentStatus(t.agent_id, "IDLE"); } catch { /* noop */ }
+        // AUDIT FIXPACK2 (2026-10-18): watchdog инвалидирует задачу, но раньше НЕ отпускал
+        // её pool-lease: heartbeat продолжал продлевать мёртвый lease (done=0) бессрочно,
+        // пока жив процесс-владелец (например await provider-вызова с зависшим keep-alive
+        // сокетом) — нес reapable orphan-слот до рестарта демона. Release для не-пуловых
+        // агентов безопасен: DELETE по (task_id, agent_id, done=0) не найдёт строк.
+        try { poolRelease(t.agent_id, t.id, "stale_worker_watchdog"); } catch { /* release не критичен */ }
+      }
       ids.push(t.id);
     }
   } catch { /* watchdog не роняет master loop */ }

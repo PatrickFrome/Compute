@@ -729,3 +729,24 @@ export async function drainCommands(max = 8): Promise<number> {
   }
   return n;
 }
+
+/**
+ * AUDIT FIXPACK2 (2026-10-18): реконсилация осиротевших RUNNING-команд при буте.
+ * Crash/SIGKILL между claimCommand (PENDING→RUNNING) и завершением runCommand оставлял
+ * строку RUNNING навсегда: drainCommands берёт только PENDING, никакого boot-reaper'а не
+ * было — мутация оператора молча терялась (пример: TASK_ENQUEUE, на который REST уже
+ * вернул 200). Вызывается ОДИН раз при старте живой инкарнации (после выигранного
+ * incarnation-лока, до старта циклов): в этот момент ни один хендлер этого процесса ещё
+ * не исполняется, а чужих живых инстансов нет — значит ЛЮБАЯ RUNNING-строка осиротела.
+ * Семантика восстановления — at-least-once: команда переисполняется (enqueueCommand
+ * дедуплицируется по idempotency_key), факт реенквue фиксируется в hash-chain.
+ */
+export function reconcileOrphanRunningCommands(): { requeued: number } {
+  const orphans = db.query(`SELECT id, action, lane FROM commands WHERE status='RUNNING'`).all() as Array<{ id: string; action: string; lane: string }>;
+  if (!orphans.length) return { requeued: 0 };
+  for (const o of orphans) {
+    db.query(`UPDATE commands SET status='PENDING', leased_at=NULL, error='requeued: orphaned RUNNING from a previous incarnation (crash before completion)' WHERE id=?`).run(o.id);
+    emit("COMMAND_REQUEUED", { id: o.id, action: o.action, lane: o.lane, cause: "boot_reconciliation" }, null, null);
+  }
+  return { requeued: orphans.length };
+}
