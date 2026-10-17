@@ -8,7 +8,7 @@ signal: GitHub auto-emails the repo owner on workflow failure).
 
 Env:
   SUPABASE_URL               e.g. https://xpeibufgzjknrhbhpffp.supabase.co
-  SB_STORAGE_READ_KEY        scoped read-only Storage token (NEVER service_role)
+  PAP_TRANSPORT_JWT          scoped read-only Storage token (NEVER service_role)
   BUCKET                     default computefabric-parallel-glm
 
 Usage:
@@ -22,7 +22,7 @@ import urllib.request
 
 BUCKET = os.environ.get("BUCKET", "computefabric-parallel-glm")
 BASE = os.environ.get("SUPABASE_URL", "").rstrip("/")
-KEY = os.environ.get("SB_STORAGE_READ_KEY", "")
+KEY = os.environ.get("PAP_TRANSPORT_JWT", "")
 AGENTS = ["glm", "chatgpt"]
 
 
@@ -71,7 +71,7 @@ def main():
     args = ap.parse_args()
 
     if not BASE or not KEY:
-        print("digest: SUPABASE_URL and SB_STORAGE_READ_KEY are required")
+        print("digest: SUPABASE_URL and PAP_TRANSPORT_JWT are required")
         sys.exit(2)
 
     lines = ["# Coordination Zone digest", ""]

@@ -1,0 +1,4 @@
+# Default ownership: the repository owner reviews every change.
+# (GitHub branch protection should additionally require this review; the
+# grep-based governance checks in governance.yml are advisory only.)
+* @PatrickFrome

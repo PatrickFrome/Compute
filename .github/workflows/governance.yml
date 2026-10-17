@@ -11,6 +11,7 @@ permissions:
 jobs:
   governance:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Reject external-fork governance execution
         shell: bash

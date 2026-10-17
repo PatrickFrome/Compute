@@ -32,7 +32,7 @@ on:
 
 concurrency:
   group: r1-live-recovery-source
-  queue: max
+  cancel-in-progress: false
 
 permissions: {}
 

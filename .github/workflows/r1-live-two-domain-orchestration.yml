@@ -51,7 +51,7 @@ on:
 
 concurrency:
   group: r1-live-${{ inputs.source_run_id || github.run_id }}-${{ inputs.ciphertext_artifact_id || github.run_id }}
-  queue: max
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -104,7 +104,7 @@ jobs:
           assert p.index('verified_source_handoff.py') < p.index("echo 'aws_environment=r1-aws-durability-proof'")
           assert p.index('verified_source_handoff.py') < p.index('\n  aws-provider:')
           assert 'needs: preflight-live' in p
-          assert 'queue: max' in p
+          assert 'cancel-in-progress: false' in p
           assert p.count('id-token: write') == 1
           assert 'output-env-credentials: false' in p
           assert 'output-credentials: true' in p

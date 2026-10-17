@@ -48,7 +48,7 @@ jobs:
 
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
 
       - name: METAENGINE invariant static gate
         working-directory: apps/metaengine-browser

@@ -35,7 +35,7 @@ on:
 
 concurrency:
   group: r1-live-r2-${{ inputs.source_run_id || github.run_id }}-${{ inputs.provider_run_id || github.run_id }}
-  queue: max
+  cancel-in-progress: false
 
 permissions: {}
 

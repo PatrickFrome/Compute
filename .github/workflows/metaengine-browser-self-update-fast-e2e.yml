@@ -37,7 +37,7 @@ jobs:
           node-version: '24'
       - name: Install dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Fast-loop contract gates
         working-directory: apps/metaengine-browser
         run: |
@@ -71,7 +71,7 @@ jobs:
           node-version: '24'
       - name: Install dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Contract gates before physical proof
         working-directory: apps/metaengine-browser
         shell: powershell

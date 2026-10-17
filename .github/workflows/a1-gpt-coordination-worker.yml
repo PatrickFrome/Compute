@@ -14,8 +14,9 @@ permissions:
 jobs:
   deterministic-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Parse worker modules
         run: |
           node --check coordination/gpt-worker/src/guards.mjs
@@ -30,8 +31,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: deterministic-tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Deploy pinned Wrangler build
         working-directory: coordination/gpt-worker
         env:

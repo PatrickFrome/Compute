@@ -39,7 +39,7 @@ jobs:
 
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm ci --no-audit --no-fund
 
       - name: Prove shell-first source boundary
         working-directory: apps/metaengine-browser
