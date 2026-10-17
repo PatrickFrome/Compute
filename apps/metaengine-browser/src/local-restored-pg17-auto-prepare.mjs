@@ -4,6 +4,8 @@ import { pipeline } from 'node:stream/promises';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
+import { setTimeout as pause } from 'node:timers/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -196,6 +198,152 @@ export async function prepareInstalledAttachedPg17({
   if(!(await fs.readFile(original.file)).equals(original.bytes))fail('old_config_changed');
   return Object.freeze({configFile,postgresMode:'attached',apiRoleMode:'direct',clusterPinPreserved:true,
     copyVerified:false,vaultPreserved:true,postgresLifecycleOwned:false,automaticRetryAllowed:false});
+}
+
+async function nativeWindowsBootTime() {
+  if(process.platform!=='win32'||!path.win32.isAbsolute(process.env.SystemRoot||''))fail('native_boot_unavailable');
+  try {
+    const {stdout}=await exec(path.win32.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe'),
+      ['-NoLogo','-NoProfile','-NonInteractive','-Command',
+        "(Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime().ToString('o')"],
+      {windowsHide:true,shell:false,timeout:15000,maxBuffer:4096});
+    const value=stdout.trim();
+    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$/.test(value))fail('native_boot_unavailable');
+    return Date.parse(value);
+  } catch {fail('native_boot_unavailable');}
+}
+function absentProcess(pid) {
+  try {process.kill(pid,0);return 'PRESENT';}
+  catch(error){return error?.code==='ESRCH'?'ABSENT':'UNKNOWN';}
+}
+function observePort(port) {
+  return new Promise(resolve=>{
+    const socket=net.createConnection({host:'127.0.0.1',port});
+    let finished=false;
+    const finish=state=>{if(finished)return;finished=true;socket.destroy();resolve(state);};
+    socket.setTimeout(900,()=>finish('UNKNOWN'));
+    socket.once('connect',()=>finish('PRESENT'));
+    socket.once('error',error=>finish(error?.code==='ECONNREFUSED'?'ABSENT':'UNKNOWN'));
+  });
+}
+async function stableRecoveryEvidence(file) {
+  await physical(file,'file');
+  const before=await fs.lstat(file);
+  if(before.size<2||before.size>65536)fail('replacement_evidence_invalid');
+  const bytes=await fs.readFile(file),after=await fs.lstat(file);
+  if(bytes.length!==before.size||after.size!==before.size||after.ino!==before.ino
+    ||after.mtimeMs!==before.mtimeMs||after.birthtimeMs!==before.birthtimeMs)fail('replacement_evidence_changed');
+  let value;
+  try{value=JSON.parse(bytes.toString('utf8'));}catch{fail('replacement_evidence_invalid');}
+  return {file,bytes,value,mtimeMs:before.mtimeMs,birthtimeMs:before.birthtimeMs};
+}
+
+// Explicit operator preparation after an independently observed machine reboot.
+// Never called by ordinary runtime startup. Legacy STARTING still fails closed
+// in runtime-host-orphan-reconciliation: no child custody is fabricated here.
+// A reboot can prove pre-boot processes ended; it cannot reconcile task effects.
+// The old config, lock and status remain intact behind a durable recovery gate.
+// A fresh profile keeps the same ports and database pin; normal packaged startup
+// must independently verify its bundle, cluster, privileges and health.
+export async function prepareInstalledAttachedPg17AfterReboot({
+  oldConfigFile,bundleDirectory,bundleDigest,operatorChoice,platform=process.platform,
+  protectStorage=protectOwnerOnlyWindowsDirectory,verifyStorage=verifyOwnerOnlyWindowsStorage,
+}={},testDependencies={}) {
+  if(operatorChoice!=='PRESERVE_FAILED_STATE_AND_PREPARE_REPLACEMENT'
+    ||platform!=='win32'||![oldConfigFile,bundleDirectory].every(local)||!SHA.test(bundleDigest||''))fail('replacement_choice_required');
+  const readBootTime=testDependencies.readBootTime||nativeWindowsBootTime;
+  const pidState=testDependencies.pidState||absentProcess;
+  const portState=testDependencies.portState||observePort;
+  const delay=testDependencies.delay||pause;
+  const now=testDependencies.now||Date.now;
+  const original=await stablePrivateConfig(oldConfigFile,verifyStorage),config=original.value;
+  if(!config||config.schema!=='compute.runtime-host-config.v1'||config.version!==1
+    ||config.postgres_mode!=='attached'||config.api_role_mode!=='direct'
+    ||!SHA.test(config.expected_bundle_sha256||'')
+    ||!/^[1-9][0-9]{0,19}$/.test(config.expected_cluster_system_identifier||'')
+    ||![config.state_directory,config.pg_data_directory,config.bundle_directory].every(local))fail('attached_direct_cluster_pin_required');
+  const state=await physical(config.state_directory,'directory');
+  const data=await physical(config.pg_data_directory,'directory');
+  const bundle=await physical(bundleDirectory,'directory');
+  if(!prefix(state,original.file)||prefix(state,data)||prefix(data,state)||prefix(bundle,state)
+    ||prefix(state,bundle)||prefix(bundle,data)||prefix(data,bundle)
+    ||prefix(sourceOrInstallationRoot,state)||prefix(state,sourceOrInstallationRoot))fail('private_state_overlap');
+  if((await verifyStorage(state,{operation:'VERIFY_DIRECTORY'}))?.owner_dacl_verified!==true)fail('private_storage_acl_unverified');
+  const gateFile=path.join(state,'runtime-host-recovery-gate.json');
+  await absent(gateFile);
+  const lock=await stableRecoveryEvidence(path.join(state,'runtime-host-lock.json'));
+  const status=await stableRecoveryEvidence(path.join(state,'runtime-instance.json'));
+  const old=lock.value,s=status.value;
+  if(!old||Object.keys(old).sort().join('|')!=='owner_nonce|pid|schema'
+    ||old.schema!=='compute.runtime-host-lock.v1'||!Number.isSafeInteger(old.pid)||old.pid<=4||old.pid>0x7fffffff
+    ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(old.owner_nonce||'')
+    ||s?.schema!=='metaengine.client-state.runtime-status.v1'||s.state!=='STARTING'||s.runtime_ready!==false
+    ||s.host_pid!==old.pid||s.bundle_sha256!==config.expected_bundle_sha256||s.state_provider!=='LOCAL_POSTGRES'
+    ||s.hosted_supabase_required!==false||s.automatic_cloud_fallback!==false||s.authority_effect!==false)fail('replacement_owner_unverified');
+  let databasePort;
+  try {
+    const db=new URL(config.database_url),inspect=new URL(config.inspect_database_url);
+    databasePort=Number(db.port);
+    if(![db,inspect].every(url=>['postgres:','postgresql:'].includes(url.protocol)&&url.hostname==='127.0.0.1')
+      ||db.port!==inspect.port||db.pathname!==inspect.pathname)fail('attached_database_binding_invalid');
+  } catch {fail('attached_database_binding_invalid');}
+  if(![databasePort,config.api_port,config.edge_port].every(p=>Number.isSafeInteger(p)&&p>=1024&&p<=65535)
+    ||new Set([databasePort,config.api_port,config.edge_port]).size!==3)fail('attached_database_binding_invalid');
+  const bootedAtMs=await readBootTime();
+  const validateBoot=value=>{
+    if(!Number.isFinite(value)||value<=0||value>now()||value!==bootedAtMs
+      ||[lock,status].some(e=>e.mtimeMs>=value-5000||e.birthtimeMs>=value-5000))fail('replacement_reboot_not_proven');
+  };
+  validateBoot(bootedAtMs);
+  const unchanged=async()=>{
+    for(const prior of [lock,status]){
+      const current=await stableRecoveryEvidence(prior.file);
+      if(!current.bytes.equals(prior.bytes)||current.mtimeMs!==prior.mtimeMs
+        ||current.birthtimeMs!==prior.birthtimeMs)fail('replacement_evidence_changed');
+    }
+    const current=await stablePrivateConfig(original.file,verifyStorage);
+    if(!current.bytes.equals(original.bytes))fail('old_config_changed');
+  };
+  const observe=async()=>{
+    if(await pidState(old.pid)!=='ABSENT')fail('replacement_owner_presence_unresolved');
+    // STARTING snapshots may have recorded API/Edge children before the host
+    // failed. A closed endpoint is insufficient evidence that those exact
+    // processes are gone; require an independent PID census as well.
+    if(Array.isArray(s.children)){
+      for(const child of s.children){
+        if(!child || !Number.isSafeInteger(child.pid) || child.pid<=4 || child.pid>0x7fffffff)
+          fail('replacement_child_evidence_invalid');
+        if(await pidState(child.pid)!=='ABSENT')fail('replacement_child_presence_unresolved');
+      }
+    }
+    for(const port of [config.api_port,config.edge_port])if(await portState(port)!=='ABSENT')fail('replacement_endpoint_presence_unresolved');
+    if(await portState(databasePort)!=='PRESENT')fail('replacement_keeper_unavailable');
+  };
+  await observe();await delay(120);await observe();
+  validateBoot(await readBootTime());await unchanged();
+  // Exclusive durable publication is the point of no automatic retry. Failure
+  // after this point preserves the gate and any partial private successor.
+  const gate=await fs.open(gateFile,'wx',0o600);
+  try{await gate.writeFile(JSON.stringify({schema:'compute.runtime-host-recovery-gate.v1',
+    pid:process.pid,nonce:randomUUID(),reason:'OPERATOR_REBOOT_REPLACEMENT'})+'\n');await gate.sync();}
+  finally{await gate.close();}
+  await observe();await unchanged();
+  const successor=path.join(path.dirname(state),path.basename(state)+'-replacement-'+randomUUID());
+  if(prefix(data,successor)||prefix(successor,data)||prefix(bundle,successor)||prefix(successor,bundle))fail('private_state_overlap');
+  await fs.mkdir(successor,{mode:0o700});
+  await physical(successor,'directory');
+  if((await protectStorage(successor))?.owner_dacl_verified!==true
+    ||(await verifyStorage(successor,{operation:'VERIFY_DIRECTORY'}))?.owner_dacl_verified!==true)fail('private_storage_acl_unverified');
+  const copiedConfig=path.join(successor,'prior-attached-config.json');
+  await fs.writeFile(copiedConfig,JSON.stringify({...config,state_directory:successor},null,2)+'\n',{flag:'wx',mode:0o600});
+  const prepared=await prepareInstalledAttachedPg17({oldConfigFile:copiedConfig,bundleDirectory:bundle,
+    bundleDigest,platform,protectStorage,verifyStorage});
+  await unchanged();await observe();validateBoot(await readBootTime());
+  const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
+  return Object.freeze({...prepared,stateDirectory:successor,priorStateDirectory:state,
+    priorConfigSha256:digest(original.bytes),priorLockSha256:digest(lock.bytes),priorStatusSha256:digest(status.bytes),
+    bootedAt:new Date(bootedAtMs).toISOString(),gateFile,oldLockPreserved:true,
+    historicalEffectsReconciled:false,providerPublished:false,automaticRetryAllowed:false,authorityEffect:false});
 }
 
 /**

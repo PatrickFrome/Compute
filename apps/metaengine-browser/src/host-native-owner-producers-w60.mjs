@@ -4,30 +4,31 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
-import { loadPackagedEmergencyMaintenanceTrustRoot } from './emergency-maintenance-trust-root.mjs';
+import path from 'node:path';
+import { processScript, ABSENT_PROCESS_ERROR, ABSENT_PROCESS_TYPE, ABSENT_PROCESS_FIELDS } from './win32-kernel-process-query-w60.mjs';
 
-const run = promisify(execFile);
+const execAsync = promisify(execFile);
+// These are fixed read-only commands: no command ever consumes stdin. Native
+// Windows PowerShell may wait for redirected input to close under a CI parent.
+// End only this child's pipe, never the Host's input. The original finite
+// timeout/maxBuffer and rejection semantics remain authoritative.
+const run = (...args) => {
+  const pending = execAsync(...args);
+  pending.child.stdin?.end();
+  return pending;
+};
 const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const HEX40 = /^[a-f0-9]{40}$/i;
 const HEX64 = /^[a-f0-9]{64}$/i;
 const valid = x => x && typeof x === 'object' && !Array.isArray(x);
 const pos = x => Number.isSafeInteger(x) && x > 0;
 const at = () => new Date().toISOString();
-const fixtures = x => x?.fixture_classification != null || x?.synthetic === true || x?.staging === true;
+const fixtures = x => x?.fixture_classification != null || x?.synthetic === true || x?.staging === true || x?.untrusted === true;
+const fresh = x => Number.isFinite(Date.parse(x)) &&
+  Date.parse(x) >= Date.now() - 30000 && Date.parse(x) <= Date.now() + 5000;
 const safe = f => Promise.resolve().then(f).catch(() => null);
 const frozen = x => x ? Object.freeze(x) : null;
 
-// Fixed PowerShell, numeric PID only. Unlike Get-Process from a status screenshot,
-// StartTime is read from the Windows kernel at the time of each observation.
-// Numeric-only interpolation avoids PowerShell's -Command trailing-argument
-// ambiguity: $args[0] is not populated consistently on Windows PowerShell 5.1.
-const processScript = pid => [
-  '$ErrorActionPreference = "Stop"',
-  '$p = Get-Process -Id ' + String(pid) + ' -ErrorAction Stop',
-  '$start = $p.StartTime.ToUniversalTime().ToString("o")',
-  '$exe = $p.Path',
-  '@{ pid = [int]$p.Id; created_at = $start; exe_path = $exe } | ConvertTo-Json -Compress',
-].join('; ');
 const signatureScript = executable => [
   '$ErrorActionPreference = "Stop"',
   // A single, PowerShell-literal-escaped trusted native EXE path; no command
@@ -37,16 +38,56 @@ const signatureScript = executable => [
   '@{ status = [string]$s.Status; thumbprint = [string]$s.SignerCertificate.Thumbprint } | ConvertTo-Json -Compress',
 ].join('; ');
 
+function trustedWindowsShellW60() {
+  // Match the existing native KnownFolder rail: a nonstandard Windows system
+  // drive stays UNKNOWN until it has an independent native root resolver.
+  // Environment and PATH cannot select another executable or module provider.
+  const root = 'C:\\Windows';
+  const declaredRoot = String(process.env.SystemRoot || process.env.SYSTEMROOT || '');
+  if (declaredRoot.toLowerCase() !== root.toLowerCase() ||
+      (process.env.WINDIR && process.env.WINDIR.toLowerCase() !== root.toLowerCase())) return null;
+  const system32 = path.win32.join(root,'System32');
+  const powershell = path.win32.join(system32,'WindowsPowerShell','v1.0','powershell.exe');
+  const env = {SystemRoot:root,SYSTEMROOT:root,WINDIR:root,PATH:system32,
+    PSModulePath:path.win32.join(system32,'WindowsPowerShell','v1.0','Modules')};
+  return {powershell,env};
+}
+
 export async function readWindowsKernelProcessW60(pid, { platform = process.platform, exec = run } = {}) {
   if (platform !== 'win32' || !pos(pid) || pid > 0x7fffffff) return null;
+  const shell = trustedWindowsShellW60();
+  if (!shell) return null;
   return safe(async () => {
-    const { stdout } = await exec('powershell.exe',
+    const { stdout } = await exec(shell.powershell,
       ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command', processScript(pid)],
-      { timeout: 15000, windowsHide: true, maxBuffer: 4096 });
+      { env:shell.env, shell:false, timeout: 15000, windowsHide: true, maxBuffer: 4096 });
     const x = JSON.parse(stdout.trim());
+    if (x?.state === 'NOT_RUNNING') {
+      if (Object.keys(x).length !== ABSENT_PROCESS_FIELDS.length ||
+          !ABSENT_PROCESS_FIELDS.every(key => Object.hasOwn(x,key)) ||
+          x.pid !== pid || x.native_target_pid !== pid ||
+          x.native_error_id !== ABSENT_PROCESS_ERROR ||
+          x.native_error_category !== 'ObjectNotFound' ||
+          x.native_error_type !== ABSENT_PROCESS_TYPE) return null;
+      return frozen({pid,source:'OS_PROCESS_INVENTORY',state:'NOT_RUNNING',
+        native_verified:true,authority_effect:false,observed_at:at()});
+    }
+    // The physical Windows reader sends UTF-8 Base64 to avoid dynamically
+    // loading PowerShell's ConvertTo-Json module after reading kernel fields.
+    // Never accept two conflicting path fields or non-canonical Base64.
+    let exePath = x.exe_path;
+    if (Object.hasOwn(x, 'exe_path_base64')) {
+      if (Object.hasOwn(x, 'exe_path') || typeof x.exe_path_base64 !== 'string' ||
+          x.exe_path_base64.length > 4096 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(x.exe_path_base64)) return null;
+      const bytes = Buffer.from(x.exe_path_base64,'base64');
+      if (bytes.length < 1 || bytes.length > 2048 ||
+          bytes.toString('base64') !== x.exe_path_base64) return null;
+      exePath = new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+      if (exePath.includes(String.fromCharCode(0))) return null;
+    }
     if (x.pid !== pid || !Number.isFinite(Date.parse(x.created_at)) ||
-      typeof x.exe_path !== 'string' || !x.exe_path) return null;
-    return frozen({pid, created_at:new Date(x.created_at).toISOString(),exe_path:x.exe_path,
+      typeof exePath !== 'string' || !exePath) return null;
+    return frozen({pid, created_at:new Date(x.created_at).toISOString(),exe_path:exePath,
       source:'OS_PROCESS_INVENTORY',state:'PRESENT',authority_effect:false,observed_at:at()});
   });
 }
@@ -57,10 +98,12 @@ export async function readWindowsSignedExecutableW60(executable, {
   if (platform !== 'win32' || typeof executable !== 'string' ||
     executable.length > 2048 || !/^[A-Za-z]:\\/.test(executable) ||
     executable.startsWith('\\\\') || executable.includes('\0')) return null;
+  const shell = trustedWindowsShellW60();
+  if (!shell) return null;
   return safe(async () => {
-    const { stdout } = await exec('powershell.exe',
+    const { stdout } = await exec(shell.powershell,
       ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',signatureScript(executable)],
-      { timeout: 3500, windowsHide: true, maxBuffer: 4096 });
+      { env:shell.env, shell:false, timeout: 3500, windowsHide: true, maxBuffer: 4096 });
     const sig = JSON.parse(stdout.trim());
     if (sig.status !== 'Valid' || !HEX40.test(sig.thumbprint || '')) return null;
     const bytes = await readFile(executable);
@@ -93,10 +136,7 @@ export function createHostNativeOwnerReadersW60({
   const ownExe = process.execPath;
   const platform = process.platform;
 
-  async function ownerRecord() {
-    // Device enrollment alone is not an Owner binding. This operation can
-    // only be fulfilled by the existing Host custody's authenticated record.
-    const x = await safe(() => identity.readHostOwnerIncarnation());
+  function validOwnerRecord(x) {
     const observed = Date.parse(x?.observed_at);
     if (!valid(x) || fixtures(x) || x.schema !== 'metaengine.host.owner-incarnation.v1' ||
       x.source !== 'LOCAL_HOST_OWNER' || x.authority_effect !== false ||
@@ -105,16 +145,22 @@ export function createHostNativeOwnerReadersW60({
       typeof x.process_incarnation_id !== 'string' || x.process_incarnation_id.length < 8 ||
       !Number.isFinite(Date.parse(x.created_at)) || !Number.isFinite(observed) ||
       observed < Date.now() - 30000 || observed > Date.now() + 5000 ||
-      x.device_id !== identity.snapshot()?.device_id) return null;
+      x.device_id !== identity.snapshot()?.device_id) return false;
+    return true;
+  }
+
+  async function ownerRecord() {
+    // Device enrollment alone is not an Owner binding. This operation can
+    // only be fulfilled by the existing Host custody's authenticated record.
+    const x = await safe(() => identity.readHostOwnerIncarnation());
+    if (!validOwnerRecord(x)) return null;
     const k = await readWindowsKernelProcessW60(x.pid,{platform,exec});
     if (!k || k.created_at !== new Date(x.created_at).toISOString() ||
       k.exe_path.toLowerCase() !== ownExe.toLowerCase() || x.pid !== processId) return null;
     const again = await safe(() => identity.readHostOwnerIncarnation());
-    if (!valid(again) || fixtures(again) || !['owner_id','project_id','device_id','pid',
-      'created_at','process_incarnation_id','generation','epoch'].every(key=>x[key]===again[key]) ||
-      !Number.isFinite(Date.parse(again.observed_at)) ||
-      Date.parse(again.observed_at) < Date.now() - 30000 ||
-      Date.parse(again.observed_at) > Date.now() + 5000) return null;
+    if (!validOwnerRecord(again) || !['owner_id','project_id','device_id','pid',
+      'created_at','process_incarnation_id','generation','epoch','source_sha']
+      .every(key=>x[key]===again[key])) return null;
     return frozen({...x,observed_at:at()});
   }
   const readers = {
@@ -157,25 +203,31 @@ export function createHostNativeOwnerReadersW60({
     async readSignedInstalledExecutable(ownerId, generation) {
       const owner = await ownerRecord();
       if (!owner || owner.owner_id !== ownerId || owner.generation !== generation ||
-        !app.isPackaged || platform !== 'win32') return null;
-      const root = await safe(() => loadPackagedEmergencyMaintenanceTrustRoot());
-      const native = await readWindowsSignedExecutableW60(ownExe,{platform,exec});
-      // An arbitrary Valid Authenticode signature is NOT the METAENGINE signer.
-      // Existing trusted root must explicitly pin signer + source + exact bytes.
-      if (!root || !native ||
-        !HEX40.test(root.build_sha || '') || !HEX64.test(root.installed_exe_sha256 || '') ||
-        !HEX40.test(root.installed_signer_thumbprint || '') ||
-        native.signer_thumbprint !== root.installed_signer_thumbprint.toLowerCase() ||
-        native.installed_exe_sha256 !== root.installed_exe_sha256.toLowerCase()) return null;
-      // Existing release trust must carry its *own* signed proof identity;
-      // hashing this module's chosen Owner fields would manufacture provenance.
-      if (!HEX64.test(root.installed_proof_identity || '')) return null;
-      const proof = root.installed_proof_identity.toLowerCase();
-      return frozen({source:'INSTALLED_EXE_NATIVE_VERIFIER',owner_id:owner.owner_id,
+        !HEX40.test(owner.source_sha || '') || !app.isPackaged || platform !== 'win32') return null;
+      // W68 owns the existing release-root signature and exact EXE/SLSA byte
+      // verification. Lazy import avoids a static W60 -> W68 -> W60 cycle;
+      // its production API accepts only the native app, never injected roots,
+      // paths, signers or this producer's diagnostic exec callback.
+      const proof = await safe(async () => {
+        const { readVerifiedInstalledExecutableW68 } = await import('./installed-executable-provenance-w68.mjs');
+        return readVerifiedInstalledExecutableW68(app);
+      });
+      if (!valid(proof) || fixtures(proof) || proof.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
+        proof.release_root_signature_verified !== true || proof.slsa_evidence_digest_bound !== true ||
+        proof.native_signature_verified !== true || proof.exact_bytes_verified !== true ||
+        proof.authority_effect !== false || !HEX40.test(proof.source_sha || '') ||
+        proof.source_sha.toLowerCase() !== owner.source_sha.toLowerCase() ||
+        !HEX64.test(proof.installed_exe_sha256 || '') || !HEX64.test(proof.proof_identity || '') ||
+        !fresh(proof.observed_at)) return null;
+      const after = await ownerRecord();
+      if (!after || !['owner_id','device_id','project_id','pid','created_at',
+        'generation','epoch','process_incarnation_id','source_sha'].every(k=>owner[k]===after[k]) ||
+        !fresh(proof.observed_at)) return null;
+      // Preserve W68's signed proof identity and observation, adding only the
+      // independently rechecked current Owner binding. No provenance is minted.
+      return frozen({...proof,owner_id:owner.owner_id,
         owner_epoch:owner.epoch,owner_generation:owner.generation,
-        process_incarnation_id:owner.process_incarnation_id,source_sha:root.build_sha.toLowerCase(),
-        installed_exe_sha256:native.installed_exe_sha256,proof_identity:proof,
-        exact_bytes_verified:true,native_signature_verified:true,observed_at:at(),authority_effect:false});
+        process_incarnation_id:owner.process_incarnation_id});
     },
     async readOwnerSecretStore(ownerId,generation) {
       const owner = await ownerRecord();

@@ -5,11 +5,22 @@ param(
   [string]$InstalledExePath = '',
   [string]$ProofPath = '',
   [switch]$PhysicalProof,
+  [ValidateRange(1,1800)][int]$InstallTimeoutSeconds = 1800,
   [int]$StartupTimeoutSeconds = 70
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+function Write-BootstrapProof($Proof) {
+  $json = $Proof | ConvertTo-Json -Depth 8
+  if ($ProofPath) {
+    $parent = Split-Path -Parent $ProofPath
+    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    [System.IO.File]::WriteAllText($ProofPath, ($json + "`n"), [System.Text.UTF8Encoding]::new($false))
+  }
+  $json
+}
 
 if ($ExpectedInstallerSha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'bootstrap_installer_sha256_invalid' }
 if ($ExpectedVersion -notmatch '^\d+\.\d+\.\d+-dev\.\d+\.1$') { throw 'bootstrap_expected_version_invalid' }
@@ -20,7 +31,12 @@ if (-not $InstalledExePath) {
 }
 
 $expectedInstallerHash = $ExpectedInstallerSha256.Trim().ToLowerInvariant()
-$actualInstallerHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$installerStream = [System.IO.File]::OpenRead((Resolve-Path -LiteralPath $InstallerPath).Path)
+try {
+  $installerHasher = [System.Security.Cryptography.SHA256]::Create()
+  try { $actualInstallerHash = [System.BitConverter]::ToString($installerHasher.ComputeHash($installerStream)).Replace('-', '').ToLowerInvariant() }
+  finally { $installerHasher.Dispose() }
+} finally { $installerStream.Dispose() }
 if ($actualInstallerHash -ne $expectedInstallerHash) { throw 'bootstrap_installer_sha256_mismatch' }
 
 function Get-BrowserProcesses([string]$ExactExePath) {
@@ -35,9 +51,48 @@ function Get-BrowserProcesses([string]$ExactExePath) {
 $preexisting = @(Get-BrowserProcesses $InstalledExePath)
 if ($preexisting.Count -gt 0) { throw 'bootstrap_preexisting_browser_process' }
 
-$install = Start-Process -FilePath $InstallerPath -ArgumentList '/S' -PassThru -Wait
-if ($install.ExitCode -ne 0) { throw "bootstrap_installer_exit_$($install.ExitCode)" }
-if (-not (Test-Path -LiteralPath $InstalledExePath -PathType Leaf)) { throw 'bootstrap_installed_executable_missing' }
+$boundedInstaller = Join-Path $PSScriptRoot 'install-package-bounded.ps1'
+if (-not (Test-Path -LiteralPath $boundedInstaller -PathType Leaf)) { throw 'bootstrap_bounded_installer_missing' }
+try {
+  # The helper hashes the payload again immediately before launch and owns only
+  # this installer process tree in a kill-on-close job with a fixed deadline.
+  $installJson = & $boundedInstaller -InstallerPath $InstallerPath `
+    -ExpectedSha256 $expectedInstallerHash -TimeoutSeconds $InstallTimeoutSeconds
+  $install = $installJson | ConvertFrom-Json
+  if ($install.schema -ne 'metaengine.browser.bounded-package-install.v1' `
+      -or [string]$install.installer_sha256 -ne $expectedInstallerHash `
+      -or [int64]$install.installer_pid -le 0 `
+      -or [int]$install.installer_exit_code -ne 0 `
+      -or [int]$install.timeout_seconds -ne $InstallTimeoutSeconds `
+      -or $install.process_tree_scoped_job -ne $true `
+      -or $install.descendant_cleanup_on_job_close -ne $true `
+      -or $install.installed_payload_qualification_required -ne $true `
+      -or $install.authority_effect -ne $false) { throw 'bootstrap_bounded_installer_receipt_invalid' }
+  if (-not (Test-Path -LiteralPath $InstalledExePath -PathType Leaf)) { throw 'bootstrap_installed_executable_missing' }
+} catch {
+  # A terminated installer may already have changed files. Preserve uncertainty
+  # for readback; never imply rollback or start another installation here.
+  $reason = 'bootstrap_installer_unconfirmed'
+  if ($_.Exception.Message -match '(package_installer_timeout|package_installer_exit_[0-9]+|bootstrap_bounded_installer_receipt_invalid|bootstrap_installed_executable_missing)') {
+    $reason = $Matches[1]
+  }
+  Write-BootstrapProof ([ordered]@{
+    schema = 'metaengine.browser.bootstrap-install-autostart-proof.v1'
+    state = 'EFFECT_UNKNOWN'
+    reason = $reason
+    expected_version = $ExpectedVersion
+    installer_sha256 = $actualInstallerHash
+    installer_timeout_seconds = $InstallTimeoutSeconds
+    installer_effect_attempted = $true
+    installed_payload_qualification_required = $true
+    automatic_browser_launch_performed = $false
+    automatic_retry_allowed = $false
+    rollback_confirmed = $false
+    authority_effect = $false
+    captured_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+  }) | Write-Output
+  throw
+}
 
 $userData = $null
 $startupJournal = $null
@@ -49,7 +104,7 @@ if ($PhysicalProof) {
   $priorProfileWrite = $env:METAENGINE_PROFILE_PROBE_WRITE
   $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
   try {
-    $probe = Start-Process -FilePath $InstalledExePath -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+    $probe = Start-Process -FilePath $InstalledExePath -ArgumentList '--metaengine-profile-probe' -WindowStyle Hidden -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
     $null = $probe.Handle
     if (-not $probe.WaitForExit(15000)) {
       try { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -150,7 +205,10 @@ $result = [ordered]@{
   installer_sha256 = $actualInstallerHash
   installed_executable = $InstalledExePath
   installed_executable_exists = $true
-  install_exit_code = [int]$install.ExitCode
+  install_exit_code = [int]$install.installer_exit_code
+  installer_pid = [int]$install.installer_pid
+  installer_timeout_seconds = $InstallTimeoutSeconds
+  installer_process_tree_scoped_job = $true
   normal_launch_pid = [int]$normal.Id
   silent_install_then_exact_normal_launch = $true
   automatic_browser_launch_performed = $true
@@ -161,13 +219,8 @@ $result = [ordered]@{
   version_probe_verified = $versionProbeVerified
   bootstrap_launch_kind = 'POST_INSTALL_NORMAL'
   installer_effect_attempted = $true
+  automatic_retry_allowed = $false
   authority_effect = $false
   captured_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 }
-$json = $result | ConvertTo-Json -Depth 8
-if ($ProofPath) {
-  $parent = Split-Path -Parent $ProofPath
-  if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-  [System.IO.File]::WriteAllText($ProofPath, ($json + "`n"), [System.Text.UTF8Encoding]::new($false))
-}
-$json
+Write-BootstrapProof $result

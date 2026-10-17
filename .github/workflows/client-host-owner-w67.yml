@@ -9,6 +9,7 @@ on:
       - 'apps/metaengine-browser/src/host-agent-remote-composition.mjs'
       - 'apps/metaengine-browser/src/host-agent-runtime.mjs'
       - 'apps/metaengine-browser/src/host-native-owner-producers-w60.mjs'
+      - 'apps/metaengine-browser/test/host-native-command-input-w60.test.mjs'
       - 'apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs'
       - 'apps/metaengine-browser/native/browser-guardian-scm/**'
       - 'apps/metaengine-browser/test/host-owner-custody-w67.test.mjs'
@@ -49,6 +50,7 @@ jobs:
         run: |
           node --test --test-concurrency=1 \
             apps/metaengine-browser/test/host-owner-custody-w67.test.mjs \
+            apps/metaengine-browser/test/host-native-command-input-w60.test.mjs \
             apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
             apps/metaengine-browser/test/host-owner-ipc-w60.test.mjs \
             apps/metaengine-browser/test/native-owner-verifier-w52.test.mjs

@@ -23,14 +23,20 @@ async function fixture(t) {
   let instanceId = firstId;
   let attested = true;
   let redirect = false;
+  let healthDelayMs = 0;
   const requests = [];
   const server = http.createServer((request, response) => {
     requests.push(request.url);
     if (redirect) { response.writeHead(302, { location: 'https://example.com/health' }).end(); return; }
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ ok: true, instance_id: instanceId, state_provider: 'LOCAL_POSTGRES',
-      runtime_ready: attested, hosted_supabase_required: false,
-      capability_health: { state: attested ? 'ATTESTED' : 'UNATTESTED', authority_effect: false } }));
+    const respond = () => {
+      if (response.destroyed) return;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ ok: true, instance_id: instanceId, state_provider: 'LOCAL_POSTGRES',
+        runtime_ready: attested, hosted_supabase_required: false,
+        capability_health: { state: attested ? 'ATTESTED' : 'UNATTESTED', authority_effect: false } }));
+    };
+    if (healthDelayMs > 0) setTimeout(respond, healthDelayMs);
+    else respond();
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -51,7 +57,8 @@ async function fixture(t) {
   await writeIdentity();
   return { temporary, appData, ownerFile, identityFile, base, config, requests, writeIdentity,
     changeRuntime: id => { instanceId = id; }, unattest: () => { attested = false; },
-    redirect: () => { redirect = true; }, closeServer: () => new Promise(resolve => server.close(resolve)) };
+    redirect: () => { redirect = true; }, delayHealth: ms => { healthDelayMs = ms; },
+    closeServer: () => new Promise(resolve => server.close(resolve)) };
 }
 
 async function probe(fixture, { extraEnv = {}, firstImport = endpointsUrl, action = '', argv = [] } = {}) {
@@ -71,6 +78,18 @@ test('actual bare-process boot loads owner profile and current attested runtime 
   assert.equal(result.instance, firstId);
   assert.equal(result.boot.persistent, true);
   assert.equal(result.boot.state, 'READY');
+  assert.deepEqual(f.requests, ['/a2-browser-native-supervisor-v1/health']);
+});
+
+test('physical attested local /health taking longer than 3s retains Owner admission without cloud fallback', { timeout: 11000 }, async t => {
+  const f = await fixture(t);
+  f.delayHealth(3500);
+  const result = await probe(f);
+  assert.equal(result.ok, true);
+  assert.equal(result.boot.state, 'READY');
+  assert.equal(result.boot.provider, 'LOCAL_POSTGRES');
+  assert.equal(result.boot.instance_id, firstId);
+  assert.equal(result.boot.authority_effect, false);
   assert.deepEqual(f.requests, ['/a2-browser-native-supervisor-v1/health']);
 });
 

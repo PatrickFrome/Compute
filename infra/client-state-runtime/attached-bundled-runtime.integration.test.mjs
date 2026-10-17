@@ -14,6 +14,7 @@ import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
 import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES, probeNativeSupervisorRuntimeCapabilities } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
+import { assertOwnerConsumerKind, assertOwnerConsumerProof } from '../../apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs';
 
 const exec = promisify(execFile);
 const bundleDirectory = process.env.LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY;
@@ -27,9 +28,10 @@ const installedOwnerInputs = {
   evidenceDirectory: process.env.LOCAL_STATE_TEST_ATTACHED_INSTALL_EVIDENCE_DIRECTORY,
 };
 const installedOwnerSelected = Object.values(installedOwnerInputs).some(Boolean);
+const installedConsumer = process.env.LOCAL_STATE_TEST_ATTACHED_CONSUMER;
 // The archive is the explicit opt-in. A public bundle-only CI run must not
 // require private schema fixtures simply because it supplies bundle pins.
-const enabled = Boolean(dump || expectedDumpSha256 || installedOwnerSelected);
+const enabled = Boolean(dump || expectedDumpSha256 || installedOwnerSelected || installedConsumer);
 const fail = code => { throw new Error('attached_bundle_fixture_' + code); };
 const ROLE_NAMES = ['anon', 'authenticated', 'authenticator', 'cli_login_postgres', 'cli_login_supabase_read_only_user',
   'dashboard_user', 'pgbouncer', 'postgres', 'service_role', 'supabase_admin', 'supabase_auth_admin', 'supabase_etl_admin',
@@ -124,6 +126,10 @@ test('verified bundled onboarding and attached host restart preserve an existing
   skip: !enabled, timeout: installedOwnerSelected ? 1800000 : 900000,
 }, async t => {
   assert.equal(process.platform, 'win32');
+  if (installedConsumer !== undefined) {
+    assertOwnerConsumerKind(installedConsumer);
+    assert(installedOwnerSelected, 'consumer requires all installed Owner pins');
+  }
   assert(bundleDirectory && dump && path.isAbsolute(bundleDirectory) && path.isAbsolute(dump), 'explicit absolute fixture inputs required');
   assert.match(expectedBundleDigest || '', /^[a-f0-9]{64}$/);
   assert.match(expectedDumpSha256 || '', /^[a-f0-9]{64}$/);
@@ -168,6 +174,8 @@ test('verified bundled onboarding and attached host restart preserve an existing
   let owned;
   let direct;
   let cleanupUnconfirmed = false;
+  let consumerProof = null;
+  let fixtureQualificationCompleted = false;
   const hosts = [];
   t.after(async () => {
     // Any inability to prove cleanup preserves the fixture for explicit review.
@@ -197,6 +205,11 @@ test('verified bundled onboarding and attached host restart preserve an existing
     assert.equal(path.dirname(await fs.realpath(root)).toLowerCase(), (await fs.realpath(os.tmpdir())).toLowerCase());
     assert(path.basename(root).startsWith('compute-attached-bundle-'));
     await fs.rm(root, { recursive: true, force: false });
+    // Only a completed consumer AND actual fixture postmaster/port cleanup
+    // may publish this workflow receipt. No private Owner/config is exported.
+    if (consumerProof && fixtureQualificationCompleted) await fs.writeFile(path.join(installedOwnerInputs.evidenceDirectory, 'installed-owner-consumer-proof.json'),
+      JSON.stringify({ ...consumerProof, disposable_pg_cleanup_confirmed: true,
+        fixture_directory_removed: true, production_database_modified: false }) + '\n', { flag: 'wx', mode: 0o600 });
   });
   await privateExec(path.join(bin, 'initdb.exe'), ['-D', data, '--username=' + owner,
     '--auth=scram-sha-256', '--pwfile=' + passwordFile, '--no-locale', '-E', 'UTF8'], env, 'initdb');
@@ -436,6 +449,31 @@ test('verified bundled onboarding and attached host restart preserve an existing
     installedOwnerQualified = true;
     cleanupUnconfirmed = false;
     t.diagnostic('real installed Owner UI/socket qualification passed and preserved the fixture postmaster');
+    if (installedConsumer) {
+      cleanupUnconfirmed = true;
+      const consumerEntry = path.join(sourceRoot, 'apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs');
+      const consumer = spawnBundled(verified, [consumerEntry, '--consumer', installedConsumer,
+        '--install-root', installedOwnerInputs.installRoot, '--source-root', sourceRoot,
+        '--expected-head', installedOwnerInputs.sourceHead, '--expected-version', installedOwnerInputs.version,
+        '--owner-qa-root', root, '--evidence-dir', installedOwnerInputs.evidenceDirectory], {}, false, 720000);
+      const consumerClosed = await consumer.closed, consumerOutput = consumer.output();
+      for (const secret of [ownerPassword, apiPassword, config.database_url, config.inspect_database_url]) assert.equal(consumerOutput.includes(secret), false);
+      if (consumerClosed.code !== 0) {
+        const reason = consumerOutput.match(/(?:^|\n)(installed_owner_consumer_[a-z0-9_]{1,100})(?:\r?\n|$)/);
+        if (reason) t.diagnostic('fixed installed Owner consumer failure reason: ' + reason[1]);
+      }
+      assert.deepEqual(consumerClosed, { code: 0, signal: null });
+      consumerProof = assertOwnerConsumerProof(JSON.parse(consumerOutput.trim()), {
+        consumer: installedConsumer, sourceHead: installedOwnerInputs.sourceHead, version: installedOwnerInputs.version,
+        bundleSha256: expectedBundleDigest, installedAsarSha256: qualificationReceipt.installed_asar_sha256,
+        installedExecutableSha256: qualificationReceipt.installed_executable_sha256,
+      });
+      assert.equal((await fs.readFile(path.join(data, 'postmaster.pid'))).equals(pidBytes), true);
+      assert.equal((await owned.verify()).pid, owned.pid);
+      await assertPortClosed(apiPort); await assertPortClosed(edgePort);
+      cleanupUnconfirmed = false;
+      t.diagnostic('fixed installed Owner consumer passed with independent readback and confirmed runtime cleanup');
+    }
   }
   await verifyOfflineRuntimeBundle({ bundleDirectory, expectedBundleDigest });
   assert.equal(await fileDigest(dump), expectedDumpSha256);
@@ -448,5 +486,7 @@ test('verified bundled onboarding and attached host restart preserve an existing
     bundled_api_edge_health_attested: true, owned_children_cleanup_confirmed: true,
     external_postmaster_incarnation_preserved: true, existing_vault_preserved: true,
     production_database_modified: false, owner_profile_published: ownerProfilePublished, installed_socket_ui_smoke: installedOwnerQualified,
+    installed_consumer_qualified: consumerProof !== null,
     production_qualification: false }));
+  fixtureQualificationCompleted = true;
 });
