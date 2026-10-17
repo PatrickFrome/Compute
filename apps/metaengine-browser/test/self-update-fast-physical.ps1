@@ -42,7 +42,7 @@ function Complete-CapturedProcessOutput($Capture) {
   [System.IO.File]::WriteAllText($Capture.ErrPath, [string]$stderr, [System.Text.UTF8Encoding]::new($false))
 }
 
-function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) {
+function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label, [int[]]$AllowedExitCodes = @()) {
   $process = $Capture.Process
   try {
     if (-not $process.WaitForExit($TimeoutMs)) {
@@ -55,13 +55,30 @@ function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) 
     $process.WaitForExit()
     Complete-CapturedProcessOutput $Capture
     $exitCode = [int]$process.ExitCode
-    if ($exitCode -ne 0) {
+    if ($exitCode -ne 0 -and $AllowedExitCodes -notcontains $exitCode) {
       Get-Content $Capture.ErrPath -ErrorAction SilentlyContinue
       throw "${Label}_exit_$exitCode"
     }
   } finally {
     try { $process.Dispose() } catch {}
   }
+}
+
+# A secondary diagnostic probe deliberately exits with
+# SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE (6) instead of 0, so the exit code
+# alone can never be mistaken for a successful qualification of a new
+# installer. Callers that allow 6 must independently prove the refusal JSON.
+function Assert-SecondaryDiagnosticRefusal([string]$OutPath, [string]$ExpectedProbe) {
+  $row = Read-LastJsonLine $OutPath 5
+  if (-not $row) { throw 'singleton_secondary_refusal_json_missing' }
+  if ($row.schema -ne 'metaengine.browser.secondary-diagnostic-refusal.v1') { throw 'singleton_secondary_refusal_schema_invalid' }
+  if ($row.state -ne 'PRIMARY_INSTANCE_REQUIRED') { throw 'singleton_secondary_refusal_state_invalid' }
+  if ($row.requested_probe -ne $ExpectedProbe) { throw 'singleton_secondary_refusal_probe_invalid' }
+  if ($row.primary_instance -ne $false) { throw 'singleton_secondary_refusal_primary_invalid' }
+  if ($row.original_primary_terminated -ne $false) { throw 'singleton_secondary_refusal_primary_terminated' }
+  if ($row.browser_runtime_started -ne $false) { throw 'singleton_secondary_refusal_runtime_started' }
+  if ($row.automatic_retry_allowed -ne $false) { throw 'singleton_secondary_refusal_retry_allowed' }
+  if ($row.authority_effect -ne $false) { throw 'singleton_secondary_refusal_authority_effect' }
 }
 
 $root = (Get-Location).Path
@@ -300,7 +317,11 @@ $first.Refresh()
 if ($first.HasExited -or $firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
 $secondOut = Join-Path $temp 'singleton-second.out'; $secondErr = Join-Path $temp 'singleton-second.err'
 $second = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-single-instance-probe' -OutPath $secondOut -ErrPath $secondErr
-Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary'
+# The secondary probe is DESIGNED to refuse with exit code 6 and a bounded
+# refusal JSON (secondary-diagnostic-refusal.v1). Accept exactly that exit
+# code, then independently prove the refusal contract instead of trusting it.
+Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary' -AllowedExitCodes @(6)
+Assert-SecondaryDiagnosticRefusal -OutPath $secondOut -ExpectedProbe '--metaengine-single-instance-probe'
 $first.Refresh()
 if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
 try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}

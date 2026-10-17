@@ -433,6 +433,24 @@ try {
   if ($ConcurrentBurstSize -gt 0 -and $burstElapsedMs -gt 8000) { throw "soak_concurrent_burst_budget_exceeded:$([Math]::Round($burstElapsedMs,2))" }
   if ($proof.second_instance_activations_verified -ne $expectedActivationCount) { throw 'soak_activation_count_mismatch' }
   Write-Host ($proof | ConvertTo-Json -Compress)
+} catch {
+  # Fail with the SAME throw, but first emit the bounded evidence needed to
+  # attribute the failure (the 2026-10-17 installed-ui-72 run failed at
+  # soak_normal_ui_not_stable_visible with no journal dump, leaving the phase
+  # unattributable from CI logs). Bounded size, diagnostic only, no authority.
+  Write-Host '##[group]soak diagnostic dump (failure attribution)'
+  foreach ($dump in @($journal, "$journal.corrupt-*", $normalOut, $normalErr, $controlStatePath, $runtimeGenesisPath)) {
+    if (Test-Path $dump -PathType Leaf) {
+      Write-Host "--- $dump"
+      Get-Content $dump -TotalCount 400 -ErrorAction SilentlyContinue | Write-Host
+    }
+  }
+  if ($normal) {
+    if ($normal.HasExited) { Write-Host "--- normal process exited: True exit_code=$($normal.ExitCode)" }
+    else { Write-Host '--- normal process exited: False (still running at failure time)' }
+  }
+  Write-Host '##[endgroup]'
+  throw
 } finally {
   if ($normal -and -not $normal.HasExited) {
     cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null

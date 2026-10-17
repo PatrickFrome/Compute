@@ -13,7 +13,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomous-development-fabric-v1-20261017',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.864629885843.1',
+  package_version:'0.7.0-dev.1107139874562.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -45,9 +45,11 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.870171998070.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
- }]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+ },{
+  // Recorded by the local-ai-repair commit: 234d3a9e1 held 870171998070 and
+  // 59dbfdc7a introduced 864629885843, which regressed below the burned
+  // 875758155169. The repair burns 864629885843 and reseats the candidate
+  // strictly above the highest burned reservation (1107139874561).
   schema:'metaengine.client.package-version-successor.v1',
   source_parent:'234d3a9e1ed7b139ed229fa5cf998678a76607b7',
   baseline_source_parent:candidate.source_parent,
@@ -55,10 +57,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.864629885843.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
+ }]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  schema:'metaengine.client.package-version-successor.v1',
+  source_parent:'59dbfdc7a13caf4698074f4b475800df662e3066',
+  baseline_source_parent:candidate.source_parent,
+  prior_version:'0.7.0-dev.864629885843.1',
+  distinct_version:'0.7.0-dev.1107139874562.1',
+  preceding_version_burned:true,production_ready:false,
+  promotion_authorized:false,authority_effect:false,
  });
+ const repairVersion=BigInt('1107139874562');
+ const maxBurned=manifest.burned_versions
+  .map((v)=>BigInt(v.split('.')[3]))
+  .reduce((a,b)=>(a>b?a:b));
+ assert.ok(repairVersion>maxBurned,
+  'candidate version must stay strictly above every burned reservation');
  assert.equal(parentVersion,previous[0].prior_version,'baseline source package identity drift');
  assert.equal(previous[0].distinct_version,previous[1].prior_version,'historical successor chain');
- assert.equal(previous[1].distinct_version,successor.prior_version,'current successor chain');
+ assert.equal(previous[previous.length-1].distinct_version,successor.prior_version,'current successor chain');
  assert.equal(candidate.package_version,successor.distinct_version,'new source version drift');
  assert.ok(manifest.burned_versions.includes(parentVersion),'previous physical version must stay burned');
  assert.equal(candidate.historical_package_version,manifest.test_candidate.version);
