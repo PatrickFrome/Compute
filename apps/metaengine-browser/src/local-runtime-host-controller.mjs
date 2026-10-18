@@ -58,7 +58,7 @@ export function validatePackagedLocalRuntimeBinding(pkg, { bundleDirectory, expe
     || !/^[a-f0-9]{40}$/.test(String(binding.source_head_sha || ''))
     || binding.bundle_manifest_relative_path !== 'offline-runtime-bundle.json'
     || binding.runtime_verifier_relative_path !== 'infra/client-state-runtime/offline-runtime-bundle.mjs'
-    || binding.bundle_sha256 !== expectedBundleDigest || binding.authority_effect !== false
+    || typeof expectedBundleDigest !== 'string' || !SHA256.test(expectedBundleDigest) || binding.authority_effect !== false
     || !Number.isSafeInteger(binding.resource_file_count) || binding.resource_file_count < 1 || binding.resource_file_count > 10000
     || !Number.isSafeInteger(binding.resource_size_bytes) || binding.resource_size_bytes < 1 || binding.resource_size_bytes > 2 ** 31
     || typeof resourcesPath !== 'string' || !path.isAbsolute(resourcesPath)
@@ -66,6 +66,11 @@ export function validatePackagedLocalRuntimeBinding(pkg, { bundleDirectory, expe
     || ['bundle_sha256', 'bundle_manifest_sha256', 'runtime_verifier_sha256', ...SOURCE_BINDING_KEYS]
       .some(key => typeof binding[key] !== 'string' || !SHA256.test(binding[key]))) {
     throw new Error('packaged_local_runtime_binding_invalid');
+  }
+  // The package itself is well-formed, but the preserved Owner profile pins
+  // another runtime generation. Never rewrite its custody as a side effect.
+  if (binding.bundle_sha256 !== expectedBundleDigest) {
+    throw new Error('packaged_local_runtime_owner_digest_mismatch');
   }
   return Object.freeze({ ...binding });
 }
