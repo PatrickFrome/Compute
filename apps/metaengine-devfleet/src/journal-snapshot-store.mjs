@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 const SCHEMA='metaengine.devfleet.journal-snapshot.v1';
 const sha=text=>crypto.createHash('sha256').update(text).digest('hex');
 const digest=obj=>sha(JSON.stringify(obj));
-const MAX_SNAPSHOTS=512;
+// Snapshot files are append-only. No fixed generation ceiling. Disk exhaustion
+// remains a real fail-closed error; historical receipts must not be discarded.
 const emptyHash=sha('EMPTY_PRIMARY');
 const snapshotName=(file,seq)=>path.basename(file)+'.snapshot-v1-'+String(seq).padStart(8,'0')+'.json';
 function verify(envelope,seq,baseHash,previousHash){
@@ -46,8 +47,7 @@ export function createJournalSnapshotStore({file,atomicWrite,io=fs}){
    const prefix=path.basename(file)+'.snapshot-v1-';
    const snapshots=names.filter(name=>name.startsWith(prefix) &&
      !/^\d{8}\.json\.tmp-[0-9a-f-]{36}$/.test(name.slice(prefix.length)));
-   if(snapshots.length>MAX_SNAPSHOTS ||
-       snapshots.some(name=>!/^\d{8}\.json$/.test(name.slice(prefix.length))))
+   if(snapshots.some(name=>!/^\d{8,}\.json$/.test(name.slice(prefix.length))))
      throw Error('journal_snapshot_catalog_invalid');
    snapshots.sort();
    let prior=emptyHash;
@@ -82,7 +82,7 @@ export function createJournalSnapshotStore({file,atomicWrite,io=fs}){
        await verifyBase();
      }
    }else await verifyBase();
-   if(seq>=MAX_SNAPSHOTS)throw Error('journal_snapshot_capacity_fenced');
+   if(!Number.isSafeInteger(seq+1))throw Error('journal_snapshot_sequence_unrepresentable');
    const next=seq+1;
    const body={schema:SCHEMA,seq:next,base_sha256:baseHash,
      previous_sha256:lastHash,state_sha256:sha(stable),state:structuredClone(state)};

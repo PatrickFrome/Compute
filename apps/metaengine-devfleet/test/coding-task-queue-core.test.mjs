@@ -30,12 +30,12 @@ test('dedup cannot change project, request, content or authority scope',()=>{
  assert.throws(()=>enqueueCodingTask(q,{...task('group-alpha','x1'),scope:'LIVE_EFFECT'}),/task_invalid/);
  assert.throws(()=>enqueueCodingTask(q,{...task('group-alpha','x1'),draft_pr_only:false}),/task_invalid/);
 });
-test('queue bounded by 32 tasks, no silent eviction of old identities',()=>{
+test('queue can exceed historical 32 tasks without silent eviction',()=>{
  let q=emptyCodingQueue();
- for(let i=0;i<QUEUE_LIMIT;i++)q=add(q,'group-alpha','x'+i);
- assert.equal(q.items.length,32);
- assert.throws(()=>add(q,'group-alpha','overflow'),/capacity_exceeded/);
- assert.equal(codingQueueSummary(q,0).items.length,32);
+ for(let i=0;i<80;i++)q=add(q,'group-alpha','x'+i);
+ assert.equal(q.items.length,80);
+ q=add(q,'group-alpha','overflow');
+ assert.equal(codingQueueSummary(q,0).items.length,81);
  assert.equal(codingQueueSummary(q,0).hot_limit,4);
  assert.equal(JSON.stringify(codingQueueSummary(q,0)).includes('Build hermetic'),false);
 });

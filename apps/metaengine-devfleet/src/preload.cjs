@@ -10,6 +10,10 @@ const api=Object.freeze({
   recover: p=>ipcRenderer.invoke('devfleet:recover',p),
   close: p=>ipcRenderer.invoke('devfleet:close',p),
   assign: p=>ipcRenderer.invoke('devfleet:assign',p),
+  conveyorStatus: ()=>ipcRenderer.invoke('devfleet:conveyor-status'),
+  conveyorStart: p=>ipcRenderer.invoke('devfleet:conveyor-start',p),
+  conveyorStop: ()=>ipcRenderer.invoke('devfleet:conveyor-stop'),
+  conveyorEnqueueBatch: p=>ipcRenderer.invoke('devfleet:conveyor-enqueue-batch',p),
   select: id=>ipcRenderer.invoke('devfleet:select',id),
   onReady: cb=>{if(typeof cb==='function')ipcRenderer.once('devfleet:ready',cb);}
 });

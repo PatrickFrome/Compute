@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DevFleetOperator, SCHEMA } from './operator-core.mjs';
+import { DevFleetConveyor } from './conveyor-controller.mjs';
 import {atomicPrivateWrite} from './atomic-private-write.mjs';
 import {createJournalSnapshotStore} from './journal-snapshot-store.mjs';
 import { ChatSurface } from './chat-surface.mjs';
@@ -35,7 +36,7 @@ app.setName(APP_NAME);
 app.setPath('userData', dataDir);
 app.commandLine.appendSwitch('disable-features','Translate');
 app.commandLine.appendSwitch('force-renderer-accessibility');
-let mainWindow, surface, operator, httpServer, rpcToken, rpcManifest;
+let mainWindow, surface, operator, conveyor, httpServer, rpcToken, rpcManifest;
 let liveUiSlots, liveContracts, sourceWorkspace, devConsoleWindow, developerToken, developerManifest;
 let shuttingDown = false;
 function safeError(error) {
@@ -232,6 +233,10 @@ function listenLocal() {
         'dev.pipeline.queue_status':()=>operator.queueStatus(),
         'dev.pipeline.configure':p=>operator.configureCodingSlots(p),
         'dev.pipeline.enqueue':p=>operator.enqueueCoding(p),
+        'dev.pipeline.enqueue_batch':p=>conveyor.enqueueBatch(p),
+        'dev.pipeline.conveyor_start':p=>conveyor.start(p),
+        'dev.pipeline.conveyor_stop':p=>conveyor.stop(p),
+        'dev.pipeline.conveyor_status':()=>conveyor.status(),
         'dev.pipeline.cancel':p=>operator.cancelCoding(p),
         'dev.pipeline.admit':p=>operator.admitCoding(p),
         'dev.receipt.status':()=>operator.receiptSummary(),
@@ -244,7 +249,7 @@ function listenLocal() {
         return respond(400,{ok:false,error:'developer_method_unknown'});
       const noParams=new Set(['dev.status','dev.stage','dev.activate',
         'dev.rollback','dev.reconcile','dev.contract.status','dev.source.status','dev.receipt.status',
-        'dev.pipeline.queue_status']);
+        'dev.pipeline.queue_status','dev.pipeline.conveyor_status']);
       if(noParams.has(envelope.method)&&Object.keys(params).length)
         return respond(400,{ok:false,error:'developer_params_denied'});
       try {
@@ -365,6 +370,7 @@ async function start() {
   surface=new ChatSurface(mainWindow);
   operator=new DevFleetOperator({adapter:surface,store:disk,contracts:liveContracts});
   await operator.init({deferRestore:true});
+  conveyor=new DevFleetConveyor(operator);
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});
   ipcMain.handle('devfleet:read',async(e,p)=>{uiSender(e);return operator.read(p);});
@@ -374,6 +380,10 @@ async function start() {
   ipcMain.handle('devfleet:recover',async(e,p)=>{uiSender(e);return operator.recover(p);});
   ipcMain.handle('devfleet:close',async(e,p)=>{uiSender(e);return operator.closeTab(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
+  ipcMain.handle('devfleet:conveyor-status',async e=>{uiSender(e);return conveyor.status();});
+  ipcMain.handle('devfleet:conveyor-start',async(e,p)=>{uiSender(e);return conveyor.start(p);});
+  ipcMain.handle('devfleet:conveyor-stop',async e=>{uiSender(e);return conveyor.stop();});
+  ipcMain.handle('devfleet:conveyor-enqueue-batch',async(e,p)=>{uiSender(e);return conveyor.enqueueBatch(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
   registerDevConsole();
   // Publish the authenticated localhost control plane while physical ChatGPT
@@ -381,6 +391,7 @@ async function start() {
   // methods fail closed as operator_restoring until every cell is settled.
   await listenLocal();
   void operator.whenRestored().then(()=>{
+    conveyor?.resume();
     if(mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send('devfleet:ready');
   }).catch(()=>{ /* Early loopback remains available for diagnostic list. */ });

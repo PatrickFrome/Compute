@@ -38,7 +38,8 @@ export class DevFleetOperator {
   #store;
   #contracts;
   #state = { schema: SCHEMA, sessions: [], requests: [],
-    hot_slots_target:DEFAULT_HOT_TARGET,coding_queue:emptyCodingQueue() };
+    hot_slots_target:DEFAULT_HOT_TARGET,coding_queue:emptyCodingQueue(),
+    conveyor_enabled:false };
   #busy = false;
   #initialized = false;
   #restoring = false;
@@ -62,7 +63,7 @@ export class DevFleetOperator {
     const disk = await this.#store.load();
     if (disk != null) {
       if (disk.schema !== SCHEMA || !Array.isArray(disk.sessions) || !Array.isArray(disk.requests)
-        || disk.requests.length > 500)
+        )
         throw new Error('operator_state_invalid');
       const seen = new Set();
       for (const s of disk.sessions) {
@@ -70,9 +71,12 @@ export class DevFleetOperator {
         if (seen.has(s.tab_id) || !ownChatUrl(s.url)) throw new Error('operator_state_session_invalid');
         seen.add(s.tab_id);
       }
+      if(disk.conveyor_enabled!==undefined && typeof disk.conveyor_enabled!=='boolean')
+        throw Error('operator_conveyor_intent_invalid');
       const target=disk.hot_slots_target===undefined?DEFAULT_HOT_TARGET:disk.hot_slots_target;
       if(!Number.isSafeInteger(target)||target<1)throw Error('operator_hot_slots_invalid');
       this.#state = plain({...disk,hot_slots_target:target,
+        conveyor_enabled:disk.conveyor_enabled===true,
         coding_queue:readCodingQueue(disk.coding_queue)});
     }
     // Process reincarnation has destroyed all prior WebContents. Never
@@ -255,7 +259,6 @@ export class DevFleetOperator {
     // Explicit owner chat.create is not capped by the advisory coding hot target.
     // Per-call policy and real OS/WebContents outcomes remain effect fences.
     return this.#exclusive(async () => {
-      if (this.#state.requests.length >= 500) throw new Error('operator_request_history_full');
       const log = recordFor(id, 'create', fingerprint);
       this.#state.requests.push(log);
       await this.#save(); // write-ahead ambiguity fence BEFORE any tab is created
@@ -291,6 +294,64 @@ export class DevFleetOperator {
       this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id),
       this.#state.hot_slots_target),
       read_only:true,automatic_retry_allowed:false};
+  }
+  // Persisted owner intent; native effects still run through this operator.
+  conveyorIntent() {
+    if(!this.#initialized)throw Error('operator_not_initialized');
+    return this.#state.conveyor_enabled===true;
+  }
+  async setConveyorIntent({enabled}={}) {
+    this.#requireInit();
+    if(typeof enabled!=='boolean')throw Error('conveyor_intent_invalid');
+    return this.#exclusive(async()=>{
+      if(this.#state.conveyor_enabled!==enabled){
+        this.#state.conveyor_enabled=enabled;
+        await this.#save();
+      }
+      return {schema:'metaengine.devfleet.conveyor-intent.v1',
+        enabled:this.#state.conveyor_enabled,durable:true,
+        new_authority:false,automatic_retry_of_ambiguous:false};
+    });
+  }
+  // Internal-only access: operator owns all tasks and native Send effects.
+  queueTask(taskId) {
+    this.#requireInit();
+    const row=this.#state.coding_queue.items.find(x=>x.task_id===taskId);
+    return row ? {task_id:row.task_id,request_id:row.request_id,
+      tab_id:row.tab_id,text:row.text,state:row.state} : null;
+  }
+  // Durable task/ledger correlation: a send receipt can be committed before
+  // the coding queue item is resolved. A subsequent run must reconcile it
+  // without entering the ChatGPT Send path a second time.
+  codingTaskReceiptStatus(taskId) {
+    this.#requireInit();
+    const item=this.#state.coding_queue.items.find(x=>x.task_id===taskId);
+    if(!item)throw Error('coding_queue_task_not_owned');
+    const log=this.#state.requests.find(x=>x.operation==='assign'&&
+      x.request_id===item.request_id&&x.tab_id===item.tab_id);
+    const tab=this.#state.sessions.find(x=>x.tab_id===item.tab_id);
+    return {schema:'metaengine.devfleet.coding-ledger-readback.v1',
+      task_id:item.task_id,task_state:item.state,
+      ledger_state:log?.state??'NONE',
+      tab_state:tab?.state??'MISSING',
+      read_only:true,authority_effect:false};
+  }
+  async resolveCodingTask({task_id,state}={}) {
+    this.#requireInit();
+    if(!['SENT','AMBIGUOUS'].includes(state))throw Error('conveyor_receipt_state_invalid');
+    return this.#exclusive(async()=>{
+      const item=this.#state.coding_queue.items.find(x=>x.task_id===task_id);
+      if(!item||!['READY_NOT_SENT',state].includes(item.state))
+        throw Error('conveyor_task_not_ready');
+      const receipt=this.#state.requests.find(r=>r.operation==='assign'&&r.request_id===item.request_id);
+      if(!receipt||receipt.state!==state||receipt.tab_id!==item.tab_id)
+        throw Error('conveyor_receipt_not_proven');
+      if(item.state===state)
+        return {schema:'metaengine.devfleet.conveyor-receipt.v1',task_id,state,already_resolved:true};
+      item.state=state;
+      await this.#save();
+      return {schema:'metaengine.devfleet.conveyor-receipt.v1',task_id,state};
+    });
   }
   // Owner-authorized durable target, not a fixed number baked into the binary.
   async configureCodingSlots(params) {
@@ -355,8 +416,6 @@ export class DevFleetOperator {
       const results=[];
       for(const taskId of selection.task_ids) {
         if(this.#persistenceFenced)throw Error('operator_persistence_reconciliation_required');
-        if(this.#state.requests.length>=500)
-          throw Error('operator_request_history_full');
         const item=queue.items.find(x=>x.task_id===taskId);
         if(!item || item.state!=='QUEUED')throw Error('coding_queue_selection_stale');
         if(this.#state.requests.some(x=>x.request_id===item.request_id))
@@ -470,8 +529,6 @@ export class DevFleetOperator {
     if(typeof this.#adapter.closeTab!=='function')
       throw Error('pipeline_retirement_close_unavailable');
     return this.#exclusive(async()=>{
-      if(this.#state.requests.length>=497)
-        throw Error('operator_request_history_full');
       const oldUnknown=this.#state.requests
         .filter(r=>r.operation==='assign'&&r.tab_id===tabId&&r.state==='AMBIGUOUS')
         .map(r=>r.request_id);
@@ -563,7 +620,6 @@ export class DevFleetOperator {
     if(typeof this.#adapter.closeTab!=='function')
       throw Error('operator_rotation_close_unavailable');
     return this.#exclusive(async()=>{
-      if(this.#state.requests.length>494)throw Error('operator_request_history_full');
       const unresolved=this.#state.requests.filter(r=>
         r.operation==='assign'&&r.tab_id===tabId&&r.state==='AMBIGUOUS')
         .map(r=>r.request_id);
@@ -660,7 +716,6 @@ export class DevFleetOperator {
       throw new Error('tab_close_reconciliation_required');
     if(typeof this.#adapter.closeTab!=='function')throw new Error('tab_close_unavailable');
     return this.#exclusive(async()=>{
-      if(this.#state.requests.length>=500)throw new Error('operator_request_history_full');
       const log={...recordFor(id,'close',fingerprint),tab_id:tabId};
       this.#state.requests.push(log);
       await this.#save();
@@ -826,7 +881,6 @@ export class DevFleetOperator {
     if (this.#state.requests.some(r => r.operation === 'assign' &&
       r.state === 'AMBIGUOUS' && r.tab_id === tab.tab_id))
       throw new Error('operator_tab_ambiguous_reconciliation_required');
-    if (this.#state.requests.length >= 500) throw new Error('operator_request_history_full');
     {
       // Read-only origin/mode/composer preflight before any write-ahead
       // effect intent. Existing composer drafts may be replaced with the

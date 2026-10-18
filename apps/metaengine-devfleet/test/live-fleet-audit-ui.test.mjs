@@ -10,7 +10,8 @@ assert.equal(extracted.length,1);
 function harness(scenarios){
   const nodes=new Map();
   for(const id of ['create','read','assign','refresh','inspect','recover','replace','audit-all',
-    'tabs','status','output','fleet-evidence','count','prompt','model-probe','input-probe']){
+    'tabs','status','output','fleet-evidence','count','prompt','model-probe','input-probe',
+    'conveyor-launch','conveyor-stop','conveyor-state','conveyor-batch','conveyor-hot']){
     nodes.set(id,{disabled:false,value:id==='count'?'7':'',textContent:'',
       replaceChildren(){this.children=[];},append(x){(this.children??=[]).push(x);}});
   }
@@ -19,6 +20,10 @@ function harness(scenarios){
     url:'https://chatgpt.com/',state:'OPEN'}));
   const devfleet={
     list:async()=>({session_count:sessions.length,sessions}),
+    conveyorStatus:async()=>({enabled:false,counts:{},hot_slots:10,occupied_or_reserved:0,last_error:null}),
+    conveyorStart:async()=>({state:'STARTED'}),
+    conveyorStop:async()=>({state:'STOPPED'}),
+    conveyorEnqueueBatch:async()=>({accepted:0}),
     inspect:async({tab_id})=>{
       used.inspect.push(tab_id);
       const idx=sessions.findIndex(s=>s.tab_id===tab_id);
@@ -33,7 +38,7 @@ function harness(scenarios){
   const context={
     window:{devfleet},document:{getElementById:id=>nodes.get(id),
       createElement:()=>({textContent:'',className:'',title:'',onclick:null})},
-    setTimeout:()=>{},crypto:{randomUUID:()=> 'test-id'},
+    setTimeout:()=>{},setInterval:()=>{},crypto:{randomUUID:()=> 'test-id'},
   };
   vm.runInNewContext(extracted[0][1],context,{timeout:3000});
   return {nodes,used,sessions,devfleet,run:async()=>nodes.get('audit-all').onclick()};

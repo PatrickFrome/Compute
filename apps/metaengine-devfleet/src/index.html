@@ -4,7 +4,7 @@
 <style>
 :root{color-scheme:dark;font:13px system-ui,Segoe UI,Arial,sans-serif}
 *{box-sizing:border-box}body{margin:0;color:#e2e8f0;background:#10151e}
-aside{width:340px;height:100vh;display:flex;flex-direction:column;border-right:1px solid #334155;background:#151b28;padding:14px;gap:9px}
+aside{width:340px;height:100vh;overflow-y:auto;display:flex;flex-direction:column;border-right:1px solid #334155;background:#151b28;padding:14px;gap:9px}
 h1{font-size:17px;letter-spacing:.04em;margin:0}small,.help{font-size:11px;color:#94a3b8}
 button{border:1px solid #475569;background:#263244;color:#f1f5f9;padding:9px 12px;border-radius:7px;cursor:pointer}
 button:hover{background:#37465b}button:disabled{opacity:.35;cursor:wait}
@@ -23,6 +23,14 @@ hr{width:100%;border:0;border-top:1px solid #334155}
   <h1>METAENGINE <span style="color:#5eead4">DevFleet</span></h1>
   <div class="help">Отдельное приложение • ChatGPT • Без Supabase</div>
   <div class="row"><label>Чатов:</label><input id="count" type="number" min="1" max="8" value="7"><button id="create" class="primary">Создать</button></div>
+  <section id="conveyor-console" style="border:1px solid #0d9488;border-radius:8px;padding:9px;display:grid;gap:7px">
+    <strong>Конвейер METAENGINE</strong>
+    <div id="conveyor-state" class="help">Состояние загрузки...</div>
+    <textarea id="conveyor-batch" rows="3" placeholder="Вставьте задания. Для разделения задач используйте отдельную строку ---"></textarea>
+    <div class="row"><input id="conveyor-hot" type="number" min="1" placeholder="Авто" title="Максимум одновременных вкладок, пусто = авто" style="width:74px">
+      <button class="primary" id="conveyor-launch">Отправить поток</button>
+      <button id="conveyor-stop">Стоп</button></div>
+  </section>
   <div id="tabs" role="list" aria-label="DevFleet chats"></div>
   <div class="row"><button id="read">Прочитать</button><button id="refresh">Обновить</button></div>
   <div class="row"><button id="inspect">Проверить Chat</button><button id="recover">Перезагрузить ошибку</button></div>
@@ -39,6 +47,48 @@ hr{width:100%;border:0;border-top:1px solid #334155}
 <script>
 'use strict';
 const q=id=>document.getElementById(id);
+async function conveyorRefresh(){
+  try{
+    const state=await window.devfleet.conveyorStatus();
+    const c=state.counts||{};
+    const text=(state.enabled?'RUNNING':'STOPPED')+' | '+
+      'SENT '+(c.SENT||0)+' | READY '+(c.READY_NOT_SENT||0)+
+      ' | QUEUED '+(c.QUEUED||0)+' | UNKNOWN '+(c.AMBIGUOUS||0)+
+      ' | RESTORE_BLOCKED '+(state.restore_blocked_tasks||0)+
+      ' | ORPHANED '+(state.orphaned_tasks||0)+
+      ' | Слотов '+state.occupied_or_reserved+'/'+state.hot_slots+
+      (state.last_error?' | '+state.last_error:'');
+    q('conveyor-state').textContent=text;
+  }catch(e){q('conveyor-state').textContent='Конвейер недоступен: '+String(e?.message||e).slice(0,80);}
+}
+q('conveyor-launch').onclick=async()=>{
+  try{
+    const raw=q('conveyor-batch').value;
+    const prompts=raw.split(/\n\s*---\s*\n/).map(x=>x.trim()).filter(Boolean);
+    const custom=q('conveyor-hot').value.trim();
+    const hot=custom?Number(custom):undefined;
+    if(hot!==undefined&&(!Number.isSafeInteger(hot)||hot<1))throw Error('Неверное число слотов');
+    if(prompts.length){
+      for(let i=0;i<prompts.length;i+=32){
+        const tasks=prompts.slice(i,i+32).map((text,j)=>{
+          const uuid=crypto.randomUUID();
+          return {task_id:'metaengine-conveyor-'+uuid,request_id:'send-conveyor-'+uuid,
+            project_id:'conveyor',kind:'SOURCE_CODING',scope:'SOURCE_ONLY',draft_pr_only:true,text};
+        });
+        await window.devfleet.conveyorEnqueueBatch({tasks});
+      }
+    }
+    await window.devfleet.conveyorStart(hot===undefined?{}:{hot_slots:hot});
+    q('conveyor-batch').value='';
+    await conveyorRefresh();
+  }catch(e){q('conveyor-state').textContent='Ошибка: '+String(e?.message||e).slice(0,120);}
+};
+q('conveyor-stop').onclick=async()=>{
+  try{await window.devfleet.conveyorStop();await conveyorRefresh();}
+  catch(e){q('conveyor-state').textContent='Ошибка: '+String(e?.message||e).slice(0,120);}
+};
+setInterval(()=>{void conveyorRefresh();},3000);
+void conveyorRefresh();
 let selected=null,working=false,epoch=0;
 const showStatus=msg=>{q('status').textContent=String(msg).slice(0,450);};
 const setWorking=v=>{working=v;for(const id of ['create','read','assign','refresh','inspect','recover','replace','audit-all','model-probe','input-probe'])q(id).disabled=v;};

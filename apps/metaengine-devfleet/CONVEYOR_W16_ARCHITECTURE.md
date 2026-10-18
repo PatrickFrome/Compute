@@ -1,0 +1,61 @@
+# METAENGINE DevFleet — Mass Conveyor W16
+
+Source scope: `apps/metaengine-devfleet`. Base `02d4c8bcca129e16014330c8961f173e9b3bdf23`; new isolated branch `work/devfleet-conveyor-rebuild-20261018`.
+
+## Behavior
+
+- One existing authenticated `DevFleetOperator` remains the sole authority for native ChatGPT `WebContentsView` creation, input, Send and durable request receipts.
+- The owner starts or stops `DevFleetConveyor`. New tasks are loaded in batches, stored durably, and dispatched automatically through the existing queue; the stream can be replenished while running.
+- No fixed *total* task limit (previous 32), request-history ceiling (previous 500), or 512-snapshot journal cap. Storage/OS limits can still fail closed. For long-lived operation, segmented journal compaction remains desirable; historic unknown receipts must never be silently discarded.
+- The concurrency window is auto-sized from available local RAM (1 GiB reserve, 350 MiB estimate per new ChatGPT renderer), or explicitly set by the owner. There is no hardcoded count of 10 or 16 slots. Physical memory is finite.
+- `READY_NOT_SENT` may be retried after a compositor-readiness failure, without another request identity. A committed `AMBIGUOUS` or `SENT` request is never submitted again. A tab is not declared working merely because its WebContents exists.
+- Existing task fairness remains project-based. Task IDs and signed source/Draft PR constraints belong to the operator admission contract.
+
+## Native composer repair
+
+`composerDomText()` still validates the exact CDP backend node. When `DOM.describeNode` provides incomplete nested ProseMirror children, the same `backendNodeId` is recovered through native CDP `DOM.getOuterHTML` and parsed locally by pinned `parse5@8.0.0`; no page JavaScript or selector guessed from page content. Rich-text markup outside the narrow element allowlist is rejected. Exact text is read back before the single native Enter.
+
+## Control plane
+
+Local first-party UI: Conveyor text input; separate tasks with a line containing `---`, optional hot-slot target, *send stream*, *stop*, live QUEUED/READY_NOT_SENT/SENT/AMBIGUOUS/occupied counters. Untrusted ChatGPT text never becomes command authority.
+
+Authenticated developer routes: `dev.pipeline.enqueue_batch`, `dev.pipeline.conveyor_start`, `dev.pipeline.conveyor_stop`, `dev.pipeline.conveyor_status`. Same native app and existing private developer RPC; no hosted fallback or additional service.
+
+## Acceptance / outstanding physical evidence
+
+- Source contracts: previous full suite 151/151 passed before the new controller unit test; targeted controller fake-admission test 1/1 passed.
+- **Not equivalent to verified ChatGPT delivery**. A real QA `SENT` receipt requires current installed Electron UI plus a confirmed native user-message readback in the exact ChatGPT conversation. A failed readback remains UNKNOWN; future delivery reports must not invent a rate.
+- Package identity: `0.1.0-dev.16.20261018.1`, non-production QA candidate; Authenticode depends on actual signing custody. Do not replace installed Browser/Guardian/Owner/PostgreSQL during DevFleet QA.
+- Follow-up: independent Windows QA login/session, real multi-slot send proof, journal segment archiving for long-term storage efficiency, GitHub Draft PR integration.
+
+Research: Electron `WebContentsView` and `webContents.debugger` official APIs; persistent partition is shared among views and background throttling is scoped to WebContents.
+
+## W16.2 — restore-resume repair
+
+Observed on Windows v16.1: an explicit conveyor START sent while the original DevFleetOperator was still restoring its ten saved ChatGPT WebContents left `enabled=true` but zero attempts; synchronous `queueStatus()` failed with `operator_restoring` even inside the pump's finalizer. V16.2 catches this transient error, schedules a bounded retry, and triggers `resume()` from the existing `operator.whenRestored()` completion path. This does not authorize a new request identity and never retries a committed AMBIGUOUS send.
+
+Exact source test suite: 153 tests, 153 PASS, including new transient RESTORING controller test. New disposable QA package identity: `0.1.0-dev.16.20261018.2`; final Windows physical SEND remains a separate acceptance gate.
+
+## W16.3 — durable receipt reconciliation and blocked restore
+
+A previously recorded `SENT` or `AMBIGUOUS` request can survive a crash before its corresponding queue item is marked final. The conveyor now reads the request's durable ledger state and updates only the queue item, never issuing another native Send for that request. `resolveCodingTask` is idempotent after matching an existing authoritative receipt. Queued tasks tied to `RESTORE_BLOCKED` tabs are not attempted until legitimate restoration; the first-party status UI exposes `RESTORE_BLOCKED` count. No new scheduler, trust root, or authority paths were added.
+
+Exact local full source suite: 155/155 PASS (includes ledger SENT re-sync and RESTORE_BLOCKED negatives). QA package identity `0.1.0-dev.16.20261018.3`. Physical ChatGPT delivery proof remains independent from source fixture proof.
+
+## W16.4 — persist owner-started continuous dispatch across restart
+
+The queue retains the owner-controlled conveyor_enabled flag in the EXISTING local operator snapshot, not in a second service. START persists the intent before scheduling; STOP persists the disabled intent. After process reincarnation, DevFleetConveyor reads the flag but only begins work after operator.whenRestored() completes. A legacy state without this optional flag is disabled by default. The same request ledger rejects repeats for uncertain Sends.
+
+This implements owner preference continue until stopped; it does not guarantee unlimited physical resources or convert synthetic test fixtures into real ChatGPT delivery. Test coverage includes durable STOP/START across operator restarts and invalid saved intents. QA package identity 0.1.0-dev.16.20261018.4, pending physical qualification.
+
+## Live MCP adapter compatibility (2026-10-18)
+
+The packaged MCP adapter from an older installed DevFleet release omitted the W16 conveyor_status read-only method. Updated the tracked src/scripts/devfleet-admin-mcp.mjs allowlist with exactly dev.pipeline.conveyor_status; did not add an effectful conveyor_start or native Send endpoint. Original workspace-pinned developer RPC and loopback credential custody remain enforced. Verified local stdio MCP initialize and tools/list and native conveyor_status readback against the running W16.4 process: 10 OPEN tabs, 10 READY_NOT_SENT tasks, zero SENT, enabled=false. Standalone adapter can be launched from this worktree source; existing installed adapter files and production Browser/Guardian/PostgreSQL were not edited. ChatGPT native plugin SSE rate limit 429 remains external and not corrected by this local MCP change.
+
+## W16.5 — actual live pre-Send blocker classification
+
+Read-only native W16.4 `chat.input_probe` showed at least two OPEN real ChatGPT cells in CHAT mode, unique_send=true but unique_composer=false, composer_readback.state=UNKNOWN, with three native ProseMirror paragraphs. This is not a Send proof. One W13 READY_NOT_SENT task also referenced a non-owned retired tab ID, although ten different tabs were OPEN: this is an orphaned queue binding, not justification to borrow an arbitrary tab.
+
+W16.5 improves source-only diagnosis: `conveyor.status().orphaned_tasks` counts READY_NOT_SENT tasks whose exact bound native tab is MISSING; the existing pump emits CONVEYOR_ORPHANED_TAB_BINDING and does not attempt Send. GUI displays ORPHANED separately from RESTORE_BLOCKED. `composerHtmlText()` records bounded structural failure reasons and a sanitized tag name to an optional diagnostic object; `ChatSurface.composerValue` passes this diagnostic through same-backend CDP outerHTML fallback. It NEVER returns raw page text or attributes in diagnostic and NEVER treats malformed markup as authorizing Send.
+
+Source suite 159/159 PASS, including a positive orphan negative-send and sanitized diagnostics without private draft leakage. Fresh QA identity 0.1.0-dev.16.20261018.5. Physical native ChatGPT successful Send still unproven; direct ChatGPT connector SSE 429 is an independent external problem.

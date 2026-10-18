@@ -61,4 +61,7 @@ test('packaged admin MCP is an explicit extraResource, not an implicit code eval
  assert(!source.includes('spawn('));
  assert.match(source,/developer-rpc\.json/);
  assert.match(source,/workspace_pinned/);
+ assert(source.includes("'dev.pipeline.conveyor_status'"));
+ // This adapter repair adds observation only, not a new Send path.
+ assert(!source.includes("'dev.pipeline.conveyor_start'"));
 });
