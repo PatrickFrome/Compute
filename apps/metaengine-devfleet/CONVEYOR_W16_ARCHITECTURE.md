@@ -51,3 +51,11 @@ This implements owner preference continue until stopped; it does not guarantee u
 ## Live MCP adapter compatibility (2026-10-18)
 
 The packaged MCP adapter from an older installed DevFleet release omitted the W16 conveyor_status read-only method. Updated the tracked src/scripts/devfleet-admin-mcp.mjs allowlist with exactly dev.pipeline.conveyor_status; did not add an effectful conveyor_start or native Send endpoint. Original workspace-pinned developer RPC and loopback credential custody remain enforced. Verified local stdio MCP initialize and tools/list and native conveyor_status readback against the running W16.4 process: 10 OPEN tabs, 10 READY_NOT_SENT tasks, zero SENT, enabled=false. Standalone adapter can be launched from this worktree source; existing installed adapter files and production Browser/Guardian/PostgreSQL were not edited. ChatGPT native plugin SSE rate limit 429 remains external and not corrected by this local MCP change.
+
+## W16.5 — actual live pre-Send blocker classification
+
+Read-only native W16.4 `chat.input_probe` showed at least two OPEN real ChatGPT cells in CHAT mode, unique_send=true but unique_composer=false, composer_readback.state=UNKNOWN, with three native ProseMirror paragraphs. This is not a Send proof. One W13 READY_NOT_SENT task also referenced a non-owned retired tab ID, although ten different tabs were OPEN: this is an orphaned queue binding, not justification to borrow an arbitrary tab.
+
+W16.5 improves source-only diagnosis: `conveyor.status().orphaned_tasks` counts READY_NOT_SENT tasks whose exact bound native tab is MISSING; the existing pump emits CONVEYOR_ORPHANED_TAB_BINDING and does not attempt Send. GUI displays ORPHANED separately from RESTORE_BLOCKED. `composerHtmlText()` records bounded structural failure reasons and a sanitized tag name to an optional diagnostic object; `ChatSurface.composerValue` passes this diagnostic through same-backend CDP outerHTML fallback. It NEVER returns raw page text or attributes in diagnostic and NEVER treats malformed markup as authorizing Send.
+
+Source suite 159/159 PASS, including a positive orphan negative-send and sanitized diagnostics without private draft leakage. Fresh QA identity 0.1.0-dev.16.20261018.5. Physical native ChatGPT successful Send still unproven; direct ChatGPT connector SSE 429 is an independent external problem.

@@ -27,3 +27,15 @@ test('durable source queue accepts 80 independent tasks, no legacy 32-task hard 
   assert.equal(readCodingQueue(q).items.length,80);
   assert.equal(chooseFairCodingWave(q,40).task_ids.length,40);
 });
+
+test('native composer diagnostics expose structure only, never draft text',()=>{
+  const diagnostic={};
+  const secret='PRIVATE_TEXT_NEVER_INCLUDE_IN_PROBE';
+  assert.equal(composerHtmlText('<div contenteditable="true"><p><video>'+secret+'</video></p></div>',diagnostic),null);
+  assert.deepEqual(diagnostic,{outer_html_rejection:'UNSUPPORTED_ELEMENT',unsupported_element:'video'});
+  assert(!JSON.stringify(diagnostic).includes(secret));
+  const invalid={};
+  assert.equal(composerHtmlText('<div contenteditable="false">'+secret+'</div>',invalid),null);
+  assert.equal(invalid.outer_html_rejection,'EDITOR_IDENTITY');
+  assert(!JSON.stringify(invalid).includes(secret));
+});

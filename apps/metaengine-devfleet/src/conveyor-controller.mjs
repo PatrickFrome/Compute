@@ -28,6 +28,8 @@ export class DevFleetConveyor {
   }
   status(){
     const q=this.#operator.queueStatus();
+    const orphaned=q.items.filter(item=>item.state==='READY_NOT_SENT' &&
+      item.tab_id && this.#operator.codingTaskReceiptStatus(item.task_id).tab_state==='MISSING').length;
     return {schema:'metaengine.devfleet.conveyor.v1',
       enabled:this.#enabled,running:this.#running,
       hot_slots:q.hot_limit,free_slots:q.free_hot_slots,
@@ -35,6 +37,7 @@ export class DevFleetConveyor {
       counts:q.counts,items:q.items,last_error:this.#error,
       sent_confirmed:q.counts.SENT||0,
       restore_blocked_tasks:this.#blocked.size,
+      orphaned_tasks:orphaned,
       send_unknown:q.counts.AMBIGUOUS||0,
       automatic_retry_of_ambiguous:false,
       read_only:true,authority_effect:false};
@@ -132,6 +135,13 @@ export class DevFleetConveyor {
             }
             if(current.tab_state==='RESTORE_BLOCKED'){
               this.#blocked.add(row.task_id);
+              waiting=true;
+              continue;
+            }
+            if(current.tab_state==='MISSING'){
+              // A retired/rotated cell is not proof the queued request was sent.
+              // Never select an arbitrary other tab or manufacture a receipt.
+              this.#error='CONVEYOR_ORPHANED_TAB_BINDING';
               waiting=true;
               continue;
             }

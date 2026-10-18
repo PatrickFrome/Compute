@@ -99,12 +99,14 @@ async function composerValue(view, node, diagnostic = null) {
     try{
       const outer=await dbg.sendCommand('DOM.getOuterHTML',
         {backendNodeId:node.backendDOMNodeId});
-      const recovered=composerHtmlText(outer?.outerHTML);
+      const recovered=composerHtmlText(outer?.outerHTML, diagnostic);
       if(recovered!==null){
         if(diagnostic)diagnostic.state='PROVEN_NATIVE_OUTER_HTML';
         return recovered;
       }
-    }catch{}
+    }catch{
+      if(diagnostic)diagnostic.outer_html_rejection='CDP_UNAVAILABLE';
+    }
   }
   // Native input value is authoritative for a textarea; contenteditable AX
   // values can flatten/lag paragraphs and MUST use the exact DOM node above.

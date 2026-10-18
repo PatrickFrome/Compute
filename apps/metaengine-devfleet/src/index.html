@@ -55,6 +55,7 @@ async function conveyorRefresh(){
       'SENT '+(c.SENT||0)+' | READY '+(c.READY_NOT_SENT||0)+
       ' | QUEUED '+(c.QUEUED||0)+' | UNKNOWN '+(c.AMBIGUOUS||0)+
       ' | RESTORE_BLOCKED '+(state.restore_blocked_tasks||0)+
+      ' | ORPHANED '+(state.orphaned_tasks||0)+
       ' | Слотов '+state.occupied_or_reserved+'/'+state.hot_slots+
       (state.last_error?' | '+state.last_error:'');
     q('conveyor-state').textContent=text;

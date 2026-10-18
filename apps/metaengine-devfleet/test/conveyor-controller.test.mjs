@@ -107,3 +107,22 @@ test('RESTORE_BLOCKED task is not resent and counted separately',async()=>{
   assert.equal(row.state,'READY_NOT_SENT');
   await conveyor.stop();
 });
+
+test('orphaned queue tab is surfaced without sending or borrowing another tab',async()=>{
+  const op=new FakeOperator();
+  const row={task_id:'task-orphan-01',request_id:'send-orphan-01',
+    project_id:'client',kind:'SOURCE_CODING',scope:'SOURCE_ONLY',
+    draft_pr_only:true,text:'Preserve distinct task binding',
+    state:'READY_NOT_SENT',tab_id:'tab_33333333-3333-4333-8333-333333333333',
+    tab_state:'MISSING',ledger_state:'NONE'};
+  op.items.push(row);
+  const controller=new DevFleetConveyor(op,{retryDelayMs:10});
+  assert.equal(controller.status().orphaned_tasks,1);
+  await controller.start({hot_slots:1});
+  for(let i=0;i<25&&controller.status().last_error!=='CONVEYOR_ORPHANED_TAB_BINDING';i++)
+    await sleep(10);
+  assert.equal(controller.status().last_error,'CONVEYOR_ORPHANED_TAB_BINDING');
+  assert.equal(op.sends,0);
+  assert.equal(row.state,'READY_NOT_SENT');
+  await controller.stop();
+});
