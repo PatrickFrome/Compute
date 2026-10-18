@@ -145,3 +145,4 @@ METAENGINE постоянно развивает поставленную опе
 | NEXT-G0.1 | G0 | Требуется свежий read-only source/installed/CI baseline с source-to-artifact provenance и независимой сверкой. | OPEN | NONE |
 
 Каждый следующий завершённый пакет добавляет запись (а не меняет прошлый SHA/доказательства): дата, gate, PR, SHA, тесты, реальный readback, negative-case, независимый decision и следующий шаг. Спорные старые доказательства остаются HISTORICAL.
+| G0.1-SNAPSHOT-20261018 | G0 | [Read-only GitHub / Windows evidence ledger](../../docs/audits/metaengine-20261018/G0_1_EXACT_HEAD_INSTALLED_CI_EVIDENCE_20261018.md): Git SHA 980bd4b/7eaa00f; retrieved CI 12 (3 pass, 8 fail, 1 cancelled) with known filtered-run discrepancy; installed EXE/ASAR/Owner digest mismatch; Guardian service and PG17.6 listener/OS metadata only; trust/leases/100ns birth UNKNOWN. | EVIDENCE_RECORDED; INDEPENDENT_REVIEW_REQUIRED; G0 still IN_PROGRESS, G1 BLOCKED | NONE |
