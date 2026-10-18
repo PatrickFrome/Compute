@@ -326,7 +326,7 @@
     "apps/metaengine-browser/test/supervisor-bootstrap-ambiguity-repair-r4.test.mjs": "74d55ad5924f1c9a5f7ab8fe60ac0e8abedd3c48",
     "apps/metaengine-browser/test/supervisor-rollover-draft-hardening.test.mjs": "8f02d49595ef63032817c9eee3ad300171955b8b",
     "coordination/operator-control/DEVFLEET_WAVE13_AUTONOMY_10.json": "d0ad641974c9e257fc2a2bc043c250144974884e",
-    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "7565fd25ead9a1039bed51b38191cdb8e19bf190",
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "269bddd850aa67fc34d20dff4ad1e7dc49dfe76c",
     "infra/client-state-runtime/README-client-local-provider.md": "630854f33b331eed8cd0e0b74a5ba8961a8b9473",
     "infra/client-state-runtime/README-host-native-owner-w60.md": "d308afbc4f3ec05be6670a3db8d2c29a3c3a6ddc",
     "infra/client-state-runtime/client-backup-acl-native-w58.ipc.test.mjs": "b8b1e6f8b0e95a687cc050d153808465ab961b61",
