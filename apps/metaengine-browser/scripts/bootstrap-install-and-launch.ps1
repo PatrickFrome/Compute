@@ -3,6 +3,9 @@ param(
   [Parameter(Mandatory = $true)][string]$ExpectedInstallerSha256,
   [Parameter(Mandatory = $true)][string]$ExpectedVersion,
   [string]$InstalledExePath = '',
+  # Candidate staged resources are used for a read-only compatibility refusal,
+  # not as authenticated producer proof or permission to rewrite Owner custody.
+  [string]$CandidateResourcesPath = '',
   [string]$ProofPath = '',
   [switch]$PhysicalProof,
   [ValidateRange(1,1800)][int]$InstallTimeoutSeconds = 1800,
@@ -50,6 +53,33 @@ function Get-BrowserProcesses([string]$ExactExePath) {
 # collection so StrictMode sees a stable .Count for zero, one, or many processes.
 $preexisting = @(Get-BrowserProcesses $InstalledExePath)
 if ($preexisting.Count -gt 0) { throw 'bootstrap_preexisting_browser_process' }
+
+# Refuse an incompatible installed Owner BEFORE the NSIS process can replace
+# executable resources. Neither this check nor its receipt modifies Owner/PG.
+$existingOwnerFile = if ($env:APPDATA) {
+  Join-Path $env:APPDATA '@metaengine\browser-shell\metaengine-state-provider-v1.json'
+} else { '' }
+if ($existingOwnerFile -and (Test-Path -LiteralPath $existingOwnerFile)) {
+  if (-not $CandidateResourcesPath) { throw 'bootstrap_owner_preinstall_resources_required' }
+  $preflightScript = Join-Path $PSScriptRoot 'owner-runtime-preinstall-compatibility.mjs'
+  if (-not (Test-Path -LiteralPath $preflightScript -PathType Leaf)) {
+    throw 'bootstrap_owner_preinstall_verifier_unavailable'
+  }
+  $installedResourcesPath = Join-Path (Split-Path -Parent $InstalledExePath) 'resources'
+  $preflightJson = & node $preflightScript --candidate-resources $CandidateResourcesPath --expected-version $ExpectedVersion --installed-resources $installedResourcesPath
+  if ($LASTEXITCODE -ne 0) { throw 'bootstrap_owner_preinstall_incompatible' }
+  try { $preflightResult = $preflightJson | ConvertFrom-Json } catch {
+    throw 'bootstrap_owner_preinstall_receipt_invalid'
+  }
+  if ($preflightResult.schema -ne 'metaengine.browser.qa-owner-preinstall-compatibility.v1' `
+      -or $preflightResult.state -ne 'COMPATIBLE' `
+      -or $preflightResult.package_version -ne $ExpectedVersion `
+      -or $preflightResult.installer_effect_attempted -ne $false `
+      -or $preflightResult.owner_mutated -ne $false `
+      -or $preflightResult.authority_effect -ne $false) {
+    throw 'bootstrap_owner_preinstall_receipt_invalid'
+  }
+}
 
 $boundedInstaller = Join-Path $PSScriptRoot 'install-package-bounded.ps1'
 if (-not (Test-Path -LiteralPath $boundedInstaller -PathType Leaf)) { throw 'bootstrap_bounded_installer_missing' }

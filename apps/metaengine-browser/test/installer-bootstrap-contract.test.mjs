@@ -53,3 +53,13 @@ test('exact upgrade qualification proves installed executable provenance, profil
   assert.doesNotMatch(exactUpgradeBootstrap, /Stop-Process -Id \(\[int\]\$_.ProcessId\) -Force/);
   assert.match(exactUpgradeBootstrap, /bootstrap_cleanup_shutdown_verified = \$true/);
 });
+test('QA installer checks existing Owner pin before bounded installation or GUI startup', () => {
+  const profileCheck = bootstrap.indexOf('bootstrap_owner_preinstall_resources_required');
+  const bundleCheck = bootstrap.indexOf('owner-runtime-preinstall-compatibility.mjs');
+  const install = bootstrap.indexOf("$boundedInstaller = Join-Path $PSScriptRoot 'install-package-bounded.ps1'");
+  const launch = bootstrap.indexOf('Start-Process -FilePath $InstalledExePath -PassThru');
+  assert.ok(profileCheck > 0 && bundleCheck > profileCheck && install > bundleCheck && launch > install);
+  assert.match(bootstrap, /bootstrap_owner_preinstall_incompatible/);
+  assert.match(bootstrap, /\$preflightResult\.owner_mutated -ne \$false/);
+  assert.doesNotMatch(bootstrap.slice(profileCheck, install), /Set-Content|Remove-Item|Move-Item|Set-ItemProperty|Copy-Item/);
+});
