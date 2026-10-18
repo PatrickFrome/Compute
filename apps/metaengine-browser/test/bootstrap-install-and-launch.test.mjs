@@ -11,7 +11,7 @@ const quote = value => `'${String(value).replaceAll("'", "''")}'`;
 const script = new URL('../scripts/bootstrap-install-and-launch.ps1', import.meta.url);
 
 async function bootstrapFixture(t, { failure = '', digestMismatch = false, timeout = 7,
-  omitInstallTimeoutParameter = false, receiptPatch = '' } = {}) {
+  omitInstallTimeoutParameter = false, receiptPatch = '', existingOwner = false } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-bootstrap-bounded-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const installer = path.join(root, 'candidate.exe');
@@ -23,6 +23,14 @@ async function bootstrapFixture(t, { failure = '', digestMismatch = false, timeo
   const bytes = Buffer.from('inert test fixture, never executed');
   await fs.writeFile(installer, bytes);
   await fs.writeFile(installed, bytes);
+  // Never read the real user's protected Owner from a disposable fixture.
+  const appData = path.join(root, 'Roaming');
+  await fs.mkdir(appData, { recursive: true });
+  if (existingOwner) {
+    const savedOwner = path.join(appData, '@metaengine', 'browser-shell', 'metaengine-state-provider-v1.json');
+    await fs.mkdir(path.dirname(savedOwner), { recursive: true });
+    await fs.writeFile(savedOwner, '{"schema":"inert-fixture"}');
+  }
   const digest = createHash('sha256').update(bytes).digest('hex');
   await fs.writeFile(path.join(root, 'install-package-bounded.ps1'), `
 param([string]$InstallerPath,[string]$ExpectedSha256,[int]$TimeoutSeconds)
@@ -47,6 +55,7 @@ $receipt | ConvertTo-Json -Compress
     + (omitInstallTimeoutParameter ? '' : ` -InstallTimeoutSeconds ${timeout}`);
   await fs.writeFile(path.join(root, 'invoke.ps1'), `
 $ErrorActionPreference = 'Stop'
+$env:APPDATA = ${quote(appData)}
 $global:BootstrapProcessReads = 0
 function Get-Process {
   param($ErrorAction)
@@ -156,4 +165,13 @@ test('bootstrap uses default 1800-second install deadline when InstallTimeoutSec
     assert.equal(f.proof.installer_effect_attempted, true);
     assert.equal(f.proof.automatic_retry_allowed, false);
     assert.deepEqual(f.launches, [f.installed]);
+  });
+test('bootstrap refuses a previously pinned Owner before starting the installer without candidate resources',
+  { skip: !windows }, async t => {
+    const f = await bootstrapFixture(t, { existingOwner: true });
+    assert.notEqual(f.result.status, 0);
+    assert.match(f.result.stderr, /bootstrap_owner_preinstall_resources_required/);
+    assert.equal(f.calls, null);
+    assert.equal(f.proof, null);
+    assert.deepEqual(f.launches, []);
   });
