@@ -117,7 +117,11 @@ test('staging manifest grants no LocalSystem activation authority', () => {
   ]) assert.match(build, expected);
   assert.match(build, /METAENGINEBrowserGuardian\.exe/);
   assert.match(build, /METAENGINEBrowserGuardianConfigure\.exe/);
-  assert.match(build, /Get-FileHash[^\n]+SHA256/);
+  // The staged binaries use a bounded streaming .NET SHA256 hasher, not Get-FileHash.
+  assert.match(build, /function Get-Sha256\(\[string\]\$Path\)/);
+  assert.match(build, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
+  assert.match(build, /\$sha\s*=\s*Get-Sha256\s+\$file\.FullName/);
+  assert.match(build, /Get-Sha256\s+\$binary/);
   assert.doesNotMatch(build, /\b(?:sc\.exe|Start-Service|New-Service)\b/i);
 });
 

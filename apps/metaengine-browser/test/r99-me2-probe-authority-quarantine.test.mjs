@@ -32,7 +32,10 @@ const SAFE_PROBE = Object.freeze({
 test('R99 Browser-hosted ME2 probe cannot seed or expose mutation/model REST authority', () => {
   const daemon = source('apps/me2-daemon/index.ts');
   assert.match(daemon, /if \(!PROBE_MODE\) seed\(\)/);
-  assert.match(daemon, /method !== "GET" \|\| PROBE_BLOCKED_GET_PATHS\.has\(path\)/);
+  // Only the explicitly isolated qualification mode may execute POST /eval/run.
+  assert.match(daemon, /const qualificationEval = QUALIFICATION_MODE && method === "POST" && path === "\/eval\/run"/);
+  assert.match(daemon, /\(!qualificationEval && method !== "GET"\) \|\| PROBE_BLOCKED_GET_PATHS\.has\(path\)/);
+  assert.match(daemon, /model_execution_enabled: false/);
   for (const pathName of ['/providers','/llm','/glm','/agents','/agentchat','/pool','/governor','/demand','/tokens']) {
     assert.equal(daemon.includes('"' + pathName + '"'), true, 'probe must classify ' + pathName);
   }

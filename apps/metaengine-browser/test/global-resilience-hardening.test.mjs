@@ -15,7 +15,7 @@ const routes = read('apps/metaengine-browser/supabase/a2-browser-native-supervis
 test('expired DevOS effects are fenced ambiguous and never automatically requeued', () => {
   assert.match(reconcile, /state\s*=\s*'AMBIGUOUS'/);
   assert.match(reconcile, /LEASE_EXPIRED_EFFECT_UNKNOWN/);
-  assert.match(reconcile, /automatic_retry_allowed',false/);
+  assert.match(reconcile, /'automatic_retry_allowed'\s*,\s*false/);
   assert.doesNotMatch(reconcile, /set\s+state\s*=\s*'READY'/i);
 });
 
