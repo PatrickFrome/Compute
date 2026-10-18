@@ -118,7 +118,7 @@ test('protected packaged binding pins version, verifier, manifest and each revie
   const pkg = { version: binding.package_version, metaengineClientStateRuntime: binding };
   assert.deepEqual(validatePackagedLocalRuntimeBinding(pkg, options), binding);
   for (const patch of [{ schema: 'foreign' }, { schema_version: 2 }, { package_version: 'old' },
-    { source_head_sha: 'unpinned' }, { bundle_sha256: '3'.repeat(64) }, { bundle_manifest_sha256: 'invalid' },
+    { source_head_sha: 'unpinned' }, { bundle_sha256: 'invalid' }, { bundle_manifest_sha256: 'invalid' },
     { bundle_manifest_relative_path: '../manifest.json' }, { runtime_verifier_relative_path: '../verifier.mjs' },
     { runtime_verifier_sha256: 'invalid' }, { reviewed_startup_source_sha256: 'invalid' },
     { reviewed_startup_files_sha256: 'invalid' }, { source_bundle_sha256: 'invalid' },
@@ -127,6 +127,11 @@ test('protected packaged binding pins version, verifier, manifest and each revie
     assert.throws(() => validatePackagedLocalRuntimeBinding({ ...pkg, metaengineClientStateRuntime: { ...binding, ...patch } }, options), /packaged_local_runtime_binding_invalid/);
   }
   assert.throws(() => validatePackagedLocalRuntimeBinding(pkg, { ...options, bundleDirectory: path.resolve(os.tmpdir(), 'foreign-bundle') }), /packaged_local_runtime_binding_invalid/);
+  // Upgrading the packaged runtime must not change the original Owner's pin.
+  assert.throws(() => validatePackagedLocalRuntimeBinding(pkg, { ...options, expectedBundleDigest: '3'.repeat(64) }),
+    /packaged_local_runtime_owner_digest_mismatch/);
+  assert.throws(() => validatePackagedLocalRuntimeBinding(pkg, { ...options, expectedBundleDigest: undefined }),
+    /packaged_local_runtime_binding_invalid/);
 });
 
 test('one verified external host starts from a private file, binds ready IPC and stops through real child IPC', async t => {
@@ -299,4 +304,13 @@ test('host shutdown during bootstrap health cannot overwrite BLOCKED with stale 
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'local_state_provider_owned_host_not_ready');
   assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
   assert.equal(f.verifications(), 1);
+});
+test('stale packaged Owner pin leaves the old profile intact and exits without a second uncaught dialog (source contract)', async () => {
+  const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  const reject = source.indexOf("const staleOwnerBinding = reason === 'packaged_local_runtime_owner_digest_mismatch'");
+  const stop = source.indexOf('if (staleOwnerBinding) {', reject);
+  const rethrow = source.indexOf('throw error;', stop);
+  assert.ok(reject >= 0 && stop > reject && rethrow > stop, 'mismatch remains an explicit fail-closed admission error');
+  assert.match(source.slice(stop, rethrow), /app\.exit\(1\);\s*return;/);
+  assert.match(source, /Do not delete the Owner profile or PostgreSQL database/);
 });
