@@ -391,6 +391,7 @@ async function start() {
   // methods fail closed as operator_restoring until every cell is settled.
   await listenLocal();
   void operator.whenRestored().then(()=>{
+    conveyor?.resume();
     if(mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send('devfleet:ready');
   }).catch(()=>{ /* Early loopback remains available for diagnostic list. */ });

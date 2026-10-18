@@ -29,3 +29,9 @@ Authenticated developer routes: `dev.pipeline.enqueue_batch`, `dev.pipeline.conv
 - Follow-up: independent Windows QA login/session, real multi-slot send proof, journal segment archiving for long-term storage efficiency, GitHub Draft PR integration.
 
 Research: Electron `WebContentsView` and `webContents.debugger` official APIs; persistent partition is shared among views and background throttling is scoped to WebContents.
+
+## W16.2 — restore-resume repair
+
+Observed on Windows v16.1: an explicit conveyor START sent while the original DevFleetOperator was still restoring its ten saved ChatGPT WebContents left `enabled=true` but zero attempts; synchronous `queueStatus()` failed with `operator_restoring` even inside the pump's finalizer. V16.2 catches this transient error, schedules a bounded retry, and triggers `resume()` from the existing `operator.whenRestored()` completion path. This does not authorize a new request identity and never retries a committed AMBIGUOUS send.
+
+Exact source test suite: 153 tests, 153 PASS, including new transient RESTORING controller test. New disposable QA package identity: `0.1.0-dev.16.20261018.2`; final Windows physical SEND remains a separate acceptance gate.

@@ -50,3 +50,18 @@ test('owner-started conveyor sends 48 distinct queued source tasks via single op
   assert.equal(conveyor.status().send_unknown,0);
   assert.equal(conveyor.stop().state,'STOPPING');
 });
+
+test('conveyor resumes automatically after transient operator RESTORING',async()=>{
+  const op=new FakeOperator(),initial=op.queueStatus.bind(op);
+  let restoring=3;
+  op.queueStatus=()=>{if(restoring-->0)throw Error('operator_restoring');return initial();};
+  const controller=new DevFleetConveyor(op,{retryDelayMs:10});
+  await controller.enqueueBatch({tasks:[{task_id:'task-after-restore-01',
+    request_id:'send-after-restore-01',project_id:'client',text:'source task',
+    kind:'SOURCE_CODING',scope:'SOURCE_ONLY',draft_pr_only:true}]});
+  await controller.start({hot_slots:2});
+  for(let i=0;i<45&&op.sends===0;i++)await sleep(10);
+  assert.equal(op.sends,1);
+  assert.equal(controller.status().last_error,null);
+  controller.stop();
+});

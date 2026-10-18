@@ -14,7 +14,10 @@ export class DevFleetConveyor {
   #nextAttempt=new Map();
   #error=null;
   #explicitTarget=null;
-  constructor(operator){
+  #retryDelayMs=5000;
+  constructor(operator,{retryDelayMs=5000}={}){
+    if(!Number.isSafeInteger(retryDelayMs)||retryDelayMs<1)throw Error('conveyor_retry_delay_invalid');
+    this.#retryDelayMs=retryDelayMs;
     if(!operator||typeof operator.admitCoding!=='function'||
         typeof operator.queueStatus!=='function'||typeof operator.assign!=='function')
       throw Error('conveyor_operator_missing');
@@ -57,6 +60,12 @@ export class DevFleetConveyor {
       adaptive_capacity:hot_slots===undefined,
       automatic_retry_of_ambiguous:false};
   }
+  resume(){
+    if(this.#enabled){
+      if(this.#timer){clearTimeout(this.#timer);this.#timer=null;}
+      this.#schedule();
+    }
+  }
   stop(){
     this.#enabled=false;this.#stopped=true;
     if(this.#timer){clearTimeout(this.#timer);this.#timer=null;}
@@ -87,6 +96,7 @@ export class DevFleetConveyor {
       for(;;){
         if(!this.#enabled||this.#stopped)break;
         let q=this.#operator.queueStatus();
+        this.#error=null;
         await this.#capacity(q);
         q=this.#operator.queueStatus();
         let progress=false;
@@ -125,9 +135,15 @@ export class DevFleetConveyor {
     }finally{
       this.#running=false;
       if(this.#enabled){
-        const q=this.#operator.queueStatus();
-        if(waiting||(q.counts.READY_NOT_SENT||0)>0||(q.counts.QUEUED||0)>0)
-          this.#schedule(5000);
+        let pending=true;
+        try{
+          const q=this.#operator.queueStatus();
+          pending=waiting||(q.counts.READY_NOT_SENT||0)>0||(q.counts.QUEUED||0)>0;
+        }catch(error){
+          // RESTORING is transient; do not disable an owner-started conveyor.
+          this.#error=String(error?.message||'CONVEYOR_WAITING_FOR_RESTORE').slice(0,120);
+        }
+        if(pending)this.#schedule(this.#retryDelayMs);
       }
     }
   }
