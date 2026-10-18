@@ -298,15 +298,34 @@ export class DevFleetOperator {
     return row ? {task_id:row.task_id,request_id:row.request_id,
       tab_id:row.tab_id,text:row.text,state:row.state} : null;
   }
+  // Durable task/ledger correlation: a send receipt can be committed before
+  // the coding queue item is resolved. A subsequent run must reconcile it
+  // without entering the ChatGPT Send path a second time.
+  codingTaskReceiptStatus(taskId) {
+    this.#requireInit();
+    const item=this.#state.coding_queue.items.find(x=>x.task_id===taskId);
+    if(!item)throw Error('coding_queue_task_not_owned');
+    const log=this.#state.requests.find(x=>x.operation==='assign'&&
+      x.request_id===item.request_id&&x.tab_id===item.tab_id);
+    const tab=this.#state.sessions.find(x=>x.tab_id===item.tab_id);
+    return {schema:'metaengine.devfleet.coding-ledger-readback.v1',
+      task_id:item.task_id,task_state:item.state,
+      ledger_state:log?.state??'NONE',
+      tab_state:tab?.state??'MISSING',
+      read_only:true,authority_effect:false};
+  }
   async resolveCodingTask({task_id,state}={}) {
     this.#requireInit();
     if(!['SENT','AMBIGUOUS'].includes(state))throw Error('conveyor_receipt_state_invalid');
     return this.#exclusive(async()=>{
       const item=this.#state.coding_queue.items.find(x=>x.task_id===task_id);
-      if(!item||item.state!=='READY_NOT_SENT')throw Error('conveyor_task_not_ready');
+      if(!item||!['READY_NOT_SENT',state].includes(item.state))
+        throw Error('conveyor_task_not_ready');
       const receipt=this.#state.requests.find(r=>r.operation==='assign'&&r.request_id===item.request_id);
       if(!receipt||receipt.state!==state||receipt.tab_id!==item.tab_id)
         throw Error('conveyor_receipt_not_proven');
+      if(item.state===state)
+        return {schema:'metaengine.devfleet.conveyor-receipt.v1',task_id,state,already_resolved:true};
       item.state=state;
       await this.#save();
       return {schema:'metaengine.devfleet.conveyor-receipt.v1',task_id,state};

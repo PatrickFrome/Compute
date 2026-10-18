@@ -25,8 +25,15 @@ class FakeOperator {
     return {state:'WAVE_COMPLETED'};
   }
   queueTask(task_id){return this.items.find(x=>x.task_id===task_id);}
+  codingTaskReceiptStatus(task_id){
+    const row=this.queueTask(task_id);
+    return {task_id,task_state:row?.state,ledger_state:row?.ledger_state??'NONE',
+      tab_state:row?.tab_state??'OPEN',read_only:true,authority_effect:false};
+  }
   async resolveCodingTask({task_id,state}){
-    this.items.find(x=>x.task_id===task_id).state=state;
+    const row=this.items.find(x=>x.task_id===task_id);
+    if(row?.ledger_state!==state)throw Error('conveyor_receipt_not_proven');
+    row.state=state;
   }
   async assign(){throw Error('UNEXPECTED_ASSIGN');}
 }
@@ -64,4 +71,37 @@ test('conveyor resumes automatically after transient operator RESTORING',async()
   assert.equal(op.sends,1);
   assert.equal(controller.status().last_error,null);
   controller.stop();
+});
+
+test('committed SENT ledger resolves READY task without new Send',async()=>{
+  const op=new FakeOperator();
+  const row={task_id:'task-ledger-sent-01',request_id:'send-ledger-sent-01',
+    project_id:'client',kind:'SOURCE_CODING',scope:'SOURCE_ONLY',
+    draft_pr_only:true,text:'Existing confirmed user turn',
+    state:'READY_NOT_SENT',tab_id:'tab_11111111-1111-4111-8111-111111111111',
+    tab_state:'OPEN',ledger_state:'SENT'};
+  op.items.push(row);
+  const conveyor=new DevFleetConveyor(op,{retryDelayMs:10});
+  await conveyor.start({hot_slots:1});
+  for(let i=0;i<35&&row.state!=='SENT';i++)await sleep(10);
+  assert.equal(row.state,'SENT');
+  assert.equal(op.sends,0);
+  assert.equal(conveyor.status().sent_confirmed,1);
+  conveyor.stop();
+});
+test('RESTORE_BLOCKED task is not resent and counted separately',async()=>{
+  const op=new FakeOperator();
+  const row={task_id:'task-restored-bad-01',request_id:'send-restored-bad-01',
+    project_id:'client',kind:'SOURCE_CODING',scope:'SOURCE_ONLY',
+    draft_pr_only:true,text:'Do not blindly resend',
+    state:'READY_NOT_SENT',tab_id:'tab_22222222-2222-4222-8222-222222222222',
+    tab_state:'RESTORE_BLOCKED',ledger_state:'NONE'};
+  op.items.push(row);
+  const conveyor=new DevFleetConveyor(op,{retryDelayMs:10});
+  await conveyor.start({hot_slots:1});
+  for(let i=0;i<25&&conveyor.status().restore_blocked_tasks!==1;i++)await sleep(10);
+  assert.equal(conveyor.status().restore_blocked_tasks,1);
+  assert.equal(op.sends,0);
+  assert.equal(row.state,'READY_NOT_SENT');
+  conveyor.stop();
 });

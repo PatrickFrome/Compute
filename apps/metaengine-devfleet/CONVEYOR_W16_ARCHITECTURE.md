@@ -35,3 +35,9 @@ Research: Electron `WebContentsView` and `webContents.debugger` official APIs; p
 Observed on Windows v16.1: an explicit conveyor START sent while the original DevFleetOperator was still restoring its ten saved ChatGPT WebContents left `enabled=true` but zero attempts; synchronous `queueStatus()` failed with `operator_restoring` even inside the pump's finalizer. V16.2 catches this transient error, schedules a bounded retry, and triggers `resume()` from the existing `operator.whenRestored()` completion path. This does not authorize a new request identity and never retries a committed AMBIGUOUS send.
 
 Exact source test suite: 153 tests, 153 PASS, including new transient RESTORING controller test. New disposable QA package identity: `0.1.0-dev.16.20261018.2`; final Windows physical SEND remains a separate acceptance gate.
+
+## W16.3 — durable receipt reconciliation and blocked restore
+
+A previously recorded `SENT` or `AMBIGUOUS` request can survive a crash before its corresponding queue item is marked final. The conveyor now reads the request's durable ledger state and updates only the queue item, never issuing another native Send for that request. `resolveCodingTask` is idempotent after matching an existing authoritative receipt. Queued tasks tied to `RESTORE_BLOCKED` tabs are not attempted until legitimate restoration; the first-party status UI exposes `RESTORE_BLOCKED` count. No new scheduler, trust root, or authority paths were added.
+
+Exact local full source suite: 155/155 PASS (includes ledger SENT re-sync and RESTORE_BLOCKED negatives). QA package identity `0.1.0-dev.16.20261018.3`. Physical ChatGPT delivery proof remains independent from source fixture proof.

@@ -11,6 +11,7 @@ export class DevFleetConveyor {
   #timer=null;
   #stopped=false;
   #held=new Set();
+  #blocked=new Set();
   #nextAttempt=new Map();
   #error=null;
   #explicitTarget=null;
@@ -31,6 +32,7 @@ export class DevFleetConveyor {
       occupied_or_reserved:q.occupied_or_reserved,
       counts:q.counts,items:q.items,last_error:this.#error,
       sent_confirmed:q.counts.SENT||0,
+      restore_blocked_tasks:this.#blocked.size,
       send_unknown:q.counts.AMBIGUOUS||0,
       automatic_retry_of_ambiguous:false,
       read_only:true,authority_effect:false};
@@ -97,6 +99,7 @@ export class DevFleetConveyor {
         if(!this.#enabled||this.#stopped)break;
         let q=this.#operator.queueStatus();
         this.#error=null;
+        this.#blocked.clear();
         await this.#capacity(q);
         q=this.#operator.queueStatus();
         let progress=false;
@@ -108,15 +111,40 @@ export class DevFleetConveyor {
           if((this.#nextAttempt.get(task.request_id)||0)>Date.now()){waiting=true;continue;}
           const row=this.#operator.queueTask(task.task_id);
           if(!row)continue;
-          try{
+          try {
+            const current=this.#operator.codingTaskReceiptStatus(row.task_id);
+            if(['SENT','AMBIGUOUS'].includes(current.ledger_state)){
+              // Durably committed effect: resolve only, never Send again.
+              await this.#operator.resolveCodingTask({
+                task_id:row.task_id,state:current.ledger_state});
+              this.#held.add(row.request_id);
+              progress=true;
+              continue;
+            }
+            if(current.ledger_state!=='NONE'){
+              this.#error='CONVEYOR_UNRECONCILED_SEND';
+              this.#held.add(row.request_id);
+              continue;
+            }
+            if(current.tab_state==='RESTORE_BLOCKED'){
+              this.#blocked.add(row.task_id);
+              waiting=true;
+              continue;
+            }
+            if(current.tab_state!=='OPEN'){
+              waiting=true;
+              continue;
+            }
             const receipt=await this.#operator.assign({request_id:row.request_id,
               tab_id:row.tab_id,text:row.text});
-            if(['SENT','AMBIGUOUS','ABANDONED_UNKNOWN'].includes(receipt.state)){
-              this.#held.add(row.request_id);
+            if(['SENT','AMBIGUOUS'].includes(receipt.state)){
               await this.#operator.resolveCodingTask({task_id:row.task_id,state:receipt.state});
-            }else this.#nextAttempt.set(row.request_id,Date.now()+5000);
+              this.#held.add(row.request_id);
+            }else this.#nextAttempt.set(row.request_id,Date.now()+this.#retryDelayMs);
           }catch{
-            this.#nextAttempt.set(row.request_id,Date.now()+5000);
+            // May include a committed receipt and a failed queue save;
+            // re-read the ledger on the next pass rather than assuming Send failed.
+            this.#nextAttempt.set(row.request_id,Date.now()+this.#retryDelayMs);
             waiting=true;
           }
           progress=true;
