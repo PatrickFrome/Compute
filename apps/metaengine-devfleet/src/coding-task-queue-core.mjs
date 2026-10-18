@@ -4,8 +4,9 @@ import {createHash} from 'node:crypto';
 export const CODING_QUEUE_SCHEMA = 'metaengine.devfleet.coding-queue.v1';
 // Slot target is an operator-owned, durable configuration — not a hardcoded constant.
 export const DEFAULT_HOT_TARGET = 4;
-export const QUEUE_LIMIT = 32;
-export const QUEUE_CHAR_LIMIT = 64000;
+// No arbitrary total task cap: durable storage and resources determine capacity.
+export const QUEUE_LIMIT = Number.MAX_SAFE_INTEGER;
+export const QUEUE_CHAR_LIMIT = Number.MAX_SAFE_INTEGER;
 const idPattern = /^[a-zA-Z0-9._:-]{12,100}$/;
 const projectPattern = /^[a-zA-Z0-9._:-]{3,64}$/;
 const states = new Set(['QUEUED','CANCELLED','RESERVED','CREATION_UNKNOWN',
@@ -21,7 +22,7 @@ export function readCodingQueue(value) {
   if(!value || value.schema!==CODING_QUEUE_SCHEMA ||
     (value.last_project!==null && (typeof value.last_project!=='string' ||
       !projectPattern.test(value.last_project))) ||
-    !Array.isArray(value.items) || value.items.length>QUEUE_LIMIT)
+    !Array.isArray(value.items))
     throw Error('coding_queue_state_invalid');
   const ids=new Set(),requestIds=new Set();
   let total=0;
@@ -42,7 +43,6 @@ export function readCodingQueue(value) {
       item.project_id,item.text]))throw Error('coding_queue_state_invalid');
     ids.add(item.task_id);requestIds.add(item.request_id);total+=item.text.length;
   }
-  if(total>QUEUE_CHAR_LIMIT)throw Error('coding_queue_state_invalid');
   return clone(value);
 }
 export function enqueueCodingTask(queue, task, maxPromptChars=4000) {
@@ -63,9 +63,6 @@ export function enqueueCodingTask(queue, task, maxPromptChars=4000) {
       prior.fingerprint!==hash)throw Error('coding_queue_identity_collision');
     return {queue:clone(queue),item:clone(prior),duplicate:true};
   }
-  if(queue.items.length>=QUEUE_LIMIT ||
-    queue.items.reduce((n,x)=>n+x.text.length,0)+task.text.length>QUEUE_CHAR_LIMIT)
-    throw Error('coding_queue_capacity_exceeded');
   const next=clone(queue);
   const item={task_id:task.task_id,request_id:task.request_id,
     project_id:task.project_id,text:task.text,fingerprint:hash,

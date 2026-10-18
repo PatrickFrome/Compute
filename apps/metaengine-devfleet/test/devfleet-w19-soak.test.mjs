@@ -298,10 +298,9 @@ test('W19 / collisions, four-wave batch and 500-receipt ceiling fail closed', as
   f.setDisk({schema:SCHEMA,sessions:[],requests:full});
   operator=new DevFleetOperator(f);
   await operator.init();
-  await assert.rejects(operator.create({
-    request_id:'w19-ledger-overflow-create',count:1}),
-    /operator_request_history_full/);
-  assert.equal(f.creates.length,4);
+  const beyond=await operator.create({request_id:'w19-ledger-overflow-create',count:1});
+  assert.equal(beyond.state,'CREATED');
+  assert.equal(f.creates.length,5);
   assert.equal(f.sendAttempts.length,0);
-  assert.equal(f.disk.requests.length,500);
+  assert.equal(f.disk.requests.length,501);
 });

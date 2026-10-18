@@ -6,6 +6,7 @@ import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
 import { AxEventHints } from './ax-event-hints.mjs';
 import {receiptMarker,postedMessageObserved,postedUserTurnObserved,userTurnReceiptDiagnostic} from './send-receipt-core.mjs';
 import {composerDomText} from './composer-dom-core.mjs';
+import {composerHtmlText} from './composer-html-core.mjs';
 import {classifyConversationSurface,classifyPostSendNavigation} from './conversation-readiness-core.mjs';
 import {summarizeNativePageMount} from './native-page-mount-proof.mjs';
 
@@ -91,6 +92,20 @@ async function composerValue(view, node, diagnostic = null) {
       state:dom===null?'UNKNOWN':'PROVEN'});
   }
   if (dom !== null) return dom;
+  // CDP DOM.describeNode can omit deep ProseMirror child structure. Only the
+  // SAME backend node's native outerHTML may recover its exact text.
+  if(result?.node?.backendNodeId===node.backendDOMNodeId &&
+     result?.node?.nodeName==='DIV'){
+    try{
+      const outer=await dbg.sendCommand('DOM.getOuterHTML',
+        {backendNodeId:node.backendDOMNodeId});
+      const recovered=composerHtmlText(outer?.outerHTML);
+      if(recovered!==null){
+        if(diagnostic)diagnostic.state='PROVEN_NATIVE_OUTER_HTML';
+        return recovered;
+      }
+    }catch{}
+  }
   // Native input value is authoritative for a textarea; contenteditable AX
   // values can flatten/lag paragraphs and MUST use the exact DOM node above.
   return result?.node?.nodeName === 'TEXTAREA' &&
