@@ -11,6 +11,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { validateRuntimeHostConfig } from '../../../infra/client-state-runtime/runtime-host.mjs';
+import { verifyOfflineRuntimeBundle } from '../../../infra/client-state-runtime/offline-runtime-bundle.mjs';
 import { localRuntimeHostEnvironment } from '../src/local-runtime-host-controller.mjs';
 import { localStateProviderOwnerFile, validateLocalStateProviderConfig,
   validateLocalStateRuntimeIdentity, localStateProviderHealthAttested } from '../src/local-state-provider-policy.mjs';
@@ -65,6 +66,48 @@ async function hashFile(file) {
   await physical(file); const h=createHash('sha256');
   for await(const part of createReadStream(file))h.update(part);
   return h.digest('hex');
+}
+// Old Owner must only be restored together with the *same* physically verified
+// application image. Restoring a JSON descriptor after NSIS changed app.asar is
+// not rollback; it can strand the runtime in an incompatible generation.
+export function assertPredecessorImageMatches(expected, actual) {
+  if (!expected || !actual
+    || !SHA.test(expected.asar_sha256 || '') || !SHA.test(actual.asar_sha256 || '')
+    || !SHA.test(expected.bundle_sha256 || '') || !SHA.test(actual.bundle_sha256 || '')
+    || !SHA.test(expected.executable_sha256 || '') || !SHA.test(actual.executable_sha256 || '')
+    || !HEAD.test(expected.source_head || '') || !HEAD.test(actual.source_head || '')
+    || typeof expected.package_version !== 'string' || expected.package_version !== actual.package_version
+    || expected.executable_sha256 !== actual.executable_sha256
+    || expected.asar_sha256 !== actual.asar_sha256
+    || expected.bundle_sha256 !== actual.bundle_sha256
+    || expected.source_head !== actual.source_head) fail('predecessor_image_not_restored');
+  return true;
+}
+export async function readPredecessorImage(installedResources, ownerBundleDigest) {
+  if (!SHA.test(ownerBundleDigest || '')) fail('predecessor_owner_pin_invalid');
+  const resources = await physical(installedResources, 'directory');
+  const archive = path.join(resources, 'app.asar');
+  const asarSha256 = await hashFile(archive);
+  const executableSha256 = await hashFile(path.join(path.dirname(resources), 'METAENGINE Browser Test.exe'));
+  let pkg;
+  try {
+    const asar = require('@electron/asar');
+    pkg = JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8'));
+  } catch { fail('predecessor_asar_unreadable'); }
+  const binding = pkg?.metaengineClientStateRuntime;
+  if (!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(pkg?.version || '')
+    || !HEAD.test(binding?.source_head_sha || '') || !SHA.test(binding?.bundle_sha256 || ''))
+    fail('predecessor_package_identity_invalid');
+  const image = Object.freeze({ asar_sha256: asarSha256, executable_sha256: executableSha256, package_version: pkg.version,
+    source_head: binding.source_head_sha, bundle_sha256: binding.bundle_sha256 });
+  if (image.bundle_sha256 !== ownerBundleDigest) fail('predecessor_owner_package_mismatch');
+  // Use the trusted source verifier, never execute JS extracted from the
+  // potentially replaced installer payload.
+  try {
+    await verifyOfflineRuntimeBundle({ bundleDirectory: path.join(resources, 'client-state-runtime'),
+      expectedBundleDigest: ownerBundleDigest });
+  } catch { fail('predecessor_bundle_unverified'); }
+  return image;
 }
 async function absent(file) { try{await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return;throw e;} fail('existing_attempt_requires_readback'); }
 async function exclusive(file,bytes) {const h=await fs.open(file,'wx',0o600);try{await h.writeFile(bytes);await h.sync();}finally{await h.close();}}
@@ -215,7 +258,9 @@ async function qualify(verified,configFile,owner) {
 export async function prepareUpgrade(options) {
   if(process.platform!=='win32')fail('windows_required');
   await absent(options.receipt);await privateReceiptRoot(options.receipt);
-  const checked=await candidate(options), old=await oldState(options);await quiescent(old);
+  const checked=await candidate(options), old=await oldState(options);
+  const predecessorImage=await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256);
+  await quiescent(old);
   const pg=await keeper(old.config);
   const stateDirectory=path.join(path.dirname(old.config.state_directory),'client-state-qa-upgrade-'+randomUUID());
   for(const root of [old.config.pg_data_directory,checked.resources,options['installed-resources']])if(inside(root,stateDirectory)||inside(stateDirectory,root))fail('state_boundary_invalid');
@@ -239,6 +284,7 @@ export async function prepareUpgrade(options) {
     old_status_file:old.owner.runtime_identity_file,old_status_sha256:sha(old.statusBytes),backup_owner_file:backupOwner,backup_config_file:backupConfig,
     config_file:configFile,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_file:qualificationFile,
     state_directory:stateDirectory,proposed_provider:proposed,runtime,keeper:pg,
+    predecessor_image:predecessorImage,
     production_authorized:false,provenance_verified:false,provider_published:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
   await exclusive(options.receipt,JSON.stringify(receipt,null,2)+'\n');await acl(options.receipt);
   return {state:receipt.state,receipt_file:options.receipt,receipt_sha256:sha(await stableUpgradeRead(options.receipt)),provider_published:false,production_authorized:false};
@@ -252,7 +298,12 @@ export function assertUpgradeReceipt(receipt,options) {
     ||receipt.asar_sha256!==options['expected-asar-sha256']||receipt.old_owner_sha256!==options['expected-owner-sha256']
     ||!samePath(receipt.candidate_resources,options['candidate-resources'])||!samePath(receipt.installed_resources,options['installed-resources'])
     ||!SHA.test(receipt.bundle_sha256||'')||!SHA.test(receipt.config_sha256||'')||!SHA.test(receipt.old_config_sha256||'')
-    ||receipt.runtime?.exit_code!==0||receipt.runtime?.children_stopped!==true)fail('receipt_unverified');
+    ||receipt.runtime?.exit_code!==0||receipt.runtime?.children_stopped!==true
+    ||!SHA.test(receipt.predecessor_image?.asar_sha256 || '')
+    ||!SHA.test(receipt.predecessor_image?.bundle_sha256 || '')
+    ||!SHA.test(receipt.predecessor_image?.executable_sha256 || '')
+    ||!HEAD.test(receipt.predecessor_image?.source_head || '')
+    ||!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(receipt.predecessor_image?.package_version || ''))fail('receipt_unverified');
   return true;
 }
 // One descriptor transaction. A failed final readback restores the predecessor
@@ -284,7 +335,10 @@ export async function publishUpgrade(options) {
   if(sha(proofBytes)!==options['expected-receipt-sha256'])fail('receipt_digest_mismatch');
   const proof=JSON.parse(proofBytes);assertUpgradeReceipt(proof,options);
   const checked=await candidate(options);if(checked.binding.bundle_sha256!==proof.bundle_sha256)fail('candidate_changed');
-  const old=await oldState(options);await quiescent(old);await keeperUnchanged(old.config,proof.keeper);
+  const old=await oldState(options);
+  assertPredecessorImageMatches(proof.predecessor_image,
+    await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256));
+  await quiescent(old);await keeperUnchanged(old.config,proof.keeper);
   const proposed=validateLocalStateProviderConfig(proof.proposed_provider), finalBytes=await stableUpgradeRead(proof.config_file);
   const final=validateRuntimeHostConfig(JSON.parse(finalBytes));
   const expected=makeUpgradeConfigs(old.config,{stateDirectory:proof.state_directory,candidateBundle:path.join(checked.resources,'client-state-runtime'),
@@ -342,7 +396,19 @@ export async function rollbackUpgrade(options) {
   await acl(publicationFile);
   const journal=JSON.parse(await stableUpgradeRead(publicationFile));
   if(journal.schema!==SCHEMA||journal.state!=='PUBLISHED_INSTALL_PENDING'||journal.proof_sha256!==sha(bytes))fail('rollback_receipt_invalid');
-  await noBrowser();const oldBytes=await stableUpgradeRead(proof.backup_owner_file);await acl(proof.backup_owner_file);
+  await noBrowser();
+  // NSIS is non-atomic. Refuse Owner-only rollback unless the predecessor
+  // application image AND complete offline runtime were independently restored.
+  // UNKNOWN is terminal for automatic replay; preserve the published Owner.
+  try {
+    assertPredecessorImageMatches(proof.predecessor_image,
+      await readPredecessorImage(options['installed-resources'],proof.predecessor_image.bundle_sha256));
+  } catch {
+    journal.state='EFFECT_UNKNOWN_IMAGE_NOT_RESTORED';
+    await save(publicationFile,journal);
+    fail('predecessor_image_not_restored');
+  }
+  const oldBytes=await stableUpgradeRead(proof.backup_owner_file);await acl(proof.backup_owner_file);
   if(sha(oldBytes)!==proof.old_owner_sha256)fail('backup_changed');
   const current=await stableUpgradeRead(journal.owner_file);if(sha(current)!==journal.new_owner_sha256)fail('rollback_cas_mismatch');
   const config=validateRuntimeHostConfig(JSON.parse(await stableUpgradeRead(proof.backup_config_file)));
