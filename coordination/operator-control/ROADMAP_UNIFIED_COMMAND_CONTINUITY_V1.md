@@ -1,8 +1,45 @@
 # METAENGINE Unified Command & Continuity Plane V1
 
 Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY UNQUALIFIED
-Date: 2026-10-15 (current audit; historical checkpoints retained below)
+Date: 2026-10-18 (binding closure plan; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
+
+## CURRENT BINDING CHECKPOINT — critical audit closure plan (2026-10-18)
+
+**User-adopted execution sequence, not a new roadmap or execution authority.**
+The source-owned, step-by-step gate register is
+[AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md](./AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md).
+It is subordinate to this Unified Roadmap, the accepted
+[ADF ADR](../../docs/METAENGINE_AUTONOMOUS_DEVELOPMENT_FABRIC_V1.md), and
+[Canonical Level-1 Roadmap](../../docs/CANONICAL_ROADMAP.md).
+The register owns the CURRENT phase/status/evidence and next exact action; all
+dated prior checkpoints below retain historical meaning only.
+
+**Freeze reference:** source HEAD 7eaa00f0c4f618ece008968dd606fb648c157c4e
+(Draft #1318), on top of 94eb9cd (#1317) and b4caa18 (#1316).
+This is SOURCE ONLY; signed release, production Owner composition, installed
+readiness and Critic-verified restart are NOT accepted. The original QA
+package version 0.7.0-dev.1107139874568.1 is already reserved for b4caa18
+and MUST NOT be built under another SHA.
+
+**Mandatory stage order:** G0 baseline/evidence freeze → G1 genuine release and
+safe Owner/runtime transition → G2 authentic Host/Guardian/Owner custody plus
+G3 disposable/verified own-PG17 → G4 real C1 worker and C2 serial coding loop
+→ G5 useful work after restart → G6 durable recursive logical agents/mailboxes
+→ G8 bounded physical scale/soak → G9 independently governed RSI.
+G7 module ownership/reachability/legacy-hosted cleanup may run READ-ONLY in
+parallel; no source deletion before explicit consumer/entrypoint verification.
+
+**Current gate state:** G0 IN_PROGRESS, G7 IN_PROGRESS (read-only classification),
+G1–G6/G8/G9 BLOCKED until their respective evidence. Every future change must
+update the register with exact SHA, source/staging/live classification, negative
+tests, independent verification, blocker and one next step before advancing.
+No new scheduler, cloud/Supabase fallback, unsigned installed Owner auto-rebind,
+AMBIGUOUS replay, live attached-PG changes or main merge is authorized here.
+
+**Immediate NEXT:** G0.1 — fresh exact-head/CI and physical installed
+Owner/Guardian/PG read-only evidence ledger, version/provenance blocker triage.
+
 
 ## Architectural adoption — Autonomous Development Fabric V1 (2026-10-17)
 
