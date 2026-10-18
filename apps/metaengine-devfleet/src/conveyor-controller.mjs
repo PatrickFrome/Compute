@@ -20,9 +20,11 @@ export class DevFleetConveyor {
     if(!Number.isSafeInteger(retryDelayMs)||retryDelayMs<1)throw Error('conveyor_retry_delay_invalid');
     this.#retryDelayMs=retryDelayMs;
     if(!operator||typeof operator.admitCoding!=='function'||
-        typeof operator.queueStatus!=='function'||typeof operator.assign!=='function')
+        typeof operator.queueStatus!=='function'||typeof operator.assign!=='function'||
+        typeof operator.conveyorIntent!=='function'||typeof operator.setConveyorIntent!=='function')
       throw Error('conveyor_operator_missing');
     this.#operator=operator;
+    this.#enabled=operator.conveyorIntent();
   }
   status(){
     const q=this.#operator.queueStatus();
@@ -53,6 +55,7 @@ export class DevFleetConveyor {
   async start({hot_slots}={}){
     if(hot_slots!==undefined && (!Number.isSafeInteger(hot_slots)||hot_slots<1))
       throw Error('conveyor_hot_slots_invalid');
+    await this.#operator.setConveyorIntent({enabled:true});
     this.#explicitTarget=hot_slots??null;
     this.#stopped=false;
     this.#enabled=true;
@@ -68,9 +71,10 @@ export class DevFleetConveyor {
       this.#schedule();
     }
   }
-  stop(){
+  async stop(){
     this.#enabled=false;this.#stopped=true;
     if(this.#timer){clearTimeout(this.#timer);this.#timer=null;}
+    await this.#operator.setConveyorIntent({enabled:false});
     return {schema:'metaengine.devfleet.conveyor.v1',state:'STOPPING',
       in_flight:this.#running,automatic_retry_of_ambiguous:false};
   }

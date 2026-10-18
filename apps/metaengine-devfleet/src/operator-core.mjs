@@ -38,7 +38,8 @@ export class DevFleetOperator {
   #store;
   #contracts;
   #state = { schema: SCHEMA, sessions: [], requests: [],
-    hot_slots_target:DEFAULT_HOT_TARGET,coding_queue:emptyCodingQueue() };
+    hot_slots_target:DEFAULT_HOT_TARGET,coding_queue:emptyCodingQueue(),
+    conveyor_enabled:false };
   #busy = false;
   #initialized = false;
   #restoring = false;
@@ -70,9 +71,12 @@ export class DevFleetOperator {
         if (seen.has(s.tab_id) || !ownChatUrl(s.url)) throw new Error('operator_state_session_invalid');
         seen.add(s.tab_id);
       }
+      if(disk.conveyor_enabled!==undefined && typeof disk.conveyor_enabled!=='boolean')
+        throw Error('operator_conveyor_intent_invalid');
       const target=disk.hot_slots_target===undefined?DEFAULT_HOT_TARGET:disk.hot_slots_target;
       if(!Number.isSafeInteger(target)||target<1)throw Error('operator_hot_slots_invalid');
       this.#state = plain({...disk,hot_slots_target:target,
+        conveyor_enabled:disk.conveyor_enabled===true,
         coding_queue:readCodingQueue(disk.coding_queue)});
     }
     // Process reincarnation has destroyed all prior WebContents. Never
@@ -290,6 +294,24 @@ export class DevFleetOperator {
       this.#state.sessions.length,this.#state.sessions.map(x=>x.tab_id),
       this.#state.hot_slots_target),
       read_only:true,automatic_retry_allowed:false};
+  }
+  // Persisted owner intent; native effects still run through this operator.
+  conveyorIntent() {
+    if(!this.#initialized)throw Error('operator_not_initialized');
+    return this.#state.conveyor_enabled===true;
+  }
+  async setConveyorIntent({enabled}={}) {
+    this.#requireInit();
+    if(typeof enabled!=='boolean')throw Error('conveyor_intent_invalid');
+    return this.#exclusive(async()=>{
+      if(this.#state.conveyor_enabled!==enabled){
+        this.#state.conveyor_enabled=enabled;
+        await this.#save();
+      }
+      return {schema:'metaengine.devfleet.conveyor-intent.v1',
+        enabled:this.#state.conveyor_enabled,durable:true,
+        new_authority:false,automatic_retry_of_ambiguous:false};
+    });
   }
   // Internal-only access: operator owns all tasks and native Send effects.
   queueTask(taskId) {

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {DevFleetConveyor} from '../src/conveyor-controller.mjs';
 
 class FakeOperator {
-  items=[]; hot=3; admissions=0; sends=0;
+  items=[]; hot=3; admissions=0; sends=0; intent=false;
+  conveyorIntent(){return this.intent;}
+  async setConveyorIntent({enabled}){this.intent=enabled;return {enabled,durable:true};}
   queueStatus(){
     const counts={};
     for(const x of this.items)counts[x.state]=(counts[x.state]||0)+1;
@@ -55,7 +57,7 @@ test('owner-started conveyor sends 48 distinct queued source tasks via single op
   assert.equal(op.sends,48);
   assert.equal(conveyor.status().sent_confirmed,48);
   assert.equal(conveyor.status().send_unknown,0);
-  assert.equal(conveyor.stop().state,'STOPPING');
+  assert.equal((await conveyor.stop()).state,'STOPPING');
 });
 
 test('conveyor resumes automatically after transient operator RESTORING',async()=>{
@@ -70,7 +72,7 @@ test('conveyor resumes automatically after transient operator RESTORING',async()
   for(let i=0;i<45&&op.sends===0;i++)await sleep(10);
   assert.equal(op.sends,1);
   assert.equal(controller.status().last_error,null);
-  controller.stop();
+  await controller.stop();
 });
 
 test('committed SENT ledger resolves READY task without new Send',async()=>{
@@ -87,7 +89,7 @@ test('committed SENT ledger resolves READY task without new Send',async()=>{
   assert.equal(row.state,'SENT');
   assert.equal(op.sends,0);
   assert.equal(conveyor.status().sent_confirmed,1);
-  conveyor.stop();
+  await conveyor.stop();
 });
 test('RESTORE_BLOCKED task is not resent and counted separately',async()=>{
   const op=new FakeOperator();
@@ -103,5 +105,5 @@ test('RESTORE_BLOCKED task is not resent and counted separately',async()=>{
   assert.equal(conveyor.status().restore_blocked_tasks,1);
   assert.equal(op.sends,0);
   assert.equal(row.state,'READY_NOT_SENT');
-  conveyor.stop();
+  await conveyor.stop();
 });

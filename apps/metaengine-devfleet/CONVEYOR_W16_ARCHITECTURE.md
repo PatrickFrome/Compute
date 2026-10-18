@@ -41,3 +41,9 @@ Exact source test suite: 153 tests, 153 PASS, including new transient RESTORING 
 A previously recorded `SENT` or `AMBIGUOUS` request can survive a crash before its corresponding queue item is marked final. The conveyor now reads the request's durable ledger state and updates only the queue item, never issuing another native Send for that request. `resolveCodingTask` is idempotent after matching an existing authoritative receipt. Queued tasks tied to `RESTORE_BLOCKED` tabs are not attempted until legitimate restoration; the first-party status UI exposes `RESTORE_BLOCKED` count. No new scheduler, trust root, or authority paths were added.
 
 Exact local full source suite: 155/155 PASS (includes ledger SENT re-sync and RESTORE_BLOCKED negatives). QA package identity `0.1.0-dev.16.20261018.3`. Physical ChatGPT delivery proof remains independent from source fixture proof.
+
+## W16.4 — persist owner-started continuous dispatch across restart
+
+The queue retains the owner-controlled conveyor_enabled flag in the EXISTING local operator snapshot, not in a second service. START persists the intent before scheduling; STOP persists the disabled intent. After process reincarnation, DevFleetConveyor reads the flag but only begins work after operator.whenRestored() completes. A legacy state without this optional flag is disabled by default. The same request ledger rejects repeats for uncertain Sends.
+
+This implements owner preference continue until stopped; it does not guarantee unlimited physical resources or convert synthetic test fixtures into real ChatGPT delivery. Test coverage includes durable STOP/START across operator restarts and invalid saved intents. QA package identity 0.1.0-dev.16.20261018.4, pending physical qualification.
