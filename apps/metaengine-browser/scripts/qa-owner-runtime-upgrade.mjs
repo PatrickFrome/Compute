@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { validateRuntimeHostConfig } from '../../../infra/client-state-runtime/runtime-host.mjs';
 import { verifyOfflineRuntimeBundle } from '../../../infra/client-state-runtime/offline-runtime-bundle.mjs';
+import { captureInstalledTreeFingerprint, INSTALLED_TREE_SCHEMA } from './qa-installed-tree-fingerprint.mjs';
 import { localRuntimeHostEnvironment } from '../src/local-runtime-host-controller.mjs';
 import { localStateProviderOwnerFile, validateLocalStateProviderConfig,
   validateLocalStateRuntimeIdentity, localStateProviderHealthAttested } from '../src/local-state-provider-policy.mjs';
@@ -75,8 +76,17 @@ export function assertPredecessorImageMatches(expected, actual) {
     || !SHA.test(expected.asar_sha256 || '') || !SHA.test(actual.asar_sha256 || '')
     || !SHA.test(expected.bundle_sha256 || '') || !SHA.test(actual.bundle_sha256 || '')
     || !SHA.test(expected.executable_sha256 || '') || !SHA.test(actual.executable_sha256 || '')
+    || expected.schema !== INSTALLED_TREE_SCHEMA || actual.schema !== INSTALLED_TREE_SCHEMA
+    || !SHA.test(expected.tree_sha256 || '') || !SHA.test(actual.tree_sha256 || '')
+    || !Number.isSafeInteger(expected.file_count) || expected.file_count < 1
+    || !Number.isSafeInteger(actual.file_count) || actual.file_count < 1
+    || !Number.isSafeInteger(expected.total_bytes) || expected.total_bytes < 1
+    || !Number.isSafeInteger(actual.total_bytes) || actual.total_bytes < 1
     || !HEAD.test(expected.source_head || '') || !HEAD.test(actual.source_head || '')
     || typeof expected.package_version !== 'string' || expected.package_version !== actual.package_version
+    || expected.tree_sha256 !== actual.tree_sha256
+    || expected.file_count !== actual.file_count
+    || expected.total_bytes !== actual.total_bytes
     || expected.executable_sha256 !== actual.executable_sha256
     || expected.asar_sha256 !== actual.asar_sha256
     || expected.bundle_sha256 !== actual.bundle_sha256
@@ -107,7 +117,10 @@ export async function readPredecessorImage(installedResources, ownerBundleDigest
     await verifyOfflineRuntimeBundle({ bundleDirectory: path.join(resources, 'client-state-runtime'),
       expectedBundleDigest: ownerBundleDigest });
   } catch { fail('predecessor_bundle_unverified'); }
-  return image;
+  // Fingerprint the full NSIS install image (including native resources and
+  // uninstaller), not only Electron EXE/ASAR and the runtime payload.
+  const tree=await captureInstalledTreeFingerprint(path.dirname(resources));
+  return Object.freeze({...image,...tree});
 }
 async function absent(file) { try{await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return;throw e;} fail('existing_attempt_requires_readback'); }
 async function exclusive(file,bytes) {const h=await fs.open(file,'wx',0o600);try{await h.writeFile(bytes);await h.sync();}finally{await h.close();}}
@@ -302,6 +315,10 @@ export function assertUpgradeReceipt(receipt,options) {
     ||!SHA.test(receipt.predecessor_image?.asar_sha256 || '')
     ||!SHA.test(receipt.predecessor_image?.bundle_sha256 || '')
     ||!SHA.test(receipt.predecessor_image?.executable_sha256 || '')
+    ||receipt.predecessor_image?.schema !== INSTALLED_TREE_SCHEMA
+    ||!SHA.test(receipt.predecessor_image?.tree_sha256 || '')
+    ||!Number.isSafeInteger(receipt.predecessor_image?.file_count) || receipt.predecessor_image.file_count < 1
+    ||!Number.isSafeInteger(receipt.predecessor_image?.total_bytes) || receipt.predecessor_image.total_bytes < 1
     ||!HEAD.test(receipt.predecessor_image?.source_head || '')
     ||!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(receipt.predecessor_image?.package_version || ''))fail('receipt_unverified');
   return true;

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
   assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile } from '../scripts/qa-owner-runtime-upgrade.mjs';
+import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
 
 const digest='a'.repeat(64),source='b'.repeat(40),version='0.7.0-dev.202610190001.1';
 const options={mode:'prepare','candidate-resources':path.resolve(os.tmpdir(),'qa-candidate','resources'),
@@ -70,7 +71,8 @@ test('unsigned QA proof cannot gain production authority or replay a publication
     source_head:source,package_version:version,asar_sha256:digest,old_owner_sha256:options['expected-owner-sha256'],
     candidate_resources:options['candidate-resources'],installed_resources:options['installed-resources'],
     bundle_sha256:digest,config_sha256:digest,old_config_sha256:digest,runtime:{exit_code:0,children_stopped:true},
-    predecessor_image:{asar_sha256:'d'.repeat(64),executable_sha256:'f'.repeat(64),bundle_sha256:'e'.repeat(64),source_head:source,package_version:'0.7.0-dev.1107139874568.1'}};
+    predecessor_image:{schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456,
+      asar_sha256:'d'.repeat(64),executable_sha256:'f'.repeat(64),bundle_sha256:'e'.repeat(64),source_head:source,package_version:'0.7.0-dev.1107139874568.1'}};
   assert.equal(assertUpgradeReceipt(receipt,options),true);
   for(const [key,value] of [['production_authorized',true],['provenance_verified',true],['provider_published',true],
     ['state','PUBLISHED_INSTALL_PENDING'],['old_owner_sha256','d'.repeat(64)],['source_head','e'.repeat(40)],
@@ -84,7 +86,8 @@ test('unsigned QA proof cannot gain production authority or replay a publication
 
 test('Owner-only rollback requires exact restored predecessor ASAR, source and runtime digest',()=>{
   const old={asar_sha256:'a'.repeat(64),executable_sha256:'d'.repeat(64),bundle_sha256:'b'.repeat(64),
-    source_head:'c'.repeat(40),package_version:'0.7.0-dev.1107139874568.1'};
+    source_head:'c'.repeat(40),package_version:'0.7.0-dev.1107139874568.1',
+    schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456};
   assert.equal(assertPredecessorImageMatches(old,{...old}),true);
   for(const change of [
     {asar_sha256:'e'.repeat(64)}, // NSIS replaced ASAR
@@ -93,6 +96,10 @@ test('Owner-only rollback requires exact restored predecessor ASAR, source and r
     {source_head:'f'.repeat(40)}, // unexpected historical builder
     {package_version:'0.7.0-dev.1107139874571.1'},
     {asar_sha256:'invalid'}, // UNKNOWN must never become PASS
+    {tree_sha256:'2'.repeat(64)}, // package files changed beyond EXE/ASAR/runtime
+    {file_count:38}, // added/removed files cannot pass
+    {total_bytes:123457}, // even before digest, inventory mismatch must fail
+    {schema:'untrusted-snapshot'}, // unreviewed inventory cannot authorize rollback
   ]) assert.throws(()=>assertPredecessorImageMatches(old,{...old,...change}),
     /predecessor_image_not_restored/);
   assert.throws(()=>assertPredecessorImageMatches(old,null),/predecessor_image_not_restored/);
