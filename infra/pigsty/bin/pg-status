@@ -3,6 +3,33 @@
 set -euo pipefail
 PIGSTY_ROOT="${PIGSTY_ROOT:-/home/z/my-project/pigsty}"
 PGBIN="${PGBIN:-$PIGSTY_ROOT/rootless/pgroot/usr/lib/postgresql/17/bin}"
-PGCLIENTBIN="${PGCLIENTBIN:-/home/z/my-project/pg17/usr/lib/postgresql/17/bin}"
+
+# Resolve the client binary dir (pg_isready). Priority:
+#   1. explicit $PGCLIENTBIN override (must contain pg_isready)
+#   2. the rootless pgroot extracted by 01-bootstrap-rootless-pg17.sh
+#   3. the standard PGDG/RHEL paths (/usr/pgsql-17/bin, /usr/lib/postgresql/17/bin)
+#   4. whatever `command -v pg_isready` finds on PATH
+PGCLIENTDIR="${PGCLIENTBIN:-}"
+if [ -n "$PGCLIENTDIR" ] && [ ! -x "$PGCLIENTDIR/pg_isready" ]; then
+  echo "pg-status: PGCLIENTBIN=$PGCLIENTDIR is set but $PGCLIENTDIR/pg_isready is missing" >&2
+  exit 1
+fi
+if [ -z "$PGCLIENTDIR" ]; then
+  for cand in \
+    "$PIGSTY_ROOT/rootless/pgroot/usr/lib/postgresql/17/bin" \
+    "/usr/pgsql-17/bin" \
+    "/usr/lib/postgresql/17/bin"; do
+    if [ -x "$cand/pg_isready" ]; then PGCLIENTDIR="$cand"; break; fi
+  done
+fi
+if [ -z "$PGCLIENTDIR" ]; then
+  cand="$(command -v pg_isready 2>/dev/null || true)"
+  if [ -n "$cand" ]; then PGCLIENTDIR="$(dirname "$cand")"; fi
+fi
+if [ -z "$PGCLIENTDIR" ]; then
+  echo "pg-status: no PostgreSQL client found (pg_isready). Install postgresql-client-17, run bootstrap/01-bootstrap-rootless-pg17.sh, or set PGCLIENTBIN to the client binary directory." >&2
+  exit 1
+fi
+
 "$PGBIN/pg_ctl" -D "$PIGSTY_ROOT/rootless/PGDATA" status || true
-exec "$PGCLIENTBIN/pg_isready" -h "$PIGSTY_ROOT/rootless/run" -p 55432
+exec "$PGCLIENTDIR/pg_isready" -h "$PIGSTY_ROOT/rootless/run" -p 55432

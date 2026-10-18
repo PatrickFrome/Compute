@@ -37,6 +37,7 @@ create or replace function public.h205f22_a2_browser_device_activate_approved_v1
 ) returns jsonb
 language plpgsql
 security definer
+set search_path to 'pg_catalog', 'public'
 as $fn$
 declare
   v_request public.compute_fabric_a2_browser_device_enrollment_request_h205f22%rowtype;

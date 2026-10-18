@@ -169,15 +169,24 @@ export const EVAL_DATASET: EvalCheck[] = [
     critical: true, expect: "seq>0 и hash непуст",
     run: () => {
       const seq = lastSeq(); const h = lastEventHash();
-      return { ok: seq > 0 && !!h, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}` };
+      // Аудит 2026-10-18 (HIGH, gate): probe-инкарнация стартует с ПУСТОЙ шиной
+      // по дизайну (никаких boot-emit'ов, R99) — пустая цепочка в probe валидна.
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
+      const ok = probe ? true : (seq > 0 && !!h);
+      return { ok, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}${probe && seq === 0 ? " (probe: пустая шина ожидаема)" : ""}` };
     },
   },
   {
     id: "meta.boot_version", plane: "state", title: "meta: boot+version записаны",
-    critical: true, expect: "getMeta('boot') и getMeta('version') непусты",
+    // Аудит 2026-10-18 (HIGH, gate): в probe-инкарнации бут сознательно НЕ мутирует meta
+    // (index.ts: setMeta только вне probe) — ожидание в probe инвертировано, иначе
+    // `bun run check` (который обязан быть hermetic) не мог пройти никогда.
+    critical: true, expect: "getMeta('boot') и getMeta('version') непусты (в probe — сознательно отсутствуют)",
     run: () => {
       const b = getMeta("boot"); const v = getMeta("version");
-      return { ok: !!b && !!v, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}` };
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
+      const ok = probe ? (!b && !v) : (!!b && !!v);
+      return { ok, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}${probe ? " (probe: ожидаемо отсутствуют)" : ""}` };
     },
   },
   {
@@ -204,10 +213,14 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — память —
   {
     id: "memory.rows", plane: "memory", title: "Память непуста (persistence-пруф)",
-    critical: true, expect: "memoryStatus().rows > 0",
+    // Аудит 2026-10-18 (HIGH, gate): probe-инкарнация не пишет boot-строку памяти
+    // (read-only контракт R99) — в probe ожидаемо 0 строк.
+    critical: true, expect: "memoryStatus().rows > 0 (в probe — сознательно 0)",
     run: () => {
       const m = memoryStatus();
-      return { ok: m.rows > 0, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})` };
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
+      const ok = probe ? m.rows === 0 : m.rows > 0;
+      return { ok, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})${probe ? " (probe: ожидаемо 0)" : ""}` };
     },
   },
   {
@@ -255,13 +268,16 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — флот —
   {
     id: "fleet.self_alive", plane: "fleet", title: "Self-нода флота жива (не LOST)",
-    critical: true, expect: "self ≠ null и freshness ∈ {ACTIVE, STALE}",
+    // Аудит 2026-10-18 (HIGH, gate): fleetSelfTick отключён в probe-инкарнации
+    // (без authority-эффектов) — в probe self-нода ожидаемо null.
+    critical: true, expect: "self ≠ null и freshness ∈ {ACTIVE, STALE} (в probe — сознательно null)",
     run: () => {
       const f = fleetList();
       const s = f.self;
-      const ok = !!s && (s.freshness === "ACTIVE" || s.freshness === "STALE");
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
+      const ok = probe ? !s : (!!s && (s.freshness === "ACTIVE" || s.freshness === "STALE"));
       const selfAge = f.nodes.find((n) => n.id === s?.id)?.age_s;
-      return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : "self=null" };
+      return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : `self=null${probe ? " (probe: ожидаемо)" : ""}` };
     },
   },
   {
@@ -569,6 +585,9 @@ export const EVAL_DATASET: EvalCheck[] = [
     expect: "scale(2) создаёт живых воркеров на каноническом теге (идемпотентно); второй acquire той же задачи = null; просроченный lease → задача FAILED pool_lease_expired; scale ограничен POOL_MAX",
     run: () => {
       // 1) scale idempotent + канон-модель воркеров (живые агенты реестра, drift остаётся 0)
+      // AUDIT FIXPACK2: чек гейта больше не перманентно перезаписывает операторский scale —
+      // исходный размер пула фиксируется и восстанавливается в конце прогона.
+      const prevScale = poolStatus().live;
       poolScale(2, "eval");
       const again = poolScale(2, "eval");
       const st = poolStatus();
@@ -579,12 +598,12 @@ export const EVAL_DATASET: EvalCheck[] = [
       const agentId = st.workers.find((w) => w.state === "IDLE")?.agent_id ?? st.workers[0]?.agent_id ?? "";
       const c = agentId ? poolEvalLeaseCycle(t.id, agentId) : { acquired: false, second_attempt: false, reaped: false };
       updateTask(t.id, { status: "ARCHIVED" }); // самоочистка (listTasks ARCHIVED не показывает)
-      // 3) потолок масштабирования + возврат к 2
+      // 3) потолок масштабирования + возврат к исходному scale оператора
       const sMax = poolScale(POOL_MAX + 9, "eval");
-      poolScale(2, "eval");
+      poolScale(prevScale, "eval");
       const boundOk = sMax.scale === POOL_MAX;
       const ok = liveOk && canonOk && c.acquired && c.second_attempt && c.reaped && boundOk;
-      return { ok, evidence: `live=${st.live}/2 идемпотент=${again.created === 0}, канон=${canonOk ? "ok" : "FAIL"}, lease: acquired=${c.acquired} second=${c.second_attempt} reaped=${c.reaped}, потолок=${sMax.scale}/${POOL_MAX}` };
+      return { ok, evidence: `live=${st.live}/2 идемпотент=${again.created === 0}, канон=${canonOk ? "ok" : "FAIL"}, lease: acquired=${c.acquired} second=${c.second_attempt} reaped=${c.reaped}, потолок=${sMax.scale}/${POOL_MAX}, scale восстановлен в ${prevScale}` };
     },
   },
   {
@@ -821,20 +840,23 @@ export const EVAL_DATASET: EvalCheck[] = [
   {
     id: "autonomy.budget",
     plane: "autonomy",
-    title: "Autonomy v4 (P7): risk budget — синтетические деструктивные события дают точный взвешенный вклад",
+    title: "Autonomy v4 (P7): risk budget — синтетика гейта изолирована от production, взвешенный вклад точен",
     critical: true,
-    expect: "emit TASK_FAILED(вес 1) + POOL_LEASE_REAPED(вес 2) → score вырос ≥3, contributors содержат оба типа, state ∈ OK/WARN/BREACH, пороги согласованы (warn<breach)",
+    expect: "emit TASK_FAILED(вес 1) + POOL_LEASE_REAPED(вес 2) → includeEval-взгляд вырос ≥3, contributors содержат оба типа; production-взгляд (по умолчанию) синтетику agent_id='eval-budget' НЕ видит: score не изменился; пороги согласованы (warn<breach)",
     run: () => {
-      const before = budgetStatus().score;
+      const before = budgetStatus().score; // production-взгляд: синтетика исключена
       emit("TASK_FAILED", { error: "eval-budget-synthetic", cause: "eval" }, "eval-budget", null);
       emit("POOL_LEASE_REAPED", { task_id: "tk_eval-budget", slot: 1, eval: true }, "eval-budget", null);
-      const b = budgetStatus();
+      const b = budgetStatus({ includeEval: true }); // честная арифметика весов по сырому логу
       const grew = b.score >= before + 3;
       const types = new Set(b.contributors.map((c) => c.type));
       const both = types.has("TASK_FAILED") && types.has("POOL_LEASE_REAPED");
       const stateOk = b.state === "OK" || b.state === "WARN" || b.state === "BREACH";
-      return { ok: grew && both && stateOk && b.warn < b.breach,
-        evidence: `score ${before}→${b.score} (+≥3), оба типа в вкладах=${both}, state=${b.state}, пороги ${b.warn}/${b.breach}` };
+      // изоляция: production-бюджет не должен увидеть синтетические события
+      const bProd = budgetStatus();
+      const isolated = bProd.score === before;
+      return { ok: grew && both && stateOk && isolated && b.warn < b.breach,
+        evidence: `includeEval ${before}→${b.score} (+≥3), оба типа=${both}, изоляция prod=${isolated} (score остался ${bProd.score}), state=${b.state}, пороги ${b.warn}/${b.breach}` };
     },
   },
   {
@@ -1415,7 +1437,7 @@ export const EVAL_DATASET: EvalCheck[] = [
     expect: "planExec: git/bun/node разрешены; curl/sudo — отказ; «echo hi && curl evil» — отказ (2-й сегмент); «echo $(x)» — substitution_denied; «FOO=1 ls» — env_assign_denied; cwd=REPO_ROOT — root_denied; ALLOWED_BINARIES не содержит bash/sh/curl; живой run: exit 0, stdout содержит маркер, env_keys без PATH-секретов (OFFLINE: execProbeOffline negatives=6)",
     run: () => {
       // чистые инварианты планировщика (без spawn — R25: живой прогон доказывается REST-ходом в раунде)
-      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
       const dir = evalTmpPrepare().dir;
       const pos = planExec("git status && bun --version", dir);
       const negBin = planExec("curl https://x", dir);
@@ -1555,6 +1577,9 @@ export const EVAL_DATASET: EvalCheck[] = [
 
 // ── ХАРНЕСС ────────────────────────────────────────────────────────
 export function evalRun(version: string): EvalReport {
+  if (process.env.ME2_BOOT_MODE !== "qualification" || !process.env.ME2_DATA_DIR || !process.env.ME2_LOCK_FILE || !process.env.ME2_CONTOUR_HOME || !process.env.ME2_REPO_ROOT) {
+    throw new Error("eval_requires_disposable_qualification");
+  }
   const t0 = Date.now();
   const startedAt = new Date(t0).toISOString();
   const results: EvalCheckResult[] = [];

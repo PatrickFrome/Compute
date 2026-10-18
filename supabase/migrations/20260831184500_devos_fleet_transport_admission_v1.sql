@@ -113,8 +113,20 @@ $$;
 revoke all on function destruktion_meta.devos_fleet_claim_transport_admission_h205f22() from public, anon, authenticated;
 grant execute on function destruktion_meta.devos_fleet_claim_transport_admission_h205f22() to service_role;
 
-drop trigger if exists devos_fleet_claim_transport_admission_trg on destruktion_meta.devos_fleet_claim_h205f22;
-create trigger devos_fleet_claim_transport_admission_trg
-before insert on destruktion_meta.devos_fleet_claim_h205f22
-for each row
-execute function destruktion_meta.devos_fleet_claim_transport_admission_h205f22();
+-- AUDIT FIXPACK2 (2026-10-18), fresh-project replayability: the trigger target
+-- destruktion_meta.devos_fleet_claim_h205f22 is created much later in this chain
+-- (20260929010000_client_v1_fresh_project_bootstrap_v1); a fresh `supabase db push`
+-- cannot safely skip an admission fence. This historical chain requires its
+-- declared predecessor schema; fail closed instead of certifying an unfenced DB.
+do $guard$
+begin
+  if to_regclass('destruktion_meta.devos_fleet_claim_h205f22') is null then
+    raise exception 'devos_transport_admission_dependency_required: devos_fleet_claim_h205f22' using errcode = '55000';
+  end if;
+  drop trigger if exists devos_fleet_claim_transport_admission_trg on destruktion_meta.devos_fleet_claim_h205f22;
+  create trigger devos_fleet_claim_transport_admission_trg
+  before insert on destruktion_meta.devos_fleet_claim_h205f22
+  for each row
+  execute function destruktion_meta.devos_fleet_claim_transport_admission_h205f22();
+end
+$guard$;

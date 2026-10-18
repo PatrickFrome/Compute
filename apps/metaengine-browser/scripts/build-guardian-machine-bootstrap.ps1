@@ -5,6 +5,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+function Get-Sha256([string]$Path) {
+  $stream = [IO.File]::OpenRead($Path)
+  $hash = [Security.Cryptography.SHA256]::Create()
+  try { return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+  finally { $hash.Dispose(); $stream.Dispose() }
+}
 $root = Split-Path $PSScriptRoot -Parent
 $staging = (Resolve-Path $StagingDir).Path
 $manifestPath = Join-Path $staging 'guardian-native-manifest.json'
@@ -16,12 +22,12 @@ $service = Join-Path $staging 'METAENGINEBrowserGuardian.exe'
 $configure = Join-Path $staging 'METAENGINEBrowserGuardianConfigure.exe'
 foreach ($asset in @($service,$configure)) {
   $row = @($manifest.binaries | Where-Object { $_.name -eq (Split-Path $asset -Leaf) })
-  if ($row.Count -ne 1 -or (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant() -ne $row[0].sha256 `
+  if ($row.Count -ne 1 -or (Get-Sha256 $asset) -ne $row[0].sha256 `
       -or (Get-Item $asset).Length -ne $row[0].size) { throw 'bootstrap_staging_asset_drift' }
 }
-$serviceSha = (Get-FileHash $service -Algorithm SHA256).Hash.ToLowerInvariant()
-$configSha = (Get-FileHash $configure -Algorithm SHA256).Hash.ToLowerInvariant()
-$manifestSha = (Get-FileHash $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$serviceSha = Get-Sha256 $service
+$configSha = Get-Sha256 $configure
+$manifestSha = Get-Sha256 $manifestPath
 $sourceHead = [string]$manifest.source_head
 $slotId = $sourceHead.Substring(0,16) + '-' + $manifestSha.Substring(0,16)
 $out = [System.IO.Path]::GetFullPath($OutputDir)
@@ -68,7 +74,7 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
     package_version=[string]$manifest.package_version
     slot_id=$slotId
     bootstrap_name=$exeName
-    bootstrap_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+    bootstrap_sha256=(Get-Sha256 $exe)
     bootstrap_size=[int64](Get-Item $exe).Length
     guardian_manifest_sha256=$manifestSha
     service_sha256=$serviceSha

@@ -10,7 +10,7 @@
     "start:v4": "tsx src/same_point_v4.ts",
     "start:control": "tsx src/control.ts",
     "start:legacy": "node -e \"console.error('sovereign_legacy_runner_retired_chatgpt_only'); process.exit(2)\"",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --import tsx --test test/*.test.mjs"
   },
   "dependencies": {
     "pg": "8.13.1"

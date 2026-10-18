@@ -5,16 +5,17 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, normalize, dirname, relative, isAbsolute, sep } from "node:path";
 import {
-  listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
+  listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, nowIso, type AgentRow, type TaskRow,
 } from "./store";
 import { chat, webSearch as providerWebSearch } from "./providers";
 import { isQuotaError, parkTaskQuota, PARK_MAX } from "./src/quota";
 import { recordSpan } from "./src/otel";
 import { reviewTask } from "./src/reviewer";
 import { isPoolAgent, poolAcquire, poolRelease, type PoolLeaseRow } from "./src/pool";
+import { childEnv } from "./src/childenv";
 
 const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
@@ -66,10 +67,33 @@ function taskDir(taskId: string) {
   return dir;
 }
 function safeJoin(cwd: string, p: string) {
+  // Аудит 2026-10-18 (MEDIUM): resolve/normalize НЕ следят за symlink — ссылка внутри
+  // task-каталога могла вести наружу (обход workspace-джойнов). Канон src/exec.ts §5:
+  // realpath-канонизация ОБОИХ сторон + префикс-проверка; несуществующий путь
+  // (ленивое создание файлов) канонизируем по ближайшему живому предку.
+  const rootReal = safeRealpath(resolve(cwd));
   const full = resolve(cwd, normalize(p || "."));
-  const pathFromRoot = relative(resolve(cwd), full);
+  const fullReal = safeRealpath(full);
+  const pathFromRoot = relative(rootReal, fullReal);
   if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) throw new Error("path_escape_blocked");
   return full;
+}
+
+function safeRealpath(p: string): string {
+  let cur = resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync(cur);
+      return tail.length ? real + sep + tail.reverse().join(sep) : real;
+    } catch {
+      // ENOENT (файл ещё не создан) и др.: поднимаемся к ближайшему живому предку
+      const parent = resolve(cur, "..");
+      if (parent === cur) return resolve(p); // достигли корня ФС — дальше канонизировать некуда
+      tail.push(cur.slice(parent.length).replace(/^[/\\]/, ""));
+      cur = parent;
+    }
+  }
 }
 
 type WrittenArtifact = { path: string; sha256: string };
@@ -101,10 +125,14 @@ function unverifiedWrittenArtifacts(calls: ToolCallRecord[]): string[] {
 
 async function runShell(cwd: string, command: string): Promise<string> {
   return new Promise((res) => {
-    const proc = spawn("bash", ["-lc", command], { cwd, timeout: SHELL_TIMEOUT_MS }, );
+    // Аудит 2026-10-18 (HIGH): spawn без env наследовал полный process.env daemon'а —
+    // секреты vault'а попадали в окружение shell-тула (канон src/exec.ts §4 —
+    // белый список src/childenv.ts). (LOW) stdout/stderr копились без предела —
+    // «yes» давал memory-DoS; накопление капится MAX_TOOL_OUTPUT (финальный текст и так обрезается).
+    const proc = spawn("bash", ["-lc", command], { cwd, timeout: SHELL_TIMEOUT_MS, env: childEnv() });
     let out = "", err = "";
-    proc.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-    proc.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+    proc.stdout.on("data", (d: Buffer) => { if (out.length < MAX_TOOL_OUTPUT) out += d.toString(); });
+    proc.stderr.on("data", (d: Buffer) => { if (err.length < MAX_TOOL_OUTPUT) err += d.toString(); });
     proc.on("error", (e) => res(`ERROR: ${e.message}`));
     proc.on("close", (code) => {
       const text = `exit=${code}\nstdout:\n${out}\nstderr:\n${err}`.trim();
@@ -375,6 +403,11 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         emit("STEP_DONE", { step, parse: "retry", raw: reply.slice(0, 300) }, agent.id, task.id);
         messages.push({ role: "assistant", content: reply.slice(0, 2000) });
         messages.push({ role: "user", content: `observation: формат неверен. Ответь РОВНО ОДНИМ JSON-объектом вида {"thought":"...","action":{"tool":"...","args":{...}}}` });
+        // AUDIT FIXPACK2 (2026-10-18): parse-retry — это живой прогресс, а не ступор.
+        // Обновляем updated_at, иначе 3 невалидных ответа LLM подряд (по таймауту провайдера
+        // до 120с) = 6 минут без записи прогресса > STALE_MS 5 мин — watchdog валил ЖИВУЮ
+        // задачу (stale_worker_watchdog), агент выжигал остаток бюджета шагов в TASK_LEASE_VOID.
+        try { updateTask(task.id, { updated_at: nowIso() } as Partial<TaskRow>); } catch { /* touch не критичен */ }
         continue;
       }
       const tool = parsed.action.tool;
@@ -504,7 +537,15 @@ export function watchdogStaleTasks(): { reaped: number; ids: string[] } {
       updateTask(t.id, { status: "FAILED", error: "stale_worker_watchdog", reflection: refl });
       emit("TASK_FAILED", { error: "stale_worker_watchdog", agent: t.agent_id, stale_s: Math.round((Date.now() - upd) / 1000) }, t.agent_id, t.id);
       recordSpan("watchdog.stale_worker", { "me2.task_id": t.id }, Date.now(), { status: "ERROR", message: "stale_worker_watchdog" });
-      if (t.agent_id) { try { setAgentStatus(t.agent_id, "IDLE"); } catch { /* noop */ } }
+      if (t.agent_id) {
+        try { setAgentStatus(t.agent_id, "IDLE"); } catch { /* noop */ }
+        // AUDIT FIXPACK2 (2026-10-18): watchdog инвалидирует задачу, но раньше НЕ отпускал
+        // её pool-lease: heartbeat продолжал продлевать мёртвый lease (done=0) бессрочно,
+        // пока жив процесс-владелец (например await provider-вызова с зависшим keep-alive
+        // сокетом) — нес reapable orphan-слот до рестарта демона. Release для не-пуловых
+        // агентов безопасен: DELETE по (task_id, agent_id, done=0) не найдёт строк.
+        try { poolRelease(t.agent_id, t.id, "stale_worker_watchdog"); } catch { /* release не критичен */ }
+      }
       ids.push(t.id);
     }
   } catch { /* watchdog не роняет master loop */ }

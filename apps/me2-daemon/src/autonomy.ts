@@ -26,11 +26,16 @@
  */
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { db, getMeta } from "../store";
 import { verifyChain } from "../evidence";
+import { REPO_ROOT } from "./worktrees";
+
+// AUDIT FIXPACK2 (2026-10-18): recoveryHierarchy L4 ссылался на неопределённый REPO —
+// execFileSync гарантированно кидал ReferenceError, гард гасил его в catch и L4 ВСЕГДА
+// рапортовал "git недоступен из runtime". Мёртвый уровень иерархии восстановления теперь
+// читает реальный git HEAD репозитория (тот же REPO_ROOT, что worktrees/sandbox).
 
 // R51: исходники резолвятся относительно пакета (укладка-независимо: sandbox, monorepo apps/, CI)
 const PKG_SRC = dirname(fileURLToPath(import.meta.url));
@@ -162,14 +167,21 @@ export function livenessBrief(): string {
 }
 
 // ── P7: cumulative autonomy/risk budget ───────────────────────────
-export function budgetStatus(): {
+// AUDIT FIXPACK2 (2026-10-18): the falsifier gate emits realistic TASK_FAILED /
+// POOL_LEASE_REAPED events with the reserved synthetic marker agent_id='eval-budget'
+// on every run (boot auto-eval included). Left unfiltered, eval noise alone drove the
+// production budget toward WARN/BREACH (~+3 per boot). Default view EXCLUDES the
+// synthetic marker; the eval check opts back in via { includeEval: true } to keep
+// verifying the weighting arithmetic against the raw bus.
+export function budgetStatus(opts?: { includeEval?: boolean }): {
   state: "OK" | "WARN" | "BREACH"; score: number; warn: number; breach: number; window_h: number;
   contributors: Array<{ type: string; count: number; weight: number; subtotal: number }>;
 } {
   const since = new Date(Date.now() - BUDGET_WINDOW_MS).toISOString();
+  const evalFilter = opts?.includeEval ? "" : " AND agent_id IS NOT 'eval-budget'";
   const rows = db.query(
-    `SELECT type, COUNT(*) c FROM events WHERE ts>=? AND type IN (${Object.keys(BUDGET_WEIGHTS).map(() => "?").join(",")}) GROUP BY type`,
-  ).all(since, ...Object.keys(BUDGET_WEIGHTS)) as Array<{ type: string; c: number }>;
+    `SELECT type, COUNT(*) c FROM events WHERE ts>=?${evalFilter} AND type IN (${Object.keys(BUDGET_WEIGHTS).map(() => "?").join(",")}) GROUP BY type`,
+  ).all(since, ...Object.keys(BUDGET_WEIGHTS)) as Array<{ type: string; c: number }>; // NULL-safe: IS NOT keeps NULL-agent rows counted
   const contributors = rows.map((r) => ({ type: r.type, count: r.c, weight: BUDGET_WEIGHTS[r.type] ?? 1, subtotal: r.c * (BUDGET_WEIGHTS[r.type] ?? 1) }))
     .sort((a, b) => b.subtotal - a.subtotal);
   const score = contributors.reduce((a, c) => a + c.subtotal, 0);
@@ -273,7 +285,7 @@ export function recoveryHierarchy(): Array<{ level: string; component: string; s
   // L4: immutable bootstrap — git HEAD (источник истины вне живого процесса)
   let l4 = "n/a";
   try {
-    const head = execFileSync("git", ["log", "-1", "--format=%h %s"], { cwd: REPO, timeout: 4000 }).toString().trim();
+    const head = execFileSync("git", ["log", "-1", "--format=%h %s"], { cwd: REPO_ROOT, timeout: 4000 }).toString().trim();
     l4 = head.slice(0, 80);
   } catch { l4 = "git недоступен из runtime (bootstrap только через клон ветки)"; }
   rows.push({ level: "L4", component: "bootstrap: ветка sandbox/me2-os (GitHub)", status: l4, recovers: "полная потеря песочницы (env-recovery из капсулы/ветки)" });

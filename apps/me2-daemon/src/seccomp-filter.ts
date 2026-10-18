@@ -46,11 +46,15 @@ const EPERM = 1;
 /** x86_64 syscall numbers — deny-лист (canonical Bwrap/Chrome/Chromium-канон). */
 export const SECCOMP_DENY_SYSCALLS: ReadonlyArray<{ nr: number; name: string }> = [
   { nr: 165, name: "mount" }, { nr: 166, name: "umount2" }, // маунты вне ns
-  { nr: 161, name: "chroot" }, { nr: 218, name: "pivot_root" }, // смена корня
+  { nr: 161, name: "chroot" }, { nr: 155, name: "pivot_root" }, // смена корня
+  { nr: 428, name: "open_tree" }, { nr: 429, name: "move_mount" },
+  { nr: 430, name: "fsopen" }, { nr: 431, name: "fsconfig" },
+  { nr: 432, name: "fsmount" }, { nr: 433, name: "fspick" },
+  { nr: 442, name: "mount_setattr" }, { nr: 467, name: "open_tree_attr" },
   { nr: 169, name: "reboot" },
   { nr: 167, name: "swapon" }, { nr: 168, name: "swapoff" },
   { nr: 246, name: "kexec_load" }, { nr: 320, name: "kexec_file_load" },
-  { nr: 175, name: "init_module" }, { nr: 273, name: "finit_module" }, { nr: 176, name: "delete_module" },
+  { nr: 175, name: "init_module" }, { nr: 313, name: "finit_module" }, { nr: 176, name: "delete_module" },
   { nr: 321, name: "bpf" }, // загрузка BPF-программ
   { nr: 101, name: "ptrace" }, // инъекции/инспекция чужих процессов
   { nr: 250, name: "keyctl" }, { nr: 248, name: "add_key" }, { nr: 249, name: "request_key" },
@@ -61,11 +65,8 @@ export const SECCOMP_DENY_SYSCALLS: ReadonlyArray<{ nr: number; name: string }> 
   { nr: 310, name: "process_vm_readv" }, { nr: 311, name: "process_vm_writev" },
   { nr: 425, name: "io_uring_setup" }, { nr: 426, name: "io_uring_enter" }, { nr: 427, name: "io_uring_register" }, // обход seccomp (5.10)
 ];
-// NB: clone3(435) СОЗНАТЕЛЬНО не в deny-листе: флаги ns в clone3 — указатель на
-// структуру (classic BPF не видит содержимое), но эксплуатация требует
-// mount/unshare/setns/chroot/pivot_root — все уже denied; исключение clone3
-// бережёт glibc posix_spawn (fallback clone3→clone на EPERM в glibc 2.35
-// не гарантирован — инцидент docker-seccomp 2022).
+// clone3 flags live behind a pointer, which classic BPF cannot inspect. Return
+// ENOSYS so libc can use clone(2), whose namespace flags are checked below.
 
 /** CLONE_NEW* маска (NS|USER|IPC|UTS|CGROUP|PID|NET) — clone(2) с этими флагами = новый ns. */
 export const CLONE_NEW_FLAGS_MASK = 0x00020000 | 0x02000000 | 0x04000000 | 0x08000000 | 0x10000000 | 0x20000000 | 0x40000000;
@@ -92,6 +93,15 @@ export function buildSeccompFilter(net: NetMode): SeccompProgram {
   retEperm();
   // 2) load syscall nr
   push(BPF_LD_W_ABS, 0, 0, OFF_NR);
+
+  // The x32 ABI shares AUDIT_ARCH_X86_64 but sets bit 30 in the syscall number.
+  // Without this check every native-number deny rule can be bypassed via x32.
+  push(BPF_ALU_AND_K, 0, 0, 0x40000000);
+  push(BPF_JEQ_K, 1, 0, 0);
+  retEperm();
+  push(BPF_LD_W_ABS, 0, 0, OFF_NR);
+  push(BPF_JEQ_K, 0, 1, 435);
+  push(BPF_RET_K, 0, 0, SECCOMP_RET_ERRNO_BASE | 38); // ENOSYS, safe clone fallback
 
   // 3) deny-лист: JEQ nr → RET EPERM; иначе дальше
   for (const { nr } of SECCOMP_DENY_SYSCALLS) {
@@ -128,7 +138,7 @@ export function buildSeccompFilter(net: NetMode): SeccompProgram {
 
   return {
     instrs: prog,
-    deny_syscalls: SECCOMP_DENY_SYSCALLS.map((d) => d.name),
+    deny_syscalls: [...SECCOMP_DENY_SYSCALLS.map((d) => d.name), "clone3"],
     net,
     len: prog.length / 4,
   };

@@ -92,15 +92,11 @@ export function suCached(): SuCheck | null {
   return checkCache && Date.now() - checkCache.at < 10 * 60_000 ? checkCache.data : null;
 }
 
-export function suCheck(version: string, force = false): SuCheck {
-  if (!force && checkCache && Date.now() - checkCache.at < CHECK_TTL_MS) return checkCache.data;
-  const t0 = Date.now();
-  const data = suCheckInner(version);
-  recordSpan("selfupdate.check", { "me2.verdict": data.verdict, "me2.ms": Date.now() - t0 }, t0,
-    data.verdict === "ERROR" || data.verdict === "NO_TOKEN" ? { status: "ERROR", message: data.error ?? data.verdict } : {});
-  checkCache = { at: Date.now(), data };
-  return data;
-}
+// AUDIT FIXPACK2 (2026-10-18): sync-путь suCheck/suCheckInner (сетевые ls-remote/fetch в
+// spawnSync) удалён — GET /selfupdate и POST apply через него замораживали event-loop
+// на GIT_TIMEOUT_MS=20с (watchdog.sh с --max-time 3 успевал убить демона посреди git).
+// Канон R25: сетевой git — только async (gitRemote). Локальные rev-parse/status/merge
+// (<5мс) остаются sync в git().
 
 /** Async-проверка (R25): сетевые ls-remote/fetch без блокировки event-loop. */
 export async function suCheckAsync(version: string, force = false): Promise<SuCheck> {
@@ -150,54 +146,14 @@ async function suCheckAsyncInner(version: string): Promise<SuCheck> {
   return { ...base, ok: true, verdict, remote_head: remoteHead, behind: b, ahead: a };
 }
 
-function suCheckInner(version: string): SuCheck {
-  const token = readToken();
-  const head = git(["rev-parse", "HEAD"]);
-  const localHead = head.ok ? head.out.trim() : null;
-  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  const dirty = git(["status", "--porcelain"]);
-  const dirtyFiles = dirty.ok ? dirty.out.split("\n").filter((l) => l.trim()).length : -1;
-  const base: SuCheck = {
-    ok: false, verdict: "ERROR", local_head: localHead, remote_head: null,
-    branch: branch.ok ? branch.out.trim() : "?", behind: null, ahead: null,
-    dirty_files: dirtyFiles, version, checked_at: Date.now(),
-  };
-  if (!token) return { ...base, verdict: "NO_TOKEN", error: "no GITHUB_TOKEN_ADMIN in tokens DB (POST /tokens {op:\"set\",name:\"GITHUB_TOKEN_ADMIN\",value:…})" };
-  if (!localHead) return { ...base, error: mask(head.err, token).slice(0, 200) || "git_rev_parse_failed" };
-
-  const url = remoteUrl(token);
-  const ls = spawnSync("git", ["ls-remote", url, `refs/heads/${REMOTE_REF}`], {
-    cwd: REPO_ROOT, timeout: GIT_TIMEOUT_MS, encoding: "utf8",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
-  if (ls.status !== 0) return { ...base, error: mask(ls.stderr ?? "", token).slice(0, 200) || "ls_remote_failed" };
-  const remoteHead = (ls.stdout ?? "").trim().split(/\s+/)[0] ?? "";
-  if (!remoteHead) return { ...base, error: `remote ref ${REMOTE_REF} not found` };
-
-  const fetch = git(["fetch", url, REMOTE_REF]);
-  if (!fetch.ok) return { ...base, remote_head: remoteHead, error: mask(fetch.err, token).slice(0, 200) || "fetch_failed" };
-
-  const behind = git(["rev-list", "--count", `HEAD..FETCH_HEAD`]);
-  const ahead = git(["rev-list", "--count", `FETCH_HEAD..HEAD`]);
-  if (!behind.ok || !ahead.ok) return { ...base, remote_head: remoteHead, error: "rev_list_failed" };
-  const b = Number(behind.out.trim() || 0);
-  const a = Number(ahead.out.trim() || 0);
-  let verdict: SuCheck["verdict"];
-  if (b === 0 && a === 0) verdict = "UP_TO_DATE";
-  else if (b > 0 && a === 0) verdict = "BEHIND";
-  else if (b === 0 && a > 0) verdict = "AHEAD";
-  else verdict = "DIVERGED";
-  return { ...base, ok: true, verdict, remote_head: remoteHead, behind: b, ahead: a };
-}
-
-export interface SuApply {
-  ok: boolean; applied: boolean; from: string | null; to: string | null;
-  reason: string; journal_id: number | null; recheck_in_s: number;
-}
-
-export function suApply(version: string): SuApply {
+/**
+ * AUDIT FIXPACK2: apply теперь async (check через suCheckAsync — без заморозки event-loop);
+ * локальный merge --ff-only остаётся sync в git(). Журнал честен: если merge вернул
+ * "Already up to date" — пишем NO_OP, а не APPLIED (канон "timeout ≠ NO_EFFECT_PROVEN").
+ */
+export async function suApplyAsync(version: string): Promise<SuApply> {
   const t0 = Date.now();
-  const chk = suCheck(version, true);
+  const chk = await suCheckAsync(version, true);
   const fail = (reason: string): SuApply => {
     db.query(`INSERT INTO selfupdate_journal (op,from_sha,to_sha,result,detail,at) VALUES ('apply',?,?,?, ?,?)`)
       .run(chk.local_head, chk.remote_head, "REFUSED", reason, Date.now());
@@ -217,9 +173,9 @@ export function suApply(version: string): SuApply {
   if (!merge.ok) return fail(mask(merge.err, token).slice(0, 200) || "ff_merge_failed");
   const to = chk.remote_head;
   db.query(`INSERT INTO selfupdate_journal (op,from_sha,to_sha,result,detail,at) VALUES ('apply',?,?,?,?,?)`)
-    .run(chk.local_head, to, "APPLIED", `ff-only ${REMOTE_REF}`, Date.now());
-  emit("SELFUPDATE_APPLIED", { from: chk.local_head.slice(0, 8), to: to.slice(0, 8), behind: chk.behind });
-  recordSpan("selfupdate.apply", { "me2.result": "APPLIED", "me2.from": chk.local_head.slice(0, 8), "me2.to": to.slice(0, 8) }, t0);
+    .run(chk.local_head, to, merged ? "APPLIED" : "NO_OP", `ff-only ${REMOTE_REF}`, Date.now());
+  if (merged) emit("SELFUPDATE_APPLIED", { from: chk.local_head.slice(0, 8), to: to.slice(0, 8), behind: chk.behind });
+  recordSpan("selfupdate.apply", { "me2.result": merged ? "APPLIED" : "NO_OP", "me2.from": chk.local_head.slice(0, 8), "me2.to": to.slice(0, 8) }, t0);
   checkCache = null;
   return {
     ok: true, applied: merged, from: chk.local_head, to,
@@ -228,8 +184,8 @@ export function suApply(version: string): SuApply {
   };
 }
 
-export function selfupdateStatus(version: string) {
-  const chk = suCheck(version);
+export async function selfupdateStatus(version: string) {
+  const chk = await suCheckAsync(version);
   const journal = db.query(`SELECT * FROM selfupdate_journal ORDER BY at DESC LIMIT 10`).all() as Array<{
     id: number; op: string; from_sha: string | null; to_sha: string | null; result: string; detail: string | null; at: number;
   }>;

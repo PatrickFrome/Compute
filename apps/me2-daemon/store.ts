@@ -237,6 +237,18 @@ export function setMeta(key: string, value: string) {
 function chainHash(prev: string | null, ts: string, type: string, actor: string | null, subject: string | null, data: string): string {
   return createHash("sha256").update(`${prev ?? "GENESIS"}|${ts}|${type}|${actor ?? "-"}|${subject ?? "-"}|${data}`).digest("hex");
 }
+const JSON_BYTE_LIMIT = 8000;
+// A string slice can cut an escape or surrogate pair and destroys the ledger's
+// JSON contract. Large events remain explicit digest-bearing summaries; commands
+// must retain the entire requested payload or be rejected before any write.
+function eventData(data: Record<string, unknown>): string {
+  const encoded = JSON.stringify(data);
+  const size = Buffer.byteLength(encoded);
+  if (size <= JSON_BYTE_LIMIT) return encoded;
+  return JSON.stringify({ data_truncated: true, original_bytes: size,
+    original_sha256: createHash("sha256").update(encoded).digest("hex"),
+    preview: encoded.slice(0, 1024) });
+}
 export function lastEventHash(): string | null {
   const r = db.query(`SELECT hash FROM events ORDER BY seq DESC LIMIT 1`).get() as { hash: string | null } | null;
   return r?.hash ?? null;
@@ -244,7 +256,7 @@ export function lastEventHash(): string | null {
 export function emit(type: string, data: Record<string, unknown>, agentId?: string | null, taskId?: string | null): EventRow {
   const e: EventRow = {
     seq: 0, ts: nowIso(), type, agent_id: agentId ?? null, task_id: taskId ?? null,
-    data: JSON.stringify(data).slice(0, 8000), prev_hash: null, hash: null,
+    data: eventData(data), prev_hash: null, hash: null,
   };
   const prev = lastEventHash();
   e.prev_hash = prev;
@@ -358,9 +370,20 @@ export function nextReadyTaskAny(): TaskRow | null {
   return (db.query(`SELECT * FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? ORDER BY created_at LIMIT 1`).get(Date.now()) as TaskRow | null) ?? null;
 }
 export function updateTask(id: string, patch: Partial<TaskRow>) {
+  // Аудит 2026-10-18 (MEDIUM): имена колонок интерполировались в SQL без валидации —
+  // любой будущий вызывающий с внешним ключом = SQL-инъекция. Fail-closed белый список
+  // колонок tasks (schema store.ts + ALTER-миграции ниже); неизвестный ключ — throws.
+  const TASK_COLUMNS = new Set([
+    "id", "title", "spec", "role", "parent_id", "status", "agent_id",
+    "max_steps", "steps", "result", "error", "created_at", "updated_at",
+    "reflection", "objective_id", "review", "not_before_ms", "park_count",
+  ]);
   const cols = Object.keys(patch);
   if (!cols.length) return;
-  const set = cols.map((c) => `${c}=?`).join(",");
+  for (const c of cols) {
+    if (!TASK_COLUMNS.has(c)) throw new Error(`updateTask_unknown_column:${c}`);
+  }
+  const set = cols.map((c) => `"${c}"=?`).join(",");
   db.query(`UPDATE tasks SET ${set}, updated_at=? WHERE id=?`).run(...(Object.values(patch) as unknown[]), nowIso(), id);
 }
 export function cancelTask(id: string) {
@@ -376,7 +399,7 @@ export function setTaskReflectionLlm(id: string, llm: { lesson: string; fix?: st
     try { base = JSON.parse(t.reflection) as Record<string, unknown>; } catch { base = {}; }
   }
   base.llm = { ...llm, at: nowIso() };
-  updateTask(id, { reflection: JSON.stringify(base).slice(0, 8000) });
+  updateTask(id, { reflection: eventData(base) });
   return emit("TASK_REFLECTED", { task_id: id, has_llm: true, model: llm.model ?? null, source: llm.source ?? "operator" }, null, id);
 }
 export function setAgentModel(id: string, model: string) {
@@ -395,7 +418,7 @@ export function searchEvents(q: string, limit = 50): EventRow[] {
 export function budgetWindow(): { used: number; limit: number; window_ms: number; reset_hint: string } {
   const since = new Date(Date.now() - BUDGET_WINDOW_MS).toISOString();
   const r = db.query(
-    `SELECT COALESCE(SUM(cost),0) AS used FROM commands WHERE created_at>=? AND status IN ('PENDING','RUNNING','COMPLETED') AND lane!='EMERGENCY'`,
+    `SELECT COALESCE(SUM(cost),0) AS used FROM commands WHERE created_at>=? AND status IN ('PENDING','RUNNING','AMBIGUOUS','COMPLETED') AND lane!='EMERGENCY'`,
   ).get(since) as { used: number };
   return { used: Number(r.used), limit: budgetLimit(), window_ms: BUDGET_WINDOW_MS, reset_hint: since };
 }
@@ -414,22 +437,38 @@ export function enqueueCommand(input: {
   const lane = (String(input.lane ?? "").toUpperCase() || inferLane(action)) as Lane;
   if (!(lane in LANES)) return { ok: false, error: `unknown_lane_${lane}` };
   const laneSpec = LANES[lane];
+  if (lane !== inferLane(action)) return { ok: false, error: "command_lane_mismatch" };
+  const minimumCost = COST_OF[action] ?? laneSpec.cost;
+  const cost = input.cost ?? minimumCost;
+  if (!Number.isSafeInteger(cost) || cost < minimumCost || cost < 0) return { ok: false, error: "command_cost_invalid" };
+  const runAfter = input.run_after ?? null;
+  if (runAfter !== null && (!Number.isSafeInteger(runAfter) || runAfter < 0)) return { ok: false, error: "command_run_after_invalid" };
+  let payload: string | null;
+  try { payload = input.payload ? JSON.stringify(input.payload) : null; }
+  catch { return { ok: false, error: "command_payload_invalid" }; }
+  if (payload !== null && Buffer.byteLength(payload) > JSON_BYTE_LIMIT) return { ok: false, error: "command_payload_too_large" };
 
   // idempotency: повтор с тем же ключом возвращает исходную команду
   if (input.idempotency_key) {
     const dup = db.query(`SELECT * FROM commands WHERE idempotency_key=?`).get(input.idempotency_key) as CommandRow | undefined;
-    if (dup) return { ok: true, command: dup, deduped: true };
+    if (dup) {
+      if (dup.status === "REJECTED") return { ok: false, error: dup.error ?? "command_rejected" };
+      if (dup.action !== action || dup.lane !== lane || dup.payload !== payload || dup.cost !== cost || dup.run_after !== runAfter) {
+        return { ok: false, error: "idempotency_key_conflict" };
+      }
+      return { ok: true, command: dup, deduped: true };
+    }
   }
 
-  const cost = input.cost ?? COST_OF[action] ?? laneSpec.cost;
   if (lane !== "EMERGENCY") {
     const b = budgetWindow();
     if (b.used + cost > b.limit) {
-      insertCommand({ action, lane, status: "REJECTED", payload: input.payload ?? null, idempotency_key: input.idempotency_key ?? null, cost, error: "budget_exceeded" });
+      // A request which was never admitted must not reserve an executable key.
+      // Retain the rejection row, while allowing a later budget-window attempt.
+      insertCommand({ action, lane, status: "REJECTED", payload: input.payload ?? null, idempotency_key: null, cost, error: "budget_exceeded" });
       return { ok: false, error: `budget_exceeded (used ${b.used}/${b.limit} per ${BUDGET_WINDOW_MS / 1000}s)` };
     }
   }
-  const runAfter = input.run_after ?? null;
   const cmd = insertCommand({ action, lane, status: "PENDING", payload: input.payload, idempotency_key: input.idempotency_key ?? null, cost, error: null, run_after: runAfter });
   emit("COMMAND_ENQUEUED", { action, lane, cost, id: cmd.id, ...(runAfter ? { run_after: runAfter, scheduled: true } : {}) }, null, null);
   return { ok: true, command: cmd, deduped: false };
@@ -441,7 +480,7 @@ function insertCommand(c: {
 }): CommandRow {
   const row: CommandRow = {
     id: rid("cmd"), action: c.action, lane: c.lane, status: c.status,
-    payload: c.payload ? JSON.stringify(c.payload).slice(0, 8000) : null,
+    payload: c.payload ? JSON.stringify(c.payload) : null,
     result: null, idempotency_key: c.idempotency_key, cost: c.cost, run_after: c.run_after ?? null,
     created_at: nowIso(), leased_at: null, completed_at: null, error: c.error,
   };
@@ -464,7 +503,10 @@ function inferLane(action: string): Lane {
   if (LANE_OF[action]) return LANE_OF[action]; // явные переопределения реестра v0.5.0
   if (action.endsWith("_RESET") || action.startsWith("FLUSH") || action.endsWith("_FLUSH") || action.startsWith("FENCE")) return "EMERGENCY";
   if (action.endsWith("_CANCEL") || action.endsWith("_RETIRE") || action.endsWith("_PAUSE") || action.endsWith("_RESUME")) return "CONTROL";
-  if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_RETRY") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
+  // Аудит 2026-10-18 (MEDIUM): TASK_SCHEDULE уходил в READ_ONLY (_SCHEDULE отсутствовал
+  // в суффиксах) — планирование мутирует шину, но бюджетировалось как чтение. Выровнено
+  // с fallback каталога actionCatalog() (commands.ts), где _SCHEDULE уже был MUTATION.
+  if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_RETRY") || action.endsWith("_SCHEDULE") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
   return "READ_ONLY";
 }
 

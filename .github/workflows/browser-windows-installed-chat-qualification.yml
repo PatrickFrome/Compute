@@ -141,6 +141,7 @@ jobs:
           METAENGINE_INSTALL_QUALIFIER_URL: https://jhriwwsryeqsvvvufkok.supabase.co/functions/v1/metaengine-client-installed-qualification-h205f22
         run: |
           $ErrorActionPreference = 'Stop'
+          . .\scripts\installed-qualification-http-policy.ps1
           $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
           $installer = Join-Path $env:RUNNER_TEMP ([string]$proof.installer_name)
@@ -216,7 +217,7 @@ jobs:
           $oidcUri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=$([uri]::EscapeDataString($audience))"
           $oidcEnvelope = Invoke-RestMethod -Method Get -Uri $oidcUri -Headers @{
             Authorization = "bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
-          }
+          } -TimeoutSec 10
           $qualificationOidc = [string]$oidcEnvelope.value
           if (-not $qualificationOidc -or ($qualificationOidc -split '\.').Count -ne 3) {
             throw 'installed_qualification_oidc_token_invalid'
@@ -243,6 +244,7 @@ jobs:
           $qualificationApproved = $false
           $qualificationReadback = $null
           $qualificationNextAttempt = [DateTime]::UtcNow
+          $qualificationTransientAttempts = 0
 
           $normalOut = "$env:RUNNER_TEMP\installed-chat-normal.out"
           $normalErr = "$env:RUNNER_TEMP\installed-chat-normal.err"
@@ -275,32 +277,60 @@ jobs:
               }
 
               if (-not $qualificationApproved -and [DateTime]::UtcNow -ge $qualificationNextAttempt) {
+                # The legacy hosted request has a whole-response timeout and
+                # byte cap. A quota 402 remains a blocker and cannot establish
+                # own-PG17 Owner custody.
+                $qualificationStatus = -1
+                $qualificationRawContent = $null
+                $qualificationTransportError = ''
                 try {
-                  $qualificationResponse = Invoke-WebRequest -UseBasicParsing -Method Post `
+                  $qualificationResponse = Invoke-InstalledQualificationHttpRequest `
                     -Uri $env:METAENGINE_INSTALL_QUALIFIER_URL `
-                    -Headers @{ Authorization = "Bearer $qualificationOidc" } `
-                    -ContentType 'application/json' `
-                    -Body $qualificationBody
-                  $qualificationPayload = $qualificationResponse.Content | ConvertFrom-Json
-                  if ([int]$qualificationResponse.StatusCode -eq 200 `
-                      -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
-                      -and $qualificationPayload.accepted -eq $true `
-                      -and $qualificationPayload.oidc_verified -eq $true `
-                      -and $qualificationPayload.github_run_verified -eq $true `
-                      -and $qualificationPayload.nonce_bound -eq $true `
-                      -and [string]$qualificationPayload.source_head -eq '${{ github.event.pull_request.head.sha || github.sha }}' `
-                      -and [string]$qualificationPayload.run_id -eq '${{ github.run_id }}' `
-                      -and [int]$qualificationPayload.run_attempt -eq [int]'${{ github.run_attempt }}') {
-                    $qualificationApproved = $true
-                    $qualificationReadback = $qualificationPayload
-                  } elseif ([int]$qualificationResponse.StatusCode -ne 202 `
-                      -or $qualificationPayload.reason -ne 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
-                    throw "installed_qualification_oidc_unexpected:$($qualificationResponse.StatusCode):$($qualificationPayload.reason)"
-                  }
+                    -Bearer $qualificationOidc `
+                    -Body $qualificationBody `
+                    -Deadline $deadline
+                  $qualificationStatus = [int]$qualificationResponse.StatusCode
+                  $qualificationRawContent = [string]$qualificationResponse.Content
                 } catch {
-                  throw "installed_qualification_oidc_failed:$($_.Exception.Message)"
+                  $qualificationTransportError = [string]$_.Exception.Message
                 }
-                $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
+                $qualificationPayload = $null
+                if ($qualificationRawContent) {
+                  try { $qualificationPayload = $qualificationRawContent | ConvertFrom-Json } catch { $qualificationPayload = $null }
+                }
+                if ([DateTime]::UtcNow -ge $deadline) { throw 'installed_qualification_oidc_deadline_exhausted' }
+                if ($qualificationStatus -eq 200 `
+                    -and $qualificationPayload `
+                    -and $qualificationPayload.schema -eq 'metaengine.client-v1.installed-qualification-oidc.v1' `
+                    -and $qualificationPayload.accepted -eq $true `
+                    -and $qualificationPayload.oidc_verified -eq $true `
+                    -and $qualificationPayload.github_run_verified -eq $true `
+                    -and $qualificationPayload.nonce_bound -eq $true `
+                    -and [string]$qualificationPayload.source_head -eq '${{ github.event.pull_request.head.sha || github.sha }}' `
+                    -and [string]$qualificationPayload.run_id -eq '${{ github.run_id }}' `
+                    -and [int]$qualificationPayload.run_attempt -eq [int]'${{ github.run_attempt }}') {
+                  $qualificationApproved = $true
+                  $qualificationReadback = $qualificationPayload
+                } elseif ($qualificationStatus -eq 202 `
+                    -and $qualificationPayload `
+                    -and $qualificationPayload.reason -eq 'WAITING_FOR_EXACT_ENROLLMENT_REQUEST') {
+                  # Enrollment request not visible yet; keep the fast poll.
+                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds(1)
+                } elseif ($qualificationStatus -eq 402) {
+                  throw 'installed_qualification_oidc_blocked:HOSTED_QUALIFIER_QUOTA_402'
+                } elseif (@(429, 500, 502, 503, 504) -contains $qualificationStatus) {
+                  # Bounded retries stay inside the remaining wall-clock
+                  # budget, including the WinPS request/DNS reserve.
+                  $qualificationTransientAttempts++
+                  $qualificationDelaySeconds = Get-InstalledQualificationRetryDelaySeconds -Status $qualificationStatus -TransientAttempts $qualificationTransientAttempts -Deadline $deadline
+                  $qualificationNextAttempt = [DateTime]::UtcNow.AddSeconds($qualificationDelaySeconds)
+                } else {
+                  # Other 4xx, malformed 2xx payloads and transport-level
+                  # failures fail fast with the canonical error name.
+                  $qualificationDetail = $qualificationTransportError
+                  if (-not $qualificationDetail) { $qualificationDetail = "unexpected_status_$($qualificationStatus)" }
+                  throw "installed_qualification_oidc_failed:$qualificationDetail"
+                }
               }
 
               if (Test-Path $normalOut -PathType Leaf) {

@@ -35,7 +35,7 @@ import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
-import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
+import { assertReloadAllowed, initiateSelectedTabReload } from './reload-auth-redirect-gate.mjs';
 import { ExactBrowserTabViewMap, resolveExactWebContentsTabBinding } from './browser-webcontents-tab-index.mjs';
 import {
   assertExactNativeSupervisorMutationTargetCurrent,
@@ -1568,10 +1568,7 @@ async function handleCommandWithRecoveryAdmission(command, payload = {}) {
     // P0 repair (point 1): RELOAD is refused on a ChatGPT auth-redirect surface.
     // A reload there re-enters the redirect and multiplies login tabs; the page
     // is healthy, the session is not, and only a human sign-in changes that.
-    assertReloadAllowed({ action: 'RELOAD', url: selected?.url });
-    selectedView?.webContents.reload();
-    invalidatePerception(selected?.tab_id);
-    return { ok: true, reload_initiated: true };
+    return initiateSelectedTabReload({ tab: selected, view: selectedView, invalidatePerception });
   }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
   if (command === 'DOWNLOAD_STATUS') return downloads?.snapshot() || null;

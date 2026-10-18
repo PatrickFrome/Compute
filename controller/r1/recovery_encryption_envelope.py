@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 AGE_REQUIRED_VERSION = "1.3.1"
+AGE_VERSION_PARTS = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
 BUNDLE_SCHEMA = "metaengine.compute.r1-recovery-bundle-build-receipt.h205f22.v2"
 BUNDLE_CLASSIFICATION = "PLAINTEXT_BUNDLE_BUILD_RECEIPT_NONAUTHORITATIVE"
 ENVELOPE_SCHEMA = "metaengine.compute.r1-recovery-encryption-envelope.h205f22.v1"
@@ -148,15 +149,28 @@ def load_recipients(path: Path, profile: str) -> list[dict[str, str]]:
     return parsed
 
 
+def _parse_age_version(text: str) -> tuple[int, int, int] | None:
+    """Extract a two- or three-part semantic version from age CLI output."""
+    match = AGE_VERSION_PARTS.search(text)
+    if match is None:
+        return None
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch or 0))
+
+
 def _age_version(age_bin: Path) -> str:
     try:
         proc = subprocess.run([str(age_bin), "--version"], check=True, text=True, capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
         raise EnvelopeError("age_version_check_failed") from exc
     text = (proc.stdout + "\n" + proc.stderr).strip()
-    if AGE_REQUIRED_VERSION not in text:
-        raise EnvelopeError(f"age_version_mismatch:required={AGE_REQUIRED_VERSION}:observed={text[:120]}")
-    return AGE_REQUIRED_VERSION
+    observed = _parse_age_version(text)
+    required = _parse_age_version(AGE_REQUIRED_VERSION)
+    if observed is None or required is None:
+        raise EnvelopeError(f"age_version_unparsable:required={AGE_REQUIRED_VERSION}:observed={text[:120]}")
+    if observed < required:
+        raise EnvelopeError(f"age_version_too_old:required={AGE_REQUIRED_VERSION}:observed={text[:120]}")
+    return ".".join(str(part) for part in observed)
 
 
 def _run_age_encrypt(age_bin: Path, recipients_file: Path, bundle: Path, output: Path) -> None:

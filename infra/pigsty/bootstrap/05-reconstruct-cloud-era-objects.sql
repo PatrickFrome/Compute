@@ -36,6 +36,13 @@ create table if not exists destruktion_meta.devos_fleet_task_h205f22 (
 );
 grant all on destruktion_meta.devos_fleet_task_h205f22 to service_role;
 
+-- 1b. finished_at на task-таблице: колонка канонического контракта
+--     (20260929010000:34), её ставит devos_fleet_complete_v1 в
+--     09-devos-fleet-task-plane-completion-v1. Idempotent-добавление для
+--     кластеров, где таблица уже была восстановлена из дампа без колонки.
+alter table destruktion_meta.devos_fleet_task_h205f22
+  add column if not exists finished_at timestamptz;
+
 -- 2. devos_fleet_claim (контракт: test/devos-dispatch-admission-*-smoke.sql)
 create table if not exists destruktion_meta.devos_fleet_claim_h205f22 (
   claim_id bigserial primary key,
@@ -48,6 +55,50 @@ create table if not exists destruktion_meta.devos_fleet_claim_h205f22 (
   state text not null default 'ACTIVE'
 );
 grant all on destruktion_meta.devos_fleet_claim_h205f22 to service_role;
+
+-- 2b. devos_fleet_event: журнал событий fleet-плоскости. Ни один bootstrap-шаг
+--     его не создавал, но 09-devos-fleet-task-plane-completion-v1 делает
+--     ALTER TABLE + индекс по idempotency_key и его devos_emit_event_h205f22
+--     вставляет строки (event_id/workspace_id/event_type/task_id/
+--     lease_generation/payload/authority_effect/idempotency_key), а
+--     devos_fleet_snapshot_v1 читает created_at и event_id. Колонки
+--     point_id/role/agent_id/base_sha — из канонического контракта
+--     (20260929010000:70); idempotency_key остаётся nullable: emit в 09
+--     пишет NULL для неидемпотентных дубль-событий, частичный уникальный
+--     индекс создаёт сам 09.
+create table if not exists destruktion_meta.devos_fleet_event_h205f22 (
+  event_id bigint generated always as identity primary key,
+  workspace_id uuid not null,
+  event_type text not null,
+  task_id uuid,
+  point_id text,
+  role text,
+  agent_id text,
+  lease_generation bigint,
+  base_sha text,
+  payload jsonb not null default '{}'::jsonb,
+  idempotency_key text,
+  created_at timestamptz not null default clock_timestamp(),
+  authority_effect boolean not null default false check (authority_effect = false)
+);
+grant all on destruktion_meta.devos_fleet_event_h205f22 to service_role;
+
+-- 2c. devos_fleet_runtime_control: per-workspace admission/refill fence.
+--     09 (runtime-control seeding + lease_v1/enqueue_v1) требует
+--     workspace_id (PK — ON CONFLICT (workspace_id)), generation_floor,
+--     refill_enabled, supervisor_admission_enabled. Колонки из канонического
+--     контракта (20260913163614:5 + 20260913165258:5).
+create table if not exists destruktion_meta.devos_fleet_runtime_control_h205f22 (
+  workspace_id uuid primary key,
+  generation_floor bigint not null default 0 check (generation_floor >= 0),
+  refill_enabled boolean not null default true,
+  supervisor_admission_enabled boolean not null default true,
+  reset_at timestamptz,
+  reset_reason text,
+  updated_at timestamptz not null default clock_timestamp(),
+  authority_effect boolean not null default false
+);
+grant all on destruktion_meta.devos_fleet_runtime_control_h205f22 to service_role;
 
 -- 3. actuation_lease (контракт: test/c5-transport-promotion-lease-verifier-v2-smoke.sql)
 create table if not exists public.compute_fabric_a2_supervisor_actuation_lease_h205f22 (

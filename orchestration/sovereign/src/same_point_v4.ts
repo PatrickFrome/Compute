@@ -83,7 +83,11 @@ function required(name: string): string {
 }
 
 function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
-  const n = Number(raw ?? fallback);
+  // Empty/whitespace-only env values fall back to the documented default;
+  // Number("") === 0 would otherwise clamp to `min`.
+  const text = raw?.trim();
+  if (!text) return fallback;
+  const n = Number(text);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback;
 }
 

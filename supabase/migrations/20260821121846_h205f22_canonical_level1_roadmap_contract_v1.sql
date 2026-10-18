@@ -30,6 +30,38 @@ create table destruktion_meta.compute_fabric_canonical_milestone_h205f22 (
  unique(roadmap_key,ordinal)
 );
 
+-- AUDIT FIXPACK2 (2026-10-18), fresh-project replayability: the canonical mapping and
+-- progress-receipt tables below carry foreign keys into the historical Level-2 plane
+-- (compute_fabric_roadmap_milestone / _step_receipt), which no migration in this chain
+-- created (the live cloud had them from the pre-canonical era; the reconstruction
+-- snapshot lives in infra/pigsty/bootstrap/05). Port the canonical reconstruction DDL
+-- here so a fresh `supabase db push` survives. Idempotent; no-op on the live cloud.
+create table if not exists destruktion_meta.compute_fabric_roadmap_milestone_h205f22 (
+  roadmap_id text not null,
+  milestone_key text not null,
+  status text not null default 'PLANNED',
+  verified_checkpoint_id text,
+  phase_order integer not null default 0,
+  priority integer not null default 0,
+  updated_at timestamptz not null default clock_timestamp(),
+  primary key (roadmap_id, milestone_key)
+);
+grant all on destruktion_meta.compute_fabric_roadmap_milestone_h205f22 to service_role;
+
+create table if not exists destruktion_meta.compute_fabric_roadmap_step_receipt_h205f22 (
+  receipt_id bigserial primary key,
+  roadmap_id uuid not null,
+  milestone_key text not null,
+  step_kind text not null,
+  status text not null,
+  result_checkpoint_id text,
+  summary jsonb not null default '{}'::jsonb,
+  claim_id bigint,
+  evidence jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default clock_timestamp()
+);
+grant all on destruktion_meta.compute_fabric_roadmap_step_receipt_h205f22 to service_role;
+
 create table destruktion_meta.compute_fabric_level2_canonical_mapping_h205f22 (
  roadmap_id text not null,
  milestone_key text not null,
@@ -176,9 +208,34 @@ create or replace function destruktion_meta.compute_fabric_finish_roadmap_claim_
 
 create or replace function destruktion_meta.compute_fabric_supervisor_snapshot_h205f22_v2() returns jsonb language sql stable set search_path='pg_catalog','destruktion_meta','extensions' as $f$ select destruktion_meta.compute_fabric_supervisor_snapshot_h205f22()||jsonb_build_object('schema','metaengine.compute.fabric-supervisor-snapshot.h205f22.v2','canonical_alignment',destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22(),'current_level1_focus',destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22()->'current_canonical_focus') $f$;
 
-create or replace function public.h205f22_aop1_snapshot_v1() returns jsonb language sql security definer set search_path='pg_catalog','destruktion_meta' as $f$ select jsonb_build_object('schema','metaengine.compute.aop-snapshot.h205f22.v1','invariant','NO_MANUAL_HANDOFF_V1','semantic_head',destruktion_meta.compute_fabric_roadmap_status_h205f22()->'semantic_head','canonical_alignment',destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22(),'canonical_gate_required',true,'roles',(select coalesce(jsonb_agg(to_jsonb(r) order by role_key),'[]') from destruktion_meta.compute_fabric_aop_role_h205f22 r where enabled),'active_runs',(select coalesce(jsonb_agg((to_jsonb(x)-'output') order by created_at,run_id),'[]') from destruktion_meta.compute_fabric_aop_run_h205f22 x where state in('READY','LEASED','RUNNING','WAITING_EXECUTOR','WAITING_EVENT')),'recent_events',(select coalesce(jsonb_agg(to_jsonb(e) order by event_id desc),'[]') from(select * from destruktion_meta.compute_fabric_aop_event_h205f22 order by event_id desc limit 50)e),'canonical',false,'authority_effect',false) $f$;
+-- AUDIT FIXPACK2: the AOP snapshot is `language sql`, so its body is validated at CREATE
+-- time; it reads the ghost AOP plane (aop_role/aop_run/aop_event) and roadmap_status(),
+-- none of which exist on a fresh project. Skip creation there; the live cloud is unaffected.
+do $guard$
+begin
+  if to_regclass('destruktion_meta.compute_fabric_aop_role_h205f22') is null
+     or to_regclass('destruktion_meta.compute_fabric_aop_run_h205f22') is null
+     or to_regclass('destruktion_meta.compute_fabric_aop_event_h205f22') is null
+     or to_regprocedure('destruktion_meta.compute_fabric_roadmap_status_h205f22()') is null then
+    raise notice 'skip h205f22_aop1_snapshot_v1: AOP plane objects are absent on a fresh project (reconstruction plane owns them)';
+    return;
+  end if;
+  create or replace function public.h205f22_aop1_snapshot_v1() returns jsonb language sql security definer set search_path='pg_catalog','destruktion_meta' as $f$ select jsonb_build_object('schema','metaengine.compute.aop-snapshot.h205f22.v1','invariant','NO_MANUAL_HANDOFF_V1','semantic_head',destruktion_meta.compute_fabric_roadmap_status_h205f22()->'semantic_head','canonical_alignment',destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22(),'canonical_gate_required',true,'roles',(select coalesce(jsonb_agg(to_jsonb(r) order by role_key),'[]') from destruktion_meta.compute_fabric_aop_role_h205f22 r where enabled),'active_runs',(select coalesce(jsonb_agg((to_jsonb(x)-'output') order by created_at,run_id),'[]') from destruktion_meta.compute_fabric_aop_run_h205f22 x where state in('READY','LEASED','RUNNING','WAITING_EXECUTOR','WAITING_EVENT')),'recent_events',(select coalesce(jsonb_agg(to_jsonb(e) order by event_id desc),'[]') from(select * from destruktion_meta.compute_fabric_aop_event_h205f22 order by event_id desc limit 50)e),'canonical',false,'authority_effect',false) $f$;
+  -- audit fixpack2: SECURITY DEFINER must not stay executable by anon/public (PostgREST /rpc surface)
+  revoke all on function public.h205f22_aop1_snapshot_v1() from public, anon, authenticated;
+end
+$guard$;
 
-update destruktion_meta.compute_fabric_aop_role_h205f22 r set config=r.config||jsonb_build_object('canonical_roadmap_key','compute-fabric-canonical-roadmap-v1','canonical_milestone_key',coalesce((select x.canonical_milestone_key from destruktion_meta.compute_fabric_level2_canonical_mapping_h205f22 x where x.roadmap_id='compute-fabric-roadmap-v1' and x.milestone_key=r.milestone_key and x.canonical_roadmap_key='compute-fabric-canonical-roadmap-v1'),'CROSS-CUTTING'),'canonical_finish_fields',jsonb_build_array('canonical_milestone_key','canonical_acceptance_criterion','canonical_progress_summary','canonical_real_compute_effect','canonical_control_plane_only'),'roadmap_alignment_function','destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22'),updated_at=now() where r.role_key in('W1_IMPLEMENTER','T0_IMPLEMENTER','F1_IMPLEMENTER','R1_IMPLEMENTER','A1_IMPLEMENTER','INTEGRATION_ANALYST','MAINLINE_SUPERVISOR');
+-- AUDIT FIXPACK2: aop_role is part of the ghost AOP plane; skip on fresh projects.
+do $guard$
+begin
+  if to_regclass('destruktion_meta.compute_fabric_aop_role_h205f22') is null then
+    raise notice 'skip aop_role canonical alignment: table absent on a fresh project';
+    return;
+  end if;
+  update destruktion_meta.compute_fabric_aop_role_h205f22 r set config=r.config||jsonb_build_object('canonical_roadmap_key','compute-fabric-canonical-roadmap-v1','canonical_milestone_key',coalesce((select x.canonical_milestone_key from destruktion_meta.compute_fabric_level2_canonical_mapping_h205f22 x where x.roadmap_id='compute-fabric-roadmap-v1' and x.milestone_key=r.milestone_key and x.canonical_roadmap_key='compute-fabric-canonical-roadmap-v1'),'CROSS-CUTTING'),'canonical_finish_fields',jsonb_build_array('canonical_milestone_key','canonical_acceptance_criterion','canonical_progress_summary','canonical_real_compute_effect','canonical_control_plane_only'),'roadmap_alignment_function','destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22'),updated_at=now() where r.role_key in('W1_IMPLEMENTER','T0_IMPLEMENTER','F1_IMPLEMENTER','R1_IMPLEMENTER','A1_IMPLEMENTER','INTEGRATION_ANALYST','MAINLINE_SUPERVISOR');
+end
+$guard$;
 
 revoke all on function destruktion_meta.compute_fabric_canonical_roadmap_digest_h205f22(text) from public,anon,authenticated;
 revoke all on function destruktion_meta.compute_fabric_canonical_claim_gate_h205f22(text,text) from public,anon,authenticated;

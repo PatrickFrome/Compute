@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+const store = await import("../../store");
+let checks = 0;
+
+const ordinary = store.emit("SMALL", { quoted: 'hello "world"', unicode: "данные" });
+assert.deepEqual(JSON.parse(ordinary.data), { quoted: 'hello "world"', unicode: "данные" });
+checks++;
+const original = { value: '😀"'.repeat(5000) };
+const event = store.emit("LARGE", original);
+const parsed = JSON.parse(event.data);
+assert.equal(parsed.data_truncated, true);
+assert.equal(parsed.original_sha256, createHash("sha256").update(JSON.stringify(original)).digest("hex"));
+assert.equal(parsed.original_bytes, Buffer.byteLength(JSON.stringify(original)));
+assert(Buffer.byteLength(event.data) <= 8000);
+const expectedHash = createHash("sha256").update(`${event.prev_hash}|${event.ts}|${event.type}|-|-|${event.data}`).digest("hex");
+assert.equal(event.hash, expectedHash);
+checks++;
+const before = store.listCommands().length;
+const oversized = store.enqueueCommand({ action: "TASK_ENQUEUE", payload: original, idempotency_key: "large" });
+assert.deepEqual(oversized, { ok: false, error: "command_payload_too_large" });
+assert.equal(store.listCommands().length, before);
+const afterOversize = store.enqueueCommand({ action: "TASK_ENQUEUE", payload: { title: "small" }, idempotency_key: "large" });
+assert.equal(afterOversize.ok, true);
+checks++;
+for (const cost of [-1, 0.1, NaN, Infinity, 0]) {
+  assert.equal(store.enqueueCommand({ action: "TASK_ENQUEUE", cost }).ok, false);
+}
+assert.equal(store.enqueueCommand({ action: "TASK_ENQUEUE", lane: "READ_ONLY", cost: 0 }).ok, false);
+checks++;
+const admitted = store.enqueueCommand({ action: "TASK_ENQUEUE", payload: { title: "one" }, idempotency_key: "exact" });
+assert.equal(admitted.ok, true);
+const dedup = store.enqueueCommand({ action: "TASK_ENQUEUE", payload: { title: "one" }, idempotency_key: "exact" });
+assert.equal(dedup.ok, true);
+if (admitted.ok && dedup.ok) assert.equal(dedup.command.id, admitted.command.id);
+checks++;
+assert.deepEqual(store.enqueueCommand({ action: "TASK_ENQUEUE", payload: { title: "different" }, idempotency_key: "exact" }), { ok: false, error: "idempotency_key_conflict" });
+checks++;
+store.db.query("INSERT INTO commands(id,action,lane,status,payload,idempotency_key,cost,created_at,error) VALUES (?,?,?,?,?,?,?,?,?)")
+  .run("old-rejected", "TASK_ENQUEUE", "MUTATION", "REJECTED", null, "old-key", 2, new Date().toISOString(), "budget_exceeded");
+assert.deepEqual(store.enqueueCommand({ action: "TASK_ENQUEUE", idempotency_key: "old-key" }), { ok: false, error: "budget_exceeded" });
+checks++;
+store.db.query("DELETE FROM commands WHERE id <> 'old-rejected'").run();
+store.setMeta("budget_limit", "6");
+for (let n = 0; n < 3; n++) assert.equal(store.enqueueCommand({ action: "TASK_ENQUEUE" }).ok, true);
+assert.equal(store.enqueueCommand({ action: "TASK_ENQUEUE", idempotency_key: "budget-key" }).ok, false);
+assert.equal(store.db.query("SELECT id FROM commands WHERE idempotency_key='budget-key'").get(), null);
+store.db.query("UPDATE commands SET created_at='2000-01-01T00:00:00.000Z'").run();
+assert.equal(store.enqueueCommand({ action: "TASK_ENQUEUE", idempotency_key: "budget-key" }).ok, true);
+checks++;
+for (const run_after of [NaN, Infinity, -1, 1.5]) assert.equal(store.enqueueCommand({ action: "TASK_LIST", run_after }).ok, false);
+checks++;
+store.db.close();
+process.stdout.write(JSON.stringify({ checks }));

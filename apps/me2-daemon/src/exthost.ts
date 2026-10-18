@@ -249,7 +249,7 @@ export function exthostStatus(): ExthostStatus {
     } catch { /* журнал может отсутствовать в probe */ }
     return { ...m, runs, last };
   });
-  const probe = process.env.ME2_BOOT_MODE === "probe";
+  const probe = ["probe", "qualification"].includes(process.env.ME2_BOOT_MODE ?? "");
   return {
     ok: true, schema: EXTHOST_SCHEMA, mode: probe ? "probe_offline" : "live",
     ext_dir: "skills/ext", exts: rows, errors,

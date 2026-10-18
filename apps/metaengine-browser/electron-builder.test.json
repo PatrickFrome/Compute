@@ -16,6 +16,7 @@
   "directories": {
     "output": "dist-test"
   },
+  "compression": "store",
   "files": [
     "src/**/*",
     "package.json",

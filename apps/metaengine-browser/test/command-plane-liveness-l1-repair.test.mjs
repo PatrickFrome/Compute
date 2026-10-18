@@ -1,13 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runBoundedCdpCommand } from '../src/native-browser-control.mjs';
-import { classifyNoOpEffectOutcome } from '../src/native-supervisor-client-base.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
+// Keep this contract suite side-effect free. Importing the full Supervisor
+// client starts its continuity timers and makes a pure classifier test hold a
+// Node worker open for minutes. Evaluate only the reviewed pure function body.
+const supervisorSource = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
+const classifierStart = supervisorSource.indexOf('export function classifyNoOpEffectOutcome');
+const classifierBody = supervisorSource
+  .slice(classifierStart, supervisorSource.indexOf('// D-Q1 liveness repair', classifierStart))
+  .replace('export function classifyNoOpEffectOutcome', 'function classifyNoOpEffectOutcome');
+const classifyNoOpEffectOutcome = new Function(`${classifierBody}; return classifyNoOpEffectOutcome;`)();
 
 // ---------- F-L1a: bounded command CDP execution ----------
 
@@ -96,9 +104,12 @@ test('D-L2: BACK/FORWARD classify navigated=false as NO_EFFECT_PROVEN and naviga
   assert.equal(classifyNoOpEffectOutcome('BACK', null), null);
 });
 
-test('D-L2: RELOAD initiation is CONFIRMED', () => {
+test('D-L2: only explicit RELOAD initiation is CONFIRMED', () => {
   assert.equal(classifyNoOpEffectOutcome('RELOAD', { reload_initiated: true }), 'CONFIRMED');
-  assert.equal(classifyNoOpEffectOutcome('RELOAD', {}), 'CONFIRMED');
+  for (const result of [undefined, null, {}, { reload_initiated: false },
+    { reload_initiated: 'true' }, { ok: true }]) {
+    assert.equal(classifyNoOpEffectOutcome('RELOAD', result), null);
+  }
 });
 
 test('D-L2: SCROLL classifies movement vs boundary no-op vs unproven', () => {

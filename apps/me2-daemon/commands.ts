@@ -729,3 +729,27 @@ export async function drainCommands(max = 8): Promise<number> {
   }
   return n;
 }
+
+/**
+ * AUDIT FIXPACK2 (2026-10-18): реконсилация осиротевших RUNNING-команд при буте.
+ * Crash/SIGKILL между claimCommand (PENDING→RUNNING) и завершением runCommand оставлял
+ * строку RUNNING навсегда: drainCommands берёт только PENDING, никакого boot-reaper'а не
+ * было. Эффект мог уже сохраниться до потери квитанции: повтор TASK_ENQUEUE или
+ * AGENT_SPAWN создаст новый объект, даже если сама команда имеет idempotency_key.
+ * После выигранного incarnation-лока до старта циклов фиксируем UNKNOWN-эффект как
+ * AMBIGUOUS. Сохраняем исходные lease, payload, result и error для readback; drain
+ * берёт только PENDING и не повторяет неоднозначную мутацию автоматически.
+ */
+export function reconcileOrphanRunningCommands(): { ambiguous: number; automatic_retry_allowed: false } {
+  return db.transaction(() => {
+    const orphans = db.query(`SELECT id, action, lane, leased_at FROM commands WHERE status='RUNNING'`).all() as Array<{ id: string; action: string; lane: string; leased_at: string | null }>;
+    let ambiguous = 0;
+    for (const o of orphans) {
+      const changed = db.query(`UPDATE commands SET status='AMBIGUOUS' WHERE id=? AND status='RUNNING'`).run(o.id);
+      if (Number(changed.changes) !== 1) continue;
+      emit("COMMAND_EFFECT_UNKNOWN", { id: o.id, action: o.action, lane: o.lane, leased_at: o.leased_at, cause: "orphaned_running_command_after_restart", automatic_retry_allowed: false }, null, null);
+      ambiguous++;
+    }
+    return { ambiguous, automatic_retry_allowed: false as const };
+  })();
+}

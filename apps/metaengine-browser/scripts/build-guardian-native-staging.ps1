@@ -5,6 +5,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+function Get-Sha256([string]$Path) {
+  $stream = [IO.File]::OpenRead($Path)
+  $hash = [Security.Cryptography.SHA256]::Create()
+  try { return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+  finally { $hash.Dispose(); $stream.Dispose() }
+}
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceDir = Join-Path $root 'native\browser-guardian-scm'
@@ -89,7 +95,7 @@ foreach ($item in @(
 )) {
   if (-not (Test-Path $item.path -PathType Leaf)) { throw "guardian_native_binary_missing:$($item.path)" }
   $file = Get-Item $item.path
-  $sha = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  $sha = Get-Sha256 $file.FullName
   if ($sha -notmatch '^[0-9a-f]{64}$') { throw "guardian_native_binary_digest_invalid:$($file.Name)" }
   $binaries += [ordered]@{
     name = $file.Name
@@ -148,6 +154,6 @@ if ($readback.bounded_update_actuator_embedded -ne $true -or $readback.update_ac
 if (@($readback.binaries).Count -ne 2) { throw 'guardian_staging_binary_cardinality_invalid' }
 foreach ($row in @($readback.binaries)) {
   $binary = Join-Path $resolvedOut ([string]$row.name)
-  if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$row.sha256) { throw "guardian_staging_binary_readback_mismatch:$($row.name)" }
+  if ((Get-Sha256 $binary) -ne [string]$row.sha256) { throw "guardian_staging_binary_readback_mismatch:$($row.name)" }
 }
 Write-Host ($readback | ConvertTo-Json -Depth 6 -Compress)

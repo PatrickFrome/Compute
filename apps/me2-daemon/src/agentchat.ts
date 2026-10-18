@@ -45,6 +45,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import * as ports from "./ports";
 import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
+import { childEnv } from "./childenv";
 import { db, emit, nowIso, createAgent, createTask, getMeta, setMeta, type AgentRow } from "../store";
 import { chat, webSearch as providerWebSearch } from "../providers";
 import { laneForRole } from "./governor";
@@ -422,10 +423,13 @@ async function execChatTool(name: ChatToolName, args: Record<string, unknown>, s
       }
       case "shell":
         return await new Promise<string>((res) => {
-          const proc = spawn("bash", ["-lc", String(args.command ?? "")], { cwd, timeout: SHELL_TIMEOUT_MS });
+          // Аудит 2026-10-18 (HIGH): spawn без env наследовал полный process.env daemon'а
+          // (секреты vault'а в окружении shell-тула) — канон src/exec.ts §4 / src/childenv.ts.
+          // (LOW) безлимитное накопление stdout/stderr капится MAX_TOOL_OUTPUT.
+          const proc = spawn("bash", ["-lc", String(args.command ?? "")], { cwd, timeout: SHELL_TIMEOUT_MS, env: childEnv() });
           let out = "", err = "";
-          proc.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-          proc.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+          proc.stdout.on("data", (d: Buffer) => { if (out.length < MAX_TOOL_OUTPUT) out += d.toString(); });
+          proc.stderr.on("data", (d: Buffer) => { if (err.length < MAX_TOOL_OUTPUT) err += d.toString(); });
           proc.on("error", (e) => res(`ERROR: ${e.message}`));
           proc.on("close", (code) => {
             const text = `exit=${code}\nstdout:\n${out}\nstderr:\n${err}`.trim();

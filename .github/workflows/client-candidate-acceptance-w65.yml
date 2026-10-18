@@ -22,7 +22,7 @@ jobs:
         os: [windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
@@ -33,9 +33,9 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED"
           git diff --check
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Fail closed stale/QUEUED/unrelated CI and real-Windows ACL assertions
         shell: bash
         run: |
@@ -46,17 +46,20 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      # Audit 2026-10-18 re-pin: the historical W58 tree (41d755bb9ecd53bd509163f9219473c32d7439b6)
+      # lacked the TEMP-fixture fs.realpath canonicalization fixes and CI stayed red against
+      # windows-2025 image drift; re-pin to the audited fix head without weakening ACL assertions.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: 41d755bb9ecd53bd509163f9219473c32d7439b6
+          ref: 59dbfdc7a13caf4698074f4b475800df662e3066
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
-      - name: Exact historical source and Windows PowerShell ACL module
+          node-version: '24.21.0'
+      - name: Exact pinned source and Windows PowerShell ACL module
         shell: powershell
         run: |
-          if ((git rev-parse HEAD) -ne '41d755bb9ecd53bd509163f9219473c32d7439b6') { throw 'W58_SOURCE_PIN_CHANGED' }
+          if ((git rev-parse HEAD) -ne '59dbfdc7a13caf4698074f4b475800df662e3066') { throw 'W58_SOURCE_PIN_CHANGED' }
           Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
           Get-Command Get-Acl,Set-Acl | Select-Object Name,Source
       - name: Windows W58 actual native ACL and upgrade restore negatives

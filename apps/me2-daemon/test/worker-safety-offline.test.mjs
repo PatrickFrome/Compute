@@ -17,9 +17,12 @@ const between = (start, end) => {
 };
 
 const joinBody = between('function safeJoin(', 'async function runShell(');
-const makeArtifactHelpers = (files = new Map()) => new Function('resolve', 'normalize', 'relative', 'isAbsolute', 'sep', 'createHash', 'readFileSync', 'taskDir',
+// realpathSync stub (аудит 2026-10-18): production safeJoin канонизирует пути через
+// realpathSync — identity-стаб для путей без симлинков; symlink-тест подменяет стаб.
+const identityRealpath = (path) => path;
+const makeArtifactHelpers = (files = new Map(), realpathSync = identityRealpath) => new Function('resolve', 'normalize', 'relative', 'isAbsolute', 'sep', 'createHash', 'realpathSync', 'readFileSync', 'taskDir',
   `${joinBody}; return { safeJoin, captureWriteArtifact, unverifiedWrittenArtifacts };`)(
-  resolve, normalize, relative, isAbsolute, sep, createHash,
+  resolve, normalize, relative, isAbsolute, sep, createHash, realpathSync,
   (path) => { if (!files.has(path)) throw new Error('ENOENT'); return Buffer.from(files.get(path)); },
   () => resolve('owned-workspace', 'task_a'),
 );
@@ -28,6 +31,19 @@ const { safeJoin } = makeArtifactHelpers();
 test('worker path boundary rejects a sibling whose name starts with the task directory', () => {
   const cwd = resolve('owned-workspace', 'task_a');
   assert.throws(() => safeJoin(cwd, '../task_a_neighbor/report.txt'), /path_escape_blocked/);
+});
+
+test('safeJoin canonicalizes symlinks that point outside the task directory', () => {
+  // Аудит 2026-10-18 (MEDIUM symlink-обход): resolve/normalize не следят за symlink;
+  // production safeJoin теперь канонизирует обе стороны через realpathSync.
+  const cwd = resolve('owned-workspace', 'task_a');
+  const linkFull = resolve(cwd, 'link');
+  const outside = resolve('owned-workspace', 'task_b');
+  const symlinkRealpath = (p) => (p === linkFull || p.startsWith(linkFull + sep) ? outside + p.slice(linkFull.length) : p);
+  const { safeJoin: safeJoinWithLinks } = makeArtifactHelpers(new Map(), symlinkRealpath);
+  assert.throws(() => safeJoinWithLinks(cwd, 'link/report.txt'), /path_escape_blocked/);
+  // штатный путь внутри каталога задачи по-прежнему разрешён
+  assert.equal(safeJoinWithLinks(cwd, 'report.txt'), resolve(cwd, 'report.txt'));
 });
 
 const sigStatsBody = between('function sigStats(', '// \u2500\u2500 R18');

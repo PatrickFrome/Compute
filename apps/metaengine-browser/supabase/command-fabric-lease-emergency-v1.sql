@@ -2,6 +2,15 @@
 -- Intentionally rollback-only and outside supabase/migrations. This function is a
 -- qualification artifact until the dedicated Browser emergency intake is wired and
 -- physical preemption tests pass.
+--
+-- AUDIT FIXPACK2 (2026-10-18) — DIVERGENCE WARNING, same RPC name, different behavior:
+-- the deployed canonical function public.h205f22_a2_browser_supervisor_lease_emergency_v1
+-- is defined by supabase/migrations/20260921000000_browser_emergency_lane_and_lease_v1.sql
+-- and leases the WHOLE dedicated emergency lane with advisory lock key
+-- 'workspace:client'. THIS artifact leases a narrower subset and uses advisory lock key
+-- 'workspace:client:emergency'. It is NOT deployed by the migration chain. If you change
+-- one, reconcile the other — or better, retire this staged copy once the physical
+-- preemption qualification lands.
 
 begin;
 

@@ -13,7 +13,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomous-development-fabric-v1-20261017',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.864629885843.1',
+  package_version:'0.7.0-dev.1107139874568.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -45,9 +45,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.870171998070.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
- }]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+ },{
   schema:'metaengine.client.package-version-successor.v1',
   source_parent:'234d3a9e1ed7b139ed229fa5cf998678a76607b7',
   baseline_source_parent:candidate.source_parent,
@@ -55,15 +53,44 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.864629885843.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
+ }]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  schema:'metaengine.client.package-version-successor.v1',
+  source_parent:'adcd58073377fa4276330c5046b42458116e4dac',
+  baseline_source_parent:candidate.source_parent,
+  prior_version:'0.7.0-dev.864629885843.1',
+  distinct_version:'0.7.0-dev.1107139874568.1',
+  preceding_version_burned:true,production_ready:false,
+  promotion_authorized:false,authority_effect:false,
  });
  assert.equal(parentVersion,previous[0].prior_version,'baseline source package identity drift');
  assert.equal(previous[0].distinct_version,previous[1].prior_version,'historical successor chain');
- assert.equal(previous[1].distinct_version,successor.prior_version,'current successor chain');
+ assert.equal(previous[1].distinct_version,previous[2].prior_version,'historical successor chain');
+ assert.equal(previous[2].distinct_version,successor.prior_version,'current successor chain');
  assert.equal(candidate.package_version,successor.distinct_version,'new source version drift');
  assert.ok(manifest.burned_versions.includes(parentVersion),'previous physical version must stay burned');
  assert.equal(candidate.historical_package_version,manifest.test_candidate.version);
  assert.notEqual(candidate.package_version,candidate.historical_package_version);
 }
+
+function assertFreshVersion(version, burned) {
+ const parse=value=>{
+  assert.match(value,/^0\.7\.0-dev\.\d+\.1$/);
+  return BigInt(value.split('.')[3]);
+ };
+ const current=parse(version);
+ assert.ok(burned.length>0);
+ for(const previous of burned) assert.ok(current>parse(previous),'candidate must exceed every consumed reservation');
+}
+
+test('current package reservation is monotonic across known consumed candidates',()=>{
+ const current=manifest.current_source_candidate.package_version;
+ assertFreshVersion(current,manifest.burned_versions);
+ for(const value of ['0.7.0-dev.1.1','0.7.0-dev.864629885843.1','0.7.0-dev.1107139874567.1',current]) {
+  assert.throws(()=>assertFreshVersion(value,[...manifest.burned_versions,current]),{code:'ERR_ASSERTION'});
+ }
+});
 
 test('critical closure retains all reviewed source parents and the immutable W73 base',()=>{
  assert.equal(manifest.schema,'metaengine.client.critical-closure.v1');

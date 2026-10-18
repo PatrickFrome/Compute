@@ -339,9 +339,9 @@ export function classifyNoOpEffectOutcome(actionRaw, result) {
     return null;
   }
   if (action === 'RELOAD') {
-    // webContents.reload() deterministically initiates the reload; a failed
-    // load surfaces through perception_error afterwards.
-    return 'CONFIRMED';
+    // A receipt proves initiation, not completion of the later page load.
+    // Missing/legacy results still require postcondition readback.
+    return result?.reload_initiated === true ? 'CONFIRMED' : null;
   }
   if (action === 'SCROLL') {
     const scroll = result?.scroll;

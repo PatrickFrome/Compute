@@ -8,47 +8,104 @@
 
 -- ---------------------------------------------------------------------------
 -- 1. Supervisor RPC least-authority hardening.
+--    Guarded: public.coordination_read_barrier_h205f22() is defined only by
+--    coordination/read-plane/read-barrier-migration.sql (outside this chain)
+--    and the supervisor continuity RPCs are created later in 20260904202000.
+--    Per the documented fresh-project contract (supabase/operations/
+--    20261005191500) a missing dependency skips with NOTICE instead of failing
+--    the fresh migration run.
 -- ---------------------------------------------------------------------------
 
-alter function public.coordination_read_barrier_h205f22() set search_path = '';
-revoke execute on function public.coordination_read_barrier_h205f22() from public;
-revoke execute on function public.coordination_read_barrier_h205f22() from anon;
-grant execute on function public.coordination_read_barrier_h205f22() to authenticated;
-grant execute on function public.coordination_read_barrier_h205f22() to service_role;
+do $guard$
+begin
+  if to_regprocedure('public.coordination_read_barrier_h205f22()') is null then
+    raise notice 'skip: public.coordination_read_barrier_h205f22() not present (defined outside the migration chain)';
+  else
+    alter function public.coordination_read_barrier_h205f22() set search_path = '';
+    revoke execute on function public.coordination_read_barrier_h205f22() from public;
+    revoke execute on function public.coordination_read_barrier_h205f22() from anon;
+    grant execute on function public.coordination_read_barrier_h205f22() to authenticated;
+    grant execute on function public.coordination_read_barrier_h205f22() to service_role;
+  end if;
+end
+$guard$;
 
-alter function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) set search_path = '';
-revoke execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) from public;
-revoke execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) from anon;
-revoke execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) from authenticated;
-grant execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) to service_role;
+do $guard$
+begin
+  if to_regprocedure('public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb)') is null then
+    raise notice 'skip: public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid,text,jsonb) not created yet (20260904202000)';
+  else
+    alter function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) set search_path = '';
+    revoke execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) from public;
+    revoke execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) from anon;
+    revoke execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) from authenticated;
+    grant execute on function public.h205f22_a2_browser_supervisor_continue_if_needed_v1(uuid, text, jsonb) to service_role;
+  end if;
+end
+$guard$;
 
-alter function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() set search_path = '';
-revoke execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() from public;
-revoke execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() from anon;
-revoke execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() from authenticated;
-grant execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() to service_role;
+do $guard$
+begin
+  if to_regprocedure('public.h205f22_a2_browser_supervisor_continuity_trigger_v1()') is null then
+    raise notice 'skip: public.h205f22_a2_browser_supervisor_continuity_trigger_v1() not created yet (20260904202000)';
+  else
+    alter function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() set search_path = '';
+    revoke execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() from public;
+    revoke execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() from anon;
+    revoke execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() from authenticated;
+    grant execute on function public.h205f22_a2_browser_supervisor_continuity_trigger_v1() to service_role;
+  end if;
+end
+$guard$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Supervisor storage least-authority hardening.
+--    Guarded per table: the two supervisor tables are created later in
+--    20260929010000, and compute_fabric_development_gate_policy_h205f22 is
+--    created nowhere in this chain (live-only R1 object).
 -- ---------------------------------------------------------------------------
 
-alter table public.compute_fabric_a2_supervisor_mesh_instance_h205f22 enable row level security;
-alter table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 enable row level security;
-alter table public.compute_fabric_development_gate_policy_h205f22 enable row level security;
+do $guard$
+begin
+  if to_regclass('public.compute_fabric_a2_supervisor_mesh_instance_h205f22') is null then
+    raise notice 'skip: public.compute_fabric_a2_supervisor_mesh_instance_h205f22 not created yet (20260929010000)';
+  else
+    alter table public.compute_fabric_a2_supervisor_mesh_instance_h205f22 enable row level security;
+    revoke all privileges on table public.compute_fabric_a2_supervisor_mesh_instance_h205f22 from public, anon, authenticated;
+    grant select, insert, update, delete on table public.compute_fabric_a2_supervisor_mesh_instance_h205f22 to service_role;
+  end if;
+end
+$guard$;
 
-revoke all privileges on table public.compute_fabric_a2_supervisor_mesh_instance_h205f22 from public, anon, authenticated;
-revoke all privileges on table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 from public, anon, authenticated;
-revoke all privileges on table public.compute_fabric_development_gate_policy_h205f22 from public, anon, authenticated;
+do $guard$
+begin
+  if to_regclass('public.compute_fabric_a2_supervisor_actuation_lease_h205f22') is null then
+    raise notice 'skip: public.compute_fabric_a2_supervisor_actuation_lease_h205f22 not created yet (20260929010000)';
+  else
+    alter table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 enable row level security;
+    revoke all privileges on table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 from public, anon, authenticated;
+    grant select, insert, update, delete on table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 to service_role;
 
-grant select, insert, update, delete on table public.compute_fabric_a2_supervisor_mesh_instance_h205f22 to service_role;
-grant select, insert, update, delete on table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 to service_role;
-grant select, insert, update, delete on table public.compute_fabric_development_gate_policy_h205f22 to service_role;
+    -- Cover the composite FK used during coordinator handoff/release. The unique active-client
+    -- index cannot serve this lookup because it is keyed by target_client_id instead.
+    create index if not exists a2_supervisor_actuation_holder_fk_idx
+      on public.compute_fabric_a2_supervisor_actuation_lease_h205f22
+      (workspace_id, holder_supervisor_instance_id);
+  end if;
+end
+$guard$;
 
--- Cover the composite FK used during coordinator handoff/release. The unique active-client
--- index cannot serve this lookup because it is keyed by target_client_id instead.
-create index if not exists a2_supervisor_actuation_holder_fk_idx
-  on public.compute_fabric_a2_supervisor_actuation_lease_h205f22
-  (workspace_id, holder_supervisor_instance_id);
+do $guard$
+begin
+  if to_regclass('public.compute_fabric_development_gate_policy_h205f22') is null then
+    raise notice 'skip: public.compute_fabric_development_gate_policy_h205f22 is created nowhere in this chain (live-only object)';
+  else
+    alter table public.compute_fabric_development_gate_policy_h205f22 enable row level security;
+    revoke all privileges on table public.compute_fabric_development_gate_policy_h205f22 from public, anon, authenticated;
+    grant select, insert, update, delete on table public.compute_fabric_development_gate_policy_h205f22 to service_role;
+  end if;
+end
+$guard$;
 
 -- ---------------------------------------------------------------------------
 -- 3. Explicit RPC authority for the Browser Edge service only.

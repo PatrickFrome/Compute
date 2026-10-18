@@ -30,7 +30,8 @@
 // planExec обязателен для ЛЮБОЙ команды через эту плоскость (non-bypass).
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { db, emit, VERSION } from "../store";
 import { recordSpan } from "./otel";
@@ -39,6 +40,8 @@ import { REPO_ROOT, WORKTREE_ROOT } from "./worktrees";
 import { planExec } from "./exec";
 import { loadPolicy, type SandboxPolicy } from "./policy";
 import { buildSeccompFilter, type NetMode } from "./seccomp-filter";
+import { strictCheck } from "./sandbox-enforcement";
+export { strictCheck } from "./sandbox-enforcement";
 
 export const SANDBOX2_SCHEMA = "me2.sandbox2.v1";
 const S2_DIR = join(SB_ROOT, ".sandbox2");
@@ -48,7 +51,10 @@ const STDERR_CAP = 4_000;
 const PROBE_TIMEOUT_MS = 15_000;
 
 // секреты хоста — единственный обязательный hide (vault $CONTOUR/.a2)
-const DEFAULT_HIDE = [join(process.env.ME2_CONTOUR_HOME ?? "/home/z", ".a2")];
+const DEFAULT_HIDE = [
+  join(process.env.ME2_CONTOUR_HOME ?? "/home/z", ".a2"),
+  resolve(process.env.ME2_DATA_DIR ?? join(dirname(fileURLToPath(import.meta.url)), "..", "data")),
+];
 export const SECRETS_HIDE = DEFAULT_HIDE[0];
 
 try { mkdirSync(S2_DIR, { recursive: true }); } catch { /* probe-режим */ }
@@ -70,7 +76,7 @@ let runtimeOverride: Partial<SandboxPolicy> | null = null;
 
 export function sandboxConfig(): SandboxPolicy {
   const fromFile = loadPolicy().sandbox ?? CFG_DEFAULTS;
-  return { ...CFG_DEFAULTS, ...fromFile, ...(runtimeOverride ?? {}) };
+  return { ...CFG_DEFAULTS, ...fromFile, ...(runtimeOverride ?? {}), strict: true };
 }
 export function sandboxSetOverride(patch: Partial<SandboxPolicy>): SandboxPolicy {
   runtimeOverride = { ...(runtimeOverride ?? {}), ...patch };
@@ -170,7 +176,7 @@ export function planSandbox(
   if (caps.verdict === "unsandboxed") {
     return { ok: false, reason: "sandbox_unavailable", detail: `fs_confinement=${caps.fs_confinement} seccomp_mode=${caps.seccomp_mode} — честный unsandboxed; канонический ask (P0-2)` };
   }
-  const net: NetMode = opts.net === "allow" ? "allow" : (cfg.net === "allow" ? "allow" : "deny");
+  const net: NetMode = opts.net ?? cfg.net;
   const hide = [...DEFAULT_HIDE, ...cfg.extra_hide, ...(opts.hide ?? [])];
   for (const h of hide) {
     // канон fail-closed: мусор в hide не фильтруем молча — отклоняем план
@@ -254,24 +260,6 @@ export interface SandboxVerdict {
 }
 
 /** Обязательные слои strict-режима: без НИХ ребёнок не запускается (fail-closed). */
-export function strictCheck(layers: Record<string, string | boolean> | null, net: NetMode, strict: boolean): { ok: boolean; failed: string[] } {
-  if (!layers) return { ok: false, failed: ["verdict_file_missing"] };
-  const failed: string[] = [];
-  if (layers.make_private !== true) failed.push("make_private");
-  if (layers.ro_root !== true) failed.push("ro_root");
-  if (layers.rw_rebinds !== true) failed.push("rw_rebinds");
-  if (layers.secrets_hidden !== true) failed.push("secrets_hidden");
-  if (layers.seccomp !== "installed") failed.push("seccomp");
-  if (layers.rlimit_as !== true || layers.rlimit_nofile !== true || layers.rlimit_core !== true) failed.push("rlimits");
-  if (net === "deny" && layers.net !== "deny") failed.push("net_mode");
-  // нестрогий режим: только seccomp+verdict обязательны (fs-слои деградировали честно)
-  if (!strict) {
-    const soft = failed.filter((f) => f === "seccomp" || f === "verdict_file_missing");
-    return { ok: soft.length === 0, failed: soft.length === 0 ? [] : soft };
-  }
-  return { ok: failed.length === 0, failed };
-}
-
 function killTree(child: ReturnType<typeof spawn>): void {
   try { child.kill("SIGTERM"); } catch { /* уже мёртв */ }
   setTimeout(() => { try { if (child.exitCode === null && !child.killed) child.kill("SIGKILL"); } catch { /* гонка */ } }, 800).unref();
