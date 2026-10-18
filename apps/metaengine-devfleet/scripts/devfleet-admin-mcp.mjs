@@ -13,7 +13,8 @@ const methods=new Set([
   'dev.contract.rollback','dev.contract.reconcile',
   'dev.source.status','dev.source.inspect','dev.source.patch','dev.source.reconcile',
   'dev.receipt.status','dev.receipt.inspect','dev.receipt.reconcile','dev.receipt.abandon','dev.surface.inspect','dev.pipeline.rotate','dev.pipeline.rotate_batch','dev.pipeline.retire','dev.pipeline.retire_batch',
-  'dev.pipeline.queue_status','dev.pipeline.enqueue','dev.pipeline.cancel','dev.pipeline.admit','dev.pipeline.configure'
+  'dev.pipeline.queue_status','dev.pipeline.conveyor_status',
+  'dev.pipeline.enqueue','dev.pipeline.cancel','dev.pipeline.admit','dev.pipeline.configure'
 ]);
 const tools=[
   {name:'devfleet_overview',description:'One bounded, read-only observation of owned ChatGPT cells, exact receipts and native policy; never proves task completion',
