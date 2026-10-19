@@ -362,6 +362,7 @@ jobs:
             ${{ runner.temp }}/soak-me2-ui-proof.json
             ${{ runner.temp }}/soak-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-soak.json
+            ${{ runner.temp }}/soak-normal-ui-readback.json
             ${{ runner.temp }}/soak-profile.out
             ${{ runner.temp }}/soak-profile.err
             ${{ runner.temp }}/soak-normal-ui.out

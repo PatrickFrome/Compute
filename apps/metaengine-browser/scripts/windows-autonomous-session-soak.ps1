@@ -433,6 +433,20 @@ try {
   if ($ConcurrentBurstSize -gt 0 -and $burstElapsedMs -gt 8000) { throw "soak_concurrent_burst_budget_exceeded:$([Math]::Round($burstElapsedMs,2))" }
   if ($proof.second_instance_activations_verified -ne $expectedActivationCount) { throw 'soak_activation_count_mismatch' }
   Write-Host ($proof | ConvertTo-Json -Compress)
+} catch {
+  # Diagnostic-only readback. Never change the existing fatal soak result or
+  # serialize raw Owner/userData fields into a public CI artifact.
+  $failureCode = 'SOAK_OTHER_FAILURE'
+  if ($_.Exception.Message -eq 'soak_normal_ui_not_stable_visible') {
+    $failureCode = 'SOAK_NORMAL_UI_NOT_STABLE_VISIBLE'
+  } elseif ($_.Exception.Message -eq 'soak_runtime_import_failed') {
+    $failureCode = 'SOAK_RUNTIME_IMPORT_FAILED'
+  }
+  try {
+    $readback = Join-Path $RunnerTemp 'soak-normal-ui-readback.json'
+    & node (Join-Path $PSScriptRoot 'qa-soak-startup-readback.mjs') $journal $readback $failureCode | Out-Null
+  } catch {}
+  throw
 } finally {
   if ($normal -and -not $normal.HasExited) {
     cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
