@@ -63,7 +63,38 @@ function Read-DetachedSentinelByCustody([int]$ParentPid, [string]$Executable, [s
   } catch { return $null }
 }
 
-function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [string]$ProfilePath, [int]$Seconds = 15) {
+function Write-ResidentStartupFailureEvidence(
+  [int]$ParentPid, [string]$Executable, [string]$ProfilePath,
+  [string]$ExpectedVersion, [string]$Phase, [string]$StdoutPath, [string]$StderrPath,
+  [Nullable[int]]$ExitCode=$null
+) {
+  try {
+    $parameters=@{ParentPid=$ParentPid;Executable=$Executable;ProfilePath=$ProfilePath;
+      ExpectedVersion=$ExpectedVersion;Phase=$Phase;StdoutPath=$StdoutPath;StderrPath=$StderrPath;
+      ExitCode=$ExitCode}
+    $text=& (Join-Path $PSScriptRoot '../scripts/qa-resident-startup-failure.ps1') @parameters 2>$null
+    $row=($text | Out-String) | ConvertFrom-Json -ErrorAction Stop
+    if($row.schema -ne 'metaengine.browser.qa-resident-startup-failure.v1' -or
+       $row.state -notin @('UNQUALIFIED','CAPTURE_UNAVAILABLE') -or
+       $row.failure_phase -ne $Phase -or $row.expected_parent_pid -ne $ParentPid -or
+       $row.capture_only -ne $true -or $row.verification_succeeded -ne $false -or
+       $row.automatic_retry_allowed -ne $false -or $row.authority_effect -ne $false){return}
+    $evidence=Join-Path (Get-Location).Path 'self-update-fast-evidence'
+    if(-not (Test-Path -LiteralPath $evidence -PathType Container)){return}
+    $name=if($Phase -eq 'LEGACY_BEFORE_INSTALL'){'resident-startup-legacy-failure.json'}
+      elseif($Phase -eq 'SUCCESSOR_AFTER_INSTALL'){'resident-startup-successor-failure.json'}
+      else {return}
+    $file=Join-Path $evidence $name
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($row | ConvertTo-Json -Depth 10 -Compress))
+    $handle=[IO.File]::Open($file,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{$handle.Write($bytes,0,$bytes.Length);$handle.Flush($true)}finally{$handle.Dispose()}
+  } catch {
+    # Diagnostic failure never changes the original failing gate or authorizes retry.
+  }
+}
+
+function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [string]$ProfilePath,
+  [string]$ExpectedVersion, [string]$Phase, [string]$StdoutPath, [string]$StderrPath, [int]$Seconds = 15) {
   $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
   do {
     $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentPid" -ErrorAction SilentlyContinue | Where-Object {
@@ -96,6 +127,7 @@ function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [string]$Profi
     [IO.File]::WriteAllText((Join-Path $evidence 'resident-sentinel-readback.json'),
       (($failure | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
   }
+  Write-ResidentStartupFailureEvidence -ParentPid $ParentPid -Executable $Executable -ProfilePath $ProfilePath -ExpectedVersion $ExpectedVersion -Phase $Phase -StdoutPath $StdoutPath -StderrPath $StderrPath
   throw "sentinel_child_missing_for_parent:$ParentPid"
 }
 
@@ -150,12 +182,17 @@ if ($legacyProfile.primary_instance -ne $true -or $legacyProfile.marker_present 
 # HostResilience + detached Sentinel, matching the user's reported installation.
 Remove-Item Env:METAENGINE_DISABLE_CRASH_SENTINEL -ErrorAction SilentlyContinue
 Remove-Item Env:METAENGINE_SELF_UPDATE_TEST_MODE -ErrorAction SilentlyContinue
-$legacyPrimary = Start-Process -FilePath $app -PassThru
+$legacyStdout=Join-Path $temp ('resident-legacy-'+[guid]::NewGuid().ToString('N')+'.out')
+$legacyStderr=Join-Path $temp ('resident-legacy-'+[guid]::NewGuid().ToString('N')+'.err')
+$legacyPrimary = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $legacyStdout -RedirectStandardError $legacyStderr
 $null = $legacyPrimary.Handle
 Start-Sleep -Seconds 5
 $legacyPrimary.Refresh()
-if ($legacyPrimary.HasExited) { throw "legacy_primary_exited_before_upgrade:$($legacyPrimary.ExitCode)" }
-$legacySentinel = Wait-SentinelChild -ParentPid $legacyPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path)
+if ($legacyPrimary.HasExited) {
+  Write-ResidentStartupFailureEvidence -ParentPid $legacyPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path) -ExpectedVersion $legacyVersion -Phase 'LEGACY_BEFORE_INSTALL' -StdoutPath $legacyStdout -StderrPath $legacyStderr -ExitCode $legacyPrimary.ExitCode
+  throw "legacy_primary_exited_before_upgrade:$($legacyPrimary.ExitCode)"
+}
+$legacySentinel = Wait-SentinelChild -ParentPid $legacyPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path) -ExpectedVersion $legacyVersion -Phase 'LEGACY_BEFORE_INSTALL' -StdoutPath $legacyStdout -StderrPath $legacyStderr
 $legacySentinelPid = [int]$legacySentinel.ProcessId
 if (-not (Get-Process -Id $legacySentinelPid -ErrorAction SilentlyContinue)) { throw 'legacy_sentinel_not_alive_before_upgrade' }
 
@@ -180,12 +217,17 @@ if ($installedSha -ne $expectedInstalledExecutableSha) { throw "resident_upgrade
 $targetProbe = Read-VersionProbe $app
 if ([string]$targetProbe.version -ne $targetVersion -or $targetProbe.primary_instance -ne $true) { throw 'resident_upgrade_target_version_probe_invalid' }
 
-$newPrimary = Start-Process -FilePath $app -PassThru
+$newStdout=Join-Path $temp ('resident-successor-'+[guid]::NewGuid().ToString('N')+'.out')
+$newStderr=Join-Path $temp ('resident-successor-'+[guid]::NewGuid().ToString('N')+'.err')
+$newPrimary = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $newStdout -RedirectStandardError $newStderr
 $null = $newPrimary.Handle
 Start-Sleep -Seconds 5
 $newPrimary.Refresh()
-if ($newPrimary.HasExited) { throw "resident_upgrade_new_primary_exited_early:$($newPrimary.ExitCode)" }
-$newSentinel = Wait-SentinelChild -ParentPid $newPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path)
+if ($newPrimary.HasExited) {
+  Write-ResidentStartupFailureEvidence -ParentPid $newPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path) -ExpectedVersion $targetVersion -Phase 'SUCCESSOR_AFTER_INSTALL' -StdoutPath $newStdout -StderrPath $newStderr -ExitCode $newPrimary.ExitCode
+  throw "resident_upgrade_new_primary_exited_early:$($newPrimary.ExitCode)"
+}
+$newSentinel = Wait-SentinelChild -ParentPid $newPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path) -ExpectedVersion $targetVersion -Phase 'SUCCESSOR_AFTER_INSTALL' -StdoutPath $newStdout -StderrPath $newStderr
 $newSentinelPid = [int]$newSentinel.ProcessId
 if (-not (Get-Process -Id $newSentinelPid -ErrorAction SilentlyContinue)) { throw 'resident_upgrade_new_sentinel_not_alive' }
 

@@ -115,6 +115,8 @@ jobs:
             if ($parseErrors.Count -ne 0) { throw "physical_script_parse_failed:${path}:$($parseErrors[0].Message)" }
           }
           ./test/qualified-installer-consumer-verify.ps1
+          node --test test/qa-resident-sentinel-readback.test.mjs test/qa-resident-sentinel-physical-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'resident_failure_readback_tests_failed' }
       - name: Physically qualify disposable NSIS registry and both shortcut rollback
         working-directory: apps/metaengine-browser
         shell: powershell

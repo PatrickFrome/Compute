@@ -201,3 +201,40 @@ registry SHA256 `556b683a65eea5dca186ede9081b3a50ac5e6e7adf9fab0a83135f61ce451bd
 Start Menu `44eaa92adedb6d7419c2f4d6dac30916171846c366313ecf221565ab35644d49`,
 Desktop `dc11fb6da13bbe9967306c1ef39fe94ff884509242825b3f396f62464555b3d0`.
 This closes the missing Desktop readback in G1, not live restoration or installation.
+
+### W79-RESIDENT-STARTUP-READBACK — 2026-10-19 / R1, ADF-1 / DIAGNOSTIC ONLY
+
+- Source base: PR #1341, exact `421bfce64d71ffbc5a916b22c89eae86a2a7a538`.
+  Isolated branch: `work/metaengine-w79-resident-startup-evidence-20261019`.
+  Distinct source-only package version `0.7.0-dev.1107139874584.1`; .4583.1
+  remains burned. No intermediate physical builds, main merge or user installation.
+- Fresh #1341 terminal readback: Package Smoke 39198378614/117886176008 SUCCESS;
+  Current Source 39198378462, W59 39198378479, W66 39198378595, Final Runtime
+  39198378574 and Shell-First 39198378619 SUCCESS. Native NSIS fixture in actual
+  Windows Self Update executed 10/10 PASS. The old W45 five-second lease failure
+  was not reproduced on #1341; no production CAS defect is asserted from it.
+- Self Update 39198378472/117886788222 FAILED at the legacy resident launch:
+  sentinel_child_missing_for_parent:8112. Main N-to-N+1, durable successor, profile,
+  singleton and embedded ME2/Guardian checks completed before that gate. The
+  generic custody-missing receipt does NOT establish why the legacy startup
+  stopped. Separate no-Owner Autonomous Soak and hosted Installed Chat are red.
+- Implementation extends the existing resident witness serializer and physical
+  harness. The normal legacy and successor processes redirect output only into
+  disposable RUNNER_TEMP files. On early exit or missing Sentinel the existing
+  artifact receives fixed-category journal/PID/version/boot-phase, parent-presence,
+  Sentinel/heartbeat and known denial readback. The native reader is read-only;
+  raw output, token, profile path, command line, arbitrary error and URL are never
+  serialized. Stale other-PID/version/boot events cannot supply current phases.
+- Missing, malformed, oversized or late healthy evidence remains UNQUALIFIED;
+  capture-only diagnostics cannot admit a worker, waive the existing failure,
+  extend deadlines, authorize replay or manufacture Owner/Guardian authority.
+  Diagnostic capture failure also retains the original failing gate.
+- Local Windows regression: 21/21 PASS, including the real native helper reading
+  generated fixture bytes and leaving every input unchanged, real stdin CLI,
+  stale binding, malformed/oversized data and secret-redaction negatives.
+  Existing physical script and new native reader PowerShell parse PASS.
+  Existing Self Update Windows job now executes these native tests before package
+  acquisition. Exact-source closure and full source parse are required at final HEAD.
+- Decision: G1 remains BLOCKED / evidence preparation only. Next: read the actual
+  legacy phase receipt from terminal Windows CI, fix the evidenced startup cause,
+  then qualify the joined package/Owner/external-effect transaction and provenance.
