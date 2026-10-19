@@ -1,0 +1,48 @@
+name: Browser Renderer Readiness Proof W14
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/browser-renderer-readiness-proof.mjs'
+      - 'apps/metaengine-browser/test/browser-renderer-readiness-proof.test.mjs'
+      - 'docs/browser-renderer-readiness-proof.md'
+      - '.github/workflows/browser-renderer-readiness-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-renderer-readiness-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-source-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/metaengine-browser
+    steps:
+      - name: Checkout exact PR HEAD (never merge checkout)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Bind receipt to exact SHA
+        shell: bash
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Parse pure source and test
+        run: |
+          node --check src/browser-renderer-readiness-proof.mjs
+          node --check test/browser-renderer-readiness-proof.test.mjs
+      - name: Run W14 hermetic adversarial proof
+        run: node --test test/browser-renderer-readiness-proof.test.mjs
