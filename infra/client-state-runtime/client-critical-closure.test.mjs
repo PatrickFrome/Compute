@@ -13,7 +13,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomous-development-fabric-v1-20261017',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874581.1',
+  package_version:'0.7.0-dev.1107139874582.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -157,14 +157,22 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   distinct_version:'0.7.0-dev.1107139874580.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
- }]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+ },{
   schema:'metaengine.client.package-version-successor.v1',
   source_parent:'7abe627b12c2c2054d51980b0524239fcc25d8a8',
   baseline_source_parent:candidate.source_parent,
   prior_version:'0.7.0-dev.1107139874580.1',
   distinct_version:'0.7.0-dev.1107139874581.1',
+  preceding_version_burned:true,production_ready:false,
+  promotion_authorized:false,authority_effect:false,
+ }]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  schema:'metaengine.client.package-version-successor.v1',
+  source_parent:'40c1aa85a007d13127a05db21f5f6947253ac40d',
+  baseline_source_parent:candidate.source_parent,
+  prior_version:'0.7.0-dev.1107139874581.1',
+  distinct_version:'0.7.0-dev.1107139874582.1',
   preceding_version_burned:true,production_ready:false,
   promotion_authorized:false,authority_effect:false,
  });
@@ -184,7 +192,8 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
  assert.equal(previous[12].distinct_version,previous[13].prior_version,'historical successor chain');
  assert.equal(previous[13].distinct_version,previous[14].prior_version,'historical successor chain');
  assert.equal(previous[14].distinct_version,previous[15].prior_version,'historical successor chain');
- assert.equal(previous[15].distinct_version,successor.prior_version,'current successor chain');
+ assert.equal(previous[15].distinct_version,previous[16].prior_version,'historical successor chain');
+ assert.equal(previous[16].distinct_version,successor.prior_version,'current successor chain');
  assert.equal(candidate.package_version,successor.distinct_version,'new source version drift');
  assert.ok(manifest.burned_versions.includes(parentVersion),'previous physical version must stay burned');
  assert.equal(candidate.historical_package_version,manifest.test_candidate.version);
