@@ -142,10 +142,11 @@ test('an invalid acknowledgement is never treated as delivery success', async ()
   assert.match(transport.snapshot().last_error, /ack_invalid/);
 });
 
-test('gap invokes one full-snapshot recovery before cursor skips lost deltas', async () => {
+test('lost retained causal delta invokes one full-snapshot recovery before cursor skips it', async () => {
   const bus = new BrowserCognitiveDeltaBus({ streamId: STREAM_A, maxEvents: 8 });
   for (let i = 0; i < 8; i += 1) bus.publish({ type: 'WEB_CONTENTS_DESTROYED', web_contents_id: i + 1 });
-  bus.publish({ type: 'METRICS_SAMPLE' }); // dropped because critical ring is full
+  bus.publish({ type: 'METRICS_SAMPLE' }); // intentionally dropped before sequence allocation
+  bus.publish({ type: 'WEB_CONTENTS_CREATED', web_contents_id: 99 }); // evicts retained causal event
   const resyncs = [];
   const transport = new BrowserCognitiveDeltaTransport({
     readDeltas: (after, limit) => bus.readSince(after, limit),
@@ -158,6 +159,31 @@ test('gap invokes one full-snapshot recovery before cursor skips lost deltas', a
   assert.equal(resyncs[0].authority_effect, false);
   assert.equal(transport.snapshot().resync_count, 1);
   assert.equal(transport.snapshot().acknowledged_through_sequence, bus.snapshot().sequence);
+});
+
+test('saturated P3 metrics do not trigger resync churn when no causal delta was lost', async () => {
+  const bus = new BrowserCognitiveDeltaBus({ streamId: STREAM_A, maxEvents: 8 });
+  for (let i = 0; i < 8; i += 1) bus.publish({ type: 'WEB_CONTENTS_DESTROYED', web_contents_id: i + 1 });
+  let resyncs = 0;
+  const transport = new BrowserCognitiveDeltaTransport({
+    readDeltas: (after, limit) => bus.readSince(after, limit),
+    sendBatch: senderFrom([]),
+    resync: async () => { resyncs += 1; return true; },
+  });
+  assert.equal(await transport.flush(), true);
+  const cursor = transport.snapshot().acknowledged_through_sequence;
+  assert.equal(cursor, 8);
+
+  for (let i = 0; i < 64; i += 1) {
+    const dropped = bus.publish({ type: 'METRICS_SAMPLE' });
+    assert.equal(dropped.accepted, false);
+    assert.equal(dropped.resync_required, false);
+  }
+  assert.equal(bus.snapshot().sequence, 8);
+  assert.equal(await transport.flush(), true);
+  assert.equal(transport.snapshot().acknowledged_through_sequence, 8);
+  assert.equal(transport.snapshot().resync_count, 0);
+  assert.equal(resyncs, 0);
 });
 
 test('one in-flight send coalesces concurrent notify edges without a timer loop', async () => {
