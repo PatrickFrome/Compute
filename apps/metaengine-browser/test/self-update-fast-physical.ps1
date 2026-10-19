@@ -42,7 +42,7 @@ function Complete-CapturedProcessOutput($Capture) {
   [System.IO.File]::WriteAllText($Capture.ErrPath, [string]$stderr, [System.Text.UTF8Encoding]::new($false))
 }
 
-function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) {
+function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label, [int]$ExpectedExitCode = 0) {
   $process = $Capture.Process
   try {
     if (-not $process.WaitForExit($TimeoutMs)) {
@@ -55,7 +55,7 @@ function Wait-CapturedProcessOrThrow($Capture, [int]$TimeoutMs, [string]$Label) 
     $process.WaitForExit()
     Complete-CapturedProcessOutput $Capture
     $exitCode = [int]$process.ExitCode
-    if ($exitCode -ne 0) {
+    if ($exitCode -ne $ExpectedExitCode) {
       Get-Content $Capture.ErrPath -ErrorAction SilentlyContinue
       throw "${Label}_exit_$exitCode"
     }
@@ -300,7 +300,19 @@ $first.Refresh()
 if ($first.HasExited -or $firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
 $secondOut = Join-Path $temp 'singleton-second.out'; $secondErr = Join-Path $temp 'singleton-second.err'
 $second = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-single-instance-probe' -OutPath $secondOut -ErrPath $secondErr
-Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary'
+Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary' -ExpectedExitCode 6
+$secondRow = Read-LastJsonLine $secondOut
+if ([string]$secondRow.schema -ne 'metaengine.browser.secondary-diagnostic-refusal.v1' -or
+    [string]$secondRow.state -ne 'PRIMARY_INSTANCE_REQUIRED' -or
+    [string]$secondRow.requested_probe -ne '--metaengine-single-instance-probe' -or
+    $secondRow.primary_instance -ne $false -or
+    $secondRow.original_primary_terminated -ne $false -or
+    $secondRow.browser_runtime_started -ne $false -or
+    $secondRow.network_started -ne $false -or
+    $secondRow.owner_bootstrap_started -ne $false -or
+    $secondRow.submit_effect_attempted -ne $false -or
+    $secondRow.automatic_retry_allowed -ne $false -or
+    $secondRow.authority_effect -ne $false) { throw 'singleton_secondary_refusal_invalid' }
 $first.Refresh()
 if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
 try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
