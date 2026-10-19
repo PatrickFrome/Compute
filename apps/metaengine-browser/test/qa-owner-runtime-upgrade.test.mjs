@@ -7,6 +7,7 @@ import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
   assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile } from '../scripts/qa-owner-runtime-upgrade.mjs';
 import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
 import { QA_IMAGE_SNAPSHOT_SCHEMA } from '../scripts/qa-installed-image-snapshot.mjs';
+import { NSIS_EFFECTS_SCHEMA } from '../scripts/qa-nsis-external-effects.mjs';
 
 const digest='a'.repeat(64),source='b'.repeat(40),version='0.7.0-dev.202610190001.1';
 const options={mode:'prepare','candidate-resources':path.resolve(os.tmpdir(),'qa-candidate','resources'),
@@ -75,6 +76,9 @@ test('unsigned QA proof cannot gain production authority or replay a publication
     candidate_resources:options['candidate-resources'],installed_resources:options['installed-resources'],
     bundle_sha256:digest,config_sha256:digest,old_config_sha256:digest,runtime:{exit_code:0,children_stopped:true},
     state_directory:stateDir,
+    predecessor_nsis_effects:{schema:NSIS_EFFECTS_SCHEMA,state:'OBSERVED',version:'0.7.0-dev.1107139874568.1',
+      registry_entry_count:1,shortcut_count:1,shortcut_target_bound:true,uninstaller_present:true,
+      registry_sha256:'4'.repeat(64),shortcut_sha256:'5'.repeat(64),mutation:false,authority_effect:false},
     predecessor_snapshot:{schema:QA_IMAGE_SNAPSHOT_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456,
       source_unchanged:true,copied_tree_verified:true,installed_mutated:false,restore_authorized:false,
       production_authorized:false,authority_effect:false,image_directory:path.join(snapshotRoot,'image'),
@@ -94,6 +98,12 @@ test('unsigned QA proof cannot gain production authority or replay a publication
     assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_snapshot:{...receipt.predecessor_snapshot,...change}},options),/receipt_unverified/);
   }
   assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_snapshot:null},options),/receipt_unverified/);
+  for(const change of [{version:'0.7.0-dev.1107139874574.1'},{registry_entry_count:2},
+    {shortcut_target_bound:false},{registry_sha256:'bad'},{authority_effect:true}]){
+    assert.throws(()=>assertUpgradeReceipt({...receipt,
+      predecessor_nsis_effects:{...receipt.predecessor_nsis_effects,...change}},options),/receipt_unverified/);
+  }
+  assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_nsis_effects:null},options),/receipt_unverified/);
   assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_image:{...receipt.predecessor_image,asar_sha256:'bad'}},options),/receipt_unverified/);
 });
 

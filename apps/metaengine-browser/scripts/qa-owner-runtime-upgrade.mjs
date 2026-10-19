@@ -14,6 +14,7 @@ import { validateRuntimeHostConfig } from '../../../infra/client-state-runtime/r
 import { verifyOfflineRuntimeBundle } from '../../../infra/client-state-runtime/offline-runtime-bundle.mjs';
 import { captureInstalledTreeFingerprint, INSTALLED_TREE_SCHEMA } from './qa-installed-tree-fingerprint.mjs';
 import { stagePrivateQaImageSnapshot, QA_IMAGE_SNAPSHOT_SCHEMA } from './qa-installed-image-snapshot.mjs';
+import { observeWindowsNsisEffects, assertNsisEffectsObserved, assertNsisEffectsRestored } from './qa-nsis-external-effects.mjs';
 import { localRuntimeHostEnvironment } from '../src/local-runtime-host-controller.mjs';
 import { localStateProviderOwnerFile, validateLocalStateProviderConfig,
   validateLocalStateRuntimeIdentity, localStateProviderHealthAttested } from '../src/local-state-provider-policy.mjs';
@@ -274,6 +275,7 @@ export async function prepareUpgrade(options) {
   await absent(options.receipt);await privateReceiptRoot(options.receipt);
   const checked=await candidate(options), old=await oldState(options);
   const predecessorImage=await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256);
+  const predecessorNsis=await observeWindowsNsisEffects({expectedVersion:predecessorImage.package_version});
   await quiescent(old);
   const pg=await keeper(old.config);
   const stateDirectory=path.join(path.dirname(old.config.state_directory),'client-state-qa-upgrade-'+randomUUID());
@@ -307,11 +309,16 @@ export async function prepareUpgrade(options) {
     config_file:configFile,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_file:qualificationFile,
     state_directory:stateDirectory,proposed_provider:proposed,runtime,keeper:pg,
     predecessor_image:predecessorImage,predecessor_snapshot:predecessorSnapshot,
+    predecessor_nsis_effects:predecessorNsis,
     production_authorized:false,provenance_verified:false,provider_published:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
   await exclusive(options.receipt,JSON.stringify(receipt,null,2)+'\n');await acl(options.receipt);
   return {state:receipt.state,receipt_file:options.receipt,receipt_sha256:sha(await stableUpgradeRead(options.receipt)),provider_published:false,production_authorized:false};
 }
 
+function validNsisPredecessorReceipt(proof,version) {
+  try {return assertNsisEffectsObserved(proof,version)===true;}
+  catch {return false;}
+}
 export function assertUpgradeReceipt(receipt,options) {
   if(receipt?.schema!==SCHEMA||receipt.state!=='QUALIFIED_AND_STOPPED'||receipt.provider_published!==false
     ||receipt.production_authorized!==false||receipt.provenance_verified!==false||receipt.authority_effect!==false
@@ -340,6 +347,8 @@ export function assertUpgradeReceipt(receipt,options) {
     ||receipt.predecessor_snapshot?.restore_authorized!==false
     ||receipt.predecessor_snapshot?.production_authorized!==false
     ||receipt.predecessor_snapshot?.authority_effect!==false
+    ||receipt.predecessor_nsis_effects?.version!==receipt.predecessor_image?.package_version
+    ||!validNsisPredecessorReceipt(receipt.predecessor_nsis_effects,receipt.predecessor_image?.package_version)
     ||!samePath(receipt.predecessor_snapshot?.image_directory||'.',path.join(receipt.state_directory,'predecessor-image-snapshot','image'))
     ||!samePath(receipt.predecessor_snapshot?.receipt_file||'.',path.join(receipt.state_directory,'predecessor-image-snapshot','snapshot-proof.json')))
     fail('receipt_unverified');
@@ -377,6 +386,8 @@ export async function publishUpgrade(options) {
   const old=await oldState(options);
   assertPredecessorImageMatches(proof.predecessor_image,
     await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256));
+  assertNsisEffectsRestored(proof.predecessor_nsis_effects,
+    await observeWindowsNsisEffects({expectedVersion:proof.predecessor_image.package_version}));
   await acl(proof.predecessor_snapshot.image_directory,true);
   await acl(proof.predecessor_snapshot.receipt_file);
   const stagedPredecessor=await captureInstalledTreeFingerprint(proof.predecessor_snapshot.image_directory);
@@ -452,6 +463,16 @@ export async function rollbackUpgrade(options) {
     journal.state='EFFECT_UNKNOWN_IMAGE_NOT_RESTORED';
     await save(publicationFile,journal);
     fail('predecessor_image_not_restored');
+  }
+  // NSIS registry and Start Menu link are external installer effects. Never
+  // publish an Owner-only rollback if these are still changed or unverified.
+  try {
+    assertNsisEffectsRestored(proof.predecessor_nsis_effects,
+      await observeWindowsNsisEffects({expectedVersion:proof.predecessor_image.package_version}));
+  } catch {
+    journal.state='EFFECT_UNKNOWN_EXTERNAL_EFFECTS_NOT_RESTORED';
+    await save(publicationFile,journal);
+    fail('predecessor_nsis_effects_not_restored');
   }
   const oldBytes=await stableUpgradeRead(proof.backup_owner_file);await acl(proof.backup_owner_file);
   if(sha(oldBytes)!==proof.old_owner_sha256)fail('backup_changed');
