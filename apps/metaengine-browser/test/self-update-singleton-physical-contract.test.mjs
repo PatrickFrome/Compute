@@ -28,6 +28,12 @@ test('physical SelfUpdate test demands exit 6 and validates all secondary refusa
     'network_started','owner_bootstrap_started','submit_effect_attempted',
     'automatic_retry_allowed','authority_effect'
   ])assert.ok(source.includes('$secondRow.'+field+' -ne $false'),field);
+  // Secondary diagnostic denial is emitted on console.error (stderr).
+  // Stdout must never be accepted as its refusal proof.
+  const entry=readFileSync(new URL('../src/main-entry.mjs',import.meta.url),'utf8');
+  assert.match(entry,/console\.error\(JSON\.stringify\(secondaryDiagnosticRefusal\(/);
+  assert.match(source,/\$secondRow\s*=\s*Read-LastJsonLine\s+\$secondErr/);
+  assert.doesNotMatch(source,/\$secondRow\s*=\s*Read-LastJsonLine\s+\$secondOut/);
   assert.match(source,/singleton_secondary_displaced_primary/);
   assert.match(source,/singleton_secondary_refusal_invalid/);
 });
