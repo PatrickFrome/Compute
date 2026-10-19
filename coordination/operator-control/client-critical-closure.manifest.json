@@ -503,7 +503,8 @@
     "apps/metaengine-browser/test/qa-resident-sentinel-physical-contract.test.mjs": "558df0fc6043dbfbe6240fd20ed51b1adad90540",
     "apps/metaengine-browser/test/installer-resident-upgrade-physical.ps1": "e283a1add4b98740982d449a38129f911b38f7de",
     "apps/metaengine-browser/scripts/qa-disposable-nsis-effects.ps1": "b65e127a43a9d4eb4dd1db64f150e6d7f42627ff",
-    "apps/metaengine-browser/test/qa-disposable-nsis-effects.test.mjs": "58484c3bceec898a5e80fcecebc96b5e70af12d4"
+    "apps/metaengine-browser/test/qa-disposable-nsis-effects.test.mjs": "58484c3bceec898a5e80fcecebc96b5e70af12d4",
+    "coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md": "f7f80faee20f109832e2d96e1cc1b1d2fd75cbe7"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
