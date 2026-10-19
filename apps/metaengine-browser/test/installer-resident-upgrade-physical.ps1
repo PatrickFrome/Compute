@@ -22,7 +22,48 @@ function Wait-ProcessGone([int]$ProcessId, [int]$Seconds, [string]$Label) {
   throw "${Label}_still_alive:$ProcessId"
 }
 
-function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds = 15) {
+function Read-DetachedSentinelByCustody([int]$ParentPid, [string]$Executable, [string]$ProfilePath) {
+  if (-not $ProfilePath -or -not [IO.Path]::IsPathRooted($ProfilePath)) { return $null }
+  $statePath = Join-Path $ProfilePath 'metaengine-browser-sentinel-v1.json'
+  $heartbeatPath = "$statePath.worker-heartbeat-v1.json"
+  foreach ($file in @($statePath, $heartbeatPath)) {
+    $info = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    if (-not $info -or $info.PSIsContainer -or $info.Length -lt 2 -or $info.Length -gt 32768 -or
+        ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $null }
+  }
+  try {
+    $state = Get-Content -LiteralPath $statePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $heartbeat = Get-Content -LiteralPath $heartbeatPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $workerPid = [int]$state.worker_pid
+    if ($workerPid -le 0) { return $null }
+    $wmiRows = @(Get-CimInstance Win32_Process -Filter "ProcessId = $workerPid" -ErrorAction Stop)
+    if ($wmiRows.Count -ne 1) { return $null }
+    $record = $wmiRows[0]
+    $inputValue = [ordered]@{
+      parentPid = $ParentPid; executable = $Executable;
+      state = $state; heartbeat = $heartbeat;
+      process = [ordered]@{
+        ProcessId = [int]$record.ProcessId;
+        ParentProcessId = [int]$record.ParentProcessId;
+        ExecutablePath = [string]$record.ExecutablePath;
+        CommandLine = [string]$record.CommandLine;
+      }
+    }
+    # This native witness is never a new authority root. It is checked by
+    # the exact reviewed verifier without publishing process command lines.
+    $receiptText = ($inputValue | ConvertTo-Json -Depth 12 -Compress) | & node (Join-Path $PSScriptRoot '../scripts/qa-resident-sentinel-readback.mjs') 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $receipt = $receiptText | ConvertFrom-Json -ErrorAction Stop
+    if ($receipt.schema -ne 'metaengine.browser.qa-resident-sentinel-readback.v1' -or
+        $receipt.state -ne 'VERIFIED' -or $receipt.parent_pid -ne $ParentPid -or
+        $receipt.worker_pid -ne $workerPid -or $receipt.worker_custody_token_verified -ne $true -or
+        $receipt.heartbeat_fresh -ne $true -or $receipt.process_executable_verified -ne $true -or
+        $receipt.worker_script_verified -ne $true -or $receipt.authority_effect -ne $false) { return $null }
+    return $record
+  } catch { return $null }
+}
+
+function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [string]$ProfilePath, [int]$Seconds = 15) {
   $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
   do {
     $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentPid" -ErrorAction SilentlyContinue | Where-Object {
@@ -38,13 +79,31 @@ function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds 
     if ($children.Count -gt 1) { throw "sentinel_child_cardinality_invalid:$($children.Count)" }
     Start-Sleep -Milliseconds 200
   } while ([DateTime]::UtcNow -lt $deadline)
+  # A Windows detached worker may no longer report the launcher's OS parent.
+  # Never accept a guessed PID: require current custody, heartbeat and WMI.
+  $detached = Read-DetachedSentinelByCustody -ParentPid $ParentPid -Executable $Executable -ProfilePath $ProfilePath
+  if ($detached) { return $detached }
+  $failure = [ordered]@{
+    schema = 'metaengine.browser.qa-resident-sentinel-failure.v1'
+    state = 'UNQUALIFIED'
+    reason = 'SENTINEL_NATIVE_OR_CUSTODY_READBACK_MISSING'
+    expected_parent_pid = $ParentPid
+    automatic_retry_allowed = $false
+    authority_effect = $false
+  }
+  $evidence = Join-Path (Get-Location).Path 'self-update-fast-evidence'
+  if (Test-Path -LiteralPath $evidence -PathType Container) {
+    [IO.File]::WriteAllText((Join-Path $evidence 'resident-sentinel-readback.json'),
+      (($failure | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+  }
   throw "sentinel_child_missing_for_parent:$ParentPid"
 }
 
-function Read-VersionProbe([string]$Executable) {
+function Read-VersionProbe([string]$Executable, [string]$ProbeFlag = '--metaengine-version-probe') {
+  if ($ProbeFlag -notin @('--metaengine-version-probe', '--metaengine-profile-probe')) { throw 'resident_probe_flag_invalid' }
   $out = Join-Path $temp ("resident-version-" + [guid]::NewGuid().ToString('N') + '.out')
   $err = Join-Path $temp ("resident-version-" + [guid]::NewGuid().ToString('N') + '.err')
-  $p = Start-Process -FilePath $Executable -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+  $p = Start-Process -FilePath $Executable -ArgumentList $ProbeFlag -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
   $null = $p.Handle
   if (-not $p.WaitForExit(15000)) { try { Stop-Process -Id $p.Id -Force } catch {}; throw 'version_probe_timeout' }
   if ($p.ExitCode -ne 0) { Get-Content $err -ErrorAction SilentlyContinue; throw "version_probe_exit_$($p.ExitCode)" }
@@ -76,6 +135,16 @@ if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw 'legacy_installed
 $legacyProbe = Read-VersionProbe $app
 if ([string]$legacyProbe.version -ne $legacyVersion -or $legacyProbe.primary_instance -ne $true) { throw 'legacy_version_probe_invalid' }
 
+$legacyProfile = Read-VersionProbe $app '--metaengine-profile-probe'
+$baselineUserData = (Get-Content (Join-Path $temp 'baseline-user-data-path.txt') -Raw).Trim()
+if ($legacyProfile.primary_instance -ne $true -or $legacyProfile.marker_present -ne $true -or
+    [string]$legacyProfile.version -ne $legacyVersion -or
+    -not [IO.Path]::IsPathRooted([string]$legacyProfile.user_data_path) -or
+    -not [String]::Equals([IO.Path]::GetFullPath([string]$legacyProfile.user_data_path),
+      [IO.Path]::GetFullPath($baselineUserData), [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'legacy_profile_custody_unverified'
+}
+
 # The workflow normally suppresses Sentinel for the synthetic self-update harness.
 # Remove that override here: this phase must be a real ordinary Browser launch with
 # HostResilience + detached Sentinel, matching the user's reported installation.
@@ -86,7 +155,7 @@ $null = $legacyPrimary.Handle
 Start-Sleep -Seconds 5
 $legacyPrimary.Refresh()
 if ($legacyPrimary.HasExited) { throw "legacy_primary_exited_before_upgrade:$($legacyPrimary.ExitCode)" }
-$legacySentinel = Wait-SentinelChild -ParentPid $legacyPrimary.Id -Executable $app
+$legacySentinel = Wait-SentinelChild -ParentPid $legacyPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path)
 $legacySentinelPid = [int]$legacySentinel.ProcessId
 if (-not (Get-Process -Id $legacySentinelPid -ErrorAction SilentlyContinue)) { throw 'legacy_sentinel_not_alive_before_upgrade' }
 
@@ -116,7 +185,7 @@ $null = $newPrimary.Handle
 Start-Sleep -Seconds 5
 $newPrimary.Refresh()
 if ($newPrimary.HasExited) { throw "resident_upgrade_new_primary_exited_early:$($newPrimary.ExitCode)" }
-$newSentinel = Wait-SentinelChild -ParentPid $newPrimary.Id -Executable $app
+$newSentinel = Wait-SentinelChild -ParentPid $newPrimary.Id -Executable $app -ProfilePath ([string]$legacyProfile.user_data_path)
 $newSentinelPid = [int]$newSentinel.ProcessId
 if (-not (Get-Process -Id $newSentinelPid -ErrorAction SilentlyContinue)) { throw 'resident_upgrade_new_sentinel_not_alive' }
 
