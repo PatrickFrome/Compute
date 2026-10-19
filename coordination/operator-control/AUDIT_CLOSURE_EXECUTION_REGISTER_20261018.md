@@ -272,3 +272,8 @@ This closes the missing Desktop readback in G1, not live restoration or installa
 - Decision: EVIDENCE_READY for fenced prestate capture only. G1 remains BLOCKED
   for signed release, joined image/external effects/Owner transaction, installation
   and live admission. No Browser, Guardian, Owner, database or OS policy mutation.
+
+**Closure repair:** initial 179df86c closure was 5/6: the appended audit register
+retained its old protected blob. Correct that metadata, retain the failed receipt
+as historical, burn published .4585.1 and assign distinct .4586.1. No physical
+artifact from the earlier source qualifies this successor.
