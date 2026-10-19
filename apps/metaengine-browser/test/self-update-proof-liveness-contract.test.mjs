@@ -21,7 +21,12 @@ test('physical self-update uses direct ProcessStartInfo capture with stable exit
   assert.match(wait, /\$process\.WaitForExit\(\)/);
   assert.match(wait, /Complete-CapturedProcessOutput \$Capture/);
   assert.match(wait, /\[int\]\$process\.ExitCode/);
-  assert.match(wait, /\$exitCode -ne 0/);
+  // Standard probes still default to success code zero; the secondary
+  // singleton probe must independently require its explicit denial code six.
+  assert.match(wait, /\[int\]\$ExpectedExitCode = 0/);
+  assert.match(wait, /\$exitCode -ne \$ExpectedExitCode/);
+  assert.match(physicalScript, /-Label 'singleton_secondary' -ExpectedExitCode 6/);
+  assert.match(physicalScript, /\$secondRow\.state -ne 'PRIMARY_INSTANCE_REQUIRED'/);
   assert.doesNotMatch(wait, /exit_code_unavailable/);
 
   assert.doesNotMatch(
