@@ -238,3 +238,42 @@ This closes the missing Desktop readback in G1, not live restoration or installa
 - Decision: G1 remains BLOCKED / evidence preparation only. Next: read the actual
   legacy phase receipt from terminal Windows CI, fix the evidenced startup cause,
   then qualify the joined package/Owner/external-effect transaction and provenance.
+
+### G1-FENCED-PREDECESSOR — 2026-10-19 / R1, ADF-1 / RECOVERY PREFLIGHT
+
+- Source base: PR #1342, exact c5f3f7d3416b6e599829911c8c19923ccc3a2c7e.
+  Isolated worktree/branch: work/metaengine-g1-fenced-predecessor-recovery-20261019.
+  Distinct source version 0.7.0-dev.1107139874585.1; .4584.1 remains burned.
+- Physical defect: installed .4568.1 app.asar SHA256
+  a11d2d9e906c3ed8a20cade5f14b2caa9f59f1e7d718456cf0e84a85462077d9
+  binds runtime a9becd9d764d743080ca24b7eaa319e88f505c63254e20572b5f340131446392;
+  the existing Owner binds 8e72494a924d4cc271f2b8861914a278cc2eb42f69ff5e88c4a3ba7cad8c4df5.
+  Existing prepare refuses even to capture this broken prestate:
+  qa_upgrade_predecessor_owner_package_mismatch.
+- Fix the existing operator-only recovery tool, not runtime admission. Its default
+  remains Owner-bound. Explicit preserve-fenced recovery requires BOTH externally
+  pinned predecessor ASAR and runtime digests. Verify the actual full runtime
+  inventory under the actual image binding, preserve the original Owner mismatch,
+  and bind it through prepare/publish/rollback. A restored snapshot never admits
+  a runtime. Changed pins, a matched image in fenced mode, altered qualification
+  flags and old V1 receipts are rejected. Receipt schema is now V2.
+- Native read-only check on the real installed prestate: default mode still fails;
+  a changed ASAR pin fails with qa_upgrade_predecessor_recovery_preimage_changed;
+  exact fenced mode verifies 3229 files / 870647506 bytes, tree SHA256
+  5db32c6a23fc7d6628de88fcd6b1baec3585ff652725f46a9e47a3922299692b.
+  Owner bytes unchanged, mutation=false, authority_effect=false.
+- Windows regressions: 24/24 image/snapshot/NSIS/Owner tests PASS; affected Owner
+  suite repeated 12/12 after final policy validation; source parse 190 PASS.
+  Exact-HEAD blob closure and terminal CI remain separate requirements.
+- Read-only Windows signing capability check found zero code-signing certificates
+  and zero usable certificate private keys in CurrentUser/My and LocalMachine/My.
+  This says nothing about undisclosed external signers. W77 still explicitly
+  reports EXISTING_PROTECTED_RELEASE_ROOT_SIGNING_CAPABILITY_NOT_WIRED.
+- Decision: EVIDENCE_READY for fenced prestate capture only. G1 remains BLOCKED
+  for signed release, joined image/external effects/Owner transaction, installation
+  and live admission. No Browser, Guardian, Owner, database or OS policy mutation.
+
+**Closure repair:** initial 179df86c closure was 5/6: the appended audit register
+retained its old protected blob. Correct that metadata, retain the failed receipt
+as historical, burn published .4585.1 and assign distinct .4586.1. No physical
+artifact from the earlier source qualifies this successor.

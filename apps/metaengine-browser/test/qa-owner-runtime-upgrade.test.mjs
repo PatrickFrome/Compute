@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
-  assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile } from '../scripts/qa-owner-runtime-upgrade.mjs';
+  assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile, classifyPredecessorBinding, predecessorReadPolicy } from '../scripts/qa-owner-runtime-upgrade.mjs';
 import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
 import { QA_IMAGE_SNAPSHOT_SCHEMA } from '../scripts/qa-installed-image-snapshot.mjs';
 import { NSIS_EFFECTS_SCHEMA } from '../scripts/qa-nsis-external-effects.mjs';
@@ -70,7 +70,7 @@ test('kernel identity rejects recycled PG PID, path changes and unavailable obse
 test('unsigned QA proof cannot gain production authority or replay a publication',()=>{
   const stateDir=path.resolve(os.tmpdir(),'qa-recovery-test-state');
   const snapshotRoot=path.join(stateDir,'predecessor-image-snapshot');
-  const receipt={schema:'metaengine.operator.qa-owner-runtime-upgrade.v1',state:'QUALIFIED_AND_STOPPED',provider_published:false,
+  const receipt={schema:'metaengine.operator.qa-owner-runtime-upgrade.v2',state:'QUALIFIED_AND_STOPPED',provider_published:false,
     production_authorized:false,provenance_verified:false,authority_effect:false,historical_effects_reconciled:false,automatic_retry_allowed:false,
     source_head:source,package_version:version,asar_sha256:digest,old_owner_sha256:options['expected-owner-sha256'],
     candidate_resources:options['candidate-resources'],installed_resources:options['installed-resources'],
@@ -84,7 +84,8 @@ test('unsigned QA proof cannot gain production authority or replay a publication
       production_authorized:false,authority_effect:false,image_directory:path.join(snapshotRoot,'image'),
       receipt_file:path.join(snapshotRoot,'snapshot-proof.json')},
     predecessor_image:{schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456,
-      asar_sha256:'d'.repeat(64),executable_sha256:'f'.repeat(64),bundle_sha256:'e'.repeat(64),source_head:source,package_version:'0.7.0-dev.1107139874568.1'}};
+      asar_sha256:'d'.repeat(64),executable_sha256:'f'.repeat(64),bundle_sha256:'e'.repeat(64),source_head:source,package_version:'0.7.0-dev.1107139874568.1',
+      owner_binding:{state:'OWNER_BOUND',owner_bundle_sha256:'e'.repeat(64),restore_admits_runtime:false,authority_effect:false}}};
   assert.equal(assertUpgradeReceipt(receipt,options),true);
   for(const [key,value] of [['production_authorized',true],['provenance_verified',true],['provider_published',true],
     ['state','PUBLISHED_INSTALL_PENDING'],['old_owner_sha256','d'.repeat(64)],['source_head','e'.repeat(40)],
@@ -106,12 +107,30 @@ test('unsigned QA proof cannot gain production authority or replay a publication
   }
   assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_nsis_effects:null},options),/receipt_unverified/);
   assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_image:{...receipt.predecessor_image,asar_sha256:'bad'}},options),/receipt_unverified/);
+  assert.throws(()=>assertUpgradeReceipt({...receipt,schema:'metaengine.operator.qa-owner-runtime-upgrade.v1'},options),/receipt_unverified/);
+  const recoveryOptions={...options,'predecessor-binding':'preserve-fenced',
+    'expected-predecessor-asar-sha256':receipt.predecessor_image.asar_sha256,
+    'expected-predecessor-bundle-sha256':receipt.predecessor_image.bundle_sha256};
+  const fencedReceipt={...receipt,predecessor_image:{...receipt.predecessor_image,
+    owner_binding:{state:'OWNER_DIGEST_MISMATCH_FENCED',owner_bundle_sha256:'f'.repeat(64),
+      restore_admits_runtime:false,authority_effect:false}}};
+  assert.equal(assertUpgradeReceipt(fencedReceipt,recoveryOptions),true);
+  assert.throws(()=>assertUpgradeReceipt(fencedReceipt,options),/receipt_unverified/);
+  assert.throws(()=>assertUpgradeReceipt(receipt,recoveryOptions),/receipt_unverified/);
+  for(const change of [{restore_admits_runtime:true},{authority_effect:true},{state:'OWNER_BOUND'},
+    {owner_bundle_sha256:'invalid'},{unexpected:'field'}]) {
+    assert.throws(()=>assertUpgradeReceipt({...fencedReceipt,predecessor_image:{...fencedReceipt.predecessor_image,
+      owner_binding:{...fencedReceipt.predecessor_image.owner_binding,...change}}},recoveryOptions),/receipt_unverified/);
+  }
+  assert.throws(()=>assertUpgradeReceipt(fencedReceipt,{...recoveryOptions,
+    'expected-predecessor-asar-sha256':'9'.repeat(64)}),/receipt_unverified/);
 });
 
 test('Owner-only rollback requires exact restored predecessor ASAR, source and runtime digest',()=>{
   const old={asar_sha256:'a'.repeat(64),executable_sha256:'d'.repeat(64),bundle_sha256:'b'.repeat(64),
     source_head:'c'.repeat(40),package_version:'0.7.0-dev.1107139874568.1',
-    schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456};
+    schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456,
+    owner_binding:{state:'OWNER_BOUND',owner_bundle_sha256:'b'.repeat(64),restore_admits_runtime:false,authority_effect:false}};
   assert.equal(assertPredecessorImageMatches(old,{...old}),true);
   for(const change of [
     {asar_sha256:'e'.repeat(64)}, // NSIS replaced ASAR
@@ -168,4 +187,51 @@ test('private reads and publication reject hard-link aliases and staged byte cha
   await fs.unlink(alias);await fs.writeFile(files.stagedFile,'changed');
   await assert.rejects(publishOwnerFile(files),/owner_stage_mismatch/);
   assert.deepEqual(await fs.readFile(files.ownerFile),files.oldBytes);
+});
+test('fenced predecessor capture requires explicit ASAR and runtime preimage pins',()=>{
+  const recovery={...options,'predecessor-binding':'preserve-fenced',
+    'expected-predecessor-asar-sha256':'d'.repeat(64),'expected-predecessor-bundle-sha256':'e'.repeat(64)};
+  const policy=predecessorReadPolicy(recovery);
+  assert.deepEqual(validateUpgradeArguments(argv(recovery)),recovery);
+  assert.deepEqual(policy,{mode:'preserve-fenced',asar_sha256:'d'.repeat(64),bundle_sha256:'e'.repeat(64)});
+  for(const key of ['predecessor-binding','expected-predecessor-asar-sha256','expected-predecessor-bundle-sha256']) {
+    const incomplete={...recovery};delete incomplete[key];
+    assert.throws(()=>validateUpgradeArguments(argv(incomplete)),/predecessor_recovery_pins_required/);
+  }
+  for(const change of [{'predecessor-binding':'auto'},{'expected-predecessor-asar-sha256':'invalid'},
+    {'expected-predecessor-bundle-sha256':'invalid'}]) {
+    assert.throws(()=>validateUpgradeArguments(argv({...recovery,...change})),/predecessor_recovery_pins_required/);
+  }
+  assert.deepEqual(predecessorReadPolicy(options),{mode:'owner-bound'});
+});
+
+test('preserve-fenced capture classifies exact broken bytes without admitting a runtime',()=>{
+  const image={asar_sha256:'a'.repeat(64),bundle_sha256:'b'.repeat(64)},ownerDigest='c'.repeat(64);
+  assert.throws(()=>classifyPredecessorBinding(image,ownerDigest),/predecessor_owner_package_mismatch/);
+  const policy={mode:'preserve-fenced',asar_sha256:image.asar_sha256,bundle_sha256:image.bundle_sha256};
+  const binding=classifyPredecessorBinding(image,ownerDigest,policy);
+  assert.deepEqual(binding,{state:'OWNER_DIGEST_MISMATCH_FENCED',owner_bundle_sha256:ownerDigest,
+    restore_admits_runtime:false,authority_effect:false});
+  assert.equal(Object.isFrozen(binding),true);
+  for(const change of [{asar_sha256:'d'.repeat(64)},{bundle_sha256:'e'.repeat(64)}])
+    assert.throws(()=>classifyPredecessorBinding({...image,...change},ownerDigest,policy),/predecessor_recovery_preimage_changed/);
+  assert.throws(()=>classifyPredecessorBinding(image,image.bundle_sha256,policy),/predecessor_recovery_not_fenced/);
+  for(const malformed of [{mode:'auto'}, {...policy,authority_effect:true},{mode:'preserve-fenced'},
+    {mode:'owner-bound',allow_mismatch:true}])
+    assert.throws(()=>classifyPredecessorBinding(image,ownerDigest,malformed),/predecessor_recovery_policy_invalid/);
+  assert.throws(()=>classifyPredecessorBinding(image,'invalid',policy),/predecessor_owner_pin_invalid/);
+});
+
+test('rollback compares the original Owner mismatch and cannot promote a fenced snapshot',()=>{
+  const image={asar_sha256:'a'.repeat(64),executable_sha256:'d'.repeat(64),bundle_sha256:'b'.repeat(64),
+    source_head:'c'.repeat(40),package_version:'0.7.0-dev.1107139874568.1',
+    schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456};
+  const policy={mode:'preserve-fenced',asar_sha256:image.asar_sha256,bundle_sha256:image.bundle_sha256};
+  const captured={...image,owner_binding:classifyPredecessorBinding(image,'e'.repeat(64),policy)};
+  assert.equal(assertPredecessorImageMatches(captured,{...captured}),true);
+  for(const owner_binding of [undefined, {...captured.owner_binding,state:'OWNER_BOUND'},
+    {...captured.owner_binding,owner_bundle_sha256:'f'.repeat(64)}, {...captured.owner_binding,restore_admits_runtime:true},
+    {...captured.owner_binding,authority_effect:true}]) {
+    assert.throws(()=>assertPredecessorImageMatches(captured,{...captured,owner_binding}),/predecessor_image_not_restored/);
+  }
 });
