@@ -14,6 +14,7 @@ import { validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity,
   localStateProviderHealthAttested } from '../src/local-state-provider-policy.mjs';
 import { localAttachedProviderAutoConnectFile, LOCAL_ATTACHED_AUTOCONNECT_SCHEMA } from '../src/local-restored-pg17-setup.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../src/private-windows-storage-acl.mjs';
+import { qualifyOwnerBackedActivationWave } from './qa-owner-backed-activation-wave.mjs';
 
 const execute = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -791,6 +792,16 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     const screenshot = await client.command('Page.captureScreenshot', { format: 'png' });
     const png = Buffer.from(screenshot.data, 'base64'); assert(png.length > 4096);
     await fs.writeFile(path.join(directory, 'installed-owner-ui.png'), png);
+    // This is the existing real attached-PG17/Owner sandbox, not an unbound
+    // package soak: every secondary must ACK the same physical window and
+    // appear in the pinned current-boot durable journal before acceptance.
+    const wave = await qualifyOwnerBackedActivationWave({
+      activate: () => activateInstalledPrimary(activationInput),
+      readJournal: journal,
+      inspectWindow: () => verifyInstalledVisiblePrimaryWindow(launch.child.pid, osWindowBefore.handle),
+      pid: launch.child.pid,version: identity.package_version,
+      windowId: assertInstalledPrimaryWindowJournal(before,{pid:launch.child.pid,version:identity.package_version}).window_id,
+    });
     const sentinelPath = path.join(profile.user_data_path, 'metaengine-browser-sentinel-v1.json');
     const progressPath = sentinelPath + '.parent-progress-v1.json';
     const sentinelBefore = JSON.parse(await fs.readFile(sentinelPath, 'utf8'));
@@ -829,6 +840,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       automatic_owner_publication_verified: true, private_autoconnect_descriptor_verified: true,
       descriptor_sha256: automatic.descriptorSha256, source_config_preserved: true,
       second_instance_activation_verified: true, native_activation_before_and_after_grace_verified: true,
+      owner_backed_activation_wave: wave,
       surface_visibility_observation: 'AFTER_NORMAL_SECOND_INSTANCE_ACTIVATION', startup_grace_survival_seconds: 190,
       sentinel_relaunch_attempted: false, ui_listener: uiListener, gateway_listener: gatewayListener,
       api_listener: apiListener, edge_listener: edgeListener,
