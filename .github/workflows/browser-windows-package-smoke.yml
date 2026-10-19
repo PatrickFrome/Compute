@@ -1001,6 +1001,18 @@ jobs:
           $positive = Get-Content (Join-Path $evidence 'installed-launch-qualification.json') -Raw | ConvertFrom-Json
           $owner = Get-Content (Join-Path $evidence 'installed-owner-boot-proof.json') -Raw | ConvertFrom-Json
           if ($positive.source_head -ne $sha -or $positive.package_version -ne [string]$proof.package_version -or $positive.owner_boot_qualified -ne $true -or $positive.normal_ui_boot_verified -ne $true -or $positive.production_ready -ne $false -or $positive.authority_effect -ne $false) { throw 'installed_owner_qa_proof_invalid' }
+          if ($owner.owner_backed_activation_wave.schema -ne 'metaengine.browser.owner-backed-activation-wave.v1' -or
+              $owner.owner_backed_activation_wave.owner_backed_activation_wave_verified -ne $true -or
+              [int]$owner.owner_backed_activation_wave.sequential_activations -ne 64 -or
+              [int]$owner.owner_backed_activation_wave.concurrent_activations -ne 8 -or
+              [int]$owner.owner_backed_activation_wave.total_activations -ne 72 -or
+              [int]$owner.owner_backed_activation_wave.unique_nonce_count -ne 72 -or
+              [int]$owner.owner_backed_activation_wave.unique_durable_sequence_count -ne 72 -or
+              $owner.owner_backed_activation_wave.same_native_window_verified -ne $true -or
+              [double]$owner.owner_backed_activation_wave.activation_p95_ms -gt 1000 -or
+              [double]$owner.owner_backed_activation_wave.concurrent_burst_ms -gt 8000 -or
+              $owner.owner_backed_activation_wave.production_ready -ne $false -or
+              $owner.owner_backed_activation_wave.authority_effect -ne $false) { throw 'installed_owner_qa_72_activations_unqualified' }
           if ($owner.second_instance_activation_verified -ne $true -or $owner.native_activation_before_and_after_grace_verified -ne $true -or $owner.current_os_window_visible -ne $true -or $owner.same_os_window_across_startup_grace -ne $true -or $owner.attached_postgres_incarnation_preserved -ne $true -or $owner.process_cleanup_confirmed -ne $true -or $owner.runtime_host_lock_released -ne $true -or $owner.runtime_ports_closed -ne $true) { throw 'installed_owner_qa_native_proof_invalid' }
           $proof.normal_ui_boot_verified = $true
           $proof.runtime_import_observability_verified = $true
