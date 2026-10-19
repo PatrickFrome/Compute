@@ -301,7 +301,9 @@ if ($first.HasExited -or $firstRow.primary_instance -ne $true) { throw 'singleto
 $secondOut = Join-Path $temp 'singleton-second.out'; $secondErr = Join-Path $temp 'singleton-second.err'
 $second = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-single-instance-probe' -OutPath $secondOut -ErrPath $secondErr
 Wait-CapturedProcessOrThrow -Capture $second -TimeoutMs 5000 -Label 'singleton_secondary' -ExpectedExitCode 6
-$secondRow = Read-LastJsonLine $secondOut
+# Production intentionally writes denied diagnostic probes to stderr, never stdout.
+# A secondary's exit 6 is a refusal, not a successful primary proof.
+$secondRow = Read-LastJsonLine $secondErr
 if ([string]$secondRow.schema -ne 'metaengine.browser.secondary-diagnostic-refusal.v1' -or
     [string]$secondRow.state -ne 'PRIMARY_INSTANCE_REQUIRED' -or
     [string]$secondRow.requested_probe -ne '--metaengine-single-instance-probe' -or
