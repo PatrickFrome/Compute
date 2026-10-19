@@ -145,3 +145,59 @@ METAENGINE постоянно развивает поставленную опе
 | NEXT-G0.1 | G0 | Требуется свежий read-only source/installed/CI baseline с source-to-artifact provenance и независимой сверкой. | OPEN | NONE |
 
 Каждый следующий завершённый пакет добавляет запись (а не меняет прошлый SHA/доказательства): дата, gate, PR, SHA, тесты, реальный readback, negative-case, независимый decision и следующий шаг. Спорные старые доказательства остаются HISTORICAL.
+### G1-NSIS-EXTERNAL-RESTORE — 2026-10-19 / R1, ADF-1 / STAGING ONLY
+
+- **Baseline:** PR #1340, exact `c2a45d82fecab447c318b4dca027c16d5970f997`.
+  Isolated branch/worktree: `work/metaengine-g1-nsis-effects-restore-20261019`.
+  **Implementation commit:** `94920be23a04c39c53c7bdf3260306530545c42f`.
+  Distinct source-only package identity: `0.7.0-dev.1107139874583.1`; predecessor
+  `.4582.1` is burned. No intermediate source/version physical build was reused.
+- **Finding:** the existing G1 recovery observer compares the HKCU uninstall
+  record and Start Menu shortcut but does not restore them. The frozen NSIS
+  configuration also enables a Desktop shortcut, so that effect must be included.
+- **Implementation:** `qa-disposable-nsis-effects.ps1` captures and restores all
+  supported registry value types, including an unexpanded ExpandString, exact
+  signed DWord/QWord representations, binary and MultiString values, plus the
+  original bytes of BOTH real Windows .lnk files. The complete snapshot is
+  externally digest-pinned; every value is decoded before mutation. Reject
+  changed snapshots/preimages, uncaptured subkeys and filesystem junctions.
+- **Physical Windows evidence:** 9 native scenarios (TAP 10/10 including parent)
+  PASS with no skip. Exact restoration, three separately corrupted backup
+  files, changed preimage, injected failure between registry and links, blocked
+  replay, unknown subkeys, junction and invalid scope were exercised. The
+  injected partial effect journals EFFECT_UNKNOWN_REQUIRES_READBACK and cannot
+  be retried. Independent before/after hashes of the REAL uninstall record and
+  both live shortcuts matched; only UUID-derived temporary objects were written.
+- **Regression:** 46/46 focused Windows recovery/image/Owner/NSIS/Sentinel/
+  activation tests PASS; Browser syntax/source checks 190 PASS; native PowerShell
+  parser PASS. Exact-HEAD protected Git blob closure is required after the final
+  evidence commit. Native regression is registered BEFORE package acquisition in
+  the EXISTING Windows Self Update job; no new scheduler or workflow authority.
+- **Current CI facts:** parent #1340 Self Update contract SUCCESS; physical
+  Self Update run 39195995296/job 117879718388 still IN_PROGRESS at readback.
+  Package Smoke run 39195995234/job 117878832011 still IN_PROGRESS. Separate W59
+  run 39195995324 is FAILURE: W45 reported two lease acquisitions across a
+  five-second fixture lease; fixture timing versus locking is not resolved here.
+- **Decision:** EVIDENCE_READY for this disposable native external-effect
+  operation only. G1 installed acceptance remains BLOCKED. This is not a live
+  restore API, signed release or NSIS install/Owner transaction. User workstation
+  readback still showed 3 Browser, 1 Guardian and 6 PostgreSQL processes.
+- **Next:** join whole-image restoration, exact external effects and Owner CAS
+  under the existing crash journal on an isolated real NSIS installation; retain
+  unknown-effect fencing, independently verify the same final package provenance
+  and obtain terminal Windows update/rollback evidence before live installation.
+
+**G1 same-work-item follow-up — Desktop admission / NSIS evidence V2.**
+Source parent for this follow-up: `a15bd61d1c867c1ee3393dd72e4bc9e258b78917`.
+The existing `qa-nsis-external-effects.mjs` read-only producer and the existing
+prepare/publish/rollback consumers now require V2 evidence with TWO independently
+target-bound shortcut digests. V1 receipts, an omitted/mismatched Desktop digest
+or a missing/incorrect Desktop link are rejected; old receipts are not rewritten.
+The fixed native reader also closes its own stdin pipe.
+Affected Owner and external-effect regressions were repeated: **13/13 PASS**.
+Actual read-only Windows V2 observation of installed `.4568.1` returned OBSERVED,
+one uninstall record, two shortcuts and both targets bound, mutation=false:
+registry SHA256 `556b683a65eea5dca186ede9081b3a50ac5e6e7adf9fab0a83135f61ce451bd9`,
+Start Menu `44eaa92adedb6d7419c2f4d6dac30916171846c366313ecf221565ab35644d49`,
+Desktop `dc11fb6da13bbe9967306c1ef39fe94ff884509242825b3f396f62464555b3d0`.
+This closes the missing Desktop readback in G1, not live restoration or installation.
