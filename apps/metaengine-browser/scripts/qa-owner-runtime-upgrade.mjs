@@ -24,7 +24,7 @@ import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
 
 const require = createRequire(import.meta.url), exec = promisify(execFile);
 const SHA = /^[a-f0-9]{64}$/, HEAD = /^[a-f0-9]{40}$/;
-const SCHEMA = 'metaengine.operator.qa-owner-runtime-upgrade.v1';
+const SCHEMA = 'metaengine.operator.qa-owner-runtime-upgrade.v2';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error('qa_upgrade_' + code); };
 const samePath = (a,b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
@@ -35,7 +35,8 @@ export function validateUpgradeArguments(args) {
   for(let i=0;i<args.length;i+=2) {
     const key=args[i]?.replace(/^--/,''), value=args[i+1];
     if(!['mode','candidate-resources','installed-resources','expected-version','expected-source',
-      'expected-asar-sha256','expected-owner-sha256','receipt','expected-receipt-sha256'].includes(key)
+      'expected-asar-sha256','expected-owner-sha256','receipt','expected-receipt-sha256',
+      'predecessor-binding','expected-predecessor-asar-sha256','expected-predecessor-bundle-sha256'].includes(key)
       ||!args[i].startsWith('--')||!value||Object.hasOwn(options,key)) fail('arguments_invalid');
     options[key]=value;
   }
@@ -47,7 +48,54 @@ export function validateUpgradeArguments(args) {
     ||inside(options['candidate-resources']||'.',options.receipt||'.')
     ||inside(options['installed-resources']||'.',options.receipt||'.')
     ||(options.mode!=='prepare'&&!SHA.test(options['expected-receipt-sha256']||''))) fail('arguments_invalid');
+  predecessorReadPolicy(options);
   return options;
+}
+
+// An explicit byte-pinned recovery preserves a broken installation as a fenced
+// rollback target. It never converts its mismatching Owner into an admission.
+export function predecessorReadPolicy(options) {
+  const mode=options['predecessor-binding'];
+  const asar=options['expected-predecessor-asar-sha256'];
+  const bundle=options['expected-predecessor-bundle-sha256'];
+  if(mode===undefined&&asar===undefined&&bundle===undefined)return {mode:'owner-bound'};
+  if(mode!=='preserve-fenced'||!SHA.test(asar||'')||!SHA.test(bundle||''))
+    fail('predecessor_recovery_pins_required');
+  return {mode,asar_sha256:asar,bundle_sha256:bundle};
+}
+export function classifyPredecessorBinding(image,ownerBundleDigest,policy={mode:'owner-bound'}) {
+  if(!SHA.test(ownerBundleDigest||'')||!SHA.test(image?.asar_sha256||'')
+    ||!SHA.test(image?.bundle_sha256||''))fail('predecessor_owner_pin_invalid');
+  if(!policy||typeof policy!=='object'||Array.isArray(policy))fail('predecessor_recovery_policy_invalid');
+  if(policy.mode==='owner-bound') {
+    if(Object.keys(policy).length!==1)fail('predecessor_recovery_policy_invalid');
+    if(image.bundle_sha256!==ownerBundleDigest)fail('predecessor_owner_package_mismatch');
+    return Object.freeze({state:'OWNER_BOUND',owner_bundle_sha256:ownerBundleDigest,
+      restore_admits_runtime:false,authority_effect:false});
+  }
+  if(policy.mode!=='preserve-fenced'||Object.keys(policy).length!==3
+    ||!SHA.test(policy.asar_sha256||'')||!SHA.test(policy.bundle_sha256||''))
+    fail('predecessor_recovery_policy_invalid');
+  if(image.asar_sha256!==policy.asar_sha256||image.bundle_sha256!==policy.bundle_sha256)
+    fail('predecessor_recovery_preimage_changed');
+  if(image.bundle_sha256===ownerBundleDigest)fail('predecessor_recovery_not_fenced');
+  return Object.freeze({state:'OWNER_DIGEST_MISMATCH_FENCED',owner_bundle_sha256:ownerBundleDigest,
+    restore_admits_runtime:false,authority_effect:false});
+}
+function validStoredPredecessorBinding(image) {
+  const binding=image?.owner_binding;
+  if(!binding||Object.keys(binding).length!==4||!SHA.test(binding.owner_bundle_sha256||'')
+    ||binding.restore_admits_runtime!==false||binding.authority_effect!==false)return false;
+  return binding.state==='OWNER_BOUND'?image.bundle_sha256===binding.owner_bundle_sha256:
+    binding.state==='OWNER_DIGEST_MISMATCH_FENCED'&&image.bundle_sha256!==binding.owner_bundle_sha256;
+}
+function assertPredecessorBindingReceipt(image,options) {
+  const binding=image?.owner_binding;
+  const expected=classifyPredecessorBinding(image,binding?.owner_bundle_sha256,predecessorReadPolicy(options));
+  if(!validStoredPredecessorBinding(image)||binding.state!==expected.state
+    ||binding.owner_bundle_sha256!==expected.owner_bundle_sha256)
+    fail('predecessor_binding_receipt_invalid');
+  return true;
 }
 
 async function physical(file,kind='file') {
@@ -92,10 +140,16 @@ export function assertPredecessorImageMatches(expected, actual) {
     || expected.executable_sha256 !== actual.executable_sha256
     || expected.asar_sha256 !== actual.asar_sha256
     || expected.bundle_sha256 !== actual.bundle_sha256
-    || expected.source_head !== actual.source_head) fail('predecessor_image_not_restored');
+    || expected.source_head !== actual.source_head
+    || JSON.stringify(expected.owner_binding) !== JSON.stringify(actual.owner_binding)
+    || !validStoredPredecessorBinding(expected) || !validStoredPredecessorBinding(actual)
+    || expected.owner_binding.restore_admits_runtime !== false
+    || actual.owner_binding.restore_admits_runtime !== false
+    || expected.owner_binding.authority_effect !== false
+    || actual.owner_binding.authority_effect !== false) fail('predecessor_image_not_restored');
   return true;
 }
-export async function readPredecessorImage(installedResources, ownerBundleDigest) {
+export async function readPredecessorImage(installedResources, ownerBundleDigest, policy={mode:'owner-bound'}) {
   if (!SHA.test(ownerBundleDigest || '')) fail('predecessor_owner_pin_invalid');
   const resources = await physical(installedResources, 'directory');
   const archive = path.join(resources, 'app.asar');
@@ -112,17 +166,17 @@ export async function readPredecessorImage(installedResources, ownerBundleDigest
     fail('predecessor_package_identity_invalid');
   const image = Object.freeze({ asar_sha256: asarSha256, executable_sha256: executableSha256, package_version: pkg.version,
     source_head: binding.source_head_sha, bundle_sha256: binding.bundle_sha256 });
-  if (image.bundle_sha256 !== ownerBundleDigest) fail('predecessor_owner_package_mismatch');
+  const ownerBinding=classifyPredecessorBinding(image,ownerBundleDigest,policy);
   // Use the trusted source verifier, never execute JS extracted from the
   // potentially replaced installer payload.
   try {
     await verifyOfflineRuntimeBundle({ bundleDirectory: path.join(resources, 'client-state-runtime'),
-      expectedBundleDigest: ownerBundleDigest });
+      expectedBundleDigest: image.bundle_sha256 });
   } catch { fail('predecessor_bundle_unverified'); }
   // Fingerprint the full NSIS install image (including native resources and
   // uninstaller), not only Electron EXE/ASAR and the runtime payload.
   const tree=await captureInstalledTreeFingerprint(path.dirname(resources));
-  return Object.freeze({...image,...tree});
+  return Object.freeze({...image,...tree,owner_binding:ownerBinding});
 }
 async function absent(file) { try{await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return;throw e;} fail('existing_attempt_requires_readback'); }
 async function exclusive(file,bytes) {const h=await fs.open(file,'wx',0o600);try{await h.writeFile(bytes);await h.sync();}finally{await h.close();}}
@@ -274,7 +328,7 @@ export async function prepareUpgrade(options) {
   if(process.platform!=='win32')fail('windows_required');
   await absent(options.receipt);await privateReceiptRoot(options.receipt);
   const checked=await candidate(options), old=await oldState(options);
-  const predecessorImage=await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256);
+  const predecessorImage=await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256,predecessorReadPolicy(options));
   const predecessorNsis=await observeWindowsNsisEffects({expectedVersion:predecessorImage.package_version});
   await quiescent(old);
   const pg=await keeper(old.config);
@@ -352,6 +406,8 @@ export function assertUpgradeReceipt(receipt,options) {
     ||!samePath(receipt.predecessor_snapshot?.image_directory||'.',path.join(receipt.state_directory,'predecessor-image-snapshot','image'))
     ||!samePath(receipt.predecessor_snapshot?.receipt_file||'.',path.join(receipt.state_directory,'predecessor-image-snapshot','snapshot-proof.json')))
     fail('receipt_unverified');
+  try {assertPredecessorBindingReceipt(receipt.predecessor_image,options);}
+  catch {fail('receipt_unverified');}
   return true;
 }
 // One descriptor transaction. A failed final readback restores the predecessor
@@ -385,7 +441,7 @@ export async function publishUpgrade(options) {
   const checked=await candidate(options);if(checked.binding.bundle_sha256!==proof.bundle_sha256)fail('candidate_changed');
   const old=await oldState(options);
   assertPredecessorImageMatches(proof.predecessor_image,
-    await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256));
+    await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256,predecessorReadPolicy(options)));
   assertNsisEffectsRestored(proof.predecessor_nsis_effects,
     await observeWindowsNsisEffects({expectedVersion:proof.predecessor_image.package_version}));
   await acl(proof.predecessor_snapshot.image_directory,true);
@@ -458,7 +514,7 @@ export async function rollbackUpgrade(options) {
   // UNKNOWN is terminal for automatic replay; preserve the published Owner.
   try {
     assertPredecessorImageMatches(proof.predecessor_image,
-      await readPredecessorImage(options['installed-resources'],proof.predecessor_image.bundle_sha256));
+      await readPredecessorImage(options['installed-resources'],proof.predecessor_image.owner_binding.owner_bundle_sha256,predecessorReadPolicy(options)));
   } catch {
     journal.state='EFFECT_UNKNOWN_IMAGE_NOT_RESTORED';
     await save(publicationFile,journal);
