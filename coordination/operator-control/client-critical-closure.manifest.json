@@ -228,8 +228,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "16b329c3ec1ab5aebda438cf73259431f56bd8e6",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "7ded79bf8d8d348de2a490cc1a34504ffe0f401d",
-    "apps/metaengine-browser/package.json": "800f1ebe23f85a0fce446d71a7a955e0281a072f",
+    "apps/metaengine-browser/package-lock.json": "15ed91c467d19a40fd63164b00e3a3884117607e",
+    "apps/metaengine-browser/package.json": "f087f91dea787a72b46e9d00c7d0078cc324b517",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "062cbcf6f6f85bbfd9b2d8e20720105aac14fbe3",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "5c205488d854ccbbfeb71c7f9304f341d732aba0",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "a25d7f56eb5a916c9a211a68c3100d1ea30224b2",
@@ -341,7 +341,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "e802debf249b877db00f0a1a099ea9ad569ef3b6",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "6449f689d90ab10e23a28e6a9bd0fe7e432531aa",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -482,7 +482,9 @@
     "apps/metaengine-browser/scripts/qa-installed-tree-fingerprint.mjs": "f39ac09facb2d9e95e0db7652a8e85724122793b",
     "apps/metaengine-browser/test/qa-installed-tree-fingerprint.test.mjs": "45d3551e0ceee3a17da743c06d117a8cbd606c4a",
     "apps/metaengine-browser/scripts/qa-installed-image-snapshot.mjs": "e177a45ec6ed30c57442f789f78410ac0eb33ce4",
-    "apps/metaengine-browser/test/qa-installed-image-snapshot.test.mjs": "058e8d4ae8f4bcd237e0cc9e75f2c6ee5fefc85e"
+    "apps/metaengine-browser/test/qa-installed-image-snapshot.test.mjs": "058e8d4ae8f4bcd237e0cc9e75f2c6ee5fefc85e",
+    "apps/metaengine-browser/scripts/qa-disposable-image-restore.mjs": "497e08803341109c9ee5d3fa20742b09bd5672c5",
+    "apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs": "bdbe4cb0981bacaf680a0eeebdd11952dab6080e"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -537,7 +539,8 @@
     "0.7.0-dev.1107139874569.1",
     "0.7.0-dev.1107139874570.1",
     "0.7.0-dev.1107139874571.1",
-    "0.7.0-dev.1107139874572.1"
+    "0.7.0-dev.1107139874572.1",
+    "0.7.0-dev.1107139874573.1"
   ],
   "verification_workflow": ".github/workflows/client-source-candidate-w73.yml",
   "physical_pg_complement": ".github/workflows/client-source-candidate-w59.yml",
@@ -583,7 +586,7 @@
     "classification": "SOURCE_ONLY_NO_CURRENT_PACKAGE",
     "branch": "work/autonomous-development-fabric-v1-20261017",
     "source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "package_version": "0.7.0-dev.1107139874573.1",
+    "package_version": "0.7.0-dev.1107139874574.1",
     "historical_package_version": "0.7.0-dev.202610152359.1",
     "package_build_authorized": false,
     "package_version_reuse_authorized": false,
@@ -684,14 +687,25 @@
       "production_ready": false,
       "promotion_authorized": false,
       "authority_effect": false
+    },
+    {
+      "schema": "metaengine.client.package-version-successor.v1",
+      "source_parent": "6809eff4d8428274b72309b90aaac742ca19f134",
+      "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+      "prior_version": "0.7.0-dev.1107139874572.1",
+      "distinct_version": "0.7.0-dev.1107139874573.1",
+      "preceding_version_burned": true,
+      "production_ready": false,
+      "promotion_authorized": false,
+      "authority_effect": false
     }
   ],
   "current_package_transition": {
     "schema": "metaengine.client.package-version-successor.v1",
-    "source_parent": "6809eff4d8428274b72309b90aaac742ca19f134",
+    "source_parent": "dbff3714d22761d4a8a849317ef37db25e73be97",
     "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "prior_version": "0.7.0-dev.1107139874572.1",
-    "distinct_version": "0.7.0-dev.1107139874573.1",
+    "prior_version": "0.7.0-dev.1107139874573.1",
+    "distinct_version": "0.7.0-dev.1107139874574.1",
     "preceding_version_burned": true,
     "production_ready": false,
     "promotion_authorized": false,
