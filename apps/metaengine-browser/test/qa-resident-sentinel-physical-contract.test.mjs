@@ -15,6 +15,13 @@ test('real resident upgrade must bind profile before launching legacy primary',a
   assert.match(text,/Read-DetachedSentinelByCustody/);
   assert.match(text,/qa-resident-sentinel-readback\.mjs/);
   assert.match(text,/sentinel_child_missing_for_parent/);
+  assert.match(text,/Write-ResidentStartupFailureEvidence/);
+  assert.match(text,/qa-resident-startup-failure\.ps1/);
+  assert.match(text,/-RedirectStandardOutput \$legacyStdout -RedirectStandardError \$legacyStderr/);
+  assert.match(text,/-RedirectStandardOutput \$newStdout -RedirectStandardError \$newStderr/);
+  assert.match(text,/Write-ResidentStartupFailureEvidence[^\r\n]+-Phase \$Phase/);
+  assert.ok(text.lastIndexOf('Write-ResidentStartupFailureEvidence -ParentPid $ParentPid') <
+    text.indexOf('throw "sentinel_child_missing_for_parent:$ParentPid"'));
   assert.match(text,/SENTINEL_NATIVE_OR_CUSTODY_READBACK_MISSING/);
   assert.match(text,/\$legacySentinel = Wait-SentinelChild[^\r\n]+-ProfilePath/);
   assert.match(text,/\$newSentinel = Wait-SentinelChild[^\r\n]+-ProfilePath/);
