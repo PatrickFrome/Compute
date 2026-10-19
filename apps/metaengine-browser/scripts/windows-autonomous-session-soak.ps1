@@ -444,7 +444,7 @@ try {
   }
   try {
     $readback = Join-Path $RunnerTemp 'soak-normal-ui-readback.json'
-    & node (Join-Path $PSScriptRoot 'qa-soak-startup-readback.mjs') $journal $readback $failureCode | Out-Null
+    & node (Join-Path $PSScriptRoot 'qa-soak-startup-readback.mjs') $journal $readback $failureCode $normalErr | Out-Null
   } catch {}
   throw
 } finally {
