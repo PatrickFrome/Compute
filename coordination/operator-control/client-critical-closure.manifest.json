@@ -475,7 +475,7 @@
     "supabase/migrations/20261017211756_me2_evidence_ingest_privilege_and_json_v1.sql": "461833a38739846ddfbbccad63df392a8adc180d",
     "supabase/migrations/20261018010000_me2_evidence_plane_v1.sql": "e8568fc097b1072284952870d9710330262456f6",
     "apps/metaengine-browser/scripts/qa-owner-runtime-upgrade.mjs": "fa76c8d3a03de494119dc9115ccba91e395b2a84",
-    "apps/metaengine-browser/test/qa-owner-runtime-upgrade.test.mjs": "9225f19ad8d0aaa89f1a132988a2a7b3c453cb6c",
+    "apps/metaengine-browser/test/qa-owner-runtime-upgrade.test.mjs": "3ed3c1aaf10cd4aa36eb2f37936afcfd2d59a01e",
     "apps/metaengine-browser/test/browser-guardian-native-staging-contract.test.mjs": "122d472b4c4b31361dd31c1b1cccb7c9891c312e",
     "apps/metaengine-browser/test/global-resilience-hardening.test.mjs": "7b25aee6b274333d8cb47d43c58d57f8e44cf788",
     "apps/metaengine-browser/test/r99-me2-probe-authority-quarantine.test.mjs": "156ed99a4aac945385aabbf85a1bc00ba7e8dbc8",
@@ -485,8 +485,8 @@
     "apps/metaengine-browser/test/qa-installed-image-snapshot.test.mjs": "058e8d4ae8f4bcd237e0cc9e75f2c6ee5fefc85e",
     "apps/metaengine-browser/scripts/qa-disposable-image-restore.mjs": "497e08803341109c9ee5d3fa20742b09bd5672c5",
     "apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs": "bdbe4cb0981bacaf680a0eeebdd11952dab6080e",
-    "apps/metaengine-browser/scripts/qa-nsis-external-effects.mjs": "f32b39d150591365df4475a16649c3477dbe8220",
-    "apps/metaengine-browser/test/qa-nsis-external-effects.test.mjs": "ac739dc252ca66801964ae558080cf5b85fae94b",
+    "apps/metaengine-browser/scripts/qa-nsis-external-effects.mjs": "62edbf52c3b1d459f2ba6dc752ad4d4c9bc0dfe3",
+    "apps/metaengine-browser/test/qa-nsis-external-effects.test.mjs": "107c5e1391604bc0e4bc42e9edbff0f1b4c56115",
     "apps/metaengine-browser/test/self-update-fast-physical.ps1": "a884dd3911a365423dd5eadc5b7705bdd78a9e4f",
     "apps/metaengine-browser/test/self-update-singleton-physical-contract.test.mjs": "6b390351ecb7210801a36524d73b705333c38066",
     "apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs": "79650219117d607b58fa152424190b1703cd8e4c",
@@ -504,7 +504,7 @@
     "apps/metaengine-browser/test/installer-resident-upgrade-physical.ps1": "e283a1add4b98740982d449a38129f911b38f7de",
     "apps/metaengine-browser/scripts/qa-disposable-nsis-effects.ps1": "b65e127a43a9d4eb4dd1db64f150e6d7f42627ff",
     "apps/metaengine-browser/test/qa-disposable-nsis-effects.test.mjs": "58484c3bceec898a5e80fcecebc96b5e70af12d4",
-    "coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md": "f7f80faee20f109832e2d96e1cc1b1d2fd75cbe7"
+    "coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md": "826f1f4d0c69881fb2efc2f4afe8f6ae34c4e55c"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {

@@ -186,3 +186,18 @@ METAENGINE постоянно развивает поставленную опе
   under the existing crash journal on an isolated real NSIS installation; retain
   unknown-effect fencing, independently verify the same final package provenance
   and obtain terminal Windows update/rollback evidence before live installation.
+
+**G1 same-work-item follow-up — Desktop admission / NSIS evidence V2.**
+Source parent for this follow-up: `a15bd61d1c867c1ee3393dd72e4bc9e258b78917`.
+The existing `qa-nsis-external-effects.mjs` read-only producer and the existing
+prepare/publish/rollback consumers now require V2 evidence with TWO independently
+target-bound shortcut digests. V1 receipts, an omitted/mismatched Desktop digest
+or a missing/incorrect Desktop link are rejected; old receipts are not rewritten.
+The fixed native reader also closes its own stdin pipe.
+Affected Owner and external-effect regressions were repeated: **13/13 PASS**.
+Actual read-only Windows V2 observation of installed `.4568.1` returned OBSERVED,
+one uninstall record, two shortcuts and both targets bound, mutation=false:
+registry SHA256 `556b683a65eea5dca186ede9081b3a50ac5e6e7adf9fab0a83135f61ce451bd9`,
+Start Menu `44eaa92adedb6d7419c2f4d6dac30916171846c366313ecf221565ab35644d49`,
+Desktop `dc11fb6da13bbe9967306c1ef39fe94ff884509242825b3f396f62464555b3d0`.
+This closes the missing Desktop readback in G1, not live restoration or installation.
