@@ -26,8 +26,14 @@ export async function captureInstalledTreeFingerprint(root) {
   if(typeof root!=='string'||!path.isAbsolute(root)||root.startsWith('\\\\'))fail('absolute_local_root_required');
   const base=path.resolve(root), baseStat=await fs.lstat(base);
   if(!baseStat.isDirectory()||baseStat.isSymbolicLink())fail('root_not_physical_directory');
-  const real=await fs.realpath(base);
-  if(real.toLowerCase()!==base.toLowerCase())fail('root_alias_or_reparse');
+  // Windows runners can expose the same physical Temp directory under a
+  // differently spelled canonical path (8.3 spelling, volume aliases or
+  // namespaced paths). Compare kernel file identity, never path strings.
+  // The root itself must not be a reparse point; every child is checked too.
+  const real=await fs.realpath(base), realStat=await fs.lstat(real);
+  if(!realStat.isDirectory()||realStat.isSymbolicLink()
+    ||realStat.dev!==baseStat.dev||realStat.ino!==baseStat.ino)
+    fail('root_alias_or_reparse');
   const rows=[], folded=new Set();
   let totalBytes=0;
   async function visit(dir,relative,depth) {

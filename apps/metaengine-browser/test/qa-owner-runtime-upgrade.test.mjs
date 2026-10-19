@@ -6,6 +6,7 @@ import os from 'node:os';
 import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
   assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile } from '../scripts/qa-owner-runtime-upgrade.mjs';
 import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
+import { QA_IMAGE_SNAPSHOT_SCHEMA } from '../scripts/qa-installed-image-snapshot.mjs';
 
 const digest='a'.repeat(64),source='b'.repeat(40),version='0.7.0-dev.202610190001.1';
 const options={mode:'prepare','candidate-resources':path.resolve(os.tmpdir(),'qa-candidate','resources'),
@@ -66,11 +67,18 @@ test('kernel identity rejects recycled PG PID, path changes and unavailable obse
 });
 
 test('unsigned QA proof cannot gain production authority or replay a publication',()=>{
+  const stateDir=path.resolve(os.tmpdir(),'qa-recovery-test-state');
+  const snapshotRoot=path.join(stateDir,'predecessor-image-snapshot');
   const receipt={schema:'metaengine.operator.qa-owner-runtime-upgrade.v1',state:'QUALIFIED_AND_STOPPED',provider_published:false,
     production_authorized:false,provenance_verified:false,authority_effect:false,historical_effects_reconciled:false,automatic_retry_allowed:false,
     source_head:source,package_version:version,asar_sha256:digest,old_owner_sha256:options['expected-owner-sha256'],
     candidate_resources:options['candidate-resources'],installed_resources:options['installed-resources'],
     bundle_sha256:digest,config_sha256:digest,old_config_sha256:digest,runtime:{exit_code:0,children_stopped:true},
+    state_directory:stateDir,
+    predecessor_snapshot:{schema:QA_IMAGE_SNAPSHOT_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456,
+      source_unchanged:true,copied_tree_verified:true,installed_mutated:false,restore_authorized:false,
+      production_authorized:false,authority_effect:false,image_directory:path.join(snapshotRoot,'image'),
+      receipt_file:path.join(snapshotRoot,'snapshot-proof.json')},
     predecessor_image:{schema:INSTALLED_TREE_SCHEMA,tree_sha256:'1'.repeat(64),file_count:37,total_bytes:123456,
       asar_sha256:'d'.repeat(64),executable_sha256:'f'.repeat(64),bundle_sha256:'e'.repeat(64),source_head:source,package_version:'0.7.0-dev.1107139874568.1'}};
   assert.equal(assertUpgradeReceipt(receipt,options),true);
@@ -81,6 +89,11 @@ test('unsigned QA proof cannot gain production authority or replay a publication
   }
   assert.throws(()=>assertUpgradeReceipt({...receipt,runtime:{exit_code:1,children_stopped:true}},options),/receipt_unverified/);
   assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_image:null},options),/receipt_unverified/);
+  for(const change of [{tree_sha256:'e'.repeat(64)},{file_count:38},{restore_authorized:true},
+    {copied_tree_verified:false},{image_directory:options['installed-resources']}]) {
+    assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_snapshot:{...receipt.predecessor_snapshot,...change}},options),/receipt_unverified/);
+  }
+  assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_snapshot:null},options),/receipt_unverified/);
   assert.throws(()=>assertUpgradeReceipt({...receipt,predecessor_image:{...receipt.predecessor_image,asar_sha256:'bad'}},options),/receipt_unverified/);
 });
 

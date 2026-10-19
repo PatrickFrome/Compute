@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { validateRuntimeHostConfig } from '../../../infra/client-state-runtime/runtime-host.mjs';
 import { verifyOfflineRuntimeBundle } from '../../../infra/client-state-runtime/offline-runtime-bundle.mjs';
 import { captureInstalledTreeFingerprint, INSTALLED_TREE_SCHEMA } from './qa-installed-tree-fingerprint.mjs';
+import { stagePrivateQaImageSnapshot, QA_IMAGE_SNAPSHOT_SCHEMA } from './qa-installed-image-snapshot.mjs';
 import { localRuntimeHostEnvironment } from '../src/local-runtime-host-controller.mjs';
 import { localStateProviderOwnerFile, validateLocalStateProviderConfig,
   validateLocalStateRuntimeIdentity, localStateProviderHealthAttested } from '../src/local-state-provider-policy.mjs';
@@ -278,6 +279,14 @@ export async function prepareUpgrade(options) {
   const stateDirectory=path.join(path.dirname(old.config.state_directory),'client-state-qa-upgrade-'+randomUUID());
   for(const root of [old.config.pg_data_directory,checked.resources,options['installed-resources']])if(inside(root,stateDirectory)||inside(stateDirectory,root))fail('state_boundary_invalid');
   await fs.mkdir(stateDirectory,{mode:0o700});await protectOwnerOnlyWindowsDirectory(stateDirectory);await acl(stateDirectory,true);
+  const snapshotContainer=path.join(stateDirectory,'predecessor-image-snapshot');
+  await fs.mkdir(snapshotContainer,{mode:0o700});
+  await protectOwnerOnlyWindowsDirectory(snapshotContainer);await acl(snapshotContainer,true);
+  const predecessorSnapshot=await stagePrivateQaImageSnapshot({
+    installedRoot:path.dirname(options['installed-resources']),snapshotContainer});
+  if(predecessorSnapshot.tree_sha256!==predecessorImage.tree_sha256
+    ||predecessorSnapshot.file_count!==predecessorImage.file_count
+    ||predecessorSnapshot.total_bytes!==predecessorImage.total_bytes)fail('snapshot_predecessor_mismatch');
   const backupOwner=path.join(stateDirectory,'predecessor-owner.json'), backupConfig=path.join(stateDirectory,'predecessor-config.json');
   await exclusive(backupOwner,old.bytes);await exclusive(backupConfig,old.configBytes);await acl(backupOwner);await acl(backupConfig);
   const configs=makeUpgradeConfigs(old.config,{stateDirectory,candidateBundle:path.join(checked.resources,'client-state-runtime'),
@@ -297,7 +306,7 @@ export async function prepareUpgrade(options) {
     old_status_file:old.owner.runtime_identity_file,old_status_sha256:sha(old.statusBytes),backup_owner_file:backupOwner,backup_config_file:backupConfig,
     config_file:configFile,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_file:qualificationFile,
     state_directory:stateDirectory,proposed_provider:proposed,runtime,keeper:pg,
-    predecessor_image:predecessorImage,
+    predecessor_image:predecessorImage,predecessor_snapshot:predecessorSnapshot,
     production_authorized:false,provenance_verified:false,provider_published:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
   await exclusive(options.receipt,JSON.stringify(receipt,null,2)+'\n');await acl(options.receipt);
   return {state:receipt.state,receipt_file:options.receipt,receipt_sha256:sha(await stableUpgradeRead(options.receipt)),provider_published:false,production_authorized:false};
@@ -320,7 +329,20 @@ export function assertUpgradeReceipt(receipt,options) {
     ||!Number.isSafeInteger(receipt.predecessor_image?.file_count) || receipt.predecessor_image.file_count < 1
     ||!Number.isSafeInteger(receipt.predecessor_image?.total_bytes) || receipt.predecessor_image.total_bytes < 1
     ||!HEAD.test(receipt.predecessor_image?.source_head || '')
-    ||!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(receipt.predecessor_image?.package_version || ''))fail('receipt_unverified');
+    ||!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(receipt.predecessor_image?.package_version || '')
+    ||receipt.predecessor_snapshot?.schema!==QA_IMAGE_SNAPSHOT_SCHEMA
+    ||receipt.predecessor_snapshot?.tree_sha256!==receipt.predecessor_image.tree_sha256
+    ||receipt.predecessor_snapshot?.file_count!==receipt.predecessor_image.file_count
+    ||receipt.predecessor_snapshot?.total_bytes!==receipt.predecessor_image.total_bytes
+    ||receipt.predecessor_snapshot?.copied_tree_verified!==true
+    ||receipt.predecessor_snapshot?.source_unchanged!==true
+    ||receipt.predecessor_snapshot?.installed_mutated!==false
+    ||receipt.predecessor_snapshot?.restore_authorized!==false
+    ||receipt.predecessor_snapshot?.production_authorized!==false
+    ||receipt.predecessor_snapshot?.authority_effect!==false
+    ||!samePath(receipt.predecessor_snapshot?.image_directory||'.',path.join(receipt.state_directory,'predecessor-image-snapshot','image'))
+    ||!samePath(receipt.predecessor_snapshot?.receipt_file||'.',path.join(receipt.state_directory,'predecessor-image-snapshot','snapshot-proof.json')))
+    fail('receipt_unverified');
   return true;
 }
 // One descriptor transaction. A failed final readback restores the predecessor
@@ -355,6 +377,12 @@ export async function publishUpgrade(options) {
   const old=await oldState(options);
   assertPredecessorImageMatches(proof.predecessor_image,
     await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256));
+  await acl(proof.predecessor_snapshot.image_directory,true);
+  await acl(proof.predecessor_snapshot.receipt_file);
+  const stagedPredecessor=await captureInstalledTreeFingerprint(proof.predecessor_snapshot.image_directory);
+  if(stagedPredecessor.tree_sha256!==proof.predecessor_image.tree_sha256
+    ||stagedPredecessor.file_count!==proof.predecessor_image.file_count
+    ||stagedPredecessor.total_bytes!==proof.predecessor_image.total_bytes)fail('predecessor_snapshot_changed');
   await quiescent(old);await keeperUnchanged(old.config,proof.keeper);
   const proposed=validateLocalStateProviderConfig(proof.proposed_provider), finalBytes=await stableUpgradeRead(proof.config_file);
   const final=validateRuntimeHostConfig(JSON.parse(finalBytes));
