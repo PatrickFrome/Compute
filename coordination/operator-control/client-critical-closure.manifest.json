@@ -228,8 +228,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "16b329c3ec1ab5aebda438cf73259431f56bd8e6",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "408ec1b05f94b4d3570e6f17b135a694cd4a99b2",
-    "apps/metaengine-browser/package.json": "95af5e9a8b6a81f4d6776a3d808fd4ab9cb02023",
+    "apps/metaengine-browser/package-lock.json": "eec1acd4a0e69eacf2b59c38f0e62eb410ce3aa2",
+    "apps/metaengine-browser/package.json": "55450090bcd8c5d23806d143239f95d6ca54874d",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "062cbcf6f6f85bbfd9b2d8e20720105aac14fbe3",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "5c205488d854ccbbfeb71c7f9304f341d732aba0",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "a25d7f56eb5a916c9a211a68c3100d1ea30224b2",
@@ -341,7 +341,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "0fbdd84d3a9fcd4dfb997090de866b2ac5061dd5",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "7affaba949e6817655eb5823fc976df6a019f7f3",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -489,7 +489,11 @@
     "apps/metaengine-browser/test/qa-nsis-external-effects.test.mjs": "ac739dc252ca66801964ae558080cf5b85fae94b",
     "apps/metaengine-browser/test/self-update-fast-physical.ps1": "f32cfcb68006eb6273d3fdd9468094965269cba3",
     "apps/metaengine-browser/test/self-update-singleton-physical-contract.test.mjs": "1cedd549c9bfbc3df8e882cd3caf368a6355d45c",
-    "apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs": "79650219117d607b58fa152424190b1703cd8e4c"
+    "apps/metaengine-browser/test/self-update-proof-liveness-contract.test.mjs": "79650219117d607b58fa152424190b1703cd8e4c",
+    "apps/metaengine-browser/scripts/qa-soak-startup-readback.mjs": "e50da25ca424b0574d248714bbe7ae3c72b36897",
+    "apps/metaengine-browser/test/qa-soak-startup-readback.test.mjs": "1af384fe826af6de40ceb451fdef82aec0f93972",
+    "apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1": "4e4ed1219ec75e356ba8a3bd67fce61485bccef8",
+    ".github/workflows/browser-windows-autonomous-soak-v1.yml": "387ed9b40a5b60f3c842c4179c9f442477832bf6"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -548,7 +552,8 @@
     "0.7.0-dev.1107139874573.1",
     "0.7.0-dev.1107139874574.1",
     "0.7.0-dev.1107139874575.1",
-    "0.7.0-dev.1107139874576.1"
+    "0.7.0-dev.1107139874576.1",
+    "0.7.0-dev.1107139874577.1"
   ],
   "verification_workflow": ".github/workflows/client-source-candidate-w73.yml",
   "physical_pg_complement": ".github/workflows/client-source-candidate-w59.yml",
@@ -594,7 +599,7 @@
     "classification": "SOURCE_ONLY_NO_CURRENT_PACKAGE",
     "branch": "work/autonomous-development-fabric-v1-20261017",
     "source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "package_version": "0.7.0-dev.1107139874577.1",
+    "package_version": "0.7.0-dev.1107139874578.1",
     "historical_package_version": "0.7.0-dev.202610152359.1",
     "package_build_authorized": false,
     "package_version_reuse_authorized": false,
@@ -739,14 +744,25 @@
       "production_ready": false,
       "promotion_authorized": false,
       "authority_effect": false
+    },
+    {
+      "schema": "metaengine.client.package-version-successor.v1",
+      "source_parent": "04ace552bcde49d0d720038e82ef81d97ca10333",
+      "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+      "prior_version": "0.7.0-dev.1107139874576.1",
+      "distinct_version": "0.7.0-dev.1107139874577.1",
+      "preceding_version_burned": true,
+      "production_ready": false,
+      "promotion_authorized": false,
+      "authority_effect": false
     }
   ],
   "current_package_transition": {
     "schema": "metaengine.client.package-version-successor.v1",
-    "source_parent": "04ace552bcde49d0d720038e82ef81d97ca10333",
+    "source_parent": "6d138c8a8e07ffef7e67f33eb3e0a175631d41a9",
     "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "prior_version": "0.7.0-dev.1107139874576.1",
-    "distinct_version": "0.7.0-dev.1107139874577.1",
+    "prior_version": "0.7.0-dev.1107139874577.1",
+    "distinct_version": "0.7.0-dev.1107139874578.1",
     "preceding_version_burned": true,
     "production_ready": false,
     "promotion_authorized": false,
