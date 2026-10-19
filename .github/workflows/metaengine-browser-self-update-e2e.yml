@@ -115,6 +115,12 @@ jobs:
             if ($parseErrors.Count -ne 0) { throw "physical_script_parse_failed:${path}:$($parseErrors[0].Message)" }
           }
           ./test/qualified-installer-consumer-verify.ps1
+      - name: Physically qualify disposable NSIS registry and both shortcut rollback
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          node --test --test-concurrency=1 test/qa-disposable-nsis-effects.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'disposable_nsis_effects_rollback_failed' }
       - name: Acquire immutable Package Smoke installer
         working-directory: apps/metaengine-browser
         shell: powershell
