@@ -155,6 +155,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "scripts/stage-client-state-runtime.mjs",
   "scripts/offline-runtime-package-binding.cjs",
   "src/local-state-provider-bootstrap.mjs",
+  "src/local-provider-upgrade-admission.mjs",
   "src/local-state-provider-policy.mjs",
   "src/local-runtime-host-controller.mjs",
   "src/local-restored-pg17-setup.mjs",

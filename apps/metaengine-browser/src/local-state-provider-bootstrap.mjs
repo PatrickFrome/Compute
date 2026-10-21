@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { canonicalLocalStateSupervisorBase, LOCAL_STATE_INSTANCE_UUID, localStateProviderHealthAttested, localStateProviderOwnerFile, validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity } from './local-state-provider-policy.mjs';
 import { ownedLocalRuntimeHostReady, startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost } from './local-runtime-host-controller.mjs';
+import { qaUpgradeAdmissionFile, assertQaUpgradeAdmission } from './local-provider-upgrade-admission.mjs';
 
 const CONFIG_MAX_BYTES = 16384;
 const RUNTIME_MAX_BYTES = 65536;
@@ -9,7 +10,7 @@ const RUNTIME_MAX_BYTES = 65536;
 // admission deadline can reject a still-valid local Owner under contention.
 const HEALTH_TIMEOUT_MS = 12000;
 
-async function readBoundedJson(file, maximumBytes) {
+async function readBoundedJson(file, maximumBytes, { withBytes = false } = {}) {
   const stat = await fs.lstat(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maximumBytes) throw new Error('local_state_provider_file_invalid');
   const handle = await fs.open(file, 'r');
@@ -17,7 +18,10 @@ async function readBoundedJson(file, maximumBytes) {
     const bytes = Buffer.alloc(maximumBytes + 1);
     const result = await handle.read(bytes, 0, bytes.length, 0);
     if (result.bytesRead > maximumBytes) throw new Error('local_state_provider_file_too_large');
-    try { return JSON.parse(bytes.subarray(0, result.bytesRead).toString('utf8')); } catch { throw new Error('local_state_provider_json_invalid'); }
+    try {
+      const content = bytes.subarray(0, result.bytesRead), value = JSON.parse(content.toString('utf8'));
+      return withBytes ? { value, bytes: content } : value;
+    } catch { throw new Error('local_state_provider_json_invalid'); }
   } finally { await handle.close(); }
 }
 
@@ -76,7 +80,23 @@ export async function bootstrapPersistentLocalProvider({
   };
   failClosed(env, 'OWNER_CONFIG_VALIDATION_PENDING');
   try {
-    const config = validateLocalStateProviderConfig(await readBoundedJson(ownerFile, CONFIG_MAX_BYTES));
+    const ownerRead = await readBoundedJson(ownerFile, CONFIG_MAX_BYTES, { withBytes: true });
+    const config = validateLocalStateProviderConfig(ownerRead.value);
+    // Retiring the install gate is not the final commit. New operator QA state
+    // directories remain blocked through crashes/failures until a separate,
+    // exact-Owner and bundle-bound admission record is durably committed.
+    try {
+      const admissionFile = qaUpgradeAdmissionFile(config);
+      if (admissionFile) {
+        assertQaUpgradeAdmission(await readBoundedJson(admissionFile, CONFIG_MAX_BYTES),
+          { owner: config, ownerBytes: ownerRead.bytes });
+      }
+    } catch {
+      delete env.METAENGINE_SUPERVISOR_BASE_URL;
+      delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+      delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
+      throw new Error('local_state_provider_upgrade_admission_unverified');
+    }
     if ((inherited.provider && inherited.provider !== 'LOCAL_POSTGRES') || (inherited.base && canonicalLocalStateSupervisorBase(inherited.base) !== config.base_url) || (inherited.instance && !LOCAL_STATE_INSTANCE_UUID.test(inherited.instance))) {
       throw new Error('local_state_provider_environment_conflict');
     }

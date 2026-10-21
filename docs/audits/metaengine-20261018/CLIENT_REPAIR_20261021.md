@@ -14,3 +14,11 @@ Targeted source/behavior checks passed: 39 upgrade/consumer/image tests; 49 laun
 Current local read-only PostgreSQL inspection succeeded using the protected inspection identity. The old installed Browser remains fenced by its historical Owner/runtime digest mismatch until the explicit upgrade completes. No PostgreSQL lifecycle or historical task effect was changed by this audit.
 
 Remaining acceptance: build the distinct candidate once; qualify staged runtime; execute and independently read back the physical upgrade; verify normal installed UI/API/Edge. The legacy SelfUpdate successor test still needs a genuine attached Owner, and hosted InstalledChat still reports quota 402. Neither is converted to a pass. Production signing/Owner custody and useful autonomous goal → lease → result → independent critic → PostgreSQL checkpoint → restart continuation remain separate, unproven gates.
+
+## Successor .4588.1
+
+The .4587.1 staging attempt stopped before NSIS or installer creation because the frozen runtime postgres dependency had not been materialized. It was installed from the existing lockfile. The failed staging and receipts are preserved.
+
+Candidate 0.7.0-dev.1107139874588.1 additionally restores an explicitly observed ABSENT/EMPTY install target without treating missing bytes as a valid tree. A final atomic, Owner/bundle/receipt-bound admission marker now fences new QA states after gate retirement; pre-commit completion receipts explicitly deny launch permission. Presence recovery:14/14 physical filesystem tests passed. Admission/commit:26/26 tests passed. Production and installed acceptance remain pending until fresh build/install receipts exist.
+
+Combined successor integration checks: 78/78 PASS, zero failures or skips (upgrade, image/presence recovery, admission/bootstrap, consumer, qualifier progress, host lifecycle and activation wave).

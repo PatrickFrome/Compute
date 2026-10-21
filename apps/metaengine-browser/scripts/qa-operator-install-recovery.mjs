@@ -59,6 +59,43 @@ export function assertOperatorRecoveryPaths({installedRoot,stateDirectory,snapsh
   return true;
 }
 async function exists(file){try{return await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return null;throw e;}}
+const kernelIdentity=s=>({device:String(s.dev),file_id:String(s.ino),birthtime_ns:String(s.birthtimeNs)});
+async function physicalAncestors(directory){
+  let current=path.resolve(directory);
+  for(;;){const stat=await fs.lstat(current);if(!stat.isDirectory()||stat.isSymbolicLink())fail('reparse_boundary_forbidden');
+    const parent=path.dirname(current);if(parent===current)break;current=parent;}
+}
+// Presence is an explicit native filesystem observation, never an empty tree
+// pretending to be a verified application. Pin the parent/root kernel identities
+// so replacement of an empty directory cannot inherit another attempt's pin.
+export async function captureQaImagePreimage(installedRoot){
+  if(!path.isAbsolute(installedRoot||''))fail('paths_invalid');
+  const parent=path.dirname(installedRoot);await physicalAncestors(parent);
+  const parentStat=await fs.lstat(parent,{bigint:true}),stat=await exists(installedRoot);
+  const marker={schema:'metaengine.operator.qa-image-preimage.v1',state:'ABSENT',parent_identity:kernelIdentity(parentStat)};
+  if(stat){
+    if(!stat.isDirectory()||stat.isSymbolicLink())fail('target_not_physical_directory');
+    const rootBefore=await fs.lstat(installedRoot,{bigint:true});
+    if((await fs.readdir(installedRoot)).length){
+      const tree=await captureInstalledTreeFingerprint(installedRoot);
+      return Object.freeze({...tree,state:'PRESENT',preimage_sha256:tree.tree_sha256});
+    }
+    const rootAfter=await fs.lstat(installedRoot,{bigint:true});
+    if(JSON.stringify(kernelIdentity(rootBefore))!==JSON.stringify(kernelIdentity(rootAfter))
+      ||rootBefore.mtimeNs!==rootAfter.mtimeNs)fail('preimage_changed');
+    marker.state='EMPTY';marker.directory_identity=kernelIdentity(rootBefore);
+  }
+  if(JSON.stringify(kernelIdentity(parentStat))!==JSON.stringify(kernelIdentity(await fs.lstat(parent,{bigint:true}))))fail('preimage_changed');
+  return Object.freeze({...marker,preimage_sha256:sha(JSON.stringify(marker))});
+}
+function assertPreimage(actual,presence,digest){
+  if(actual.state!==presence||actual.preimage_sha256!==digest)fail('preimage_changed');
+}
+export async function captureOperatorQaPreimage(options){
+  if(process.platform!=='win32')fail('windows_required');
+  assertOperatorRecoveryPaths(options);
+  return captureQaImagePreimage(options.installedRoot);
+}
 async function durable(file,record,first=false){
   const tmp=first?file:file+'.'+randomUUID()+'.tmp';const h=await fs.open(tmp,'wx',0o600);
   try{await h.writeFile(JSON.stringify(record)+'\n');await h.sync();}finally{await h.close();}
@@ -68,35 +105,49 @@ async function durable(file,record,first=false){
 // Shared transaction core, exercised on disposable physical trees. The real
 // entry below supplies the fixed Windows target and private snapshot boundary.
 export async function restorePinnedQaImage({installedRoot,snapshotRoot,journalFile,expectedSnapshotSha256,
-  expectedPreimageSha256,protect=async()=>{},beforeMutation=async()=>{},onCheckpoint=async()=>{}}){
+  expectedPreimageSha256,expectedPreimagePresence='PRESENT',protect=async()=>{},beforeMutation=async()=>{},onCheckpoint=async()=>{}}){
   if(![expectedSnapshotSha256,expectedPreimageSha256].every(x=>SHA.test(x||'')))fail('digest_required');
+  if(!['PRESENT','ABSENT','EMPTY'].includes(expectedPreimagePresence))fail('presence_invalid');
   if(await exists(journalFile))fail('existing_attempt_requires_readback');
-  const snapshot=await captureInstalledTreeFingerprint(snapshotRoot),before=await captureInstalledTreeFingerprint(installedRoot);
-  if(snapshot.tree_sha256!==expectedSnapshotSha256||before.tree_sha256!==expectedPreimageSha256)fail('preimage_changed');
+  const snapshot=await captureInstalledTreeFingerprint(snapshotRoot),before=await captureQaImagePreimage(installedRoot);
+  if(snapshot.tree_sha256!==expectedSnapshotSha256)fail('preimage_changed');
+  assertPreimage(before,expectedPreimagePresence,expectedPreimageSha256);
   const nonce=randomUUID(),prepared=installedRoot+'.qa-prepared-'+nonce,quarantine=installedRoot+'.qa-quarantine-'+nonce;
   const copied=await copyInstalledImageToFreshDirectory(snapshotRoot,prepared,{onDirectory:protect});
   if(copied.tree_sha256!==expectedSnapshotSha256||copied.copied_tree_verified!==true)fail('snapshot_copy_unverified');
-  const record={schema:'metaengine.operator.qa-image-restore.v1',state:'PREPARED',
-    snapshot_sha256:expectedSnapshotSha256,preimage_sha256:expectedPreimageSha256,
+  const record={schema:'metaengine.operator.qa-image-restore.v2',state:'PREPARED',
+    snapshot_sha256:expectedSnapshotSha256,preimage_sha256:expectedPreimageSha256,preimage_presence:expectedPreimagePresence,
+    preimage_observation:before,
     prepared_directory:prepared,quarantine_directory:quarantine,installed_mutated:false,
     owner_mutated:false,guardian_mutated:false,postgres_mutated:false,
     production_authorized:false,automatic_retry_allowed:false,authority_effect:false};
   await durable(journalFile,record,true);await beforeMutation();
-  if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==expectedPreimageSha256)fail('preimage_changed');
+  assertPreimage(await captureQaImagePreimage(installedRoot),expectedPreimagePresence,expectedPreimageSha256);
   let phase='PREPARED';
   try{
-    record.state='MOVING_PREIMAGE';await durable(journalFile,record);
-    await fs.rename(installedRoot,quarantine);phase='QUARANTINED';record.installed_mutated=true;
-    record.state='PREIMAGE_QUARANTINED';await durable(journalFile,record);await onCheckpoint(phase);
+    if(expectedPreimagePresence==='ABSENT'){
+      record.state='ABSENT_PREIMAGE_CONFIRMED';await durable(journalFile,record);phase='ABSENT_CONFIRMED';
+      await onCheckpoint(phase);
+      assertPreimage(await captureQaImagePreimage(installedRoot),'ABSENT',expectedPreimageSha256);
+    }else{
+      record.state='MOVING_PREIMAGE';await durable(journalFile,record);
+      await fs.rename(installedRoot,quarantine);phase='QUARANTINED';record.installed_mutated=true;
+      record.state='PREIMAGE_QUARANTINED';await durable(journalFile,record);await onCheckpoint(phase);
+    }
     await fs.rename(prepared,installedRoot);phase='PROMOTED';
-    record.state='RESTORED_UNVERIFIED';await durable(journalFile,record);await onCheckpoint(phase);
-    if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==expectedSnapshotSha256
-      ||(await captureInstalledTreeFingerprint(quarantine)).tree_sha256!==expectedPreimageSha256)fail('readback_mismatch');
+    record.state='RESTORED_UNVERIFIED';record.installed_mutated=true;await durable(journalFile,record);await onCheckpoint(phase);
+    if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==expectedSnapshotSha256)fail('readback_mismatch');
+    if(expectedPreimagePresence==='ABSENT'){if(await exists(quarantine))fail('unexpected_quarantine');}
+    else assertPreimage(await captureQaImagePreimage(quarantine),expectedPreimagePresence,expectedPreimageSha256);
     record.state='RESTORED_IMAGE_VERIFIED';await durable(journalFile,record);return record;
   }catch(error){
     if(phase==='QUARANTINED'&&!await exists(installedRoot)
-      &&(await captureInstalledTreeFingerprint(quarantine)).tree_sha256===expectedPreimageSha256){
+      &&(await captureQaImagePreimage(quarantine)).preimage_sha256===expectedPreimageSha256){
       await fs.rename(quarantine,installedRoot);record.state='ABORTED_PREIMAGE_RESTORED';record.installed_mutated=false;
+      await durable(journalFile,record);throw Object.assign(error,{rollbackConfirmed:true});
+    }
+    if(phase==='ABSENT_CONFIRMED'&&!await exists(installedRoot)){
+      record.state='ABORTED_ABSENT_PREIMAGE_PRESERVED';record.installed_mutated=false;
       await durable(journalFile,record);throw Object.assign(error,{rollbackConfirmed:true});
     }
     record.state='EFFECT_UNKNOWN_REQUIRES_READBACK';await durable(journalFile,record);throw error;
@@ -106,11 +157,7 @@ export async function restorePinnedQaImage({installedRoot,snapshotRoot,journalFi
 export async function restoreOperatorQaImage(options){
   if(process.platform!=='win32')fail('windows_required');
   assertOperatorRecoveryPaths(options);
-  for(const target of [options.installedRoot,options.stateDirectory,options.snapshotRoot]){
-    let current=path.resolve(target);
-    for(;;){const stat=await fs.lstat(current);if(!stat.isDirectory()||stat.isSymbolicLink())fail('reparse_boundary_forbidden');
-      const parent=path.dirname(current);if(parent===current)break;current=parent;}
-  }
+  for(const target of [path.dirname(options.installedRoot),options.stateDirectory,options.snapshotRoot])await physicalAncestors(target);
   for(const file of [options.stateDirectory,options.snapshotRoot]){
     if((await verifyOwnerOnlyWindowsStorage(file,{operation:'VERIFY_DIRECTORY'})).owner_dacl_verified!==true)fail('private_acl_unverified');
   }

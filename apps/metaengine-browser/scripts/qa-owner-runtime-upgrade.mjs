@@ -23,6 +23,7 @@ import { readWindowsKernelProcessW60 } from '../src/host-native-owner-producers-
 import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
 import { compareQaInstalledImage, restoreOperatorQaImage } from './qa-operator-install-recovery.mjs';
 import { operatorNsisEffects, assertOperatorNsisReceipt, verifyOperatorNsisSnapshot } from './qa-operator-nsis-recovery.mjs';
+import { QA_UPGRADE_ADMISSION_SCHEMA, qaUpgradeAdmissionFile, assertQaUpgradeAdmission } from '../src/local-provider-upgrade-admission.mjs';
 
 const require = createRequire(import.meta.url), exec = promisify(execFile);
 const SHA = /^[a-f0-9]{64}$/, HEAD = /^[a-f0-9]{40}$/;
@@ -39,7 +40,8 @@ export function validateUpgradeArguments(args) {
     if(!['mode','candidate-resources','installed-resources','expected-version','expected-source',
       'expected-asar-sha256','expected-owner-sha256','receipt','expected-receipt-sha256',
       'predecessor-binding','expected-predecessor-asar-sha256','expected-predecessor-bundle-sha256',
-      'expected-uninstaller-sha256','expected-current-image-tree-sha256','expected-current-nsis-sha256'].includes(key)
+      'expected-uninstaller-sha256','expected-current-image-tree-sha256','expected-current-nsis-sha256',
+      'expected-current-image-presence','expected-current-image-preimage-sha256'].includes(key)
       ||!args[i].startsWith('--')||!value||Object.hasOwn(options,key)) fail('arguments_invalid');
     options[key]=value;
   }
@@ -52,7 +54,11 @@ export function validateUpgradeArguments(args) {
     ||inside(options['installed-resources']||'.',options.receipt||'.')
     ||(options.mode!=='prepare'&&!SHA.test(options['expected-receipt-sha256']||''))
     ||(options.mode==='finalize'&&!SHA.test(options['expected-uninstaller-sha256']||''))
-    ||(options.mode==='recover'&&!['expected-current-image-tree-sha256','expected-current-nsis-sha256'].every(k=>SHA.test(options[k]||'')))) fail('arguments_invalid');
+    ||(options.mode==='recover'&&(!SHA.test(options['expected-current-nsis-sha256']||'')
+      ||!['PRESENT','ABSENT','EMPTY'].includes(options['expected-current-image-presence']||'PRESENT')
+      ||((options['expected-current-image-presence']||'PRESENT')==='PRESENT'
+        ?!SHA.test(options['expected-current-image-tree-sha256']||'')||options['expected-current-image-preimage-sha256']!==undefined
+        :!SHA.test(options['expected-current-image-preimage-sha256']||'')||options['expected-current-image-tree-sha256']!==undefined)))) fail('arguments_invalid');
   predecessorReadPolicy(options);
   return options;
 }
@@ -566,7 +572,39 @@ export async function completeUpgradeFiles({ownerFile,gateFile,terminalFile,reti
   if(sha(await stableUpgradeRead(retiredGateFile))!==expectedGateSha256
     ||sha(await stableUpgradeRead(ownerFile))!==expectedOwnerSha256)fail('finalization_effect_unknown');
   await verify();
-  return {...receipt,launch_allowed:true,gate_retired:true};
+  return {...receipt,launch_allowed:false,gate_retired:true,admission_commit_required:true};
+}
+// The admission marker is the sole last commit point. Gate retirement and the
+// earlier completion receipt still deny launch, including after a crash.
+export async function commitUpgradeAdmission({ownerFile,gateFile,completionFile,admission},
+  {verify=async()=>{},protect=async()=>{}}={}){
+  const ownerBytes=await stableUpgradeRead(ownerFile),owner=validateLocalStateProviderConfig(JSON.parse(ownerBytes));
+  assertQaUpgradeAdmission(admission,{owner,ownerBytes});
+  const markerFile=qaUpgradeAdmissionFile(owner),markerBytes=Buffer.from(JSON.stringify(admission,null,2)+'\n');
+  if(!markerFile)fail('admission_state_directory_invalid');
+  const check=async()=>{
+    await absent(gateFile);await absent(markerFile);
+    if(sha(await stableUpgradeRead(ownerFile))!==admission.owner_sha256)fail('publication_cas_changed');
+    const completedBytes=await stableUpgradeRead(completionFile);
+    if(sha(completedBytes)!==admission.completed_receipt_sha256)fail('completion_receipt_changed');
+    const completed=JSON.parse(completedBytes);
+    if(completed.state!=='INSTALLED_VERIFIED'||completed.installed_payload_verified!==true
+      ||completed.launch_allowed!==false||completed.gate_retired!==true||completed.admission_commit_required!==true
+      ||completed.owner_sha256!==admission.owner_sha256||completed.bundle_sha256!==admission.bundle_sha256
+      ||completed.source_head!==admission.source_head||completed.package_version!==admission.package_version
+      ||completed.installed_asar_sha256!==admission.installed_asar_sha256
+      ||completed.installed_image?.installed_tree_sha256!==admission.installed_tree_sha256
+      ||completed.production_authorized!==false||completed.authority_effect!==false)fail('completion_receipt_unverified');
+    await verify();
+  };
+  await check();
+  const staged=markerFile+'.'+randomUUID()+'.tmp';await exclusive(staged,markerBytes);await protect(staged);
+  if(sha(await stableUpgradeRead(staged))!==sha(markerBytes))fail('admission_staged_changed');
+  await check();
+  await fs.rename(staged,markerFile);
+  // Nothing that can reject admission follows this atomic commit. A caller
+  // interrupted here must read this immutable record instead of replaying.
+  return {admission_file:markerFile,admission_sha256:sha(markerBytes),launch_allowed:true};
 }
 export async function finalizeUpgrade(options){
   if(process.platform!=='win32')fail('windows_required');
@@ -591,6 +629,7 @@ export async function finalizeUpgrade(options){
   const nsis=await observeWindowsNsisEffects({expectedVersion:proof.package_version});
   const receipt={schema:SCHEMA,state:'INSTALLED_VERIFIED',proof_sha256:journal.proof_sha256,
     source_head:proof.source_head,package_version:proof.package_version,owner_sha256:journal.new_owner_sha256,
+    bundle_sha256:proof.bundle_sha256,installed_asar_sha256:proof.asar_sha256,
     installed_image:image,nsis_effects:nsis,keeper:proof.keeper,installed_payload_verified:true,
     production_authorized:false,provenance_verified:false,historical_effects_reconciled:false,
     automatic_retry_allowed:false,authority_effect:false};
@@ -602,11 +641,21 @@ export async function finalizeUpgrade(options){
   journal.state='INSTALLED_VERIFIED';journal.installed_payload_verified=true;journal.gate_retired=true;
   journal.installed_receipt_sha256=sha(await stableUpgradeRead(terminalFile));
   await save(publicationFile,journal);
-  // Final launch permission is durable separately from the pre-retirement image
-  // receipt, so a crash at any point remains a manual readback, never a retry.
+  // This receipt still denies launch; only the last atomic admission marker
+  // below permits the new QA state to bootstrap.
   const completionFile=options.receipt+'.completed.json';await exclusive(completionFile,JSON.stringify(completed,null,2)+'\n');await acl(completionFile);
-  return {state:completed.state,completion_file:completionFile,completion_sha256:sha(await stableUpgradeRead(completionFile)),
-    launch_allowed:true,installed_payload_verified:true,production_authorized:false};
+  const completionSha=sha(await stableUpgradeRead(completionFile));
+  const admission={schema:QA_UPGRADE_ADMISSION_SCHEMA,state:'INSTALLED_VERIFIED',
+    owner_sha256:journal.new_owner_sha256,bundle_sha256:proof.bundle_sha256,
+    proof_sha256:journal.proof_sha256,completed_receipt_sha256:completionSha,
+    source_head:proof.source_head,package_version:proof.package_version,
+    installed_asar_sha256:proof.asar_sha256,installed_tree_sha256:image.installed_tree_sha256,
+    publication_gate_sha256:journal.publication_gate_sha256,launch_allowed:true,gate_retired:true,
+    production_authorized:false,provenance_verified:false,automatic_retry_allowed:false,authority_effect:false};
+  const committed=await commitUpgradeAdmission({ownerFile:journal.owner_file,gateFile:journal.publication_gate,completionFile,admission},
+    {verify,protect:async file=>acl(file)});
+  return {state:completed.state,completion_file:completionFile,completion_sha256:completionSha,
+    ...committed,installed_payload_verified:true,production_authorized:false};
 }
 export async function recoverUpgrade(options){
   if(process.platform!=='win32')fail('windows_required');
@@ -621,7 +670,9 @@ export async function recoverUpgrade(options){
   if(observed.external_effects_sha256!==options['expected-current-nsis-sha256'])fail('nsis_preimage_changed');
   await restoreOperatorQaImage({installedRoot:path.dirname(options['installed-resources']),stateDirectory:proof.state_directory,
     snapshotRoot:proof.predecessor_snapshot.image_directory,expectedSnapshotSha256:proof.predecessor_image.tree_sha256,
-    expectedPreimageSha256:options['expected-current-image-tree-sha256'],beforeMutation:verify});
+    expectedPreimagePresence:options['expected-current-image-presence']||'PRESENT',
+    expectedPreimageSha256:(options['expected-current-image-presence']||'PRESENT')==='PRESENT'
+      ?options['expected-current-image-tree-sha256']:options['expected-current-image-preimage-sha256'],beforeMutation:verify});
   await verify();
   await operatorNsisEffects({mode:'Restore',stateDirectory:proof.state_directory,expectedVersion:proof.predecessor_image.package_version,
     expectedSnapshotSha256:proof.predecessor_nsis_snapshot.snapshot_sha256,expectedPreimageSha256:options['expected-current-nsis-sha256']});

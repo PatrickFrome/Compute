@@ -6,7 +6,8 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
   assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile, classifyPredecessorBinding, predecessorReadPolicy,
-  completeUpgradeFiles,assertPendingPublication } from '../scripts/qa-owner-runtime-upgrade.mjs';
+  completeUpgradeFiles,commitUpgradeAdmission,assertPendingPublication } from '../scripts/qa-owner-runtime-upgrade.mjs';
+import {QA_UPGRADE_ADMISSION_SCHEMA,qaUpgradeAdmissionFile,assertQaUpgradeAdmission} from '../src/local-provider-upgrade-admission.mjs';
 import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
 import { QA_IMAGE_SNAPSHOT_SCHEMA } from '../scripts/qa-installed-image-snapshot.mjs';
 import { NSIS_EFFECTS_SCHEMA } from '../scripts/qa-nsis-external-effects.mjs';
@@ -37,6 +38,13 @@ test('QA upgrade requires explicit mode, immutable package and predecessor ident
   assert.equal(validateUpgradeArguments(argv({...options,mode:'finalize','expected-receipt-sha256':digest,
     'expected-uninstaller-sha256':digest})).mode,'finalize');
   assert.throws(()=>validateUpgradeArguments(argv({...options,mode:'recover','expected-receipt-sha256':digest})),/arguments_invalid/);
+  for(const presence of ['ABSENT','EMPTY']){
+    const recover={...options,mode:'recover','expected-receipt-sha256':digest,'expected-current-nsis-sha256':digest,
+      'expected-current-image-presence':presence,'expected-current-image-preimage-sha256':digest};
+    assert.equal(validateUpgradeArguments(argv(recover))['expected-current-image-presence'],presence);
+    assert.throws(()=>validateUpgradeArguments(argv({...recover,'expected-current-image-tree-sha256':digest})),/arguments_invalid/);
+    assert.throws(()=>validateUpgradeArguments(argv({...recover,'expected-current-image-preimage-sha256':'invalid'})),/arguments_invalid/);
+  }
 });
 
 test('qualification and final configs preserve database credentials, cluster, ports and lifecycle',()=>{
@@ -265,7 +273,7 @@ test('completion durably records exact image before gate retirement and cannot r
     try{await fs.stat(f.gateFile);}catch{retired=true;
       assert.equal(JSON.parse(await fs.readFile(f.terminalFile,'utf8')).launch_allowed,false);}
   }});
-  assert.equal(retired,true);assert.equal(result.launch_allowed,true);assert.equal(result.production_authorized,false);
+  assert.equal(retired,true);assert.equal(result.launch_allowed,false);assert.equal(result.admission_commit_required,true);assert.equal(result.production_authorized,false);
   await assert.rejects(fs.stat(f.gateFile),{code:'ENOENT'});
   assert.equal(hash(await fs.readFile(f.retiredGateFile)),f.expectedGateSha256);
   await assert.rejects(completeUpgradeFiles(f),/existing_attempt_requires_readback/);
@@ -281,6 +289,56 @@ test('Owner or gate drift prevents completion without clobbering concurrent byte
       assert.equal(JSON.parse(await fs.readFile(f.terminalFile,'utf8')).launch_allowed,false);
     });
   }
+});
+
+async function admissionFixture(t){
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-admission-commit-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const state=path.join(root,'client-state-qa-upgrade-11111111-2222-4333-8444-555555555555');await fs.mkdir(state);
+  const owner={schema:'metaengine.browser.local-state-provider-config.v1',version:1,profile:'CLIENT_LOCAL_POSTGRES_V1',
+    provider:'LOCAL_POSTGRES',base_url:'http://127.0.0.1:55434/a2-browser-native-supervisor-v1',authority_effect:false,
+    runtime_identity_file:path.join(state,'runtime-instance.json'),runtime_host:{bundle_directory:path.join(root,'resources','client-state-runtime'),
+      expected_bundle_sha256:digest,config_file:path.join(state,'installed-runtime-config.json')}};
+  const ownerBytes=Buffer.from(JSON.stringify(owner)+'\n'),ownerFile=path.join(root,'owner.json'),completionFile=path.join(root,'completed.json');
+  await fs.writeFile(ownerFile,ownerBytes);
+  const completed={state:'INSTALLED_VERIFIED',installed_payload_verified:true,launch_allowed:false,gate_retired:true,admission_commit_required:true,
+    owner_sha256:hash(ownerBytes),bundle_sha256:digest,source_head:source,package_version:version,installed_asar_sha256:'c'.repeat(64),
+    installed_image:{installed_tree_sha256:'d'.repeat(64)},production_authorized:false,authority_effect:false};
+  const completedBytes=Buffer.from(JSON.stringify(completed)+'\n');await fs.writeFile(completionFile,completedBytes);
+  const admission={schema:QA_UPGRADE_ADMISSION_SCHEMA,state:'INSTALLED_VERIFIED',owner_sha256:hash(ownerBytes),bundle_sha256:digest,
+    proof_sha256:'e'.repeat(64),completed_receipt_sha256:hash(completedBytes),source_head:source,package_version:version,
+    installed_asar_sha256:'c'.repeat(64),installed_tree_sha256:'d'.repeat(64),publication_gate_sha256:'f'.repeat(64),
+    launch_allowed:true,gate_retired:true,production_authorized:false,provenance_verified:false,automatic_retry_allowed:false,authority_effect:false};
+  return {owner,ownerBytes,ownerFile,completionFile,gateFile:ownerFile+'.qa-upgrade-gate.json',admission,markerFile:qaUpgradeAdmissionFile(owner)};
+}
+
+test('admission is committed only after private staging and the last physical verification',async t=>{
+  const f=await admissionFixture(t);let verifications=0,protectedStage=false;
+  const result=await commitUpgradeAdmission(f,{verify:async()=>{
+    verifications++;await assert.rejects(fs.stat(f.markerFile),{code:'ENOENT'});
+    assert.equal(JSON.parse(await fs.readFile(f.completionFile,'utf8')).launch_allowed,false);
+    if(verifications===2)assert.equal(protectedStage,true);
+  },protect:async file=>{assert.equal(path.dirname(file),path.dirname(f.markerFile));assert.match(file,/installed-owner-admission\.json\..+\.tmp$/);protectedStage=true;}});
+  assert.equal(verifications,2);assert.equal(result.launch_allowed,true);
+  const bytes=await fs.readFile(result.admission_file);assert.equal(hash(bytes),result.admission_sha256);
+  assert.equal(assertQaUpgradeAdmission(JSON.parse(bytes),{owner:f.owner,ownerBytes:f.ownerBytes}),true);
+  await assert.rejects(commitUpgradeAdmission(f),/existing_attempt_requires_readback/);
+});
+
+test('a failure before the last admission rename leaves the QA runtime blocked',async t=>{
+  for(const failure of ['LAST_VERIFY','ACL','OWNER_CAS','COMPLETION_CAS','GATE_RETURNED'])await t.test(failure,async t=>{
+    const f=await admissionFixture(t);let calls=0;
+    await assert.rejects(commitUpgradeAdmission(f,{verify:async()=>{
+      if(++calls===2&&failure==='LAST_VERIFY')throw Error('injected_last_verify');
+    },protect:async()=>{
+      if(failure==='ACL')throw Error('injected_acl');
+      if(failure==='OWNER_CAS')await fs.appendFile(f.ownerFile,' ');
+      if(failure==='COMPLETION_CAS')await fs.appendFile(f.completionFile,' ');
+      if(failure==='GATE_RETURNED')await fs.writeFile(f.gateFile,'concurrent pending gate');
+    }}));
+    await assert.rejects(fs.stat(f.markerFile),{code:'ENOENT'});
+    assert.equal(JSON.parse(await fs.readFile(f.completionFile,'utf8')).launch_allowed,false);
+  });
 });
 test('publication admission binds the exact private proof, Owner, gate and false authority',()=>{
   const ownerFile=path.resolve(os.tmpdir(),'test-owner.json'),proof={old_owner_sha256:digest,backup_owner_file:path.resolve(os.tmpdir(),'backup.json')};

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {compareQaInstalledImage,restorePinnedQaImage,assertOperatorRecoveryPaths} from '../scripts/qa-operator-install-recovery.mjs';
+import {compareQaInstalledImage,restorePinnedQaImage,assertOperatorRecoveryPaths,captureQaImagePreimage} from '../scripts/qa-operator-install-recovery.mjs';
 import {captureInstalledTreeFingerprint} from '../scripts/qa-installed-tree-fingerprint.mjs';
 import {assertOperatorNsisReceipt,verifyOperatorNsisSnapshot} from '../scripts/qa-operator-nsis-recovery.mjs';
 
@@ -52,6 +52,49 @@ test('rename-gap failure restores current preimage, post-promotion failure remai
     assert.equal(result.state,point==='QUARANTINED'?'ABORTED_PREIMAGE_RESTORED':'EFFECT_UNKNOWN_REQUIRES_READBACK');
     assert.equal((await captureInstalledTreeFingerprint(installed)).tree_sha256,point==='QUARANTINED'?before.tree_sha256:old.tree_sha256);
   });
+});
+test('interrupted NSIS can restore a genuinely ABSENT or EMPTY fixed-target preimage without fake tree proof',async t=>{
+  for(const presence of ['ABSENT','EMPTY'])await t.test(presence,async t=>{
+    const root=await fixture(t),installed=path.join(root,'installed'),snapshot=path.join(root,'snapshot');
+    await tree(snapshot,'exact previous application');if(presence==='EMPTY')await fs.mkdir(installed);
+    const before=await captureQaImagePreimage(installed),old=await captureInstalledTreeFingerprint(snapshot);
+    assert.equal(before.state,presence);assert.equal(before.tree_sha256,undefined);
+    const journal=path.join(root,'restore.json');
+    const result=await restorePinnedQaImage({installedRoot:installed,snapshotRoot:snapshot,journalFile:journal,
+      expectedSnapshotSha256:old.tree_sha256,expectedPreimagePresence:presence,expectedPreimageSha256:before.preimage_sha256});
+    assert.equal(result.state,'RESTORED_IMAGE_VERIFIED');assert.equal(result.preimage_presence,presence);
+    assert.equal((await captureInstalledTreeFingerprint(installed)).tree_sha256,old.tree_sha256);
+    assert.equal(result.owner_mutated,false);assert.equal(result.postgres_mutated,false);
+    if(presence==='EMPTY')assert.equal((await fs.readdir(result.quarantine_directory)).length,0);
+    else await assert.rejects(fs.stat(result.quarantine_directory),{code:'ENOENT'});
+  });
+});
+test('presence pins reject changed target and preserve files created by another writer',async t=>{
+  for(const presence of ['ABSENT','EMPTY'])await t.test(presence,async t=>{
+    const root=await fixture(t),installed=path.join(root,'installed'),snapshot=path.join(root,'snapshot');
+    await tree(snapshot,'exact previous application');if(presence==='EMPTY')await fs.mkdir(installed);
+    const before=await captureQaImagePreimage(installed),old=await captureInstalledTreeFingerprint(snapshot);
+    await assert.rejects(restorePinnedQaImage({installedRoot:installed,snapshotRoot:snapshot,journalFile:path.join(root,'journal.json'),
+      expectedSnapshotSha256:old.tree_sha256,expectedPreimagePresence:presence,expectedPreimageSha256:before.preimage_sha256,
+      beforeMutation:async()=>{if(presence==='ABSENT')await fs.mkdir(installed);await fs.writeFile(path.join(installed,'concurrent.txt'),'keep me');}}),/preimage_changed/);
+    assert.equal(await fs.readFile(path.join(installed,'concurrent.txt'),'utf8'),'keep me');
+    assert.deepEqual(await fs.readdir(installed),['concurrent.txt']);
+  });
+});
+test('EMPTY kernel identity is pinned and rename-gap failures preserve the original empty target',async t=>{
+  const root=await fixture(t),installed=path.join(root,'installed'),snapshot=path.join(root,'snapshot');
+  await tree(snapshot,'previous');await fs.mkdir(installed);
+  const before=await captureQaImagePreimage(installed),old=await captureInstalledTreeFingerprint(snapshot);
+  await fs.rename(installed,path.join(root,'other-empty'));await fs.mkdir(installed);
+  assert.notEqual((await captureQaImagePreimage(installed)).preimage_sha256,before.preimage_sha256);
+  await assert.rejects(restorePinnedQaImage({installedRoot:installed,snapshotRoot:snapshot,journalFile:path.join(root,'rejected.json'),
+    expectedSnapshotSha256:old.tree_sha256,expectedPreimagePresence:'EMPTY',expectedPreimageSha256:before.preimage_sha256}),/preimage_changed/);
+  const fresh=await captureQaImagePreimage(installed),journal=path.join(root,'gap.json');
+  await assert.rejects(restorePinnedQaImage({installedRoot:installed,snapshotRoot:snapshot,journalFile:journal,
+    expectedSnapshotSha256:old.tree_sha256,expectedPreimagePresence:'EMPTY',expectedPreimageSha256:fresh.preimage_sha256,
+    onCheckpoint:async p=>{if(p==='QUARANTINED')throw Error('injected empty gap');}}),/injected empty gap/);
+  assert.equal((await captureQaImagePreimage(installed)).preimage_sha256,fresh.preimage_sha256);
+  assert.equal(JSON.parse(await fs.readFile(journal,'utf8')).state,'ABORTED_PREIMAGE_RESTORED');
 });
 test('real operator recovery refuses arbitrary profile, snapshot, network and PG targets',()=>{
   const local=path.resolve(os.tmpdir(),'qa-local'),state=path.join(local,'METAENGINE','client-state-qa-upgrade-11111111-2222-3333-4444-555555555555');
