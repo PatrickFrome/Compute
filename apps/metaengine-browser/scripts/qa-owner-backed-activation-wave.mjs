@@ -43,6 +43,12 @@ export async function qualifyOwnerBackedActivationWave({
     ||!Number.isFinite(concurrentBudgetMs)||concurrentBudgetMs<100
     ||typeof clock!=='function')fail('arguments_invalid');
   const acks=[],latencies=[],launchIds=new Set(),sequences=new Set();
+  // With fixed N, more than N-ceil(.95*N) slow samples makes the final P95
+  // impossible. Fail at that point; do not launch the remaining secondaries
+  // for minutes only to have the outer qualifier kill the real failure.
+  const maximumSlowSamples=sequentialCount+concurrentCount
+    -Math.ceil((sequentialCount+concurrentCount)*.95);
+  let slowSamples=0;
   const one=async()=>{
     const start=clock();const ack=await activate();const elapsed=clock()-start;
     if(!receiptOk(ack,{pid,version})||!Number.isFinite(elapsed)||elapsed<0)
@@ -51,6 +57,8 @@ export async function qualifyOwnerBackedActivationWave({
       fail('secondary_duplicate');
     launchIds.add(ack.launch_id);sequences.add(ack.event_sequence);
     acks.push(ack);latencies.push(elapsed);
+    if(elapsed>p95BudgetMs&&++slowSamples>maximumSlowSamples)
+      fail('activation_latency_budget_exceeded');
   };
   for(let i=0;i<sequentialCount;i++)await one();
   const concurrentStart=clock();

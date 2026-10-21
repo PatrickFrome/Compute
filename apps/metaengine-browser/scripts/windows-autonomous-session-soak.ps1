@@ -51,10 +51,13 @@ Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
 $normalOut = Join-Path $RunnerTemp 'soak-normal-ui.out'
 $normalErr = Join-Path $RunnerTemp 'soak-normal-ui.err'
 $normal = $null
+$soakPassed = $false
 try {
   # Ordinary Explorer / Start Menu path: no smoke or probe flags.
   $normal = Start-Process -FilePath $AppPath -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
   $null = $normal.Handle
+  @{ pid=$normal.Id; version=[string]$proof.package_version } | ConvertTo-Json -Compress |
+    Set-Content (Join-Path $RunnerTemp 'soak-running-primary.json') -Encoding utf8
   $deadline = [DateTime]::UtcNow.AddSeconds(55)
   $stable = $null
   while ([DateTime]::UtcNow -lt $deadline) {
@@ -433,6 +436,7 @@ try {
   if ($ConcurrentBurstSize -gt 0 -and $burstElapsedMs -gt 8000) { throw "soak_concurrent_burst_budget_exceeded:$([Math]::Round($burstElapsedMs,2))" }
   if ($proof.second_instance_activations_verified -ne $expectedActivationCount) { throw 'soak_activation_count_mismatch' }
   Write-Host ($proof | ConvertTo-Json -Compress)
+  $soakPassed = $true
 } catch {
   # Diagnostic-only readback. Never change the existing fatal soak result or
   # serialize raw Owner/userData fields into a public CI artifact.
@@ -449,6 +453,20 @@ try {
   throw
 } finally {
   if ($normal -and -not $normal.HasExited) {
-    cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
+    # The Owner runtime owns API/Edge children. Forced termination of only the
+    # Browser can leave those children and its durable incarnation lock alive.
+    $shutdown = Start-Process -FilePath $AppPath -ArgumentList '--metaengine-installer-shutdown' -WindowStyle Hidden -PassThru
+    $null = $shutdown.Handle
+    if (-not $shutdown.WaitForExit(50000)) { throw 'soak_shutdown_signal_timeout' }
+    if ($shutdown.ExitCode -ne 0) { throw 'soak_shutdown_signal_failed' }
+    if (-not $normal.WaitForExit(60000)) { throw 'soak_shutdown_primary_timeout' }
+  }
+  if ($normal) {
+    $normal.Refresh()
+    if (-not $normal.HasExited -or $normal.ExitCode -ne 0) { throw 'soak_primary_cleanup_unconfirmed' }
+  }
+  if ($soakPassed) {
+    $proof | Add-Member -NotePropertyName process_cleanup_confirmed -NotePropertyValue $true -Force
+    $proof | ConvertTo-Json -Depth 6 | Set-Content $ProofPath -Encoding utf8
   }
 }

@@ -40,6 +40,22 @@ export async function bootstrapPersistentLocalProvider({
     delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
     return Object.freeze({ state: 'NO_OWNER_CONFIG', persistent: false, authority_effect: false });
   }
+  // An operator's two-phase install can publish the future Owner before NSIS
+  // replaces the old image. No Browser may start that host until full installed
+  // payload readback commits the transaction and retires this gate.
+  try {
+    await fs.lstat(ownerFile + '.qa-upgrade-gate.json');
+    failClosed(env, 'local_state_provider_upgrade_install_pending');
+    delete env.METAENGINE_SUPERVISOR_BASE_URL;
+    delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+    delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
+    throw new Error('local_state_provider_upgrade_install_pending');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      failClosed(env, 'local_state_provider_upgrade_install_pending');
+      throw new Error('local_state_provider_upgrade_install_pending');
+    }
+  }
   let exists;
   try { exists = await fs.lstat(ownerFile); } catch (error) {
     if (error?.code === 'ENOENT') {

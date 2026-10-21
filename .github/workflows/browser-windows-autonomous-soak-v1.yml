@@ -199,6 +199,9 @@ jobs:
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
+      - name: Install frozen attached runtime fixture dependencies
+        working-directory: infra/client-state-runtime
+        run: npm ci --no-audit --no-fund
       - name: Parse packaged session soak harness before expensive build
         working-directory: apps/metaengine-browser
         shell: pwsh
@@ -314,24 +317,52 @@ jobs:
           $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
 
-      - name: Open normal UI and prove 64 sequential plus 8 concurrent exact activations
-        working-directory: apps/metaengine-browser
+      - name: Prove 72 activations with a real disposable Owner and attached PostgreSQL
+        working-directory: infra/client-state-runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $proofPath = "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json"
+          $head = '${{ env.EXACT_HEAD }}'
+          $version = [string](node -p "require('../../apps/metaengine-browser/package.json').version")
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
-          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
-          ./scripts/windows-autonomous-session-soak.ps1 `
-            -AppPath $app `
-            -ProofPath $proofPath `
-            -RunnerTemp $env:RUNNER_TEMP `
-            -ActivationCount 64 `
-            -ConcurrentBurstSize 8 `
-            -PostActivationHoldSeconds 30 `
-            -ActivationP95BudgetMs 1000 `
-            -MaxWorkingSetGrowthBytes 67108864 `
-            -MaxHandleGrowth 24
+          $bundle = Join-Path $installRoot 'resources\client-state-runtime'
+          $manifest = Get-Content (Join-Path $bundle 'offline-runtime-bundle.json') -Raw | ConvertFrom-Json
+          $bundleSha = [string]$manifest.bundle_sha256
+          if ($bundleSha -notmatch '^[a-f0-9]{64}$') { throw 'soak_owner_bundle_pin_invalid' }
+          $nodeTemp = (node -p "require('node:os').tmpdir()").Trim()
+          if (-not [IO.Path]::IsPathRooted($nodeTemp)) { throw 'soak_owner_temp_invalid' }
+          $schema = Join-Path $nodeTemp ('soak-owner-schema-' + [guid]::NewGuid().ToString('N'))
+          $evidence = Join-Path $env:RUNNER_TEMP ('soak-owner-evidence-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $schema -ErrorAction Stop | Out-Null
+          New-Item -ItemType Directory -Path $evidence -ErrorAction Stop | Out-Null
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY = $bundle
+          $env:LOCAL_STATE_TEST_ATTACHED_BUNDLE_SHA256 = $bundleSha
+          $env:LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR = Join-Path $bundle 'runtime/postgresql/bin'
+          $env:LOCAL_STATE_TEST_GENERATED_SCHEMA_DIRECTORY = $schema
+          npm run test:attached-onboarding
+          if ($LASTEXITCODE -ne 0) { throw 'soak_owner_schema_failed' }
+          $dump = Join-Path $schema 'generated-empty-schema-pg17.dump'
+          $schemaSha = (Get-Content (Join-Path $schema 'generated-empty-schema-pg17.sha256') -Raw).Trim()
+          if ($schemaSha -notmatch '^[a-f0-9]{64}$' -or $schemaSha -ne (Get-FileHash $dump -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'soak_owner_schema_pin_changed' }
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP = $dump
+          $env:LOCAL_STATE_TEST_ATTACHED_SCHEMA_DUMP_SHA256 = $schemaSha
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_ROOT = $installRoot
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_SOURCE_HEAD = $head
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_VERSION = $version
+          $env:LOCAL_STATE_TEST_ATTACHED_INSTALL_EVIDENCE_DIRECTORY = $evidence
+          $env:LOCAL_STATE_TEST_ATTACHED_CONSUMER = 'AUTONOMOUS_SESSION_SOAK'
+          node --test --test-concurrency=1 attached-bundled-runtime.integration.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'soak_owner_physical_qualification_failed' }
+          $consumer = Get-Content (Join-Path $evidence 'installed-owner-consumer-proof.json') -Raw | ConvertFrom-Json
+          if ($consumer.consumer -ne 'AUTONOMOUS_SESSION_SOAK' -or $consumer.real_local_runtime_attested -ne $true -or $consumer.attached_postgres_incarnation_preserved -ne $true) { throw 'soak_owner_consumer_unproven' }
+          # Keep producer identity and bundle evidence already established above.
+          $proofPath = Join-Path $env:RUNNER_TEMP 'windows-autonomous-soak-proof.json'
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          foreach ($property in $consumer.session_soak.PSObject.Properties) {
+            $proof | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force
+          }
+          $proof | Add-Member -NotePropertyName owner_backed_soak_verified -NotePropertyValue $true -Force
+          $proof | ConvertTo-Json -Depth 10 | Set-Content $proofPath -Encoding utf8
 
       - name: Require bound Package Smoke producer terminal success
         working-directory: apps/metaengine-browser
@@ -363,6 +394,10 @@ jobs:
             ${{ runner.temp }}/soak-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-soak.json
             ${{ runner.temp }}/soak-normal-ui-readback.json
+            ${{ runner.temp }}/soak-owner-evidence-*/installed-owner-consumer-proof.json
+            ${{ runner.temp }}/soak-owner-evidence-*/installed-launch-progress.json
+            ${{ runner.temp }}/soak-owner-evidence-*/installed-launch-failure.json
+            ${{ runner.temp }}/soak-owner-evidence-*/soak-normal-ui-readback.json
             ${{ runner.temp }}/soak-profile.out
             ${{ runner.temp }}/soak-profile.err
             ${{ runner.temp }}/soak-normal-ui.out

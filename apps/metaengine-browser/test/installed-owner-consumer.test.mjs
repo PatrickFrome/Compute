@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { assertOwnerConsumerKind, assertOwnerConsumerFixture, assertOwnerConsumerProfile,
   assertFinalRuntimeConsumerActivation, assertOwnerConsumerRuntime, assertOwnerConsumerStopped,
-  assertOwnerConsumerProof, qualifyInstalledOwnerConsumer } from '../scripts/qualify-installed-owner-consumer.mjs';
+  assertOwnerConsumerProof, assertOwnerSessionSoak, qualifyInstalledOwnerConsumer } from '../scripts/qualify-installed-owner-consumer.mjs';
 
 const root = path.join(os.tmpdir(), 'compute-attached-bundle-unit-only');
 const resourcesDir = path.join(os.tmpdir(), 'installed-owner-consumer-unit-package/resources');
@@ -40,11 +40,28 @@ const runtime = () => ({ previous: { instance_id: previousId, state: 'STOPPED', 
   health: { ok: true, instance_id: currentId, state_provider: 'LOCAL_POSTGRES', hosted_supabase_required: false,
     runtime_ready: true, capability_health: { state: 'ATTESTED', authority_effect: false } }, owner, pid: 410, postgresPid: 400 });
 
-test('only two fixed consumers are accepted before paths, processes or provider reads', async () => {
-  for (const kind of ['FINAL_RUNTIME_ACTIVATION', 'SHELL_FIRST_DIRTY_PROFILE']) assert.equal(assertOwnerConsumerKind(kind), kind);
+test('only reviewed fixed consumers are accepted before paths, processes or provider reads', async () => {
+  for (const kind of ['FINAL_RUNTIME_ACTIVATION', 'SHELL_FIRST_DIRTY_PROFILE', 'AUTONOMOUS_SESSION_SOAK']) assert.equal(assertOwnerConsumerKind(kind), kind);
   for (const kind of [undefined, '', 'READY', 'node arbitrary.mjs', '../external-consumer.mjs', 'FINAL_RUNTIME_ACTIVATION\n']) {
     assert.throws(() => assertOwnerConsumerKind(kind), /kind_invalid/);
     await assert.rejects(qualifyInstalledOwnerConsumer({ consumer: kind }), /kind_invalid/);
+  }
+});
+
+test('Owner session soak refuses partial activation, missing cleanup and exceeded physical resource budgets', () => {
+  const proof={schema:'metaengine.browser.windows-autonomous-soak.v3',source_head:sourceHead,package_version:version,
+    normal_ui_boot_verified:true,second_instance_activations_verified:72,resource_budget_evidence_captured:true,
+    process_cleanup_confirmed:true,startup_resource_baseline_settled:true,duplicate_browser_runtime_observed:false,
+    activation_latency_p95_budget_ms:1000,handle_growth_budget:24,working_set_growth_budget_bytes:67108864,
+    concurrent_activation_burst_size:8,signed:false,published:false,promotion_authorized:false,authority_effect:false,
+    activation_latency_p95_ms:1000,handle_growth:24,working_set_growth_bytes:67108864,
+    concurrent_activation_burst_elapsed_ms:8000,primary_pid:410};
+  assert.equal(assertOwnerSessionSoak(proof,{sourceHead,version}),proof);
+  for(const [key,value] of [['second_instance_activations_verified',71],['process_cleanup_confirmed',false],
+    ['primary_pid',null],['activation_latency_p95_ms',1001],['handle_growth',25],
+    ['working_set_growth_bytes',67108865],['concurrent_activation_burst_elapsed_ms',8001],
+    ['activation_latency_p95_budget_ms',9999],['authority_effect',true]]) {
+    assert.throws(()=>assertOwnerSessionSoak({...proof,[key]:value},{sourceHead,version}),/session_soak/);
   }
 });
 

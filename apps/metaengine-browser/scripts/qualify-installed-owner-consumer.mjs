@@ -1,6 +1,7 @@
 // CI consumers of a newly created disposable Owner. This is not an Owner
 // provisioner and never accepts an arbitrary command, endpoint or READY flag.
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -8,7 +9,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
+import { parseArgs, promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { assertInstalledLaunchIdentity, assertInstalledPrimaryWindowJournal,
   verifyInstalledVisiblePrimaryWindow, isolatedLaunchEnvironment, INSTALLED_LAUNCH_SOURCE_FILES,
@@ -21,7 +22,7 @@ const require = createRequire(import.meta.url);
 const { assertPackagedOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = reason => { throw new Error('installed_owner_consumer_' + reason); };
-export const OWNER_CONSUMERS = Object.freeze(['FINAL_RUNTIME_ACTIVATION', 'SHELL_FIRST_DIRTY_PROFILE']);
+export const OWNER_CONSUMERS = Object.freeze(['FINAL_RUNTIME_ACTIVATION', 'SHELL_FIRST_DIRTY_PROFILE', 'AUTONOMOUS_SESSION_SOAK']);
 const contained = (root, target) => {
   const relative = path.relative(path.resolve(root), path.resolve(target));
   return relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
@@ -105,6 +106,24 @@ export function assertOwnerConsumerStopped({ current, stopped, primaryClose, shu
   return true;
 }
 
+export function assertOwnerSessionSoak(proof, {sourceHead, version}) {
+  if (proof?.schema !== 'metaengine.browser.windows-autonomous-soak.v3'
+    || proof.source_head !== sourceHead || proof.package_version !== version
+    || proof.normal_ui_boot_verified !== true || proof.second_instance_activations_verified !== 72
+    || proof.resource_budget_evidence_captured !== true || proof.process_cleanup_confirmed !== true
+    || proof.startup_resource_baseline_settled !== true || proof.duplicate_browser_runtime_observed !== false
+    || proof.activation_latency_p95_budget_ms !== 1000 || proof.handle_growth_budget !== 24
+    || proof.working_set_growth_budget_bytes !== 67108864 || proof.concurrent_activation_burst_size !== 8
+    || proof.signed !== false || proof.published !== false || proof.promotion_authorized !== false
+    || proof.authority_effect !== false) fail('session_soak_unproven');
+  for (const [value, budget] of [[proof.activation_latency_p95_ms,1000], [proof.handle_growth,24],
+    [proof.working_set_growth_bytes,67108864], [proof.concurrent_activation_burst_elapsed_ms,8000]]) {
+    if (!Number.isFinite(value) || value < 0 || value > budget) fail('session_soak_budget_unproven');
+  }
+  if (!Number.isSafeInteger(proof.primary_pid) || proof.primary_pid < 1) fail('session_soak_pid_invalid');
+  return proof;
+}
+
 export function assertOwnerConsumerProof(proof, { consumer, sourceHead, version, bundleSha256, installedAsarSha256, installedExecutableSha256 }) {
   assertOwnerConsumerKind(consumer);
   if (proof?.schema !== 'metaengine.browser.installed-owner-consumer-proof.v1'
@@ -122,7 +141,8 @@ export function assertOwnerConsumerProof(proof, { consumer, sourceHead, version,
     || proof.shutdown_method !== 'EXISTING_INSTALLER_SHUTDOWN_BARRIER' || proof.live_agent_execution !== false
     || proof.production_ready !== false || proof.promotion_authorized !== false || proof.automatic_retry_allowed !== false
     || proof.authority_effect !== false) fail('proof_invalid');
-  if (consumer === 'FINAL_RUNTIME_ACTIVATION') activationFields(proof.activation);
+  if (consumer === 'AUTONOMOUS_SESSION_SOAK') assertOwnerSessionSoak(proof.session_soak, {sourceHead, version});
+  else if (consumer === 'FINAL_RUNTIME_ACTIVATION') activationFields(proof.activation);
   else if (proof.fleet_degraded !== true || proof.activation !== null) fail('proof_invalid');
   return proof;
 }
@@ -207,6 +227,66 @@ export async function qualifyInstalledOwnerConsumer({ consumer, installRoot, sou
   while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
   const [uiPort, gatewayPort, daemonPort] = ports;
   const env = isolatedLaunchEnvironment({ appData, localAppData, temporaryDirectory, uiPort, gatewayPort, daemonPort });
+  if (consumer === 'AUTONOMOUS_SESSION_SOAK') {
+    const proofFile = path.join(directory, 'windows-autonomous-soak-proof.json');
+    await fs.writeFile(proofFile, JSON.stringify({schema:'metaengine.browser.windows-autonomous-soak.v3',
+      source_head:expectedHead,package_version:expectedVersion,normal_ui_boot_verified:false,
+      second_instance_activations_verified:0,signed:false,published:false,promotion_authorized:false,
+      authority_effect:false})+'\n', {flag:'wx',mode:0o600});
+    let finished = false, current = null, attestedHealth = null, nativeWindow = null;
+    const task = promisify(execFile)('powershell.exe', ['-NoLogo','-NoProfile','-NonInteractive',
+      '-ExecutionPolicy','Bypass','-File',path.join(sourceRoot,'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'),
+      '-AppPath',executable,'-ProofPath',proofFile,'-RunnerTemp',directory],
+      {env:{...env,RUNNER_TEMP:directory},windowsHide:true,timeout:900000,maxBuffer:1024*1024});
+    // Observe fresh runtime attestation while the real UI is running, rather
+    // than inferring runtime readiness from a final success flag.
+    task.then(()=>{finished=true;},()=>{finished=true;});
+    while (!finished) {
+      try {
+        const status = JSON.parse(await regularBytes(owner.runtime_identity_file));
+        const response = await fetch(owner.base_url+'/health',{signal:AbortSignal.timeout(2000)});
+        const health = response.ok ? await response.json() : null;
+        if (response.ok && status.instance_id !== previous.instance_id
+          && status.bundle_sha256 === owner.runtime_host.expected_bundle_sha256
+          && status.postgres_mode === 'attached' && status.api_role_mode === 'direct'
+          && localStateProviderHealthAttested(health,status.instance_id)) {
+          current=status;attestedHealth=health;
+          if(!nativeWindow){
+            const running=JSON.parse((await regularBytes(path.join(directory,'soak-running-primary.json'))).toString('utf8').replace(/^\uFEFF/,''));
+            if(running.version===expectedVersion&&Number.isSafeInteger(running.pid)&&running.pid>0)
+              nativeWindow=await verifyInstalledVisiblePrimaryWindow(running.pid);
+          }
+        }
+      } catch { /* wait only while the bounded physical runner is alive */ }
+      if (!finished) await delay(250);
+    }
+    try { await task; } catch { fail('session_soak_physical_failed'); }
+    const soak = assertOwnerSessionSoak(JSON.parse((await regularBytes(proofFile)).toString('utf8').replace(/^\uFEFF/,'')),{sourceHead:expectedHead,version:expectedVersion});
+    if (!current || nativeWindow?.pid !== soak.primary_pid || nativeWindow.visible!==true) fail('session_soak_attestation_missing');
+    assertOwnerConsumerRuntime({previous,current,health:attestedHealth,owner,pid:soak.primary_pid,postgresPid});
+    const stopped = JSON.parse(await regularBytes(owner.runtime_identity_file));
+    assertOwnerConsumerStopped({current,stopped,primaryClose:{code:0,signal:null},shutdownClose:{code:0,signal:null}});
+    await assert.rejects(fs.lstat(path.join(config.state_directory,'runtime-host-lock.json')),{code:'ENOENT'});
+    for (const port of [config.api_port,config.edge_port,...ports]) await closedPort(port);
+    for (const pid of [soak.primary_pid,current.host_pid,...current.children.map(child=>child.pid)]) {
+      try { process.kill(pid,0); fail('runtime_process_still_alive'); } catch(error) { if(error.code!=='ESRCH')throw error; }
+    }
+    if (!(await regularBytes(postmasterFile)).equals(pgBefore)
+      || !(await regularBytes(ownerFile)).equals(ownerBytes)
+      || !(await regularBytes(owner.runtime_host.config_file)).equals(configBytes)) fail('owner_input_changed');
+    process.kill(postgresPid,0);
+    if(hash(await fs.readFile(executable))!==artifact.installed_executable_sha256
+      ||hash(await fs.readFile(archive))!==artifact.installed_asar_sha256)fail('artifact_or_cleanup_changed');
+    return Object.freeze({schema:'metaengine.browser.installed-owner-consumer-proof.v1',state:'PASSED_ISOLATED_REAL_RUNTIME',
+      consumer,...identity,...artifact,qualifier_sha256:hash(await fs.readFile(fileURLToPath(import.meta.url))),
+      real_local_runtime_attested:true,runtime_instance_id:current.instance_id,profile_isolated:true,
+      fixture_source_rows_restored:0,current_os_window_visible:true,stable_window_verified:true,
+      session_soak:soak,activation:null,fleet_degraded:false,primary_exit_code:0,shutdown_exit_code:0,
+      process_cleanup_confirmed:true,runtime_host_lock_released:true,runtime_ports_closed:true,
+      attached_postgres_incarnation_preserved:true,shutdown_method:'EXISTING_INSTALLER_SHUTDOWN_BARRIER',
+      installed_source_bytes_verified:true,live_agent_execution:false,production_ready:false,promotion_authorized:false,
+      automatic_retry_allowed:false,authority_effect:false});
+  }
   if (consumer === 'SHELL_FIRST_DIRTY_PROFILE') Object.assign(env, { METAENGINE_DISABLE_CRASH_SENTINEL: '1', METAENGINE_DISABLE_LOGIN_START: '1' });
   const profileProcess = startInstalledQualificationProcess(executable,
     ['--metaengine-profile-probe', '--user-data-dir=' + path.join(appData, 'BrowserProfile')],

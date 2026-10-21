@@ -15,6 +15,7 @@ import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
 import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES, probeNativeSupervisorRuntimeCapabilities } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
 import { assertOwnerConsumerKind, assertOwnerConsumerProof } from '../../apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs';
+import { INSTALLED_LAUNCH_QUALIFIER_TIMEOUT_MS, INSTALLED_LAUNCH_FIXTURE_TIMEOUT_MS } from '../../apps/metaengine-browser/scripts/installed-launch-progress.mjs';
 
 const exec = promisify(execFile);
 const bundleDirectory = process.env.LOCAL_STATE_TEST_ATTACHED_BUNDLE_DIRECTORY;
@@ -123,7 +124,7 @@ async function stopHost(host) {
 }
 
 test('verified bundled onboarding and attached host restart preserve an existing SCRAM PG17 incarnation', {
-  skip: !enabled, timeout: installedOwnerSelected ? 1800000 : 900000,
+  skip: !enabled, timeout: installedOwnerSelected ? INSTALLED_LAUNCH_FIXTURE_TIMEOUT_MS : 900000,
 }, async t => {
   assert.equal(process.platform, 'win32');
   if (installedConsumer !== undefined) {
@@ -423,7 +424,7 @@ test('verified bundled onboarding and attached host restart preserve an existing
     const qualification = spawnBundled(verified, [installedCli, '--install-root', installedOwnerInputs.installRoot,
       '--source-root', sourceRoot, '--expected-head', installedOwnerInputs.sourceHead,
       '--expected-version', installedOwnerInputs.version, '--evidence-dir', installedOwnerInputs.evidenceDirectory,
-      '--owner-qa-root', root], {}, false, 600000);
+      '--owner-qa-root', root], {}, false, INSTALLED_LAUNCH_QUALIFIER_TIMEOUT_MS);
     const qualificationClosed = await qualification.closed;
     const qualificationOutput = qualification.output();
     for (const secret of [ownerPassword, apiPassword, config.database_url, config.inspect_database_url]) assert.equal(qualificationOutput.includes(secret), false);
@@ -455,7 +456,8 @@ test('verified bundled onboarding and attached host restart preserve an existing
       const consumer = spawnBundled(verified, [consumerEntry, '--consumer', installedConsumer,
         '--install-root', installedOwnerInputs.installRoot, '--source-root', sourceRoot,
         '--expected-head', installedOwnerInputs.sourceHead, '--expected-version', installedOwnerInputs.version,
-        '--owner-qa-root', root, '--evidence-dir', installedOwnerInputs.evidenceDirectory], {}, false, 720000);
+        '--owner-qa-root', root, '--evidence-dir', installedOwnerInputs.evidenceDirectory], {}, false,
+        installedConsumer === 'AUTONOMOUS_SESSION_SOAK' ? 1200000 : 720000);
       const consumerClosed = await consumer.closed, consumerOutput = consumer.output();
       for (const secret of [ownerPassword, apiPassword, config.database_url, config.inspect_database_url]) assert.equal(consumerOutput.includes(secret), false);
       if (consumerClosed.code !== 0) {

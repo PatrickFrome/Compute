@@ -21,10 +21,12 @@ import { localStateProviderOwnerFile, validateLocalStateProviderConfig,
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../src/private-windows-storage-acl.mjs';
 import { readWindowsKernelProcessW60 } from '../src/host-native-owner-producers-w60.mjs';
 import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
+import { compareQaInstalledImage, restoreOperatorQaImage } from './qa-operator-install-recovery.mjs';
+import { operatorNsisEffects, assertOperatorNsisReceipt, verifyOperatorNsisSnapshot } from './qa-operator-nsis-recovery.mjs';
 
 const require = createRequire(import.meta.url), exec = promisify(execFile);
 const SHA = /^[a-f0-9]{64}$/, HEAD = /^[a-f0-9]{40}$/;
-const SCHEMA = 'metaengine.operator.qa-owner-runtime-upgrade.v2';
+const SCHEMA = 'metaengine.operator.qa-owner-runtime-upgrade.v3';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error('qa_upgrade_' + code); };
 const samePath = (a,b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
@@ -36,18 +38,21 @@ export function validateUpgradeArguments(args) {
     const key=args[i]?.replace(/^--/,''), value=args[i+1];
     if(!['mode','candidate-resources','installed-resources','expected-version','expected-source',
       'expected-asar-sha256','expected-owner-sha256','receipt','expected-receipt-sha256',
-      'predecessor-binding','expected-predecessor-asar-sha256','expected-predecessor-bundle-sha256'].includes(key)
+      'predecessor-binding','expected-predecessor-asar-sha256','expected-predecessor-bundle-sha256',
+      'expected-uninstaller-sha256','expected-current-image-tree-sha256','expected-current-nsis-sha256'].includes(key)
       ||!args[i].startsWith('--')||!value||Object.hasOwn(options,key)) fail('arguments_invalid');
     options[key]=value;
   }
-  if(!['prepare','publish','rollback'].includes(options.mode)
+  if(!['prepare','publish','finalize','recover','rollback'].includes(options.mode)
     ||!['candidate-resources','installed-resources','receipt'].every(k=>typeof options[k]==='string'&&path.isAbsolute(options[k])&&!/^(?:\\\\|\/\/)/.test(options[k]))
     ||!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(options['expected-version']||'')
     ||!HEAD.test(options['expected-source']||'')
     ||!['expected-asar-sha256','expected-owner-sha256'].every(k=>SHA.test(options[k]||''))
     ||inside(options['candidate-resources']||'.',options.receipt||'.')
     ||inside(options['installed-resources']||'.',options.receipt||'.')
-    ||(options.mode!=='prepare'&&!SHA.test(options['expected-receipt-sha256']||''))) fail('arguments_invalid');
+    ||(options.mode!=='prepare'&&!SHA.test(options['expected-receipt-sha256']||''))
+    ||(options.mode==='finalize'&&!SHA.test(options['expected-uninstaller-sha256']||''))
+    ||(options.mode==='recover'&&!['expected-current-image-tree-sha256','expected-current-nsis-sha256'].every(k=>SHA.test(options[k]||'')))) fail('arguments_invalid');
   predecessorReadPolicy(options);
   return options;
 }
@@ -241,7 +246,8 @@ async function candidate(options) {
   await assertPackagedOfflineRuntimeBinding(binding,{expectedHead:options['expected-source'],packageVersion:pkg.version,resourcesDir:resources,verifierBytes});
   const verifier=await import('data:text/javascript;base64,'+verifierBytes.toString('base64'));
   const verified=await verifier.verifyOfflineRuntimeBundle({bundleDirectory:path.join(resources,'client-state-runtime'),expectedBundleDigest:binding.bundle_sha256});
-  return {resources,binding,verified};
+  const image=await captureInstalledTreeFingerprint(path.dirname(resources));
+  return {resources,binding,verified,image};
 }
 async function oldState(options) {
   const file=localStateProviderOwnerFile();if(!file)fail('owner_location_unknown');
@@ -343,6 +349,8 @@ export async function prepareUpgrade(options) {
   if(predecessorSnapshot.tree_sha256!==predecessorImage.tree_sha256
     ||predecessorSnapshot.file_count!==predecessorImage.file_count
     ||predecessorSnapshot.total_bytes!==predecessorImage.total_bytes)fail('snapshot_predecessor_mismatch');
+  const predecessorNsisSnapshot=await operatorNsisEffects({mode:'Capture',stateDirectory,
+    expectedVersion:predecessorImage.package_version});
   const backupOwner=path.join(stateDirectory,'predecessor-owner.json'), backupConfig=path.join(stateDirectory,'predecessor-config.json');
   await exclusive(backupOwner,old.bytes);await exclusive(backupConfig,old.configBytes);await acl(backupOwner);await acl(backupConfig);
   const configs=makeUpgradeConfigs(old.config,{stateDirectory,candidateBundle:path.join(checked.resources,'client-state-runtime'),
@@ -362,7 +370,8 @@ export async function prepareUpgrade(options) {
     old_status_file:old.owner.runtime_identity_file,old_status_sha256:sha(old.statusBytes),backup_owner_file:backupOwner,backup_config_file:backupConfig,
     config_file:configFile,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_file:qualificationFile,
     state_directory:stateDirectory,proposed_provider:proposed,runtime,keeper:pg,
-    predecessor_image:predecessorImage,predecessor_snapshot:predecessorSnapshot,
+    candidate_image:checked.image,predecessor_image:predecessorImage,predecessor_snapshot:predecessorSnapshot,
+    predecessor_nsis_snapshot:predecessorNsisSnapshot,
     predecessor_nsis_effects:predecessorNsis,
     production_authorized:false,provenance_verified:false,provider_published:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
   await exclusive(options.receipt,JSON.stringify(receipt,null,2)+'\n');await acl(options.receipt);
@@ -373,6 +382,10 @@ function validNsisPredecessorReceipt(proof,version) {
   try {return assertNsisEffectsObserved(proof,version)===true;}
   catch {return false;}
 }
+function validNsisSnapshot(proof,stateDirectory){
+  try{return assertOperatorNsisReceipt(proof,'Capture')===proof
+    &&samePath(proof.snapshot_directory,path.join(stateDirectory,'predecessor-nsis'));}catch{return false;}
+}
 export function assertUpgradeReceipt(receipt,options) {
   if(receipt?.schema!==SCHEMA||receipt.state!=='QUALIFIED_AND_STOPPED'||receipt.provider_published!==false
     ||receipt.production_authorized!==false||receipt.provenance_verified!==false||receipt.authority_effect!==false
@@ -382,6 +395,11 @@ export function assertUpgradeReceipt(receipt,options) {
     ||!samePath(receipt.candidate_resources,options['candidate-resources'])||!samePath(receipt.installed_resources,options['installed-resources'])
     ||!SHA.test(receipt.bundle_sha256||'')||!SHA.test(receipt.config_sha256||'')||!SHA.test(receipt.old_config_sha256||'')
     ||receipt.runtime?.exit_code!==0||receipt.runtime?.children_stopped!==true
+    ||receipt.candidate_image?.schema!==INSTALLED_TREE_SCHEMA
+    ||!SHA.test(receipt.candidate_image?.tree_sha256||'')
+    ||!Number.isSafeInteger(receipt.candidate_image?.file_count)||receipt.candidate_image.file_count<1
+    ||!Number.isSafeInteger(receipt.candidate_image?.total_bytes)||receipt.candidate_image.total_bytes<1
+    ||!validNsisSnapshot(receipt.predecessor_nsis_snapshot,receipt.state_directory)
     ||!SHA.test(receipt.predecessor_image?.asar_sha256 || '')
     ||!SHA.test(receipt.predecessor_image?.bundle_sha256 || '')
     ||!SHA.test(receipt.predecessor_image?.executable_sha256 || '')
@@ -439,6 +457,7 @@ export async function publishUpgrade(options) {
   if(sha(proofBytes)!==options['expected-receipt-sha256'])fail('receipt_digest_mismatch');
   const proof=JSON.parse(proofBytes);assertUpgradeReceipt(proof,options);
   const checked=await candidate(options);if(checked.binding.bundle_sha256!==proof.bundle_sha256)fail('candidate_changed');
+  if(JSON.stringify(checked.image)!==JSON.stringify(proof.candidate_image))fail('candidate_image_changed');
   const old=await oldState(options);
   assertPredecessorImageMatches(proof.predecessor_image,
     await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256,predecessorReadPolicy(options)));
@@ -451,6 +470,9 @@ export async function publishUpgrade(options) {
     ||stagedPredecessor.file_count!==proof.predecessor_image.file_count
     ||stagedPredecessor.total_bytes!==proof.predecessor_image.total_bytes)fail('predecessor_snapshot_changed');
   await quiescent(old);await keeperUnchanged(old.config,proof.keeper);
+  await verifyOperatorNsisSnapshot(proof.predecessor_nsis_snapshot,proof.predecessor_image.package_version);
+  const nsisNow=await operatorNsisEffects({mode:'Observe',stateDirectory:proof.state_directory,expectedVersion:proof.predecessor_image.package_version});
+  if(nsisNow.external_effects_sha256!==proof.predecessor_nsis_snapshot.external_effects_sha256)fail('nsis_predecessor_changed');
   const proposed=validateLocalStateProviderConfig(proof.proposed_provider), finalBytes=await stableUpgradeRead(proof.config_file);
   const final=validateRuntimeHostConfig(JSON.parse(finalBytes));
   const expected=makeUpgradeConfigs(old.config,{stateDirectory:proof.state_directory,candidateBundle:path.join(checked.resources,'client-state-runtime'),
@@ -477,7 +499,9 @@ export async function publishUpgrade(options) {
     new_owner_sha256:sha(nextBytes),backup_owner_file:proof.backup_owner_file,owner_file:old.file,publication_gate:gate,
     installed_payload_verified:false,production_authorized:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
   await exclusive(publicationFile,JSON.stringify(journal,null,2)+'\n');await acl(publicationFile);
-  await exclusive(gate,JSON.stringify({schema:SCHEMA,nonce:randomUUID(),pid:process.pid,old_owner_sha256:sha(old.bytes),new_owner_sha256:sha(nextBytes)})+'\n');await acl(gate);
+  const gateBytes=Buffer.from(JSON.stringify({schema:SCHEMA,nonce:randomUUID(),pid:process.pid,old_owner_sha256:sha(old.bytes),new_owner_sha256:sha(nextBytes)})+'\n');
+  await exclusive(gate,gateBytes);await acl(gate);
+  journal.publication_gate_sha256=sha(gateBytes);await save(publicationFile,journal);
   await quiescent(old);await keeperUnchanged(old.config,proof.keeper);
   if(!(await stableUpgradeRead(old.file)).equals(old.bytes)||!(await stableUpgradeRead(options.receipt)).equals(proofBytes))fail('owner_cas_mismatch');
   // Publication deliberately precedes NSIS. The Browser must remain closed
@@ -498,6 +522,112 @@ export async function publishUpgrade(options) {
   return {state:journal.state,publication_file:publicationFile,new_owner_sha256:journal.new_owner_sha256,
     launch_allowed:false,installed_payload_verified:false,production_authorized:false};
 }
+
+export function assertPendingPublication(journal,proof,proofDigest,ownerFile){
+  if(journal?.schema!==SCHEMA||journal.state!=='PUBLISHED_INSTALL_PENDING'||journal.provider_published!==true
+    ||journal.proof_sha256!==proofDigest||journal.old_owner_sha256!==proof.old_owner_sha256
+    ||!SHA.test(journal.new_owner_sha256||'')||!SHA.test(journal.publication_gate_sha256||'')
+    ||!samePath(journal.owner_file||'.',ownerFile)||!samePath(journal.publication_gate||'.',ownerFile+'.qa-upgrade-gate.json')
+    ||!samePath(journal.backup_owner_file||'.',proof.backup_owner_file||'.')
+    ||journal.production_authorized!==false||journal.historical_effects_reconciled!==false
+    ||journal.automatic_retry_allowed!==false||journal.authority_effect!==false)fail('publication_receipt_invalid');
+  return true;
+}
+async function pendingUpgrade(options){
+  await privateReceiptRoot(options.receipt);await acl(options.receipt);
+  const bytes=await stableUpgradeRead(options.receipt);if(sha(bytes)!==options['expected-receipt-sha256'])fail('receipt_digest_mismatch');
+  const proof=JSON.parse(bytes);assertUpgradeReceipt(proof,options);
+  const publicationFile=options.receipt+'.publication.json';await acl(publicationFile);
+  const journal=JSON.parse(await stableUpgradeRead(publicationFile));
+  assertPendingPublication(journal,proof,sha(bytes),localStateProviderOwnerFile());
+  return {proof,bytes,publicationFile,journal};
+}
+async function pendingCustody(journal){
+  const owner=await stableUpgradeRead(journal.owner_file),gate=await stableUpgradeRead(journal.publication_gate);
+  await acl(journal.owner_file);await acl(journal.publication_gate);
+  if(sha(owner)!==journal.new_owner_sha256||sha(gate)!==journal.publication_gate_sha256)fail('publication_cas_changed');
+  let g;try{g=JSON.parse(gate);}catch{fail('publication_gate_invalid');}
+  if(g.schema!==SCHEMA||g.old_owner_sha256!==journal.old_owner_sha256||g.new_owner_sha256!==journal.new_owner_sha256)fail('publication_gate_invalid');
+  return {owner,gate};
+}
+export async function completeUpgradeFiles({ownerFile,gateFile,terminalFile,retiredGateFile,
+  expectedOwnerSha256,expectedGateSha256,receipt},{verify=async()=>{},protect=async()=>{}}={}){
+  await absent(terminalFile);await absent(retiredGateFile);
+  const check=async()=>{
+    if(sha(await stableUpgradeRead(ownerFile))!==expectedOwnerSha256
+      ||sha(await stableUpgradeRead(gateFile))!==expectedGateSha256)fail('publication_cas_changed');
+    await verify();
+  };
+  await check();
+  // A durable exact-image receipt exists BEFORE the admission gate is retired.
+  await exclusive(terminalFile,JSON.stringify({...receipt,launch_allowed:false,gate_retired:false},null,2)+'\n');
+  await protect(terminalFile);await check();
+  await fs.rename(gateFile,retiredGateFile);await protect(retiredGateFile);
+  if(sha(await stableUpgradeRead(retiredGateFile))!==expectedGateSha256
+    ||sha(await stableUpgradeRead(ownerFile))!==expectedOwnerSha256)fail('finalization_effect_unknown');
+  await verify();
+  return {...receipt,launch_allowed:true,gate_retired:true};
+}
+export async function finalizeUpgrade(options){
+  if(process.platform!=='win32')fail('windows_required');
+  const {proof,publicationFile,journal}=await pendingUpgrade(options);
+  const checked=await candidate(options);
+  if(checked.binding.bundle_sha256!==proof.bundle_sha256
+    ||JSON.stringify(checked.image)!==JSON.stringify(proof.candidate_image))fail('candidate_image_changed');
+  const configBytes=await stableUpgradeRead(proof.config_file);await acl(proof.config_file);
+  if(sha(configBytes)!==proof.config_sha256)fail('successor_config_changed');
+  const config=validateRuntimeHostConfig(JSON.parse(configBytes));
+  let verifiedImage;
+  const verify=async()=>{await noBrowser();await keeperUnchanged(config,proof.keeper);
+    for(const port of [config.api_port,config.edge_port])await portAbsent(port);
+    if(verifiedImage&&(await captureInstalledTreeFingerprint(path.dirname(options['installed-resources']))).tree_sha256!==verifiedImage.installed_tree_sha256)
+      fail('installed_image_changed');};
+  await verify();await pendingCustody(journal);
+  // Reuse the complete runtime verifier with the ACTUAL installed resource root.
+  await candidate({...options,'candidate-resources':options['installed-resources']});
+  const image=await compareQaInstalledImage(path.dirname(checked.resources),path.dirname(options['installed-resources']),
+    {expectedUninstallerSha256:options['expected-uninstaller-sha256']});
+  verifiedImage=image;
+  const nsis=await observeWindowsNsisEffects({expectedVersion:proof.package_version});
+  const receipt={schema:SCHEMA,state:'INSTALLED_VERIFIED',proof_sha256:journal.proof_sha256,
+    source_head:proof.source_head,package_version:proof.package_version,owner_sha256:journal.new_owner_sha256,
+    installed_image:image,nsis_effects:nsis,keeper:proof.keeper,installed_payload_verified:true,
+    production_authorized:false,provenance_verified:false,historical_effects_reconciled:false,
+    automatic_retry_allowed:false,authority_effect:false};
+  const terminalFile=options.receipt+'.installed.json';
+  const completed=await completeUpgradeFiles({ownerFile:journal.owner_file,gateFile:journal.publication_gate,
+    terminalFile,retiredGateFile:path.join(proof.state_directory,'completed-upgrade-gate.json'),
+    expectedOwnerSha256:journal.new_owner_sha256,expectedGateSha256:journal.publication_gate_sha256,receipt},
+    {verify,protect:async file=>acl(file)});
+  journal.state='INSTALLED_VERIFIED';journal.installed_payload_verified=true;journal.gate_retired=true;
+  journal.installed_receipt_sha256=sha(await stableUpgradeRead(terminalFile));
+  await save(publicationFile,journal);
+  // Final launch permission is durable separately from the pre-retirement image
+  // receipt, so a crash at any point remains a manual readback, never a retry.
+  const completionFile=options.receipt+'.completed.json';await exclusive(completionFile,JSON.stringify(completed,null,2)+'\n');await acl(completionFile);
+  return {state:completed.state,completion_file:completionFile,completion_sha256:sha(await stableUpgradeRead(completionFile)),
+    launch_allowed:true,installed_payload_verified:true,production_authorized:false};
+}
+export async function recoverUpgrade(options){
+  if(process.platform!=='win32')fail('windows_required');
+  const {proof,journal}=await pendingUpgrade(options);
+  const bytes=await stableUpgradeRead(proof.backup_config_file);await acl(proof.backup_config_file);
+  if(sha(bytes)!==proof.old_config_sha256)fail('backup_changed');
+  const config=validateRuntimeHostConfig(JSON.parse(bytes));
+  const verify=async()=>{await noBrowser();await pendingCustody(journal);await keeperUnchanged(config,proof.keeper);
+    for(const port of [config.api_port,config.edge_port])await portAbsent(port);};
+  await verify();await verifyOperatorNsisSnapshot(proof.predecessor_nsis_snapshot,proof.predecessor_image.package_version);
+  const observed=await operatorNsisEffects({mode:'Observe',stateDirectory:proof.state_directory,expectedVersion:proof.predecessor_image.package_version});
+  if(observed.external_effects_sha256!==options['expected-current-nsis-sha256'])fail('nsis_preimage_changed');
+  await restoreOperatorQaImage({installedRoot:path.dirname(options['installed-resources']),stateDirectory:proof.state_directory,
+    snapshotRoot:proof.predecessor_snapshot.image_directory,expectedSnapshotSha256:proof.predecessor_image.tree_sha256,
+    expectedPreimageSha256:options['expected-current-image-tree-sha256'],beforeMutation:verify});
+  await verify();
+  await operatorNsisEffects({mode:'Restore',stateDirectory:proof.state_directory,expectedVersion:proof.predecessor_image.package_version,
+    expectedSnapshotSha256:proof.predecessor_nsis_snapshot.snapshot_sha256,expectedPreimageSha256:options['expected-current-nsis-sha256']});
+  await verify();
+  return rollbackUpgrade(options);
+}
 export async function rollbackUpgrade(options) {
   if(process.platform!=='win32')fail('windows_required');
   await privateReceiptRoot(options.receipt);
@@ -507,7 +637,7 @@ export async function rollbackUpgrade(options) {
   const publicationFile=options.receipt+'.publication.json';
   await acl(publicationFile);
   const journal=JSON.parse(await stableUpgradeRead(publicationFile));
-  if(journal.schema!==SCHEMA||journal.state!=='PUBLISHED_INSTALL_PENDING'||journal.proof_sha256!==sha(bytes))fail('rollback_receipt_invalid');
+  assertPendingPublication(journal,proof,sha(bytes),localStateProviderOwnerFile());await pendingCustody(journal);
   await noBrowser();
   // NSIS is non-atomic. Refuse Owner-only rollback unless the predecessor
   // application image AND complete offline runtime were independently restored.
@@ -540,12 +670,15 @@ export async function rollbackUpgrade(options) {
   await fs.rename(staged,journal.owner_file);
   if(!(await stableUpgradeRead(journal.owner_file)).equals(oldBytes))fail('rollback_unconfirmed');
   await acl(journal.owner_file);journal.state='ROLLED_BACK';await save(publicationFile,journal);
-  return {state:'ROLLED_BACK',old_owner_sha256:proof.old_owner_sha256,production_authorized:false};
+  if(sha(await stableUpgradeRead(journal.publication_gate))!==journal.publication_gate_sha256)fail('publication_gate_invalid');
+  const retiredGate=path.join(proof.state_directory,'rolled-back-upgrade-gate.json');await absent(retiredGate);
+  await fs.rename(journal.publication_gate,retiredGate);await acl(retiredGate);
+  return {state:'ROLLED_BACK',old_owner_sha256:proof.old_owner_sha256,launch_allowed:false,production_authorized:false};
 }
 if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url) {
   try {
     const options=validateUpgradeArguments(process.argv.slice(2));
-    const result=await ({prepare:prepareUpgrade,publish:publishUpgrade,rollback:rollbackUpgrade}[options.mode])(options);
+    const result=await ({prepare:prepareUpgrade,publish:publishUpgrade,finalize:finalizeUpgrade,recover:recoverUpgrade,rollback:rollbackUpgrade}[options.mode])(options);
     process.stdout.write(JSON.stringify(result)+'\n');
   } catch(error) {
     const reason=/^[a-z][a-z0-9_]{1,160}$/.test(error?.message||'')?error.message:'qa_upgrade_operation_failed';

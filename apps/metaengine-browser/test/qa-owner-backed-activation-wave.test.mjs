@@ -76,6 +76,21 @@ test('readback cannot waive latency or burst budgets',async()=>{
     ...fixture().options,concurrentBudgetMs:100,clock:(()=>{let t=0;return ()=>{t+=101;return t;};})(),
   }),/owner_backed_activation_wave_(activation_latency_budget_exceeded|burst_budget_exceeded)/);
 });
+test('72 activation wave stops at the fourth slow sample and still permits exactly three',async()=>{
+  for(const slowLimit of [3,4]){
+    const f=fixture(); let now=0,calls=0;
+    const activate=async()=>{const ack=await f.options.activate(); if(++calls<=slowLimit)now+=1001; return ack;};
+    const run=()=>qualifyOwnerBackedActivationWave({...f.options,activate,
+      sequentialCount:64,concurrentCount:8,clock:()=>now});
+    if(slowLimit===4){
+      await assert.rejects(run(),/owner_backed_activation_wave_activation_latency_budget_exceeded/);
+      assert.equal(calls,4,'remaining physical secondary launches must not run after P95 is impossible');
+    }else{
+      const receipt=await run(); assert.equal(calls,72); assert.equal(receipt.total_activations,72);
+      assert.equal(receipt.activation_p95_ms,0);
+    }
+  }
+});
 test('invalid callbacks and missing exact native identities fail before activation',async()=>{
   await assert.rejects(qualifyOwnerBackedActivationWave({
     ...fixture().options,windowId:null}),/owner_backed_activation_wave_arguments_invalid/);

@@ -1,12 +1,15 @@
 param(
-  [Parameter(Mandatory=$true)][string]$FixtureId,
+  [Parameter(ParameterSetName='Disposable',Mandatory=$true)][string]$FixtureId,
+  [Parameter(ParameterSetName='Operator',Mandatory=$true)][string]$OperatorSnapshotDirectory,
+  [Parameter(ParameterSetName='Operator',Mandatory=$true)][string]$OperatorExpectedVersion,
   [Parameter(Mandatory=$true)][ValidateSet('Observe','Capture','Restore')][string]$Mode,
   [string]$ExpectedSnapshotSha256,
   [string]$ExpectedPreimageSha256,
   [switch]$FailAfterRegistry
 )
-# Native, disposable G1 falsifier. No live install/profile/Owner/PG write path.
-# All writable paths and the HKCU key are derived from a fresh fixture UUID.
+# Shared native codec. Default scope is the disposable G1 falsifier. The explicit
+# Operator parameter set targets ONLY the installed Test app's fixed HKCU entry
+# and its two known links; no Owner, Guardian, PG or arbitrary target is writable.
 $ErrorActionPreference='Stop'
 $phase='BEFORE_MUTATION'
 $schema='metaengine.browser.qa-disposable-nsis-effects.v1'
@@ -49,7 +52,8 @@ function Exclusive([string]$File,[byte[]]$Bytes) {
   $f=[IO.File]::Open($File,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
   try {$f.Write($Bytes,0,$Bytes.Length);$f.Flush($true)} finally {$f.Dispose()}
 }
-function SaveJournal($Value) {
+function SaveJournal($Value,[switch]$First) {
+  if($First){Exclusive $journal (JsonBytes $Value);return}
   $tmp=Join-Path $base ('journal-'+[guid]::NewGuid().ToString('N')+'.tmp')
   Exclusive $tmp (JsonBytes $Value)
   if([IO.File]::Exists($journal)){[IO.File]::Replace($tmp,$journal,[NullString]::Value)}
@@ -57,7 +61,7 @@ function SaveJournal($Value) {
 }
 function RegistryBytes {
   $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subkey,$false)
-  if($null -eq $key){Refuse 'key_missing'}
+  if($null -eq $key){if($operator){return ,(JsonBytes @())};Refuse 'key_missing'}
   try {
     if($key.SubKeyCount -ne 0){Refuse 'subkeys_not_snapshotted'}
     [string[]]$names=$key.GetValueNames()
@@ -80,25 +84,59 @@ function RegistryBytes {
   } finally {$key.Dispose()}
 }
 function CurrentState {
-  foreach($d in @($base,$current)){Physical $d $true}
+  Physical $base $true
+  if(-not $operator){Physical $current $true}
   $registry=RegistryBytes
-  $start=ReadBytes $startLink;$desktop=ReadBytes $desktopLink
-  $hashes=[ordered]@{registry_sha256=(Digest $registry);start_menu_sha256=(Digest $start);desktop_sha256=(Digest $desktop)}
+  $start=$null;$desktop=$null
+  if(-not $operator -or [IO.File]::Exists($startLink)){$start=ReadBytes $startLink}
+  if(-not $operator -or [IO.File]::Exists($desktopLink)){$desktop=ReadBytes $desktopLink}
+  $startHash='ABSENT';$desktopHash='ABSENT'
+  if($null -ne $start){$startHash=Digest $start};if($null -ne $desktop){$desktopHash=Digest $desktop}
+  $hashes=[ordered]@{registry_sha256=(Digest $registry);start_menu_sha256=$startHash;desktop_sha256=$desktopHash}
   return @{registry=$registry;start=$start;desktop=$desktop;hashes=$hashes;digest=(Digest (JsonBytes $hashes))}
 }
 function Receipt([string]$State) {
-  return [ordered]@{schema=$schema;state=$State;classification='DISPOSABLE_WINDOWS_STAGING';
+  $classification='DISPOSABLE_WINDOWS_STAGING';if($operator){$classification='OPERATOR_LOCAL_QA'}
+  return [ordered]@{schema=$schema;state=$State;classification=$classification;
     production_authorized=$false;owner_mutated=$false;guardian_mutated=$false;postgres_mutated=$false;
-    live_install_mutated=$false;automatic_retry_allowed=$false;authority_effect=$false}
+    live_install_mutated=($operator -and $phase -ne 'BEFORE_MUTATION');automatic_retry_allowed=$false;authority_effect=$false}
 }
 try {
-  if($env:OS -ne 'Windows_NT' -or $FixtureId -cnotmatch '^[a-f0-9]{32}$'){Refuse 'scope_invalid'}
-  $temp=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-  $base=Join-Path $temp ('metaengine-qa-nsis-effects-'+$FixtureId)
-  $subkey='Software\METAENGINE\QA\NSIS-Effects-Restore\'+$FixtureId
-  $current=Join-Path $base 'current'
-  $startLink=Join-Path $current 'start-menu.lnk'
-  $desktopLink=Join-Path $current 'desktop.lnk'
+  $operator=$PSCmdlet.ParameterSetName -ceq 'Operator'
+  if($env:OS -ne 'Windows_NT'){Refuse 'scope_invalid'}
+  if($operator){
+    $schema='metaengine.operator.qa-nsis-effects.v1'
+    $base=[IO.Path]::GetFullPath($OperatorSnapshotDirectory)
+    $state=Split-Path -Parent $base
+    $expectedParent=Join-Path $env:LOCALAPPDATA 'METAENGINE'
+    if(-not [IO.Path]::IsPathRooted($OperatorSnapshotDirectory) -or
+      (Split-Path -Leaf $base) -cne 'predecessor-nsis' -or
+      (Split-Path -Leaf $state) -cnotmatch '^client-state-qa-upgrade-[a-f0-9-]{36}$' -or
+      -not [string]::Equals((Split-Path -Parent $state),$expectedParent,[StringComparison]::OrdinalIgnoreCase) -or
+      $OperatorExpectedVersion -cnotmatch '^\d+\.\d+\.\d+-dev\.\d+\.1$' -or $FailAfterRegistry){Refuse 'scope_invalid'}
+    $current=Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+    $subkey='Software\Microsoft\Windows\CurrentVersion\Uninstall\c32f3891-2b9e-5a4a-bd4f-5173b65b39bb'
+    $startLink=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\METAENGINE Browser Test.lnk'
+    $desktopLink=Join-Path ([Environment]::GetFolderPath('Desktop')) 'METAENGINE Browser Test.lnk'
+    Physical (Split-Path -Parent $startLink) $true;Physical (Split-Path -Parent $desktopLink) $true
+    $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subkey,$false)
+    if($null -ne $key){
+      try {
+        $display=[string]$key.GetValue('DisplayName')
+        if($display -notlike 'METAENGINE Browser Test *'){Refuse 'operator_target_unbound'}
+        if($Mode -eq 'Capture' -and ($display -cne ('METAENGINE Browser Test '+$OperatorExpectedVersion) -or
+          [string]$key.GetValue('DisplayVersion') -cne $OperatorExpectedVersion)){Refuse 'operator_version_mismatch'}
+      }finally{$key.Dispose()}
+    }elseif($Mode -eq 'Capture'){Refuse 'key_missing'}
+  }else{
+    if($FixtureId -cnotmatch '^[a-f0-9]{32}$'){Refuse 'scope_invalid'}
+    $temp=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    $base=Join-Path $temp ('metaengine-qa-nsis-effects-'+$FixtureId)
+    $subkey='Software\METAENGINE\QA\NSIS-Effects-Restore\'+$FixtureId
+    $current=Join-Path $base 'current'
+    $startLink=Join-Path $current 'start-menu.lnk'
+    $desktopLink=Join-Path $current 'desktop.lnk'
+  }
   $snapshot=Join-Path $base 'snapshot'
   $journal=Join-Path $base 'restore-journal.json'
   Physical $base $true
@@ -109,11 +147,12 @@ try {
   } elseif($Mode -eq 'Capture'){
     if(Test-Path -LiteralPath $snapshot){Refuse 'snapshot_exists_requires_readback'}
     $before=CurrentState
+    if($operator -and ($null -eq $before.start -or $null -eq $before.desktop)){Refuse 'operator_shortcuts_missing'}
     [void][IO.Directory]::CreateDirectory($snapshot)
     Exclusive (Join-Path $snapshot 'registry.json') $before.registry
     Exclusive (Join-Path $snapshot 'start-menu.lnk') $before.start
     Exclusive (Join-Path $snapshot 'desktop.lnk') $before.desktop
-    $manifest=[ordered]@{schema=$schema;fixture_id=$FixtureId;
+    $manifest=[ordered]@{schema=$schema;fixture_id=$FixtureId;operator_version=$OperatorExpectedVersion;
       registry_sha256=$before.hashes.registry_sha256;start_menu_sha256=$before.hashes.start_menu_sha256;
       desktop_sha256=$before.hashes.desktop_sha256;external_effects_sha256=$before.digest}
     Exclusive (Join-Path $snapshot 'manifest.json') (JsonBytes $manifest)
@@ -135,7 +174,8 @@ try {
     $manifestBytes=ReadBytes (Join-Path $snapshot 'manifest.json')
     if((Digest $manifestBytes) -cne $ExpectedSnapshotSha256){Refuse 'snapshot_digest_mismatch'}
     $m=[Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json
-    if($m.schema -cne $schema -or $m.fixture_id -cne $FixtureId){Refuse 'snapshot_binding_invalid'}
+    if($m.schema -cne $schema -or $m.fixture_id -cne $FixtureId -or
+      ($operator -and $m.operator_version -cne $OperatorExpectedVersion)){Refuse 'snapshot_binding_invalid'}
     $backup=ReadBytes (Join-Path $snapshot 'registry.json')
     $start=ReadBytes (Join-Path $snapshot 'start-menu.lnk')
     $desktop=ReadBytes (Join-Path $snapshot 'desktop.lnk')
@@ -177,12 +217,13 @@ try {
     if($now.digest -cne $ExpectedPreimageSha256){Refuse 'preimage_changed'}
     $record=Receipt 'PREPARED';$record.preimage_sha256=$now.digest
     $record.snapshot_sha256=$ExpectedSnapshotSha256
-    SaveJournal $record
+    SaveJournal $record -First
     if((CurrentState).digest -cne $now.digest){Refuse 'preimage_changed'}
     $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subkey,$true)
-    if($null -eq $key){Refuse 'key_missing'}
     $phase='MUTATION_STARTED'
+    if($operator){$record.live_install_mutated=$true}
     $record.state='RESTORING_REGISTRY';SaveJournal $record
+    if($null -eq $key){if($operator){$key=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($subkey)}else{Refuse 'key_missing'}}
     try {
       foreach($name in $key.GetValueNames()){$key.DeleteValue($name,$true)}
       foreach($row in $restoreRows){
@@ -194,11 +235,11 @@ try {
     $record.state='REGISTRY_RESTORED_LINKS_PENDING';SaveJournal $record
     if($FailAfterRegistry){Refuse 'injected_after_registry'}
     foreach($entry in @(@{file=$startLink;bytes=$start},@{file=$desktopLink;bytes=$desktop})){
-      Physical $current $true
-      $tmp=Join-Path $current ([guid]::NewGuid().ToString('N')+'.tmp')
+      $linkParent=Split-Path -Parent $entry.file;Physical $linkParent $true
+      $tmp=Join-Path $linkParent ([guid]::NewGuid().ToString('N')+'.tmp')
       Exclusive $tmp $entry.bytes
-      Physical $entry.file $false
-      [IO.File]::Replace($tmp,$entry.file,[NullString]::Value)
+      if([IO.File]::Exists($entry.file)){Physical $entry.file $false;[IO.File]::Replace($tmp,$entry.file,[NullString]::Value)}
+      elseif($operator){[IO.File]::Move($tmp,$entry.file)}else{Refuse 'shortcut_missing'}
     }
     $restored=CurrentState
     if($restored.digest -cne $m.external_effects_sha256){Refuse 'restored_effects_mismatch'}

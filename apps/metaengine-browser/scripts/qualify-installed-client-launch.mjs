@@ -15,6 +15,7 @@ import { validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity,
 import { localAttachedProviderAutoConnectFile, LOCAL_ATTACHED_AUTOCONNECT_SCHEMA } from '../src/local-restored-pg17-setup.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../src/private-windows-storage-acl.mjs';
 import { qualifyOwnerBackedActivationWave } from './qa-owner-backed-activation-wave.mjs';
+import { createInstalledLaunchProgressReporter } from './installed-launch-progress.mjs';
 
 const execute = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -285,13 +286,19 @@ async function stop(launch) {
   await Promise.race([launch.closed, deadline(60000, 'process_cleanup_timeout')]);
 }
 
-async function waitUntil(action, launch, timeoutMs = 60000) {
+export async function waitUntil(action, launch, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
     launch?.alive();
     try { const result = await action(); if (result) return result; }
-    catch (error) { lastError = error; }
+    catch (error) {
+      // A current-boot terminal failure cannot become healthy through polling.
+      // Preserve it instead of consuming the whole startup/outer deadline.
+      if (['installed_launch_normal_runtime_import_failed',
+        'installed_launch_normal_primary_window_journal_failed'].includes(error?.message)) throw error;
+      lastError = error;
+    }
     await delay(200);
   }
   fail('readback_timeout_' + (String(lastError?.message || '').startsWith('installed_launch_') ? lastError.message.slice(17) : 'unavailable'));
@@ -736,7 +743,8 @@ async function normalUiSocket(port, primaryPid, executable) {
   return verifyWindowsTcpListener({ port, pid: row.ProcessId });
 }
 
-export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, directory, ownerQaRoot, identity }) {
+export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, directory, ownerQaRoot, identity, progress }) {
+  await progress?.phase('OWNER_PREPARE');
   const fixture = await ownerProfile({ ownerQaRoot, resourcesDir, identity });
   const automatic = await prepareIsolatedAttachedAutoConnect(fixture, identity);
   const ports = [];
@@ -752,8 +760,11 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     '--proxy-server=127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost'], env, directory, { visibleGui: true });
   const currentEvents = journal => journal.events?.filter(row => row.boot_id === journal.current_boot_id && row.pid === launch.child.pid && row.version === identity.package_version) || [];
   const journal = () => fs.readFile(journalPath, 'utf8').then(JSON.parse);
+  const phase = async name => progress?.phase(name, { pid: launch.child.pid,
+    journal: await journal().catch(() => null) });
   let client, proof, statusBefore, target;
   try {
+    await phase('OWNER_STARTUP');
     const before = await waitUntil(async () => {
       const row = await journal();
       const events = currentEvents(row);
@@ -761,6 +772,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       assertInstalledPrimaryWindowJournal(row, { pid: launch.child.pid, version: identity.package_version });
       return row;
     }, launch, 420000);
+    await phase('OWNER_RUNTIME_READBACK');
     const ownerBytes = await fs.readFile(fixture.ownerFile);
     const currentOwner = validateLocalStateProviderConfig(JSON.parse(ownerBytes));
     const currentConfig = JSON.parse(await fs.readFile(currentOwner.runtime_host.config_file, 'utf8'));
@@ -780,6 +792,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     assert(health.ok && localStateProviderHealthAttested(await health.json(), runtimeIdentity.instance_id));
     const uiListener = await normalUiSocket(uiPort, launch.child.pid, executable);
     const gatewayListener = await verifyWindowsTcpListener({ port: gatewayPort, pid: launch.child.pid });
+    await phase('OWNER_CDP_READBACK');
     target = await waitUntil(() => targetAt(debuggingPort, gatewayPort), launch);
     client = await cdp(target.webSocketDebuggerUrl);
     const debuggingListener = await verifyWindowsTcpListener({ port: debuggingPort, pid: launch.child.pid });
@@ -795,6 +808,7 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     // This is the existing real attached-PG17/Owner sandbox, not an unbound
     // package soak: every secondary must ACK the same physical window and
     // appear in the pinned current-boot durable journal before acceptance.
+    await phase('OWNER_ACTIVATION_WAVE');
     const wave = await qualifyOwnerBackedActivationWave({
       activate: () => activateInstalledPrimary(activationInput),
       readJournal: journal,
@@ -806,7 +820,9 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
     const progressPath = sentinelPath + '.parent-progress-v1.json';
     const sentinelBefore = JSON.parse(await fs.readFile(sentinelPath, 'utf8'));
     const progressBefore = JSON.parse(await fs.readFile(progressPath, 'utf8'));
+    await phase('OWNER_STARTUP_GRACE');
     await delay(190000); launch.alive();
+    await phase('OWNER_POST_GRACE');
     const afterAck = await activateInstalledPrimary(activationInput);
     const after = await journal();
     const sentinelAfter = JSON.parse(await fs.readFile(sentinelPath, 'utf8'));
@@ -851,7 +867,13 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
       bootstrap_window_timeout_superseded: journalWindow.bootstrap_timeout_superseded,
       current_os_window: osWindowAfter, current_os_window_visible: true, same_os_window_across_startup_grace: true,
       owner_boot_qualified: true, production_ready: false, authority_effect: false };
+  } catch (error) {
+    // Capture before cleanup: an outer kill or a secondary cleanup failure must
+    // not erase the actual failing phase. No raw profile/log contents are saved.
+    await progress?.failure(error, { pid: launch.child.pid, journal: await journal().catch(() => null) });
+    throw error;
   } finally {
+    await phase('OWNER_SHUTDOWN');
     client?.close();
     // Use the existing installer shutdown barrier to stop the owned API/edge
     // host. An attached PostgreSQL clone stays with the fixture's owner.
@@ -876,6 +898,9 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
           process.kill(pgPid, 0);
         }
       }
+    } catch (error) {
+      await progress?.failure(error, { pid: launch.child.pid, journal: await journal().catch(() => null) });
+      throw error;
     } finally {
       await stop(shutdown); await stop(launch);
       await fs.writeFile(path.join(directory, 'installed-owner-ui.log'), launch.output());
@@ -889,6 +914,10 @@ export async function qualifyInstalledOwnerBoot({ executable, resourcesDir, dire
 export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, expectedHead, expectedVersion, evidenceDirectory, ownerQaRoot }) {
   if (process.platform !== 'win32') fail('windows_required');
   const directory = await fs.realpath(evidenceDirectory);
+  const progress = createInstalledLaunchProgressReporter({ directory,
+    identity: { source_head: expectedHead, package_version: expectedVersion } });
+  await progress.phase('VERIFY_PACKAGE');
+  try {
   const resourcesDir = path.join(await fs.realpath(installRoot), 'resources');
   const executable = path.join(path.dirname(resourcesDir), 'METAENGINE Browser Test.exe');
   const archive = path.join(resourcesDir, 'app.asar');
@@ -912,16 +941,20 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
   });
   const isolatedDirectory = path.join(directory, 'isolated-launch-' + randomUUID());
   await fs.mkdir(isolatedDirectory);
+  await progress.phase('OFFLINE_SUCCESSOR');
   const offlineSuccessor = await qualifyInstalledOfflineSuccessor({ executable, archive, directory: isolatedDirectory, identity });
   if (offlineSuccessor.installed_asar_sha256 !== installedHashes.installed_asar_sha256
     || offlineSuccessor.installed_executable_sha256 !== installedHashes.installed_executable_sha256) fail('installed_artifact_identity_changed');
   await fs.writeFile(path.join(directory, 'installed-offline-successor-proof.json'), JSON.stringify(offlineSuccessor, null, 2) + '\n');
+  await progress.phase('FIRST_RUN');
   const firstRun = await qualifyInstalledFirstRun({ executable, directory: isolatedDirectory, identity });
   await fs.writeFile(path.join(directory, 'installed-first-run-proof.json'), JSON.stringify(firstRun, null, 2) + '\n');
+  await progress.phase('OWNED_UI_HOST');
   const uiHost = await qualifyInstalledUiHost({ executable, asar, archive, directory: isolatedDirectory, resourcesDir, identity });
   await fs.writeFile(path.join(directory, 'installed-owned-ui-host-proof.json'), JSON.stringify(uiHost, null, 2) + '\n');
-  const owner = ownerQaRoot ? await qualifyInstalledOwnerBoot({ executable, resourcesDir, directory: isolatedDirectory, ownerQaRoot, identity }) : null;
+  const owner = ownerQaRoot ? await qualifyInstalledOwnerBoot({ executable, resourcesDir, directory: isolatedDirectory, ownerQaRoot, identity, progress }) : null;
   if (owner) await fs.writeFile(path.join(directory, 'installed-owner-boot-proof.json'), JSON.stringify(owner, null, 2) + '\n');
+  await progress.phase('VERIFY_FINAL_BYTES');
   if (digest(await fs.readFile(archive)) !== installedHashes.installed_asar_sha256
     || digest(await fs.readFile(executable)) !== installedHashes.installed_executable_sha256) fail('installed_artifact_identity_changed');
   const proof = Object.freeze({ schema: 'metaengine.browser.installed-launch-qualification.v1', ...identity,
@@ -940,7 +973,12 @@ export async function qualifyInstalledClientLaunch({ installRoot, sourceRoot, ex
     candidate_install_qualified: owner?.owner_boot_qualified === true,
     production_ready: false, release_published: false, promotion_authorized: false, authority_effect: false });
   await fs.writeFile(path.join(directory, 'installed-launch-qualification.json'), JSON.stringify(proof, null, 2) + '\n');
+  await progress.phase('COMPLETE');
   return proof;
+  } catch (error) {
+    await progress.failure(error);
+    throw error;
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

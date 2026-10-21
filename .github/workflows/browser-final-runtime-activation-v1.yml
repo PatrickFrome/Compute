@@ -196,5 +196,7 @@ jobs:
             ${{ runner.temp }}/final-runtime-activation-proof.json
             ${{ runner.temp }}/final-runtime-normal.out
             ${{ runner.temp }}/final-runtime-normal.err
+            ${{ runner.temp }}/owner-consumer-evidence-*/installed-launch-progress.json
+            ${{ runner.temp }}/owner-consumer-evidence-*/installed-launch-failure.json
           if-no-files-found: error
           retention-days: 30
