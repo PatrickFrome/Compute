@@ -199,6 +199,11 @@ async function privateReceiptRoot(file) {
   // Full proposed Owner settings may appear in receipts; refuse public output roots.
   await acl(path.dirname(file),true);
 }
+async function verifyUpgradeOwnerDirectory() {
+  const file=localStateProviderOwnerFile();if(!file)fail('owner_location_unknown');
+  await physical(path.dirname(file),'directory');
+  await acl(path.dirname(file),true);
+}
 async function save(file,value) {
   await privateReceiptRoot(file);
   const temp=file+'.'+randomUUID()+'.tmp';
@@ -338,6 +343,7 @@ async function qualify(verified,configFile,owner) {
 
 export async function prepareUpgrade(options) {
   if(process.platform!=='win32')fail('windows_required');
+  await verifyUpgradeOwnerDirectory();
   await absent(options.receipt);await privateReceiptRoot(options.receipt);
   const checked=await candidate(options), old=await oldState(options);
   const predecessorImage=await readPredecessorImage(options['installed-resources'],old.owner.runtime_host.expected_bundle_sha256,predecessorReadPolicy(options));
@@ -458,6 +464,7 @@ export async function publishOwnerFile({ownerFile,stagedFile,oldBytes,nextBytes,
 }
 export async function publishUpgrade(options) {
   if(process.platform!=='win32')fail('windows_required');
+  await verifyUpgradeOwnerDirectory();
   await privateReceiptRoot(options.receipt);
   const proofBytes=await stableUpgradeRead(options.receipt);await acl(options.receipt);
   if(sha(proofBytes)!==options['expected-receipt-sha256'])fail('receipt_digest_mismatch');
