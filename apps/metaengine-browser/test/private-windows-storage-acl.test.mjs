@@ -112,6 +112,29 @@ test('Win32 DACL operator rejects unreadable receipt, unsupported platform and u
     /private_windows_storage_arguments_invalid/);
 });
 
+test('fixed native denial markers distinguish a rejected grant from timeout without stderr disclosure',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-acl-denial-'));
+  t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  const args={platform:'win32',env:{SystemRoot:'C:\\Windows'},operation:'VERIFY_DIRECTORY'};
+  for(const reason of ['UNAPPROVED_GRANT','INSUFFICIENT_RIGHTS','DENY_OR_UNKNOWN_ACE']){
+    let attempts=0;
+    await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{...args,run:async()=>{
+      attempts++;
+      throw Object.assign(Error('private child error'),{code:1,killed:false,
+        stdout:`ACL_PHASE_READBACK\nACL_DENIAL_${reason}\n`,stderr:'C:\\private\\secret credential'});
+    }}),{message:`private_windows_storage_acl_not_confirmed_readback_${reason.toLowerCase()}`});
+    assert.equal(attempts,1);
+  }
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{...args,run:async()=>{
+    throw Object.assign(Error('private timeout'),{code:'ETIMEDOUT',killed:true,
+      stdout:'ACL_PHASE_READBACK\nACL_DENIAL_UNAPPROVED_GRANT\n',stderr:'private secret'});
+  }}),{message:'private_windows_storage_powershell_timeout_readback'});
+  await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{...args,run:async()=>{
+    throw Object.assign(Error('private path'),{code:1,stdout:'ACL_PHASE_READBACK\nACL_DENIAL_UNKNOWN_PRIVATE_TEXT\n',
+      stderr:'ACL_DENIAL_UNAPPROVED_GRANT\nC:\\private\\secret'});
+  }}),{message:'private_windows_storage_acl_not_confirmed_readback'});
+});
+
 test('Win32 real ACL protects fresh private directory and verifies inheriting config and copied Vault', {
   skip:process.platform!=='win32',
 },async t=>{
@@ -140,7 +163,7 @@ test('Win32 real ACL protects fresh private directory and verifies inheriting co
   await promisify(execFile)(path.win32.join(windowsRoot,'System32','icacls.exe'),
     [vault,'/grant','*S-1-1-0:(R)'],{shell:false,windowsHide:true,timeout:120000,maxBuffer:8192});
   await assert.rejects(verifyOwnerOnlyWindowsStorage(vault),{
-    message:'private_windows_storage_acl_not_confirmed_readback',
+    message:'private_windows_storage_acl_not_confirmed_readback_unapproved_grant',
   });
 });
 

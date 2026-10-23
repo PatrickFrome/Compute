@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
   assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile, classifyPredecessorBinding, predecessorReadPolicy,
   completeUpgradeFiles,commitUpgradeAdmission,assertPendingPublication } from '../scripts/qa-owner-runtime-upgrade.mjs';
@@ -11,6 +13,7 @@ import {QA_UPGRADE_ADMISSION_SCHEMA,qaUpgradeAdmissionFile,assertQaUpgradeAdmiss
 import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
 import { QA_IMAGE_SNAPSHOT_SCHEMA } from '../scripts/qa-installed-image-snapshot.mjs';
 import { NSIS_EFFECTS_SCHEMA } from '../scripts/qa-nsis-external-effects.mjs';
+import {protectOwnerOnlyWindowsDirectory} from '../src/private-windows-storage-acl.mjs';
 
 const digest='a'.repeat(64),source='b'.repeat(40),version='0.7.0-dev.202610190001.1';
 const options={mode:'prepare','candidate-resources':path.resolve(os.tmpdir(),'qa-candidate','resources'),
@@ -18,6 +21,40 @@ const options={mode:'prepare','candidate-resources':path.resolve(os.tmpdir(),'qa
   'expected-version':version,'expected-source':source,'expected-asar-sha256':digest,
   'expected-owner-sha256':'c'.repeat(64),receipt:path.resolve(os.tmpdir(),'qa-proof.json')};
 const argv=x=>Object.entries(x).flatMap(([k,v])=>['--'+k,v]);
+
+test('prepare and publish reject an unapproved Owner parent before reading missing package or receipt roots',{
+  skip:process.platform!=='win32',timeout:180000,
+},async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-upgrade-early-acl-'));
+  t.after(async()=>{
+    const actual=await fs.realpath(root),parent=await fs.realpath(os.tmpdir());
+    assert.ok(actual.startsWith(parent+path.sep));
+    assert.ok(path.basename(actual).startsWith('metaengine-upgrade-early-acl-'));
+    await fs.rm(actual,{recursive:true,force:true});
+  });
+  const appData=path.join(root,'appdata'),ownerParent=path.join(appData,'@metaengine','browser-shell');
+  await fs.mkdir(ownerParent,{recursive:true});
+  await protectOwnerOnlyWindowsDirectory(ownerParent);
+  await promisify(execFile)(path.win32.join(process.env.SystemRoot||process.env.SYSTEMROOT,'System32','icacls.exe'),
+    [ownerParent,'/grant','*S-1-1-0:(R)'],{shell:false,windowsHide:true,timeout:120000,maxBuffer:8192});
+  const receipt=path.join(root,'absent-receipt-root','proof.json');
+  const input={...options,receipt,'candidate-resources':path.join(root,'absent-package','resources')};
+  const moduleUrl=new URL('../scripts/qa-owner-runtime-upgrade.mjs',import.meta.url).href;
+  const script=`import {prepareUpgrade,publishUpgrade} from ${JSON.stringify(moduleUrl)};
+    const input=${JSON.stringify(input)};
+    for(const fn of [prepareUpgrade,publishUpgrade]){
+      let blocked=false;
+      try{await fn(input);}catch(error){blocked=error.message==='private_windows_storage_acl_not_confirmed_readback_unapproved_grant';}
+      if(!blocked)throw Error('early_owner_acl_not_observed');
+    }
+    console.log('EARLY_OWNER_ACL_DENIED_BOTH_MODES');`;
+  const result=await promisify(execFile)(process.execPath,['--input-type=module','-e',script],
+    {env:{...process.env,APPDATA:appData},shell:false,windowsHide:true,timeout:150000,maxBuffer:8192});
+  assert.equal(result.stdout.trim(),'EARLY_OWNER_ACL_DENIED_BOTH_MODES');
+  for(const file of [receipt,path.dirname(receipt),input['candidate-resources'],path.join(ownerParent,'metaengine-state-provider-v1.json')]){
+    await assert.rejects(fs.lstat(file),{code:'ENOENT'});
+  }
+});
 
 test('QA upgrade requires explicit mode, immutable package and predecessor identities',()=>{
   assert.deepEqual(validateUpgradeArguments(argv(options)),options);
