@@ -129,6 +129,32 @@ async function hashFile(file) {
   for await(const part of createReadStream(file))h.update(part);
   return h.digest('hex');
 }
+const UPGRADE_ASAR_ENTRIES = new Map([
+  ['package.json', 65536],
+  [path.normalize('infra/client-state-runtime/offline-runtime-bundle.mjs'), 512 * 1024],
+]);
+function freshUpgradeAsarEntry(archive, entry) {
+  const maximum=UPGRADE_ASAR_ENTRIES.get(entry), asar=require('@electron/asar');
+  if(!maximum||typeof asar.uncache!=='function'||typeof asar.statFile!=='function'
+    ||typeof asar.extractFile!=='function')fail('asar_reader_api_unavailable');
+  // @electron/asar caches headers by pathname, even after NSIS replaces that
+  // file. A fresh disk hash must never be combined with the old cached offsets.
+  // Invalidate only this archive, immediately before each synchronous read.
+  asar.uncache(archive);
+  const info=asar.statFile(archive,entry,false);
+  if(!info||!Number.isSafeInteger(info.size)||info.size<1||info.size>maximum
+    ||info.unpacked||'files' in info||'link' in info)fail('asar_entry_invalid');
+  const bytes=asar.extractFile(archive,entry,false);
+  if(!Buffer.isBuffer(bytes)||bytes.length!==info.size)fail('asar_entry_invalid');
+  return bytes;
+}
+// Fixed, bounded entries only; this is not an arbitrary archive extraction API.
+export async function readUpgradeAsarPackage(archive) {
+  return JSON.parse(freshUpgradeAsarEntry(await physical(archive),'package.json').toString('utf8'));
+}
+export async function readUpgradeAsarVerifier(archive) {
+  return freshUpgradeAsarEntry(await physical(archive),path.normalize('infra/client-state-runtime/offline-runtime-bundle.mjs'));
+}
 // Old Owner must only be restored together with the *same* physically verified
 // application image. Restoring a JSON descriptor after NSIS changed app.asar is
 // not rollback; it can strand the runtime in an incompatible generation.
@@ -168,8 +194,7 @@ export async function readPredecessorImage(installedResources, ownerBundleDigest
   const executableSha256 = await hashFile(path.join(path.dirname(resources), 'METAENGINE Browser Test.exe'));
   let pkg;
   try {
-    const asar = require('@electron/asar');
-    pkg = JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8'));
+    pkg = await readUpgradeAsarPackage(archive);
   } catch { fail('predecessor_asar_unreadable'); }
   const binding = pkg?.metaengineClientStateRuntime;
   if (!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(pkg?.version || '')
@@ -248,11 +273,10 @@ export function makeUpgradeConfigs(old, { stateDirectory, candidateBundle, insta
 async function candidate(options) {
   const resources=await physical(options['candidate-resources'],'directory'), archive=path.join(resources,'app.asar');
   if(await hashFile(archive)!==options['expected-asar-sha256'])fail('candidate_asar_mismatch');
-  const asar=require('@electron/asar');
-  const pkg=JSON.parse(asar.extractFile(archive,'package.json').toString('utf8'));
+  const pkg=await readUpgradeAsarPackage(archive);
   if(pkg.version!==options['expected-version']||pkg.metaengineClientStateRuntime?.source_head_sha!==options['expected-source'])fail('candidate_identity_mismatch');
   const binding=pkg.metaengineClientStateRuntime;
-  const verifierBytes=asar.extractFile(archive,path.normalize('infra/client-state-runtime/offline-runtime-bundle.mjs'));
+  const verifierBytes=await readUpgradeAsarVerifier(archive);
   const {assertPackagedOfflineRuntimeBinding}=require('./offline-runtime-package-binding.cjs');
   await assertPackagedOfflineRuntimeBinding(binding,{expectedHead:options['expected-source'],packageVersion:pkg.version,resourcesDir:resources,verifierBytes});
   const verifier=await import('data:text/javascript;base64,'+verifierBytes.toString('base64'));
