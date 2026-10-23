@@ -422,6 +422,24 @@ export class SupervisorDeviceIdentity {
 
   randomNonce() { return crypto.randomBytes(24).toString('base64url'); }
 
+  // Native composition only; deliberately absent from renderer, delegated
+  // identity IPC and HTTP request signers. The private host issuer obtains
+  // `expected` from fresh OS/installed-image/own-PG observations.
+  async signNativeCodingProof(payload, {expected, now = Date.now()} = {}) {
+    // This purpose never creates/rotates/enrolls an identity as a side effect.
+    const state = this.snapshot();
+    if (!state?.enrolled || !state.device_id || !this.#privateKey) throw new Error('supervisor_device_not_enrolled');
+    const {validateNativeCodingProofPayload, nativeCodingProofSigningBytes} = await import('./native-coding-transport-proof.mjs');
+    const checked = validateNativeCodingProofPayload(payload, {expected, now});
+    if (checked.device_id !== state.device_id || checked.device_key_fingerprint_sha256 !== state.key_fingerprint_sha256) {
+      throw new Error('supervisor_native_coding_device_binding_mismatch');
+    }
+    return Object.freeze({
+      algorithm:'ES256', issuer_key_fingerprint_sha256:state.key_fingerprint_sha256,
+      payload:checked, signature:this.#sign(nativeCodingProofSigningBytes(checked).toString('utf8')),
+    });
+  }
+
   async guardianOwnerChallenge({ command_id, request_nonce, enrollment_ticket_sha256 = null } = {}) {
     const state = await this.ensure();
     if (!state.device_id) throw new Error('supervisor_device_not_enrolled');

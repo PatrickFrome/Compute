@@ -30,6 +30,10 @@
   "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
   "extraResources": [
     {
+      "from": "scripts/codex-cli-job-runner.ps1",
+      "to": "native-coding/codex-cli-job-runner.ps1"
+    },
+    {
       "from": "client-state-runtime-dist",
       "to": "client-state-runtime",
       "filter": ["**/*"]
