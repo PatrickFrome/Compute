@@ -29,11 +29,18 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 .lesson-message{background:#1b293a;border:1px solid #35495f;border-radius:14px;padding:20px;margin-top:18px}
 .lesson-message h2{font-size:14px;color:#7ce0cf}
 .lesson-message p{color:#e3ecf4;font-size:14px;line-height:1.7;white-space:pre-wrap}
+#material-glossary{display:grid;gap:10px}#material-glossary div{border-left:2px solid #40726f;padding-left:12px;color:#d5e5ea;line-height:1.55}
+#material-references{display:grid;gap:7px}#material-references button{text-align:left;overflow-wrap:anywhere}
+#material-spotlight[hidden]{display:none}
 #material-status{color:#91a5ba;font-size:12px}
 .material-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
 #review-list button{display:block;width:100%;margin-top:5px;text-align:left;font-size:12px}
 #lab-title,#lab-kind{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
 #lab-observation{min-height:80px;max-height:160px}.caption{font-size:11px;color:#9daabe}
+#notebook-list{display:grid;gap:8px;margin:10px 0}#notebook-list .entry{padding:10px;border:1px solid #38516a;border-radius:8px}
+#notebook-list .entry p{white-space:pre-wrap;overflow-wrap:anywhere;color:#dbe7f2}
+#notebook-title,#notebook-source{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
+#notebook-body{min-height:112px;max-height:260px}
 </style></head>
 <body><div class="shell">
 <aside class="left" aria-label="Направления обучения">
@@ -54,18 +61,30 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
     <small id="material-status">Локальный учебный материал · без подключения GPT</small>
     <h1 id="material-title">Выбери учебный чат в левой панели</h1>
     <div class="material-actions">
-      <button id="library-discuss" class="primary">Открыть GPT для этой темы</button>
-      <button id="library-copy">Скопировать учебный материал для GPT</button>
+      <button id="library-external" class="primary">Продолжить с GPT в обычном браузере</button>
+      <button id="library-discuss">Встроенный GPT (эксперимент)</button>
+      <button id="library-copy">Скопировать подробный урок для GPT</button>
     </div>
     <div class="lesson-message"><h2>Объяснение с нуля</h2><p id="material-theory"></p></div>
     <div class="lesson-message"><h2>Пример из практики</h2><p id="material-example"></p></div>
     <div class="lesson-message"><h2>Задание для самостоятельного выполнения</h2><p id="material-exercise"></p></div>
     <div class="lesson-message"><h2>Контрольный вопрос</h2><p id="material-check"></p></div>
-    <p id="material-guidance" class="caption">Подготовленный учебный чат хранится локально. GPT-переписка начинается отдельно по твоему действию; сообщения автоматически не отправляются.</p>
+    <div class="lesson-message"><h2>Учебная цель</h2><p id="material-objective"></p></div>
+    <div class="lesson-message"><h2>Словарь технических терминов</h2><div id="material-glossary"></div></div>
+    <div class="lesson-message"><h2>Углублённый контекст дисциплины</h2><p id="material-extension"></p></div>
+    <div class="lesson-message" id="material-spotlight" hidden><h2 id="spotlight-title"></h2><p id="spotlight-text"></p></div>
+    <div class="lesson-message"><h2>Распространённая ошибка</h2><p id="material-mistake"></p></div>
+    <div class="lesson-message"><h2>Проверь понимание</h2><p id="material-reflection"></p></div>
+    <div class="lesson-message"><h2>Надёжные источники для дальнейшего изучения</h2><div id="material-references"></div><small>Источник приведён для самостоятельной сверки, а не как гарантия всех утверждений конспекта.</small></div>
+    <p id="material-guidance" class="caption">Материал хранится локально. Рекомендуется обычный браузер: программа копирует подробный учебный запрос и открывает ChatGPT, но не отправляет сообщение. Если встроенный ChatGPT показывает ошибку JavaScript, выбери обычный браузер.</p>
   </div>
 </main>
 <section class="right" aria-label="Учебный контекст">
   <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
+  <button id="browser-from-sidebar" class="primary">Открыть урок с GPT в обычном браузере</button>
+  <small>Если встроенная вкладка сообщает об ошибке JavaScript, эта кнопка продолжит обучение во внешнем браузере. Сообщение не отправляется автоматически.</small>
+  <button id="check-embedded-gpt">Диагностика встроенного GPT</button>
+  <small id="embedded-gpt-health">Настройки встроенной вкладки ещё не проверены.</small>
   <div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
   <p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
   <h2>Повторить сегодня (UTC)</h2>
@@ -79,7 +98,17 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
   <h2>Инструкция для преподавателя GPT</h2>
   <textarea id="lesson-prompt" readonly aria-label="Шаблон учебного запроса"></textarea>
   <button id="copy-prompt">Скопировать текст урока</button>
-  <h2>Мой конспект</h2>
+  <h2>Тетрадь выбранной вкладки</h2>
+  <div class="card"><strong id="notebook-heading">Выбери тему</strong><p id="notebook-count" class="caption">Записей: 0</p>
+    <input id="notebook-title" maxlength="100" placeholder="Заголовок заметки">
+    <textarea id="notebook-body" maxlength="5000" placeholder="Что понял, что нужно повторить, формулы, вопросы к GPT…"></textarea>
+    <select id="notebook-source"><option value="student">Моя запись</option><option value="gpt_manually_copied">Я вручную перенёс ответ GPT (не проверено)</option></select>
+    <div class="toolbar"><button id="notebook-save" class="primary">Сохранить запись</button><button id="notebook-cancel">Отмена</button></div>
+    <div id="notebook-list"></div>
+    <label><input type="checkbox" id="notebook-include-gpt"> Включить заметки в контекст GPT при копировании или открытии</label>
+    <p class="caption">Записи хранятся локально. Передача в GPT — только по нажатию кнопки; обновлённый контекст нужно отправлять вручную.</p>
+  </div>
+  <h2>Старые конспекты по модулям</h2>
   <textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
   <button id="save-note">Сохранить конспект</button><div id="note-list"></div>
   <h2>Журнал практических работ</h2>
@@ -89,14 +118,14 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
   <button id="save-lab">Сохранить самоотчёт</button><div class="caption">Самоотчёт не означает проверку или подтверждение практических навыков.</div>
   <div id="lab-list"></div></div>
   <small>В учебных чатах отправка сообщений выполняется только вручную.</small>
-  <h2>Следующие модули</h2>
-  <div class="card"><small>Лаборатории, интервальные повторения и расширенные экзамены — последующие этапы. Эта версия сохраняет дерево чатов и результаты проверок.</small></div>
+  <h2>Что подтверждено</h2>
+  <div class="card"><small>Проверены ответы на локальные задания и даты повторения. Конспекты и лабораторные записи — самоотчёты, не подтверждение практической квалификации. GPT может помогать разбирать ошибки, но не выставляет официальный допуск.</small></div>
 </section></div>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 let state=null,fleet=null,selected='subject-3',selectedLesson=null,focusQuestionId=null,visibleQuestionId=null,busy=false;
-let selectedMaterial='material-03-01',materialMode=true;
+let selectedMaterial='material-03-01',materialMode=true,selectedChatTabId=null,editingNotebookEntry=null,confirmDeleteEntry=null,renderedNotebookKey=null;
 const status=message=>{$('status').textContent=String(message).slice(0,450);};
 function askTitle(message,initial=''){
   return new Promise(resolve=>{
@@ -129,6 +158,56 @@ function topSubject(folderId){
   while(f?.parent_id&&guard++<state.folders.length)f=state.folders.find(x=>x.id===f.parent_id);
   return f?.id||null;
 }
+function activeNotebookKey(){
+  if(materialMode)return selectedMaterial;
+  const chat=state?.chats.find(c=>c.tab_id===selectedChatTabId);
+  return chat?.tab_id||null;
+}
+function activeMaterialId(){
+  if(materialMode)return selectedMaterial;
+  return state?.chats.find(c=>c.tab_id===selectedChatTabId)?.material_id||null;
+}
+function renderNotebook(){
+  const key=activeNotebookKey(),notes=state.notebook_entries||[];
+  if(key!==renderedNotebookKey){
+    renderedNotebookKey=key;editingNotebookEntry=null;confirmDeleteEntry=null;
+    $('notebook-title').value='';$('notebook-body').value='';$('notebook-source').value='student';
+    $('notebook-source').disabled=false;$('notebook-save').textContent='Сохранить запись';
+  }
+  const chat=state.chats.find(c=>c.tab_id===key);
+  const material=state.materials.find(m=>m.id===key);
+  $('notebook-heading').textContent=material?'Тема: '+material.title:
+    chat?'GPT: '+chat.title:'Открой тему или GPT-вкладку';
+  const current=notes.filter(n=>n.notebook_key===key);
+  $('notebook-count').textContent='Записей: '+current.length+' · только на этом компьютере';
+  const list=$('notebook-list');list.replaceChildren();
+  for(const n of current.slice(-30).reverse()){
+    const div=elm('div',undefined,'entry');
+    div.append(elm('strong',n.title),
+      elm('small',' · '+(n.source==='student'?'моя запись':'GPT, вручную скопировано; не проверено')),
+      elm('p',n.body));
+    const toolbar=elm('div',undefined,'toolbar');
+    const edit=elm('button','Изменить');
+    edit.onclick=()=>{
+      editingNotebookEntry=n.id;
+      $('notebook-title').value=n.title;$('notebook-body').value=n.body;
+      $('notebook-source').value=n.source;
+      $('notebook-source').disabled=true;
+      $('notebook-save').textContent='Сохранить изменения';
+      $('notebook-body').focus();
+    };
+    const del=elm('button',confirmDeleteEntry===n.id?'Подтвердить удаление':'Удалить');
+    del.onclick=async()=>{
+      if(confirmDeleteEntry!==n.id){confirmDeleteEntry=n.id;renderNotebook();return;}
+      confirmDeleteEntry=null;editingNotebookEntry=null;
+      $('notebook-title').value='';$('notebook-body').value='';
+      $('notebook-source').disabled=false;$('notebook-save').textContent='Сохранить запись';
+      await action(()=>window.devfleet.education.deleteNotebookEntry({entry_id:n.id}));
+    };
+    toolbar.append(edit,del);div.append(toolbar);list.append(div);
+  }
+  $('notebook-save').disabled=!key;
+}
 function render(){
   const tree=$('tree');tree.replaceChildren();
   const tabs=new Set((fleet.sessions||[]).filter(s=>s.state==='OPEN').map(s=>s.tab_id));
@@ -141,7 +220,7 @@ function render(){
       const subject=Number((topSubject(selected)||'').replace('subject-',''));
       const first=state.materials.find(m=>m.subject===subject);
       if(first)selectedMaterial=first.id;
-      materialMode=true;render();
+      selectedChatTabId=null;materialMode=true;render();
       window.devfleet.education.showMaterial().catch(e=>status(String(e?.message||e)));
     };tree.append(b);
     for(const chat of state.chats.filter(c=>c.folder_id===folder.id)){
@@ -150,7 +229,8 @@ function render(){
       cb.title=tabs.has(chat.tab_id)?'Открыть GPT-чат':'Чат пока не восстановлен в сессиях';
       cb.onclick=()=>action(async()=>{
         if(!tabs.has(chat.tab_id))throw Error('Чат недоступен; восстанови исходную сессию.');
-        await window.devfleet.select(chat.tab_id);selected=chat.folder_id;materialMode=false;
+        await window.devfleet.select(chat.tab_id);selected=chat.folder_id;
+        selectedChatTabId=chat.tab_id;materialMode=false;
       });tree.append(cb);
     }
     if(folder.id===topSubject(folder.id)){
@@ -162,7 +242,7 @@ function render(){
         mb.append(elm('span',linked?'◉':'◇'),elm('span',material.title));
         mb.title=linked?'Материал и связанный GPT-чат':'Подготовленный локальный учебный чат';
         mb.onclick=()=>{
-          selected=folder.id;selectedMaterial=material.id;materialMode=true;
+          selected=folder.id;selectedMaterial=material.id;selectedChatTabId=null;materialMode=true;
           render();window.devfleet.education.showMaterial().catch(e=>status(String(e?.message||e)));
         };
         tree.append(mb);
@@ -179,8 +259,25 @@ function render(){
     $('material-example').textContent=currentMaterial.example;
     $('material-exercise').textContent=currentMaterial.exercise;
     $('material-check').textContent=currentMaterial.check;
+    const depth=currentMaterial.depth;
+    $('material-objective').textContent=depth.objective;
+    $('material-extension').textContent=depth.extension;
+    $('material-mistake').textContent=depth.commonMistake;
+    $('material-reflection').textContent=depth.reflection;
+    const glossary=$('material-glossary');glossary.replaceChildren();
+    for(const item of depth.glossary){const line=elm('div');line.append(elm('strong',item.term+' — '),elm('span',item.meaning));glossary.append(line);}
+    const spotlight=$('material-spotlight');spotlight.hidden=!depth.spotlight;
+    $('spotlight-title').textContent=depth.spotlight?.title||'';
+    $('spotlight-text').textContent=depth.spotlight?.text||'';
+    const refs=$('material-references');refs.replaceChildren();
+    for(const source of depth.references){
+      const b=elm('button',source.title+' · '+source.url);
+      b.onclick=()=>window.devfleet.education.openReference(source.url).catch(e=>status('Источник не открыт: '+e.message));
+      refs.append(b);
+    }
     const linked=state.chats.find(c=>c.material_id===currentMaterial.id);
-    $('library-discuss').textContent=linked&&tabs.has(linked.tab_id)?'Вернуться к GPT-обсуждению':'Создать GPT-обсуждение';
+    $('library-discuss').textContent=linked&&tabs.has(linked.tab_id)?'Встроенный GPT: вернуться к беседе':'Встроенный GPT (эксперимент)';
+
   }
   const unbound=$('unbound');unbound.replaceChildren();
   const bound=new Set(state.chats.map(c=>c.tab_id));
@@ -245,6 +342,12 @@ function render(){
   $('lesson-prompt').value=materialMode&&currentMaterial?
   materialPrompt(currentMaterial):
   f&&lesson?'Ты мой преподаватель по дисциплине «'+f.title+'». Урок: «'+lesson.title+'». Цель: '+lesson.goal+'. Я начинаю с абсолютного нуля. Объясни все термины, покажи несколько понятных примеров, предложи безопасное практическое задание и задавай проверочные вопросы по одному. Не раскрывай ответ до моей попытки. Не объявляй тему освоенной без доказательств.':'Выбери дисциплину и урок.';
+  const previewMaterial=activeMaterialId();
+  if(previewMaterial){
+    window.devfleet.education.previewHandoff(previewMaterial,handoffOptions()).then(result=>{
+      if(activeMaterialId()===result.material_id)$('lesson-prompt').value=result.text;
+    }).catch(e=>status('Предпросмотр GPT недоступен: '+e.message));
+  }
   const notes=$('note-list');notes.replaceChildren();
   for(const n of state.notes.filter(n=>n.lesson_id===selectedLesson).slice(-3).reverse()){
     notes.append(elm('small',n.text));
@@ -253,8 +356,10 @@ function render(){
   for(const lab of state.labs.filter(l=>l.lesson_id===selectedLesson).slice(-3).reverse()){
     labList.append(elm('small',lab.title+' · '+lab.kind+' · НЕ ПРОВЕРЕНО: '+lab.observation));
   }
+  renderNotebook();
   if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
 }
+function handoffOptions(){return {includeNotebook:$('notebook-include-gpt').checked};}
 function materialPrompt(material){
   return ['Я изучаю телекоммуникации и ВОЛС с нулевого уровня.',
     'Направление '+material.subject+'. Тема: '+material.title,
@@ -266,6 +371,25 @@ function materialPrompt(material){
     'Не показывай решение до моей попытки. Не считай прочитанный материал доказательством освоения. Следи за безопасностью практики.'].join('\n\n');
 }
 let renderFeedback=null;
+$('notebook-cancel').onclick=()=>{
+  editingNotebookEntry=null;$('notebook-title').value='';$('notebook-body').value='';
+  $('notebook-source').value='student';$('notebook-source').disabled=false;
+  $('notebook-save').textContent='Сохранить запись';
+};
+$('notebook-save').onclick=()=>action(async()=>{
+  const key=activeNotebookKey(),title=$('notebook-title').value,body=$('notebook-body').value;
+  if(!key)throw Error('Сначала выбери учебную тему или GPT-вкладку');
+  if(editingNotebookEntry){
+    await window.devfleet.education.editNotebookEntry({entry_id:editingNotebookEntry,title,body});
+  }else{
+    await window.devfleet.education.addNotebookEntry({notebook_key:key,title,body,
+      source:$('notebook-source').value});
+  }
+  editingNotebookEntry=null;
+  $('notebook-title').value='';$('notebook-body').value='';
+  $('notebook-source').value='student';$('notebook-source').disabled=false;
+  $('notebook-save').textContent='Сохранить запись';
+});
 $('add-folder').onclick=async()=>{
   const title=await askTitle('Название новой вложенной папки');
   if(title!==null)await action(async()=>{await window.devfleet.education.addFolder({parent_id:selected,title});renderFeedback=null;});
@@ -284,13 +408,36 @@ $('next-question').onclick=()=>{
   focusQuestionId=questions[(current+1)%questions.length].id;
   renderFeedback=null;render();
 };
+$('notebook-include-gpt').onchange=()=>{
+  if(state&&materialMode)render();
+  status($('notebook-include-gpt').checked?
+    'Личные записи войдут в следующий вручную отправляемый учебный запрос.':
+    'Личные записи исключены из передачи GPT.');
+};
 $('library-copy').onclick=async()=>{
-  const material=state.materials.find(m=>m.id===selectedMaterial);
-  if(!material){status('Выбери учебный материал');return;}
-  const text=materialPrompt(material);
-  try{await navigator.clipboard.writeText(text);status('Учебный конспект для GPT скопирован. Вставь его в беседу вручную.');}
-  catch{$('lesson-prompt').value=text;$('lesson-prompt').focus();$('lesson-prompt').select();
-    status('Текст выделен в правой панели: нажми Ctrl+C.');}
+  if(!selectedMaterial){status('Выбери тему');return;}
+  try{const r=await window.devfleet.education.copyHandoff(activeMaterialId()||selectedMaterial,handoffOptions());
+    status('Подробный учебный запрос скопирован ('+r.character_count+' символов). Отправь его в GPT вручную.');}
+  catch(e){status('Не удалось скопировать: '+e.message);}
+};
+async function launchInBrowser(){
+  if(!selectedMaterial){status('Выбери тему');return;}
+  try{const r=await window.devfleet.education.launchExternalGPT(activeMaterialId()||selectedMaterial,handoffOptions());
+    if(r.opened&&r.copied)status('ChatGPT открыт в обычном браузере. Учебный запрос скопирован — вставь Ctrl+V и отправь вручную.');}
+  catch(e){status('Не удалось открыть браузер: '+e.message+'. Можно скопировать урок отдельной кнопкой.');}
+}
+$('library-external').onclick=launchInBrowser;
+$('browser-from-sidebar').onclick=launchInBrowser;
+$('check-embedded-gpt').onclick=async()=>{
+  try{
+    const result=await window.devfleet.education.chatHealth();
+    $('embedded-gpt-health').textContent=result.state==='NO_NATIVE_TAB'?
+      'Встроенная GPT-вкладка сейчас не выбрана. JavaScript локального Electron работает; попробуй обычный браузер.':
+      'Вкладка: '+result.state+' · JavaScript '+(result.javascript?'разрешён':'отключён')+
+      ' · URL '+(result.origin||'неизвестен')+' · событие '+(result.last_event?.type||'неизвестно')+
+      (result.last_event?.code?' ('+result.last_event.code+')':'')+
+      '. Поддержка ChatGPT во встроенном браузере не гарантируется.';
+  }catch(e){$('embedded-gpt-health').textContent='Диагностика недоступна: '+e.message;}
 };
 $('library-discuss').onclick=()=>action(async()=>{
   const material=state.materials.find(m=>m.id===selectedMaterial);
@@ -299,7 +446,7 @@ $('library-discuss').onclick=()=>action(async()=>{
   const available=new Set((fleet.sessions||[]).filter(t=>t.state==='OPEN').map(t=>t.tab_id));
   if(linked){
     if(!available.has(linked.tab_id))throw Error('Связанный GPT-чат недоступен; восстанови сессию, новая беседа не создаётся.');
-    await window.devfleet.select(linked.tab_id);materialMode=false;return;
+    await window.devfleet.select(linked.tab_id);selectedChatTabId=linked.tab_id;materialMode=false;return;
   }
   const result=await window.devfleet.create({request_id:crypto.randomUUID(),count:1});
   if(result.state!=='CREATED'||result.sessions?.length!==1)
@@ -307,7 +454,7 @@ $('library-discuss').onclick=()=>action(async()=>{
   const tab_id=result.sessions[0].tab_id;
   await window.devfleet.education.bindChat({folder_id:'subject-'+material.subject,
     tab_id,material_id:material.id,title:'GPT · '+material.title});
-  await window.devfleet.select(tab_id);materialMode=false;
+  await window.devfleet.select(tab_id);selectedChatTabId=tab_id;materialMode=false;
   status('GPT-вкладка открыта. Нажми «Скопировать учебный материал» и вставь текст вручную.');
 });
 $('copy-prompt').onclick=async()=>{
@@ -346,9 +493,13 @@ $('new-chat').onclick=async()=>{
       throw Error('Создание не подтверждено ('+result.state+'). Не повторяй запрос, проверь вкладки.');
     const tab_id=result.sessions[0].tab_id;
     await window.devfleet.education.bindChat({folder_id:selected,tab_id,title});
-    await window.devfleet.select(tab_id);
+    await window.devfleet.select(tab_id);selectedChatTabId=tab_id;materialMode=false;
   });
 };
+window.devfleet.onExternalAuthRequired?.(payload=>{
+  status('Google не разрешает вход во встроенном браузере. ChatGPT открыт в обычном браузере. Продолжай авторизацию там; cookies между браузерами не переносятся.');
+  $('embedded-gpt-health').textContent='Встроенный Google OAuth не поддерживается. Используй обычный браузер.';
+});
 window.devfleet.onReady(()=>load().catch(e=>status(String(e?.message||e))));
 load().catch(e=>status('Не удалось открыть Education: '+String(e?.message||e)));
 </script></body></html>

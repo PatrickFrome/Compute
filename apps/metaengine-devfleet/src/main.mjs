@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, dialog, Menu } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, dialog, Menu, shell, clipboard } from 'electron';
 import { createServer } from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -11,6 +11,8 @@ import { LiveUiSlots } from './live-ui-slots.mjs';
 import { LiveOperatorContracts } from './live-operator-contracts.mjs';
 import { DevFleetSourceWorkspace } from './source-workspace-patch.mjs';
 import { EducationStore } from './education-core.mjs';
+import { buildEducationHandoff } from './education-handoff.mjs';
+import { ALLOWED_RESOURCE_URLS } from './education-lesson-depth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const educationMode=process.argv.includes('--devfleet-education');
@@ -383,6 +385,32 @@ async function start() {
     await educationStore.init();
     ipcMain.handle('education:snapshot',async e=>{educationSender(e);return educationStore.snapshot();});
     ipcMain.handle('education:show-material',async e=>{educationSender(e);return surface.showLibrary();});
+    ipcMain.handle('education:chat-health',async e=>{educationSender(e);return surface.health();});
+    const handoff=(id,options={})=>{
+      const snapshot=educationStore.snapshot();
+      const linked=snapshot.chats.find(c=>c.material_id===id);
+      return buildEducationHandoff(id,snapshot.study_contexts,snapshot.notebook_entries,{
+        includeNotebook:options?.includeNotebook===true,
+        linkedNotebookKey:linked?.tab_id??null
+      });
+    };
+    ipcMain.handle('education:preview-handoff',async(e,id,options)=>{educationSender(e);return handoff(id,options);});
+    ipcMain.handle('education:copy-handoff',async(e,id,options)=>{
+      educationSender(e);const result=handoff(id,options);clipboard.writeText(result.text);return {
+        material_id:id,copied:true,character_count:result.character_count,sent:false
+      };
+    });
+    ipcMain.handle('education:launch-external-gpt',async(e,id,options)=>{
+      educationSender(e);const result=handoff(id,options);
+      clipboard.writeText(result.text);
+      await shell.openExternal('https://chatgpt.com/');
+      return {material_id:id,copied:true,opened:true,sent:false};
+    });
+    ipcMain.handle('education:open-reference',async(e,url)=>{
+      educationSender(e);
+      if(!ALLOWED_RESOURCE_URLS.includes(url))throw Error('education_reference_not_allowed');
+      await shell.openExternal(url);return {opened:true};
+    });
     ipcMain.handle('education:add-folder',async(e,p)=>{educationSender(e);return educationStore.addFolder(p);});
     ipcMain.handle('education:rename-folder',async(e,p)=>{educationSender(e);return educationStore.renameFolder(p);});
     ipcMain.handle('education:bind-chat',async(e,p)=>{
@@ -392,6 +420,9 @@ async function start() {
     });
     ipcMain.handle('education:submit-answer',async(e,p)=>{educationSender(e);return educationStore.submitAnswer(p);});
     ipcMain.handle('education:add-note',async(e,p)=>{educationSender(e);return educationStore.addNote(p);});
+    ipcMain.handle('education:notebook-add',async(e,p)=>{educationSender(e);return educationStore.addNotebookEntry(p);});
+    ipcMain.handle('education:notebook-edit',async(e,p)=>{educationSender(e);return educationStore.editNotebookEntry(p);});
+    ipcMain.handle('education:notebook-delete',async(e,p)=>{educationSender(e);return educationStore.deleteNotebookEntry(p);});
     ipcMain.handle('education:add-lab',async(e,p)=>{educationSender(e);return educationStore.addLabReport(p);});
   }
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});

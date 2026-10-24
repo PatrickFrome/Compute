@@ -4,6 +4,7 @@
 import { TOPICS_A } from './education-library-a.mjs';
 import { TOPICS_B } from './education-library-b.mjs';
 import { TOPICS_C } from './education-library-c.mjs';
+import { lessonDepth } from './education-lesson-depth.mjs';
 export const MATERIAL_SCHEMA='devfleet.education.materials.v1';
 const data=[...TOPICS_A,...TOPICS_B,...TOPICS_C];
 const ids=new Set(),subjects=new Set();
@@ -21,7 +22,8 @@ for(const [subject,topics] of data){
     ids.add(id);
     const [title,theory,example,exercise,check]=entry;
     result.push(Object.freeze({id,subject,position:i+1,title,theory,example,exercise,check,
-      origin:MATERIAL_SCHEMA,assistant_status:'curated_study_material_not_gpt',
+      origin:MATERIAL_SCHEMA,depth:lessonDepth({id,subject}),
+      assistant_status:'curated_study_material_not_gpt',
       read_only:true}));
   });
 }

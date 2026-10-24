@@ -49,15 +49,16 @@ const title=value=>typeof value==='string'&&value.trim().length>0&&value.trim().
 function freshState(){
   return {schema:EDUCATION_SCHEMA,folders:SUBJECTS.map((name,index)=>({
     id:'subject-'+index,parent_id:null,title:name,order:index
-  })),chats:[],attempts:[],notes:[],reviews:[],labs:[],created_at:new Date().toISOString()};
+  })),chats:[],attempts:[],notes:[],notebook_entries:[],reviews:[],labs:[],created_at:new Date().toISOString()};
 }
 function check(state){
   if(state&&state.notes===undefined)state.notes=[];
+  if(state&&state.notebook_entries===undefined)state.notebook_entries=[];
   if(state&&state.reviews===undefined)state.reviews=[];
   if(state&&state.labs===undefined)state.labs=[];
   if(!state||state.schema!==EDUCATION_SCHEMA||!Array.isArray(state.notes)||!Array.isArray(state.reviews)||!Array.isArray(state.labs)||!Array.isArray(state.folders)
-    ||!Array.isArray(state.chats)||!Array.isArray(state.attempts))throw Error('education_state_invalid');
-  if(state.folders.length>500||state.chats.length>1000||state.attempts.length>10000||state.notes.length>1500||state.labs.length>500||state.reviews.length>100)
+    ||!Array.isArray(state.chats)||!Array.isArray(state.notebook_entries)||!Array.isArray(state.attempts))throw Error('education_state_invalid');
+  if(state.folders.length>500||state.chats.length>1000||state.attempts.length>10000||state.notes.length>1500||state.notebook_entries.length>2500||state.labs.length>500||state.reviews.length>100)
     throw Error('education_state_capacity_exceeded');
   const ids=new Set();
   for(const f of state.folders){
@@ -84,6 +85,19 @@ function check(state){
     if(!validId(note.id)||!knownLessons.has(note.lesson_id)
       ||typeof note.text!=='string'||note.text.length<1||note.text.length>4000)
       throw Error('education_note_invalid');
+  }
+  const notebookIds=new Set();
+  for(const entry of state.notebook_entries){
+    if(!entry||!validId(entry.id)||notebookIds.has(entry.id)
+      ||!title(entry.title)||typeof entry.body!=='string'
+      ||entry.body.trim().length<1||entry.body.length>5000
+      ||!['student','gpt_manually_copied'].includes(entry.source)
+      ||typeof entry.at!=='string'||Number.isNaN(Date.parse(entry.at))
+      ||!((typeof entry.notebook_key==='string'
+        &&MATERIALS.some(m=>m.id===entry.notebook_key))
+        ||(validTabId(entry.notebook_key)&&tabIds.has(entry.notebook_key))))
+      throw Error('education_notebook_invalid');
+    notebookIds.add(entry.id);
   }
   const qids=new Set(BANK.map(q=>q.id)),usedReviews=new Set();
   for(const r of state.reviews){
@@ -152,6 +166,40 @@ export class EducationStore{
       const chat={id:crypto.randomUUID(),folder_id,tab_id,material_id,title:title(label),
         created_at:new Date().toISOString()};
       s.chats.push(chat);return snapshot(chat);});
+  }
+  #validNotebookKey(key,state){
+    return typeof key==='string'&&(MATERIALS.some(m=>m.id===key)
+      ||(validTabId(key)&&state.chats.some(c=>c.tab_id===key)));
+  }
+  addNotebookEntry({notebook_key,title:label,body,source='student'}={}){
+    return this.#change(s=>{
+      if(!this.#validNotebookKey(notebook_key,s)||!title(label)
+        ||typeof body!=='string'||body.trim().length<1||body.length>5000
+        ||!['student','gpt_manually_copied'].includes(source))
+        throw Error('education_notebook_invalid');
+      const entry={id:crypto.randomUUID(),notebook_key,title:title(label),
+        body:body.trim(),source,at:this.#now().toISOString()};
+      s.notebook_entries.push(entry);return snapshot(entry);
+    });
+  }
+  editNotebookEntry({entry_id,body,title:label}={}){
+    return this.#change(s=>{
+      const entry=s.notebook_entries.find(e=>e.id===entry_id);
+      if(!entry||!title(label)||typeof body!=='string'
+        ||body.trim().length<1||body.length>5000)
+        throw Error('education_notebook_invalid');
+      entry.title=title(label);entry.body=body.trim();
+      entry.updated_at=this.#now().toISOString();
+      return snapshot(entry);
+    });
+  }
+  deleteNotebookEntry({entry_id}={}){
+    return this.#change(s=>{
+      const index=s.notebook_entries.findIndex(e=>e.id===entry_id);
+      if(index<0)throw Error('education_notebook_invalid');
+      const [deleted]=s.notebook_entries.splice(index,1);
+      return {deleted:true,entry_id:deleted.id,notebook_key:deleted.notebook_key};
+    });
   }
   addNote({lesson_id,text:body}={}){
     return this.#change(s=>{
