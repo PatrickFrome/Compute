@@ -21,7 +21,7 @@ async function run(){
   });
   await store.init();
   let opened=[];
-  let window;
+  let window,view;
   function trusted(event){
     if(!window||BrowserWindow.fromWebContents(event.sender)!==window
       ||event.senderFrame!==event.sender.mainFrame
@@ -30,6 +30,10 @@ async function run(){
   }
   const wrap=(channel,handler)=>ipcMain.handle(channel,(event,p)=>{trusted(event);return handler(p);});
   wrap('education:snapshot',()=>store.snapshot());
+  wrap('education:show-material',()=>{
+    if(view&&window){try{window.contentView.removeChildView(view);}catch{}}
+    return {mode:'study_material',native_chat_visible:false};
+  });
   wrap('education:add-folder',p=>store.addFolder(p));
   wrap('education:rename-folder',p=>store.renameFolder(p));
   wrap('education:bind-chat',p=>store.bindChat(p,opened.map(x=>x.tab_id)));
@@ -51,7 +55,7 @@ async function run(){
   window=new BrowserWindow({show:false,width:1320,height:820,
     webPreferences:{preload:path.join(root,'src','education-preload.cjs'),
       nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
-  const view=new WebContentsView({webPreferences:{
+  view=new WebContentsView({webPreferences:{
     nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
   window.contentView.addChildView(view);
   view.setBounds({x:320,y:0,width:700,height:820});
@@ -59,6 +63,8 @@ async function run(){
   const dom=await window.webContents.executeJavaScript(`({
     title:document.title,
     folders:document.querySelectorAll('#tree button.folder').length,
+    materials:document.querySelectorAll('#tree button.material-chat').length,
+    localMaterial:document.getElementById('material-theory').textContent,
     lessons:document.querySelectorAll('#lessons button.lesson-row').length,
     sidebars:!!document.querySelector('.left')&&!!document.querySelector('.right'),
     prompt:document.getElementById('lesson-prompt').value,
@@ -67,10 +73,18 @@ async function run(){
     lab:!!document.getElementById('save-lab'),
     error:document.getElementById('status').textContent
   })`);
-  if(!dom.title.includes('Education')||dom.folders!==15||dom.lessons!==2||!dom.sidebars
-    ||!dom.prompt.includes('преподаватель')||!dom.review.includes('К повторению')
+  if(!dom.title.includes('Education')||dom.folders!==15||dom.materials!==120
+    ||dom.localMaterial.length<40||dom.lessons!==2||!dom.sidebars
+    ||!dom.prompt.includes('телекоммуникации')||!dom.review.includes('К повторению')
     ||!dom.context.includes('Проверенные ответы')||!dom.lab)
     throw Error('education_dom_smoke_failed '+JSON.stringify(dom));
+  const changed=await window.webContents.executeJavaScript(`(()=>{
+    document.querySelectorAll('#tree button.material-chat')[85].click();
+    return {title:document.getElementById('material-title').textContent,
+      text:document.getElementById('material-theory').textContent};
+  })()`);
+  if(!changed.title.includes('Сварочный аппарат')||changed.text.length<45||opened.length!==0)
+    throw Error('education_material_navigation_invalid');
   // Exercise typed renderer bridge on a real isolated Electron process.
   await window.webContents.executeJavaScript(`window.devfleet.education.addNote({
     lesson_id:'s3-1',text:'Electron smoke: written by the learner'
@@ -81,9 +95,17 @@ async function run(){
   })`);
   if(tab.state!=='CREATED'||tab.sessions.length!==1)throw Error('education_tab_create_failed');
   await window.webContents.executeJavaScript(`window.devfleet.education.bindChat({
-    folder_id:'subject-3',tab_id:'${tab.sessions[0].tab_id}',title:'Проверка GPT'
+    folder_id:'subject-3',tab_id:'${tab.sessions[0].tab_id}',title:'Проверка GPT',
+    material_id:'material-03-01'
   })`);
-  if(store.snapshot().chats.length!==1)throw Error('education_chat_ipc_failed');
+  if(store.snapshot().chats.length!==1
+    ||store.snapshot().chats[0].material_id!=='material-03-01')
+    throw Error('education_chat_ipc_failed');
+  await window.webContents.executeJavaScript(`document.getElementById('library-discuss').click()`);
+  for(let i=0;i<30&&!store.snapshot().chats.some(c=>c.material_id==='material-10-06');i++)
+    await new Promise(resolve=>setTimeout(resolve,30));
+  if(!store.snapshot().chats.some(c=>c.material_id==='material-10-06')||opened.length!==2)
+    throw Error('education_material_to_gpt_ui_binding_failed');
   await window.webContents.executeJavaScript(`window.devfleet.education.addLabReport({
     lesson_id:'s3-1',title:'E4 virtual lab',kind:'simulation',observation:'Simulated 12V circuit'
   })`);
@@ -96,7 +118,8 @@ async function run(){
     ||after.study_contexts[3].distinct_correct_answers!==1)
     throw Error('education_e4_ipc_or_evidence_failed');
   const result={state:'PASS',schema:'devfleet.education.electron-smoke.v2',
-    folders:dom.folders,visible_lessons:dom.lessons,notes:store.snapshot().notes.length,
+    folders:dom.folders,seeded_material_chats:dom.materials,
+    visible_lessons:dom.lessons,notes:store.snapshot().notes.length,
     bound_chats:store.snapshot().chats.length,
     review_entries:after.reviews.length,practice_questions:after.questions.length,
     self_reported_labs:after.labs.length,

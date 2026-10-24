@@ -197,6 +197,14 @@ export class ChatSurface {
     this.#layout();
     return {tab_id:tabId,url:view.webContents.getURL(),selected:true};
   }
+  showLibrary(){
+    if(!this.#educationMode)throw Error('education_mode_required');
+    for(const view of this.#views.values()){
+      try{this.#window.contentView.removeChildView(view);}catch{}
+    }
+    this.#selected=null;
+    return {mode:'study_material',native_chat_visible:false};
+  }
   list() {
     return [...this.#views.entries()].map(([tabId,view])=>({
       tab_id:tabId,url:view.webContents.getURL(),selected:tabId===this.#selected,

@@ -21,6 +21,16 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 .lesson-row{width:100%;text-align:left;margin:3px 0;padding:7px}.lesson-row.active{background:#124b4b;border-color:#39bba6}
 #note-text{min-height:74px;max-height:130px}#note-list{display:flex;flex-direction:column;gap:6px;white-space:pre-wrap;overflow-wrap:anywhere}#note-list small{padding:8px;background:#182638;border-radius:5px}
 .counter{font-size:24px;font-weight:700}#unbound{max-height:130px;overflow-y:auto}
+.material-chat{color:#a5d6d1;font-size:12px}
+.material-chat.open{background:#1d4545}
+.center{overflow-y:auto}
+#library-panel{padding:30px;max-width:900px;margin:auto}
+#material-title{font-size:23px;line-height:1.3}
+.lesson-message{background:#1b293a;border:1px solid #35495f;border-radius:14px;padding:20px;margin-top:18px}
+.lesson-message h2{font-size:14px;color:#7ce0cf}
+.lesson-message p{color:#e3ecf4;font-size:14px;line-height:1.7;white-space:pre-wrap}
+#material-status{color:#91a5ba;font-size:12px}
+.material-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
 #review-list button{display:block;width:100%;margin-top:5px;text-align:left;font-size:12px}
 #lab-title,#lab-kind{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
 #lab-observation{min-height:80px;max-height:160px}.caption{font-size:11px;color:#9daabe}
@@ -28,7 +38,7 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 <body><div class="shell">
 <aside class="left" aria-label="Направления обучения">
   <header><h1>◈ DevFleet <span style="color:#60d4c0">Education</span></h1>
-  <small>Локальная академия · отдельный профиль GPT</small></header>
+  <small>15 дисциплин · 120 подготовленных тем · GPT по запросу</small></header>
   <div class="toolbar"><button id="add-folder">+ Папка</button><button id="rename-folder">Переименовать</button></div>
   <div id="entry" class="card" hidden><small id="entry-label">Название</small>
   <input id="entry-title" maxlength="100" aria-label="Название" style="width:100%;padding:8px;margin:8px 0;background:#0b1522;color:white;border:1px solid #51657b;border-radius:6px">
@@ -39,14 +49,28 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
   <h2>Не распределены</h2><div id="unbound"></div></div>
   <div id="status" role="status" aria-live="polite">Загрузка Education…</div>
 </aside>
-<main class="center" aria-label="Активный GPT-чат"></main>
+<main class="center" aria-label="Материал учебного чата или активный GPT-чат">
+  <div id="library-panel">
+    <small id="material-status">Локальный учебный материал · без подключения GPT</small>
+    <h1 id="material-title">Выбери учебный чат в левой панели</h1>
+    <div class="material-actions">
+      <button id="library-discuss" class="primary">Открыть GPT для этой темы</button>
+      <button id="library-copy">Скопировать учебный материал для GPT</button>
+    </div>
+    <div class="lesson-message"><h2>Объяснение с нуля</h2><p id="material-theory"></p></div>
+    <div class="lesson-message"><h2>Пример из практики</h2><p id="material-example"></p></div>
+    <div class="lesson-message"><h2>Задание для самостоятельного выполнения</h2><p id="material-exercise"></p></div>
+    <div class="lesson-message"><h2>Контрольный вопрос</h2><p id="material-check"></p></div>
+    <p id="material-guidance" class="caption">Подготовленный учебный чат хранится локально. GPT-переписка начинается отдельно по твоему действию; сообщения автоматически не отправляются.</p>
+  </div>
+</main>
 <section class="right" aria-label="Учебный контекст">
   <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
   <div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
   <p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
   <h2>Повторить сегодня (UTC)</h2>
   <div class="card"><div id="review-count" class="caption">Загрузка…</div><div id="review-list"></div></div>
-  <h2>План занятий</h2>
+  <h2>Контрольные модули программы</h2>
   <div id="lessons" class="card" aria-label="Модули дисциплины"></div>
   <h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div><button id="next-question">Другой вопрос</button></div>
   <h2>Результаты дисциплины</h2><div class="card"><div id="context-details" class="caption"></div>
@@ -72,6 +96,7 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 'use strict';
 const $=id=>document.getElementById(id);
 let state=null,fleet=null,selected='subject-3',selectedLesson=null,focusQuestionId=null,visibleQuestionId=null,busy=false;
+let selectedMaterial='material-03-01',materialMode=true;
 const status=message=>{$('status').textContent=String(message).slice(0,450);};
 function askTitle(message,initial=''){
   return new Promise(resolve=>{
@@ -89,7 +114,9 @@ const elm=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefin
 async function load(){
   [state,fleet]=await Promise.all([window.devfleet.education.snapshot(),window.devfleet.list()]);
   if(!state.folders.some(f=>f.id===selected))selected=state.folders[0]?.id||null;
-  render();status('Дисциплин: '+state.folders.length+' · учебных чатов: '+state.chats.length);
+  render();
+  if(materialMode)await window.devfleet.education.showMaterial();
+  status('Дисциплин: '+state.folders.length+' · подготовленных учебных чатов: '+state.materials.length+' · активных GPT-вкладок: '+state.chats.length);
 }
 async function action(fn){
   if(busy)return;busy=true;
@@ -108,19 +135,53 @@ function render(){
   function folderRow(folder,depth=0){
     const b=elm('button','', 'folder'+(folder.id===selected?' active':''));
     b.style.paddingLeft=(8+Math.min(depth,6)*12)+'px';b.setAttribute('role','treeitem');
-    b.append(elm('span','📁'),elm('span',folder.title));b.onclick=()=>{selected=folder.id;render();};tree.append(b);
+    b.append(elm('span','📁'),elm('span',folder.title));
+    b.onclick=()=>{
+      selected=folder.id;
+      const subject=Number((topSubject(selected)||'').replace('subject-',''));
+      const first=state.materials.find(m=>m.subject===subject);
+      if(first)selectedMaterial=first.id;
+      materialMode=true;render();
+      window.devfleet.education.showMaterial().catch(e=>status(String(e?.message||e)));
+    };tree.append(b);
     for(const chat of state.chats.filter(c=>c.folder_id===folder.id)){
       const cb=elm('button','', 'chat');cb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
       cb.append(elm('span',tabs.has(chat.tab_id)?'◉':'○'),elm('span',chat.title));
       cb.title=tabs.has(chat.tab_id)?'Открыть GPT-чат':'Чат пока не восстановлен в сессиях';
       cb.onclick=()=>action(async()=>{
         if(!tabs.has(chat.tab_id))throw Error('Чат недоступен; восстанови исходную сессию.');
-        await window.devfleet.select(chat.tab_id);selected=chat.folder_id;
+        await window.devfleet.select(chat.tab_id);selected=chat.folder_id;materialMode=false;
       });tree.append(cb);
+    }
+    if(folder.id===topSubject(folder.id)){
+      const subject=Number(folder.id.slice('subject-'.length));
+      for(const material of state.materials.filter(m=>m.subject===subject)){
+        const mb=elm('button','', 'chat material-chat'+(material.id===selectedMaterial&&materialMode?' open':''));
+        mb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
+        const linked=state.chats.some(c=>c.material_id===material.id);
+        mb.append(elm('span',linked?'◉':'◇'),elm('span',material.title));
+        mb.title=linked?'Материал и связанный GPT-чат':'Подготовленный локальный учебный чат';
+        mb.onclick=()=>{
+          selected=folder.id;selectedMaterial=material.id;materialMode=true;
+          render();window.devfleet.education.showMaterial().catch(e=>status(String(e?.message||e)));
+        };
+        tree.append(mb);
+      }
     }
     state.folders.filter(f=>f.parent_id===folder.id).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f,depth+1));
   }
   state.folders.filter(f=>f.parent_id===null).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f));
+  const currentMaterial=state.materials.find(m=>m.id===selectedMaterial);
+  if(currentMaterial&&materialMode){
+    $('material-status').textContent='Локальный учебный чат · '+(currentMaterial.position)+' из 8 · предмет '+currentMaterial.subject;
+    $('material-title').textContent=currentMaterial.title;
+    $('material-theory').textContent=currentMaterial.theory;
+    $('material-example').textContent=currentMaterial.example;
+    $('material-exercise').textContent=currentMaterial.exercise;
+    $('material-check').textContent=currentMaterial.check;
+    const linked=state.chats.find(c=>c.material_id===currentMaterial.id);
+    $('library-discuss').textContent=linked&&tabs.has(linked.tab_id)?'Вернуться к GPT-обсуждению':'Создать GPT-обсуждение';
+  }
   const unbound=$('unbound');unbound.replaceChildren();
   const bound=new Set(state.chats.map(c=>c.tab_id));
   for(const tab of (fleet.sessions||[]).filter(t=>t.state==='OPEN'&&!bound.has(t.tab_id))){
@@ -181,7 +242,9 @@ function render(){
     });
     if(mastered.has(question.id))$('feedback').textContent='✓ Есть верный проверенный ответ.';
   }
-  $('lesson-prompt').value=f&&lesson?'Ты мой преподаватель по дисциплине «'+f.title+'». Урок: «'+lesson.title+'». Цель: '+lesson.goal+'. Я начинаю с абсолютного нуля. Объясни все термины, покажи несколько понятных примеров, предложи безопасное практическое задание и задавай проверочные вопросы по одному. Не раскрывай ответ до моей попытки. Не объявляй тему освоенной без доказательств.':'Выбери дисциплину и урок.';
+  $('lesson-prompt').value=materialMode&&currentMaterial?
+  materialPrompt(currentMaterial):
+  f&&lesson?'Ты мой преподаватель по дисциплине «'+f.title+'». Урок: «'+lesson.title+'». Цель: '+lesson.goal+'. Я начинаю с абсолютного нуля. Объясни все термины, покажи несколько понятных примеров, предложи безопасное практическое задание и задавай проверочные вопросы по одному. Не раскрывай ответ до моей попытки. Не объявляй тему освоенной без доказательств.':'Выбери дисциплину и урок.';
   const notes=$('note-list');notes.replaceChildren();
   for(const n of state.notes.filter(n=>n.lesson_id===selectedLesson).slice(-3).reverse()){
     notes.append(elm('small',n.text));
@@ -191,6 +254,16 @@ function render(){
     labList.append(elm('small',lab.title+' · '+lab.kind+' · НЕ ПРОВЕРЕНО: '+lab.observation));
   }
   if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
+}
+function materialPrompt(material){
+  return ['Я изучаю телекоммуникации и ВОЛС с нулевого уровня.',
+    'Направление '+material.subject+'. Тема: '+material.title,
+    'Исходный учебный конспект: '+material.theory,
+    'Пример: '+material.example,
+    'Практическое задание: '+material.exercise,
+    'Проверь меня вопросом: '+material.check,
+    'Объясни все новые технические термины, проверь факты, разбери аналогии и задавай вопросы по одному.',
+    'Не показывай решение до моей попытки. Не считай прочитанный материал доказательством освоения. Следи за безопасностью практики.'].join('\n\n');
 }
 let renderFeedback=null;
 $('add-folder').onclick=async()=>{
@@ -211,6 +284,32 @@ $('next-question').onclick=()=>{
   focusQuestionId=questions[(current+1)%questions.length].id;
   renderFeedback=null;render();
 };
+$('library-copy').onclick=async()=>{
+  const material=state.materials.find(m=>m.id===selectedMaterial);
+  if(!material){status('Выбери учебный материал');return;}
+  const text=materialPrompt(material);
+  try{await navigator.clipboard.writeText(text);status('Учебный конспект для GPT скопирован. Вставь его в беседу вручную.');}
+  catch{$('lesson-prompt').value=text;$('lesson-prompt').focus();$('lesson-prompt').select();
+    status('Текст выделен в правой панели: нажми Ctrl+C.');}
+};
+$('library-discuss').onclick=()=>action(async()=>{
+  const material=state.materials.find(m=>m.id===selectedMaterial);
+  if(!material)throw Error('Выбери учебную тему');
+  const linked=state.chats.find(c=>c.material_id===material.id);
+  const available=new Set((fleet.sessions||[]).filter(t=>t.state==='OPEN').map(t=>t.tab_id));
+  if(linked){
+    if(!available.has(linked.tab_id))throw Error('Связанный GPT-чат недоступен; восстанови сессию, новая беседа не создаётся.');
+    await window.devfleet.select(linked.tab_id);materialMode=false;return;
+  }
+  const result=await window.devfleet.create({request_id:crypto.randomUUID(),count:1});
+  if(result.state!=='CREATED'||result.sessions?.length!==1)
+    throw Error('Создание GPT-сессии не подтверждено. Проверь вкладки, автоматического повтора нет.');
+  const tab_id=result.sessions[0].tab_id;
+  await window.devfleet.education.bindChat({folder_id:'subject-'+material.subject,
+    tab_id,material_id:material.id,title:'GPT · '+material.title});
+  await window.devfleet.select(tab_id);materialMode=false;
+  status('GPT-вкладка открыта. Нажми «Скопировать учебный материал» и вставь текст вручную.');
+});
 $('copy-prompt').onclick=async()=>{
   const promptText=$('lesson-prompt').value;
   try{await navigator.clipboard.writeText(promptText);status('Текст урока скопирован. Вставь его в ChatGPT вручную.');}

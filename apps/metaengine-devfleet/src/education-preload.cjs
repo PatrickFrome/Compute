@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('devfleet',Object.freeze({
   select:tabId=>ipcRenderer.invoke('devfleet:select',tabId),
   education:Object.freeze({
     snapshot:()=>ipcRenderer.invoke('education:snapshot'),
+    showMaterial:()=>ipcRenderer.invoke('education:show-material'),
     addFolder:params=>ipcRenderer.invoke('education:add-folder',params),
     renameFolder:params=>ipcRenderer.invoke('education:rename-folder',params),
     bindChat:params=>ipcRenderer.invoke('education:bind-chat',params),

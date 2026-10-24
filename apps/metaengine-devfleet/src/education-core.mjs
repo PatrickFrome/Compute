@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
-import { LESSONS, CURRICULUM_VERSION } from './curriculum.mjs';
+import { LESSONS, CURRICULUM_VERSION, subjectForFolder } from './curriculum.mjs';
 import { nextReview, summarizeReviews, publicStudyContext } from './education-review.mjs';
+import { MATERIALS, MATERIAL_SCHEMA } from './education-library.mjs';
 
 export const EDUCATION_SCHEMA='metaengine.devfleet.education.v1';
 export const SUBJECTS=[
@@ -43,6 +44,7 @@ const BANK=Object.freeze([
 const snapshot=value=>structuredClone(value);
 const validId=value=>typeof value==='string'&&/^[a-z0-9-]{1,80}$/i.test(value);
 const validTabId=value=>typeof value==='string'&&/^tab_[0-9a-f-]{36}$/i.test(value);
+const validMaterialId=value=>value===null||MATERIALS.some(x=>x.id===value);
 const title=value=>typeof value==='string'&&value.trim().length>0&&value.trim().length<=100?value.trim():null;
 function freshState(){
   return {schema:EDUCATION_SCHEMA,folders:SUBJECTS.map((name,index)=>({
@@ -67,12 +69,15 @@ function check(state){
     while(p!==null){if(!ids.has(p)||seen.has(p))throw Error('education_folder_cycle');
       seen.add(p);p=state.folders.find(x=>x.id===p).parent_id;}
   }
-  const chatIds=new Set(),tabIds=new Set();
+  const chatIds=new Set(),tabIds=new Set(),linkedMaterials=new Set();
   for(const c of state.chats){
     if(!validId(c.id)||chatIds.has(c.id)||tabIds.has(c.tab_id)
-      ||!ids.has(c.folder_id)||!validTabId(c.tab_id)||!title(c.title))
+      ||!ids.has(c.folder_id)||!validTabId(c.tab_id)||!title(c.title)
+      ||!validMaterialId(c.material_id??null)
+      ||(c.material_id&&linkedMaterials.has(c.material_id)))
       throw Error('education_chat_invalid');
     chatIds.add(c.id);tabIds.add(c.tab_id);
+    if(c.material_id)linkedMaterials.add(c.material_id);
   }
   const knownLessons=new Set(LESSONS.map(l=>l.id));
   for(const note of state.notes){
@@ -110,6 +115,7 @@ export class EducationStore{
     const now=this.#now().toISOString();
     return snapshot({
       ...this.#state,curriculum_version:CURRICULUM_VERSION,lessons:LESSONS,
+      materials_schema:MATERIAL_SCHEMA,materials:MATERIALS,
       questions:BANK.map(({correct,explanation,...q})=>q),
       mastered:[...new Set(this.#state.attempts.filter(a=>a.passed).map(a=>a.question_id))],
       review_summary:summarizeReviews(this.#state.reviews,BANK,now),
@@ -134,11 +140,16 @@ export class EducationStore{
       if(!folder||!title(label))throw Error('education_folder_or_title_invalid');
       folder.title=title(label);return snapshot(folder);});
   }
-  bindChat({folder_id,tab_id,title:label}={},liveTabs=[]){
+  bindChat({folder_id,tab_id,title:label,material_id=null}={},liveTabs=[]){
     return this.#change(s=>{if(!s.folders.some(f=>f.id===folder_id))throw Error('education_folder_not_found');
-      if(!liveTabs.includes(tab_id)||!validTabId(tab_id)||!title(label))throw Error('education_chat_binding_invalid');
-      if(s.chats.some(c=>c.tab_id===tab_id))throw Error('education_tab_already_bound');
-      const chat={id:crypto.randomUUID(),folder_id,tab_id,title:title(label),
+      if(!liveTabs.includes(tab_id)||!validTabId(tab_id)||!title(label)
+        ||!validMaterialId(material_id)
+        ||(material_id&&MATERIALS.find(m=>m.id===material_id)?.subject!==
+          subjectForFolder(folder_id,s.folders)))
+        throw Error('education_chat_binding_invalid');
+      if(s.chats.some(c=>c.tab_id===tab_id||material_id&&c.material_id===material_id))
+        throw Error('education_tab_already_bound');
+      const chat={id:crypto.randomUUID(),folder_id,tab_id,material_id,title:title(label),
         created_at:new Date().toISOString()};
       s.chats.push(chat);return snapshot(chat);});
   }

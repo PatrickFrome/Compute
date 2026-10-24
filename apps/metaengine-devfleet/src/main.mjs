@@ -382,6 +382,7 @@ async function start() {
     educationStore=new EducationStore(educationDisk);
     await educationStore.init();
     ipcMain.handle('education:snapshot',async e=>{educationSender(e);return educationStore.snapshot();});
+    ipcMain.handle('education:show-material',async e=>{educationSender(e);return surface.showLibrary();});
     ipcMain.handle('education:add-folder',async(e,p)=>{educationSender(e);return educationStore.addFolder(p);});
     ipcMain.handle('education:rename-folder',async(e,p)=>{educationSender(e);return educationStore.renameFolder(p);});
     ipcMain.handle('education:bind-chat',async(e,p)=>{
