@@ -109,6 +109,30 @@ function fakeDatabase() {
   return { calls, sql: { begin: async (run) => run(tx), array: (value) => value, json: (value) => value } };
 }
 
+test('six occupied application requests cannot starve the authenticated DB health read',async()=>{
+  const database=fakeDatabase(),rawBegin=database.sql.begin;
+  let release,entered=0;const gate=new Promise(resolve=>{release=resolve;});
+  database.sql.begin=fn=>rawBegin(tx=>fn({...tx,unsafe:async(text,values)=>{
+    if(text.startsWith('SELECT "public"."devos_environment_state_v1"')) {entered++;await gate;}
+    return tx.unsafe(text,values);
+  }}));
+  const secret='f'.repeat(64),runtime=await startDbApi({apiKey:secret,port:0,sql:database.sql});
+  const headers={apikey:secret,'content-type':'application/json'};
+  const rpc=()=>fetch(runtime.address+'/rest/v1/rpc/devos_environment_state_v1',{method:'POST',headers,body:'{}'});
+  const pending=Array.from({length:6},rpc);
+  try {
+    const deadline=Date.now()+5000;while(entered<6&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(entered,6);
+    assert.equal((await rpc()).status,503);
+    const denied=await fetch(runtime.address+'/health');assert.equal(denied.status,401);
+    const health=await fetch(runtime.address+'/health',{headers:{apikey:secret}});
+    const value=await health.json();
+    assert.equal(value.schema,'metaengine.client-state.health.v1');
+    assert.equal(value.error,undefined);
+    assert.deepEqual(value.runtime_capabilities,{schema:'test-capabilities'});
+  } finally {release();await Promise.allSettled(pending);await runtime.close();}
+});
+
 test('direct API keeps the login identity while preserving signed protocol claims', async () => {
   const database = fakeDatabase();
   const apiKey = 'c'.repeat(64);
@@ -280,10 +304,12 @@ test('busy requests fail before entering the database pool', async () => {
     await gate;
     return originalBegin(run);
   };
-  const responses = Array.from({ length: 6 }, () => fetch(runtime.address + '/health', { headers: { apikey: secret } }));
+  const applicationRequest=()=>fetch(runtime.address+'/rest/v1/rpc/devos_environment_state_v1',
+    {method:'POST',headers:{apikey:secret,'content-type':'application/json'},body:'{}'});
+  const responses = Array.from({ length: 6 }, applicationRequest);
   try {
     await admitted;
-    const overflow = await fetch(runtime.address + '/health', { headers: { apikey: secret } });
+    const overflow = await applicationRequest();
     assert.equal(overflow.status, 503);
     assert.equal((await overflow.json()).code, 'local_state_api_busy');
     assert.equal(held, 6);
