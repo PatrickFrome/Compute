@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DevFleet Education</title>
+<style>
+:root{color-scheme:dark;font:13px system-ui,"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#0d1420;color:#e5edf6}
+.shell{display:flex;height:100vh;overflow:hidden}.left{width:320px;flex:none;background:#141d2b;border-right:1px solid #304052;padding:16px;display:flex;flex-direction:column;gap:12px}
+.center{flex:1;background:#101923;min-width:1px}.right{width:300px;flex:none;background:#141d2b;border-left:1px solid #304052;padding:16px;overflow-y:auto}
+h1{font-size:17px;margin:0}h2{font-size:14px;margin:14px 0 8px}p,small,.muted{color:#aab8ca}
+small{font-size:11px;line-height:1.5}button{background:#233247;color:#e5edf6;border:1px solid #41546c;border-radius:7px;padding:9px;cursor:pointer;font:inherit}
+button:hover{background:#30415a}button:focus-visible{outline:2px solid #55c3b5}button.primary{background:#087f73;border-color:#10b5a0}
+button:disabled{opacity:.55;cursor:wait}.toolbar{display:flex;gap:6px;flex-wrap:wrap}
+#tree{overflow:auto;flex:1;min-height:140px}.folder,.chat{display:flex;gap:6px;align-items:center;width:100%;text-align:left;border-color:transparent;background:transparent;padding:6px 8px}
+.folder.active{background:#164a4a;border-color:#3a9d91}.folder span,.chat span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat{color:#a3c5e2;font-size:12px}.folder:hover,.chat:hover{background:#26364b}
+.card{background:#1b2839;border:1px solid #33465b;border-radius:10px;padding:12px;margin-bottom:12px}
+#status{font-size:11px;color:#7dd3c5;min-height:24px;overflow-wrap:anywhere}
+.progress{background:#334155;height:7px;border-radius:9px;overflow:hidden}.bar{height:100%;background:#4ac5b2;width:0}
+textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;padding:9px;border-radius:6px;min-height:135px;resize:vertical;font:12px/1.45 system-ui}
+.choice{width:100%;margin:4px 0;text-align:left}#feedback{white-space:pre-wrap;font-size:12px;line-height:1.5;color:#a8dbcb}
+.lesson-row{width:100%;text-align:left;margin:3px 0;padding:7px}.lesson-row.active{background:#124b4b;border-color:#39bba6}
+#note-text{min-height:74px;max-height:130px}#note-list{display:flex;flex-direction:column;gap:6px;white-space:pre-wrap;overflow-wrap:anywhere}#note-list small{padding:8px;background:#182638;border-radius:5px}
+.counter{font-size:24px;font-weight:700}#unbound{max-height:130px;overflow-y:auto}
+</style></head>
+<body><div class="shell">
+<aside class="left" aria-label="Направления обучения">
+  <header><h1>◈ DevFleet <span style="color:#60d4c0">Education</span></h1>
+  <small>Локальная академия · отдельный профиль GPT</small></header>
+  <div class="toolbar"><button id="add-folder">+ Папка</button><button id="rename-folder">Переименовать</button></div>
+  <div id="entry" class="card" hidden><small id="entry-label">Название</small>
+  <input id="entry-title" maxlength="100" aria-label="Название" style="width:100%;padding:8px;margin:8px 0;background:#0b1522;color:white;border:1px solid #51657b;border-radius:6px">
+  <div class="toolbar"><button id="entry-ok" class="primary">Сохранить</button><button id="entry-cancel">Отмена</button></div></div>
+  <div id="tree" role="tree" aria-label="Дисциплины и учебные чаты"></div>
+  <div class="card"><strong>Чаты GPT</strong><p><small>Создавай чат внутри выбранной папки. Беседы открываются в центральной области без автоматической отправки сообщений.</small></p>
+  <button id="new-chat" class="primary">+ Чат в папке</button>
+  <h2>Не распределены</h2><div id="unbound"></div></div>
+  <div id="status" role="status" aria-live="polite">Загрузка Education…</div>
+</aside>
+<main class="center" aria-label="Активный GPT-чат"></main>
+<section class="right" aria-label="Учебный контекст">
+  <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
+  <div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
+  <p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
+  <h2>План занятий</h2>
+  <div id="lessons" class="card" aria-label="Модули дисциплины"></div>
+  <h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div></div>
+  <h2>Инструкция для преподавателя GPT</h2>
+  <textarea id="lesson-prompt" readonly aria-label="Шаблон учебного запроса"></textarea>
+  <button id="copy-prompt">Скопировать текст урока</button>
+  <h2>Мой конспект</h2>
+  <textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
+  <button id="save-note">Сохранить конспект</button><div id="note-list"></div>
+  <small>Скопируй шаблон в активный ChatGPT. Автоматическое чтение и отправка сообщений не используются.</small>
+  <h2>Следующие модули</h2>
+  <div class="card"><small>Лаборатории, интервальные повторения и расширенные экзамены — последующие этапы. Эта версия сохраняет дерево чатов и результаты проверок.</small></div>
+</section></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let state=null,fleet=null,selected='subject-3',selectedLesson=null,busy=false;
+const status=message=>{$('status').textContent=String(message).slice(0,450);};
+function askTitle(message,initial=''){
+  return new Promise(resolve=>{
+    const box=$('entry'),input=$('entry-title');
+    $('entry-label').textContent=message;input.value=initial;box.hidden=false;input.focus();input.select();
+    const finish=value=>{box.hidden=true;$('entry-ok').onclick=null;$('entry-cancel').onclick=null;
+      input.onkeydown=null;resolve(value);};
+    $('entry-ok').onclick=()=>finish(input.value);
+    $('entry-cancel').onclick=()=>finish(null);
+    input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(input.value);}
+      if(e.key==='Escape'){e.preventDefault();finish(null);}};
+  });
+}
+const elm=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=String(text);if(cls)e.className=cls;return e;};
+async function load(){
+  [state,fleet]=await Promise.all([window.devfleet.education.snapshot(),window.devfleet.list()]);
+  if(!state.folders.some(f=>f.id===selected))selected=state.folders[0]?.id||null;
+  render();status('Дисциплин: '+state.folders.length+' · учебных чатов: '+state.chats.length);
+}
+async function action(fn){
+  if(busy)return;busy=true;
+  for(const b of document.querySelectorAll('button'))b.disabled=true;
+  try{await fn();await load();}catch(e){status('Ошибка: '+String(e?.message||e));}
+  finally{busy=false;for(const b of document.querySelectorAll('button'))b.disabled=false;}
+}
+function topSubject(folderId){
+  let f=state.folders.find(x=>x.id===folderId),guard=0;
+  while(f?.parent_id&&guard++<state.folders.length)f=state.folders.find(x=>x.id===f.parent_id);
+  return f?.id||null;
+}
+function render(){
+  const tree=$('tree');tree.replaceChildren();
+  const tabs=new Set((fleet.sessions||[]).filter(s=>s.state==='OPEN').map(s=>s.tab_id));
+  function folderRow(folder,depth=0){
+    const b=elm('button','', 'folder'+(folder.id===selected?' active':''));
+    b.style.paddingLeft=(8+Math.min(depth,6)*12)+'px';b.setAttribute('role','treeitem');
+    b.append(elm('span','📁'),elm('span',folder.title));b.onclick=()=>{selected=folder.id;render();};tree.append(b);
+    for(const chat of state.chats.filter(c=>c.folder_id===folder.id)){
+      const cb=elm('button','', 'chat');cb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
+      cb.append(elm('span',tabs.has(chat.tab_id)?'◉':'○'),elm('span',chat.title));
+      cb.title=tabs.has(chat.tab_id)?'Открыть GPT-чат':'Чат пока не восстановлен в сессиях';
+      cb.onclick=()=>action(async()=>{
+        if(!tabs.has(chat.tab_id))throw Error('Чат недоступен; восстанови исходную сессию.');
+        await window.devfleet.select(chat.tab_id);selected=chat.folder_id;
+      });tree.append(cb);
+    }
+    state.folders.filter(f=>f.parent_id===folder.id).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f,depth+1));
+  }
+  state.folders.filter(f=>f.parent_id===null).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f));
+  const unbound=$('unbound');unbound.replaceChildren();
+  const bound=new Set(state.chats.map(c=>c.tab_id));
+  for(const tab of (fleet.sessions||[]).filter(t=>t.state==='OPEN'&&!bound.has(t.tab_id))){
+    const b=elm('button','Связать '+tab.tab_id.slice(0,7)+'…','chat');
+    b.onclick=()=>action(async()=>{
+      const folder_id=selected;if(!folder_id)throw Error('Выбери папку');
+      await window.devfleet.education.bindChat({folder_id,tab_id:tab.tab_id,title:'Учебный чат '+tab.tab_id.slice(0,7)});
+    });unbound.append(b);
+  }
+  if(!unbound.childElementCount)unbound.append(elm('small','Нет свободных вкладок.'));
+  const f=state.folders.find(x=>x.id===selected);
+  $('current').textContent=f?.title||'Нет дисциплины';
+  const subject=Number((topSubject(selected)||'').replace('subject-',''));
+  const lessons=state.lessons.filter(l=>l.subject===subject);
+  if(!lessons.some(l=>l.id===selectedLesson))selectedLesson=lessons[0]?.id||null;
+  const lesson=lessons.find(l=>l.id===selectedLesson);
+  const plan=$('lessons');plan.replaceChildren();
+  for(const item of lessons){
+    const b=elm('button',item.title,'lesson-row'+(item.id===selectedLesson?' active':''));
+    b.title=item.goal;b.onclick=()=>{selectedLesson=item.id;render();};plan.append(b);
+  }
+  if(!lessons.length)plan.append(elm('small','В этой папке пока нет учебных модулей.'));
+  if(lesson)plan.append(elm('small','Цель: '+lesson.goal+' · Предварительные уроки: '+(lesson.prerequisites.join(', ')||'нет')));
+  const question=state.questions.find(q=>'subject-'+q.subject===topSubject(selected));
+  const mastered=new Set(state.mastered);
+  $('mastery').textContent=mastered.size+' / '+state.questions.length;
+  $('progress-bar').style.width=(100*mastered.size/Math.max(1,state.questions.length))+'%';
+  $('qtitle').textContent=question?.title||'Задание будет добавлено';
+  $('question').textContent=question?.question||'Для этой папки мини-экзамен пока не предусмотрен.';
+  const choices=$('choices');choices.replaceChildren();$('feedback').textContent='';
+  if(question){
+    question.choices.forEach((option,index)=>{
+      const b=elm('button',(index+1)+'. '+option,'choice');
+      b.onclick=()=>action(async()=>{
+        const r=await window.devfleet.education.submitAnswer({question_id:question.id,choice:index});
+        renderFeedback={id:question.id,text:(r.passed?'Верно! ':'Попробуй ещё раз. ')+r.explanation};
+      });choices.append(b);
+    });
+    if(mastered.has(question.id))$('feedback').textContent='✓ Есть верный проверенный ответ.';
+  }
+  $('lesson-prompt').value=f&&lesson?'Ты мой преподаватель по дисциплине «'+f.title+'». Урок: «'+lesson.title+'». Цель: '+lesson.goal+'. Я начинаю с абсолютного нуля. Объясни все термины, покажи несколько понятных примеров, предложи безопасное практическое задание и задавай проверочные вопросы по одному. Не раскрывай ответ до моей попытки. Не объявляй тему освоенной без доказательств.':'Выбери дисциплину и урок.';
+  const notes=$('note-list');notes.replaceChildren();
+  for(const n of state.notes.filter(n=>n.lesson_id===selectedLesson).slice(-3).reverse()){
+    notes.append(elm('small',n.text));
+  }
+  if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
+}
+let renderFeedback=null;
+$('add-folder').onclick=async()=>{
+  const title=await askTitle('Название новой вложенной папки');
+  if(title!==null)await action(async()=>{await window.devfleet.education.addFolder({parent_id:selected,title});renderFeedback=null;});
+};
+$('rename-folder').onclick=async()=>{
+  const f=state.folders.find(f=>f.id===selected);
+  if(!f){status('Сначала выбери папку');return;}
+  const title=await askTitle('Новое название',f.title);
+  if(title!==null)await action(()=>window.devfleet.education.renameFolder({folder_id:f.id,title}));
+};
+$('copy-prompt').onclick=async()=>{
+  const promptText=$('lesson-prompt').value;
+  try{await navigator.clipboard.writeText(promptText);status('Текст урока скопирован. Вставь его в ChatGPT вручную.');}
+  catch { $('lesson-prompt').focus();$('lesson-prompt').select();status('Выделил текст: нажми Ctrl+C.'); }
+};
+$('save-note').onclick=()=>action(async()=>{
+  if(!selectedLesson)throw Error('Выбери урок');
+  const text=$('note-text').value;
+  await window.devfleet.education.addNote({lesson_id:selectedLesson,text});
+  $('note-text').value='';
+});
+$('new-chat').onclick=async()=>{
+  if(!selected){status('Выбери папку');return;}
+  const title=await askTitle('Название нового GPT-чата','Новый урок');
+  if(title===null)return;
+  await action(async()=>{
+    const result=await window.devfleet.create({request_id:crypto.randomUUID(),count:1});
+    if(result.state!=='CREATED'||result.sessions?.length!==1)
+      throw Error('Создание не подтверждено ('+result.state+'). Не повторяй запрос, проверь вкладки.');
+    const tab_id=result.sessions[0].tab_id;
+    await window.devfleet.education.bindChat({folder_id:selected,tab_id,title});
+    await window.devfleet.select(tab_id);
+  });
+};
+window.devfleet.onReady(()=>load().catch(e=>status(String(e?.message||e))));
+load().catch(e=>status('Не удалось открыть Education: '+String(e?.message||e)));
+</script></body></html>

@@ -164,13 +164,15 @@ async function clickNode(view,backendNodeId) {
 
 export class ChatSurface {
   #window;
+  #educationMode=false;
   #views = new Map();
   #navigationGenerations = new Map();
   #eventHints = new AxEventHints();
   #selected = null;
   #partition;
-  constructor(window) {
+  constructor(window,{educationMode=false}={}) {
     this.#window = window;
+    this.#educationMode=Boolean(educationMode);
     this.#partition = session.fromPartition('persist:metaengine-devfleet-auth-v1');
     this.#partition.setPermissionRequestHandler((_webContents,_permission,done)=>done(false));
     window.on('resize',()=>this.#layout());
@@ -180,7 +182,9 @@ export class ChatSurface {
     const view = this.#views.get(this.#selected);
     if (!view) return;
     const [width,height] = this.#window.getContentSize();
-    view.setBounds({x:340,y:0,width:Math.max(1,width-340),height:Math.max(1,height)});
+    const left=this.#educationMode?320:340;
+    const right=this.#educationMode?300:0;
+    view.setBounds({x:left,y:0,width:Math.max(1,width-left-right),height:Math.max(1,height)});
   }
   select(tabId) {
     const view = this.#views.get(tabId);

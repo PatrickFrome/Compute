@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "start": "electron .",
+    "start:education": "electron . --devfleet-education",
     "admin:mcp": "node scripts/devfleet-admin-mcp.mjs",
     "package:win": "electron-builder --config electron-builder.json --win nsis --x64"
   },
