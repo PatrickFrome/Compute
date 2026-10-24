@@ -21,7 +21,7 @@ Normal `npm start` retains development mode. Education mode has a separate Elect
 - Education-only preload exposes list/create/select and typed educational operations. It does **not** expose physical Send, conversation scraping, developer console, or arbitrary execution. Local RPC and Dev Console are not started in Education mode.
 
 ## Not in scope yet
-- Validated Electron UI end-to-end with signed Windows installer;
+- Live ChatGPT integration in a user-authorized session and a signed Windows installer;
 - Cross-chat automatic understanding/reading of GPT conversation contents;
 - PostgreSQL 17 migration; this alpha uses private local JSON to avoid changing existing database/runtime;
 - Adaptive scheduler, spaced repetition, skill evidence, comprehensive independent examinations, labs and OTDR/OLTS simulator;
@@ -34,7 +34,9 @@ Normal `npm start` retains development mode. Education mode has a separate Elect
 - This is a separate mode, not a separately installed Windows product with its own installer/application ID. Distinct packaging should come after independent Electron qualification.
 
 ## Testing
-From app root run `npm test`; includes core persistence, tab-identity, hierarchy and cycle safety, assessment correctness, note persistence, curriculum consistency and IPC scope checks. CI/Electron visual checks remain separate acceptance gates.
+From app root run `npm test`; includes core persistence, tab-identity, hierarchy and cycle safety, assessment correctness, note persistence, curriculum consistency and IPC scope checks.
+
+For a native, isolated Electron UI smoke run `npm run smoke:education`. On Windows, if `npm ci` does not install Electron due to package install-script policy, run the pinned package's official `node node_modules/electron/install.js` with its checksum-backed installer rather than enabling all scripts. This smoke uses a TEMP-only profile without ChatGPT network requests, verifies DOM, 15 folders, two displayed lessons, notes IPC and tab binding, and writes `%TEMP%/devfleet-education-smoke-receipt.json`. This is not evidence of real ChatGPT login, message exchange or signed installer packaging.
 
 ## Files
 - `src/education.html`: UI, no dynamic executable lesson content from GPT.
