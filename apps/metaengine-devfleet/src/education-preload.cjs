@@ -11,7 +11,8 @@ contextBridge.exposeInMainWorld('devfleet',Object.freeze({
     renameFolder:params=>ipcRenderer.invoke('education:rename-folder',params),
     bindChat:params=>ipcRenderer.invoke('education:bind-chat',params),
     submitAnswer:params=>ipcRenderer.invoke('education:submit-answer',params),
-    addNote:params=>ipcRenderer.invoke('education:add-note',params)
+    addNote:params=>ipcRenderer.invoke('education:add-note',params),
+    addLabReport:params=>ipcRenderer.invoke('education:add-lab',params)
   }),
   onReady:callback=>{if(typeof callback==='function')ipcRenderer.once('devfleet:ready',callback);}
 }));

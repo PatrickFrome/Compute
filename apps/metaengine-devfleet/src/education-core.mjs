@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { LESSONS, CURRICULUM_VERSION } from './curriculum.mjs';
+import { nextReview, summarizeReviews, publicStudyContext } from './education-review.mjs';
 
 export const EDUCATION_SCHEMA='metaengine.devfleet.education.v1';
 export const SUBJECTS=[
@@ -24,7 +25,20 @@ const BANK=Object.freeze([
   {id:'splice',subject:10,title:'Технология сварки',question:'Какой инструмент формирует подготовленный торец стеклянного волокна?',choices:['Скалыватель','Мультиметр','Коммутатор'],correct:0,explanation:'Прецизионный скалыватель формирует торец волокна перед сваркой.'},
   {id:'otdr',subject:11,title:'Рефлектометрия',question:'Что позволяет определить OTDR?',choices:['Мощность блока питания','Положение событий вдоль оптической линии','MAC-адрес маршрутизатора'],correct:1,explanation:'OTDR анализирует обратное рассеяние и отражения вдоль волокна.'},
   {id:'pon',subject:12,title:'PON',question:'Для чего в пассивной оптической сети применяется сплиттер?',choices:['Для распределения оптической мощности','Для преобразования в медный кабель','Для зарядки аккумулятора'],correct:0,explanation:'Сплиттер пассивно распределяет оптическую мощность между направлениями.'},
-  {id:'safety',subject:13,title:'Оптическая безопасность',question:'Можно ли смотреть в торец неизвестного оптического волокна?',choices:['Да, если не видно света','Нет','Да, через лупу'],correct:1,explanation:'Волокно может переносить невидимое опасное оптическое излучение.'}
+  {id:'safety',subject:13,title:'Оптическая безопасность',question:'Можно ли смотреть в торец неизвестного оптического волокна?',choices:['Да, если не видно света','Нет','Да, через лупу'],correct:1,explanation:'Волокно может переносить невидимое опасное оптическое излучение.'},
+  {"id":"math-convert","subject":1,"title":"Единицы","question":"Сколько микрометров содержится в одном миллиметре?","choices":["10","1000","1000000"],"correct":1,"explanation":"1 мм = 1000 мкм."},
+  {"id":"physics-frequency","subject":2,"title":"Колебания","question":"Какая единица измеряет частоту?","choices":["Герц","Ом","Ватт"],"correct":0,"explanation":"Герц — число периодов в секунду."},
+  {"id":"power","subject":3,"title":"Мощность","question":"Мощность резистора при U=5 В и I=0,2 А равна:","choices":["1 Вт","25 Вт","0,04 Вт"],"correct":0,"explanation":"P=UI=5×0,2=1 Вт."},
+  {"id":"capacitor","subject":4,"title":"Элементы","question":"Что в электрической цепи накапливает заряд?","choices":["Плавкий предохранитель","Конденсатор","Диод"],"correct":1,"explanation":"Конденсатор хранит заряд и энергию электрического поля."},
+  {"id":"logic-and","subject":5,"title":"Логика","question":"Когда на выходе логического AND будет 1?","choices":["Хотя бы один вход 1","Оба входа 0","Все входы 1"],"correct":2,"explanation":"AND=1 только когда все входы равны 1."},
+  {"id":"db-power","subject":6,"title":"Уровень сигнала","question":"Разница между дБ и дБм заключается в том, что:","choices":["дБм — абсолютный уровень относительно 1 мВт","дБм измеряет расстояние","дБ всегда температура"],"correct":0,"explanation":"дБ — отношение, дБм — уровень относительно 1 мВт."},
+  {"id":"ethernet-switch","subject":7,"title":"Ethernet","question":"Коммутатор Ethernet обычно пересылает кадры с учётом:","choices":["MAC-адресов","Напряжения батареи","Показателя преломления"],"correct":0,"explanation":"Коммутаторы второго уровня используют MAC-адреса."},
+  {"id":"fiber-cladding","subject":8,"title":"Показатели преломления","question":"В стандартном ступенчатом волокне показатель преломления сердцевины обычно:","choices":["Выше оболочки","Равен нулю","Ниже оболочки"],"correct":0,"explanation":"Для направляемого распространения показатель сердцевины выше."},
+  {"id":"g657","subject":9,"title":"Семейства волокон","question":"Для чего особенно полезны волокна G.657?","choices":["Снижения чувствительности к изгибным потерям","Передачи электроэнергии","Усиления радиосигналов"],"correct":0,"explanation":"G.657 описывает изгибоустойчивые одномодовые волокна."},
+  {"id":"sleeve","subject":10,"title":"Защита сварки","question":"Для чего после сварки применяют КДЗС?","choices":["Для защиты сростка","Для изменения длины волны","Для усиления света"],"correct":0,"explanation":"КДЗС обеспечивает механическую защиту соединения."},
+  {"id":"olts","subject":11,"title":"Измерения","question":"Какой набор измеряет сквозное затухание оптической линии?","choices":["OLTS","Обычный омметр","Спутниковый компас"],"correct":0,"explanation":"OLTS использует стабильный источник и измеритель оптической мощности."},
+  {"id":"olt","subject":12,"title":"Доступ","question":"Оборудование OLT в PON обычно размещается:","choices":["Со стороны оператора","В каждом коннекторе","В сварочном аппарате"],"correct":0,"explanation":"OLT — головное оборудование пассивной оптической сети."},
+  {"id":"glass","subject":13,"title":"Безопасность","question":"Куда складывать обрезки стеклянного волокна?","choices":["В закрытый контейнер для острых отходов","В карман","На рабочую поверхность"],"correct":0,"explanation":"Острые микроскопические стеклянные осколки собирают в закрытый контейнер."}
 ]);
 const snapshot=value=>structuredClone(value);
 const validId=value=>typeof value==='string'&&/^[a-z0-9-]{1,80}$/i.test(value);
@@ -33,13 +47,15 @@ const title=value=>typeof value==='string'&&value.trim().length>0&&value.trim().
 function freshState(){
   return {schema:EDUCATION_SCHEMA,folders:SUBJECTS.map((name,index)=>({
     id:'subject-'+index,parent_id:null,title:name,order:index
-  })),chats:[],attempts:[],notes:[],created_at:new Date().toISOString()};
+  })),chats:[],attempts:[],notes:[],reviews:[],labs:[],created_at:new Date().toISOString()};
 }
 function check(state){
   if(state&&state.notes===undefined)state.notes=[];
-  if(!state||state.schema!==EDUCATION_SCHEMA||!Array.isArray(state.notes)||!Array.isArray(state.folders)
+  if(state&&state.reviews===undefined)state.reviews=[];
+  if(state&&state.labs===undefined)state.labs=[];
+  if(!state||state.schema!==EDUCATION_SCHEMA||!Array.isArray(state.notes)||!Array.isArray(state.reviews)||!Array.isArray(state.labs)||!Array.isArray(state.folders)
     ||!Array.isArray(state.chats)||!Array.isArray(state.attempts))throw Error('education_state_invalid');
-  if(state.folders.length>500||state.chats.length>1000||state.attempts.length>10000||state.notes.length>1500)
+  if(state.folders.length>500||state.chats.length>1000||state.attempts.length>10000||state.notes.length>1500||state.labs.length>500||state.reviews.length>100)
     throw Error('education_state_capacity_exceeded');
   const ids=new Set();
   for(const f of state.folders){
@@ -64,18 +80,44 @@ function check(state){
       ||typeof note.text!=='string'||note.text.length<1||note.text.length>4000)
       throw Error('education_note_invalid');
   }
+  const qids=new Set(BANK.map(q=>q.id)),usedReviews=new Set();
+  for(const r of state.reviews){
+    if(!r||!qids.has(r.question_id)||usedReviews.has(r.question_id)
+      ||!Number.isInteger(r.step)||r.step<0||r.step>6
+      ||typeof r.passed!=='boolean'||typeof r.due_at!=='string'
+      ||Number.isNaN(Date.parse(r.due_at))||new Date(r.due_at).toISOString()!==r.due_at)
+      throw Error('education_review_invalid');
+    usedReviews.add(r.question_id);
+  }
+  const seenLabs=new Set();
+  for(const lab of state.labs){
+    if(!lab||!validId(lab.id)||seenLabs.has(lab.id)||!knownLessons.has(lab.lesson_id)
+      ||!title(lab.title)||typeof lab.observation!=='string'
+      ||lab.observation.trim().length<1||lab.observation.length>4000
+      ||!['simulation','physical','analysis'].includes(lab.kind)
+      ||lab.provenance!=='self_reported_unverified')throw Error('education_lab_invalid');
+    seenLabs.add(lab.id);
+  }
   return state;
 }
 export class EducationStore{
   #disk;#state;#serial=Promise.resolve();
-  constructor(disk){this.#disk=disk;}
+  #now;
+  constructor(disk,{now=()=>new Date()}={}){this.#disk=disk;this.#now=now;}
   async init(){const saved=await this.#disk.load();this.#state=check(saved??freshState());
     if(!saved)await this.#disk.save(this.#state);return this.snapshot();}
-  snapshot(){if(!this.#state)throw Error('education_not_initialized');return snapshot({
-    ...this.#state,curriculum_version:CURRICULUM_VERSION,lessons:LESSONS,
-    questions:BANK.map(({correct,explanation,...q})=>q),
-    mastered:[...new Set(this.#state.attempts.filter(a=>a.passed).map(a=>a.question_id))]
-  });}
+  snapshot(){if(!this.#state)throw Error('education_not_initialized');
+    const now=this.#now().toISOString();
+    return snapshot({
+      ...this.#state,curriculum_version:CURRICULUM_VERSION,lessons:LESSONS,
+      questions:BANK.map(({correct,explanation,...q})=>q),
+      mastered:[...new Set(this.#state.attempts.filter(a=>a.passed).map(a=>a.question_id))],
+      review_summary:summarizeReviews(this.#state.reviews,BANK,now),
+      study_contexts:SUBJECTS.map((_,subject)=>publicStudyContext({
+        ...this.#state,questions:BANK,lessons:LESSONS
+      },subject,now))
+    });
+  }
   #change(mutator){
     const execute=async()=>{const state=snapshot(this.#state);const result=mutator(state);
       check(state);await this.#disk.save(state);this.#state=state;return result;};
@@ -109,13 +151,30 @@ export class EducationStore{
       s.notes.push(note);return snapshot(note);
     });
   }
+  addLabReport({lesson_id,title:label,kind='analysis',observation}={}){
+    return this.#change(s=>{
+      if(!LESSONS.some(l=>l.id===lesson_id)||!title(label)
+        ||!['simulation','physical','analysis'].includes(kind)
+        ||typeof observation!=='string'||observation.trim().length<1||observation.length>4000)
+        throw Error('education_lab_invalid');
+      const lab={id:crypto.randomUUID(),lesson_id,title:title(label),kind,
+        observation:observation.trim(),provenance:'self_reported_unverified',
+        at:this.#now().toISOString()};
+      s.labs.push(lab);return snapshot(lab);
+    });
+  }
   submitAnswer({question_id,choice}={}){
     return this.#change(s=>{const q=BANK.find(q=>q.id===question_id);
       if(!q||!Number.isInteger(choice)||choice<0||choice>=q.choices.length)
         throw Error('education_assessment_invalid');
+      const at=this.#now().toISOString();
       const attempt={id:crypto.randomUUID(),question_id,choice,
-        passed:choice===q.correct,at:new Date().toISOString()};
-      s.attempts.push(attempt);return {...attempt,explanation:q.explanation,
-        correct_choice:q.correct};});
+        passed:choice===q.correct,at};
+      const previous=s.reviews.find(r=>r.question_id===question_id);
+      const review=nextReview(previous,attempt.passed,at);
+      if(previous)Object.assign(previous,review);
+      else s.reviews.push({question_id,...review});
+      s.attempts.push(attempt);return {...attempt,review:structuredClone(review),
+        explanation:q.explanation,correct_choice:q.correct};});
   }
 }

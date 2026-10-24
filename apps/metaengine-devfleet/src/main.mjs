@@ -391,6 +391,7 @@ async function start() {
     });
     ipcMain.handle('education:submit-answer',async(e,p)=>{educationSender(e);return educationStore.submitAnswer(p);});
     ipcMain.handle('education:add-note',async(e,p)=>{educationSender(e);return educationStore.addNote(p);});
+    ipcMain.handle('education:add-lab',async(e,p)=>{educationSender(e);return educationStore.addLabReport(p);});
   }
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});

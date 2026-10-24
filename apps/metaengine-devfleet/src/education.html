@@ -21,6 +21,9 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 .lesson-row{width:100%;text-align:left;margin:3px 0;padding:7px}.lesson-row.active{background:#124b4b;border-color:#39bba6}
 #note-text{min-height:74px;max-height:130px}#note-list{display:flex;flex-direction:column;gap:6px;white-space:pre-wrap;overflow-wrap:anywhere}#note-list small{padding:8px;background:#182638;border-radius:5px}
 .counter{font-size:24px;font-weight:700}#unbound{max-height:130px;overflow-y:auto}
+#review-list button{display:block;width:100%;margin-top:5px;text-align:left;font-size:12px}
+#lab-title,#lab-kind{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
+#lab-observation{min-height:80px;max-height:160px}.caption{font-size:11px;color:#9daabe}
 </style></head>
 <body><div class="shell">
 <aside class="left" aria-label="Направления обучения">
@@ -41,23 +44,34 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
   <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
   <div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
   <p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
+  <h2>Повторить сегодня (UTC)</h2>
+  <div class="card"><div id="review-count" class="caption">Загрузка…</div><div id="review-list"></div></div>
   <h2>План занятий</h2>
   <div id="lessons" class="card" aria-label="Модули дисциплины"></div>
-  <h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div></div>
+  <h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div><button id="next-question">Другой вопрос</button></div>
+  <h2>Результаты дисциплины</h2><div class="card"><div id="context-details" class="caption"></div>
+  <button id="copy-context">Скопировать проверенные результаты</button>
+  <div class="caption">Передаются только результаты локальных заданий и количество самоотчётов, не история чатов.</div></div>
   <h2>Инструкция для преподавателя GPT</h2>
   <textarea id="lesson-prompt" readonly aria-label="Шаблон учебного запроса"></textarea>
   <button id="copy-prompt">Скопировать текст урока</button>
   <h2>Мой конспект</h2>
   <textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
   <button id="save-note">Сохранить конспект</button><div id="note-list"></div>
-  <small>Скопируй шаблон в активный ChatGPT. Автоматическое чтение и отправка сообщений не используются.</small>
+  <h2>Журнал практических работ</h2>
+  <div class="card"><input id="lab-title" maxlength="100" placeholder="Название опыта / измерения">
+  <select id="lab-kind" aria-label="Тип работы"><option value="analysis">Разбор задачи</option><option value="simulation">Виртуальная лаборатория</option><option value="physical">Физический опыт</option></select>
+  <textarea id="lab-observation" maxlength="4000" placeholder="Что делал, какие результаты получил, что не понял…"></textarea>
+  <button id="save-lab">Сохранить самоотчёт</button><div class="caption">Самоотчёт не означает проверку или подтверждение практических навыков.</div>
+  <div id="lab-list"></div></div>
+  <small>В учебных чатах отправка сообщений выполняется только вручную.</small>
   <h2>Следующие модули</h2>
   <div class="card"><small>Лаборатории, интервальные повторения и расширенные экзамены — последующие этапы. Эта версия сохраняет дерево чатов и результаты проверок.</small></div>
 </section></div>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-let state=null,fleet=null,selected='subject-3',selectedLesson=null,busy=false;
+let state=null,fleet=null,selected='subject-3',selectedLesson=null,focusQuestionId=null,visibleQuestionId=null,busy=false;
 const status=message=>{$('status').textContent=String(message).slice(0,450);};
 function askTitle(message,initial=''){
   return new Promise(resolve=>{
@@ -130,10 +144,29 @@ function render(){
   }
   if(!lessons.length)plan.append(elm('small','В этой папке пока нет учебных модулей.'));
   if(lesson)plan.append(elm('small','Цель: '+lesson.goal+' · Предварительные уроки: '+(lesson.prerequisites.join(', ')||'нет')));
-  const question=state.questions.find(q=>'subject-'+q.subject===topSubject(selected));
+  const allDue=state.review_summary?.due||[];
+  const dueBox=$('review-list');dueBox.replaceChildren();
+  $('review-count').textContent='К повторению: '+allDue.length+' · запланировано: '+(state.review_summary?.scheduled_count||0)+' · ещё не изучено: '+(state.review_summary?.untouched_count||0);
+  for(const card of allDue.slice(0,15)){
+    const dueQuestion=state.questions.find(q=>q.id===card.question_id);
+    if(!dueQuestion)continue;
+    const b=elm('button','↻ '+dueQuestion.title+' (дисциплина '+dueQuestion.subject+')');
+    b.onclick=()=>{selected='subject-'+dueQuestion.subject;focusQuestionId=dueQuestion.id;render();};
+    dueBox.append(b);
+  }
+  if(!allDue.length)dueBox.append(elm('small','На данный момент повторений нет.'));
+  const subjectQuestions=state.questions.filter(q=>'subject-'+q.subject===topSubject(selected));
+  const dueIds=new Set(allDue.map(r=>r.question_id));
+  const attemptsById=new Set(state.attempts.map(a=>a.question_id));
+  const question=subjectQuestions.find(q=>q.id===focusQuestionId)
+    ||subjectQuestions.find(q=>dueIds.has(q.id))
+    ||subjectQuestions.find(q=>!attemptsById.has(q.id))||subjectQuestions[0];
+  visibleQuestionId=question?.id||null;
   const mastered=new Set(state.mastered);
   $('mastery').textContent=mastered.size+' / '+state.questions.length;
   $('progress-bar').style.width=(100*mastered.size/Math.max(1,state.questions.length))+'%';
+  const context=state.study_contexts?.find(c=>c.subject===subject);
+  $('context-details').textContent=context?'Проверенные ответы: '+context.distinct_correct_answers+'/'+context.practice_questions+' · попыток: '+context.attempts+' · самоотчётов: '+context.self_reported_labs+'. Практические навыки пока не аттестованы.':'Недостаточно данных';
   $('qtitle').textContent=question?.title||'Задание будет добавлено';
   $('question').textContent=question?.question||'Для этой папки мини-экзамен пока не предусмотрен.';
   const choices=$('choices');choices.replaceChildren();$('feedback').textContent='';
@@ -141,6 +174,7 @@ function render(){
     question.choices.forEach((option,index)=>{
       const b=elm('button',(index+1)+'. '+option,'choice');
       b.onclick=()=>action(async()=>{
+        focusQuestionId=question.id;
         const r=await window.devfleet.education.submitAnswer({question_id:question.id,choice:index});
         renderFeedback={id:question.id,text:(r.passed?'Верно! ':'Попробуй ещё раз. ')+r.explanation};
       });choices.append(b);
@@ -151,6 +185,10 @@ function render(){
   const notes=$('note-list');notes.replaceChildren();
   for(const n of state.notes.filter(n=>n.lesson_id===selectedLesson).slice(-3).reverse()){
     notes.append(elm('small',n.text));
+  }
+  const labList=$('lab-list');labList.replaceChildren();
+  for(const lab of state.labs.filter(l=>l.lesson_id===selectedLesson).slice(-3).reverse()){
+    labList.append(elm('small',lab.title+' · '+lab.kind+' · НЕ ПРОВЕРЕНО: '+lab.observation));
   }
   if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
 }
@@ -165,6 +203,14 @@ $('rename-folder').onclick=async()=>{
   const title=await askTitle('Новое название',f.title);
   if(title!==null)await action(()=>window.devfleet.education.renameFolder({folder_id:f.id,title}));
 };
+$('next-question').onclick=()=>{
+  const subject=Number((topSubject(selected)||'').replace('subject-',''));
+  const questions=state.questions.filter(q=>q.subject===subject);
+  if(!questions.length){status('В этой дисциплине пока нет тестов.');return;}
+  const current=questions.findIndex(q=>q.id===visibleQuestionId);
+  focusQuestionId=questions[(current+1)%questions.length].id;
+  renderFeedback=null;render();
+};
 $('copy-prompt').onclick=async()=>{
   const promptText=$('lesson-prompt').value;
   try{await navigator.clipboard.writeText(promptText);status('Текст урока скопирован. Вставь его в ChatGPT вручную.');}
@@ -175,6 +221,21 @@ $('save-note').onclick=()=>action(async()=>{
   const text=$('note-text').value;
   await window.devfleet.education.addNote({lesson_id:selectedLesson,text});
   $('note-text').value='';
+});
+$('copy-context').onclick=async()=>{
+  const subject=Number((topSubject(selected)||'').replace('subject-',''));
+  const ctx=state.study_contexts.find(c=>c.subject===subject);
+  if(!ctx){status('Нет результатов');return;}
+  const text='Результаты учебных проверок по дисциплине «'+state.folders.find(f=>f.id==='subject-'+subject)?.title+'». Корректные ответы: '+ctx.distinct_correct_answers+' из '+ctx.practice_questions+'; всего попыток: '+ctx.attempts+'; практических самоотчётов: '+ctx.self_reported_labs+'. Самоотчёты не проверены. Это не доказательство квалификации. При последующем занятии проверь знания независимо.';
+  try{await navigator.clipboard.writeText(text);status('Результаты скопированы. Передай их другому преподавателю вручную.');}
+  catch {status('Не удалось скопировать результаты.');}
+};
+$('save-lab').onclick=()=>action(async()=>{
+  if(!selectedLesson)throw Error('Сначала выбери урок');
+  await window.devfleet.education.addLabReport({lesson_id:selectedLesson,
+    title:$('lab-title').value,kind:$('lab-kind').value,
+    observation:$('lab-observation').value});
+  $('lab-title').value='';$('lab-observation').value='';
 });
 $('new-chat').onclick=async()=>{
   if(!selected){status('Выбери папку');return;}

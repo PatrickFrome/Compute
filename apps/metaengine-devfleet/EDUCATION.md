@@ -1,54 +1,62 @@
-# DevFleet Education — E1–E3 isolated prototype
+# DevFleet Education — E1–E4 isolated technical-learning prototype
 
-## Purpose
-Education mode reuses DevFleet's native Electron ChatGPT view system for structured technical learning, while preserving the ordinary DevFleet development experience. This prototype is **not** an installed release or a professional certification system.
+## Purpose and current status
+Education mode adds a structured technical-learning workspace on top of DevFleet's native Electron ChatGPT view system. It is **not** a certified training system or an installed Windows release. Source branch is a Draft PR; do not merge or overwrite the live DevFleet/METAENGINE installation before the remaining acceptance gates.
 
-## Launch (from apps/metaengine-devfleet)
+## Launch from apps/metaengine-devfleet
+
 ```powershell
 npm ci
+# If Electron's binary is absent after npm ci because install scripts were blocked:
+node node_modules/electron/install.js
 npm run start:education
 ```
-Normal `npm start` retains development mode. Education mode has a separate Electron `userData` directory named `METAENGINE DevFleet Education`, which also separates ChatGPT sessions and the browser partition. Launch Education from the disposable development worktree, never by overwriting the installed DevFleet. Do not run the two modes with the same QA profile override.
 
-## Implemented
-- Three-column UI: editable hierarchical subject folders and owned GPT conversations at left, native GPT view in the middle, instructional context on the right.
-- Fifteen seeded directions (technical mathematics, physics, electrical engineering, electronics, digital techniques, networks, optics, fiber cabling/splicing, testing, PON, safety, projects).
-- Thirty fixed learning modules with explicit prerequisite IDs. User selects a module and copies an instructional prompt to their own GPT chat.
-- One introductory deterministic multiple-choice question for 13 subjects, with correct answer verified in the trusted main process. **This is only a practice check, not evidence of real professional competence.**
-- Student's manually authored per-module notes persist locally. Notes alone never mark skills mastered.
-- Native ChatGPT conversation creation and binding to a specific folder, using the real DevFleet tab identity `tab_<uuid>`. Binding requires a live owned tab.
-- Separate main-process local durable state: `education-state.json`. Atomic, bounded, serialized updates; no hosted database.
-- Education-only preload exposes list/create/select and typed educational operations. It does **not** expose physical Send, conversation scraping, developer console, or arbitrary execution. Local RPC and Dev Console are not started in Education mode.
+The pinned official Electron installer is checksum-backed; do **not** enable every package install script. Normal `npm start` retains development mode. Education uses its own `userData` path `METAENGINE DevFleet Education`, isolating browser storage and operator sessions. The currently opened development instance is not hot-reloaded by a source edit.
 
-## Not in scope yet
-- Live ChatGPT integration in a user-authorized session and a signed Windows installer;
-- Cross-chat automatic understanding/reading of GPT conversation contents;
-- PostgreSQL 17 migration; this alpha uses private local JSON to avoid changing existing database/runtime;
-- Adaptive scheduler, spaced repetition, skill evidence, comprehensive independent examinations, labs and OTDR/OLTS simulator;
-- Automated account login or imported ChatGPT message history.
+## Current implemented capabilities
+- Three-column layout: nested subject folders and GPT tabs on the left, native ChatGPT WebContentsView in the middle, curriculum/reviews/notes/lab log and assessments on the right.
+- 15 seeded technical directions and 30 curated lessons with prerequisite IDs.
+- Create and bind GPT tabs using DevFleet-owned `tab_<uuid>` identities, with live-session checks and no automatic message sending or page scraping.
+- A user-controlled lesson prompt; explicit copy of an aggregate of **locally verified practice results** between disciplines. No chat transcript is extracted.
+- 26 fixed-answer practice questions (two in each of 13 subject areas), with answer keys held in the main process and not included in renderer snapshots.
+- Per-question review tracking with a deterministic 1/3/7/14/30/60-day ladder (24-hour intervals measured against the local system clock in UTC timestamps). Correct early practice cannot accelerate a due date; a wrong answer resets the review to due-now.
+- Review queue showing due, scheduled and untouched question counts; click an item to switch to its discipline.
+- User-authored lesson notes and practice/laboratory reports (`analysis`, `simulation`, `physical`). All reports carry explicit `self_reported_unverified` provenance and **do not grant practical mastery**.
+- Read-only cross-discipline context summaries share only counts of correctly answered local questions, attempts, review-due items and unverified lab reports. Sharing to a GPT chat is manual and opt-in.
+- Local atomic serialized `education-state.json`; E1–E3 state is migrated additively in memory when `reviews` or `labs` did not yet exist. No Supabase, hosted DB or PostgreSQL mutations.
+- Education-only preload exposes a narrow IPC surface. No physical Send, read/scrape, remote code execution, local RPC control plane or Dev Console in Education mode.
 
-## Known limitations
-- Chats exist as real DevFleet-owned native tabs. If an old physical tab cannot restore, its curriculum binding persists as a reference but cannot be selected until recovery; no automatic replacement/resend.
-- Native DevFleet has a 16-session capacity. Education does not bypass this limit.
-- A single correct multiple-choice answer is shown only as a verified answer, not as mastery of a professional skill.
-- This is a separate mode, not a separately installed Windows product with its own installer/application ID. Distinct packaging should come after independent Electron qualification.
+## Key evidence limitations
+- One correct multiple-choice answer is a checked **practice answer**, not a skill certificate. The field `mastered` is retained for E1–E3 compatibility; consumers must not interpret it as professional mastery.
+- User-entered lab reports are self-reported and unverified. No physical instrument, external attestation, supervisor proof or independently evaluated lab evidence exists yet.
+- Device clock changes can shift offline review dates; no centralized trusted clock is introduced.
+- Live ChatGPT login / persisted account restoration and manual end-user acceptance are still UNKNOWN.
+- No independently installed or signed Education-specific Windows client exists yet, and the normal standalone DevFleet retains a 16-session maximum.
+- Actual laboratory simulators, OTDR trace evaluation, rubric-based practical exams and native PG17 storage are future milestones.
+- User-generated lesson notes and reports stay local; explicit shared context excludes their body text.
 
-## Testing
-From app root run `npm test`; includes core persistence, tab-identity, hierarchy and cycle safety, assessment correctness, note persistence, curriculum consistency and IPC scope checks.
+## Testing (E4)
+```powershell
+npm test
+npm run smoke:education
+```
 
-For a native, isolated Electron UI smoke run `npm run smoke:education`. On Windows, if `npm ci` does not install Electron due to package install-script policy, run the pinned package's official `node node_modules/electron/install.js` with its checksum-backed installer rather than enabling all scripts. This smoke uses a TEMP-only profile without ChatGPT network requests, verifies DOM, 15 folders, two displayed lessons, notes IPC and tab binding, and writes `%TEMP%/devfleet-education-smoke-receipt.json`. This is not evidence of real ChatGPT login, message exchange or signed installer packaging.
+The E4 isolated Windows run has 129/129 Node tests PASS and Electron smoke v2 PASS. Smoke uses a disposable temporary profile, no ChatGPT network access, and verifies 15 subject folders, lesson panel, reviews UI, local study summaries, note IPC, practice-answer review creation, self-reported lab entry, tab binding, native center view geometry and profile isolation. Receipt: `%TEMP%\devfleet-education-smoke-receipt.json`. It is not evidence of real ChatGPT sign-in or a signed installer.
 
-## Files
-- `src/education.html`: UI, no dynamic executable lesson content from GPT.
-- `src/education-preload.cjs`: bounded education IPC.
-- `src/education-core.mjs`: education store, quiz checking.
-- `src/curriculum.mjs`: fixed curricula and prerequisite graph.
-- `src/main.mjs`: standalone Education startup and IPC wiring.
-- `src/chat-surface.mjs`: layout for Education center GPT view.
-- `test/education-*.test.mjs`: regression tests.
+## Code ownership
+- `src/education.html`: Education renderer and manual UX.
+- `src/education-preload.cjs`: bounded Education IPC.
+- `src/education-core.mjs`: journal and durable assessment/lab store.
+- `src/education-review.mjs`: review ladder and bounded context summaries.
+- `src/curriculum.mjs`: curated lessons/prerequisite definitions.
+- `src/main.mjs`: Education startup, IPC and per-mode isolation.
+- `src/chat-surface.mjs`: native GPT view layout.
+- `test/education-*.test.mjs`, `scripts/education-electron-smoke.cjs`: tests/receipts.
 
-## Next milestone (E4)
-1. Run disposable-profile Electron startup/UI regression and check three-column physical WebContentsView bounds.
-2. Add multi-item skill assessments with evidence provenance and an examiner that does not blindly trust chat prose.
-3. Implement spaced repetition on proven answers and manual revision reports.
-4. Create dedicated installer identity only after isolated packaging and native UI acceptance.
+## Next milestone E5
+1. Native Windows user acceptance: verify actual ChatGPT sign-in, create/resume chat, manual prompts and UI screenshot with a disposable but authorized Education profile.
+2. Add **independent** multi-task assessment rubrics that require diverse performance evidence, not one MCQ or self-report.
+3. Replace misleading `mastered`/progress labels across all interfaces with evidence level descriptors.
+4. Implement an external-instrument evidence import process with explicit human verification for electronics/fiber practice.
+5. Assess dedicated installer identity and isolated packaging; migrate education records to local PG17 only after a staged, proven mechanism is justified.

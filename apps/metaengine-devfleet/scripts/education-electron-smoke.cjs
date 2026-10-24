@@ -35,6 +35,7 @@ async function run(){
   wrap('education:bind-chat',p=>store.bindChat(p,opened.map(x=>x.tab_id)));
   wrap('education:submit-answer',p=>store.submitAnswer(p));
   wrap('education:add-note',p=>store.addNote(p));
+  wrap('education:add-lab',p=>store.addLabReport(p));
   wrap('devfleet:list',()=>({sessions:opened,session_count:opened.length}));
   wrap('devfleet:create',p=>{
     if(p?.count!==1||typeof p.request_id!=='string')throw Error('smoke_bad_create');
@@ -61,10 +62,15 @@ async function run(){
     lessons:document.querySelectorAll('#lessons button.lesson-row').length,
     sidebars:!!document.querySelector('.left')&&!!document.querySelector('.right'),
     prompt:document.getElementById('lesson-prompt').value,
+    review:document.getElementById('review-count')?.textContent,
+    context:document.getElementById('context-details')?.textContent,
+    lab:!!document.getElementById('save-lab'),
     error:document.getElementById('status').textContent
   })`);
   if(!dom.title.includes('Education')||dom.folders!==15||dom.lessons!==2||!dom.sidebars
-    ||!dom.prompt.includes('преподаватель'))throw Error('education_dom_smoke_failed '+JSON.stringify(dom));
+    ||!dom.prompt.includes('преподаватель')||!dom.review.includes('К повторению')
+    ||!dom.context.includes('Проверенные ответы')||!dom.lab)
+    throw Error('education_dom_smoke_failed '+JSON.stringify(dom));
   // Exercise typed renderer bridge on a real isolated Electron process.
   await window.webContents.executeJavaScript(`window.devfleet.education.addNote({
     lesson_id:'s3-1',text:'Electron smoke: written by the learner'
@@ -78,9 +84,22 @@ async function run(){
     folder_id:'subject-3',tab_id:'${tab.sessions[0].tab_id}',title:'Проверка GPT'
   })`);
   if(store.snapshot().chats.length!==1)throw Error('education_chat_ipc_failed');
-  const result={state:'PASS',schema:'devfleet.education.electron-smoke.v1',
+  await window.webContents.executeJavaScript(`window.devfleet.education.addLabReport({
+    lesson_id:'s3-1',title:'E4 virtual lab',kind:'simulation',observation:'Simulated 12V circuit'
+  })`);
+  await window.webContents.executeJavaScript(`window.devfleet.education.submitAnswer({
+    question_id:'ohm',choice:1
+  })`);
+  const after=store.snapshot();
+  if(after.labs.length!==1||after.labs[0].provenance!=='self_reported_unverified'
+    ||after.reviews.length!==1||after.reviews[0].step!==1
+    ||after.study_contexts[3].distinct_correct_answers!==1)
+    throw Error('education_e4_ipc_or_evidence_failed');
+  const result={state:'PASS',schema:'devfleet.education.electron-smoke.v2',
     folders:dom.folders,visible_lessons:dom.lessons,notes:store.snapshot().notes.length,
     bound_chats:store.snapshot().chats.length,
+    review_entries:after.reviews.length,practice_questions:after.questions.length,
+    self_reported_labs:after.labs.length,
     view_bounds:view.getBounds(),profile_isolated:true,chatgpt_network_used:false};
   console.log(JSON.stringify(result));
   await fs.writeFile(path.join(os.tmpdir(),'devfleet-education-smoke-receipt.json'),JSON.stringify(result,null,2),'utf8');
