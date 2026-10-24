@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
 import { classifyPostgresUtilityFailure } from './postgres-utility-diagnostic.mjs';
+import { createPostgresContinuityInspector } from './postgres-continuity-inspector.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import net from 'node:net';
@@ -332,6 +333,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   const env = runtimeEnvironment(config);
   let stopping = false;
   let monitor;
+  let continuityInspector = null;
   let finish;
   const finished = new Promise(resolve => { finish = resolve; });
   let postgresIdentity;
@@ -363,6 +365,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     clearInterval(monitor);
     config.signal?.removeEventListener('abort', onAbort);
     let cleanupFailure;
+    if(continuityInspector) {try{await continuityInspector.close();}catch{cleanupFailure=runtimeError('runtime_cleanup_unconfirmed');}}
     // pg_ctl exits before its restricted-token postmaster. Settle that
     // preparation before deciding which exact processes this launcher owns.
     if (postgresPreparation) {
@@ -534,6 +537,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     await persistStartupManifest(startupManifestPath, startupManifest, projectRoot);
     let failedProbes = 0;
     let probing = false;
+    if(!hooks.inspectPostgres) continuityInspector=await createPostgresContinuityInspector(config);
     monitor = setInterval(async () => {
       if (stopping || probing) return;
       probing = true;
@@ -547,7 +551,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
         const session = children.find(item => item.name === 'postgres')?.session;
         if (session) { postgresStage = 'process'; await session.verify(); }
         postgresStage = 'inspection';
-        const current = await assertPostgresIdentity(await inspector(config), config, ownedPostgresPid);
+        const current = await assertPostgresIdentity(continuityInspector ? await continuityInspector.inspect() : await inspector(config), config, ownedPostgresPid);
         if (current.pid !== postgresIdentity.pid || current.started_at !== postgresIdentity.started_at) throw runtimeError('postgres_incarnation_mismatch');
         if (stopping) return;
         failedProbes = 0;

@@ -83,6 +83,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
   let signatures;
   let tableAccess;
   let activeRequests = 0;
+  let activeHealthRequests = 0;
   const transaction = (run, { readOnly = false } = {}) => sql.begin(async (tx) => {
     if (readOnly) await tx.unsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     if (roleMode === 'service_role') await tx.unsafe("SET LOCAL ROLE service_role");
@@ -143,15 +144,22 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
     request.on('error', () => response.destroy());
     response.on('error', () => request.destroy());
     let admitted = false;
+    let healthAdmitted = false;
     try {
       if (!['127.0.0.1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)) throw new ApiError(403, 'loopback_required');
       const expectedHost = `127.0.0.1:${server.address().port}`;
       if (request.headers.host !== expectedHost || request.headers.origin !== undefined) throw new ApiError(403, 'local_service_request_required');
       if (!authenticated(request.headers, apiKey)) throw new ApiError(401, 'local_service_key_required');
-      if (activeRequests >= 6) throw new ApiError(503, 'local_state_api_busy');
-      activeRequests += 1;
-      admitted = true;
       const url = new URL(request.url, `http://${expectedHost}`);
+      // Health must still inspect the DB when all six application requests
+      // are busy. It has one separate bounded read slot, with the same auth.
+      if(url.pathname==='/health'&&request.method==='GET'&&!url.search) {
+        if(activeHealthRequests>=1) throw new ApiError(503,'local_state_health_busy');
+        activeHealthRequests++;healthAdmitted=true;
+      } else {
+        if (activeRequests >= 6) throw new ApiError(503, 'local_state_api_busy');
+        activeRequests += 1;admitted = true;
+      }
       if (url.pathname === '/operator/v1/context') {
         if (request.method !== 'GET') throw new ApiError(405, 'operator_context_get_required');
         if (url.search) throw new ApiError(400, 'operator_context_query_forbidden');
@@ -278,6 +286,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       send(response, mapped.status, mapped.body);
     } finally {
       if (admitted) activeRequests -= 1;
+      if (healthAdmitted) activeHealthRequests -= 1;
     }
   });
   server.requestTimeout = 15000;
