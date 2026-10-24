@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DevFleet Education</title>
+<style>
+:root{color-scheme:dark;font:13px system-ui,"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#0d1420;color:#e5edf6}
+.shell{display:flex;height:100vh;overflow:hidden}.left{width:320px;flex:none;background:#141d2b;border-right:1px solid #304052;padding:16px;display:flex;flex-direction:column;gap:12px}
+.center{flex:1;background:#101923;min-width:1px}.right{width:300px;flex:none;background:#141d2b;border-left:1px solid #304052;padding:16px;overflow-y:auto}
+h1{font-size:17px;margin:0}h2{font-size:14px;margin:14px 0 8px}p,small,.muted{color:#aab8ca}
+small{font-size:11px;line-height:1.5}button{background:#233247;color:#e5edf6;border:1px solid #41546c;border-radius:7px;padding:9px;cursor:pointer;font:inherit}
+button:hover{background:#30415a}button:focus-visible{outline:2px solid #55c3b5}button.primary{background:#087f73;border-color:#10b5a0}
+button:disabled{opacity:.55;cursor:wait}.toolbar{display:flex;gap:6px;flex-wrap:wrap}
+#tree{overflow:auto;flex:1;min-height:140px}.folder,.chat{display:flex;gap:6px;align-items:center;width:100%;text-align:left;border-color:transparent;background:transparent;padding:6px 8px}
+.folder.active{background:#164a4a;border-color:#3a9d91}.folder span,.chat span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat{color:#a3c5e2;font-size:12px}.folder:hover,.chat:hover{background:#26364b}
+.card{background:#1b2839;border:1px solid #33465b;border-radius:10px;padding:12px;margin-bottom:12px}
+#status{font-size:11px;color:#7dd3c5;min-height:24px;overflow-wrap:anywhere}
+.progress{background:#334155;height:7px;border-radius:9px;overflow:hidden}.bar{height:100%;background:#4ac5b2;width:0}
+textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;padding:9px;border-radius:6px;min-height:135px;resize:vertical;font:12px/1.45 system-ui}
+.choice{width:100%;margin:4px 0;text-align:left}#feedback{white-space:pre-wrap;font-size:12px;line-height:1.5;color:#a8dbcb}
+.lesson-row{width:100%;text-align:left;margin:3px 0;padding:7px}.lesson-row.active{background:#124b4b;border-color:#39bba6}
+#note-text{min-height:74px;max-height:130px}#note-list{display:flex;flex-direction:column;gap:6px;white-space:pre-wrap;overflow-wrap:anywhere}#note-list small{padding:8px;background:#182638;border-radius:5px}
+.counter{font-size:24px;font-weight:700}#unbound{max-height:130px;overflow-y:auto}
+.material-chat{color:#a5d6d1;font-size:12px}
+.material-chat.open{background:#1d4545}
+.center{overflow-y:auto}
+#library-panel{padding:30px;max-width:900px;margin:auto}
+#material-title{font-size:23px;line-height:1.3}
+.lesson-message{background:#1b293a;border:1px solid #35495f;border-radius:14px;padding:20px;margin-top:18px}
+.lesson-message h2{font-size:14px;color:#7ce0cf}
+.lesson-message p{color:#e3ecf4;font-size:14px;line-height:1.7;white-space:pre-wrap}
+#material-glossary{display:grid;gap:10px}#material-glossary div{border-left:2px solid #40726f;padding-left:12px;color:#d5e5ea;line-height:1.55}
+#material-references{display:grid;gap:7px}#material-references button{text-align:left;overflow-wrap:anywhere}
+#material-spotlight[hidden]{display:none}
+#material-status{color:#91a5ba;font-size:12px}
+.material-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+#review-list button{display:block;width:100%;margin-top:5px;text-align:left;font-size:12px}
+#lab-title,#lab-kind{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
+#lab-observation{min-height:80px;max-height:160px}.caption{font-size:11px;color:#9daabe}
+#notebook-list{display:grid;gap:8px;margin:10px 0}#notebook-list .entry{padding:10px;border:1px solid #38516a;border-radius:8px}
+#notebook-list .entry p{white-space:pre-wrap;overflow-wrap:anywhere;color:#dbe7f2}
+#notebook-title,#notebook-source{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
+#notebook-body{min-height:112px;max-height:260px}
+</style></head>
+<body><div class="shell">
+<aside class="left" aria-label="Направления обучения">
+  <header><h1>◈ DevFleet <span style="color:#60d4c0">Education</span></h1>
+  <small>15 дисциплин · 120 подготовленных тем · GPT по запросу</small></header>
+  <div class="toolbar"><button id="add-folder">+ Папка</button><button id="rename-folder">Переименовать</button></div>
+  <div id="entry" class="card" hidden><small id="entry-label">Название</small>
+  <input id="entry-title" maxlength="100" aria-label="Название" style="width:100%;padding:8px;margin:8px 0;background:#0b1522;color:white;border:1px solid #51657b;border-radius:6px">
+  <div class="toolbar"><button id="entry-ok" class="primary">Сохранить</button><button id="entry-cancel">Отмена</button></div></div>
+  <div id="tree" role="tree" aria-label="Дисциплины и учебные чаты"></div>
+  <div class="card"><strong>Чаты GPT</strong><p><small>Создавай чат внутри выбранной папки. Беседы открываются в центральной области без автоматической отправки сообщений.</small></p>
+  <button id="new-chat" class="primary">+ Чат в папке</button>
+  <h2>Не распределены</h2><div id="unbound"></div></div>
+  <div id="status" role="status" aria-live="polite">Загрузка Education…</div>
+</aside>
+<main class="center" aria-label="Материал учебного чата или активный GPT-чат">
+  <div id="library-panel">
+    <small id="material-status">Локальный учебный материал · без подключения GPT</small>
+    <h1 id="material-title">Выбери учебный чат в левой панели</h1>
+    <div class="material-actions">
+      <button id="library-external" class="primary">Продолжить с GPT в обычном браузере</button>
+      <button id="library-discuss">Встроенный GPT (эксперимент)</button>
+      <button id="library-copy">Скопировать подробный урок для GPT</button>
+    </div>
+    <div class="lesson-message"><h2>Объяснение с нуля</h2><p id="material-theory"></p></div>
+    <div class="lesson-message"><h2>Пример из практики</h2><p id="material-example"></p></div>
+    <div class="lesson-message"><h2>Задание для самостоятельного выполнения</h2><p id="material-exercise"></p></div>
+    <div class="lesson-message"><h2>Контрольный вопрос</h2><p id="material-check"></p></div>
+    <div class="lesson-message"><h2>Учебная цель</h2><p id="material-objective"></p></div>
+    <div class="lesson-message"><h2>Словарь технических терминов</h2><div id="material-glossary"></div></div>
+    <div class="lesson-message"><h2>Углублённый контекст дисциплины</h2><p id="material-extension"></p></div>
+    <div class="lesson-message" id="material-spotlight" hidden><h2 id="spotlight-title"></h2><p id="spotlight-text"></p></div>
+    <div class="lesson-message"><h2>Распространённая ошибка</h2><p id="material-mistake"></p></div>
+    <div class="lesson-message"><h2>Проверь понимание</h2><p id="material-reflection"></p></div>
+    <div class="lesson-message"><h2>Надёжные источники для дальнейшего изучения</h2><div id="material-references"></div><small>Источник приведён для самостоятельной сверки, а не как гарантия всех утверждений конспекта.</small></div>
+    <p id="material-guidance" class="caption">Материал хранится локально. Рекомендуется обычный браузер: программа копирует подробный учебный запрос и открывает ChatGPT, но не отправляет сообщение. Если встроенный ChatGPT показывает ошибку JavaScript, выбери обычный браузер.</p>
+  </div>
+</main>
+<section class="right" aria-label="Учебный контекст">
+  <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
+  <button id="browser-from-sidebar" class="primary">Открыть урок с GPT в обычном браузере</button>
+  <small>Если встроенная вкладка сообщает об ошибке JavaScript, эта кнопка продолжит обучение во внешнем браузере. Сообщение не отправляется автоматически.</small>
+  <button id="check-embedded-gpt">Диагностика встроенного GPT</button>
+  <small id="embedded-gpt-health">Настройки встроенной вкладки ещё не проверены.</small>
+  <div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
+  <p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
+  <h2>Повторить сегодня (UTC)</h2>
+  <div class="card"><div id="review-count" class="caption">Загрузка…</div><div id="review-list"></div></div>
+  <h2>Контрольные модули программы</h2>
+  <div id="lessons" class="card" aria-label="Модули дисциплины"></div>
+  <h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div><button id="next-question">Другой вопрос</button></div>
+  <h2>Результаты дисциплины</h2><div class="card"><div id="context-details" class="caption"></div>
+  <button id="copy-context">Скопировать проверенные результаты</button>
+  <div class="caption">Передаются только результаты локальных заданий и количество самоотчётов, не история чатов.</div></div>
+  <h2>Инструкция для преподавателя GPT</h2>
+  <textarea id="lesson-prompt" readonly aria-label="Шаблон учебного запроса"></textarea>
+  <button id="copy-prompt">Скопировать текст урока</button>
+  <h2>Тетрадь выбранной вкладки</h2>
+  <div class="card"><strong id="notebook-heading">Выбери тему</strong><p id="notebook-count" class="caption">Записей: 0</p>
+    <input id="notebook-title" maxlength="100" placeholder="Заголовок заметки">
+    <textarea id="notebook-body" maxlength="5000" placeholder="Что понял, что нужно повторить, формулы, вопросы к GPT…"></textarea>
+    <select id="notebook-source"><option value="student">Моя запись</option><option value="gpt_manually_copied">Я вручную перенёс ответ GPT (не проверено)</option></select>
+    <div class="toolbar"><button id="notebook-save" class="primary">Сохранить запись</button><button id="notebook-cancel">Отмена</button></div>
+    <div id="notebook-list"></div>
+    <label><input type="checkbox" id="notebook-include-gpt"> Включить заметки в контекст GPT при копировании или открытии</label>
+    <p class="caption">Записи хранятся локально. Передача в GPT — только по нажатию кнопки; обновлённый контекст нужно отправлять вручную.</p>
+  </div>
+  <h2>Старые конспекты по модулям</h2>
+  <textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
+  <button id="save-note">Сохранить конспект</button><div id="note-list"></div>
+  <h2>Журнал практических работ</h2>
+  <div class="card"><input id="lab-title" maxlength="100" placeholder="Название опыта / измерения">
+  <select id="lab-kind" aria-label="Тип работы"><option value="analysis">Разбор задачи</option><option value="simulation">Виртуальная лаборатория</option><option value="physical">Физический опыт</option></select>
+  <textarea id="lab-observation" maxlength="4000" placeholder="Что делал, какие результаты получил, что не понял…"></textarea>
+  <button id="save-lab">Сохранить самоотчёт</button><div class="caption">Самоотчёт не означает проверку или подтверждение практических навыков.</div>
+  <div id="lab-list"></div></div>
+  <small>В учебных чатах отправка сообщений выполняется только вручную.</small>
+  <h2>Что подтверждено</h2>
+  <div class="card"><small>Проверены ответы на локальные задания и даты повторения. Конспекты и лабораторные записи — самоотчёты, не подтверждение практической квалификации. GPT может помогать разбирать ошибки, но не выставляет официальный допуск.</small></div>
+</section></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let state=null,fleet=null,selected='subject-3',selectedLesson=null,focusQuestionId=null,visibleQuestionId=null,busy=false;
+let selectedMaterial='material-03-01',materialMode=true,selectedChatTabId=null,editingNotebookEntry=null,confirmDeleteEntry=null,renderedNotebookKey=null;
+const status=message=>{$('status').textContent=String(message).slice(0,450);};
+function askTitle(message,initial=''){
+  return new Promise(resolve=>{
+    const box=$('entry'),input=$('entry-title');
+    $('entry-label').textContent=message;input.value=initial;box.hidden=false;input.focus();input.select();
+    const finish=value=>{box.hidden=true;$('entry-ok').onclick=null;$('entry-cancel').onclick=null;
+      input.onkeydown=null;resolve(value);};
+    $('entry-ok').onclick=()=>finish(input.value);
+    $('entry-cancel').onclick=()=>finish(null);
+    input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(input.value);}
+      if(e.key==='Escape'){e.preventDefault();finish(null);}};
+  });
+}
+const elm=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=String(text);if(cls)e.className=cls;return e;};
+async function load(){
+  [state,fleet]=await Promise.all([window.devfleet.education.snapshot(),window.devfleet.list()]);
+  if(!state.folders.some(f=>f.id===selected))selected=state.folders[0]?.id||null;
+  render();
+  if(materialMode)await window.devfleet.education.showMaterial();
+  status('Дисциплин: '+state.folders.length+' · подготовленных учебных чатов: '+state.materials.length+' · активных GPT-вкладок: '+state.chats.length);
+}
+async function action(fn){
+  if(busy)return;busy=true;
+  for(const b of document.querySelectorAll('button'))b.disabled=true;
+  try{await fn();await load();}catch(e){status('Ошибка: '+String(e?.message||e));}
+  finally{busy=false;for(const b of document.querySelectorAll('button'))b.disabled=false;}
+}
+function topSubject(folderId){
+  let f=state.folders.find(x=>x.id===folderId),guard=0;
+  while(f?.parent_id&&guard++<state.folders.length)f=state.folders.find(x=>x.id===f.parent_id);
+  return f?.id||null;
+}
+function activeNotebookKey(){
+  if(materialMode)return selectedMaterial;
+  const chat=state?.chats.find(c=>c.tab_id===selectedChatTabId);
+  return chat?.tab_id||null;
+}
+function activeMaterialId(){
+  if(materialMode)return selectedMaterial;
+  return state?.chats.find(c=>c.tab_id===selectedChatTabId)?.material_id||null;
+}
+function renderNotebook(){
+  const key=activeNotebookKey(),notes=state.notebook_entries||[];
+  if(key!==renderedNotebookKey){
+    renderedNotebookKey=key;editingNotebookEntry=null;confirmDeleteEntry=null;
+    $('notebook-title').value='';$('notebook-body').value='';$('notebook-source').value='student';
+    $('notebook-source').disabled=false;$('notebook-save').textContent='Сохранить запись';
+  }
+  const chat=state.chats.find(c=>c.tab_id===key);
+  const material=state.materials.find(m=>m.id===key);
+  $('notebook-heading').textContent=material?'Тема: '+material.title:
+    chat?'GPT: '+chat.title:'Открой тему или GPT-вкладку';
+  const current=notes.filter(n=>n.notebook_key===key);
+  $('notebook-count').textContent='Записей: '+current.length+' · только на этом компьютере';
+  const list=$('notebook-list');list.replaceChildren();
+  for(const n of current.slice(-30).reverse()){
+    const div=elm('div',undefined,'entry');
+    div.append(elm('strong',n.title),
+      elm('small',' · '+(n.source==='student'?'моя запись':'GPT, вручную скопировано; не проверено')),
+      elm('p',n.body));
+    const toolbar=elm('div',undefined,'toolbar');
+    const edit=elm('button','Изменить');
+    edit.onclick=()=>{
+      editingNotebookEntry=n.id;
+      $('notebook-title').value=n.title;$('notebook-body').value=n.body;
+      $('notebook-source').value=n.source;
+      $('notebook-source').disabled=true;
+      $('notebook-save').textContent='Сохранить изменения';
+      $('notebook-body').focus();
+    };
+    const del=elm('button',confirmDeleteEntry===n.id?'Подтвердить удаление':'Удалить');
+    del.onclick=async()=>{
+      if(confirmDeleteEntry!==n.id){confirmDeleteEntry=n.id;renderNotebook();return;}
+      confirmDeleteEntry=null;editingNotebookEntry=null;
+      $('notebook-title').value='';$('notebook-body').value='';
+      $('notebook-source').disabled=false;$('notebook-save').textContent='Сохранить запись';
+      await action(()=>window.devfleet.education.deleteNotebookEntry({entry_id:n.id}));
+    };
+    toolbar.append(edit,del);div.append(toolbar);list.append(div);
+  }
+  $('notebook-save').disabled=!key;
+}
+function render(){
+  const tree=$('tree');tree.replaceChildren();
+  const tabs=new Set((fleet.sessions||[]).filter(s=>s.state==='OPEN').map(s=>s.tab_id));
+  function folderRow(folder,depth=0){
+    const b=elm('button','', 'folder'+(folder.id===selected?' active':''));
+    b.style.paddingLeft=(8+Math.min(depth,6)*12)+'px';b.setAttribute('role','treeitem');
+    b.append(elm('span','📁'),elm('span',folder.title));
+    b.onclick=()=>{
+      selected=folder.id;
+      const subject=Number((topSubject(selected)||'').replace('subject-',''));
+      const first=state.materials.find(m=>m.subject===subject);
+      if(first)selectedMaterial=first.id;
+      selectedChatTabId=null;materialMode=true;render();
+      window.devfleet.education.showMaterial().catch(e=>status(String(e?.message||e)));
+    };tree.append(b);
+    for(const chat of state.chats.filter(c=>c.folder_id===folder.id)){
+      const cb=elm('button','', 'chat');cb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
+      cb.append(elm('span',tabs.has(chat.tab_id)?'◉':'○'),elm('span',chat.title));
+      cb.title=tabs.has(chat.tab_id)?'Открыть GPT-чат':'Чат пока не восстановлен в сессиях';
+      cb.onclick=()=>action(async()=>{
+        if(!tabs.has(chat.tab_id))throw Error('Чат недоступен; восстанови исходную сессию.');
+        await window.devfleet.select(chat.tab_id);selected=chat.folder_id;
+        selectedChatTabId=chat.tab_id;materialMode=false;
+      });tree.append(cb);
+    }
+    if(folder.id===topSubject(folder.id)){
+      const subject=Number(folder.id.slice('subject-'.length));
+      for(const material of state.materials.filter(m=>m.subject===subject)){
+        const mb=elm('button','', 'chat material-chat'+(material.id===selectedMaterial&&materialMode?' open':''));
+        mb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
+        const linked=state.chats.some(c=>c.material_id===material.id);
+        mb.append(elm('span',linked?'◉':'◇'),elm('span',material.title));
+        mb.title=linked?'Материал и связанный GPT-чат':'Подготовленный локальный учебный чат';
+        mb.onclick=()=>{
+          selected=folder.id;selectedMaterial=material.id;selectedChatTabId=null;materialMode=true;
+          render();window.devfleet.education.showMaterial().catch(e=>status(String(e?.message||e)));
+        };
+        tree.append(mb);
+      }
+    }
+    state.folders.filter(f=>f.parent_id===folder.id).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f,depth+1));
+  }
+  state.folders.filter(f=>f.parent_id===null).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f));
+  const currentMaterial=state.materials.find(m=>m.id===selectedMaterial);
+  if(currentMaterial&&materialMode){
+    $('material-status').textContent='Локальный учебный чат · '+(currentMaterial.position)+' из 8 · предмет '+currentMaterial.subject;
+    $('material-title').textContent=currentMaterial.title;
+    $('material-theory').textContent=currentMaterial.theory;
+    $('material-example').textContent=currentMaterial.example;
+    $('material-exercise').textContent=currentMaterial.exercise;
+    $('material-check').textContent=currentMaterial.check;
+    const depth=currentMaterial.depth;
+    $('material-objective').textContent=depth.objective;
+    $('material-extension').textContent=depth.extension;
+    $('material-mistake').textContent=depth.commonMistake;
+    $('material-reflection').textContent=depth.reflection;
+    const glossary=$('material-glossary');glossary.replaceChildren();
+    for(const item of depth.glossary){const line=elm('div');line.append(elm('strong',item.term+' — '),elm('span',item.meaning));glossary.append(line);}
+    const spotlight=$('material-spotlight');spotlight.hidden=!depth.spotlight;
+    $('spotlight-title').textContent=depth.spotlight?.title||'';
+    $('spotlight-text').textContent=depth.spotlight?.text||'';
+    const refs=$('material-references');refs.replaceChildren();
+    for(const source of depth.references){
+      const b=elm('button',source.title+' · '+source.url);
+      b.onclick=()=>window.devfleet.education.openReference(source.url).catch(e=>status('Источник не открыт: '+e.message));
+      refs.append(b);
+    }
+    const linked=state.chats.find(c=>c.material_id===currentMaterial.id);
+    $('library-discuss').textContent=linked&&tabs.has(linked.tab_id)?'Встроенный GPT: вернуться к беседе':'Встроенный GPT (эксперимент)';
+
+  }
+  const unbound=$('unbound');unbound.replaceChildren();
+  const bound=new Set(state.chats.map(c=>c.tab_id));
+  for(const tab of (fleet.sessions||[]).filter(t=>t.state==='OPEN'&&!bound.has(t.tab_id))){
+    const b=elm('button','Связать '+tab.tab_id.slice(0,7)+'…','chat');
+    b.onclick=()=>action(async()=>{
+      const folder_id=selected;if(!folder_id)throw Error('Выбери папку');
+      await window.devfleet.education.bindChat({folder_id,tab_id:tab.tab_id,title:'Учебный чат '+tab.tab_id.slice(0,7)});
+    });unbound.append(b);
+  }
+  if(!unbound.childElementCount)unbound.append(elm('small','Нет свободных вкладок.'));
+  const f=state.folders.find(x=>x.id===selected);
+  $('current').textContent=f?.title||'Нет дисциплины';
+  const subject=Number((topSubject(selected)||'').replace('subject-',''));
+  const lessons=state.lessons.filter(l=>l.subject===subject);
+  if(!lessons.some(l=>l.id===selectedLesson))selectedLesson=lessons[0]?.id||null;
+  const lesson=lessons.find(l=>l.id===selectedLesson);
+  const plan=$('lessons');plan.replaceChildren();
+  for(const item of lessons){
+    const b=elm('button',item.title,'lesson-row'+(item.id===selectedLesson?' active':''));
+    b.title=item.goal;b.onclick=()=>{selectedLesson=item.id;render();};plan.append(b);
+  }
+  if(!lessons.length)plan.append(elm('small','В этой папке пока нет учебных модулей.'));
+  if(lesson)plan.append(elm('small','Цель: '+lesson.goal+' · Предварительные уроки: '+(lesson.prerequisites.join(', ')||'нет')));
+  const allDue=state.review_summary?.due||[];
+  const dueBox=$('review-list');dueBox.replaceChildren();
+  $('review-count').textContent='К повторению: '+allDue.length+' · запланировано: '+(state.review_summary?.scheduled_count||0)+' · ещё не изучено: '+(state.review_summary?.untouched_count||0);
+  for(const card of allDue.slice(0,15)){
+    const dueQuestion=state.questions.find(q=>q.id===card.question_id);
+    if(!dueQuestion)continue;
+    const b=elm('button','↻ '+dueQuestion.title+' (дисциплина '+dueQuestion.subject+')');
+    b.onclick=()=>{selected='subject-'+dueQuestion.subject;focusQuestionId=dueQuestion.id;render();};
+    dueBox.append(b);
+  }
+  if(!allDue.length)dueBox.append(elm('small','На данный момент повторений нет.'));
+  const subjectQuestions=state.questions.filter(q=>'subject-'+q.subject===topSubject(selected));
+  const dueIds=new Set(allDue.map(r=>r.question_id));
+  const attemptsById=new Set(state.attempts.map(a=>a.question_id));
+  const question=subjectQuestions.find(q=>q.id===focusQuestionId)
+    ||subjectQuestions.find(q=>dueIds.has(q.id))
+    ||subjectQuestions.find(q=>!attemptsById.has(q.id))||subjectQuestions[0];
+  visibleQuestionId=question?.id||null;
+  const mastered=new Set(state.mastered);
+  $('mastery').textContent=mastered.size+' / '+state.questions.length;
+  $('progress-bar').style.width=(100*mastered.size/Math.max(1,state.questions.length))+'%';
+  const context=state.study_contexts?.find(c=>c.subject===subject);
+  $('context-details').textContent=context?'Проверенные ответы: '+context.distinct_correct_answers+'/'+context.practice_questions+' · попыток: '+context.attempts+' · самоотчётов: '+context.self_reported_labs+'. Практические навыки пока не аттестованы.':'Недостаточно данных';
+  $('qtitle').textContent=question?.title||'Задание будет добавлено';
+  $('question').textContent=question?.question||'Для этой папки мини-экзамен пока не предусмотрен.';
+  const choices=$('choices');choices.replaceChildren();$('feedback').textContent='';
+  if(question){
+    question.choices.forEach((option,index)=>{
+      const b=elm('button',(index+1)+'. '+option,'choice');
+      b.onclick=()=>action(async()=>{
+        focusQuestionId=question.id;
+        const r=await window.devfleet.education.submitAnswer({question_id:question.id,choice:index});
+        renderFeedback={id:question.id,text:(r.passed?'Верно! ':'Попробуй ещё раз. ')+r.explanation};
+      });choices.append(b);
+    });
+    if(mastered.has(question.id))$('feedback').textContent='✓ Есть верный проверенный ответ.';
+  }
+  $('lesson-prompt').value=materialMode&&currentMaterial?
+  materialPrompt(currentMaterial):
+  f&&lesson?'Ты мой преподаватель по дисциплине «'+f.title+'». Урок: «'+lesson.title+'». Цель: '+lesson.goal+'. Я начинаю с абсолютного нуля. Объясни все термины, покажи несколько понятных примеров, предложи безопасное практическое задание и задавай проверочные вопросы по одному. Не раскрывай ответ до моей попытки. Не объявляй тему освоенной без доказательств.':'Выбери дисциплину и урок.';
+  const previewMaterial=activeMaterialId();
+  if(previewMaterial){
+    window.devfleet.education.previewHandoff(previewMaterial,handoffOptions()).then(result=>{
+      if(activeMaterialId()===result.material_id)$('lesson-prompt').value=result.text;
+    }).catch(e=>status('Предпросмотр GPT недоступен: '+e.message));
+  }
+  const notes=$('note-list');notes.replaceChildren();
+  for(const n of state.notes.filter(n=>n.lesson_id===selectedLesson).slice(-3).reverse()){
+    notes.append(elm('small',n.text));
+  }
+  const labList=$('lab-list');labList.replaceChildren();
+  for(const lab of state.labs.filter(l=>l.lesson_id===selectedLesson).slice(-3).reverse()){
+    labList.append(elm('small',lab.title+' · '+lab.kind+' · НЕ ПРОВЕРЕНО: '+lab.observation));
+  }
+  renderNotebook();
+  if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
+}
+function handoffOptions(){return {includeNotebook:$('notebook-include-gpt').checked};}
+function materialPrompt(material){
+  return ['Я изучаю телекоммуникации и ВОЛС с нулевого уровня.',
+    'Направление '+material.subject+'. Тема: '+material.title,
+    'Исходный учебный конспект: '+material.theory,
+    'Пример: '+material.example,
+    'Практическое задание: '+material.exercise,
+    'Проверь меня вопросом: '+material.check,
+    'Объясни все новые технические термины, проверь факты, разбери аналогии и задавай вопросы по одному.',
+    'Не показывай решение до моей попытки. Не считай прочитанный материал доказательством освоения. Следи за безопасностью практики.'].join('\n\n');
+}
+let renderFeedback=null;
+$('notebook-cancel').onclick=()=>{
+  editingNotebookEntry=null;$('notebook-title').value='';$('notebook-body').value='';
+  $('notebook-source').value='student';$('notebook-source').disabled=false;
+  $('notebook-save').textContent='Сохранить запись';
+};
+$('notebook-save').onclick=()=>action(async()=>{
+  const key=activeNotebookKey(),title=$('notebook-title').value,body=$('notebook-body').value;
+  if(!key)throw Error('Сначала выбери учебную тему или GPT-вкладку');
+  if(editingNotebookEntry){
+    await window.devfleet.education.editNotebookEntry({entry_id:editingNotebookEntry,title,body});
+  }else{
+    await window.devfleet.education.addNotebookEntry({notebook_key:key,title,body,
+      source:$('notebook-source').value});
+  }
+  editingNotebookEntry=null;
+  $('notebook-title').value='';$('notebook-body').value='';
+  $('notebook-source').value='student';$('notebook-source').disabled=false;
+  $('notebook-save').textContent='Сохранить запись';
+});
+$('add-folder').onclick=async()=>{
+  const title=await askTitle('Название новой вложенной папки');
+  if(title!==null)await action(async()=>{await window.devfleet.education.addFolder({parent_id:selected,title});renderFeedback=null;});
+};
+$('rename-folder').onclick=async()=>{
+  const f=state.folders.find(f=>f.id===selected);
+  if(!f){status('Сначала выбери папку');return;}
+  const title=await askTitle('Новое название',f.title);
+  if(title!==null)await action(()=>window.devfleet.education.renameFolder({folder_id:f.id,title}));
+};
+$('next-question').onclick=()=>{
+  const subject=Number((topSubject(selected)||'').replace('subject-',''));
+  const questions=state.questions.filter(q=>q.subject===subject);
+  if(!questions.length){status('В этой дисциплине пока нет тестов.');return;}
+  const current=questions.findIndex(q=>q.id===visibleQuestionId);
+  focusQuestionId=questions[(current+1)%questions.length].id;
+  renderFeedback=null;render();
+};
+$('notebook-include-gpt').onchange=()=>{
+  if(state&&materialMode)render();
+  status($('notebook-include-gpt').checked?
+    'Личные записи войдут в следующий вручную отправляемый учебный запрос.':
+    'Личные записи исключены из передачи GPT.');
+};
+$('library-copy').onclick=async()=>{
+  if(!selectedMaterial){status('Выбери тему');return;}
+  try{const r=await window.devfleet.education.copyHandoff(activeMaterialId()||selectedMaterial,handoffOptions());
+    status('Подробный учебный запрос скопирован ('+r.character_count+' символов). Отправь его в GPT вручную.');}
+  catch(e){status('Не удалось скопировать: '+e.message);}
+};
+async function launchInBrowser(){
+  if(!selectedMaterial){status('Выбери тему');return;}
+  try{const r=await window.devfleet.education.launchExternalGPT(activeMaterialId()||selectedMaterial,handoffOptions());
+    if(r.opened&&r.copied)status('ChatGPT открыт в обычном браузере. Учебный запрос скопирован — вставь Ctrl+V и отправь вручную.');}
+  catch(e){status('Не удалось открыть браузер: '+e.message+'. Можно скопировать урок отдельной кнопкой.');}
+}
+$('library-external').onclick=launchInBrowser;
+$('browser-from-sidebar').onclick=launchInBrowser;
+$('check-embedded-gpt').onclick=async()=>{
+  try{
+    const result=await window.devfleet.education.chatHealth();
+    $('embedded-gpt-health').textContent=result.state==='NO_NATIVE_TAB'?
+      'Встроенная GPT-вкладка сейчас не выбрана. JavaScript локального Electron работает; попробуй обычный браузер.':
+      'Вкладка: '+result.state+' · JavaScript '+(result.javascript?'разрешён':'отключён')+
+      ' · URL '+(result.origin||'неизвестен')+' · событие '+(result.last_event?.type||'неизвестно')+
+      (result.last_event?.code?' ('+result.last_event.code+')':'')+
+      '. Поддержка ChatGPT во встроенном браузере не гарантируется.';
+  }catch(e){$('embedded-gpt-health').textContent='Диагностика недоступна: '+e.message;}
+};
+$('library-discuss').onclick=()=>action(async()=>{
+  const material=state.materials.find(m=>m.id===selectedMaterial);
+  if(!material)throw Error('Выбери учебную тему');
+  const linked=state.chats.find(c=>c.material_id===material.id);
+  const available=new Set((fleet.sessions||[]).filter(t=>t.state==='OPEN').map(t=>t.tab_id));
+  if(linked){
+    if(!available.has(linked.tab_id))throw Error('Связанный GPT-чат недоступен; восстанови сессию, новая беседа не создаётся.');
+    await window.devfleet.select(linked.tab_id);selectedChatTabId=linked.tab_id;materialMode=false;return;
+  }
+  const result=await window.devfleet.create({request_id:crypto.randomUUID(),count:1});
+  if(result.state!=='CREATED'||result.sessions?.length!==1)
+    throw Error('Создание GPT-сессии не подтверждено. Проверь вкладки, автоматического повтора нет.');
+  const tab_id=result.sessions[0].tab_id;
+  await window.devfleet.education.bindChat({folder_id:'subject-'+material.subject,
+    tab_id,material_id:material.id,title:'GPT · '+material.title});
+  await window.devfleet.select(tab_id);selectedChatTabId=tab_id;materialMode=false;
+  status('GPT-вкладка открыта. Нажми «Скопировать учебный материал» и вставь текст вручную.');
+});
+$('copy-prompt').onclick=async()=>{
+  const promptText=$('lesson-prompt').value;
+  try{await navigator.clipboard.writeText(promptText);status('Текст урока скопирован. Вставь его в ChatGPT вручную.');}
+  catch { $('lesson-prompt').focus();$('lesson-prompt').select();status('Выделил текст: нажми Ctrl+C.'); }
+};
+$('save-note').onclick=()=>action(async()=>{
+  if(!selectedLesson)throw Error('Выбери урок');
+  const text=$('note-text').value;
+  await window.devfleet.education.addNote({lesson_id:selectedLesson,text});
+  $('note-text').value='';
+});
+$('copy-context').onclick=async()=>{
+  const subject=Number((topSubject(selected)||'').replace('subject-',''));
+  const ctx=state.study_contexts.find(c=>c.subject===subject);
+  if(!ctx){status('Нет результатов');return;}
+  const text='Результаты учебных проверок по дисциплине «'+state.folders.find(f=>f.id==='subject-'+subject)?.title+'». Корректные ответы: '+ctx.distinct_correct_answers+' из '+ctx.practice_questions+'; всего попыток: '+ctx.attempts+'; практических самоотчётов: '+ctx.self_reported_labs+'. Самоотчёты не проверены. Это не доказательство квалификации. При последующем занятии проверь знания независимо.';
+  try{await navigator.clipboard.writeText(text);status('Результаты скопированы. Передай их другому преподавателю вручную.');}
+  catch {status('Не удалось скопировать результаты.');}
+};
+$('save-lab').onclick=()=>action(async()=>{
+  if(!selectedLesson)throw Error('Сначала выбери урок');
+  await window.devfleet.education.addLabReport({lesson_id:selectedLesson,
+    title:$('lab-title').value,kind:$('lab-kind').value,
+    observation:$('lab-observation').value});
+  $('lab-title').value='';$('lab-observation').value='';
+});
+$('new-chat').onclick=async()=>{
+  if(!selected){status('Выбери папку');return;}
+  const title=await askTitle('Название нового GPT-чата','Новый урок');
+  if(title===null)return;
+  await action(async()=>{
+    const result=await window.devfleet.create({request_id:crypto.randomUUID(),count:1});
+    if(result.state!=='CREATED'||result.sessions?.length!==1)
+      throw Error('Создание не подтверждено ('+result.state+'). Не повторяй запрос, проверь вкладки.');
+    const tab_id=result.sessions[0].tab_id;
+    await window.devfleet.education.bindChat({folder_id:selected,tab_id,title});
+    await window.devfleet.select(tab_id);selectedChatTabId=tab_id;materialMode=false;
+  });
+};
+window.devfleet.onExternalAuthRequired?.(payload=>{
+  status('Google не разрешает вход во встроенном браузере. ChatGPT открыт в обычном браузере. Продолжай авторизацию там; cookies между браузерами не переносятся.');
+  $('embedded-gpt-health').textContent='Встроенный Google OAuth не поддерживается. Используй обычный браузер.';
+});
+window.devfleet.onReady(()=>load().catch(e=>status(String(e?.message||e))));
+load().catch(e=>status('Не удалось открыть Education: '+String(e?.message||e)));
+</script></body></html>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, dialog, Menu } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, dialog, Menu, shell, clipboard } from 'electron';
 import { createServer } from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -10,8 +10,12 @@ import { ChatSurface } from './chat-surface.mjs';
 import { LiveUiSlots } from './live-ui-slots.mjs';
 import { LiveOperatorContracts } from './live-operator-contracts.mjs';
 import { DevFleetSourceWorkspace } from './source-workspace-patch.mjs';
+import { EducationStore } from './education-core.mjs';
+import { buildEducationHandoff } from './education-handoff.mjs';
+import { ALLOWED_RESOURCE_URLS } from './education-lesson-depth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const educationMode=process.argv.includes('--devfleet-education');
 const APP_NAME = 'METAENGINE DevFleet';
 const RPC_SCHEMA = 'metaengine.devfleet.loopback.v1';
 // A physically isolated, explicit QA profile. On Windows Electron uses the
@@ -28,13 +32,14 @@ if(qaCandidate && (!qaCandidate.toLowerCase().startsWith((qaRoot+path.sep).toLow
   throw Error('devfleet_qa_profile_outside_private_backup');
 const dataDir = process.argv.includes('--devfleet-live-ui-smoke')
   ? path.join(os.tmpdir(),'metaengine-devfleet-live-ui-smoke-'+process.pid)
-  : qaCandidate || path.join(app.getPath('appData'), 'METAENGINE DevFleet');
+  : qaCandidate || path.join(app.getPath('appData'), educationMode?'METAENGINE DevFleet Education':'METAENGINE DevFleet');
 app.setName(APP_NAME);
 app.setPath('userData', dataDir);
 app.commandLine.appendSwitch('disable-features','Translate');
 app.commandLine.appendSwitch('force-renderer-accessibility');
 let mainWindow, surface, operator, httpServer, rpcToken, rpcManifest;
 let liveUiSlots, liveContracts, sourceWorkspace, devConsoleWindow, developerToken, developerManifest;
+let educationStore;
 let shuttingDown = false;
 function safeError(error) {
   const msg = String(error?.message || 'operation_refused');
@@ -60,6 +65,11 @@ const livePolicyDisk = {
   save(data){return atomicPrivateWrite(path.join(dataDir,'live-operator-contracts.json'),
     JSON.stringify(data,null,2)+'\n');}
 };
+function educationSender(event){
+  uiSender(event);
+  if(!educationMode||event.sender.getURL()!==pathToFileURL(path.join(__dirname,'education.html')).href)
+    throw Error('education_ui_origin_denied');
+}
 function uiSender(event) {
   const w=BrowserWindow.fromWebContents(event.sender);
   if (w!==mainWindow || event.senderFrame!==event.sender.mainFrame
@@ -350,20 +360,71 @@ async function start() {
     title:APP_NAME,width:1450,height:900,minWidth:900,minHeight:600,
     backgroundColor:'#111827',
     webPreferences:{
-      preload:path.join(__dirname,'preload.cjs'),
+      preload:path.join(__dirname,educationMode?'education-preload.cjs':'preload.cjs'),
       nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true
     }
   });
   mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  await mainWindow.loadFile(activeUiFile);
+  if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'));
+  else await mainWindow.loadFile(activeUiFile);
   liveContracts=new LiveOperatorContracts({store:livePolicyDisk});
   await liveContracts.init();
   sourceWorkspace=new DevFleetSourceWorkspace({
     getWorkspace:()=>liveUiSlots?.status()?.workspace||null
   });
-  surface=new ChatSurface(mainWindow);
+  surface=new ChatSurface(mainWindow,{educationMode});
   operator=new DevFleetOperator({adapter:surface,store:disk,contracts:liveContracts});
   await operator.init({deferRestore:true});
+  if(educationMode){
+    const educationDisk={
+      async load(){try{return JSON.parse(await fs.readFile(path.join(dataDir,'education-state.json'),'utf8'));}
+        catch(e){if(e.code==='ENOENT')return null;throw e;}},
+      save(state){return atomicPrivateWrite(path.join(dataDir,'education-state.json'),JSON.stringify(state,null,2)+'\n');}
+    };
+    educationStore=new EducationStore(educationDisk);
+    await educationStore.init();
+    ipcMain.handle('education:snapshot',async e=>{educationSender(e);return educationStore.snapshot();});
+    ipcMain.handle('education:show-material',async e=>{educationSender(e);return surface.showLibrary();});
+    ipcMain.handle('education:chat-health',async e=>{educationSender(e);return surface.health();});
+    const handoff=(id,options={})=>{
+      const snapshot=educationStore.snapshot();
+      const linked=snapshot.chats.find(c=>c.material_id===id);
+      return buildEducationHandoff(id,snapshot.study_contexts,snapshot.notebook_entries,{
+        includeNotebook:options?.includeNotebook===true,
+        linkedNotebookKey:linked?.tab_id??null
+      });
+    };
+    ipcMain.handle('education:preview-handoff',async(e,id,options)=>{educationSender(e);return handoff(id,options);});
+    ipcMain.handle('education:copy-handoff',async(e,id,options)=>{
+      educationSender(e);const result=handoff(id,options);clipboard.writeText(result.text);return {
+        material_id:id,copied:true,character_count:result.character_count,sent:false
+      };
+    });
+    ipcMain.handle('education:launch-external-gpt',async(e,id,options)=>{
+      educationSender(e);const result=handoff(id,options);
+      clipboard.writeText(result.text);
+      await shell.openExternal('https://chatgpt.com/');
+      return {material_id:id,copied:true,opened:true,sent:false};
+    });
+    ipcMain.handle('education:open-reference',async(e,url)=>{
+      educationSender(e);
+      if(!ALLOWED_RESOURCE_URLS.includes(url))throw Error('education_reference_not_allowed');
+      await shell.openExternal(url);return {opened:true};
+    });
+    ipcMain.handle('education:add-folder',async(e,p)=>{educationSender(e);return educationStore.addFolder(p);});
+    ipcMain.handle('education:rename-folder',async(e,p)=>{educationSender(e);return educationStore.renameFolder(p);});
+    ipcMain.handle('education:bind-chat',async(e,p)=>{
+      educationSender(e);
+      return educationStore.bindChat(p,(operator.snapshot().sessions||[])
+        .filter(s=>s.state==='OPEN').map(s=>s.tab_id));
+    });
+    ipcMain.handle('education:submit-answer',async(e,p)=>{educationSender(e);return educationStore.submitAnswer(p);});
+    ipcMain.handle('education:add-note',async(e,p)=>{educationSender(e);return educationStore.addNote(p);});
+    ipcMain.handle('education:notebook-add',async(e,p)=>{educationSender(e);return educationStore.addNotebookEntry(p);});
+    ipcMain.handle('education:notebook-edit',async(e,p)=>{educationSender(e);return educationStore.editNotebookEntry(p);});
+    ipcMain.handle('education:notebook-delete',async(e,p)=>{educationSender(e);return educationStore.deleteNotebookEntry(p);});
+    ipcMain.handle('education:add-lab',async(e,p)=>{educationSender(e);return educationStore.addLabReport(p);});
+  }
   ipcMain.handle('devfleet:list',async e=>{uiSender(e);return operator.snapshot();});
   ipcMain.handle('devfleet:create',async(e,p)=>{uiSender(e);return operator.create(p);});
   ipcMain.handle('devfleet:read',async(e,p)=>{uiSender(e);return operator.read(p);});
@@ -374,11 +435,11 @@ async function start() {
   ipcMain.handle('devfleet:close',async(e,p)=>{uiSender(e);return operator.closeTab(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
-  registerDevConsole();
+  if(!educationMode)registerDevConsole();
   // Publish the authenticated localhost control plane while physical ChatGPT
   // pages restore; chat.list truthfully reports RESTORING. All other operator
   // methods fail closed as operator_restoring until every cell is settled.
-  await listenLocal();
+  if(!educationMode)await listenLocal();
   void operator.whenRestored().then(()=>{
     if(mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send('devfleet:ready');

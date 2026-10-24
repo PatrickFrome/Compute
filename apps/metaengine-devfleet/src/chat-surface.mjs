@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { WebContentsView, session } from 'electron';
+import { WebContentsView, session, shell } from 'electron';
+import {isGoogleEmbeddedAuthorization,SAFE_EXTERNAL_CHATGPT_URL} from './education-auth-routing.mjs';
 import { classifyPageFailure, summarizeModeNodes, safeAttrs, inferModeFromAttributes, retryWaitMs } from './chat-fleet-preflight.mjs';
 import { modelPickerCandidates, modelSubmenuCandidates, boundedModelControls, visibleEffort, gpt6FromControls, sendControls, composerControls, inspectSendSurface } from './model-proof-core.mjs';
 import { fingerprintAxSnapshot } from './fleet-observation-core.mjs';
@@ -164,13 +165,16 @@ async function clickNode(view,backendNodeId) {
 
 export class ChatSurface {
   #window;
+  #educationMode=false;
   #views = new Map();
+  #nativeLoadState = new Map();
   #navigationGenerations = new Map();
   #eventHints = new AxEventHints();
   #selected = null;
   #partition;
-  constructor(window) {
+  constructor(window,{educationMode=false}={}) {
     this.#window = window;
+    this.#educationMode=Boolean(educationMode);
     this.#partition = session.fromPartition('persist:metaengine-devfleet-auth-v1');
     this.#partition.setPermissionRequestHandler((_webContents,_permission,done)=>done(false));
     window.on('resize',()=>this.#layout());
@@ -180,7 +184,9 @@ export class ChatSurface {
     const view = this.#views.get(this.#selected);
     if (!view) return;
     const [width,height] = this.#window.getContentSize();
-    view.setBounds({x:340,y:0,width:Math.max(1,width-340),height:Math.max(1,height)});
+    const left=this.#educationMode?320:340;
+    const right=this.#educationMode?300:0;
+    view.setBounds({x:left,y:0,width:Math.max(1,width-left-right),height:Math.max(1,height)});
   }
   select(tabId) {
     const view = this.#views.get(tabId);
@@ -192,6 +198,26 @@ export class ChatSurface {
     this.#selected = tabId;
     this.#layout();
     return {tab_id:tabId,url:view.webContents.getURL(),selected:true};
+  }
+  health(){
+    if(!this.#educationMode)throw Error('education_mode_required');
+    const selected=this.#selected,view=this.#views.get(selected);
+    if(!view||view.webContents.isDestroyed())return {
+      state:'NO_NATIVE_TAB',javascript:null,platform_support:'UNKNOWN'};
+    const prefs=view.webContents.getLastWebPreferences?.()||{};
+    let origin=null;try{origin=new URL(view.webContents.getURL()).origin;}catch{}
+    return {state:view.webContents.isLoadingMainFrame()?'LOADING':'LOADED_OR_IDLE',
+      tab_id:selected,origin,javascript:prefs.javascript!==false,
+      last_event:this.#nativeLoadState.get(selected)||null,
+      platform_support:'UNKNOWN',note:'JavaScript preference does not prove remote ChatGPT login or page readiness'};
+  }
+  showLibrary(){
+    if(!this.#educationMode)throw Error('education_mode_required');
+    for(const view of this.#views.values()){
+      try{this.#window.contentView.removeChildView(view);}catch{}
+    }
+    this.#selected=null;
+    return {mode:'study_material',native_chat_visible:false};
   }
   list() {
     return [...this.#views.entries()].map(([tabId,view])=>({
@@ -205,10 +231,16 @@ export class ChatSurface {
     if (!chatUrl(requestedUrl)) throw new Error('tab_origin_not_allowed');
     const view = new WebContentsView({webPreferences:{
       partition:'persist:metaengine-devfleet-auth-v1',
+      javascript:true, // Explicit contract. JS is already true by Electron default.
       nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true,
       spellcheck:true,backgroundThrottling:false
     }});
     this.#views.set(tabId,view);
+    this.#nativeLoadState.set(tabId,{type:'CREATED'});
+    view.webContents.on('did-finish-load',()=>this.#nativeLoadState.set(tabId,{type:'DID_FINISH_LOAD'}));
+    view.webContents.on('did-fail-load',(_event,code,_detail,_url,isMainFrame)=>{
+      if(isMainFrame)this.#nativeLoadState.set(tabId,{type:'DID_FAIL_LOAD',code});
+    });
     this.#navigationGenerations.set(tabId,0);
     this.#eventHints.register(tabId,'webcontents:'+view.webContents.id);
     const advanceNavigation = () => {
@@ -225,8 +257,32 @@ export class ChatSurface {
         this.#eventHints.invalidate(tabId);
     });
     view.webContents.debugger.on('detach',()=>this.#eventHints.invalidate(tabId));
-    view.webContents.setWindowOpenHandler(({url})=>({action:'deny'}));
-    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#navigationGenerations.delete(tabId);this.#eventHints.unregister(tabId);});
+    if(this.#educationMode){
+      const externalAuth=e=>{
+        if(!isGoogleEmbeddedAuthorization(e.url))return;
+        e.preventDefault();
+        this.#nativeLoadState.set(tabId,{type:'EXTERNAL_AUTH_REQUIRED',provider:'Google'});
+        this.#window.webContents.send('education:external-auth-required',{
+          provider:'Google',source:'embedded_browser_unsupported'
+        });
+        // A system browser is used for official interactive login. Do not
+        // replay the embedded OAuth URL or transfer any browser credentials.
+        void shell.openExternal(SAFE_EXTERNAL_CHATGPT_URL).catch(()=>{});
+      };
+      view.webContents.on('will-navigate',externalAuth);
+      view.webContents.on('will-redirect',externalAuth);
+    }
+    view.webContents.setWindowOpenHandler(({url})=>{
+      if(this.#educationMode&&isGoogleEmbeddedAuthorization(url)){
+        this.#nativeLoadState.set(tabId,{type:'EXTERNAL_AUTH_REQUIRED',provider:'Google'});
+        this.#window.webContents.send('education:external-auth-required',{
+          provider:'Google',source:'embedded_popup_unsupported'
+        });
+        void shell.openExternal(SAFE_EXTERNAL_CHATGPT_URL).catch(()=>{});
+      }
+      return {action:'deny'};
+    });
+    view.webContents.on('destroyed',()=>{this.#views.delete(tabId);this.#nativeLoadState.delete(tabId);this.#navigationGenerations.delete(tabId);this.#eventHints.unregister(tabId);});
     // Only ChatGPT receives DevFleet commands; authentication redirects are
     // allowed for user-driven login, but never selected as command surfaces.
     if (!this.#selected) this.select(tabId);
