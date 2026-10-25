@@ -86,6 +86,7 @@ async function readStableFile(file, maxBytes) {
 // checks its Microsoft signature and loads the result only to inspect Run's
 // signature. No worker request is read and no job is started during preparation.
 const compilerScript = String.raw`param([Parameter(Mandatory=$true)][string]$RequestPath)
+$buildClock = [Diagnostics.Stopwatch]::StartNew()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -109,8 +110,53 @@ $arguments = @('/nologo', '/noconfig', '/nostdlib+', '/target:library', '/platfo
 foreach ($name in @('mscorlib.dll', 'System.dll', 'System.Core.dll')) { $arguments += '/reference:' + (Join-Path $framework $name) }
 $arguments += '/out:' + [string]$request.assembly_path
 $arguments += [string]$request.source_path
-& $compiler @arguments
-if ($LASTEXITCODE -ne 0) { throw 'codex_job_runtime_compile_failed' }
+function Quote-CompilerArgument([string]$Value) {
+  # CommandLineToArgvW quoting: escape quotes and their preceding backslashes,
+  # then double trailing backslashes before adding the closing quote.
+  return '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+$start = [Diagnostics.ProcessStartInfo]::new()
+$start.FileName = $compiler
+$start.Arguments = (($arguments | ForEach-Object { Quote-CompilerArgument ([string]$_) }) -join ' ')
+$start.WorkingDirectory = $system
+$start.UseShellExecute = $false
+$start.CreateNoWindow = $true
+$start.RedirectStandardInput = $true
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+$start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+$start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
+$process = [Diagnostics.Process]::new()
+$process.StartInfo = $start
+$started = $false
+try {
+  if ($buildClock.ElapsedMilliseconds -ge 150000) { throw 'codex_job_runtime_compile_budget_exhausted' }
+  if (-not $process.Start()) { throw 'codex_job_runtime_compiler_start_failed' }
+  $started = $true
+  $process.StandardInput.Close()
+  # Drain both pipes concurrently; neither a GUI-subsystem executable nor a
+  # full output pipe may turn invocation into an unobserved background build.
+  $stdout = $process.StandardOutput.ReadToEndAsync()
+  $stderr = $process.StandardError.ReadToEndAsync()
+  $wait = [int][Math]::Max(0, [Math]::Min(120000, 150000 - $buildClock.ElapsedMilliseconds))
+  $exited = $process.WaitForExit($wait)
+  if (-not $exited) {
+    $process.Kill()
+    if (-not $process.WaitForExit(5000)) { throw 'codex_job_runtime_compiler_termination_timeout' }
+  }
+  if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 5000)) { throw 'codex_job_runtime_compiler_output_timeout' }
+  [Console]::Out.Write($stdout.GetAwaiter().GetResult())
+  [Console]::Error.Write($stderr.GetAwaiter().GetResult())
+  if (-not $exited) { throw 'codex_job_runtime_compile_timeout' }
+  if ($process.ExitCode -ne 0) { throw ('codex_job_runtime_compile_failed_exit_' + $process.ExitCode) }
+} finally {
+  try {
+    if ($started -and -not $process.HasExited) {
+      $process.Kill()
+      if (-not $process.WaitForExit(5000)) { throw 'codex_job_runtime_compiler_termination_timeout' }
+    }
+  } finally { $process.Dispose() }
+}
 if ((Get-Digest $compiler) -ne [string]$request.compiler_sha256 -or (Get-Digest ([string]$request.source_path)) -ne [string]$request.csharp_sha256) { throw 'codex_job_runtime_build_input_changed' }
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes([string]$request.assembly_path))
 $type = $assembly.GetType('MetaengineCodexJob', $true, $false)

@@ -244,4 +244,15 @@ test('Windows preparation compiles the real class once, publishes pinned self-co
   assert.deepEqual(await fs.readFile(result.helperPath), helper, 'failed build must not replace the accepted helper');
   assert.deepEqual(await fs.readFile(result.manifestPath), manifestBytes, 'failed build must not replace its manifest');
   await assert.rejects(fs.access(path.join(outputDirectory, '.prepare.lock')), { code: 'ENOENT' });
+  await fs.writeFile(helperSourcePath, template.toString().replace('public static class MetaengineCodexJob', 'public static class MetaengineCodexJob INVALID_SYNTAX'));
+  await assert.rejects(prepareCodexCliJobRuntime({ helperSourcePath, outputDirectory }), error => {
+    assert.equal(error.message, 'codex_job_runtime_build_failed');
+    const diagnostics = String(error.cause?.stdout ?? '') + '\n' + String(error.cause?.stderr ?? '');
+    assert.match(diagnostics, /error CS\d{4}/, 'the actual compiler must emit its C# syntax diagnostic');
+    assert.match(diagnostics, /codex_job_runtime_compile_failed_exit_[1-9]\d*/);
+    return true;
+  });
+  assert.deepEqual(await fs.readFile(result.helperPath), helper, 'compiler failure must retain the accepted helper');
+  assert.deepEqual(await fs.readFile(result.manifestPath), manifestBytes, 'compiler failure must retain its manifest');
+  await assert.rejects(fs.access(path.join(outputDirectory, '.prepare.lock')), { code: 'ENOENT' });
 });

@@ -167,6 +167,49 @@ References:
 - [Windows current-directory lifetime](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory).
 - [Node filesystem removal and transient-error retry options](https://nodejs.org/api/fs.html#fspromisesrmpath-options).
 
+## Compiler lifetime made explicit after preserved diagnostics
+
+The cleanup follow-up `e95423f87f562ac2f166d6a796dd6fd8f376b1a2` reached
+Windows build preparation again. Current Source, Critical Audit and Live
+Mechanics all failed with
+an intact primary error: strict-mode access to an unset `$LASTEXITCODE` after
+`& $compiler @arguments`. The PowerShell wrapper exited with code 1 and was not
+killed; none of their logs contained a cleanup error. These are compiler-launch/exit
+observation failures, before native execution, not a successful compiler result.
+Exact receipts are in `compiler-lifetime-ci.json`.
+
+The next build-only repair uses an owned `System.Diagnostics.Process` for the
+fixed signed compiler, an explicit argument vector encoded for Windows, a fixed
+System32 working directory and `UseShellExecute=false`. Both output streams are
+drained concurrently, the actual process exit is awaited and its `ExitCode`
+determines compilation success. Timeout terminates only that owned process and
+requires bounded exit observation. The existing 180-second outer build deadline
+is unchanged; the inner elapsed budget accounts for signature verification and
+leaves time for termination and diagnostic drain. Task startup and boot-read
+budgets remain 30 and 12 seconds.
+
+A physical Windows negative case now supplies invalid C# and requires both a
+real `CSdddd` compiler diagnostic and a nonzero observed compiler exit. The
+previous accepted helper/manifest and lock cleanup are checked after this
+refusal. The original native C# source and successful artifact checks are
+unchanged. Linux cannot establish this Windows compiler behavior.
+
+The final local build/runtime integration passed 34 tests with zero failures and
+one Windows-only skip; 240 source parser checks and 124 current/historical
+source preflight tests passed. The Windows compilation
+and refusal cases remain a mandatory physical gate. Only the two reviewed
+build/test blobs were refreshed in the 577-path current source seal.
+
+PowerShell's documented treatment of some GUI applications is consistent with
+the observed unset variable and earlier cwd lock, but the compiler's actual PE
+subsystem was not observed, so this is an inference rather than an asserted
+root-cause subtype.
+
+References:
+
+- [PowerShell native process waiting semantics](https://devblogs.microsoft.com/powershell/managing-processes-in-powershell/).
+- [Process redirected output and deadlock avoidance](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.standardoutput?view=netframework-4.8.1).
+
 ## Acceptance still required
 
 This continuation must be qualified on its own final source commit. Portable
