@@ -6,7 +6,8 @@ import {CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX, CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX} 
 // Disposable-helper diagnostics only. These labels carry no native authority,
 // and neither helper stderr nor process arguments/environment are exported.
 export const CODEX_STARTUP_STAGES = Object.freeze(['PS_ENTER', 'ASSEMBLY_LOAD_BEGIN', 'ASSEMBLY_LOAD_END',
-  'REQUEST_READ_BEGIN', 'REQUEST_READ_END', 'NATIVE_RUN_ENTER', 'IMAGE_DIGEST_CHECKED',
+  'REQUEST_READ_BEGIN', 'REQUEST_LINE_READ', 'REQUEST_JSON_BEGIN', 'REQUEST_JSON_END', 'REQUEST_READ_END',
+  'NATIVE_RUN_ENTER', 'IMAGE_DIGEST_CHECKED',
   'CHILD_JOB_BOUND', 'IDENTITY_READBACK_COMPLETE', 'READY_WRITE_BEGIN', 'READY_FLUSH_RETURNED']);
 const prefix = 'ME_CODEX_STARTUP_V1 ';
 const ps = stage => `[Console]::Error.WriteLine('${prefix}${stage}'); [Console]::Error.Flush()\n`;
@@ -51,8 +52,19 @@ export function instrumentCodexCliRuntimeStartup(source) {
   if (loaders.length !== 1) throw invalidSource();
   const loader = loaders[0], bytes = loader.slice(CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX.length, -CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX.length);
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(bytes)) throw invalidSource();
+  const request = '  $request = [Console]::In.ReadLine() | ConvertFrom-Json';
+  if (source.split(request).length !== 2 || source.includes('$metaengineStartupRequestLine')) throw invalidSource();
+  // Only the disposable prepared helper separates the same input and parser
+  // operations. No request bytes are logged and its compiled assembly is reused.
+  const observedRequest = [
+    '  $metaengineStartupRequestLine = [Console]::In.ReadLine()',
+    '  ' + ps('REQUEST_LINE_READ').trimEnd(),
+    '  ' + ps('REQUEST_JSON_BEGIN').trimEnd(),
+    '  $request = $metaengineStartupRequestLine | ConvertFrom-Json',
+    '  ' + ps('REQUEST_JSON_END').trimEnd(),
+  ].join(eol);
   return source.replace(loader, ps('ASSEMBLY_LOAD_BEGIN').replaceAll('\n', eol) + loader
-    + eol + ps('ASSEMBLY_LOAD_END').trimEnd());
+    + eol + ps('ASSEMBLY_LOAD_END').trimEnd()).replace(request, observedRequest);
 }
 
 export function createCodexCliStartupPhaseParser({now = () => performance.now(), startedAt = now()} = {}) {

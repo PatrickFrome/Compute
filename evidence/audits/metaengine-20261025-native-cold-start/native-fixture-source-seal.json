@@ -1,0 +1,59 @@
+{
+  "schema": "metaengine.native-cold-start.source-seal-followup.v1",
+  "baseline_source": "1ca3587b1104002f11b9cd86a0555ff4efbdcd30",
+  "sealed_paths": 577,
+  "updated_entries": [
+    {
+      "path": ".github/windows-native-read-observation.mjs",
+      "prior_blob": "87f0f0adbc0c5ecff3dadcc0d48e505077820a36",
+      "current_blob": "df09cc2f60c64f1e44cb32ad9312286614dfbd40"
+    },
+    {
+      "path": ".github/workflows/client-live-mechanics-recovery-v1.yml",
+      "prior_blob": "95a358e181b7012b06f380313547fa215f671eda",
+      "current_blob": "dc77c855b65c470a09bbb1f97551f2687f3ed98d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+      "prior_blob": "daeaa7d60bc407a3c9a7ec5f347e2b480b1cde08",
+      "current_blob": "6320f4b3e3c169dfdc55b905f2ac54c2a335383c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "prior_blob": "a1d8d04b38bed5c21b274def90cf994b63c9eb2c",
+      "current_blob": "f8aec241ec62587b52613f5434a73289c54fdd92"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+      "prior_blob": "ab8ed04507c5bcdf480a75d0329b982b431b75f8",
+      "current_blob": "864c412089b45932df5088c9e23bea50bcc2ef34"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+      "prior_blob": "45294ddee8f2a5249ee59e34c3a7d33826a6d670",
+      "current_blob": "cc3ee613b1c2969428a6b2bc9d22ff8f83fef470"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs",
+      "prior_blob": "9add5de97855511e488f4b75422fe859727089e3",
+      "current_blob": "03cfcac8eaca8e4288584bc8710152dd7dff8654"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs",
+      "prior_blob": "0f1b2f25fad8143cbc8dfc780bfe6a1622775d70",
+      "current_blob": "ec87dcf1842c49a1b301bcd0fd9aa4f704fb71d8"
+    },
+    {
+      "path": "apps/metaengine-browser/test/live-mechanics-native-probe-workflow.test.mjs",
+      "prior_blob": "b49856e45227ea0dba4147a3cf622432d7dca914",
+      "current_blob": "ac15740335caee939ed93069fdc782d59f2d00ec"
+    },
+    {
+      "path": "apps/metaengine-browser/test/windows-native-read-observation.test.mjs",
+      "prior_blob": "07929a8725732e9422ccd86d189b3bd1dc3863e8",
+      "current_blob": "a9ace0ec98cccdba2eede3ac5943e954edac83d5"
+    }
+  ],
+  "all_other_manifest_fields_unchanged": true,
+  "native_runtime_changed": false
+}

@@ -13,7 +13,7 @@ passed the 124-test current/historical source preflight. These outcomes replace
 the earlier in-progress snapshot; they are not inherited qualification for this
 continuation.
 
-The failures have four independent causes:
+The observed failures fall into four groups:
 
 1. Linux Current Source and Shell each failed one real Electron MAIN_PROCESS
    ASAR regression because no X display was available. Their complete suites
@@ -21,11 +21,13 @@ The failures have four independent causes:
 2. Windows capture fixtures aborted inside libuv `src/win/fs-event.c`, before a
    JavaScript assertion could report the problem. Directory `fs.watch` was used
    on both sides of their private readiness/stop channel.
-3. Windows native controller startup stopped inside `Add-Type`: Current Source
+3. Windows native controller startup stopped in the `Add-Type` interval: Current Source
    recorded `PS_ENTER` at 254 ms and `ADD_TYPE_BEGIN` at 265 ms, no compilation
    completion, no validated ready frame, and helper close at 30,044 ms. A
    separate Critical Audit run spent approximately 24,948 ms in that same
-   compilation phase. Later warm runs took only a few hundred milliseconds.
+   interval. This includes command/module initialization and does not isolate
+   time spent inside the external compiler. Later runs took only a few hundred
+   milliseconds under different warm/load conditions.
    The boot reader also exceeded its 12-second deadline; its old path compiled
    a small C# P/Invoke class on every independent native read.
 4. Package Smoke correctly refused to reuse version
@@ -235,6 +237,93 @@ still honored. The source/run/attempt-scoped log gives a reviewer the native
 failure details before the longer complete regression job finishes.
 
 The observed stage statuses are retained in `native-stage-observability.json`.
+
+## Terminal Windows results and fixture repair
+
+The normal, completed Current Source Windows job for
+`28b105a23e8ffa28083b27313f784c6a75b8e046` ran **6,001 tests: 5,988 passed,
+five failed, eight skipped, zero cancelled**. The real producer and invalid-C#
+refusal passed. All controller cases, the forced output-order case and physical
+window capture passed. Capture completed without the earlier libuv fs-event
+assertion. The exact run and job receipts are in `windows-native-runtime-ci.json`.
+
+Three failures came from fixture assumptions: the malformed here-string negative
+used an LF-only mutation against the CRLF Windows checkout, and both physical
+birth scenarios prepared their helper below a child directory even though their
+native observer requires the helper and birth channel beside the owned cwd.
+The negative now exercises both LF and CRLF and requires changed bytes before
+asserting refusal. The birth helper is prepared in that owned cwd; the existing
+native `private_fixture_paths` guard and physical birth assertions are retained.
+
+The two other failures are real bounded-read failures: boot identity exceeded
+12 seconds and process inventory exceeded 15 seconds. A separate normal Live
+Mechanics job confirmed both: its isolated six-file suite had 129 passes, four
+failures and one skip. Controller, output order and physical capture passed;
+the two readers and two birth fixtures failed. Its later full suite reported
+5,987 passes, five failures, one cancelled test and eight skips; the fault-helper
+test hit its own 180-second ceiling. This is not a completely qualified Windows
+suite, and a cancelled test is not counted as a pass.
+
+The startup phase receipt localizes one remaining delay more precisely. Current
+Source loaded the prepared assembly from 182 to 188 ms, then spent 188 to
+22,615 ms in the combined `ReadLine | ConvertFrom-Json` interval. Live Mechanics
+showed the same broad location: assembly 165–170 ms and request 170–17,596 ms
+in its isolated run; assembly 236–244 ms and request 244–28,528 ms in its full
+run. These observations do not distinguish stdin wait from JSON/cmdlet
+initialization and do not prove runner contention.
+
+The existing post-failure, read-only diagnostic returned boot identity in
+17,648 ms and process identity in 17,370 ms using its separate 60-second
+diagnostic ceiling. Those later results cannot replace the original failed
+12/15-second observations. The diagnostic now inserts fixed, uniquely anchored
+stderr phase labels around native binding, each CIM read, owner lookup and JSON
+serialization, retaining the readers' stdout, validations, owned child handles
+and failure propagation. Only bounded stage names/times and unknown-byte counts
+are emitted; command text, paths, rows, environment and native errors are not
+exported. A changed or ambiguous source anchor refuses before execution.
+
+The disposable output-order helper likewise distinguishes `ReadLine` completion
+from JSON parsing. Its custom C# preparation runs in a separate build hook;
+the producer's 180-second subprocess ceiling and owned cleanup remain in force,
+and the hook allows 210 seconds for that preparation and cleanup. The measured
+native test keeps 60 seconds, controller startup 30 seconds and child lifetime
+15 seconds. Teardown waits for the owned preparation to settle before removing
+its directory. Neither instrumentation changes the production helper template.
+
+The four suspended-cleanup fault variants each change real C# and still receive
+one separate build; reusing the production assembly would erase those faults.
+Their preparations now precede the unchanged 180-second native test in an owned
+suite hook, with four 210-second preparation envelopes around the unchanged
+180-second producers. Every fault and cleanup/canary assertion remains present.
+The suite cleanup uses the same bounded settlement barrier, retaining the
+original setup error and refusing to remove a directory still owned by a build.
+These changes do not shorten the complete suite by themselves and do not widen
+the existing 10/20-minute workflow qualification steps.
+
+A separate Windows diagnostic job runs the two instrumented reads and the
+disposable output-order case on a fresh runner, with exact source verification
+and fixed time ceilings. It has no package installation or model invocation.
+This shorter diagnostic makes stage evidence available independently of the
+long full-suite job; the original isolated probe, full suite and PostgreSQL job
+remain mandatory and unchanged. Diagnostic completion does not establish
+source, installed-client, release or cooperative-autonomy acceptance.
+
+The combined local fixture/controller/diagnostic regression passed **169 of
+180 tests, zero failures and 11 Windows-only skips**, with 240 source parser
+checks. Controlled rejected/late-settling preparation probes exercised the
+actual fixture modules and confirmed cleanup ordering while retaining setup
+failure; they did not execute a Windows compiler or native helper. The fresh
+diagnostic import graph resolved 24 local modules and 16 Node builtins without
+packages, and a negative control proved the package-resolution refusal.
+These checks and file hashes are retained in `native-fixture-verification.json`.
+
+The preceding `1ca3587b1104002f11b9cd86a0555ff4efbdcd30` early artifact was
+successfully downloaded and digest-checked before its full job ended. Its
+isolated log is partial, with no final counts, after a 607-second step against
+a ten-minute ceiling. Five failure rows and a passing output-order observation
+are present; the full runner timeout message was not yet available. It is
+recorded separately in `early-native-partial-ci.json`, not treated as a normal
+terminal qualification or combined with the completed 28b results.
 
 ## Acceptance still required
 

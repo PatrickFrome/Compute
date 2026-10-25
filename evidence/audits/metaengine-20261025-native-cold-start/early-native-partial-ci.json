@@ -1,0 +1,153 @@
+{
+  "schema": "metaengine.ci.windows-native-early-partial.v1",
+  "source_head_sha": "1ca3587b1104002f11b9cd86a0555ff4efbdcd30",
+  "source_tree_sha": "cc13df05d7fe257e4d7483fd4cc932d5b5d20e76",
+  "workflow": "Client Live Mechanics Recovery",
+  "run_id": 40236158886,
+  "run_attempt": 1,
+  "job_id": 121298084363,
+  "url": "https://github.com/PatrickFrome/Compute/actions/runs/40236158886/job/121298084363",
+  "artifact": {
+    "id": 12615681610,
+    "name": "windows-native-probe-1ca3587b1104002f11b9cd86a0555ff4efbdcd30-40236158886-1",
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12615681610",
+    "created_at": "2026-10-25T21:48:12Z",
+    "archive_length_bytes": 4509,
+    "archive_sha256": "5efb098c16f78ed455972731cd1b6118c0ec5dbc913de0fc4d58dac6ae6826e3",
+    "api_digest": "sha256:5efb098c16f78ed455972731cd1b6118c0ec5dbc913de0fc4d58dac6ae6826e3",
+    "digest_verified": true,
+    "log_length_bytes": 11396,
+    "log_sha256": "aa82f6d62984775c26a6b7d6f9e700712bb227bb7fb6e67ba30369118f055fdc"
+  },
+  "step": {
+    "name": "Isolated Windows native diagnostic (not contention proof)",
+    "started_at": "2026-10-25T21:38:03Z",
+    "completed_at": "2026-10-25T21:48:10Z",
+    "conclusion": "failure",
+    "configured_timeout_minutes": 10,
+    "observed_duration_seconds": 607,
+    "timeout_inferred_only": true,
+    "termination_cause_confirmed": false,
+    "termination_note": "A 10m7s failed step with a 10-minute configured budget and an incomplete log is consistent with a stage timeout; the early artifact does not contain the runner termination message."
+  },
+  "completion_kind": "PARTIAL_NO_FINAL_SUMMARY",
+  "qualified": false,
+  "no_final_summary": true,
+  "final_test_totals": null,
+  "failure_count_observed": 5,
+  "failures": [
+    {
+      "test": "real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails",
+      "duration_ms": 180027.1762,
+      "status": "FAILED_ROW_OBSERVED",
+      "cause_in_early_log": null
+    },
+    {
+      "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+      "duration_ms": 12026.5247,
+      "status": "FAILED_ROW_OBSERVED",
+      "cause_in_early_log": null
+    },
+    {
+      "test": "real Windows inner Job kills the exact suspended birth-window child before ready, independently of the outer cleanup guard",
+      "duration_ms": 46944.9075,
+      "status": "FAILED_ROW_OBSERVED",
+      "cause_in_early_log": null
+    },
+    {
+      "test": "real Windows unassigned INNER control survives helper death until later exact owned cleanup",
+      "duration_ms": 46214.7746,
+      "status": "FAILED_ROW_OBSERVED",
+      "cause_in_early_log": null
+    },
+    {
+      "test": "native Windows process inventory independently reads this test process without executing a model",
+      "duration_ms": 15019.946,
+      "status": "FAILED_ROW_OBSERVED",
+      "cause_in_early_log": null
+    }
+  ],
+  "output_order": {
+    "status": "PASS_OBSERVED",
+    "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+    "duration_ms": 46152.1092,
+    "startup_observation": {
+      "schema": "metaengine.codex-cli.test-startup-phases.v1",
+      "helper_variant": "FORCED_OUTPUT_WINDOW",
+      "startup_deadline_ms": 30000,
+      "helper_spawns_observed": 1,
+      "spawn_event_elapsed_ms": 3,
+      "ready_validated_elapsed_ms": 22869,
+      "close_elapsed_ms": 22954,
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 191
+        },
+        {
+          "stage": "ASSEMBLY_LOAD_BEGIN",
+          "elapsed_ms": 200
+        },
+        {
+          "stage": "ASSEMBLY_LOAD_END",
+          "elapsed_ms": 207
+        },
+        {
+          "stage": "REQUEST_READ_BEGIN",
+          "elapsed_ms": 207
+        },
+        {
+          "stage": "REQUEST_READ_END",
+          "elapsed_ms": 22710
+        },
+        {
+          "stage": "NATIVE_RUN_ENTER",
+          "elapsed_ms": 22741
+        },
+        {
+          "stage": "IMAGE_DIGEST_CHECKED",
+          "elapsed_ms": 22861
+        },
+        {
+          "stage": "CHILD_JOB_BOUND",
+          "elapsed_ms": 22866
+        },
+        {
+          "stage": "IDENTITY_READBACK_COMPLETE",
+          "elapsed_ms": 22868
+        },
+        {
+          "stage": "READY_WRITE_BEGIN",
+          "elapsed_ms": 22868
+        },
+        {
+          "stage": "READY_FLUSH_RETURNED",
+          "elapsed_ms": 22869
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "body_failed": false,
+      "phase_timing_observation_only": true,
+      "contention_proven": false,
+      "native_qualification_proven": false
+    },
+    "assembly_load_duration_ms": 7,
+    "combined_request_read_duration_ms": 22503
+  },
+  "last_test_row": "bridge waits for close and drains output after exit before releasing private request files",
+  "physical_exact_window_capture_result_present": false,
+  "full_suite_result_included": false,
+  "original_probe_result_replaced": false,
+  "authority_effect": false,
+  "release_authority": false,
+  "native_qualification_proven": false,
+  "causal_attribution_proven": false,
+  "contention_proven": false,
+  "limits": [
+    "The artifact has no final test summary or failure stack section. Failure rows establish observed failures but do not independently establish their causes.",
+    "The output-order pass and timing observation do not qualify the incomplete six-file phase.",
+    "Moving fixture preparation to a setup hook does not shorten total stage duration or establish that the stage now fits its 10-minute budget."
+  ]
+}

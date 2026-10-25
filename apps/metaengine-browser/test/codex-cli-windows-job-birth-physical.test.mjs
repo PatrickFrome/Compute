@@ -390,8 +390,11 @@ for (const scenario of ['BOUND', 'UNASSIGNED_CONTROL']) test(scenario === 'BOUND
   const helperSourcePath = path.join(directory, 'birth-gated-helper.source.ps1');
   const helperSource = buildBirthGatedHelper(original.toString('utf8'), {scenario, nonce, channel});
   await fs.writeFile(helperSourcePath, '\ufeff' + helperSource, 'utf8');
-  const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: path.join(directory, 'prepared')});
+  // Keep the compiled helper and birth channel as siblings in the owned cwd,
+  // as required by the unchanged native observer's private_fixture_paths guard.
+  const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: directory});
   const helperPath = prepared.helperPath;
+  assert.equal(path.dirname(helperPath), directory, 'prepared helper must stay beside its private birth channel');
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const expectedSha = sha(await fs.readFile(process.execPath));
   const helperRequest = JSON.stringify({executable_path: process.execPath,

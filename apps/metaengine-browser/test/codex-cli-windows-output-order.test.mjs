@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -26,17 +26,40 @@ test('native helper acknowledges successful resume before starting either output
   assert.ok(source.indexOf(resumedFrame) < source.indexOf(stderrPump), 'stderr cannot race ahead of resumed');
 });
 
-test('real Windows native helper buffers immediate output through a forced post-resume pre-ack window', {
-  skip: process.platform !== 'win32', timeout: 60000,
-}, async t => {
+let preparedFixture, ownedFixtureDirectory, preparation;
+
+// A 210-second setup envelope contains the unchanged 180-second producer and
+// its cleanup, separately from the native test/controller/child budgets.
+// A timed-out hook cannot remove the fixture while preparation still owns it.
+after(async () => {
+  if (preparation) {
+    let timer;
+    try {
+      const settled = await Promise.race([
+        preparation.then(() => true, () => true),
+        new Promise(resolve => { timer = setTimeout(() => resolve(false), 30000); }),
+      ]);
+      if (!settled) throw Error('codex_output_order_preparation_cleanup_pending');
+    } finally { clearTimeout(timer); }
+  }
+  if (!ownedFixtureDirectory) return;
+  const {directory, temporary} = ownedFixtureDirectory;
+  assert.equal(await fs.realpath(directory), directory);
+  assert.equal(path.dirname(directory), temporary);
+  assert.ok(path.basename(directory).startsWith('metaengine-codex-output-order-'));
+  await fs.rm(directory, {recursive: true, force: true});
+});
+
+before(() => {
+  if (process.platform !== 'win32') return;
+  preparation = prepareOutputOrderFixture();
+  return preparation;
+}, {timeout: 210000});
+
+async function prepareOutputOrderFixture() {
   const temporary = await fs.realpath(os.tmpdir());
   const directory = await fs.realpath(await fs.mkdtemp(path.join(temporary, 'metaengine-codex-output-order-')));
-  t.after(async () => {
-    assert.equal(await fs.realpath(directory), directory);
-    assert.equal(path.dirname(directory), temporary);
-    assert.ok(path.basename(directory).startsWith('metaengine-codex-output-order-'));
-    await fs.rm(directory, {recursive: true, force: true});
-  });
+  ownedFixtureDirectory = {directory, temporary};
   const helperSource = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
   assert.equal(helperSource.split(resumeCall).length, 2, 'delay must target only the real native resume');
   const written = path.join(directory, 'child-wrote-before-ack.txt');
@@ -56,12 +79,20 @@ test('real Windows native helper buffers immediate output through a forced post-
   const runtimeSource = instrumentCodexCliRuntimeStartup(await fs.readFile(helperPath, 'utf8'));
   await fs.writeFile(helperPath, runtimeSource, 'utf8');
   const expectedHelperSha256 = sha(await fs.readFile(helperPath));
+  const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
+  preparedFixture = Object.freeze({directory, helperSource, written, helperPath, expectedHelperSha256, expectedExecutableSha256});
+}
+
+test('real Windows native helper buffers immediate output through a forced post-resume pre-ack window', {
+  skip: process.platform !== 'win32', timeout: 60000,
+}, async t => {
+  assert.ok(preparedFixture, 'the explicit build must complete before measured native execution');
+  const {directory, helperSource, written, helperPath, expectedHelperSha256, expectedExecutableSha256} = preparedFixture;
   const expectedStdout = 'stdout-before-ack\n';
   const expectedStderr = 'stderr-before-ack\n';
   const script = `const fs=require('node:fs');`
     + `fs.writeSync(1,'stdout-before-ack\\n');fs.writeSync(2,'stderr-before-ack\\n');`
     + `fs.writeFileSync(${JSON.stringify(written)},'both-pipes-written');`;
-  const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
   const runId = crypto.randomUUID();
   const processController = createCodexCliWindowsProcessController({helperPath, expectedHelperSha256});
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {describe, before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -334,33 +334,75 @@ test('real Windows pre-RESUME cancellations never execute a canary and bind sepa
   assert.notEqual(receipts[0].process_incarnation_id, receipts[1].process_incarnation_id);
 });
 
-test('real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails', { skip: process.platform !== 'win32', timeout: 180000 }, async t => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-cancel-fault-'));
-  t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
-  const source = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
-  const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
-  // These copies deliberately pass invalid native handles; production helper
-  // bytes and OS policy stay untouched. This is failure-path evidence only.
-  const faults = [
-    ['TerminateJobObject(job,125)', 'TerminateJobObject(IntPtr.Zero,125)'],
-    ['GetExitCodeProcess(process.process,out cancelledCode)', 'GetExitCodeProcess(IntPtr.Zero,out cancelledCode)'],
-    ['QueryInformationJobObject(job,1,out cancelledAccounting', 'QueryInformationJobObject(new IntPtr(-1),1,out cancelledAccounting'],
-    ['CloseChecked(ref job,"suspended_job_close_failed");', 'Require(CloseHandle(IntPtr.Zero),"suspended_job_close_failed");'],
-  ];
-  for (const [index, [before, after]] of faults.entries()) {
-    assert.equal(source.split(before).length, 2, 'each fault must target exactly one suspended cleanup operation');
-    const helperSourcePath = path.join(directory, `fault-${index}.ps1`), canary = path.join(directory, `must-not-exist-${index}.txt`);
-    await fs.writeFile(helperSourcePath, source.replace(before, after), 'utf8');
-    const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: path.join(directory, `prepared-${index}`)});
-    const processController = createCodexCliWindowsProcessController({ helperPath: prepared.helperPath, expectedHelperSha256: prepared.manifest.helper_sha256 });
-    await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
-      args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran')`],
-      cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {
-      handle.stdout.resume(); handle.stderr.resume(); await handle.terminate('CANCELLED');
-      const completion = await handle.completion;
-      assert.equal(completion.tree_cleanup_confirmed, false); assert.equal(completion.reason, 'NATIVE_JOB_FAILED');
-      assert.equal(completion.exit_code, 1); assert.equal(completion.cancellation_id, undefined);
-      await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
-    });
+describe('Windows native suspended cleanup fault fixtures', {skip: process.platform !== 'win32'}, () => {
+  let preparedFixture, ownedFixtureDirectory, preparation;
+
+  // Keep all four explicit C# builds outside the unchanged native test budget.
+  // A timed-out setup cannot remove a directory while its producer owns it.
+  after(async () => {
+    if (preparation) {
+      let timer;
+      try {
+        const settled = await Promise.race([
+          preparation.then(() => true, () => true),
+          new Promise(resolve => { timer = setTimeout(() => resolve(false), 30000); }),
+        ]);
+        if (!settled) throw Error('codex_cancel_fault_preparation_cleanup_pending');
+      } finally { clearTimeout(timer); }
+    }
+    if (!ownedFixtureDirectory) return;
+    const {directory, temporary, physicalDirectory} = ownedFixtureDirectory;
+    assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep));
+    assert.equal(await fs.realpath(directory), physicalDirectory);
+    assert.equal(path.dirname(physicalDirectory), temporary);
+    assert.ok(path.basename(physicalDirectory).startsWith('metaengine-codex-cancel-fault-'));
+    await fs.rm(directory, {recursive: true, force: true});
+  });
+
+  before(() => {
+    preparation = prepareFaultFixtures();
+    return preparation;
+  }, {timeout: 4 * 210000});
+
+  async function prepareFaultFixtures() {
+    const temporary = await fs.realpath(os.tmpdir());
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-cancel-fault-'));
+    ownedFixtureDirectory = {directory, temporary, physicalDirectory: await fs.realpath(directory)};
+    const source = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
+    const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
+    // These copies deliberately pass invalid native handles; production helper
+    // bytes and OS policy stay untouched. This is failure-path evidence only.
+    const faults = [
+      ['TerminateJobObject(job,125)', 'TerminateJobObject(IntPtr.Zero,125)'],
+      ['GetExitCodeProcess(process.process,out cancelledCode)', 'GetExitCodeProcess(IntPtr.Zero,out cancelledCode)'],
+      ['QueryInformationJobObject(job,1,out cancelledAccounting', 'QueryInformationJobObject(new IntPtr(-1),1,out cancelledAccounting'],
+      ['CloseChecked(ref job,"suspended_job_close_failed");', 'Require(CloseHandle(IntPtr.Zero),"suspended_job_close_failed");'],
+    ];
+    const helpers = [];
+    for (const [index, [before, after]] of faults.entries()) {
+      assert.equal(source.split(before).length, 2, 'each fault must target exactly one suspended cleanup operation');
+      const helperSourcePath = path.join(directory, `fault-${index}.ps1`), canary = path.join(directory, `must-not-exist-${index}.txt`);
+      await fs.writeFile(helperSourcePath, source.replace(before, after), 'utf8');
+      const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: path.join(directory, `prepared-${index}`)});
+      helpers.push({prepared, canary});
+    }
+    preparedFixture = {directory, expectedExecutableSha256, helpers};
   }
+
+  test('real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails', { skip: process.platform !== 'win32', timeout: 180000 }, async () => {
+    assert.ok(preparedFixture, 'all explicit fault builds must complete before measured native execution');
+    const {directory, expectedExecutableSha256, helpers} = preparedFixture;
+    for (const {prepared, canary} of helpers) {
+      const processController = createCodexCliWindowsProcessController({ helperPath: prepared.helperPath, expectedHelperSha256: prepared.manifest.helper_sha256 });
+      await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
+        args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran')`],
+        cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {
+        handle.stdout.resume(); handle.stderr.resume(); await handle.terminate('CANCELLED');
+        const completion = await handle.completion;
+        assert.equal(completion.tree_cleanup_confirmed, false); assert.equal(completion.reason, 'NATIVE_JOB_FAILED');
+        assert.equal(completion.exit_code, 1); assert.equal(completion.cancellation_id, undefined);
+        await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+      });
+    }
+  });
 });

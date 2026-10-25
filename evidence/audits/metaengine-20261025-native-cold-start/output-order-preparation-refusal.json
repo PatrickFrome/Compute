@@ -1,0 +1,7 @@
+{
+  "scope": "ACTUAL_FIXTURE_REJECTED_BEFORE_PORTABLE_CONTROL",
+  "compiler_invoked": false,
+  "native_execution_invoked": false,
+  "expected_failure": "EXPECTED_DISPOSABLE_PREPARATION_FAILURE",
+  "owned_fixture_removed": true
+}

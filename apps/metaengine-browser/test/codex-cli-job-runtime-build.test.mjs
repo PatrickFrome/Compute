@@ -155,15 +155,22 @@ test('precompilation preserves exact C# and all protocol text outside the single
   }
 });
 
-test('build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates', async () => {
-  const text = (await readTemplate()).toString();
-  for (const changed of [
-    text.replace('Add-Type -TypeDefinition', 'Other-Command -TypeDefinition'),
-    text + '\n' + text,
-    text + '\nAdd-Type -AssemblyName arbitrary\n',
-    text.replace("\n'@\n", '\nmissing-terminator\n'),
-    text.replace('public static class MetaengineCodexJob', 'public static class DifferentJob'),
-  ]) assert.throws(() => extractCodexCliJobRuntimeTemplate(Buffer.from(changed)), /codex_job_runtime_template_/);
+test('build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates with LF and CRLF', async () => {
+  const original = (await readTemplate()).toString('utf8').replace(/\r\n/g, '\n');
+  for (const ending of ['\n', '\r\n']) {
+    const text = original.replaceAll('\n', ending), templateBytes = Buffer.from(text);
+    for (const changed of [
+      text.replace('Add-Type -TypeDefinition', 'Other-Command -TypeDefinition'),
+      text + ending + text,
+      text + ending + 'Add-Type -AssemblyName arbitrary' + ending,
+      text.replace(/\r?\n'@(?=\r?\n|$)/, ending + 'missing-terminator'),
+      text.replace('public static class MetaengineCodexJob', 'public static class DifferentJob'),
+    ]) {
+      const changedBytes = Buffer.from(changed);
+      assert.equal(changedBytes.equals(templateBytes), false, 'each negative must change the actual template bytes');
+      assert.throws(() => extractCodexCliJobRuntimeTemplate(changedBytes), /codex_job_runtime_template_/);
+    }
+  }
   assert.throws(() => extractCodexCliJobRuntimeTemplate(Buffer.alloc(100, 0xff)), /encoding_invalid/);
   assert.throws(() => extractCodexCliJobRuntimeTemplate(Buffer.alloc(256 * 1024 + 1)), /size_invalid/);
 });

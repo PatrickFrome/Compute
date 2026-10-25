@@ -195,3 +195,31 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_DEVICE_BOOTSTRAP_FIXTURE_V1.sql
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261007101028_native_device_transport_bootstrap_v1.sql
           psql -v ON_ERROR_STOP=1 -f coordination/client-v1/sql/qualification/NATIVE_DEVICE_BOOTSTRAP_QUALIFICATION_V1.sql
+
+  windows-native-stage-observation:
+    name: Windows native stage observation (diagnostic only)
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prove exact observation source head
+        id: observation_source
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Observe fixed native read stages (diagnostic only)
+        timeout-minutes: 3
+        run: node .github/windows-native-read-observation.mjs
+      - name: Observe prepared helper input and JSON stages (diagnostic only)
+        if: ${{ !cancelled() && steps.observation_source.outcome == 'success' }}
+        timeout-minutes: 5
+        working-directory: apps/metaengine-browser
+        run: node --test test/codex-cli-windows-output-order.test.mjs
