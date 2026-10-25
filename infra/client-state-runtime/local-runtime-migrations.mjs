@@ -12,6 +12,17 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     relations: Object.freeze(['destruktion_meta.meta_orchestrator_controller_lease_h205f22']) },
   { path: '20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql', signature: 'public.meta_orchestrator_frontier_admit_v2(uuid,text,bigint,text[],text,bigint)', source_url: new URL('../../supabase/migrations/20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql', import.meta.url) },
   { path: '20260902183500_devos_live_ambiguity_reconciliation_v3.sql', signature: 'public.devos_fleet_reconcile_ambiguous_v2(uuid,text,uuid,text,bigint,text,text,bigint,jsonb)', source_url: new URL('../../supabase/migrations/20260902183500_devos_live_ambiguity_reconciliation_v3.sql', import.meta.url) },
+  // Native admission replaces this trigger, so an old dump must first have
+  // the reviewed browser gate. Never replay v2 over an existing v3/unknown body.
+  { path: '20260902190500_devos_dispatch_admission_runtime_v2.sql',
+    signature: 'destruktion_meta.devos_fleet_claim_transport_admission_h205f22()',
+    source_url: new URL('../../supabase/migrations/20260902190500_devos_dispatch_admission_runtime_v2.sql', import.meta.url),
+    upgrade_source_url: new URL('../../supabase/migrations/20260903052200_devos_dispatch_admission_signed_native_v3.sql', import.meta.url),
+    prerequisite: 'SIGNED_BROWSER_DISPATCH_V3',
+    signatures: Object.freeze(['destruktion_meta.devos_normalize_native_supervisor_state_h205f22(jsonb)',
+      'destruktion_meta.devos_fleet_claim_transport_admission_h205f22()']),
+    triggers: Object.freeze([{ relation: 'destruktion_meta.devos_fleet_claim_h205f22',
+      name: 'devos_fleet_claim_transport_admission_trg', signature: 'destruktion_meta.devos_fleet_claim_transport_admission_h205f22()' }]) },
   { path: '20261009194157_managed_project_admission_v1.sql', signature: 'public.h205f22_a2_managed_project_admission_v1(uuid,uuid,text,bigint,bigint,uuid,bigint,uuid,text,bigint)', source_url: new URL('../../supabase/migrations/20261009194157_managed_project_admission_v1.sql', import.meta.url),
     signatures: Object.freeze([
       'public.h205f22_a2_managed_project_repository_provision_v1(uuid,uuid,text,bigint,text,text,text)',
@@ -148,14 +159,17 @@ const REQUIRED_COLUMNS = {
 async function loadSources() {
   return Promise.all(LOCAL_RUNTIME_MIGRATIONS.map(async (migration) => {
     const source = await readFile(migration.source_url, 'utf8');
-    return { ...migration, source, sha256: createHash('sha256').update(source).digest('hex') };
+    const upgradeSource = migration.upgrade_source_url ? await readFile(migration.upgrade_source_url, 'utf8') : null;
+    return { ...migration, source, sha256: createHash('sha256').update(source).digest('hex'),
+      ...(upgradeSource === null ? {} : { upgradeSource, upgradeSha256: createHash('sha256').update(upgradeSource).digest('hex') }) };
   }));
 }
 
 function sourcePlan(sources) {
   const migrations = sources.map(migration => ({ source: migration.path, source_sha256: migration.sha256,
     signature: migration.signature, signatures: [...(migration.signatures || [migration.signature])],
-    relations: [...(migration.relations || [])], triggers: [...(migration.triggers || [])] }));
+    relations: [...(migration.relations || [])], triggers: [...(migration.triggers || [])],
+    ...(migration.upgradeSource ? { upgrade_source: '20260903052200_devos_dispatch_admission_signed_native_v3.sql', upgrade_source_sha256: migration.upgradeSha256 } : {}) }));
   return { schema: 'compute.local-runtime-migration-plan.v1',
     source_manifest_sha256: createHash('sha256').update(JSON.stringify(migrations)).digest('hex'), migrations };
 }
@@ -165,21 +179,80 @@ export async function loadLocalRuntimeMigrationPlan() { return sourcePlan(await 
 
 async function inspectMigrationObjects(tx, migration) {
   const rows = await tx.unsafe(`SELECT 'function' AS kind, value AS identity,
-      pg_catalog.to_regprocedure(value) IS NOT NULL AS installed
+      pg_catalog.to_regprocedure(value) IS NOT NULL AS installed,
+      pg_catalog.to_regprocedure(value) IS NOT NULL AS occupied
     FROM pg_catalog.jsonb_array_elements_text($1::text::jsonb)
     UNION ALL SELECT 'relation', value, EXISTS (SELECT 1 FROM pg_catalog.pg_class c
-      WHERE c.oid=pg_catalog.to_regclass(value) AND c.relkind IN ('r','p') AND c.relrowsecurity)
+      WHERE c.oid=pg_catalog.to_regclass(value) AND c.relkind IN ('r','p') AND c.relrowsecurity),
+      pg_catalog.to_regclass(value) IS NOT NULL
     FROM pg_catalog.jsonb_array_elements_text($2::text::jsonb)
     UNION ALL SELECT 'trigger', value->>'relation' || ':' || (value->>'name'), EXISTS (
       SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=pg_catalog.to_regclass(value->>'relation')
       AND t.tgname=value->>'name' AND t.tgfoid=pg_catalog.to_regprocedure(value->>'signature')
-      AND NOT t.tgisinternal AND t.tgenabled IN ('O','A'))
+      AND NOT t.tgisinternal AND t.tgenabled IN ('O','A')), EXISTS (
+      SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=pg_catalog.to_regclass(value->>'relation')
+      AND t.tgname=value->>'name')
     FROM pg_catalog.jsonb_array_elements($3::text::jsonb)`,
   [JSON.stringify(migration.signatures || [migration.signature]), JSON.stringify(migration.relations || []), JSON.stringify(migration.triggers || [])]);
   const expected = (migration.signatures || [migration.signature]).length + (migration.relations || []).length + (migration.triggers || []).length;
   if (rows.length !== expected) throw new Error('local_runtime_migration_catalog_invalid:' + migration.path);
-  return { complete: rows.every(row => row.installed), present: rows.some(row => row.installed),
+  return { complete: rows.every(row => row.installed), present: rows.some(row => row.occupied ?? row.installed),
     missing: rows.filter(row => !row.installed).map(row => row.kind + ':' + row.identity) };
+}
+
+const canonicalSqlText = value => String(value).replace(/\r\n/g, '\n');
+function reviewedBody(source, name) {
+  const start = source.indexOf('create or replace function destruktion_meta.' + name + '(');
+  const bodyStart = source.indexOf('as $$', start), end = source.indexOf('$$;', bodyStart + 5);
+  if (start < 0 || bodyStart < 0 || end < 0) throw new Error('local_runtime_dispatch_source_invalid');
+  return canonicalSqlText(source.slice(bodyStart + 5, end));
+}
+
+async function attestDispatchBodies(tx, migration) {
+  const functions = await tx.unsafe(`SELECT p.oid::text AS oid, p.proname AS name, p.prosrc AS body,
+    l.lanname AS language, p.prosecdef AS definer, p.provolatile AS volatility, p.proconfig AS config,
+    pg_catalog.format_type(p.prorettype, NULL) AS result
+    FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_language l ON l.oid=p.prolang
+    WHERE p.oid IN (pg_catalog.to_regprocedure($1::text), pg_catalog.to_regprocedure($2::text))`, migration.signatures);
+  const normalizer = functions.find(row => row.name === 'devos_normalize_native_supervisor_state_h205f22');
+  const gate = functions.find(row => row.name === 'devos_fleet_claim_transport_admission_h205f22');
+  if (functions.length !== 2 || !normalizer || !gate || normalizer.language !== 'plpgsql' || gate.language !== 'plpgsql'
+    || normalizer.definer !== false || gate.definer !== true || normalizer.volatility !== 'i' || gate.volatility !== 'v'
+    || normalizer.result !== 'jsonb' || gate.result !== 'trigger'
+    || JSON.stringify(normalizer.config) !== JSON.stringify(['search_path=pg_catalog'])
+    || JSON.stringify(gate.config) !== JSON.stringify(['search_path=pg_catalog, public, destruktion_meta'])
+    || canonicalSqlText(normalizer.body) !== reviewedBody(migration.source, normalizer.name)) {
+    throw new Error('local_runtime_dispatch_existing_body_requires_review');
+  }
+  const gateBody = canonicalSqlText(gate.body);
+  const version = gateBody === reviewedBody(migration.upgradeSource, gate.name) ? 3
+    : gateBody === reviewedBody(migration.source, gate.name) ? 2 : null;
+  if (version === null) throw new Error('local_runtime_dispatch_existing_body_requires_review');
+  const [trigger] = await tx.unsafe(`SELECT pg_catalog.pg_get_triggerdef(t.oid, false) AS definition
+    FROM pg_catalog.pg_trigger t WHERE t.tgrelid=pg_catalog.to_regclass('destruktion_meta.devos_fleet_claim_h205f22')
+    AND t.tgname='devos_fleet_claim_transport_admission_trg' AND NOT t.tgisinternal AND t.tgenabled IN ('O','A')`);
+  const compact = text => String(text).replace(/[\s()"]/g, '').toLowerCase();
+  const prefix = 'CREATE TRIGGER devos_fleet_claim_transport_admission_trg BEFORE INSERT ON destruktion_meta.devos_fleet_claim_h205f22 FOR EACH ROW ';
+  const suffix = 'EXECUTE FUNCTION destruktion_meta.devos_fleet_claim_transport_admission_h205f22()';
+  // The native migration narrows this exact gate to browser targets; all other
+  // predicates/timing/function bindings require review instead of silent repair.
+  const definitions = [prefix + suffix, prefix + "WHEN (((new.target_id IS NULL) OR (new.target_id !~~ 'codex-cli:%'::text))) " + suffix];
+  if (!definitions.some(value => compact(value) === compact(trigger?.definition))) throw new Error('local_runtime_dispatch_existing_trigger_requires_review');
+  return version;
+}
+
+async function ensureDispatchPrerequisite(tx, migration, before) {
+  if (before.present && !before.complete) throw new Error('local_runtime_migration_partial_install:' + migration.path + ':' + before.missing.join(','));
+  let version = before.complete ? await attestDispatchBodies(tx, migration) : null;
+  if (version === null) await tx.unsafe(migration.source);
+  if (version !== 3) await tx.unsafe(migration.upgradeSource);
+  if (!(await inspectMigrationObjects(tx, migration)).complete || await attestDispatchBodies(tx, migration) !== 3) {
+    throw new Error('local_runtime_dispatch_prerequisite_readback_failed');
+  }
+  return { source: migration.path, source_sha256: migration.sha256, signature: migration.signature, signatures: migration.signatures,
+    upgrade_source: '20260903052200_devos_dispatch_admission_signed_native_v3.sql', upgrade_source_sha256: migration.upgradeSha256,
+    status: version === 3 ? 'ALREADY_PRESENT_NOT_MODIFIED' : version === 2 ? 'UPGRADED_REVIEWED_V2_TO_V3' : 'APPLIED_LOCAL_ONLY',
+    existing_bodies_attested: true, browser_dispatch_version: 3 };
 }
 
 export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSourcesSha256 } = {}) {
@@ -209,6 +282,10 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
     const receipts = [];
     for (const migration of sources) {
       const before = await inspectMigrationObjects(tx, migration);
+      if (migration.prerequisite === 'SIGNED_BROWSER_DISPATCH_V3') {
+        receipts.push(await ensureDispatchPrerequisite(tx, migration, before));
+        continue;
+      }
       if (before.complete) {
         receipts.push({ source: migration.path, source_sha256: migration.sha256, signature: migration.signature,
           signatures: migration.signatures || [migration.signature], status: 'ALREADY_PRESENT_NOT_MODIFIED', existing_bodies_attested: false });

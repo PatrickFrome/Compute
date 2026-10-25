@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import postgres from 'postgres';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, quoteIdentifier } from './db-api-core.mjs';
-import { provisionLocalApiLogin } from './db-api-grants.mjs';
+import { provisionLocalApiLogin, refreshLocalApiRpcGrants } from './db-api-grants.mjs';
 import { startDbApi } from './db-api.mjs';
 import { inspectAttachedApiAdmission, onboardAttachedPostgres } from './attached-postgres-onboarding.mjs';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
@@ -92,8 +92,8 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     }
     await sql.unsafe('ALTER TABLE public.' + quoteIdentifier(table) + ' ENABLE ROW LEVEL SECURITY');
   }
-  const normalization = await source('20260902190500_devos_dispatch_admission_runtime_v2.sql');
-  await sql.unsafe(normalization.slice(normalization.indexOf('create or replace function destruktion_meta.devos_normalize_native_supervisor_state_h205f22'), normalization.indexOf('create or replace function destruktion_meta.devos_fleet_claim_transport_admission_h205f22')));
+  // Deliberately leave all legacy dispatch prerequisite objects absent: this
+  // models the older attached PG dump which failed the native trigger upgrade.
   await sql.unsafe(await source('20260831152000_a2_workspace_binding_registry_v1.sql'));
 
   const plan = await loadLocalRuntimeMigrationPlan();
@@ -110,6 +110,15 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   }
   const second = await applyLocalRuntimeMigrations({ sql });
   assert(second.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
+  const [dispatch] = await sql.unsafe("SELECT prosrc FROM pg_catalog.pg_proc WHERE oid=pg_catalog.to_regprocedure('destruktion_meta.devos_fleet_claim_transport_admission_h205f22()')");
+  assert.match(dispatch.prosrc, /devos_transport_device_binding_invalid/);
+  assert.equal(second.migrations.find(row => row.browser_dispatch_version === 3).existing_bodies_attested, true);
+  // A recognized gate may be upgraded; an unknown/relaxed body is never
+  // overwritten, even when all expected function/trigger names are present.
+  await assert.rejects(sql.begin(async tx => {
+    await tx.unsafe('CREATE OR REPLACE FUNCTION destruktion_meta.devos_fleet_claim_transport_admission_h205f22() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,destruktion_meta AS $$begin return new; end;$$');
+    await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
+  }), /existing_body_requires_review/);
   await assert.rejects(applyLocalRuntimeMigrations({ sql, expectedMigrationSourcesSha256: '0'.repeat(64) }), /source_pin_mismatch/);
   // A present register RPC cannot hide the loss of another RPC in its group.
   await assert.rejects(sql.begin(async tx => {
@@ -228,7 +237,16 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   assert.equal(identity.name, login);
   const admission = await inspectAttachedApiAdmission({ sql: api, apiLogin: login });
   assert.equal(admission.restricted_login, true);
-  assert.equal(admission.rpc_names_granted, 50);
+  assert.equal(admission.rpc_names_granted, RPC_ALLOWLIST.length);
+  const [roleBeforeRefresh] = await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]);
+  await sql.unsafe('REVOKE EXECUTE ON FUNCTION public.native_coding_admission_context_v1(uuid,text,uuid), public.native_coding_execution_context_v1(uuid,text,uuid,bigint) FROM ' + quoteIdentifier(login));
+  await assert.rejects(inspectAttachedApiAdmission({ sql: api, apiLogin: login }), /api_rpc_grants_unattested/);
+  const refreshed = await refreshLocalApiRpcGrants({ sql, databaseName: 'postgres', login });
+  assert.equal(refreshed.functions_granted, 2); assert.equal(refreshed.credentials_modified, false);
+  assert.equal((await refreshLocalApiRpcGrants({ sql, databaseName: 'postgres', login })).functions_granted, 0);
+  assert.deepEqual((await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]))[0], roleBeforeRefresh);
+  assert.deepEqual(await serviceGrants(), beforeAcl, 'upgrade must not modify shared service_role grants');
+  assert.equal((await inspectAttachedApiAdmission({ sql: api, apiLogin: login })).rpc_names_granted, RPC_ALLOWLIST.length);
   assert.deepEqual([...(await api.unsafe('SELECT token_hash FROM public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22'))], [{ token_hash: 'visible-token' }]);
   await assert.rejects(api.unsafe('SELECT private_secret FROM public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22'), error => error.code === '42501');
   await assert.rejects(api.unsafe('SET ROLE service_role'), error => error.code === '42501');

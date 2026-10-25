@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST } from './db-api-core.mjs';
-import { localApiRolePolicyName, provisionLocalApiLogin } from './db-api-grants.mjs';
+import { localApiRolePolicyName, provisionLocalApiLogin, refreshLocalApiRpcGrants } from './db-api-grants.mjs';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 
@@ -67,7 +67,7 @@ function localDatabase(value) {
 }
 
 function validateOptions(options) {
-  if (options?.ownerAction !== 'ONBOARD_EXISTING_LOCAL_POSTGRES_17') fail('explicit_owner_action_required');
+  if (!['ONBOARD_EXISTING_LOCAL_POSTGRES_17', 'UPGRADE_EXISTING_LOCAL_POSTGRES_17'].includes(options?.ownerAction)) fail('explicit_owner_action_required');
   if (!sha(options.expectedBundleDigest) || !sha(options.expectedMigrationSourcesSha256)) fail('source_pins_required');
   if (!/^[1-9][0-9]{0,19}$/.test(options.expectedClusterSystemIdentifier || '')
     || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)$/.test(options.expectedPostmasterStartedAt || '')
@@ -177,7 +177,7 @@ async function inspectIdentity(sql, options, physical, admin, pidBytes) {
   return { systemIdentifier: record.system_identifier, startedAt: new Date(record.started_at).toISOString() };
 }
 
-export async function inspectAttachedApiAdmission({ sql, apiLogin, expectedSessionLogin = apiLogin }) {
+export async function inspectAttachedApiLogin({ sql, apiLogin, expectedSessionLogin = apiLogin }) {
   const [login] = await sql.unsafe(`SELECT r.rolname AS login,
     NOT r.rolsuper AND NOT r.rolinherit AND NOT r.rolcreatedb AND NOT r.rolcreaterole
       AND NOT r.rolreplication AND NOT r.rolbypassrls AND r.rolcanlogin AS restricted,
@@ -188,6 +188,11 @@ export async function inspectAttachedApiAdmission({ sql, apiLogin, expectedSessi
     FROM pg_catalog.pg_roles r WHERE r.rolname = current_user`);
   if (login?.login !== apiLogin || login.restricted !== true || login.memberships !== 0 || login.connect !== true
     || login.database_create !== false || login.session_login !== expectedSessionLogin) fail('restricted_api_login_unattested');
+  return Object.freeze({ restricted_login: true, memberships: 0 });
+}
+
+export async function inspectAttachedApiAdmission({ sql, apiLogin, expectedSessionLogin = apiLogin }) {
+  await inspectAttachedApiLogin({ sql, apiLogin, expectedSessionLogin });
   const signatures = await sql.unsafe(RPC_CATALOG_QUERY, [JSON.stringify(RPC_ALLOWLIST)]);
   if (!Array.isArray(signatures) || signatures.length !== RPC_ALLOWLIST.length
     || RPC_ALLOWLIST.some(name => signatures.filter(signature => signature.name === name).length !== 1)) fail('api_rpc_catalog_incomplete');
@@ -315,6 +320,14 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       pg_catalog.has_schema_privilege(current_user, 'public', 'CREATE') AS public_create,
       pg_catalog.has_schema_privilege(current_user, 'destruktion_meta', 'CREATE') AS internal_create`);
     if (capability?.database_create !== true || capability.public_create !== true || capability.internal_create !== true) fail('migration_capability_unattested');
+    const upgrading = options.ownerAction === 'UPGRADE_EXISTING_LOCAL_POSTGRES_17';
+    const api = new URL(admin.href); api.username = options.apiLogin; api.password = options.apiPassword;
+    if (upgrading) {
+      // Prove the existing password and direct login before any schema/grant
+      // effect. An upgrade never rotates credentials or provisions a new role.
+      apiSql = connect(api.href);
+      await (hooks.inspectApiLogin || inspectAttachedApiLogin)({ sql: apiSql, apiLogin: options.apiLogin });
+    }
     // Runtime host and setup acquire the same exclusive pathname. Neither may
     // race a schema/role update against a running API process.
     lockFile = path.join(state, 'runtime-host-lock.json');
@@ -338,15 +351,19 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       const transaction = { unsafe: tx.unsafe.bind(tx), begin: run => run(tx) };
       const receipt = await (hooks.applyMigrations || applyLocalRuntimeMigrations)({ sql: transaction, expectedMigrationSourcesSha256: options.expectedMigrationSourcesSha256 });
       if (receipt?.source_manifest_sha256 !== options.expectedMigrationSourcesSha256) fail('migration_receipt_unattested');
-      await (hooks.provisionApiLogin || provisionLocalApiLogin)({ sql: transaction, databaseName: admin.pathname.slice(1),
-        login: options.apiLogin, password: options.apiPassword, roleMode: 'direct' });
+      if (upgrading) {
+        await (hooks.refreshApiRpcGrants || refreshLocalApiRpcGrants)({ sql: transaction, databaseName: admin.pathname.slice(1),
+          login: options.apiLogin, roleMode: 'direct' });
+      } else {
+        await (hooks.provisionApiLogin || provisionLocalApiLogin)({ sql: transaction, databaseName: admin.pathname.slice(1),
+          login: options.apiLogin, password: options.apiPassword, roleMode: 'direct' });
+      }
       await tx.unsafe('SET LOCAL ROLE "' + options.apiLogin + '"');
       await (hooks.inspectApiAdmission || inspectAttachedApiAdmission)({ sql: tx, apiLogin: options.apiLogin, expectedSessionLogin: decodeURIComponent(admin.username) });
       await tx.unsafe('RESET ROLE');
       return receipt;
     });
-    const api = new URL(admin.href); api.username = options.apiLogin; api.password = options.apiPassword;
-    apiSql = connect(api.href);
+    apiSql ||= connect(api.href);
     const admission = await (hooks.inspectApiAdmission || inspectAttachedApiAdmission)({ sql: apiSql, apiLogin: options.apiLogin });
     if (admission?.restricted_login !== true || admission.api_role_mode !== 'direct' || admission.memberships !== 0
       || admission.rpc_names_granted !== RPC_ALLOWLIST.length || admission.tables_granted !== Object.keys(TABLE_ALLOWLIST).length) fail('api_reconnect_admission_unattested');
@@ -369,6 +386,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       postgres_mode: 'attached', api_role_mode: 'direct', cluster_binding_verified: true, existing_vault_preserved: true,
       database_initialized: false, postgres_started: false, postgres_stopped: false, runtime_config_written: true,
       admin_credential_separate: true, credentials_exported: false, source_manifest_sha256: migrationReceipt.source_manifest_sha256,
+      existing_api_credentials_preserved: upgrading, api_login_created: !upgrading,
       migrations: migrationReceipt.migrations, restricted_api_admission: admission, runtime_ready: false, owner_profile_written: false,
       installed_socket_ui_smoke_required: true, automatic_cloud_fallback: false, authority_effect: false });
   } catch (error) {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
 
@@ -9,6 +10,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
     '20260901034000_meta_orchestrator_controller_lease_v1.sql',
     '20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql',
     '20260902183500_devos_live_ambiguity_reconciliation_v3.sql',
+    '20260902190500_devos_dispatch_admission_runtime_v2.sql',
     '20261009194157_managed_project_admission_v1.sql',
     '20261010100000_project_continuity_history_v1.sql',
     '20261012130000_project_verifier_reference_transport_v1.sql',
@@ -16,6 +18,9 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   ];
   const sources = plan.migrations.map(row => row.source);
   assert.deepEqual(sources.slice(0, mandatorySources.length), mandatorySources);
+  const dispatch = plan.migrations.find(row => row.source === mandatorySources[3]);
+  assert.equal(dispatch.upgrade_source, '20260903052200_devos_dispatch_admission_signed_native_v3.sql');
+  assert.match(dispatch.upgrade_source_sha256, /^[a-f0-9]{64}$/);
   assert.equal(new Set(sources).size, sources.length, 'duplicate migration paths are forbidden');
   const project = plan.migrations.find(row => row.source === '20261010100000_project_continuity_history_v1.sql');
   assert(project);
@@ -92,23 +97,88 @@ test('mismatched source pin rejects before opening a database transaction', asyn
   assert.equal(opened, 0);
 });
 
-test('migration catalog skip requires every required object and labels existing bodies unattested', async () => {
+test('migration catalog skip requires every required object and separately attests the browser dispatch prerequisite', async () => {
   const required = {
     devos_fleet_task_h205f22: 'task_id workspace_id point_id role base_sha lease_generation lease_agent_id lease_tab_id lease_target_id lease_agent_generation_epoch lease_expires_at state authority_effect result_summary result_sha256 error_code finished_at updated_at',
     devos_fleet_claim_h205f22: 'claim_id workspace_id task_id agent_id lease_generation base_sha tab_id target_id agent_generation_epoch state expires_at updated_at authority_effect',
   };
   const columns = Object.entries(required).flatMap(([table_name, names]) => names.split(' ').map(column_name => ({ table_name, column_name, udt_name: column_name === 'claim_id' ? 'int8' : 'text' })));
   const statements = [];
+  const dispatchRows = await dispatchFixture();
   const tx = { unsafe: async (query, values) => {
     statements.push(query);
     if (query.includes('information_schema.columns')) return columns;
     if (query.includes(' AS frontier')) return [{ frontier: true, event: true, supervisor: true }];
+    if (query.includes('p.prosrc AS body')) return dispatchRows.functions;
+    if (query.includes('pg_get_triggerdef')) return [{ definition: dispatchRows.trigger }];
     if (query.includes("'function' AS kind")) return values.flatMap((value, index) => JSON.parse(value).map(identity => ({ identity, kind: ['function', 'relation', 'trigger'][index], installed: true })));
     return [];
   } };
   const receipt = await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
-  assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED' && row.existing_bodies_attested === false));
+  assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
+  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3)));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
   assert(!statements.some(query => /^create /im.test(query)));
+});
+
+async function dispatchFixture(version = 3) {
+  const read = file => readFile(new URL('../../supabase/migrations/' + file, import.meta.url), 'utf8');
+  const v2 = await read('20260902190500_devos_dispatch_admission_runtime_v2.sql');
+  const v3 = await read('20260903052200_devos_dispatch_admission_signed_native_v3.sql');
+  const body = (source, name) => {
+    const start = source.indexOf('create or replace function destruktion_meta.' + name + '(');
+    const from = source.indexOf('as $$', start) + 5;
+    return source.slice(from, source.indexOf('$$;', from)).replace(/\r\n/g, '\n');
+  };
+  const normalize = 'devos_normalize_native_supervisor_state_h205f22', gate = 'devos_fleet_claim_transport_admission_h205f22';
+  return { v2, v3, functions: [
+    { oid: '10', name: normalize, body: body(v2, normalize), language: 'plpgsql', definer: false, volatility: 'i', config: ['search_path=pg_catalog'], result: 'jsonb' },
+    { oid: '11', name: gate, body: body(version === 2 ? v2 : v3, gate), language: 'plpgsql', definer: true, volatility: 'v', config: ['search_path=pg_catalog, public, destruktion_meta'], result: 'trigger' },
+  ], trigger: 'CREATE TRIGGER devos_fleet_claim_transport_admission_trg BEFORE INSERT ON destruktion_meta.devos_fleet_claim_h205f22 FOR EACH ROW EXECUTE FUNCTION destruktion_meta.devos_fleet_claim_transport_admission_h205f22()' };
+}
+
+async function dispatchUpgradeHarness({ version = 3, absent = false, partial = false, occupiedTrigger = false, unknownBody = false, unknownTrigger = false } = {}) {
+  let state = await dispatchFixture(version);
+  if (unknownBody) state.functions[1].body = 'begin return new; end;';
+  if (unknownTrigger) state.trigger = state.trigger.replace('BEFORE INSERT', 'AFTER INSERT');
+  let dispatchInstalled = !absent;
+  const ddl = [];
+  const columns = {
+    devos_fleet_task_h205f22: 'task_id workspace_id point_id role base_sha lease_generation lease_agent_id lease_tab_id lease_target_id lease_agent_generation_epoch lease_expires_at state authority_effect result_summary result_sha256 error_code finished_at updated_at',
+    devos_fleet_claim_h205f22: 'claim_id workspace_id task_id agent_id lease_generation base_sha tab_id target_id agent_generation_epoch state expires_at updated_at authority_effect',
+  };
+  const tx = { unsafe: async (query, values) => {
+    if (query.includes('information_schema.columns')) return Object.entries(columns).flatMap(([table_name, names]) => names.split(' ').map(column_name => ({ table_name, column_name, udt_name: column_name === 'claim_id' ? 'int8' : 'text' })));
+    if (query.includes(' AS frontier')) return [{ frontier: true, event: true, supervisor: true }];
+    if (query.includes('p.prosrc AS body')) return state.functions;
+    if (query.includes('pg_get_triggerdef')) return [{ definition: state.trigger }];
+    if (query.includes("'function' AS kind")) {
+      const dispatch = JSON.parse(values[0]).includes('destruktion_meta.devos_fleet_claim_transport_admission_h205f22()');
+      return values.flatMap((value, group) => JSON.parse(value).map((identity, index) => ({ identity, kind: ['function', 'relation', 'trigger'][group],
+        installed: !dispatch || (dispatchInstalled && !(partial && group === 0 && index === 0)),
+        occupied: !dispatch || dispatchInstalled || (occupiedTrigger && group === 2) })));
+    }
+    if (query === state.v2 || query === state.v3) { ddl.push(query); dispatchInstalled = true; if (query === state.v3) state = await dispatchFixture(3); }
+    return [];
+  } };
+  return { ddl, run: () => applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } }) };
+}
+
+test('missing browser gate installs v2 and signed v3 before native admission; v2 upgrades and v3 never downgrades', async () => {
+  for (const options of [{ absent: true }, { version: 2 }, { version: 3 }]) {
+    const f = await dispatchUpgradeHarness(options), receipt = await f.run();
+    assert.equal(f.ddl.length, options.absent ? 2 : options.version === 2 ? 1 : 0);
+    const gate = receipt.migrations.find(row => row.browser_dispatch_version === 3);
+    assert.equal(gate.existing_bodies_attested, true);
+    assert.equal(gate.status, options.absent ? 'APPLIED_LOCAL_ONLY' : options.version === 2 ? 'UPGRADED_REVIEWED_V2_TO_V3' : 'ALREADY_PRESENT_NOT_MODIFIED');
+  }
+});
+
+test('partial browser gate, occupied wrong trigger, unknown function and altered trigger stop without repair DDL', async () => {
+  for (const options of [{ partial: true }, { absent: true, occupiedTrigger: true }, { unknownBody: true }, { unknownTrigger: true }]) {
+    const f = await dispatchUpgradeHarness(options);
+    await assert.rejects(f.run(), /partial_install|existing_(body|trigger)_requires_review/);
+    assert.equal(f.ddl.length, 0);
+  }
 });

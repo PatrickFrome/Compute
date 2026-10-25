@@ -6,6 +6,62 @@ export function localApiRolePolicyName(login, operation) {
   return 'compute_api_' + createHash('sha256').update(login).digest('hex').slice(0, 24) + '_' + operation;
 }
 
+// Explicit upgrade operation for an already provisioned direct login. This
+// changes only EXECUTE on the current application allowlist; credentials,
+// memberships, table/RLS policies and role attributes remain untouched.
+export async function refreshLocalApiRpcGrants({ sql, databaseName, login, roleMode = 'direct' } = {}) {
+  if (!/^[a-z][a-z0-9_]{3,62}$/.test(login || '') || login === 'service_role' || login.startsWith('pg_')) throw new Error('local_api_existing_login_invalid');
+  if (typeof databaseName !== 'string' || !databaseName || databaseName.includes('\0')) throw new Error('local_api_database_name_required');
+  if (roleMode !== 'direct') throw new Error('local_api_refresh_direct_role_required');
+  return sql.begin(async tx => {
+    await tx.unsafe("SET LOCAL lock_timeout = '3s'");
+    await tx.unsafe("SET LOCAL statement_timeout = '30s'");
+    const [database] = await tx.unsafe('SELECT current_database() AS name');
+    if (database?.name !== databaseName) throw new Error('local_api_database_name_mismatch');
+    const inspectRole = async () => {
+      const [role] = await tx.unsafe(`SELECT r.oid::text AS oid, r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreatedb,
+        r.rolcreaterole, r.rolreplication, r.rolbypassrls,
+        (SELECT count(*)::int FROM pg_catalog.pg_auth_members m WHERE m.member=r.oid) AS memberships,
+        pg_catalog.has_database_privilege(r.oid, current_database(), 'CONNECT') AS connect,
+        pg_catalog.has_database_privilege(r.oid, current_database(), 'CREATE') AS database_create
+        FROM pg_catalog.pg_roles r WHERE r.rolname=$1`, [login]);
+      if (!role?.rolcanlogin || role.rolinherit || role.rolsuper || role.rolcreatedb || role.rolcreaterole
+        || role.rolreplication || role.rolbypassrls || role.memberships !== 0 || role.connect !== true || role.database_create !== false) {
+        throw new Error('local_api_existing_restricted_role_required');
+      }
+      return role.oid;
+    };
+    const oid = await inspectRole();
+    const signatures = await tx.unsafe(RPC_CATALOG_QUERY, [JSON.stringify(RPC_ALLOWLIST)]);
+    if (RPC_ALLOWLIST.some(name => signatures.filter(row => row.name === name).length !== 1)) throw new Error('local_api_rpc_catalog_incomplete_or_overloaded');
+    if (signatures.length !== RPC_ALLOWLIST.length) throw new Error('local_api_rpc_catalog_overloaded');
+    const inspectGrants = () => tx.unsafe(`SELECT p.oid::text AS oid, p.proname AS name,
+      EXISTS (SELECT 1 FROM pg_catalog.aclexplode(p.proacl) a WHERE a.grantee=$2::oid
+        AND a.privilege_type='EXECUTE' AND NOT a.is_grantable) AS direct_grant,
+      EXISTS (SELECT 1 FROM pg_catalog.aclexplode(p.proacl) a WHERE a.grantee=$2::oid
+        AND a.privilege_type='EXECUTE' AND a.is_grantable) AS grantable
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.prokind='f'
+        AND p.proname::text IN (SELECT pg_catalog.jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(RPC_ALLOWLIST), oid]);
+    const before = await inspectGrants();
+    if (before.length !== signatures.length || signatures.some(signature => !before.some(row => row.name === signature.name
+      && String(row.oid) === String(signature.oid))) || before.some(row => row.grantable)) throw new Error('local_api_rpc_grants_require_review');
+    const missing = signatures.filter(signature => !before.find(row => row.name === signature.name).direct_grant);
+    for (const signature of missing) {
+      const types = signature.args.map(arg => quoteIdentifier(arg.typeSchema) + '.' + quoteIdentifier(arg.typeName)).join(', ');
+      await tx.unsafe(`GRANT EXECUTE ON FUNCTION "public".${quoteIdentifier(signature.name)}(${types}) TO ${quoteIdentifier(login)}`);
+    }
+    const after = await inspectGrants();
+    if (await inspectRole() !== oid || after.length !== signatures.length || signatures.some(signature => !after.some(row =>
+      String(row.oid) === String(signature.oid) && row.name === signature.name && row.direct_grant === true && row.grantable === false))) {
+      throw new Error('local_api_rpc_grants_readback_failed');
+    }
+    return Object.freeze({ login, database: databaseName, role_mode: 'direct', functions: signatures.length,
+      functions_granted: missing.length, credentials_modified: false, role_attributes_modified: false,
+      memberships_modified: false, table_grants_modified: false, shared_service_role_grants_modified: false });
+  });
+}
+
 export async function provisionLocalApiLogin({ sql, databaseName, login, password, roleMode = 'service_role' }) {
   if (!/^[a-z][a-z0-9_]{3,62}$/.test(login) || typeof password !== 'string' || password.length < 32) throw new Error('local_api_credentials_invalid');
   if (typeof databaseName !== 'string' || !databaseName || databaseName.includes('\0')) throw new Error('local_api_database_name_required');
