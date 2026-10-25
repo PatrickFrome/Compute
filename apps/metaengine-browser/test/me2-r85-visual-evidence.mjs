@@ -170,6 +170,20 @@ function registerPresentationIpc() {
     admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
   }));
   ipcMain.handle('metaengine:client:work-readiness', () => fixtureWorkReadiness());
+  // This isolated presentation fixture exercises the browser route, not native
+  // coding admission. Route selection is read-only and is NOT work readiness;
+  // the renderer must still fetch the separate work-readiness fixture on submit.
+  ipcMain.handle('metaengine:client:goal-submission-mode', (_event, ...args) => {
+    if (args.length) throw new Error('client_goal_submission_mode_params_forbidden');
+    return Object.freeze({
+      schema: 'metaengine.client.goal-submission-mode.v1',
+      kind: 'BROWSER',
+      state: 'HOST_VERIFICATION_REQUIRED',
+      reason: null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  });
 
   ipcMain.handle('metaengine:shell:primary-page', (_event, rawPage) => {
     page = String(rawPage || 'browser');
