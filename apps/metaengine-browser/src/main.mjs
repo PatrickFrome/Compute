@@ -128,6 +128,9 @@ let interruptedSetupPhysicalMutationsInFlight = 0;
 let autonomousProjectRuntime = null;
 let nativeCodingRuntime = null;
 let nativeCodingHostCapability = null;
+let nativeCodingRuntimeMountPromise = null;
+let nativeCodingRuntimeMountGeneration = null;
+let nativeCodingRuntimeMountFailure = null;
 let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
 let managedTaskProjectQuitReady = false;
@@ -801,6 +804,125 @@ async function refreshClientGoal(rawRequestId) {
   return reconcileClientGoal(requestId, entry.receipt || null);
 }
 
+function assertNativeCodingRuntimeMountOpen(summary=null) {
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
+  if(shutdownRequested||globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true||managedTaskProjectHostDrainPending)
+    throw Error('native_coding_runtime_mount_closing');
+  if(nativeCodingRuntimeMountFailure)throw Error(nativeCodingRuntimeMountFailure);
+  if(summary&&readOwnedLocalRuntimeHostSummary()!==summary)throw Error('native_coding_runtime_mount_host_changed');
+}
+
+function nativeCodingRuntimeMountReadback(runtime,capability,summary) {
+  const r=runtime?.snapshot?.(),c=capability?.snapshot?.();
+  if(r?.schema!=='metaengine.native-coding.runtime.v1'||r.closed!==false||r.shutdown_state!=='OPEN'||r.host_unavailable_reason!==null
+    ||c?.closed!==false||!summary||c.instance_id!==summary.instance_id||c.host_pid!==summary.pid)return null;
+  return Object.freeze({schema:'metaengine.native-coding.runtime-mount.v1',mounted:true,
+    instance_id:c.instance_id,host_pid:c.host_pid,authority_effect:false});
+}
+
+function assertNativeCodingRuntimeMountGeneration(value,summary,prior=null) {
+  if(value?.schema!=='metaengine.browser.runtime-host-generation.v1'||value.ever_ready!==true
+    ||value.stopping!==false||value.exited!==false||value.transport_failed!==false||value.terminal_rejected!==false||value.terminal!==null
+    ||value.instance_id!==summary.instance_id||value.host_pid!==summary.pid||typeof value.launch_nonce!=='string'||!value.launch_nonce
+    ||prior&&['launch_nonce','host_pid','instance_id'].some(key=>value[key]!==prior[key]))
+    throw Error('native_coding_runtime_mount_host_generation_changed');
+}
+
+// Startup and verified READ_SEED use this one narrow mount. It never recreates
+// the Supervisor, loopback server, Host, goal or lease. Track the promise before
+// its first await so physical recovery drains include an in-flight mount.
+function ensureNativeCodingRuntimeMounted() {
+  if(nativeCodingRuntimeMountPromise)return nativeCodingRuntimeMountPromise;
+  // A drain may finish while readScope is pending. Its changed barrier still
+  // invalidates this attempt after the transient drain flag becomes false.
+  const closing=managedTaskProjectHostClosing;
+  const assertOpen=summary=>{
+    assertNativeCodingRuntimeMountOpen(summary);
+    if(managedTaskProjectHostClosing!==closing)throw Error('native_coding_runtime_mount_drain_changed');
+  };
+  const pending=Promise.resolve().then(async()=>{
+    assertOpen();
+    // Startup may not have constructed the Supervisor yet. Preserve admission
+    // and let a later readonly refresh try again; awaiting startup's drain Set
+    // here would deadlock when startup itself calls this helper.
+    if(!nativeSupervisor)throw Error('native_coding_runtime_mount_supervisor_unavailable');
+    await closing;assertOpen();
+    const summary=readOwnedLocalRuntimeHostSummary();
+    if(!summary){
+      if(nativeCodingRuntime||nativeCodingHostCapability)throw Error('native_coding_runtime_mount_host_unavailable');
+      return null;
+    }
+    const generation=await readOwnedLocalRuntimeHostRecoveryObservation();
+    assertOpen(summary);assertNativeCodingRuntimeMountGeneration(generation,summary);
+    if(nativeCodingRuntime||nativeCodingHostCapability){
+      const mounted=nativeCodingRuntimeMountReadback(nativeCodingRuntime,nativeCodingHostCapability,summary);
+      if(!mounted||!nativeCodingRuntimeMountGeneration)throw Error('native_coding_runtime_mount_existing_binding_unavailable');
+      assertNativeCodingRuntimeMountGeneration(generation,summary,nativeCodingRuntimeMountGeneration);
+      return mounted;
+    }
+    const directory=path.dirname(summary.status_file);
+    const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+    assertOpen(summary);if(!present)return null;
+    const operator=await readNativeCodingOperatorPaths(directory);assertOpen(summary);
+    const capability=createOwnedNativeCodingHostCapability(summary);let candidate=null,bindingAttempted=false;
+    try{
+      const scope=await capability.readScope();assertOpen(summary);
+      const current=await readOwnedLocalRuntimeHostRecoveryObservation();assertOpen(summary);
+      assertNativeCodingRuntimeMountGeneration(current,summary,generation);
+      const identity=ensureSupervisorIdentity(),device=identity.snapshot();
+      const permits=scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id).map(row=>row.permit);
+      const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
+      if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required');
+      const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
+      candidate=createNativeCodingRuntime({identity,ownPostgres:capability,
+        readServiceControl:()=>{
+          const snapshot=nativeSupervisor?.snapshot?.();
+          return snapshot?{supervisor_mode:snapshot.supervisor_mode,armed:snapshot.armed,
+            interrupted_setup_recovery_fenced:snapshot.continuous_service?.interrupted_setup_recovery_fenced,
+            runtime_control_generation:snapshot.continuous_service?.runtime_control?.generation_floor}:null;
+        },
+        signedRequest:(route,request)=>nativeSupervisor.nativeCodingRequest(route,request),
+        observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
+        runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
+          gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
+        resultIndexRoot:operator.result_index_root,physicalSlotBudget:Math.min(2,...permits.map(permit=>permit.physical_slot_budget))});
+      assertOpen(summary);
+      const mounted=nativeCodingRuntimeMountReadback(candidate,capability,summary);
+      if(!mounted)throw Error('native_coding_runtime_mount_candidate_unavailable');
+      bindingAttempted=true;nativeSupervisor.bindNativeCodingRuntime(candidate);
+      autonomousProjectRuntime?.bindNativeCodingRuntime(candidate);
+      assertOpen(summary);
+      if(!nativeCodingRuntimeMountReadback(candidate,capability,summary))throw Error('native_coding_runtime_mount_binding_closed');
+      nativeCodingRuntime=candidate;nativeCodingHostCapability=capability;nativeCodingRuntimeMountGeneration=current;
+      return mounted;
+    }catch(error){
+      if(bindingAttempted){
+        try{nativeSupervisor?.bindNativeCodingRuntime(null);}catch{}
+        try{autonomousProjectRuntime?.bindNativeCodingRuntime(null);}catch{}
+      }
+      let cleanupConfirmed=candidate===null;
+      if(candidate){
+        try{
+          await candidate.close();const drained=candidate.snapshot();
+          cleanupConfirmed=drained.closed===true&&drained.shutdown_state==='DRAINED'&&drained.worker_cleanup_confirmed===true;
+        }catch{cleanupConfirmed=false;}
+      }
+      if(cleanupConfirmed)try{capability.close();}catch{cleanupConfirmed=false;}
+      if(!cleanupConfirmed){
+        // Retain closed/HOLD custody for the existing physical drain. Losing
+        // these references would let recovery confirm an empty drain while an
+        // unconfirmed candidate/journal still exists. Never bind them again.
+        nativeCodingRuntimeMountFailure='native_coding_runtime_mount_cleanup_unconfirmed';
+        nativeCodingRuntime=candidate;nativeCodingHostCapability=capability;
+      }
+      throw error;
+    }
+  });
+  nativeCodingRuntimeMountPromise=pending;nativeRuntimeInitializations.add(pending);
+  const settled=()=>{nativeRuntimeInitializations.delete(pending);if(nativeCodingRuntimeMountPromise===pending)nativeCodingRuntimeMountPromise=null;};
+  pending.then(settled,settled);return pending;
+}
+
 function createNativeGoalRouter(journal){
   return createClientNativeCodingGoalRouter({journal,
     request:async(operation,input)=>{
@@ -812,7 +934,10 @@ function createNativeGoalRouter(journal){
       }finally{if(!owned)capability.close();}
     },
     projectSnapshot:request=>{if(!nativeSupervisor?.projectSnapshot)throw new Error('client_project_unavailable');return nativeSupervisor.projectSnapshot(request);},
-    onAdmitted:async()=>{if(!nativeCodingRuntime)try{await initNativeSupervisor();}catch(error){recordStartupSubsystemDegraded('NATIVE_GOAL_RUNTIME_MOUNT',error);}},
+    onAdmitted:async()=>{
+      try{const mounted=await ensureNativeCodingRuntimeMounted();if(!mounted)throw Error('native_coding_runtime_mount_unavailable');return mounted;}
+      catch(error){recordStartupSubsystemDegraded('NATIVE_GOAL_RUNTIME_MOUNT',error);throw error;}
+    },
   });
 }
 
@@ -2377,40 +2502,11 @@ async function initNativeSupervisor() {
     } catch (error) { recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error); }
   }
   if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
-  if(!nativeCodingRuntime) {
-    const summary=readOwnedLocalRuntimeHostSummary();
-    if(summary) {
-      try {
-        const directory=path.dirname(summary.status_file);
-        const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
-        if(present) {
-          const operator=await readNativeCodingOperatorPaths(directory);
-          const capability=createOwnedNativeCodingHostCapability(summary);
-          try {
-            const scope=await capability.readScope(),identity=ensureSupervisorIdentity(),device=identity.snapshot();
-            const permits=scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id).map(row=>row.permit);
-            const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
-            if(permits.length===0||hashes.length!==1) throw new Error('native_coding_protected_permits_required');
-            const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
-            nativeCodingRuntime=createNativeCodingRuntime({identity,ownPostgres:capability,
-              readServiceControl:()=>{
-                const current=nativeSupervisor?.snapshot?.();
-                return current?{supervisor_mode:current.supervisor_mode,armed:current.armed,
-                  interrupted_setup_recovery_fenced:current.continuous_service?.interrupted_setup_recovery_fenced,
-                  runtime_control_generation:current.continuous_service?.runtime_control?.generation_floor}:null;
-              },
-              signedRequest:(route,request)=>nativeSupervisor.nativeCodingRequest(route,request),
-              observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
-              runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
-                gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
-              resultIndexRoot:operator.result_index_root,physicalSlotBudget:Math.min(2,...permits.map(permit=>permit.physical_slot_budget))});
-            nativeCodingHostCapability=capability;nativeSupervisor.bindNativeCodingRuntime(nativeCodingRuntime);
-          }catch(error){capability.close();throw error;}
-        }
-      } catch(error) {recordStartupSubsystemDegraded('NATIVE_CODING_RUNTIME',error);}
-    }
+  try{
+    const mounted=await ensureNativeCodingRuntimeMounted();
+    if(mounted)autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
   }
-  autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
+  catch(error){recordStartupSubsystemDegraded('NATIVE_CODING_RUNTIME',error);}
   if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   try { await ensureInterruptedSetupRecovery(); }
   catch (error) {
