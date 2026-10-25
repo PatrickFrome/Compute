@@ -2359,6 +2359,9 @@ function closeManagedTaskProjectHost() {
   if (managedTaskProjectHostDrainPending) return managedTaskProjectHostClosing;
   const previous=managedTaskProjectHostClosing,initializations=[...nativeRuntimeInitializations];
   const mount=nativeCodingRuntimeMountPromise;if(mount&&!initializations.includes(mount))initializations.push(mount);
+  // Published listeners belong to this lifetime too. Retain the exact owner
+  // until its accepted requests and manifest cleanup have both drained.
+  if(supervisorLoopbackRpc)nativeInitializationCleanupCandidates.add({kind:'RPC',candidate:supervisorLoopbackRpc});
   managedTaskProjectHostDrainPending=true;
   let fenceError=null;
   // Publish a new barrier even with empty globals. An unpublished mount owns
@@ -2415,7 +2418,6 @@ async function startInstalledRuntimeRecovery() {
     drain:async()=>{
       nativeSupervisor?.stop();
       await Promise.allSettled([...nativeRuntimeInitializations]);
-      const rpc=supervisorLoopbackRpc;supervisorLoopbackRpc=null;await rpc?.stop();
       const receipt=await closeManagedTaskProjectHost();
       return receipt||drainManagedRuntimeBindings();
     },
@@ -2644,8 +2646,6 @@ function destroyWindowContents() {
   githubChatRelay?.stop();
   githubChatRelay = null;
   detachShellBrainPort();
-  supervisorLoopbackRpc?.stop().catch(() => {});
-  supervisorLoopbackRpc = null;
   void closeManagedTaskProjectHost().catch(() => {});
   nativeSupervisor?.stop();
   fallbackConsole?.stop();
@@ -3565,15 +3565,13 @@ app.on('before-quit', (event) => {
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;
   if (!managedTaskProjectQuitReady && (managedTaskProjectHost || autonomousProjectRuntime || nativeCodingRuntime || nativeCodingHostCapability
-    || nativeCodingRuntimeMountPromise || nativeRuntimeInitializations.size || nativeInitializationCleanupCandidates.size
+    || supervisorLoopbackRpc || nativeCodingRuntimeMountPromise || nativeRuntimeInitializations.size || nativeInitializationCleanupCandidates.size
     || managedTaskProjectHostDrainPending)) {
     event.preventDefault();
     if(managedTaskProjectQuitPending)return;
     managedTaskProjectQuitPending=true;
     nativeSupervisor?.stop();
-    const rpc = supervisorLoopbackRpc;
-    supervisorLoopbackRpc = null;
-    void Promise.all([rpc?.stop(), closeManagedTaskProjectHost()]).then(() => {
+    void closeManagedTaskProjectHost().then(() => {
       managedTaskProjectQuitReady = true;
       app.quit();
     }).catch(()=>{

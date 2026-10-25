@@ -176,7 +176,7 @@ async function mainMountFixture(){
     runtimeRecoveryGenerationLost:false,shutdownRequested:false,managedTaskProjectHostDrainPending:false,
     managedTaskProjectHostClosing:Promise.resolve(),nativeRuntimeInitializations:new Set(),nativeInitializationCleanupCandidates:new Set(),
     nativeSupervisor:{bindNativeCodingRuntime:value=>{counts.bind++;bound=value;},bindDevosProjectRuntime:()=>{},stop:()=>{},snapshot:()=>({})},autonomousProjectRuntime:null,
-    managedTaskProjectHost:null,drainManagedRuntimeBindings,
+    managedTaskProjectHost:null,supervisorLoopbackRpc:null,drainManagedRuntimeBindings,
     readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({...generation}),
     createOwnedNativeCodingHostCapability:()=>{counts.capability++;capClosed=false;return capability;},
     ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'})}),

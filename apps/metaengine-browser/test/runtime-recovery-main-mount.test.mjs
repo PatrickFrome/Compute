@@ -18,7 +18,7 @@ function fixture(){
     createRuntimeRecoveryMainController:options=>{dependencies=options;return {start:async()=>events.push('start')};},
     nativeSupervisor:{snapshot:()=>({self_update:state.update}),stop:()=>events.push('fence')},
     nativeRuntimeInitializations:new Set(),supervisorLoopbackRpc:{stop:async()=>events.push('rpc-drained')},
-    closeManagedTaskProjectHost:async()=>{events.push('workers-drained');return {schema:'metaengine.managed-runtime-drain.v1',cleanup_confirmed:true};},
+    closeManagedTaskProjectHost:async()=>{await scope.supervisorLoopbackRpc?.stop();events.push('workers-drained');return {schema:'metaengine.managed-runtime-drain.v1',cleanup_confirmed:true};},
     drainManagedRuntimeBindings:async()=>({schema:'metaengine.managed-runtime-drain.v1',cleanup_confirmed:true}),
     console:{log:()=>{}},Error,Promise};
   const context=vm.createContext(scope);vm.runInContext(mount+init,context);

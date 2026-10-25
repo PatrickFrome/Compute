@@ -372,7 +372,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
       apiLogin: 'attached_migration_fixture_api', apiPassword: attachedPassword, apiPort, edgePort,
     });
     assert.equal(onboarding.state, 'CONFIGURED_UNQUALIFIED');
-    assert.equal(onboarding.restricted_api_admission.rpc_names_granted, 50);
+    assert.equal(onboarding.restricted_api_admission.rpc_names_granted, RPC_ALLOWLIST.length);
     assert.equal(onboarding.database_initialized, false);
     assert.equal(onboarding.postgres_started, false);
     assert.equal(onboarding.postgres_stopped, false);

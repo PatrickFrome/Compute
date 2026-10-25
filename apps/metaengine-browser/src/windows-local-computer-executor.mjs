@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
+import { lstatSync, realpathSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { protectOwnerOnlyWindowsDirectory } from './private-windows-storage-acl.mjs';
@@ -14,10 +15,28 @@ import {
 
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15000;
+const BRIDGE_PHASES = Object.freeze(['SCRIPT_ENTER','MODULES_READY','REQUEST_READ',
+  'FORMS_BEGIN','FORMS_READY','DRAWING_BEGIN','DRAWING_READY','UIA_BEGIN','UIA_READY',
+  'NATIVE_TYPE_BEGIN','NATIVE_TYPE_READY','ACTION_BEGIN','ACTION_END']);
 
 const POWERSHELL_BRIDGE = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+function Write-BridgePhase([string]$Phase) {
+  [Console]::Error.WriteLine('ME_PC_BRIDGE_V1 ' + $Phase)
+  [Console]::Error.Flush()
+}
+Write-BridgePhase 'SCRIPT_ENTER'
+
+# Resolve the two required cmdlet modules directly from the OS installation,
+# without relying on auto-discovery in this request's fresh temporary profile.
+Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility')) -ErrorAction Stop
+Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management')) -ErrorAction Stop
+Write-BridgePhase 'MODULES_READY'
+$requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
+if (-not $requestPath) { throw "computer_request_path_missing" }
+$request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
+Write-BridgePhase 'REQUEST_READ'
 
 function Write-Result([object]$Value) {
   [Console]::Out.WriteLine(($Value | ConvertTo-Json -Depth 16 -Compress))
@@ -33,11 +52,25 @@ function Sha256-String([string]$Value) {
   }
 }
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName UIAutomationTypes
+if ($request.action -in @('OBSERVE_DISPLAYS','CAPTURE_DESKTOP')) {
+  Write-BridgePhase 'FORMS_BEGIN'
+  Add-Type -AssemblyName System.Windows.Forms
+  Write-BridgePhase 'FORMS_READY'
+}
+if ($request.action -in @('CAPTURE_DESKTOP','CAPTURE_WINDOW','POINTER_CLICK')) {
+  Write-BridgePhase 'DRAWING_BEGIN'
+  Add-Type -AssemblyName System.Drawing
+  Write-BridgePhase 'DRAWING_READY'
+}
+if ($request.action -in @('UIA_SNAPSHOT','UIA_FOCUS','UIA_INVOKE','UIA_SET_VALUE','UIA_TOGGLE','UIA_SELECT','UIA_EXPAND_COLLAPSE','UIA_SCROLL','TYPE_TEXT')) {
+  Write-BridgePhase 'UIA_BEGIN'
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+  Write-BridgePhase 'UIA_READY'
+}
 
+if ($request.action -notin @('STATUS','OBSERVE_DISPLAYS')) {
+Write-BridgePhase 'NATIVE_TYPE_BEGIN'
 Add-Type -TypeDefinition @"
 using System;
 using System.IO;
@@ -178,6 +211,8 @@ public static class MetaengineWin32 {
   }
 }
 "@
+Write-BridgePhase 'NATIVE_TYPE_READY'
+}
 
 function Get-MachineFingerprint {
   $machineGuid = $null
@@ -350,12 +385,10 @@ function Get-BitmapPixelSha256([System.Drawing.Bitmap]$Bitmap) {
   }
 }
 
-$requestPath = [string]$env:METAENGINE_COMPUTER_REQUEST_PATH
-if (-not $requestPath) { throw "computer_request_path_missing" }
-$request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
 $effectStarted = $false
 
 try {
+  Write-BridgePhase 'ACTION_BEGIN'
   switch ([string]$request.action) {
     'STATUS' {
       Write-Result ([ordered]@{
@@ -467,12 +500,12 @@ try {
 
     'FOREGROUND_STATUS' {
       $hwnd = [MetaengineWin32]::GetForegroundWindow()
-      $pid = [UInt32]0
+      $foregroundProcessId = [UInt32]0
       $identity = $null
       if ($hwnd -ne [IntPtr]::Zero) {
-        [MetaengineWin32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
-        if ($pid -gt 0) {
-          try { $identity = Get-ProcessIdentity ([int]$pid) } catch {}
+        [MetaengineWin32]::GetWindowThreadProcessId($hwnd, [ref]$foregroundProcessId) | Out-Null
+        if ($foregroundProcessId -gt 0) {
+          try { $identity = Get-ProcessIdentity ([int]$foregroundProcessId) } catch {}
         }
       }
       Write-Result ([ordered]@{
@@ -932,6 +965,7 @@ try {
 
     default { throw "computer_action_not_allowlisted" }
   }
+  Write-BridgePhase 'ACTION_END'
 } catch {
   Write-Result ([ordered]@{
     ok = $false
@@ -955,6 +989,123 @@ function parseSingleJson(text) {
   if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('computer_executor_response_invalid');
   return row;
 }
+
+const CAPTURE_LEASE_MS = 60000;
+const CAPTURE_LEASE_SCHEMA = 'metaengine.windows-computer-capture-lease.v1';
+const captureName = /^(?:window|capture)-[a-f0-9]{32}\.png$/;
+const activeCaptures = new Map();
+let captureRootReady = null;
+const samePhysical = (a,b) => a.dev===b.dev && a.ino===b.ino && a.birthtimeMs===b.birthtimeMs;
+
+async function assertCaptureRoot(root, expected = null) {
+  const info=await fs.lstat(root);
+  if(!info.isDirectory()||info.isSymbolicLink()||await fs.realpath(root)!==root
+    ||(expected&&!samePhysical(info,expected)))throw Error('computer_capture_store_changed');
+  return info;
+}
+
+async function deleteCaptureLease(root,marker,{expiredOnly=true,rootIdentity=null}={}) {
+  if(!captureName.test(marker.slice(0,-11))||!marker.endsWith('.lease.json'))return false;
+  await assertCaptureRoot(root,rootIdentity);
+  const markerPath=path.join(root,marker), before=await fs.lstat(markerPath).catch(()=>null);
+  if(!before?.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size>2048)return false;
+  let lease;try{lease=JSON.parse(await fs.readFile(markerPath,'utf8'));}catch{return false;}
+  if(!lease||typeof lease!=='object'||Array.isArray(lease))return false;
+  const created=Date.parse(lease.created_at),expires=Date.parse(lease.expires_at);
+  if(lease.schema!==CAPTURE_LEASE_SCHEMA||lease.filename!==marker.slice(0,-11)
+    ||!captureName.test(lease.filename)||!Number.isFinite(created)||expires-created!==CAPTURE_LEASE_MS
+    ||(expiredOnly&&expires>Date.now())||!/^[a-f0-9]{64}$/.test(lease.sha256||''))return false;
+  const after=await fs.lstat(markerPath).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+  if(!after||!samePhysical(before,after)||before.size!==after.size||before.mtimeMs!==after.mtimeMs)return false;
+  const imagePath=path.join(root,lease.filename), image=await fs.lstat(imagePath).catch(()=>null);
+  if(image){
+    if(!image.isFile()||image.isSymbolicLink()||image.nlink!==1||image.size<16||image.size>8*1024*1024)return false;
+    const content=await fs.readFile(imagePath),readback=await fs.lstat(imagePath).catch(()=>null);
+    if(!readback||!samePhysical(image,readback)||image.size!==readback.size||image.mtimeMs!==readback.mtimeMs
+      ||content.length!==image.size||createHash('sha256').update(content).digest('hex')!==lease.sha256)return false;
+  }
+  await assertCaptureRoot(root,rootIdentity);
+  const unlinkOwned=filename=>fs.unlink(filename).catch(error=>{if(error.code!=='ENOENT')throw error;});
+  if(image)await unlinkOwned(imagePath);
+  await unlinkOwned(markerPath);
+  const active=activeCaptures.get(markerPath);if(active)clearTimeout(active.timer);
+  activeCaptures.delete(markerPath);return true;
+}
+
+async function captureStore() {
+  if(!captureRootReady)captureRootReady=(async()=>{
+    const temporary=await fs.realpath(os.tmpdir()),root=path.join(temporary,'metaengine-computer-captures');
+    await fs.mkdir(root,{mode:0o700}).catch(error=>{if(error.code!=='EEXIST')throw error;});
+    const identity=await assertCaptureRoot(root);
+    const storage=await protectOwnerOnlyWindowsDirectory(root);
+    if(storage.owner_dacl_verified!==true)throw Error('computer_capture_store_unsealed');
+    await assertCaptureRoot(root,identity);
+    // This dedicated sealed store is the only startup cleanup scope. Never scan
+    // general TEMP, per-request helpers, or images without an owned lease marker.
+    const entries=await fs.opendir(root);let examined=0;
+    for await(const entry of entries){
+      if(++examined>256)break;
+      if(entry.isFile()&&entry.name.endsWith('.lease.json'))await deleteCaptureLease(root,entry.name,{rootIdentity:identity});
+    }
+    return {root,identity};
+  })().catch(error=>{captureRootReady=null;throw error;});
+  const store=await captureRootReady;await assertCaptureRoot(store.root,store.identity);return store;
+}
+
+export async function retireExpiredWindowsComputerCaptures() {
+  const {root,identity}=await captureStore();
+  let examined=0,removed=0;
+  for await(const entry of await fs.opendir(root)){
+    if(++examined>256)break;
+    if(entry.isFile()&&entry.name.endsWith('.lease.json')
+      &&await deleteCaptureLease(root,entry.name,{rootIdentity:identity}))removed++;
+  }
+  return Object.freeze({removed,authority_effect:false});
+}
+
+async function publishCaptureLease(result,requestDirectory) {
+  if(activeCaptures.size>=64)throw Error('computer_capture_store_capacity_wait');
+  const sourceRoot=path.join(await fs.realpath(requestDirectory),'metaengine-computer-captures');
+  const filename=path.basename(result.png_path||'');
+  if(!captureName.test(filename)||path.dirname(await fs.realpath(result.png_path))!==sourceRoot
+    ||(await fs.lstat(sourceRoot)).isSymbolicLink())throw Error('computer_capture_source_boundary');
+  const before=await fs.lstat(result.png_path);
+  if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<16||before.size>8*1024*1024)
+    throw Error('computer_capture_source_invalid');
+  const bytes=await fs.readFile(result.png_path),after=await fs.lstat(result.png_path);
+  if(!samePhysical(before,after)||before.size!==after.size||before.mtimeMs!==after.mtimeMs||bytes.length!==before.size
+    ||bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a'||createHash('sha256').update(bytes).digest('hex')!==result.png_sha256)
+    throw Error('computer_capture_source_changed');
+  const {root,identity}=await captureStore();
+  const outputName=(filename.startsWith('window-')?'window-':'capture-')+randomUUID().replaceAll('-','')+'.png';
+  const imagePath=path.join(root,outputName),marker=outputName+'.lease.json',markerPath=path.join(root,marker);
+  const created=Date.now(),lease={schema:CAPTURE_LEASE_SCHEMA,filename:outputName,sha256:result.png_sha256,
+    created_at:new Date(created).toISOString(),expires_at:new Date(created+CAPTURE_LEASE_MS).toISOString()};
+  // Persist cleanup ownership first so a crash during image publication leaves
+  // an expiring owned artifact, never a permanent untracked screenshot.
+  const markerHandle=await fs.open(markerPath,'wx',0o600);
+  try{await markerHandle.writeFile(JSON.stringify(lease));await markerHandle.sync();}finally{await markerHandle.close();}
+  try{
+    const output=await fs.open(imagePath,'wx',0o600);
+    try{await output.writeFile(bytes);await output.sync();}finally{await output.close();}
+    await assertCaptureRoot(root,identity);
+    const imageIdentity=await fs.lstat(imagePath),markerIdentity=await fs.lstat(markerPath);
+    const timer=setTimeout(()=>{void deleteCaptureLease(root,marker,{expiredOnly:false,rootIdentity:identity}).catch(()=>{});},CAPTURE_LEASE_MS);
+    timer.unref();activeCaptures.set(markerPath,{root,identity,imagePath,imageIdentity,markerPath,markerIdentity,timer});
+    return {...result,png_path:imagePath,capture_expires_at:lease.expires_at};
+  }catch(error){await deleteCaptureLease(root,marker,{expiredOnly:false,rootIdentity:identity}).catch(()=>{});throw error;}
+}
+
+// Normal owner shutdown removes only the exact files this process published.
+// After a crash, the next capture startup removes expired owned lease pairs.
+process.once('exit',()=>{
+  for(const item of activeCaptures.values())try{
+    if(realpathSync(item.root)!==item.root||!samePhysical(lstatSync(item.root),item.identity))continue;
+    for(const [file,identity]of[[item.imagePath,item.imageIdentity],[item.markerPath,item.markerIdentity]]){
+      try{const current=lstatSync(file);if(current.isFile()&&!current.isSymbolicLink()&&current.nlink===1&&samePhysical(current,identity))unlinkSync(file);}catch{}
+    }
+  }catch{}
+});
 
 // Only the OS installation supplies the interpreter and its modules. Caller
 // PATH, PowerShell profiles and unrelated application credentials never select
@@ -986,6 +1137,7 @@ async function verifyWindowsComputerInterpreter(executable) {
 export async function runFixedWindowsPowerShell(request, {
   timeout_ms = DEFAULT_TIMEOUT_MS,
   spawn_impl = spawn,
+  on_native_phase = null,
 } = {}) {
   if (process.platform !== 'win32') throw new Error('computer_executor_windows_required');
   const timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
@@ -994,6 +1146,7 @@ export async function runFixedWindowsPowerShell(request, {
   const cleanupRelative = path.relative(cleanupRoot, path.resolve(dir));
   if (!cleanupRelative || cleanupRelative.startsWith('..') || path.isAbsolute(cleanupRelative)
       || path.dirname(path.resolve(dir)) !== cleanupRoot) throw new Error('computer_executor_temporary_boundary');
+  let helperClosePending = false;
   try {
   const plan = windowsComputerProcessPlan(dir);
   await verifyWindowsComputerInterpreter(plan.executable);
@@ -1009,7 +1162,7 @@ export async function runFixedWindowsPowerShell(request, {
     throw new Error('computer_executor_bridge_write_readback_mismatch');
   }
 
-    return await new Promise((resolve, reject) => {
+    const result = await new Promise((resolve, reject) => {
       const child = spawn_impl(
         plan.executable,
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', bridgePath],
@@ -1025,53 +1178,80 @@ export async function runFixedWindowsPowerShell(request, {
         },
       );
 
+      helperClosePending = true;
       let stdout = '';
-      let stderr = '';
+      let phaseLine = '', phaseDiscard = false, phaseBytes = 0, phaseIndex = -1;
+      let failure = null, closeTimer = null;
       let settled = false;
+      const diagnosticError = message => Object.assign(new Error(message), {
+        native_phase: BRIDGE_PHASES[phaseIndex] || 'NOT_STARTED',
+      });
       const finish = (fn, value) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(closeTimer);
         fn(value);
       };
-      const timer = setTimeout(() => {
+      const stop = error => {
+        if (settled || failure) return;
+        failure = error;
+        // A kill request is not close evidence. Keep the protected files until
+        // the exact helper closes; if that cannot be confirmed, retain them.
+        closeTimer = setTimeout(() => finish(reject, Object.assign(failure, {helper_close_confirmed:false})), 5000);
         try { child.kill(); } catch {}
-        finish(reject, new Error(`computer_executor_timeout:${request.action}`));
-      }, timeoutMs);
+      };
+      const timer = setTimeout(() => stop(diagnosticError(`computer_executor_timeout:${request.action}`)), timeoutMs);
 
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', (chunk) => {
+        if (failure || settled) return;
         stdout += chunk;
         if (Buffer.byteLength(stdout, 'utf8') > MAX_STDOUT_BYTES) {
-          try { child.kill(); } catch {}
-          finish(reject, new Error('computer_executor_stdout_limit'));
+          stop(diagnosticError('computer_executor_stdout_limit'));
         }
       });
       child.stderr.on('data', (chunk) => {
-        stderr += chunk;
-        if (stderr.length > 8192) stderr = stderr.slice(-8192);
+        // Only fixed, ordered labels can leave the diagnostic channel. Native
+        // errors, request contents, paths and environment are never callbacks.
+        for (const character of chunk) {
+          if (++phaseBytes > 4096) break;
+          if (character === '\n') {
+            const line = phaseLine.replace(/\r$/, '');
+            const candidate = line.startsWith('ME_PC_BRIDGE_V1 ') ? BRIDGE_PHASES.indexOf(line.slice(16)) : -1;
+            if (!phaseDiscard && candidate > phaseIndex) {
+              phaseIndex = candidate;
+              if (typeof on_native_phase === 'function') {
+                try { on_native_phase(BRIDGE_PHASES[phaseIndex]); } catch { /* Diagnostics never decide an effect. */ }
+              }
+            }
+            phaseLine = ''; phaseDiscard = false;
+          } else if (phaseLine.length < 96 && !phaseDiscard) phaseLine += character;
+          else { phaseLine = ''; phaseDiscard = true; }
+        }
       });
-      child.once('error', (error) => finish(reject, error));
-      child.once('exit', (code) => {
+      child.once('error', () => stop(diagnosticError('computer_executor_spawn_failed')));
+      child.once('close', (code, signal) => {
+        helperClosePending = false;
         if (settled) return;
-        if (code !== 0) {
-          finish(reject, new Error(`computer_executor_exit_${code}:${stderr.slice(-500)}`));
+        if (failure) { finish(reject, Object.assign(failure, {helper_close_confirmed:true})); return; }
+        if (code !== 0 || signal) {
+          finish(reject, diagnosticError(`computer_executor_exit_${code}`));
           return;
         }
         try {
           finish(resolve, parseSingleJson(stdout));
-        } catch (error) {
-          const stderrTail = stderr.slice(-500).replace(/[\r\n]+/g, ' ').trim();
-          const diagnostic = stderrTail
-            ? `${String(error?.message || error)}:${stderrTail}`
-            : String(error?.message || error);
-          finish(reject, new Error(diagnostic));
+        } catch {
+          const reason = stdout.trim() ? 'computer_executor_response_invalid' : 'computer_executor_empty_response';
+          finish(reject, diagnosticError(reason));
         }
       });
     });
+    if(result.ok===true&&['CAPTURE_DESKTOP','CAPTURE_WINDOW'].includes(request.action))return await publishCaptureLease(result,dir);
+    return result;
   } finally {
-    await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
+    if (!helperClosePending) await fs.rm(dir, { recursive:true, force:true }).catch(() => {});
   }
 }
 

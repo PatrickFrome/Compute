@@ -32,6 +32,90 @@ async function rpc(url, token, body, method = 'POST', pathSuffix = '/rpc') {
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 
+test('an old authenticated command drains without deleting the replacement listener manifest', { timeout: 10000 }, async () => {
+  const manifestPath = tempManifestPath();
+  let release, entered;
+  const commandGate = new Promise(resolve => { release = resolve; });
+  const commandEntered = new Promise(resolve => { entered = resolve; });
+  const token = 'fixture-shared-token';
+  const old = new SupervisorLoopbackRpcServer({ manifestPath, token,
+    executeCommand: async () => { entered(); await commandGate; return { completed: true, authority_effect: false }; } });
+  const successor = new SupervisorLoopbackRpcServer({ manifestPath, token,
+    executeCommand: async () => ({ authority_effect: false }) });
+  let request, stopping;
+  try {
+    await old.start();
+    const first = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    request = rpc(first.url, first.token, { method: 'supervisor.command', params: { command: { action: 'FIXTURE_HELD' } } });
+    await commandEntered;
+    let stopped = false;
+    stopping = old.stop().then(() => { stopped = true; });
+    await successor.start();
+    assert.equal(stopped, false);
+    assert.equal(old.state, 'STOPPING');
+    const published = await fs.readFile(manifestPath, 'utf8');
+    const replacement = JSON.parse(published);
+    assert.notEqual(replacement.instance_id, first.instance_id);
+    assert.equal((await rpc(replacement.url, replacement.token, { method: 'supervisor.health' })).status, 200);
+    release();
+    assert.equal((await request).body.result.completed, true);
+    await stopping;
+    assert.equal(await fs.readFile(manifestPath, 'utf8'), published);
+    assert.equal(successor.state, 'LISTENING');
+    assert.equal((await rpc(replacement.url, replacement.token, { method: 'supervisor.health' })).status, 200);
+    await old.stop();
+    assert.equal(await fs.readFile(manifestPath, 'utf8'), published);
+    await successor.stop();
+    await assert.rejects(fs.readFile(manifestPath), { code: 'ENOENT' });
+  } finally {
+    release();
+    await Promise.allSettled([request, stopping, old.stop(), successor.stop()]);
+    await fs.unlink(manifestPath).catch(() => {});
+  }
+});
+
+test('concurrent start and stop calls share one listener and cleanup operation', { timeout: 10000 }, async () => {
+  const manifestPath = tempManifestPath();
+  const server = new SupervisorLoopbackRpcServer({ manifestPath, executeCommand: async () => ({ authority_effect: false }) });
+  try {
+    const starts = await Promise.all([server.start(), server.start()]);
+    assert.equal(starts[0].port, starts[1].port);
+    await Promise.all([server.stop(), server.stop()]);
+    assert.equal(server.state, 'STOPPED');
+    await assert.rejects(fs.readFile(manifestPath), { code: 'ENOENT' });
+    await server.start();
+    const replacement = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    assert.equal((await rpc(replacement.url, replacement.token, { method: 'supervisor.health' })).status, 200);
+  } finally { await server.stop(); }
+});
+
+test('disconnecting an authenticated caller does not release a still-running executor from the drain', { timeout: 10000 }, async () => {
+  const manifestPath = tempManifestPath();
+  let release, entered, executions = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const commandEntered = new Promise(resolve => { entered = resolve; });
+  const server = new SupervisorLoopbackRpcServer({ manifestPath, executeCommand: async () => {
+    executions++; entered(); await gate; return { authority_effect: false };
+  } });
+  const controller = new AbortController();
+  let request, stopping;
+  try {
+    await server.start(); const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    request = fetch(manifest.url, { method: 'POST', signal: controller.signal,
+      headers: { Authorization: `Bearer ${manifest.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: 'supervisor.command', params: { command: { action: 'FIXTURE_HELD' } } }),
+    }).then(value => value.json()).catch(error => error);
+    await commandEntered; controller.abort(); await request;
+    let stopped = false; stopping = server.stop().then(() => { stopped = true; });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(stopped, false); assert.equal(server.state, 'STOPPING');
+    assert.equal(executions, 1);
+    release(); await stopping;
+    assert.equal(server.state, 'STOPPED'); assert.equal(executions, 1);
+    await assert.rejects(fs.readFile(manifestPath), { code: 'ENOENT' });
+  } finally { release(); controller.abort(); await Promise.allSettled([request, stopping, server.stop()]); }
+});
+
 test('constructor refuses non-loopback bind hosts', () => {
   assert.throws(() => new SupervisorLoopbackRpcServer({ executeCommand: async () => ({}), host: '0.0.0.0' }), /supervisor_loopback_host_not_loopback/);
   assert.throws(() => new SupervisorLoopbackRpcServer({ executeCommand: async () => ({}), host: 'example.com' }), /supervisor_loopback_host_not_loopback/);

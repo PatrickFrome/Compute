@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import vm from 'node:vm';
 import {drainManagedRuntimeBindings} from '../src/managed-runtime-drain.mjs';
+import {SupervisorLoopbackRpcServer} from '../src/supervisor-loopback-rpc-server.mjs';
 
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
@@ -14,6 +18,7 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
   const main=await readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
   const declarations=main.slice(main.indexOf('let nativeSupervisor = null;'),main.indexOf('const managedTaskProjectClientControl ='));
   const composition=main.slice(main.indexOf('async function initGithubChatRelay('),main.indexOf('function destroyWindowContents()'));
+  const destroy=main.slice(main.indexOf('function destroyWindowContents()'),main.indexOf('async function runSmoke()'));
   const recoverySource=main.slice(main.indexOf('async function ensureInterruptedSetupRecovery('),main.indexOf("ipcMain.handle('metaengine:client:interrupted-setup-inspect'"));
   assert.ok(declarations.length>0&&composition.length>0);
   const gate=deferred(),entered=deferred(),events=[],counts={managed:0,project:0,rpc:0,relay:0,mount:0,start:0,command:0,chatCommand:0,goal:0,
@@ -38,6 +43,8 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
     archiveInterruptedBootstrapForNewEpoch:()=>{counts.recoveryApplySupervisor++;return {};}};
   const scope={Promise,Set,Map,Error,console,globalThis:{},shutdownRequested:false,fixtureSupervisor:supervisor,
     supervisorLoopbackRpc:null,githubChatRelay:null,githubChatRelayError:null,githubChatSetup:null,shellBrainPortConsumerId:'fixture',
+    detachShellBrainPort:()=>{},fallbackConsole:null,downloads:null,userSessionConfigured:false,views:new Map(),shellView:null,
+    rsiRuntime:null,rsiOutcomeRiver:null,rsiOperatorSteering:null,developmentPlane:null,
     app:{getPath:()=> 'C:/fixture/private',getVersion:()=> 'fixture'},safeStorage:{},shell:{openPath:async()=>''},
     fleet:{snapshot:()=>{counts.recoverySnapshot++;return {};},archiveInterruptedBootstrapAgents:()=>{counts.recoveryApplyFleet++;return {};}},
     registry:{snapshot:()=>({tabs:[]})},
@@ -58,7 +65,7 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
     CHAT_COMMAND_ACTIONS:[],computerExecutor:{snapshot:()=>({})},
     attachShellBrainPort:()=>{},publishSnapshot:async()=>{},recordStartupSubsystemDegraded:(name,error)=>events.push(name+':'+error.message),
     drainManagedRuntimeBindings};
-  const context=vm.createContext(scope);vm.runInContext(declarations+composition+recoverySource+'\nnativeSupervisor=fixtureSupervisor;',context);
+  const context=vm.createContext(scope);vm.runInContext(declarations+composition+destroy+recoverySource+'\nnativeSupervisor=fixtureSupervisor;',context);
   const state=()=>vm.runInContext('({host:managedTaskProjectHost,project:autonomousProjectRuntime,rpc:supervisorLoopbackRpc,relay:githubChatRelay,recovery:interruptedSetupRecovery,closing:managedTaskProjectHostClosing,drain:managedTaskProjectHostDrainPending,pending:nativeRuntimeInitializations.size})',context);
   return {context,scope,gate,entered,events,counts,managed,project,rpc,relay,supervisor,state,recoveryConstructions,
     get rpcOptions(){return rpcOptions;},get relayOptions(){return relayOptions;},get recoveryOptions(){return recoveryConstructions.at(-1)?.options;},
@@ -74,6 +81,48 @@ test('actual close waits for a deferred managed constructor and prevents its lat
   assert.equal(result.error,undefined);assert.equal(result.value.cleanup_confirmed,true);
   assert.equal(f.state().host,null);assert.equal(f.managed.state,'CLOSED');
   assert.equal(f.counts.project,0);assert.equal(f.counts.mount,0);assert.equal(f.counts.start,0);assert.equal(f.state().pending,0);
+});
+
+test('actual window teardown retains a published RPC and blocks replacement startup until its authenticated command drains', {timeout:10000}, async()=>{
+  const f=await mainFixture();assert.equal((await f.init().result).error,undefined);
+  const manifestPath=path.join(os.tmpdir(),`metaengine-main-rpc-drain-${process.pid}-${Date.now()}.json`);
+  const gate=deferred(),entered=deferred();
+  const old=new SupervisorLoopbackRpcServer({manifestPath,executeCommand:async()=>{
+    entered.resolve();await gate.promise;return {authority_effect:false,completed:true};
+  }});
+  let response,closing,fresh;
+  try{
+    await old.start();const manifest=JSON.parse(await fs.readFile(manifestPath,'utf8'));
+    f.set('supervisorLoopbackRpc',old);
+    response=fetch(manifest.url,{method:'POST',headers:{Authorization:`Bearer ${manifest.token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({method:'supervisor.command',params:{command:{action:'FIXTURE_HELD'}}})}).then(value=>value.json());
+    await entered.promise;
+    const previousFleet=f.scope.fleet;
+    f.context.destroyWindowContents();
+    closing=tracked(f.state().closing);f.scope.fleet=previousFleet;fresh=f.init();await turn();await turn();
+    assert.equal(closing.settled,false);assert.equal(fresh.settled,false);
+    assert.equal(old.state,'STOPPING');assert.equal(f.state().rpc,old);
+    assert.ok(f.custody().some(record=>record.candidate===old));
+    assert.equal(f.counts.rpc,1,'replacement must not start while published listener drains');
+    assert.equal(f.state().drain,true);
+    gate.resolve();assert.equal((await response).result.completed,true);
+    const receipt=await closing.result;assert.equal(receipt.error,undefined);assert.equal(receipt.value.cleanup_confirmed,true);
+    assert.equal((await fresh.result).error,undefined);
+    assert.equal(old.state,'STOPPED');assert.notEqual(f.state().rpc,old);assert.equal(f.counts.rpc,2);
+    await assert.rejects(fs.readFile(manifestPath),{code:'ENOENT'});
+  }finally{
+    gate.resolve();await Promise.allSettled([response,closing?.result,fresh?.result,old.stop()]);
+    await f.close().result;await fs.unlink(manifestPath).catch(()=>{});
+  }
+});
+
+test('failed published RPC cleanup retains the exact owner and fences subsequent startup',async()=>{
+  const f=await mainFixture({cleanupFailure:'rpc'});assert.equal((await f.init().result).error,undefined);
+  f.context.destroyWindowContents();const closing=await tracked(f.state().closing).result;
+  assert.match(closing.error?.message||'',/rpc cleanup unknown/);
+  assert.equal(f.state().rpc,f.rpc);assert.equal(f.state().drain,true);
+  assert.ok(f.custody().some(record=>record.candidate===f.rpc));
+  assert.ok((await f.init().result).error);assert.equal(f.counts.rpc,1);
 });
 
 test('a deferred autonomous constructor is closed before the existing managed host is released',async()=>{
