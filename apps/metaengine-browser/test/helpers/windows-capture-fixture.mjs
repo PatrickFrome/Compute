@@ -53,6 +53,11 @@ export const captureFixtureSource = [
 export function startCaptureFixture(executable, fixturePath, {
   spawnImpl = spawn, watchImpl = fs.watch, environment = process.env, signal, readyTimeoutMs = 30000, stopTimeoutMs = 5000,
 } = {}) {
+  // Use one native-resolved directory spelling for the watcher, child and
+  // nonce-bound files. Windows temp paths can contain an 8.3/junction alias;
+  // libuv expands event filenames before comparing them with the watch root.
+  // Resolve only the existing parent: an ENOENT child is still a spawn failure.
+  fixturePath = path.join(fs.realpathSync.native(path.dirname(fixturePath)), path.basename(fixturePath));
   const readyPath = fixturePath + '.ready.json', stopPath = fixturePath + '.stop';
   const nonce = randomBytes(24).toString('hex');
   const env = { ...environment, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',

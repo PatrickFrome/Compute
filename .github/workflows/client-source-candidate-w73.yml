@@ -90,7 +90,12 @@ jobs:
         run: |
           set -euo pipefail
           npm run check
-          node --test --test-concurrency=4 'test/*.test.mjs'
+          browser_test_command=(node --test --test-concurrency=4 'test/*.test.mjs')
+          if [ "$RUNNER_OS" = 'Linux' ]; then
+            xvfb-run -a "${browser_test_command[@]}"
+          else
+            "${browser_test_command[@]}"
+          fi
       - name: Additional disposable coding, backup, critic and CI-train contracts
         shell: bash
         run: |

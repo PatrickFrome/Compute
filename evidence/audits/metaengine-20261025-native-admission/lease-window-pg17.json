@@ -1,0 +1,60 @@
+{
+  "schema": "metaengine.w45.disposable-lease-window-observation.v1",
+  "prior_fixture_source": "cf547d7e5f973517fa9bd1e206892e3a108ad1ea",
+  "pinned_lease_source": "6498c1596432ea9d9987f343c92505b273d1ac11",
+  "classification": "GENERATED_LOCAL_PG17_SOURCE_BEHAVIOR_ONLY",
+  "docker_image_qualification": false,
+  "full_w45_integration_run": false,
+  "installed_qualification": false,
+  "production_qualification": false,
+  "authority_effect": false,
+  "records": [
+    {
+      "case": "original_5s_fixture_with_last_contender_delayed_5600ms",
+      "expected_counterexample_observed": true,
+      "successful_acquisitions": 2,
+      "elapsed_ms": 5614,
+      "actual_ci_internal_scheduling_proven": false
+    },
+    {
+      "case": "actual_fixed_fixture_body_with_last_contender_delayed_5600ms",
+      "passed": true,
+      "elapsed_ms": 5622,
+      "diagnostics": [
+        {
+          "schema": "metaengine.w45.lease-cas-window.v1",
+          "contenders": 8,
+          "successful_acquisitions": 1,
+          "ttl_ms": 60000,
+          "elapsed_ms": 5613,
+          "observed_generation": 1,
+          "lease_active": true,
+          "authority_effect": false
+        }
+      ],
+      "generation": 2,
+      "pending_wake_status": "AMBIGUOUS",
+      "event_seq": 1,
+      "exact_generated_expiry_preserves_lost_ack": true,
+      "forged_receipt_remains_unresolved": true
+    },
+    {
+      "case": "actual_pg17_postmaster_restart",
+      "passed": true,
+      "new_postmaster_pid": true,
+      "pending_ambiguity_and_epoch_fields_unchanged": true,
+      "graceful_restart": true
+    }
+  ],
+  "postgres_version": "postgres (PostgreSQL) 17.6",
+  "private_unix_socket_only": true,
+  "fsync_enabled": true,
+  "pinned_lease_module_sha256": "5b38d5326cf4996d37359bd50fc4c57e0b487fe120a51e7a3dad142e6156d794",
+  "original_fixture_sha256": "b5fe3fa6b135b64cb01ed08803a7e36a0821769eb6127c50bb58de64a5a469dc",
+  "fixed_fixture_sha256": "15a72efd9bb38a6b86328ccfb408e21fc626c0ccc567717ebb6ad8c0a45361e4",
+  "cleanup": {
+    "server_stopped": true,
+    "owned_temporary_directory_removed": true
+  },
+  "result": "PASS_FOR_RECORDED_LOCAL_SCOPE"
+}

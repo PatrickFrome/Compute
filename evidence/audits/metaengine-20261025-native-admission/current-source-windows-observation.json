@@ -1,0 +1,195 @@
+{
+  "schema": "metaengine.current-source.windows-observation.v1",
+  "source_sha": "cf547d7e5f973517fa9bd1e206892e3a108ad1ea",
+  "workflow_run_id": 40217087702,
+  "job_id": 121240465073,
+  "job_url": "https://github.com/PatrickFrome/Compute/actions/runs/40217087702/job/121240465073",
+  "runtime_contracts": {
+    "tests": 637,
+    "pass": 637,
+    "fail": 0,
+    "skip": 0
+  },
+  "browser_suite": {
+    "tests": 5941,
+    "pass": 5931,
+    "fail": 3,
+    "skip": 7
+  },
+  "failures": [
+    {
+      "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+      "reason": "ORIGINAL_12000MS_READ_TIMEOUT",
+      "last_stage": "ADD_TYPE_BEGIN"
+    },
+    {
+      "file": "test/windows-capture-fixture-qualification.test.mjs",
+      "reason": "LIBUV_FS_EVENT_NATIVE_ASSERTION",
+      "assertion": "!_wcsnicmp(filename, dir, dirlen)",
+      "location": "src/win/fs-event.c:72"
+    },
+    {
+      "file": "test/windows-local-computer-executor.test.mjs",
+      "reason": "LIBUV_FS_EVENT_NATIVE_ASSERTION",
+      "assertion": "!_wcsnicmp(filename, dir, dirlen)",
+      "location": "src/win/fs-event.c:72"
+    }
+  ],
+  "native_phase_observations": [
+    {
+      "schema": "metaengine.codex-cli.test-startup-phases.v1",
+      "helper_variant": "FIRST_NATIVE_RUN",
+      "startup_deadline_ms": 30000,
+      "helper_spawns_observed": 1,
+      "spawn_event_elapsed_ms": 3,
+      "ready_validated_elapsed_ms": 28500,
+      "close_elapsed_ms": 28575,
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 240
+        },
+        {
+          "stage": "ADD_TYPE_BEGIN",
+          "elapsed_ms": 251
+        },
+        {
+          "stage": "ADD_TYPE_END",
+          "elapsed_ms": 28326
+        },
+        {
+          "stage": "REQUEST_READ_BEGIN",
+          "elapsed_ms": 28326
+        },
+        {
+          "stage": "REQUEST_READ_END",
+          "elapsed_ms": 28345
+        },
+        {
+          "stage": "NATIVE_RUN_ENTER",
+          "elapsed_ms": 28376
+        },
+        {
+          "stage": "IMAGE_DIGEST_CHECKED",
+          "elapsed_ms": 28493
+        },
+        {
+          "stage": "CHILD_JOB_BOUND",
+          "elapsed_ms": 28498
+        },
+        {
+          "stage": "IDENTITY_READBACK_COMPLETE",
+          "elapsed_ms": 28499
+        },
+        {
+          "stage": "READY_WRITE_BEGIN",
+          "elapsed_ms": 28499
+        },
+        {
+          "stage": "READY_FLUSH_RETURNED",
+          "elapsed_ms": 28501
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "body_failed": false,
+      "phase_timing_observation_only": true,
+      "contention_proven": false,
+      "native_qualification_proven": false
+    },
+    {
+      "schema": "metaengine.codex-cli.test-boot-read-phases.v1",
+      "reader_variant": "FIRST_NATIVE_BOOT_READ",
+      "production_timeout_ms": 12000,
+      "transport_calls": 1,
+      "spawn_event_elapsed_ms": 7,
+      "close_elapsed_ms": 12035,
+      "stages": [
+        {
+          "stage": "SCRIPT_ENTER",
+          "elapsed_ms": 193
+        },
+        {
+          "stage": "ADD_TYPE_BEGIN",
+          "elapsed_ms": 194
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "outcome": "READ_FAILED",
+      "owned_transport_closed": true,
+      "phase_timing_observation_only": true,
+      "causal_attribution_proven": false,
+      "native_qualification_proven": false
+    },
+    {
+      "schema": "metaengine.codex-cli.test-startup-phases.v1",
+      "helper_variant": "FORCED_OUTPUT_WINDOW",
+      "startup_deadline_ms": 30000,
+      "helper_spawns_observed": 1,
+      "spawn_event_elapsed_ms": 5,
+      "ready_validated_elapsed_ms": 28700,
+      "close_elapsed_ms": 28794,
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 208
+        },
+        {
+          "stage": "ADD_TYPE_BEGIN",
+          "elapsed_ms": 218
+        },
+        {
+          "stage": "ADD_TYPE_END",
+          "elapsed_ms": 28524
+        },
+        {
+          "stage": "REQUEST_READ_BEGIN",
+          "elapsed_ms": 28525
+        },
+        {
+          "stage": "REQUEST_READ_END",
+          "elapsed_ms": 28547
+        },
+        {
+          "stage": "NATIVE_RUN_ENTER",
+          "elapsed_ms": 28583
+        },
+        {
+          "stage": "IMAGE_DIGEST_CHECKED",
+          "elapsed_ms": 28692
+        },
+        {
+          "stage": "CHILD_JOB_BOUND",
+          "elapsed_ms": 28698
+        },
+        {
+          "stage": "IDENTITY_READBACK_COMPLETE",
+          "elapsed_ms": 28699
+        },
+        {
+          "stage": "READY_WRITE_BEGIN",
+          "elapsed_ms": 28699
+        },
+        {
+          "stage": "READY_FLUSH_RETURNED",
+          "elapsed_ms": 28700
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "body_failed": false,
+      "phase_timing_observation_only": true,
+      "contention_proven": false,
+      "native_qualification_proven": false
+    }
+  ],
+  "exact_failed_runner_watch_path_observed": false,
+  "add_type_internal_cause_proven": false,
+  "installed_user_machine_qualification": false,
+  "ambiguity_reconciled": false,
+  "authority_effect": false
+}

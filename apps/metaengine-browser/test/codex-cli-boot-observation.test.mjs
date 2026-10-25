@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
@@ -8,6 +8,18 @@ import {CODEX_BOOT_READ_STAGES, instrumentWindowsBootReadScript, createWindowsBo
 
 // Generated transport/parser controls only. These do not qualify Windows,
 // Add-Type compilation, kernel identity or the physical 12s startup budget.
+const contextKeys = new Set(['TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']);
+const windowsContext = Object.freeze({TEMP: 'C:\\Fixture\\Temp', TMP: 'C:\\Fixture\\Temp',
+  USERPROFILE: 'C:\\Fixture', APPDATA: 'C:\\Fixture\\AppData\\Roaming',
+  LOCALAPPDATA: 'C:\\Fixture\\AppData\\Local'});
+// These fake Win32 transports must not inherit a Linux CI profile. Keep the
+// production environment validator intact and restore the enclosing process.
+beforeEach(t => {
+  const previous = Object.fromEntries(Object.entries(process.env).filter(([key]) => contextKeys.has(key.toUpperCase())));
+  const clear = () => { for (const key of Object.keys(process.env)) if (contextKeys.has(key.toUpperCase())) delete process.env[key]; };
+  clear(); Object.assign(process.env, windowsContext);
+  t.after(() => { clear(); Object.assign(process.env, previous); });
+});
 const prefix = 'ME_CODEX_BOOT_READ_V1 ';
 const boot = () => ({schema: 'metaengine.windows.kernel-boot.v1', kernel_boot_id: 29,
   system_process: {pid: 4, created_at: '2026-10-22T03:00:00.000Z',

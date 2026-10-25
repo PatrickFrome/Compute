@@ -1,0 +1,98 @@
+ORIGINAL FROZEN HELPER NEGATIVE CONTROL (expected assertion failure)
+✖ a real directory alias resolves to one native watch, child and nonce-file root before launch (7.480465ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 91.273807
+
+✖ failing tests:
+
+test at ../../../../tmp/metaengine-watch-alias-negative-4dj7x7sq/negative.test.mjs:137:1
+✖ a real directory alias resolves to one native watch, child and nonce-file root before launch (7.480465ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '/tmp/metaengine-capture-contract-DyC6Na/directory-alias'
+  - '/tmp/metaengine-capture-contract-DyC6Na/long-generated-capture-directory'
+
+      at TestContext.<anonymous> (file:///tmp/metaengine-watch-alias-negative-4dj7x7sq/negative.test.mjs:152:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '/tmp/metaengine-capture-contract-DyC6Na/directory-alias',
+    expected: '/tmp/metaengine-capture-contract-DyC6Na/long-generated-capture-directory',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+FIXED HELPER TARGETED REGRESSION OUTPUT
+✔ locked Electron provisioning explicitly calls its package resolver once outside timed UI execution and is CWD-independent (13.371432ms)
+✔ Electron qualification rejects version and source overrides before invoking any package code (28.242288ms)
+✔ Electron qualification refuses a resolver that leaves its locked dist or returns a missing binary (6.110676ms)
+✔ owned atomic-file readiness drives one exact observation and capture, never a title-only or foreign HWND match (45.251144ms)
+✔ a filename-less watch event checks only the nonce-bound owned readiness path and never enables Node IPC mode (2.457624ms)
+✔ a real directory alias resolves to one native watch, child and nonce-file root before launch (2.251484ms)
+✔ spawn ENOENT is handled immediately, causes zero observations, and close is awaited (2.61483ms)
+✔ exit before readiness is terminal and performs no observation (30.081458ms)
+✔ a ready fixture that exits during the observation cannot trigger capture or an observation retry (34.393575ms)
+✔ readiness timeout and an invalid owned identity cannot start a native observation (181.894226ms)
+✔ owned child close precedes fixture directory removal, including delayed graceful shutdown (90.993816ms)
+✔ automatic failure-path cleanup uses one stop-before-remove hook rather than FIFO early deletion (89.829645ms)
+✔ test cancellation kills its owned fixture and prevents later native calls (24.942187ms)
+✔ unconfirmed child close fails teardown instead of authorizing directory removal (22.193675ms)
+✔ physical capture fixture uses official preprovisioned resolution and retains raw digest, geometry and exact target assertions (1.405422ms)
+﹣ expired capture cleanup preserves a replacement image and an unexpired lease (1.294476ms) # SKIP
+✔ OS bridge ignores PATH, module and credential injection and uses private temp (1.140434ms)
+✔ executor snapshot exposes fixed bridge identity and no scheduler authority (0.357978ms)
+﹣ fixed Windows PowerShell bridge physically parses and serves STATUS (0.144277ms) # SKIP
+﹣ bridge waits for close and drains output after exit before releasing private request files (0.127422ms) # SKIP
+﹣ bridge timeout preserves exact failure and protected files until owned helper close (0.105819ms) # SKIP
+﹣ fixed Windows bridge physically captures an exact window with raw pixel digest (0.230086ms) # SKIP
+﹣ fixed Windows bridge physically reads foreground status without overwriting the automatic PID variable (0.065238ms) # SKIP
+✔ read-only observation carries no authority effect (1.254226ms)
+✔ V2 read-only computer observations include display and exact-window surfaces (1.102297ms)
+✔ V2 direct UIA fast actions preserve lease and typed positive-readback semantics (2.463384ms)
+✔ proven mutation becomes EFFECT_PROVEN only after positive readback (0.362495ms)
+✔ generic readback boolean cannot promote a delivery-only action to EFFECT_PROVEN (0.41216ms)
+✔ pre-effect executor rejection is NO_EFFECT_PROVEN and still never auto-retries (0.443878ms)
+✔ visual pointer fallback consumes one fresh exact-window capture and then fails closed (0.690738ms)
+✔ background window capture cannot authorize visual pointer mutation (0.403036ms)
+✔ geometry-unstable window capture cannot authorize visual pointer mutation (0.31291ms)
+✔ window capture without raw pixel digest cannot authorize visual pointer mutation (0.308845ms)
+✔ desktop capture cannot authorize a target-window pointer mutation (0.263787ms)
+✔ window capture cannot be replayed against a different exact target (0.309815ms)
+✔ stale visual capture is rejected before physical execution (0.442725ms)
+✔ dispatch-only physical mutations remain ambiguous without semantic effect readback (0.320983ms)
+✔ TYPE_TEXT without value readback is terminal ambiguous after dispatch (0.206691ms)
+✔ TYPE_TEXT append mode fails before physical dispatch because exact caret semantics are unproven (0.481554ms)
+✔ runner failure after dispatch boundary is conservatively ambiguous and terminal (0.349376ms)
+▶ missing or malformed effect boundary is conservatively ambiguous and terminal
+  ✔ missing response (0.288254ms)
+  ✔ null response (0.149414ms)
+  ✔ empty response (0.220691ms)
+  ✔ array response (0.266761ms)
+  ✔ incomplete error response (0.187642ms)
+  ✔ readback without effect boundary (0.140561ms)
+  ✔ null effect boundary (0.205239ms)
+  ✔ undefined effect boundary (0.280481ms)
+  ✔ string false effect boundary (0.129625ms)
+  ✔ string true effect boundary (0.163986ms)
+  ✔ zero effect boundary (0.253761ms)
+  ✔ nonzero effect boundary (0.174071ms)
+  ✔ object effect boundary (0.174151ms)
+✔ missing or malformed effect boundary is conservatively ambiguous and terminal (3.854685ms)
+✔ explicit false effect boundary preserves proven pre-actuation rejection (0.270827ms)
+✔ mutating executor path cannot bypass DB lease binding (0.251688ms)
+ℹ tests 56
+ℹ suites 0
+ℹ pass 50
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 6
+ℹ todo 0
+ℹ duration_ms 653.935615
