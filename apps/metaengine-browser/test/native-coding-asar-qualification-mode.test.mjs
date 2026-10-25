@@ -23,15 +23,17 @@ test('an explicit ASAR qualification cannot silently skip or fall back when its 
   assert.throws(()=>select({explicitExecutable:true,electron:''}),/qualification_electron_required/);
 });
 
-test('all three active Linux Browser suites select filesystem-only mode in the intended step while Windows retains MAIN_PROCESS',async()=>{
-  const matrixMode="${{ matrix.os == 'ubuntu-24.04' && 'ASAR_NODE' || 'MAIN_PROCESS' }}";
-  for(const [file,step,command,matrix] of [
+const workflowCases=[
     ['metaengine-browser-self-update-e2e.yml','Parse and contract gates','npm test',false],
     ['browser-agent-result-installer-source-qualification.yml','Prove full Browser regression','npm test',true],
     ['client-live-mechanics-recovery-v1.yml','Exercise all Browser mechanics including real local IPC',
       'node --test --test-concurrency=4 test/*.test.mjs',true],
-  ]){
-    const source=await fs.readFile(new URL('../../../.github/workflows/'+file,import.meta.url),'utf8');
+  ];
+
+function assertWorkflowMode(source,[file,step,command,matrix]){
+  // Git may materialize workflow text with CRLF on Windows; scope checks stay exact.
+  source=source.replace(/\r\n/g,'\n');
+  const matrixMode="${{ matrix.os == 'ubuntu-24.04' && 'ASAR_NODE' || 'MAIN_PROCESS' }}";
     const marker='      - name: '+step+'\n',start=source.indexOf(marker);
     assert.notEqual(start,-1,file);assert.equal(source.indexOf(marker,start+1),-1,file);
     const following=source.indexOf('\n      - ',start+marker.length);
@@ -44,6 +46,32 @@ test('all three active Linux Browser suites select filesystem-only mode in the i
     else{
       const contract=source.slice(source.indexOf('  contract:\n'),source.indexOf('\n  windows-published-n-to-one-build-target:'));
       assert.ok(contract.includes('    runs-on: ubuntu-24.04\n')&&contract.includes(marker),file);
+    }
+}
+
+async function workflowSource(file){
+  return fs.readFile(new URL('../../../.github/workflows/'+file,import.meta.url),'utf8');
+}
+
+test('all three active Linux Browser suites select filesystem-only mode in the intended step while Windows retains MAIN_PROCESS',async()=>{
+  for(const spec of workflowCases)assertWorkflowMode(await workflowSource(spec[0]),spec);
+});
+
+test('ASAR workflow guards accept identical LF and Windows CRLF checkouts',async()=>{
+  for(const spec of workflowCases){
+    const lf=(await workflowSource(spec[0])).replace(/\r\n/g,'\n');
+    for(const ending of ['\n','\r\n'])assertWorkflowMode(lf.replaceAll('\n',ending),spec);
+  }
+});
+
+test('both newline forms still reject wrong qualification mode and mode leaking beyond its step',async()=>{
+  for(const spec of workflowCases){
+    const lf=(await workflowSource(spec[0])).replace(/\r\n/g,'\n');
+    for(const ending of ['\n','\r\n']){
+      for(const changed of [lf.replace('ASAR_NODE','MAIN_PROCESS'),lf+'\n          METAENGINE_TEST_ELECTRON_MODE: MAIN_PROCESS\n']){
+        assert.notEqual(changed,lf);
+        assert.throws(()=>assertWorkflowMode(changed.replaceAll('\n',ending),spec),{code:'ERR_ASSERTION'});
+      }
     }
   }
 });

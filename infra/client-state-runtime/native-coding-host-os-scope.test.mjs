@@ -8,15 +8,30 @@ import vm from 'node:vm';
 import {createNativeCodingHostImageGuard} from './native-coding-host-os-scope.mjs';
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
 
+// The production guard intentionally rejects aliased paths. Windows TEMP may
+// use an 8.3 spelling; test images must start beneath its physical parent.
+async function imageDirectory(t,temporary=os.tmpdir()) {
+ const parent=await fs.realpath(temporary);
+ const directory=await fs.realpath(await fs.mkdtemp(path.join(parent,'metaengine-host-image-')));
+ t.after(async()=>{
+  const actual=await fs.realpath(directory),stat=await fs.lstat(directory);
+  if(actual!==directory||!stat.isDirectory()||stat.isSymbolicLink()
+    ||path.dirname(directory)!==parent||!path.basename(directory).startsWith('metaengine-host-image-'))
+   throw Error('fixture_cleanup_scope');
+  await fs.rm(directory,{recursive:true,force:false});
+ });
+ return directory;
+}
+
 test('private Host qualifies real immutable bytes once and denies use before qualification',async t=>{
- const dir=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-host-image-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const dir=await imageDirectory(t);
  const file=path.join(dir,'image.bin');await fs.writeFile(file,'real-test-image');
  const guard=createNativeCodingHostImageGuard();await assert.rejects(guard.read(file),/image_not_prepared/);
  await Promise.all([guard.prepare([file]),guard.prepare([file])]);const expected=createHash('sha256').update('real-test-image').digest('hex');
  assert.equal(await guard.read(file),expected);await guard.prepare([file]);assert.equal(await guard.read(file),expected);
 });
 for(const mutation of ['bytes','same-byte-replacement','link'])test('prepared Host never silently requalifies '+mutation,async t=>{
- const dir=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-host-image-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const dir=await imageDirectory(t);
  const file=path.join(dir,'image.bin'),alias=path.join(dir,'alias.bin');await fs.writeFile(file,'image-v1');
  const guard=createNativeCodingHostImageGuard();await guard.prepare([file]);
  if(mutation==='bytes')await fs.writeFile(file,'image-v2');
@@ -25,6 +40,37 @@ for(const mutation of ['bytes','same-byte-replacement','link'])test('prepared Ho
  await assert.rejects(guard.read(file),/image_preparation_invalidated|image_file_unverified/);
  if(mutation==='link')await fs.unlink(alias);
  await assert.rejects(guard.prepare([file]),/image_preparation_invalidated/);
+});
+
+test('image fixture canonicalizes an aliased temporary parent without weakening the production path guard',async t=>{
+ const root=await imageDirectory(t),physical=path.join(root,'physical'),alias=path.join(root,'alias');
+ await fs.mkdir(physical);await fs.symlink(physical,alias,process.platform==='win32'?'junction':'dir');
+ const cleanup=[],dir=await imageDirectory({after:fn=>cleanup.push(fn)},alias);
+ assert.equal(cleanup.length,1);
+ try{
+  assert.equal(dir,await fs.realpath(dir));assert.equal(path.dirname(dir),physical);
+  const file=path.join(dir,'image.bin');await fs.writeFile(file,'real-aliased-temp-image');
+  const guard=createNativeCodingHostImageGuard();await guard.prepare([file]);
+  assert.equal(await guard.read(file),createHash('sha256').update('real-aliased-temp-image').digest('hex'));
+  const rawAlias=path.join(alias,path.basename(dir),'image.bin');
+  await assert.rejects(createNativeCodingHostImageGuard().prepare([rawAlias]),/image_file_unverified/);
+ }finally{await cleanup[0]();}
+ await assert.rejects(fs.access(dir),error=>error.code==='ENOENT');
+});
+
+test('image fixture cleanup refuses a redirected root rather than removing another same-prefix directory',async t=>{
+ const parent=await imageDirectory(t),cleanup=[];
+ const dir=await imageDirectory({after:fn=>cleanup.push(fn)},parent),retained=dir+'-retained';
+ const unrelated=path.join(parent,'metaengine-host-image-unrelated');await fs.mkdir(unrelated);
+ const marker=path.join(unrelated,'keep.txt');await fs.writeFile(marker,'not the owned fixture');
+ await fs.rename(dir,retained);
+ try{
+  await fs.symlink(unrelated,dir,process.platform==='win32'?'junction':'dir');
+  await assert.rejects(cleanup[0](),/fixture_cleanup_scope/);
+  assert.equal(await fs.readFile(marker,'utf8'),'not the owned fixture');
+ }finally{
+  await fs.rm(dir,{recursive:true,force:false});await fs.rename(retained,dir);await cleanup[0]();
+ }
 });
 
 test('actual checkpoint and native OS scope functions route PG identity through the private active reader',async()=>{

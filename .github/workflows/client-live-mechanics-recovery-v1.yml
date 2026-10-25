@@ -10,6 +10,7 @@ on:
       - 'supabase/migrations/*claim_class_preservation*'
       - 'supabase/migrations/*native_device_transport_bootstrap*'
       - '.github/workflows/client-live-mechanics-recovery-v1.yml'
+      - '.github/browser-ci-resource-observation.mjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,7 +21,9 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Controlled diagnostic budget: 10-minute Windows-only probe plus the
+    # existing 20-minute full suite and setup headroom. No contention claim.
+    timeout-minutes: ${{ matrix.os == 'windows-2025' && 35 || 20 }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
@@ -56,16 +59,44 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; if (!fs.readFileSync(process.argv[1], "utf8").includes("DevOS must progress before an advisory CAPTURE settles")) process.exit(1)' "$idle_proof_log"
           rm -f "$idle_proof_source"
       - name: Parse runtime contracts
+        id: qualification_prerequisites
         working-directory: apps/metaengine-browser
-        run: npm run check
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          node --test test/live-mechanics-native-probe-workflow.test.mjs
+      - name: Isolated Windows native diagnostic (not contention proof)
+        id: windows_native_probe
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ../../.github/browser-ci-resource-observation.mjs isolated-windows-native
+          node --test --test-concurrency=1 \
+            test/codex-cli-runner.test.mjs \
+            test/codex-cli-sandbox-probe.test.mjs \
+            test/native-coding-host-observers.test.mjs \
+            test/windows-local-computer-executor.test.mjs
       - name: Exercise all Browser mechanics including real local IPC
+        # Explicit status function retains full coverage after a failed/timed-out
+        # probe. That failure still fails this job; cancellation remains honored.
+        if: ${{ !cancelled() && steps.qualification_prerequisites.outcome == 'success' }}
+        timeout-minutes: 20
         working-directory: apps/metaengine-browser
+        shell: bash
         # Only Linux selects the filesystem-only Electron mode; Windows keeps
         # real main-process ASAR qualification and the suite concurrency intact.
         env:
           METAENGINE_TEST_ELECTRON_MODE: ${{ matrix.os == 'ubuntu-24.04' && 'ASAR_NODE' || 'MAIN_PROCESS' }}
-        run: node --test --test-concurrency=4 test/*.test.mjs
+        run: |
+          set -euo pipefail
+          node ../../.github/browser-ci-resource-observation.mjs full-browser-suite
+          node --test --test-concurrency=4 test/*.test.mjs
       - name: Inspect generated artifacts and prove tracked source unchanged
+        if: ${{ !cancelled() && steps.qualification_prerequisites.outcome == 'success' }}
         shell: bash
         run: |
           git status --porcelain=v1 --untracked-files=all

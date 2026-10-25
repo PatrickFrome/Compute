@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,15 +33,17 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
         cwd: spec.cwd, env: spec.env, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       });
       const stdout = new PassThrough(); const stderr = new PassThrough();
-      let proof = null, resumed = false, finished = false, pending = '', terminal = null, helperErrorBytes = 0, failureReason = null;
+      let proof = null, resumeIssued = false, resumed = false, terminationIssued = false, cancellation = null;
+      let finished = false, pending = '', terminal = null, helperErrorBytes = 0, failureReason = null;
       let resolveReady, rejectReady, resolveCompletion;
       const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
       const completion = new Promise(resolve => { resolveCompletion = resolve; });
-      const end = (reason, exitCode = null) => {
+      const end = (reason, exitCode = null, helperSignal = null) => {
         if (finished) return; finished = true; clearTimeout(startupTimer);
         if (!proof) rejectReady(fail(failureReason || reason || 'not_started'));
         stdout.end(); stderr.end();
-        resolveCompletion((terminal && !failureReason && exitCode === 0 && !pending.trim()) ? terminal : { exit_code: exitCode, signal: null, reason: failureReason || reason,
+        if (terminal && pending.length) failureReason ||= 'CONTROLLER_PROTOCOL_INVALID';
+        resolveCompletion((terminal && !failureReason && exitCode === 0 && helperSignal === null && !pending.length) ? terminal : { exit_code: exitCode, signal: null, reason: failureReason || reason,
           tree_cleanup_confirmed: false, process_tree_control: 'WINDOWS_JOB_OBJECT' });
       };
       const stop = reason => { failureReason ||= reason; helper.kill(); };
@@ -48,7 +51,7 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
       const startupTimer = setTimeout(() => stop('CONTROLLER_STARTUP_TIMEOUT'), startupTimeoutMs);
       const frame = value => {
         if (failureReason) return;
-        if (!value || typeof value !== 'object') return protocolFailure();
+        if (!value || typeof value !== 'object' || terminal) return protocolFailure();
         if (value.type === 'ready') {
           if (proof || !Number.isSafeInteger(value.pid) || value.pid < 1
             || value.process_incarnation_id !== `pid:${value.pid}:created_100ns:${String(value.process_incarnation_id || '').split(':')[3]}`
@@ -61,12 +64,26 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
           const {type,...nativeProof}=value;
           proof = Object.freeze(nativeProof); clearTimeout(startupTimer); resolveReady(proof);
         } else if (value.type === 'resumed') {
-          if (!proof || resumed) return protocolFailure(); resumed = true;
+          if (!proof || !resumeIssued || cancellation || resumed) return protocolFailure(); resumed = true;
         } else if (value.type === 'output') {
           if (!proof || !resumed || !['stdout', 'stderr'].includes(value.channel)
             || typeof value.data_b64 !== 'string' || value.data_b64.length > 8192
             || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.data_b64)) return protocolFailure();
           (value.channel === 'stdout' ? stdout : stderr).write(Buffer.from(value.data_b64, 'base64'));
+        } else if (value.type === 'suspended_cancelled') {
+          const accounting = value.job_accounting;
+          if (!proof || !cancellation || resumeIssued || resumed
+            || value.cancellation_id !== cancellation.id || value.reason !== cancellation.reason
+            || value.run_id !== proof.job_id || value.job_id !== proof.job_id || value.pid !== proof.pid
+            || value.process_incarnation_id !== proof.process_incarnation_id
+            || value.exit_code !== 125 || value.process_exit_confirmed !== true || value.never_resumed !== true
+            || value.handles_closed !== true || value.tree_cleanup_confirmed !== true
+            || value.process_tree_control !== 'WINDOWS_JOB_OBJECT'
+            || !accounting || accounting.active_processes !== 0 || accounting.total_processes !== 1
+            || !Number.isSafeInteger(accounting.total_terminated_processes)
+            || accounting.total_terminated_processes < 0 || accounting.total_terminated_processes > accounting.total_processes) return protocolFailure();
+          const { type, ...receipt } = value;
+          terminal = { ...receipt, signal: null };
         } else if (value.type === 'exit') {
           if (!proof || !resumed || terminal || !Number.isSafeInteger(value.exit_code)) return protocolFailure();
           terminal = { exit_code: value.exit_code, signal: null, reason: value.reason || null,
@@ -76,11 +93,13 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
       };
       helper.stdout.setEncoding('utf8');
       helper.stdout.on('data', chunk => {
+        if (finished) return;
+        if (terminal && chunk.length) return protocolFailure();
         pending += chunk;
         let index;
         while ((index = pending.indexOf('\n')) >= 0 && !finished) {
           const line = pending.slice(0, index).trim(); pending = pending.slice(index + 1);
-          try { if (line) frame(JSON.parse(line)); } catch { protocolFailure(); }
+          try { if (line) frame(JSON.parse(line)); else if (terminal) protocolFailure(); } catch { protocolFailure(); }
         }
         if (pending.length > 65536) protocolFailure();
       });
@@ -90,15 +109,14 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
       helper.once('error', () => { failureReason ||= 'CONTROLLER_SPAWN_FAILED'; });
       // Only close proves that the helper released its job handle and cwd.
       // Resolving on an error frame can race native cleanup and leave a live tree.
-      helper.once('close', code => end(terminal ? terminal.reason : 'CONTROLLER_EXIT_UNPROVEN', code));
+      helper.once('close', (code, signal) => end(terminal ? terminal.reason : 'CONTROLLER_EXIT_UNPROVEN', code, signal ?? null));
       helper.stdin.write(`${JSON.stringify({ executable_path: spec.executablePath, args: spec.args, cwd: spec.cwd,
         run_id: spec.runId, timeout_ms: spec.timeoutMs, expected_sha256: spec.expectedExecutableSha256,
         deadline_ms: spec.deadlineAt == null ? '' : String(Date.parse(spec.deadlineAt)) })}\n`);
       await ready;
-      let resumeIssued = false;
       return Object.freeze({ proof, stdout, stderr, completion,
         async resume(prompt = '', { deadlineAt = null } = {}) {
-          if (finished || resumeIssued || Buffer.byteLength(prompt, 'utf8') > 65536) throw fail('resume_invalid');
+          if (finished || failureReason || terminationIssued || resumeIssued || Buffer.byteLength(prompt, 'utf8') > 65536) throw fail('resume_invalid');
           if (deadlineAt !== null && !Number.isFinite(Date.parse(deadlineAt))) throw fail('resume_deadline_invalid');
           const deadline = Math.min(Date.now() + spec.timeoutMs,
             spec.deadlineAt == null ? Infinity : Date.parse(spec.deadlineAt),
@@ -109,9 +127,17 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
         },
         async terminate(reason = 'CANCELLED') {
           if (finished) return;
+          if (terminationIssued) { await completion; return; }
+          // Fence resume synchronously, before writing or waiting for native cleanup.
+          terminationIssued = true;
+          const safeReason = String(reason).replace(/[^A-Z_]/g, '').slice(0, 80) || 'CANCELLED';
           // Helper holds the only job handle. Its termination kills exactly this tree.
-          helper.stdin.end(`CANCEL ${String(reason).replace(/[^A-Z_]/g, '').slice(0, 80)}\n`);
-          const deadline = setTimeout(() => helper.kill(), 6000);
+          if (!resumeIssued) {
+            cancellation = Object.freeze({ id: randomUUID(), reason: safeReason });
+            helper.stdin.end(`CANCEL_SUSPENDED ${cancellation.id} ${cancellation.reason}\n`);
+          } else helper.stdin.end(`CANCEL ${safeReason}\n`);
+          // Suspended cleanup has separate bounded process-exit/accounting waits.
+          const deadline = setTimeout(() => stop('CONTROLLER_TERMINATION_TIMEOUT'), cancellation ? 11000 : 6000);
           await completion; clearTimeout(deadline);
         },
       });

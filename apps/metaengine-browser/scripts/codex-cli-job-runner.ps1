@@ -40,9 +40,13 @@ public static class MetaengineCodexJob {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateJobObject(IntPtr j,uint code);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr p,uint code);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr j,int c,out Accounting a,uint n,IntPtr returned);
-  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr h);
   static readonly object outputLock = new object();
   static void Require(bool ok,string phase) { if(!ok) throw new InvalidOperationException("codex_job_"+phase+":"+Marshal.GetLastWin32Error()); }
+  static void CloseChecked(ref IntPtr handle,string phase) {
+    if(handle==IntPtr.Zero) return;
+    Require(CloseHandle(handle),phase); handle=IntPtr.Zero;
+  }
   static void Emit(string json) { lock(outputLock) { Console.Out.WriteLine(json); Console.Out.Flush(); } }
   static string Escape(string s) { return "\""+s.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","\\r").Replace("\n","\\n")+"\""; }
   static string Quote(string s) {
@@ -82,13 +86,41 @@ public static class MetaengineCodexJob {
       long birth,exit,kernel,user; Require(GetProcessTimes(process.process,out birth,out exit,out kernel,out user),"birth_readback_failed");
       var image=new StringBuilder(32768); uint imageSize=32768; Require(QueryFullProcessImageName(process.process,0,image,ref imageSize),"image_readback_failed");
       if(!String.Equals(Path.GetFullPath(image.ToString()),Path.GetFullPath(exe),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("codex_job_image_changed");
-      CloseHandle(stdinRead); stdinRead=IntPtr.Zero; CloseHandle(stdoutWrite); stdoutWrite=IntPtr.Zero; CloseHandle(stderrWrite); stderrWrite=IntPtr.Zero;
+      CloseChecked(ref stdinRead,"stdin_child_close_failed"); CloseChecked(ref stdoutWrite,"stdout_child_close_failed"); CloseChecked(ref stderrWrite,"stderr_child_close_failed");
       string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
       Emit("{\"type\":\"ready\",\"pid\":"+process.pid+",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+
         ",\"started_at\":"+Escape(DateTime.FromFileTimeUtc(birth).ToString("o"))+",\"user_sid\":"+Escape(sid)+",\"job_id\":"+Escape(runId)+
         ",\"executable_path\":"+Escape(image.ToString())+",\"executable_sha256\":"+Escape(expectedSha)+",\"tree_control_bound\":true,\"started_suspended\":true,\"job_bound_before_resume\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\"}");
       // No model prompt or child execution before the native host's second authorization.
       string resume=Console.In.ReadLine();
+      if(resume!=null && resume.StartsWith("CANCEL_SUSPENDED ",StringComparison.Ordinal)) {
+        string[] cancel=resume.Split(' '); Guid cancellationId;
+        if(cancel.Length!=3 || !Guid.TryParseExact(cancel[1],"D",out cancellationId) || cancellationId.ToString("D")!=cancel[1]
+          || !System.Text.RegularExpressions.Regex.IsMatch(cancel[2],"\\A[A-Z_]{1,80}\\z")) throw new InvalidOperationException("codex_job_cancel_invalid");
+        // This branch cannot call ResumeThread or pump/write child input. A receipt
+        // is emitted only after native exit, empty accounting and checked closes.
+        Require(TerminateJobObject(job,125),"suspended_termination_failed");
+        Require(WaitForSingleObject(process.process,5000)==0,"suspended_exit_wait_failed");
+        uint cancelledCode; Require(GetExitCodeProcess(process.process,out cancelledCode),"suspended_exit_readback_failed");
+        Require(cancelledCode==125,"suspended_exit_code_invalid");
+        CloseChecked(ref process.thread,"suspended_thread_close_failed"); CloseChecked(ref process.process,"suspended_process_close_failed");
+        CloseChecked(ref stdinWrite,"suspended_stdin_close_failed"); CloseChecked(ref stdoutRead,"suspended_stdout_close_failed"); CloseChecked(ref stderrRead,"suspended_stderr_close_failed");
+        var cancelDeadline=DateTime.UtcNow.AddSeconds(5); Accounting cancelledAccounting;
+        do {
+          Require(QueryInformationJobObject(job,1,out cancelledAccounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero),"suspended_accounting_readback_failed");
+          if(cancelledAccounting.active==0) break;
+          System.Threading.Thread.Sleep(20);
+        } while(DateTime.UtcNow<cancelDeadline);
+        // This unnamed, non-inheritable Job received exactly this one process;
+        // its initial thread was never resumed, so it could not spawn children.
+        Require(cancelledAccounting.active==0 && cancelledAccounting.total==1 && cancelledAccounting.terminated<=cancelledAccounting.total,"suspended_accounting_invalid");
+        CloseChecked(ref job,"suspended_job_close_failed");
+        Emit("{\"type\":\"suspended_cancelled\",\"run_id\":"+Escape(runId)+",\"job_id\":"+Escape(runId)+",\"pid\":"+process.pid+
+          ",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+",\"cancellation_id\":"+Escape(cancel[1])+",\"reason\":"+Escape(cancel[2])+
+          ",\"exit_code\":"+cancelledCode+",\"never_resumed\":true,\"process_exit_confirmed\":true,\"handles_closed\":true,\"tree_cleanup_confirmed\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\""+
+          ",\"job_accounting\":{\"active_processes\":"+cancelledAccounting.active+",\"total_processes\":"+cancelledAccounting.total+",\"total_terminated_processes\":"+cancelledAccounting.terminated+"}}");
+        return;
+      }
       if(resume==null || !resume.StartsWith("RESUME ")) throw new InvalidOperationException("codex_job_resume_not_authorized");
       string resumeBody=resume.Substring(7); int separator=resumeBody.IndexOf(' ');
       if(separator<1) throw new InvalidOperationException("codex_job_resume_deadline_missing");
