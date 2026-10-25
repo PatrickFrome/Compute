@@ -14,6 +14,7 @@ import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
 import { createRsiResultReceiptReadback } from './result-receipt-readback.mjs';
 import { resolveSelfHostedSupervisorConfig } from './self-hosted-config.mjs';
 import { createChatCommandRoutes } from './chat-command-routes.mjs';
+import { createNativeSupervisorBodyReader, NativeSupervisorBodyError } from './request-body-budget.mjs';
 
 const localRuntime=resolveSelfHostedSupervisorConfig((name:string)=>Deno.env.get(name));
 const DB_URL=localRuntime.local?localRuntime.databaseUrl:Deno.env.get('SUPABASE_DB_URL')||'';
@@ -579,6 +580,7 @@ function routedServicePath(pathname:string){
   return raw;
 }
 
+const requestBodyReader=createNativeSupervisorBodyReader();
 Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
   const url=new URL(req.url);
@@ -591,7 +593,7 @@ Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
   }
   try{
     if(req.method==='GET'&&path==='/health')return json(200,{...await health(),...(localRuntime.local?{backend_transport:'LOCAL_POSTGRES_RPC',state_provider:'LOCAL_POSTGRES',instance_id:localRuntime.instanceId,hosted_supabase_required:false}: {})});
-    const bodyText=req.method==='GET'?'':await req.text();
+    const bodyText=req.method==='GET'?'':await requestBodyReader.read(req);
     const body=parseJson(bodyText);
     if(body===null)return json(400,{error:'invalid_json'});
     if(req.method==='POST'&&path==='/v1/device/enrollment/request')return enrollmentRequest(req,bodyText,body);
@@ -629,6 +631,7 @@ Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
     if(req.method==='GET'&&path==='/v1/status')return json(200,{...await status(),...(localRuntime.local?{backend_transport:'LOCAL_POSTGRES_RPC',state_provider:'LOCAL_POSTGRES',instance_id:localRuntime.instanceId,hosted_supabase_required:false}: {})});
     return json(404,{error:'not_found'});
   }catch(e){
+    if(e instanceof NativeSupervisorBodyError)return json(e.status,{error:e.message});
     console.error('native_supervisor_request_failure',String((e as any)?.message||e));
     return json(502,{error:'native_supervisor_failure',backend_transport:localRuntime.local?'LOCAL_POSTGRES_RPC':'POSTGREST_RPC'});
   }

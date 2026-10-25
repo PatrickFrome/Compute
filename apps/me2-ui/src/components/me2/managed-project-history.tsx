@@ -87,7 +87,15 @@ export function ManagedProjectHistory({ taskId = null }: { taskId?: string | nul
               {visibleEntries.map((entry) => (
                 <div key={entry.seq} className="rounded border border-zinc-800/80 bg-zinc-950/50 p-1.5 font-mono text-[9px]">
                   <div className="flex flex-wrap gap-x-2 text-zinc-500"><span className="text-cyan-400">#{entry.seq}</span><span>{entry.event_type}</span><span>{entry.actor ?? "actor —"}</span><span>task {entry.task_id ?? "—"}</span><span>attempt {entry.attempt ?? "—"}</span></div>
-                  <div className="mt-0.5 truncate text-zinc-600" title={displayContent(entry.content)}>{displayContent(entry.content)}</div>
+                  <details className="mt-1 text-zinc-400">
+                    <summary className="cursor-pointer rounded py-1 text-cyan-300 focus-visible:outline focus-visible:outline-cyan-500">
+                      Полное содержимое события #{entry.seq}
+                    </summary>
+                    <pre tabIndex={0} aria-label={`Полное содержимое события ${entry.seq}`}
+                      className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-950 p-2 text-[11px] leading-relaxed text-zinc-300 select-text">
+                      {displayContent(entry.content)}
+                    </pre>
+                  </details>
                   <div className="mt-0.5 flex flex-wrap gap-x-2 text-zinc-700"><span>предыдущее событие {entry.causal_parent_seq ?? "—"}</span><span>{entry.source}</span><span>{entry.receipt_reference_verified ? "ссылка на квитанцию проверена; результат не подтверждён" : "результат независимо не подтверждён"}</span></div>
                 </div>
               ))}

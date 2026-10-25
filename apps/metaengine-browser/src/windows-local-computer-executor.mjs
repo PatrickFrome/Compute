@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { protectOwnerOnlyWindowsDirectory } from './private-windows-storage-acl.mjs';
 import {
   computerAuthorityPlaneSnapshot,
   computerTargetIdentityDigest,
@@ -955,6 +956,33 @@ function parseSingleJson(text) {
   return row;
 }
 
+// Only the OS installation supplies the interpreter and its modules. Caller
+// PATH, PowerShell profiles and unrelated application credentials never select
+// or configure this process. The private temporary directory is its sole temp.
+export function windowsComputerProcessPlan(temporaryDirectory, source = process.env) {
+  const root = String(source.SystemRoot || source.SYSTEMROOT || '');
+  if (!/^[A-Za-z]:\\Windows$/i.test(root) || !path.win32.isAbsolute(temporaryDirectory || '')
+      || /^(?:\\\\|\/\/)/.test(temporaryDirectory)) throw new Error('computer_executor_windows_root_unverified');
+  const system32 = path.win32.join(root, 'System32');
+  const powershell = path.win32.join(system32, 'WindowsPowerShell', 'v1.0');
+  return Object.freeze({ executable:path.win32.join(powershell, 'powershell.exe'), env:Object.freeze({
+    SystemRoot:root, SYSTEMROOT:root, WINDIR:root, SystemDrive:path.win32.parse(root).root.slice(0,2),
+    PATH:[system32,root,powershell].join(';'), PATHEXT:'.COM;.EXE;.BAT;.CMD',
+    COMSPEC:path.win32.join(system32,'cmd.exe'), PSModulePath:path.win32.join(powershell,'Modules'),
+    TEMP:temporaryDirectory,TMP:temporaryDirectory,USERPROFILE:temporaryDirectory,
+  }) });
+}
+
+async function verifyWindowsComputerInterpreter(executable) {
+  let current = path.parse(executable).root;
+  for (const part of path.relative(current, executable).split(path.sep)) {
+    current = path.join(current, part);
+    if ((await fs.lstat(current)).isSymbolicLink()) throw new Error('computer_executor_interpreter_alias');
+  }
+  if (path.resolve(await fs.realpath(executable)).toLowerCase() !== path.resolve(executable).toLowerCase()
+      || !(await fs.lstat(executable)).isFile()) throw new Error('computer_executor_interpreter_unverified');
+}
+
 export async function runFixedWindowsPowerShell(request, {
   timeout_ms = DEFAULT_TIMEOUT_MS,
   spawn_impl = spawn,
@@ -962,6 +990,15 @@ export async function runFixedWindowsPowerShell(request, {
   if (process.platform !== 'win32') throw new Error('computer_executor_windows_required');
   const timeoutMs = Math.max(1000, Math.min(60000, Number(timeout_ms) || DEFAULT_TIMEOUT_MS));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-'));
+  const cleanupRoot = path.resolve(os.tmpdir());
+  const cleanupRelative = path.relative(cleanupRoot, path.resolve(dir));
+  if (!cleanupRelative || cleanupRelative.startsWith('..') || path.isAbsolute(cleanupRelative)
+      || path.dirname(path.resolve(dir)) !== cleanupRoot) throw new Error('computer_executor_temporary_boundary');
+  try {
+  const plan = windowsComputerProcessPlan(dir);
+  await verifyWindowsComputerInterpreter(plan.executable);
+  const storage = await protectOwnerOnlyWindowsDirectory(dir);
+  if (storage?.owner_dacl_verified !== true) throw new Error('computer_executor_private_storage_unverified');
   const requestPath = path.join(dir, `request-${randomUUID()}.json`);
   const bridgePath = path.join(dir, `bridge-${WINDOWS_COMPUTER_BRIDGE_SHA256}.ps1`);
   await fs.writeFile(requestPath, JSON.stringify(request), { encoding:'utf8', flag:'wx', mode:0o600 });
@@ -972,16 +1009,17 @@ export async function runFixedWindowsPowerShell(request, {
     throw new Error('computer_executor_bridge_write_readback_mismatch');
   }
 
-  try {
     return await new Promise((resolve, reject) => {
       const child = spawn_impl(
-        'powershell.exe',
+        plan.executable,
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', bridgePath],
         {
           windowsHide: true,
+          shell: false,
+          cwd: dir,
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
-            ...process.env,
+            ...plan.env,
             METAENGINE_COMPUTER_REQUEST_PATH: requestPath,
           },
         },

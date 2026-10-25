@@ -8,6 +8,7 @@ import {
   WINDOWS_COMPUTER_BRIDGE_SHA256,
   WindowsLocalComputerExecutor,
   runFixedWindowsPowerShell,
+  windowsComputerProcessPlan,
 } from '../src/windows-local-computer-executor.mjs';
 import {
   computerTargetIdentityDigest,
@@ -24,6 +25,23 @@ const target = {
   executable_sha256:'b'.repeat(64),
   generation:3,
 };
+
+test('OS bridge ignores PATH, module and credential injection and uses private temp', () => {
+  const plan = windowsComputerProcessPlan('C:\\private-test\\run', {
+    SystemRoot:'C:\\Windows', PATH:'C:\\attacker', PSModulePath:'C:\\attacker',
+    OPENAI_API_KEY:'synthetic-do-not-inherit', PG_PASSWORD:'synthetic-do-not-inherit',
+    NODE_OPTIONS:'synthetic-do-not-inherit', TEMP:'C:\\shared-temp',
+  });
+  assert.equal(plan.executable, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.equal(plan.env.TEMP,'C:\\private-test\\run');
+  assert.equal(plan.env.TMP,plan.env.TEMP);
+  assert.equal(plan.env.USERPROFILE,plan.env.TEMP);
+  assert.equal(plan.env.PSModulePath,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules');
+  assert(!JSON.stringify(plan).includes('synthetic-do-not-inherit'));
+  assert(!JSON.stringify(plan).includes('attacker'));
+  assert.throws(() => windowsComputerProcessPlan('C:\\private', {SystemRoot:'relative'}));
+  assert.throws(() => windowsComputerProcessPlan('\\\\host\\share', {SystemRoot:'C:\\Windows'}));
+});
 
 const contextFor = (computerAction, exactTarget = target, agentId = 'agent_test-12345678') => {
   const commandId = '2a924f7a-884c-4a10-87b4-1d550561286e';
