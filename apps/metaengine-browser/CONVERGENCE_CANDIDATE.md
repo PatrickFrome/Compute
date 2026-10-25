@@ -1,4 +1,6 @@
-Reserved package identity is `0.7.0-dev.1107139874592.1`.
+Reserved package identity is `0.7.0-dev.1107139874593.1`.
+
+2026-10-25: this distinct QA candidate contains the reviewed RPC drain, capture lifetime and current PostgreSQL allowlist fixes from `c701285db0b2650d5b53d327c1e728753af52214`. Exact-head packaging and installed qualification are pending. Fresh-PC automatic provisioning remains under development and is not claimed by this candidate.
 
 2026-10-25 source reservation: `0.7.0-dev.1107139874592.1` belongs to exact source `0bebb512b055601b2f6b3b7797b228b22fb460ea`. Windows Package Smoke run `40203176070` consumed that identity and failed attached onboarding before producing an installer. This is not package, installed-client, SLSA or autonomous-work qualification. The next source revision requires a new immutable package identity and its own exact-head qualification. Historical entries below preserve earlier identities and are not the current reservation.
 
