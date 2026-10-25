@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import {ClientGoalJournal} from '../src/client-goal-journal.mjs';
 import {createClientNativeCodingGoalRouter,normalizeNativeCodingSeedResult,normalizeNativeCodingGoalProgress,readClientGoalSubmissionMode} from '../src/client-native-coding-goal.mjs';
 import {drainManagedRuntimeBindings} from '../src/managed-runtime-drain.mjs';
+import {NativeCodingHostIpcError} from '../src/native-coding-host-ipc-client.mjs';
 
 const hash=s=>createHash('sha256').update(s).digest('hex');
 function fixture(){
@@ -407,6 +408,22 @@ test('busy native profile is an admission HOLD and failed capacity read cannot c
   assert.equal(busy.kind,'NATIVE_CODING');assert.equal(busy.state,'HOLD');assert.equal(busy.reason,'NATIVE_PROFILE_BUSY');assert.equal(busy.project_id,project_id);
   const unknown=await readClientGoalSubmissionMode({readSummary,lstat,readNativeBusy:async()=>{throw Error('readback lost');}});
   assert.equal(unknown.kind,'NATIVE_CODING');assert.equal(unknown.state,'HOLD');assert.equal(unknown.reason,'NATIVE_PROFILE_STATUS_UNAVAILABLE');
+});
+
+test('native mode reports bounded private IPC failure reasons and always keeps failed discovery on HOLD',async()=>{
+  const readSummary=()=>({status_file:'C:/private/runtime/status.json'}),lstat=async()=>({isFile:()=>true,isSymbolicLink:()=>false,nlink:1});
+  const cases=[['UNSUPPORTED_ACTION','NATIVE_PROFILE_CAPABILITY_UNAVAILABLE'],['REQUEST_TIMEOUT','NATIVE_PROFILE_STATUS_TIMEOUT'],
+    ...['CHANNEL_CLOSED','CHILD_EXIT','HOST_TERMINATED','SERVER_CLOSED','CLIENT_CLOSED','SEND_FAILED'].map(reason=>[reason,'NATIVE_PROFILE_HOST_UNAVAILABLE']),
+    ['OPERATION_FAILED','NATIVE_PROFILE_VERIFICATION_FAILED'],['RESPONSE_INVALID','NATIVE_PROFILE_STATUS_UNAVAILABLE']];
+  for(const [cause,reason] of cases){
+    const mode=await readClientGoalSubmissionMode({readSummary,lstat,readNativeBusy:async()=>{throw new NativeCodingHostIpcError(cause,{action:'LIST_SEEDS'});}});
+    assert.equal(mode.reason,reason);assert.equal(mode.kind,'NATIVE_CODING');assert.equal(mode.state,'HOLD');
+    assert.equal(mode.authority_effect,false);assert.equal(mode.automatic_retry_allowed,false);
+  }
+  const raw=Object.assign(Error('postgresql://private/path secret-token'),{reason:'UNSUPPORTED_ACTION'});
+  const mode=await readClientGoalSubmissionMode({readSummary,lstat,readNativeBusy:async()=>{throw raw;}});
+  assert.equal(mode.reason,'NATIVE_PROFILE_STATUS_UNAVAILABLE');
+  assert.equal(JSON.stringify(mode).includes('private'),false);assert.equal(JSON.stringify(mode).includes('secret'),false);
 });
 
 test('actual main submit function preserves an admitted busy project before any new UUID/journal/effect',async()=>{

@@ -16,6 +16,7 @@ import {agentBridgePins} from './fixtures/native-coding-agent-bridge-pins.mjs';
 import {connectNativeCodingAgentMcpBroker} from '../src/native-coding-agent-mcp-broker.mjs';
 import {NATIVE_AGENT_MCP_ENV} from '../src/native-coding-agent-mcp-entry.mjs';
 import {withOwnedCodexCliProcess} from './fixtures/with-owned-codex-cli-process.mjs';
+import {instrumentCodexCliHelperStartup, withCodexCliStartupObservation} from './fixtures/codex-cli-startup-observation.mjs';
 
 const exec = promisify(execFile);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -230,18 +231,36 @@ test('result schema rejects unexpected fields and wrong critic subject', () => {
   assert.throws(() => validateCodexCliResult({ ...result('CRITIC'), verdict: 'ACCEPT', subject_result_sha256: 'b'.repeat(64) }, 'CRITIC', 'a'.repeat(64)), /result_invalid/);
 });
 
-test('real Windows controller starts suspended in its job and transports exact arguments without a model', { skip: process.platform !== 'win32' }, async () => {
-  const processController = createCodexCliWindowsProcessController();
+test('real Windows controller starts suspended in its job and transports exact arguments without a model', { skip: process.platform !== 'win32' }, async t => {
+  const temporary = await fs.realpath(os.tmpdir());
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(temporary, 'metaengine-codex-first-run-')));
+  const productionHelper = resolveCodexCliJobHelper(), helperBytes = await fs.readFile(productionHelper);
+  t.after(async () => {
+    assert.deepEqual(await fs.readFile(productionHelper), helperBytes, 'diagnostics must leave the production helper unchanged');
+    assert.equal(await fs.realpath(directory), directory); assert.equal(path.dirname(directory), temporary);
+    assert.ok(path.basename(directory).startsWith('metaengine-codex-first-run-'));
+    await fs.rm(directory, {recursive: true, force: true});
+  });
+  // Observe the first real helper, before later tests have warmed WinPS/.NET.
+  // Only fixed stderr labels are added; no warmup, retry or longer deadline.
+  const helperPath = path.join(directory, 'first-native-run.ps1');
+  await fs.writeFile(helperPath, '\ufeff' + instrumentCodexCliHelperStartup(helperBytes.toString('utf8').replace(/^\ufeff/, '')), 'utf8');
+  const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const processController = createCodexCliWindowsProcessController({helperPath, powershellPath});
   const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
-  await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
-    args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', 'argument with spaces', 'quote"and\\slash', 'тест🚀'],
-    cwd: os.tmpdir(), env: codexCliEnvironment(path.join(os.tmpdir(), 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {
-    assert.equal(handle.proof.started_suspended, true); assert.equal(handle.proof.tree_control_bound, true);
-    assert.deepEqual(JSON.parse(JSON.stringify(handle.proof)),handle.proof,'native proof must remain exact across protected JSON and private IPC');
-    let output = ''; handle.stdout.setEncoding('utf8'); handle.stdout.on('data', value => { output += value; });
-    await handle.resume(''); const completion = await handle.completion;
-    assert.equal(completion.exit_code, 0); assert.equal(completion.tree_cleanup_confirmed, true);
-    assert.deepEqual(JSON.parse(output), ['argument with spaces', 'quote"and\\slash', 'тест🚀']);
+  await withCodexCliStartupObservation({helperPath, powershellPath, helperVariant: 'FIRST_NATIVE_RUN',
+    report: record => t.diagnostic(JSON.stringify(record))}, async ({readyValidated}) => {
+    await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
+      args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', 'argument with spaces', 'quote"and\\slash', 'тест🚀'],
+      cwd: os.tmpdir(), env: codexCliEnvironment(path.join(os.tmpdir(), 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {
+      readyValidated();
+      assert.equal(handle.proof.started_suspended, true); assert.equal(handle.proof.tree_control_bound, true);
+      assert.deepEqual(JSON.parse(JSON.stringify(handle.proof)),handle.proof,'native proof must remain exact across protected JSON and private IPC');
+      let output = ''; handle.stdout.setEncoding('utf8'); handle.stdout.on('data', value => { output += value; });
+      await handle.resume(''); const completion = await handle.completion;
+      assert.equal(completion.exit_code, 0); assert.equal(completion.tree_cleanup_confirmed, true);
+      assert.deepEqual(JSON.parse(output), ['argument with spaces', 'quote"and\\slash', 'тест🚀']);
+    });
   });
 });
 

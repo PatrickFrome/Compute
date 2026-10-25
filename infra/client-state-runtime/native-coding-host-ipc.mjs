@@ -152,12 +152,21 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       if(message.instance_id!==instanceId)invalid('INSTANCE_MISMATCH');
       if(message.host_pid!==hostPid)invalid('HOST_PID_MISMATCH');
       if(!UUID.test(message.request_id||''))invalid('INVALID_FRAME');
-      if(!mountedActions.includes(message.action))invalid('UNSUPPORTED_ACTION');
+      if(!ACTIONS.includes(message.action)&&!OPTIONAL_ACTIONS.includes(message.action))invalid('UNSUPPORTED_ACTION');
       payload(message.action,message.payload);requestDigest=digest(message);
     }catch(error){protocolError(REASONS.has(error.reason)?error.reason:'INVALID_FRAME');return true;}
     const old=completed.get(message.request_id),running=active.get(message.request_id);
     if(old){if(old.digest===requestDigest)emit(old.frame);else emit(response(message,requestDigest,'UNKNOWN',null,'REQUEST_ID_REUSED'));return true;}
-    if(running){emit(response(message,requestDigest,writes(message.action,message.payload)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
+    if(running){emit(response(message,requestDigest,running.write||writes(message.action,message.payload)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
+    if(!mountedActions.includes(message.action)){
+      // A fully validated request for a known optional capability was never
+      // dispatched. Reply on this exact private channel instead of silently
+      // forcing discovery to time out (or making an unattempted write UNKNOWN).
+      // Malformed/foreign frames still receive no correlated response above.
+      seal({request:structuredClone(message),digest:requestDigest,write:false,timer:null,response:null},
+        'REJECTED',null,'UNSUPPORTED_ACTION');
+      return true;
+    }
     if(active.size>=maxInflight){emit(response(message,requestDigest,'REJECTED',null,'INFLIGHT_LIMIT'));return true;}
     const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),timer:null,response:null};
     active.set(message.request_id,row);

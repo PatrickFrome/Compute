@@ -120,6 +120,18 @@ test('owned startup observer preserves spawn argument identities/return handle a
   assert.doesNotMatch(JSON.stringify(record), /private|must-not-be-exported|owned-helper|fixed-powershell|PRIVATE_TOKEN/);
 });
 
+test('first native run observation has its own allowlisted variant and rejects arbitrary labels before spawn', async t => {
+  const f = fixture(t), reports = [];
+  let entered = false;
+  await assert.rejects(withCodexCliStartupObservation({helperPath, powershellPath, helperVariant: 'private-env-value', report() {}},
+    async () => { entered = true; }), {message: 'native_startup_observation_variant_invalid'});
+  assert.equal(entered, false); assert.equal(f.calls.length, 0); assert.equal(childProcess.spawn, f.delegate);
+  await withCodexCliStartupObservation({helperPath, powershellPath, helperVariant: 'FIRST_NATIVE_RUN', report: record => reports.push(record)},
+    async () => { spawn(powershellPath, args, options); f.children[0].emit('close', 0); });
+  assert.equal(reports.length, 1); assert.equal(reports[0].helper_variant, 'FIRST_NATIVE_RUN');
+  assert.equal(reports[0].startup_deadline_ms, 30000); assert.equal(reports[0].native_qualification_proven, false);
+});
+
 test('owned startup observer awaits close, restores imports and preserves the exact primary error even if reporting throws', async t => {
   const f = fixture(t), child = f.children[0], primary = Error('private primary error');
   let settled = false, reportCalled = false;

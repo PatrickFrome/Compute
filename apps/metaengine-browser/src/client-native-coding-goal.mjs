@@ -3,6 +3,7 @@ import {isDeepStrictEqual} from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {normalizeClientProjectSnapshot} from './client-project-continuity.mjs';
+import {NativeCodingHostIpcError} from './native-coding-host-ipc-client.mjs';
 
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SHA=/^[a-f0-9]{64}$/;
@@ -17,6 +18,19 @@ const ADMISSION_KEYS=['schema','state','request_id','objective','profile_id','pr
 const STATES=new Set(['READY','LEASED','RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED']);
 const routerStates=new WeakMap();
 
+function nativeProfileStatusReason(error){
+  // Only the private transport's typed, bounded reasons become presentation
+  // data. Never expose native error messages, profile paths, SQL or credentials.
+  if(error instanceof NativeCodingHostIpcError){
+    if(error.reason==='UNSUPPORTED_ACTION')return 'NATIVE_PROFILE_CAPABILITY_UNAVAILABLE';
+    if(error.reason==='REQUEST_TIMEOUT')return 'NATIVE_PROFILE_STATUS_TIMEOUT';
+    if(['CHANNEL_CLOSED','CHILD_EXIT','HOST_TERMINATED','SERVER_CLOSED','CLIENT_CLOSED','SEND_FAILED'].includes(error.reason))
+      return 'NATIVE_PROFILE_HOST_UNAVAILABLE';
+    if(error.reason==='OPERATION_FAILED')return 'NATIVE_PROFILE_VERIFICATION_FAILED';
+  }
+  return 'NATIVE_PROFILE_STATUS_UNAVAILABLE';
+}
+
 export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,readNativeBusy}={}){
   const base={schema:'metaengine.client.goal-submission-mode.v1',automatic_retry_allowed:false,authority_effect:false};
   const summary=readSummary?.();
@@ -28,7 +42,7 @@ export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,r
   // remains a native HOLD; it cannot silently downgrade into the browser path.
   if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1)return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_NOT_REGULAR_FILE'};
   if(readNativeBusy){
-    let busy;try{busy=await readNativeBusy();}catch{return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_STATUS_UNAVAILABLE'};}
+    let busy;try{busy=await readNativeBusy();}catch(error){return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:nativeProfileStatusReason(error)};}
     if(busy?.busy===true)return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_BUSY',
       project_id:UUID.test(busy.project_id||'')?busy.project_id:null};
   }

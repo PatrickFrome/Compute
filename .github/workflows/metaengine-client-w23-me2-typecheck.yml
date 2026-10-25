@@ -41,6 +41,9 @@ jobs:
       - name: Full strict ME2 TypeScript typecheck
         working-directory: apps/me2-ui
         run: bun run typecheck
+      - name: Admission status concurrency and readonly recovery
+        working-directory: apps/me2-ui
+        run: bun run test:goal-admission
       - name: Next production package build
         working-directory: apps/me2-ui
         run: bun run build
