@@ -217,7 +217,14 @@ test('automatic child-exit cleanup reports an unconfirmed stop without an unhand
     restoreSpawn();
     assert.ok(apiChild);
     process.kill(runtime.children.find(child => child.name === 'edge').pid, 'SIGTERM');
-    assert.deepEqual(await runtime.finished, { reason: 'runtime_cleanup_unconfirmed', children_stopped: false });
+    const {last_health_failure,...outcome}=await runtime.finished;
+    assert.deepEqual(outcome, { reason: 'runtime_cleanup_unconfirmed', children_stopped: false });
+    // The health poll and OS exit event can observe the same stopped Edge
+    // in either order. Retain and validate that optional finite diagnostic.
+    if(last_health_failure){
+      assert.deepEqual(normalizeRuntimeHealthFailure(last_health_failure),last_health_failure);
+      assert.equal(last_health_failure.component,'edge');
+    }
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(rejections, []);
     assert.equal(alive(apiChild.pid), true, 'failure reports the still-running owned child');
