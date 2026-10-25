@@ -1,0 +1,67 @@
+{
+  "schema": "metaengine.native-cold-start.linux-exact-ci.v1",
+  "source_head": "afbd629779e8d07e595a4f108751c4f36951d1e4",
+  "source_tree": "a03a37ca03793efbbf0579d408f38354ef91ca50",
+  "run_id": 40233326244,
+  "job_id": 121289534311,
+  "url": "https://github.com/PatrickFrome/Compute/actions/runs/40233326244/job/121289534311",
+  "conclusion": "success",
+  "browser": {
+    "tests": 5986,
+    "passed": 5921,
+    "failed": 0,
+    "skipped": 65,
+    "real_electron_main_process": true,
+    "asar_digest_and_tamper_guards": true
+  },
+  "source_preflight": {
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0
+  },
+  "state_runtime": {
+    "tests": 633,
+    "passed": 614,
+    "failed": 0,
+    "skipped": 19
+  },
+  "shell_job": {
+    "id": 121289534495,
+    "checkout": "886fce1fbc8466cef2de7fbfbbbe1e4b263f17f0",
+    "tree_verified_identical": true,
+    "conclusion": "success"
+  },
+  "installed_runtime_qualified": false,
+  "proof_excerpt": [
+    "2026-10-25T21:02:19.8878825Z   ref: afbd629779e8d07e595a4f108751c4f36951d1e4",
+    "2026-10-25T21:02:27.8632652Z HEAD is now at afbd62977 fix(native): prepare job runtime at build time and repair CI fixtures",
+    "2026-10-25T21:02:40.0882386Z ℹ tests 124",
+    "2026-10-25T21:02:40.0882700Z ℹ pass 124",
+    "2026-10-25T21:02:40.0882818Z ℹ fail 0",
+    "2026-10-25T21:02:40.0883077Z ℹ skipped 0",
+    "2026-10-25T21:02:40.0883342Z ℹ duration_ms 4677.947777",
+    "2026-10-25T21:03:37.6802894Z ℹ tests 633",
+    "2026-10-25T21:03:37.6803296Z ℹ pass 614",
+    "2026-10-25T21:03:37.6803474Z ℹ fail 0",
+    "2026-10-25T21:03:37.6803847Z ℹ skipped 19",
+    "2026-10-25T21:03:37.6804270Z ℹ duration_ms 57486.67102",
+    "2026-10-25T21:04:32.0138343Z ✔ real Electron MAIN_PROCESS qualifies physical ASAR bytes while retaining archive package and bridge reads (900.54905ms)",
+    "2026-10-25T21:04:32.0139190Z ℹ {\"classification\":\"REAL_ELECTRON_MAIN_PROCESS_ASAR_FILESYSTEM\",\"electron\":\"44.0.0\",\"main_process_started\":true,\"virtual_asar_and_physical_original_fs\":true,\"digest_and_tamper_guards_verified\":true,\"installed_runtime_qualified\":false,\"model_calls\":0}",
+    "2026-10-25T21:05:19.4537336Z ℹ tests 5986",
+    "2026-10-25T21:05:19.4537764Z ℹ pass 5921",
+    "2026-10-25T21:05:19.4537875Z ℹ fail 0",
+    "2026-10-25T21:05:19.4538107Z ℹ skipped 65",
+    "2026-10-25T21:05:19.4538354Z ℹ duration_ms 97226.241771",
+    "2026-10-25T21:05:21.7313940Z ℹ tests 68",
+    "2026-10-25T21:05:21.7314567Z ℹ pass 68",
+    "2026-10-25T21:05:21.7314681Z ℹ fail 0",
+    "2026-10-25T21:05:21.7314920Z ℹ skipped 0",
+    "2026-10-25T21:05:21.7315164Z ℹ duration_ms 2240.649688",
+    "2026-10-25T21:05:21.7938541Z ℹ tests 4",
+    "2026-10-25T21:05:21.7938893Z ℹ pass 4",
+    "2026-10-25T21:05:21.7939105Z ℹ fail 0",
+    "2026-10-25T21:05:21.7939474Z ℹ skipped 0",
+    "2026-10-25T21:05:21.7939871Z ℹ duration_ms 39.787104"
+  ]
+}

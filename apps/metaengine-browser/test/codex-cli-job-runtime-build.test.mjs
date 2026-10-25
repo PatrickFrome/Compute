@@ -12,11 +12,115 @@ import {
   extractCodexCliJobRuntimeTemplate,
   renderCodexCliJobRuntimeHelper,
   prepareCodexCliJobRuntime,
+  cleanupCodexCliJobRuntimeBuild,
 } from '../scripts/prepare-codex-cli-job-runtime.mjs';
 
 const templateUrl = new URL('../scripts/codex-cli-job-runner.ps1', import.meta.url);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const readTemplate = () => fs.readFile(templateUrl);
+const removeDirectory = fs.rm;
+
+async function ownedBuildResources(t) {
+  const root = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'metaengine-job-build-cleanup-test-'));
+  const buildRoot = path.join(root, 'build'), lockPath = path.join(root, '.prepare.lock');
+  await fs.mkdir(buildRoot);
+  await fs.writeFile(path.join(buildRoot, 'compiler-proof.json'), '{}');
+  const lock = await fs.open(lockPath, 'wx');
+  t.after(async () => { await lock.close(); await removeDirectory(root, { recursive: true, force: true }); });
+  return { buildRoot, buildStat: await fs.lstat(buildRoot), lock, lockPath, lockStat: await lock.stat() };
+}
+
+test('build cleanup retries transient Windows locks and physically removes only the captured directory', async t => {
+  const resources = await ownedBuildResources(t);
+  const codes = ['EBUSY', 'EPERM', 'ENOTEMPTY'];
+  let attempts = 0;
+  t.mock.method(fs, 'rm', async (target, options) => {
+    assert.equal(target, resources.buildRoot);
+    const code = codes[attempts++];
+    if (code) throw Object.assign(Error('transient directory lock'), { code });
+    return removeDirectory(target, options);
+  });
+  await cleanupCodexCliJobRuntimeBuild(resources);
+  assert.equal(attempts, 4);
+  await assert.rejects(fs.access(resources.buildRoot), { code: 'ENOENT' });
+  await assert.rejects(fs.access(resources.lockPath), { code: 'ENOENT' });
+});
+
+test('build cleanup stops after six busy attempts, fails closed and releases the owned preparation lock', async t => {
+  const resources = await ownedBuildResources(t);
+  const busy = Object.assign(Error('directory remains busy'), { code: 'EBUSY' });
+  let attempts = 0;
+  t.mock.method(fs, 'rm', async () => { attempts++; throw busy; });
+  await assert.rejects(cleanupCodexCliJobRuntimeBuild(resources), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.message, 'codex_job_runtime_cleanup_failed');
+    assert.equal(error.cause, busy);
+    assert.deepEqual(error.errors, [busy]);
+    return true;
+  });
+  assert.equal(attempts, 6);
+  assert.equal(await fs.readFile(path.join(resources.buildRoot, 'compiler-proof.json'), 'utf8'), '{}');
+  await assert.rejects(fs.access(resources.lockPath), { code: 'ENOENT' });
+});
+
+test('build cleanup rechecks directory identity after a busy attempt and preserves a replacement directory', async t => {
+  const resources = await ownedBuildResources(t);
+  let attempts = 0;
+  t.mock.method(fs, 'rm', async target => {
+    attempts++;
+    await fs.rename(target, target + '-original');
+    await fs.mkdir(target);
+    await fs.writeFile(path.join(target, 'replacement.txt'), 'must remain');
+    throw Object.assign(Error('directory busy before replacement'), { code: 'EBUSY' });
+  });
+  await assert.rejects(cleanupCodexCliJobRuntimeBuild(resources), error => {
+    assert.equal(error.cause.message, 'codex_job_runtime_build_cleanup_refused');
+    return true;
+  });
+  assert.equal(attempts, 1);
+  assert.equal(await fs.readFile(path.join(resources.buildRoot, 'replacement.txt'), 'utf8'), 'must remain');
+  assert.equal(await fs.readFile(path.join(resources.buildRoot + '-original', 'compiler-proof.json'), 'utf8'), '{}');
+  await assert.rejects(fs.access(resources.lockPath), { code: 'ENOENT' });
+});
+
+test('build cleanup preserves the primary compiler failure and both independent cleanup failures', async t => {
+  const resources = await ownedBuildResources(t);
+  const compilerCause = Object.assign(Error('compiler diagnostics'), { stderr: 'physical compiler failure' });
+  const primaryError = Error('codex_job_runtime_build_failed', { cause: compilerCause });
+  const removalError = Object.assign(Error('unexpected removal error'), { code: 'EIO' });
+  let attempts = 0;
+  t.mock.method(fs, 'rm', async () => { attempts++; throw removalError; });
+  await fs.rename(resources.lockPath, resources.lockPath + '-original');
+  await fs.writeFile(resources.lockPath, 'replacement lock');
+  await assert.rejects(cleanupCodexCliJobRuntimeBuild({ ...resources, primaryError }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.message, 'codex_job_runtime_build_and_cleanup_failed');
+    assert.equal(error.cause, primaryError);
+    assert.equal(error.cause.cause, compilerCause);
+    assert.equal(error.errors.length, 3);
+    assert.equal(error.errors[0], primaryError);
+    assert.equal(error.errors[1], removalError);
+    assert.equal(error.errors[2].message, 'codex_job_runtime_build_lock_cleanup_refused');
+    return true;
+  });
+  assert.equal(attempts, 1, 'unrelated filesystem failures must not be retried');
+  assert.equal(await fs.readFile(resources.lockPath, 'utf8'), 'replacement lock');
+});
+
+test('successful build cleanup retains the exact primary failure without wrapping or replacing it', async t => {
+  const resources = await ownedBuildResources(t);
+  const primaryError = Error('original failed build');
+  await assert.rejects(cleanupCodexCliJobRuntimeBuild({ ...resources, primaryError }), error => error === primaryError);
+  await assert.rejects(fs.access(resources.buildRoot), { code: 'ENOENT' });
+  await assert.rejects(fs.access(resources.lockPath), { code: 'ENOENT' });
+});
+
+test('build cleanup accepts an already removed build directory and still releases its owned lock', async t => {
+  const resources = await ownedBuildResources(t);
+  await removeDirectory(resources.buildRoot, { recursive: true });
+  await cleanupCodexCliJobRuntimeBuild(resources);
+  await assert.rejects(fs.access(resources.lockPath), { code: 'ENOENT' });
+});
 
 // Only a header fixture for the byte-transform tests below. The Windows test
 // compiles and reflects the actual reviewed class; this buffer proves no CLR run.

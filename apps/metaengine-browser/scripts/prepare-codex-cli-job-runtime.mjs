@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fixedWindowsNativeReadEnvironment } from '../src/windows-native-read-environment.mjs';
 
@@ -139,6 +140,44 @@ async function replaceOutput(file, bytes) {
   } finally { await fs.rm(pending, { force: true }); }
 }
 
+async function removeOwnedBuildDirectory(buildRoot, buildStat) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const current = await fs.lstat(buildRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (!current) return;
+    if (!buildStat || !current.isDirectory() || current.isSymbolicLink()
+        || current.dev !== buildStat.dev || current.ino !== buildStat.ino) throw Error('codex_job_runtime_build_cleanup_refused');
+    try {
+      await fs.rm(buildRoot, { recursive: true, force: true, maxRetries: 0 });
+      return;
+    } catch (error) {
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(error.code) || attempt === 5) throw error;
+      // Retry only our captured directory, checking its identity again after
+      // every wait. Six attempts spend at most 1.5 seconds in backoff.
+      await delay((attempt + 1) * 100);
+    }
+  }
+}
+
+// Build-only cleanup, exported for physical directory/lock failure tests.
+export async function cleanupCodexCliJobRuntimeBuild({ buildRoot, buildStat, lock, lockPath, lockStat, primaryError }) {
+  const errors = [];
+  try { if (buildRoot) await removeOwnedBuildDirectory(buildRoot, buildStat); }
+  catch (error) { errors.push(error); }
+  try {
+    await lock.close();
+    const currentLock = await fs.lstat(lockPath);
+    if (!currentLock.isFile() || currentLock.isSymbolicLink()
+        || currentLock.dev !== lockStat.dev || currentLock.ino !== lockStat.ino) throw Error('codex_job_runtime_build_lock_cleanup_refused');
+    await fs.unlink(lockPath);
+  } catch (error) { errors.push(error); }
+  if (errors.length) {
+    throw new AggregateError(primaryError ? [primaryError, ...errors] : errors,
+      primaryError ? 'codex_job_runtime_build_and_cleanup_failed' : 'codex_job_runtime_cleanup_failed',
+      { cause: primaryError ?? errors[0] });
+  }
+  if (primaryError) throw primaryError;
+}
+
 export async function prepareCodexCliJobRuntime({ helperSourcePath = defaultTemplate, outputDirectory = defaultOutput } = {}) {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw Error('codex_job_runtime_windows_x64_build_required');
   if (typeof helperSourcePath !== 'string' || !path.isAbsolute(helperSourcePath)
@@ -164,7 +203,7 @@ export async function prepareCodexCliJobRuntime({ helperSourcePath = defaultTemp
   const lockPath = path.join(outputRoot, '.prepare.lock');
   const lock = await fs.open(lockPath, 'wx').catch(error => { if (error.code === 'EEXIST') throw Error('codex_job_runtime_prepare_busy'); throw error; });
   const lockStat = await lock.stat();
-  let buildRoot, buildStat;
+  let buildRoot, buildStat, primaryError;
   try {
     buildRoot = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'metaengine-codex-job-build-'));
     buildStat = await fs.lstat(buildRoot);
@@ -179,7 +218,7 @@ export async function prepareCodexCliJobRuntime({ helperSourcePath = defaultTemp
       compiler_path: compiler, compiler_sha256: compilerSha256, csharp_sha256: template.csharpSha256 }), { flag: 'wx' });
     try {
       const pending = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', driverPath, '-RequestPath', requestPath],
-        { shell: false, windowsHide: true, timeout: 180000, maxBuffer: 256 * 1024, cwd: buildRoot, env: environment });
+        { shell: false, windowsHide: true, timeout: 180000, maxBuffer: 256 * 1024, cwd: path.join(systemRoot, 'System32'), env: environment });
       pending.child?.stdin?.end();
       await pending;
     } catch (error) {
@@ -218,23 +257,11 @@ export async function prepareCodexCliJobRuntime({ helperSourcePath = defaultTemp
     if (!(await readStableFile(helperPath, 4 * 1024 * 1024)).equals(helperBytes)
         || !(await readStableFile(manifestPath, 64 * 1024)).equals(manifestBytes)) throw Error('codex_job_runtime_output_readback_failed');
     return Object.freeze({ helperPath, manifestPath, manifest });
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    try {
-      if (buildRoot) {
-        const current = await fs.lstat(buildRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-        if (current) {
-          if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== buildStat.dev || current.ino !== buildStat.ino) throw Error('codex_job_runtime_build_cleanup_refused');
-          await fs.rm(buildRoot, { recursive: true, force: true });
-        }
-      }
-    } finally {
-      await lock.close();
-      const currentLock = await fs.lstat(lockPath);
-      if (!currentLock.isFile() || currentLock.isSymbolicLink() || currentLock.dev !== lockStat.dev || currentLock.ino !== lockStat.ino) {
-        throw Error('codex_job_runtime_build_lock_cleanup_refused');
-      }
-      await fs.unlink(lockPath);
-    }
+    await cleanupCodexCliJobRuntimeBuild({ buildRoot, buildStat, lock, lockPath, lockStat, primaryError });
   }
 }
 

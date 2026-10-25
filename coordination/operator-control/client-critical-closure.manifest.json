@@ -765,8 +765,8 @@
     "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs": "a22b583439e808374090508aec24def9301c5a9d",
     ".github/workflows/metaengine-browser-shell-v1.yml": "e46c2ba53df26956eff40cb88877493e638b7075",
     "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs": "0a317cd9f38ff8d9a672080c7410059ae9a89dbb",
-    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs": "25b5b6b90219519483d1178124106c05340f4dc5",
-    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs": "e019a565a4db108c76a452428c5b5ef15711e46c",
+    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs": "3af11cdec3d193397b019adce860cb93da085dbd",
+    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs": "e5833f8b4eec97161792c7c029d97ab73f0cbaa6",
     "apps/metaengine-browser/test/codex-cli-job-runtime.test.mjs": "460ee752d5e6e1225db61307ab4b3dad1504f69f",
     "apps/metaengine-browser/test/emergency-maintenance-trust-root.test.mjs": "ef32c964156187ee9e25df3df23ad8770fdb5134"
   },

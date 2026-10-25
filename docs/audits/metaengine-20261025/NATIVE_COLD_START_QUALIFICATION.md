@@ -123,6 +123,50 @@ interrupted after 1,012 seconds; the remote background-call inventory was empty.
 No current Windows checkout or running-process state was established, and no
 mutation, installation, restart or goal-dispatch command was sent to that device.
 
+## First published Windows readback and build cleanup follow-up
+
+Published functional source `afbd629779e8d07e595a4f108751c4f36951d1e4`
+reached the three independent Windows build preparation paths: Live Mechanics,
+Critical Audit and Current Source. All three stopped at removal of their own
+build temporary directory with `EBUSY`, after approximately 37, 33 and 31
+seconds respectively. Node 24.22.1 and 24.19.0 reproduced the failure.
+
+These jobs did not reach the boot, capture or controller tests. The original
+`finally` could overwrite an earlier build error, so the available logs do not
+establish whether compilation itself succeeded. No process was identified as
+the lock holder. Exact job IDs, failure excerpts and complete-log digests are
+retained in `windows-build-cleanup-ci.json` in the evidence directory.
+
+The follow-up launches the build driver from fixed System32, keeping all
+compiler inputs/outputs absolute. Owned-directory cleanup checks its captured
+identity before each of at most six attempts; transient EBUSY/EPERM/ENOTEMPTY
+backoff totals at most 1.5 seconds. A primary build failure is retained; combined
+build/cleanup failures retain both errors. Cleanup failure still fails the build.
+These changes do not alter native source bytes or task runtime deadlines.
+Windows documents that a process current directory is locked while that process
+executes; removing the temporary directory from that role avoids this unnecessary
+lifetime coupling without claiming which process held the observed lock.
+
+The exact `afbd6297…` Linux Current Source job subsequently passed: 5,921 Browser
+passes / zero failures / 65 platform skips, with a real Electron 44.0.0 main
+process and physical ASAR digest/tamper checks. Its source preflight was 124/124;
+State Runtime was 614 pass / zero fail / 19 platform skips. Shell also passed
+on synthetic merge `886fce1f…`, whose tree was independently verified identical
+to the published source tree. These are source/Linux results, not Windows native
+qualification. See `linux-exact-ci.json`.
+
+The cleanup follow-up passed 34 integration tests with zero failures and one
+Windows-only build skip; all 240 source parser checks and 124 current/historical
+source preflight tests passed. Independent review
+found no blocker. Six new failure scenarios cover real owned directories/locks
+with injected transient removal failures, replacement and error preservation.
+The 577-path current seal refresh changes only the two reviewed build/test blobs.
+
+References:
+
+- [Windows current-directory lifetime](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory).
+- [Node filesystem removal and transient-error retry options](https://nodejs.org/api/fs.html#fspromisesrmpath-options).
+
 ## Acceptance still required
 
 This continuation must be qualified on its own final source commit. Portable
