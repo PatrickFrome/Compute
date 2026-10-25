@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
+import {validateNativeCodingAgentHostRequest,nativeCodingAgentHostOperationWrites} from '../../apps/metaengine-browser/src/native-coding-agent-host-contract.mjs';
 
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
-const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT'];
-const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT']);
+const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
+const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT']);
+const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
   'REQUEST_TIMEOUT','CHILD_EXIT','CHANNEL_CLOSED','SEND_FAILED','CLIENT_CLOSED','SERVER_CLOSED']);
@@ -49,6 +51,10 @@ function scope(value,reservation=false) {
 function payload(action,value) {
   json(value);
   if(action==='READ_SCOPE')keys(value,[]);
+  else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
+  else if(action==='FINISH_CHECKPOINT'||action==='READ_FINISH_CHECKPOINT'){
+    keys(value,['project_id','checkpoint_sha256']);if(!UUID.test(value.project_id||'')||!HASH.test(value.checkpoint_sha256||''))invalid('INVALID_PAYLOAD');
+  }
   else if(action==='RECONCILE_PROJECT'||action==='READ_PROJECT_CHECKPOINT'){
     keys(value,['project_id']);if(!UUID.test(value.project_id||''))invalid('INVALID_PAYLOAD');
   }
@@ -88,7 +94,11 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     ||typeof process.send!=='function'||typeof send!=='function'||typeof onProtocolError!=='function'
     ||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16
     ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>20000)invalid('CHANNEL_CLOSED');
-  keys(operations,ACTIONS);for(const action of ACTIONS)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
+  // close is a private lifecycle method on the real authority. It is never a
+  // dispatchable IPC action; reject every other unexpected property.
+  keys(operations,[...ACTIONS,...(Object.hasOwn(operations||{},'close')?['close']:[])]);
+  for(const action of ACTIONS)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
+  if(Object.hasOwn(operations,'close')&&typeof operations.close!=='function')invalid('INVALID_PAYLOAD');
   let closed=false;const active=new Map(),completed=new Map();
   const protocolError=reason=>{try{onProtocolError(REASONS.has(reason)?reason:'INVALID_FRAME');}catch{}};
   function emit(frame) {
@@ -101,8 +111,8 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   function seal(row,outcome,value,reason) {
     if(row.response)return;
     let frame=response(row.request,row.digest,outcome,value,reason);
-    try{json(frame);}catch{frame=response(row.request,row.digest,WRITES.has(row.request.action)?'UNKNOWN':'REJECTED',null,
-      WRITES.has(row.request.action)?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED');}
+    try{json(frame);}catch{frame=response(row.request,row.digest,row.write?'UNKNOWN':'REJECTED',null,
+      row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED');}
     row.response=frame;clearTimeout(row.timer);completed.set(row.request.request_id,{digest:row.digest,frame});
     // This response cache is not a durable execution ledger. Task/lease scope
     // uniqueness and transition CAS remain in the existing own-PG operations.
@@ -112,7 +122,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   function close() {
     if(closed)return;closed=true;
     for(const row of active.values()){
-      seal(row,WRITES.has(row.request.action)?'UNKNOWN':'REJECTED',null,'SERVER_CLOSED');
+      seal(row,row.write?'UNKNOWN':'REJECTED',null,'SERVER_CLOSED');
       row.abort.abort();
     }
     process.off('disconnect',onDisconnect);
@@ -133,19 +143,19 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     }catch(error){protocolError(REASONS.has(error.reason)?error.reason:'INVALID_FRAME');return true;}
     const old=completed.get(message.request_id),running=active.get(message.request_id);
     if(old){if(old.digest===requestDigest)emit(old.frame);else emit(response(message,requestDigest,'UNKNOWN',null,'REQUEST_ID_REUSED'));return true;}
-    if(running){emit(response(message,requestDigest,WRITES.has(message.action)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
+    if(running){emit(response(message,requestDigest,writes(message.action,message.payload)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
     if(active.size>=maxInflight){emit(response(message,requestDigest,'REJECTED',null,'INFLIGHT_LIMIT'));return true;}
-    const row={request:structuredClone(message),digest:requestDigest,abort:new AbortController(),timer:null,response:null};
+    const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),timer:null,response:null};
     active.set(message.request_id,row);
     row.timer=setTimeout(()=>{
-      seal(row,WRITES.has(message.action)?'UNKNOWN':'REJECTED',null,'REQUEST_TIMEOUT');row.abort.abort();
+      seal(row,row.write?'UNKNOWN':'REJECTED',null,'REQUEST_TIMEOUT');row.abort.abort();
       // Keep the physical operation counted until it really settles. A timeout
       // must not create unbounded parallel work or authorize a second write.
     },timeoutMs);
     Promise.resolve().then(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
       Object.freeze({signal:row.abort.signal,instanceId,hostPid,requestId:message.request_id,action:message.action})))
       .then(value=>{if(!row.response){json(value);seal(row,'OK',structuredClone(value),null);}})
-      .catch(()=>seal(row,WRITES.has(message.action)?'UNKNOWN':'REJECTED',null,WRITES.has(message.action)?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED'))
+      .catch(()=>seal(row,row.write?'UNKNOWN':'REJECTED',null,row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED'))
       .finally(()=>{clearTimeout(row.timer);active.delete(message.request_id);});
     return true;
   }

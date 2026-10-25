@@ -5,6 +5,7 @@ import {validateCodexCliResult} from '../../apps/metaengine-browser/src/codex-cl
 import {buildNativeCodingTaskContext,buildNativeCodingExecutionScope,nativeCodingCanonicalJson as json,
   nativeCodingCanonicalSha256 as sha} from './native-coding-task-context.mjs';
 import {createNativeCodingCheckpointVerifier} from './native-coding-checkpoint-verifier.mjs';
+import {createNativeCodingAgentHostTools} from './native-coding-agent-host-tools.mjs';
 
 const fail=reason=>{throw new Error('native_coding_host_'+reason);};
 const same=(a,b)=>json(a)===json(b);
@@ -20,7 +21,7 @@ const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)
 
 // Only runtime-host constructs this capability. The IPC protocol exposes
 // these fixed operations, never this connection or arbitrary SQL/functions.
-export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope}={}) {
+export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null}={}) {
   if(typeof sql?.unsafe!=='function'||typeof sql?.begin!=='function'
     ||![readNativeScope,readNativeWorker,readProtectedReceipt].every(x=>typeof x==='function')) fail('private_dependencies_required');
   async function owner(tx) {
@@ -30,6 +31,15 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
   await owner(sql);
   let closed=false;
   const open=()=>{if(closed)fail('closed');};
+  if(commitService!==null&&!['FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT','close'].every(name=>typeof commitService?.[name]==='function'))fail('commit_service_invalid');
+  const agentTools=createNativeCodingAgentHostTools({sql,readNativeScope,readNativeWorker});
+  async function finishCheckpoint(action,query){
+    open();projectId(query?.project_id);
+    if(!exact(query,['project_id','checkpoint_sha256'])||!/^[a-f0-9]{64}$/.test(query.checkpoint_sha256||''))fail('commit_selector_invalid');
+    if(!commitService)return {schema:'metaengine.native-coding.host-commit-service.v1',...query,state:'COMMIT_CAPABILITY_HOLD',
+      successor_admitted:false,automatic_retry_allowed:false,authority_effect:false};
+    const result=await commitService[action](query);open();return result;
+  }
   const checkpointVerifier=typeof readCheckpointScope==='function'
     ?createNativeCodingCheckpointVerifier({readProtectedReceipt,readCheckpointScope}):null;
   const checkpointSelectors=['writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation'];
@@ -180,6 +190,9 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     catch {throw Object.assign(new Error('native_coding_host_write_unknown_readback_required'),{effect_outcome:'UNKNOWN',automatic_retry_allowed:false});}
   }
   return Object.freeze({
+    AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
+    FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
+    READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
     async READ_SCOPE() {
       open();const native=await readNativeScope(null);
       const rows=await sql.unsafe(`select public.native_coding_admission_context_v1(p.workspace_id,p.client_id,p.permit_id) as context
@@ -349,6 +362,6 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',k,verified.checkpoint_sha256);
       });
     },
-    close(){closed=true;checkpointVerifier?.close();},
+    close(){closed=true;agentTools.close();checkpointVerifier?.close();commitService?.close();},
   });
 }

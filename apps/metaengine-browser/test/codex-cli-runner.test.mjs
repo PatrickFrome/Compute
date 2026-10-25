@@ -11,6 +11,10 @@ import { pathToFileURL } from 'node:url';
 import { buildCodexCliArgv, codexCliEnvironment, codexCliTemporaryEnvironment, createCodexCliRunner } from '../src/codex-cli-runner.mjs';
 import { createCodexCliWindowsProcessController, resolveCodexCliJobHelper } from '../src/codex-cli-windows-process-controller.mjs';
 import { CODEX_CLI_RESULT_SCHEMA, validateCodexCliResult } from '../src/codex-cli-result-schema.mjs';
+import {prepareNativeCodingAgentRunBridge} from '../src/native-coding-agent-run-bridge.mjs';
+import {agentBridgePins} from './fixtures/native-coding-agent-bridge-pins.mjs';
+import {connectNativeCodingAgentMcpBroker} from '../src/native-coding-agent-mcp-broker.mjs';
+import {NATIVE_AGENT_MCP_ENV} from '../src/native-coding-agent-mcp-entry.mjs';
 
 const exec = promisify(execFile);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -62,10 +66,10 @@ function controller({ mutate = true, invalidJson = false, hang = false, criticMu
     spawns++; lastSpec = spec; const stdout = new PassThrough(); const stderr = new PassThrough(); let finish;
     const completion = new Promise(resolve => { finish = resolve; });
     return { proof: { pid: 12345, process_incarnation_id: 'pid:12345:created_100ns:133333333333333333',
-      user_sid: sid, job_id: spec.runId, tree_control_bound: true, started_suspended: true,
+      user_sid: sid, job_id: spec.runId, tree_control_bound: true, started_suspended: true,job_bound_before_resume:true,
       executable_sha256: spec.expectedExecutableSha256 }, stdout, stderr, completion,
       async resume() {
-        onResume?.();
+        await onResume?.();
         if (hang) return;
         const role = spec.args[spec.args.indexOf('--sandbox') + 1] === 'read-only' ? 'CRITIC' : 'IMPLEMENTER';
         if ((role === 'IMPLEMENTER' && mutate) || (role === 'CRITIC' && criticMutate)) await fs.writeFile(path.join(spec.cwd, 'feature.txt'), role === 'CRITIC' ? 'corrupted\n' : 'after\n');
@@ -121,6 +125,50 @@ test('native permit rejection occurs before spawning or reserving the model job'
   const runner = createCodexCliRunner({ ...f, processController, authorizeLease: async () => ({ authorized: true }) });
   await assert.rejects(runner.run({ lease: f.lease(1), role: 'IMPLEMENTER', worktreePath: f.worktree, prompt: 'x' }), /authorization_denied/);
   assert.equal(processController.spawns, 0);
+});
+
+test('runner binds real private broker only after RUNNING authorization and before prompt resume, then revokes',async t=>{
+  const f=await fixture(t),pins=await agentBridgePins(t),events=[];let running=false,bridge;
+  const processController=controller({onResume:async()=>{
+    events.push('resume');const env=processController.lastSpec.env;
+    const client=await connectNativeCodingAgentMcpBroker({endpoint:env[NATIVE_AGENT_MCP_ENV.endpoint],capability:env[NATIVE_AGENT_MCP_ENV.capability]});
+    try{assert.equal((await client.invoke('project_overview',{})).rows.length,0);}finally{client.close();}
+  }});
+  const authorizeLease=async request=>{events.push(request.phase);if(request.phase==='BEFORE_RESUME')running=true;return f.authorizeLease(request);};
+  const runner=createCodexCliRunner({...f,processController,authorizeLease,async prepareAgentBridge(details){
+    events.push('prepare-bridge');const a=details.authorization;
+    const permit={...details.binding,permit_id:a.permit_id,owner_epoch:a.owner_epoch,user_sid:a.user_sid,workspace_id:a.workspace_id,project_id:a.project_id,
+      trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,expires_at:a.expires_at,provider_id:id(55),artifact:{cli_executable_sha256:f.expectedExecutableSha256},
+      worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
+    bridge=await prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{async agentOperation(value){
+      events.push(value.operation);assert.equal(running,true);
+      return value.operation==='CHECK'?{schema:'metaengine.native-coding.agent-authorized.v1',run_id:details.runId,authorized:true,authority_effect:false}:{rows:[]};
+    }}});return bridge;
+  }});
+  const receipt=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Use managed project tools'});
+  assert.equal(receipt.state,'RESULT_READY');assert(events.indexOf('prepare-bridge')<events.indexOf('BEFORE_RESUME'));
+  assert(events.indexOf('BEFORE_RESUME')<events.indexOf('CHECK'));assert(events.indexOf('CHECK')<events.indexOf('resume'));
+  const spec=processController.lastSpec,cap=spec.env[NATIVE_AGENT_MCP_ENV.capability];
+  assert.equal(Object.isFrozen(spec.env),true);assert.equal(spec.env.TEMP,receipt.temporary_path);
+  assert(spec.args.some(value=>value.startsWith('mcp_servers.metaengine=')));assert(!JSON.stringify(spec.args).includes(cap));
+  assert(!JSON.stringify(receipt).includes(cap));
+  await assert.rejects(connectNativeCodingAgentMcpBroker({endpoint:spec.env[NATIVE_AGENT_MCP_ENV.endpoint],capability:cap}));
+});
+
+test('unverified bridge descriptor or Host bind refusal cannot resume the suspended worker',async t=>{
+  for(const mode of ['unverified','bind-refused']){
+    const f=await fixture(t),processController=controller();let closes=0;
+    let pins;if(mode==='bind-refused')pins=await agentBridgePins(t);
+    const runner=createCodexCliRunner({...f,processController,async prepareAgentBridge(details){
+      if(mode==='unverified')return {launch:{argv:['--dangerously-bypass-approvals-and-sandbox']},bindRun:async()=>{},close:async()=>{closes++;}};
+      const a=details.authorization,permit={...details.binding,...a,trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,provider_id:id(55),
+        artifact:{cli_executable_sha256:f.expectedExecutableSha256},worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
+      return prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{agentOperation:async()=>{throw Error('fixture_current_lease_rejected');}}});
+    }});
+    const receipt=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Never resume'});
+    assert.equal(receipt.state,'AMBIGUOUS');assert.equal(await fs.readFile(path.join(f.worktree,'feature.txt'),'utf8'),'before\n');
+    assert.equal(processController.spawns,mode==='unverified'?0:1);if(mode==='unverified')assert.equal(closes,1);
+  }
 });
 
 test('lease revoked before native resume leaves a durable ambiguous attempt and never reruns', async t => {

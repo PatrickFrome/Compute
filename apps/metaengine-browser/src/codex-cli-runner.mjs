@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { CODEX_CLI_RUN_RECEIPT_SCHEMA, codexCliResultSchema, validateCodexCliResult } from './codex-cli-result-schema.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
+import {isNativeCodingAgentMcpLaunch} from './native-coding-agent-mcp-launch.mjs';
 
 const SHA = /^[a-f0-9]{64}$/; const HEAD = /^[a-f0-9]{40}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -135,10 +136,11 @@ function authorized(value, binding, root) {
  */
 export function createCodexCliRunner({ executablePath, expectedExecutableSha256, codexHome, journalRoot,
   workerTempRoot, protectTemporaryStorage = protectOwnerOnlyWindowsDirectory, verifyTemporaryStorage = verifyOwnerOnlyWindowsStorage,
-  authorizeLease, processController, gitExecutable='git',model = null, timeoutMs = 600000, maxOutputBytes = 8 * 1024 * 1024 } = {}) {
+  authorizeLease, processController, prepareAgentBridge=null, gitExecutable='git',model = null, timeoutMs = 600000, maxOutputBytes = 8 * 1024 * 1024 } = {}) {
   if (![executablePath, codexHome, journalRoot, workerTempRoot].every(value => path.isAbsolute(value || ''))
     || !SHA.test(expectedExecutableSha256 || '') || typeof authorizeLease !== 'function'
-    || typeof processController?.spawn !== 'function' || !Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 1800000
+    || typeof processController?.spawn !== 'function' || prepareAgentBridge!==null&&typeof prepareAgentBridge!=='function'
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 1800000
     || typeof protectTemporaryStorage !== 'function' || typeof verifyTemporaryStorage !== 'function'
     || [journalRoot, codexHome, path.dirname(executablePath)].some(root => overlap(root, workerTempRoot))
     || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1024 || maxOutputBytes > 16 * 1024 * 1024) throw fail('composition_invalid');
@@ -203,14 +205,14 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         subject_git_artifact_sha256: subject?.git_after?.artifact_sha256 || null, subject_source_head: subject?.git_after?.head || null,
         useful_work_verified: false, model_claim_authority: false, authority_effect: false };
       await durableJson(path.join(directory, 'attempt.json'), receipt, true);
-      let handle = null, abortReason = null, eventError = null, outputBytes = 0, eventCount = 0, threadId = null,
+      let handle = null, agentBridge=null, abortReason = null, eventError = null, outputBytes = 0, eventCount = 0, threadId = null,
         completedTurns = 0, failedTurns = 0, pending = '', timer = null, processResult = null;
       const decoder = new StringDecoder('utf8'); const stdoutHash = crypto.createHash('sha256');
       const stderrHash = crypto.createHash('sha256');
       const stdoutFile = await fs.open(path.join(directory, 'events.jsonl'), 'wx', 0o600);
       const stderrFile = await fs.open(path.join(directory, 'stderr.log'), 'wx', 0o600);
       let writes = Promise.resolve();
-      const terminate = reason => { abortReason ||= reason; if (handle) void handle.terminate(reason).catch(() => {}); };
+      const terminate = reason => { abortReason ||= reason; if(agentBridge)void agentBridge.close().catch(()=>{});if (handle) void handle.terminate(reason).catch(() => {}); };
       const onAbort = () => terminate('CANCELLED');
       const parseLine = line => {
         if (!line.trim()) return;
@@ -257,11 +259,18 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         receipt.execution_deadline = deadlineAt;
         await durableJson(schemaPath, codexCliResultSchema(role, subject?.result_sha256));
         const args = buildCodexCliArgv({ role, worktreePath: root, schemaPath, resultPath, model });
+        let launchEnvironment=codexCliTemporaryEnvironment(env,temporaryPath);
+        if(prepareAgentBridge){
+          agentBridge=await prepareAgentBridge({runId,binding,authorization:structuredClone(permit),deadlineAt});
+          if(!agentBridge||!isNativeCodingAgentMcpLaunch(agentBridge.launch)||typeof agentBridge.bindRun!=='function'
+            ||typeof agentBridge.close!=='function'||agentBridge.launch.metadata.run_id!==runId)throw fail('agent_bridge_unverified');
+          args.unshift(...agentBridge.launch.argv);launchEnvironment=agentBridge.launch.createEnvironment(launchEnvironment);
+        }
         timer = setTimeout(() => terminate('TIMEOUT'), timeoutMs + 30000);
         signal?.addEventListener('abort', onAbort, { once: true });
         if (signal?.aborted) throw fail('cancelled_before_spawn');
         handle = await processController.spawn({ executablePath, expectedExecutableSha256, args, cwd: root,
-          env: codexCliTemporaryEnvironment(env, temporaryPath), timeoutMs, deadlineAt, runId, binding });
+          env: launchEnvironment, timeoutMs, deadlineAt, runId, binding });
         handle.stdout.on('data', data => output('stdout', data)); handle.stderr.on('data', data => output('stderr', data));
         const proof = handle.proof;
         if (!proof || proof.tree_control_bound !== true || proof.started_suspended !== true || proof.user_sid !== permit.user_sid
@@ -273,6 +282,8 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
           process: structuredClone(proof), run_id: runId, temporary_path: temporaryPath,
           temporary_storage_evidence_sha256: receipt.temporary_storage_evidence_sha256 }), binding, root);
         if (recheck.permit_id !== permit.permit_id || recheck.owner_epoch !== permit.owner_epoch || abortReason || signal?.aborted) throw fail('lease_changed_before_resume');
+        await agentBridge?.bindRun(structuredClone(proof));
+        if(abortReason||signal?.aborted)throw fail('cancelled_before_resume');
         receipt.state = 'EXECUTION_STARTED';
         receipt.execution_deadline = new Date(Math.min(Date.parse(deadlineAt), Date.parse(recheck.expires_at))).toISOString();
         await durableJson(path.join(directory, 'execution-started.json'), receipt, true);
@@ -301,6 +312,9 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         try { receipt.git_after = await gitProof(root, env,gitExecutable); } catch { receipt.git_after = null; }
       } finally {
         clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
+        try{await agentBridge?.close();}catch{
+          receipt.state='AMBIGUOUS';receipt.terminal_reason='AGENT_BRIDGE_REVOCATION_UNCONFIRMED';
+        }
         await writes; await stdoutFile.sync(); await stderrFile.sync(); await stdoutFile.close(); await stderrFile.close();
       }
       receipt.jsonl_sha256 = stdoutHash.digest('hex'); receipt.stderr_sha256 = stderrHash.digest('hex');

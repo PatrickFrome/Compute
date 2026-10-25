@@ -15,6 +15,9 @@ const scope=()=>({workspace_id:id(),task_id:id(),lease_generation:1,agent_id:'ag
 const lease=()=>({workspace_id:id(),project_id:id(),task_id:id(),agent_id:'agent_native-test-1234',lease_generation:1,provider_id:id()});
 const envelope=schema=>({algorithm:'ES256',issuer_key_fingerprint_sha256:'a'.repeat(64),payload:{schema},signature:'A'.repeat(86)});
 const transition=(from,to)=>({from,to,evidence_sha256:'b'.repeat(64),critic_proof_sha256:null,checkpoint_sha256:null});
+const agentRequest=(operation='CHECK')=>({operation,args:operation==='agent_send_message'?{request_id:id(),target_agent_id:'agent_native-peer123',message:'One message'}:{},
+  binding:{run_id:id(),workspace_id:id(),project_id:id(),task_id:id(),lease_generation:1,agent_id:'agent_native-test-1234',agent_generation_epoch:1,provider_id:id(),role:'IMPLEMENTER'},
+  job_binding:{job_id:id(),pid:1234,process_incarnation_id:'pid:1234:created_100ns:134371917225776174',executable_sha256:'a'.repeat(64)}});
 
 async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-ipc-'));
@@ -32,6 +35,10 @@ const operations={
  ADVANCE_EXECUTION:async value=>{++calls;return {state:value.transition.to,has_job_proof:!!value.transition.job_proof,has_result_receipt:!!value.transition.result_receipt};},
  RECONCILE_PROJECT:async value=>{++calls;if(mode==='throw-write')throw Error('checkpoint_unknown');return {project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'};},
  READ_PROJECT_CHECKPOINT:async value=>({project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'}),
+ AGENT_OPERATION:async value=>{++calls;if(mode==='slow-agent')await delay(180);return {operation:value.operation,run_id:value.binding.run_id};},
+ FINISH_CHECKPOINT:async value=>{++calls;return {...value,state:'COMMITTED_NO_SUCCESSOR'};},
+ READ_FINISH_CHECKPOINT:async value=>({...value,state:'PENDING_COMMIT'}),
+ close:()=>{},
 };
 const send=(frame,callback)=>{
  const copy=structuredClone(frame);
@@ -89,6 +96,24 @@ test('real private parent/child IPC supports all fixed actions including transac
     {state:'RESULT_READY',has_job_proof:false,has_result_receipt:true});
   const project=id();assert.deepEqual(await client.reconcileProject(project),{project_id:project,state:'CHECKPOINTED_PENDING_COMMIT'});
   assert.deepEqual(await client.readProjectCheckpoint(project),{project_id:project,state:'CHECKPOINTED_PENDING_COMMIT'});
+});
+
+test('real private IPC accepts lifecycle close without exposing it and carries only fixed agent/commit selectors',async t=>{
+  const {client,stats}=await setup(t);const request=agentRequest();
+  assert.deepEqual(await client.agentOperation(request),{operation:'CHECK',run_id:request.binding.run_id});
+  const selector={project_id:id(),checkpoint_sha256:'a'.repeat(64)};
+  assert.equal((await client.finishCheckpoint(selector)).state,'COMMITTED_NO_SUCCESSOR');
+  assert.equal((await client.readFinishCheckpoint(selector)).state,'PENDING_COMMIT');
+  await assert.rejects(client.finishCheckpoint({...selector,path:'C:/caller-receipt.json'}),e=>e.reason==='INVALID_PAYLOAD');
+  await assert.rejects(client.agentOperation({...request,args:[]}),e=>e.reason==='INVALID_PAYLOAD');
+  assert.equal((await stats()).calls,2);
+});
+
+test('agent IPC timeout marks a write unknown and keeps a readonly CHECK effect-free without replay',async t=>{
+  const {client,stats}=await setup(t,'slow-agent',{timeoutMs:30,serverTimeoutMs:1000});
+  await assert.rejects(client.agentOperation(agentRequest()),e=>e.effect_outcome==='NONE'&&e.readback_required===true);
+  await assert.rejects(client.agentOperation(agentRequest('agent_send_message')),e=>e.effect_outcome==='UNKNOWN'&&e.automatic_retry_allowed===false);
+  await sleep(220);assert.equal((await stats()).calls,2);
 });
 
 test('out-of-order replies cannot swap concurrent lease requests',async t=>{

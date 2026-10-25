@@ -72,6 +72,20 @@ test('offline resource bundle binds source, binaries, cache and licenses with no
   assert.equal(JSON.stringify(manifest).includes(f.root), false, 'inventory must not disclose input absolute paths');
 });
 
+test('offline bundle retains one exact reviewed ACL source filename while private paths remain forbidden',async t=>{
+  const f=await fixture(t),name='apps/metaengine-browser/src/private-windows-storage-acl.mjs',bytes='export const fixtureAcl=true;\n';
+  await mkdir(path.dirname(path.join(f.sources.sourceBundleDirectory,name)),{recursive:true});
+  await writeFile(path.join(f.sources.sourceBundleDirectory,name),bytes);
+  const file=path.join(f.sources.sourceBundleDirectory,'runtime-source-bundle.json'),manifest=JSON.parse(await readFile(file,'utf8'));
+  const {bundle_sha256,...body}=manifest;body.files.push({path:name,kind:'source',bytes:Buffer.byteLength(bytes),sha256:digest(bytes)});
+  const updated={...body,bundle_sha256:digest(JSON.stringify(body))};await writeFile(file,JSON.stringify(updated));
+  const inventory=await captureOfflineRuntimeInventory({...f.options,sourceBundleDigest:updated.bundle_sha256});
+  const staged=await stageOfflineRuntimeBundle({stagingDirectory:f.stage,sources:f.sources,inventory,expectedInventoryDigest:inventory.inventory_sha256});
+  await verifyOfflineRuntimeBundle({bundleDirectory:f.stage,expectedBundleDigest:staged.bundle_sha256});
+  await writeFile(path.join(f.stage,'source','apps','metaengine-browser','src','private-windows-storage-acl-copy.mjs'),'forbidden');
+  await assert.rejects(verifyOfflineRuntimeBundle({bundleDirectory:f.stage,expectedBundleDigest:staged.bundle_sha256}),/private_path_forbidden/);
+});
+
 test('offline staging rejects changed source inventory and execution rejects changed binary bytes', async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.sources.nodeDirectory, 'node.exe'), 'mutated-node');

@@ -83,8 +83,9 @@ import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardia
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 import { notifyPrimaryWindowShown } from './browser-startup-observability.mjs';
 import {readOwnedLocalRuntimeHostSummary,createOwnedNativeCodingHostCapability} from './local-runtime-host-controller.mjs';
-import {readNativeCodingOperatorPaths} from '../../../infra/client-state-runtime/native-coding-host-os-scope.mjs';
+import {readNativeCodingOperatorPaths} from './native-coding-operator-paths.mjs';
 import {createNativeCodingRuntime} from './native-coding-runtime.mjs';
+import {drainManagedRuntimeBindings} from './managed-runtime-drain.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -124,6 +125,7 @@ let nativeCodingHostCapability = null;
 let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
 let managedTaskProjectQuitReady = false;
+let managedTaskProjectQuitPending = false;
 let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
@@ -231,7 +233,7 @@ let primaryContextDrawerDock = 'BOTTOM';
 let primaryContextDrawerHeight = 200;
 let primaryContextDrawerWidth = 380;
 let primaryShellUrl = null;
-const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
+const ME2_PRIMARY_PAGES = new Set(['browser','tasks','code','operator','system']);
 let devosSourceSnapshot = null;
 let devosSessionLayoutsLoaded = false;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -2103,26 +2105,32 @@ async function connectGithubChat() {
 }
 
 function closeManagedTaskProjectHost() {
+  if (managedTaskProjectHostDrainPending) return managedTaskProjectHostClosing;
   const host = managedTaskProjectHost;
   const projectRuntime = autonomousProjectRuntime;
   const coding=nativeCodingRuntime, codingHost=nativeCodingHostCapability;
-  nativeCodingRuntime=null;nativeCodingHostCapability=null;
-  managedTaskProjectHost = null;
-  autonomousProjectRuntime = null;
   nativeSupervisor?.bindDevosProjectRuntime(null);
   nativeSupervisor?.bindNativeCodingRuntime(null);
   projectRuntime?.bindNativeCodingRuntime(null);
   if (host || projectRuntime || coding || codingHost) {
     managedTaskProjectHostDrainPending = true;
     managedTaskProjectHostClosing = (async () => {
-      try { await coding?.close(); }
-      finally { codingHost?.close();try {await projectRuntime?.close();} finally {await host?.close();} }
-    })().finally(() => { managedTaskProjectHostDrainPending = false; });
+      const receipt=await drainManagedRuntimeBindings({coding,codingHost,projectRuntime,host});
+      // Clear ownership only after positive cleanup. A rejection deliberately
+      // retains the exact closed generation and its rejected admission barrier.
+      if(nativeCodingRuntime===coding)nativeCodingRuntime=null;
+      if(nativeCodingHostCapability===codingHost)nativeCodingHostCapability=null;
+      if(managedTaskProjectHost===host)managedTaskProjectHost=null;
+      if(autonomousProjectRuntime===projectRuntime)autonomousProjectRuntime=null;
+      managedTaskProjectHostDrainPending=false;
+      return receipt;
+    })();
   }
   return managedTaskProjectHostClosing;
 }
 
 async function initNativeSupervisor() {
+  await managedTaskProjectHostClosing;
   if (!nativeSupervisor) {
     const identity = ensureSupervisorIdentity();
     const observeLocalTarget = createFleetTargetLocalObserver({
@@ -3218,15 +3226,20 @@ app.on('before-quit', (event) => {
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;
-  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || managedTaskProjectHostDrainPending)) {
+  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || nativeCodingRuntime || nativeCodingHostCapability || managedTaskProjectHostDrainPending)) {
     event.preventDefault();
+    if(managedTaskProjectQuitPending)return;
+    managedTaskProjectQuitPending=true;
     nativeSupervisor?.stop();
     const rpc = supervisorLoopbackRpc;
     supervisorLoopbackRpc = null;
-    void Promise.allSettled([rpc?.stop(), closeManagedTaskProjectHost()]).then(() => {
+    void Promise.all([rpc?.stop(), closeManagedTaskProjectHost()]).then(() => {
       managedTaskProjectQuitReady = true;
       app.quit();
-    });
+    }).catch(()=>{
+      console.error(JSON.stringify({schema:'metaengine.managed-runtime-drain.v1',state:'QUIT_FENCED',
+        cleanup_confirmed:false,automatic_retry_allowed:false,authority_effect:false}));
+    }).finally(()=>{managedTaskProjectQuitPending=false;});
   }
 });
 app.on('activate', () => {

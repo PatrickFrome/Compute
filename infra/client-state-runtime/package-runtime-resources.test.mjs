@@ -298,3 +298,15 @@ test('selected runtime bundle includes the full real first-run source closure', 
   for (const file of [FIRST_RUN_INITDB_ENTRY, 'infra/client-state-runtime/first-run-preflight.mjs', 'infra/client-state-runtime/local-vault-key.mjs', 'infra/client-state-runtime/local-vault-compat.sql', 'infra/client-state-runtime/offline-runtime-bundle.mjs', REMOTE_SUPPORT_ENTRY, 'apps/metaengine-browser/src/windows-local-computer-executor.mjs', 'apps/metaengine-browser/src/computer-authority-plane.mjs', 'apps/metaengine-browser/src/local-state-provider-policy.mjs', 'apps/metaengine-browser/src/local-runtime-host-controller.mjs', 'infra/client-state-runtime/restored-client-provider-cli.mjs', 'infra/client-state-runtime/restored-client-provider.mjs']) assert.ok(names.has(file), 'missing first-run dependency: ' + file);
   assert.ok(closure.npm.includes('npm:postgres@3.4.7'));
 });
+
+test('native Host reviewed source catalog admits the exact ACL implementation and all bridge dependencies, not private data',async()=>{
+  const manifest=await receipt(repositoryRoot,{includeRuntimeHost:true});
+  const plan=reviewedBundlePlan(manifest,manifest.source_manifest_sha256,{includeRuntimeHost:true});
+  for(const name of ['private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-agent-host-contract.mjs',
+    'native-coding-agent-mcp-broker.mjs','native-coding-agent-mcp-launch.mjs','native-coding-agent-mcp-entry.mjs','native-coding-agent-mcp-stdio.mjs'])
+    assert(plan.some(row=>row.path==='apps/metaengine-browser/src/'+name),name);
+  for(const name of ['private-windows-storage-acl-copy.mjs','private/config.json','credentials.json']){
+    const forged=structuredClone(manifest);forged.source.files.push({id:'repository/apps/metaengine-browser/src/'+name,kind:'source',bytes:0,sha256:hash('')});
+    const digest=refreshDigest(forged);assert.throws(()=>reviewedBundlePlan(forged,digest,{includeRuntimeHost:true}),/private_path_forbidden/);
+  }
+});

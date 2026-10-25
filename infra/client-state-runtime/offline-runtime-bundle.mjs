@@ -28,7 +28,9 @@ const maxTotalBytes = 2 ** 31;
 function safePath(path) {
   if (typeof path !== 'string' || path.length > 512 || path.includes('\\')
     || !path.split('/').every(part => /^[A-Za-z0-9_@+.-]+$/.test(part) && part !== '.' && part !== '..' && !part.startsWith('.'))) fail('offline_bundle_path_invalid');
-  if (path.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('offline_bundle_private_path_forbidden');
+  const aclSource='apps/metaengine-browser/src/private-windows-storage-acl.mjs';
+  if (path!==aclSource && path!=='source/'+aclSource
+    && path.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('offline_bundle_private_path_forbidden');
   return path;
 }
 

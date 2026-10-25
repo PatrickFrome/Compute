@@ -34,7 +34,7 @@ function fixture(options={}){
       if(options.unknownBarrier&&event.to==='ATTEMPTED')throw Error('fixture_commit_ack_lost');
       return {state:event.to};},
     read:async scope=>{readCount++;calls.push('read');return options.readback?.({scope,receipt,executionState})||{state:executionState};}};
-  const ownPostgres={ledger,readScope:async()=>{},readLease:async()=>({schema:'metaengine.native-coding.own-pg-lease.v1',
+  const ownPostgres={ledger,agentOperation:async()=>{throw Error('fixture_no_agent_tool_invocation');},readScope:async()=>{},readLease:async()=>({schema:'metaengine.native-coding.own-pg-lease.v1',
       source:'PRIVATE_RUNTIME_HOST_OWN_PG',observed_at:new Date().toISOString(),value:{...lease},task_prompt:options.badPrompt?'changed in transit':prompt}),
     registerProvider:async envelope=>{calls.push('register-provider');if(options.unknownRegistration)throw Error('fixture_registration_ack_lost');
       return {registered:true,provider_id:envelope.payload.provider_id,envelope_sha256:nativeCodingEnvelopeSha256(envelope)};}};
@@ -255,4 +255,26 @@ test('closing during a hanging issuer prevents a later protected registration',a
 test('missing private ledger capability is rejected at composition, not after a task starts',async t=>{
   const f=fixture();t.after(()=>f.runtime.close());const ownPostgres={...f.args.ownPostgres};delete ownPostgres.ledger;
   assert.throws(()=>createNativeCodingRuntime({...f.args,ownPostgres}),/private_ledger_required/);
+});
+
+test('runtime prepares the bridge with its full protected permit and binds it after exact ATTEMPTED/RUNNING acknowledgement',async t=>{
+  const f=fixture();t.after(()=>f.runtime.close());let prepared=0,closed=0,bound=0;
+  const runtime=createNativeCodingRuntime({...f.args,
+    observers:{...f.args.observers,readAgentMcpLaunchPins:async()=>({fixture_pins:true})},
+    agentBridgeFactory:async value=>{
+      prepared++;assert.deepEqual(value.permit,f.permit);assert.equal(value.ownPostgres,f.args.ownPostgres);assert.equal(value.pins.fixture_pins,true);
+      return {launch:{fixture_only:true},async bindRun(proof){
+        assert.deepEqual(proof,processProof);assert(f.calls.includes('ledger:ATTEMPTED'));assert(f.calls.includes('mark-running'));bound++;
+      },async close(){closed++;}};
+    },runnerFactory:({authorizeLease,prepareAgentBridge})=>({async run(request){
+      const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
+      const bridge=await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});
+      try{
+        await authorizeLease({phase:'BEFORE_RESUME',binding:request.lease,run_id:ids.run,process:processProof});
+        await bridge.bindRun(processProof);throw Error('fixture_stops_before_any_model');
+      }finally{await bridge.close();}
+    }})});t.after(()=>runtime.close());
+  runtime.dispatchLease(f.lease);
+  for(let i=0;i<100&&['PREPARING','RUNNING'].includes(runtime.snapshot().jobs[0]?.state);i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(prepared,1);assert.equal(bound,1);assert.equal(closed,1);assert.equal(runtime.snapshot().jobs[0].state,'READBACK_REQUIRED');
 });

@@ -42,7 +42,11 @@ function safeRelativePath(value) {
   if (typeof value !== 'string' || value.length > 512 || value.includes('\\')
     || !value.split('/').every(part => /^[A-Za-z0-9_@+.-]+$/.test(part)
       && part !== '.' && part !== '..' && !part.startsWith('.'))) fail('bundle_path_invalid');
-  if (value.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('bundle_private_path_forbidden');
+  // A reviewed implementation filename is source, not a private data folder.
+  // The exact path still requires the normal source catalog and digest checks.
+  const aclSource='apps/metaengine-browser/src/private-windows-storage-acl.mjs';
+  if (value!==aclSource && value!=='repository/'+aclSource
+    && value.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('bundle_private_path_forbidden');
   return value;
 }
 
@@ -58,6 +62,14 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/native-coding-task-context.mjs',
+  'apps/metaengine-browser/src/native-coding-fs-identity.mjs',
+  'apps/metaengine-browser/src/native-coding-operator-paths.mjs',
+  'apps/metaengine-browser/src/native-coding-agent-host-contract.mjs',
+  'apps/metaengine-browser/src/native-coding-agent-mcp-broker.mjs',
+  'apps/metaengine-browser/src/native-coding-agent-mcp-entry.mjs',
+  'apps/metaengine-browser/src/native-coding-agent-mcp-stdio.mjs',
+  'apps/metaengine-browser/src/native-coding-agent-mcp-launch.mjs',
   'apps/metaengine-browser/src/native-coding-host-observers.mjs',
   'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
   'apps/metaengine-browser/src/native-coding-pg-ledger.mjs',

@@ -1,10 +1,12 @@
 import { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import {validateNativeCodingAgentHostRequest,nativeCodingAgentHostOperationWrites} from './native-coding-agent-host-contract.mjs';
 
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
-const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT'];
-const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT']);
+const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
+const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT']);
+const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
   'REQUEST_TIMEOUT','CHILD_EXIT','CHANNEL_CLOSED','SEND_FAILED','CLIENT_CLOSED','SERVER_CLOSED']);
@@ -50,6 +52,10 @@ function scope(value,reservation=false) {
 function payload(action,value) {
   json(value);
   if(action==='READ_SCOPE')keys(value,[]);
+  else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
+  else if(action==='FINISH_CHECKPOINT'||action==='READ_FINISH_CHECKPOINT'){
+    keys(value,['project_id','checkpoint_sha256']);if(!UUID.test(value.project_id||'')||!HASH.test(value.checkpoint_sha256||''))invalid('INVALID_PAYLOAD');
+  }
   else if(action==='RECONCILE_PROJECT'||action==='READ_PROJECT_CHECKPOINT'){
     keys(value,['project_id']);if(!UUID.test(value.project_id||''))invalid('INVALID_PAYLOAD');
   }
@@ -99,7 +105,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>20000||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16)
     throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
   const pending=new Map();let closed=false;
-  const reject=(row,reason,unknown=WRITES.has(row.action))=>row.reject(new NativeCodingHostIpcError(reason,
+  const reject=(row,reason,unknown=row.write)=>row.reject(new NativeCodingHostIpcError(reason,
     {action:row.action,requestId:row.id,instanceId,unknown}));
   const take=id=>{const row=pending.get(id);if(row){clearTimeout(row.timer);pending.delete(id);}return row;};
   const stop=reason=>{if(closed)return;closed=true;for(const id of [...pending.keys()]){const row=take(id);reject(row,reason);}
@@ -127,7 +133,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     catch(error){return Promise.reject(new NativeCodingHostIpcError(REASONS.has(error.reason)?error.reason:'INVALID_PAYLOAD'));}
     const requestDigest=digest(frame);
     return new Promise((resolve,rejectPromise)=>{
-      const row={id:frame.request_id,action,digest:requestDigest,resolve,reject:rejectPromise,timer:null};
+      const row={id:frame.request_id,action,write:writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null};
       row.timer=setTimeout(()=>{const current=take(row.id);if(current)reject(current,'REQUEST_TIMEOUT');},timeoutMs);
       pending.set(row.id,row);
       try{child.send(frame,error=>{if(error){const current=take(row.id);if(current)reject(current,'SEND_FAILED');}});}
@@ -141,6 +147,9 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     advanceExecution:(scope,transition)=>invoke('ADVANCE_EXECUTION',{scope,transition}),
     reconcileProject:project_id=>invoke('RECONCILE_PROJECT',{project_id}),
     readProjectCheckpoint:project_id=>invoke('READ_PROJECT_CHECKPOINT',{project_id}),
+    agentOperation:request=>invoke('AGENT_OPERATION',request),
+    finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
+    readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),
     close:()=>stop('CLIENT_CLOSED'),snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:pending.size,closed,automatic_retry_allowed:false}),
   });
 }

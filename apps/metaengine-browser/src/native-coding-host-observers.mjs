@@ -4,7 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {readDirectoryIdentity} from '../../../infra/client-state-runtime/native-coding-fs-identity.mjs';
+import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
 import {readWindowsSandboxHostBoot, evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
@@ -270,11 +270,11 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
       const pkg=readPackage?await readPackage():JSON.parse(await fs.readFile(path.join(paths.asar,'package.json'),'utf8'));
       const binding=pkg?.metaengineClientStateRuntime;
       if(!HASH.test(binding?.bundle_sha256||'')||!HEAD.test(binding?.source_head_sha||'')||binding.package_version!==pkg.version)fail('installed_package_binding_invalid');
-      await verifyResources({bundleDirectory:paths.bundle,expectedBundleDigest:binding.bundle_sha256});
+      const verifiedResources=await verifyResources({bundleDirectory:paths.bundle,expectedBundleDigest:binding.bundle_sha256});
       const [installed_exe_sha256,installed_asar_sha256,cli_executable_sha256]=await Promise.all([
         hashFile(paths.exe),hashFile(paths.asar),hashFile(paths.cli,512*1024*1024)]);
       if(before!==await imageInventory(paths))fail('installed_image_changed_during_preparation');
-      preparedImage={paths,inventory:before,artifact:{installed_exe_sha256,installed_asar_sha256,
+      preparedImage={paths,inventory:before,verifiedResources,artifact:{installed_exe_sha256,installed_asar_sha256,
         runtime_bundle_sha256:binding.bundle_sha256,source_sha:binding.source_head_sha,cli_executable_sha256}};
     })();
     try{await preparingImage;}catch(error){imageInvalidated=true;throw error;}finally{preparingImage=null;}
@@ -294,6 +294,24 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     return observe('PROTECTED_OPERATOR_PERMIT_READBACK',permit);
   };
   return Object.freeze({readPermit,readNativeWorker,readCriticSubject,prepareInstalledImage,
+    async readAgentMcpLaunchPins(){
+      if(imageInvalidated||!preparedImage)fail('installed_image_not_prepared');
+      const paths=await imagePaths(),verified=preparedImage.verifiedResources;
+      const nodeExecutable=path.join(paths.bundle,'runtime','node','node.exe');
+      const node=verified?.manifest?.files?.find(file=>file.path==='runtime/node/node.exe');
+      if(!HASH.test(node?.sha256||'')||!same(verified?.paths?.nodeExecutable||'',nodeExecutable)
+        ||Object.keys(paths).some(key=>paths[key]!==preparedImage.paths[key])
+        ||preparedImage.inventory!==await imageInventory(paths))fail('agent_bridge_image_unverified');
+      const files={entrypoint:'native-coding-agent-mcp-entry.mjs',broker:'native-coding-agent-mcp-broker.mjs',adapter:'native-coding-agent-mcp-stdio.mjs'};
+      const bridgeSha256={};
+      for(const [key,name]of Object.entries(files)){
+        const bytes=await fs.readFile(path.join(paths.asar,'src',name));
+        if(!bytes.length||bytes.length>256*1024)fail('agent_bridge_source_budget');bridgeSha256[key]=digest(bytes);
+      }
+      if(preparedImage.inventory!==await imageInventory(paths))fail('agent_bridge_image_changed');
+      return Object.freeze({nodeExecutable,nodeSha256:node.sha256,
+        entrypointPath:path.join(resourcesPath,'native-coding','agent-mcp',files.entrypoint),bridgeSha256:Object.freeze(bridgeSha256)});
+    },
     async listProviderSelectors(){return permitRegistry.listProviderSelectors();},
     async readInstalledImage() {
       if(imageInvalidated||!preparedImage)fail('installed_image_not_prepared');

@@ -9,6 +9,7 @@ import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-reconciliation.mjs';
 import { createNativeCodingHostIpcServer } from './native-coding-host-ipc.mjs';
 import { createNativeCodingHostAuthority } from './native-coding-host-authority.mjs';
+import {createNativeCodingHostCommitService} from './native-coding-host-commit-service.mjs';
 import { createNativeCodingHostOsScope,readNativeCodingOperatorPaths } from './native-coding-host-os-scope.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
@@ -397,7 +398,15 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       const {default:postgres}=await import('postgres');
       nativeCodingSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false});
       const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
-      nativeCodingAuthority=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native});
+      let commitService=null;
+      // A missing/invalid separate commit capability fences commit only. It
+      // must not take the existing PG/API or readonly agent path offline.
+      try{
+        if(await lstat(path.join(config.state_directory,'native-coding-git-commit-operator-v1.json')))
+          commitService=await createNativeCodingHostCommitService({sql:nativeCodingSql,stateDirectory:config.state_directory,
+            readNativeScope:native.readNativeScope,readProtectedReceipt:native.readProtectedReceipt});
+      }catch{/* Missing/unreadable/invalid commit capability remains COMMIT_CAPABILITY_HOLD only. */}
+      nativeCodingAuthority=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native,commitService});
     }
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished,
       nativeCodingAuthority };

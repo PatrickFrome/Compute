@@ -7,8 +7,9 @@ import {createNativeCodingLeaseExecutor} from './native-coding-lease-executor.mj
 import {createNativeCodingExecutionPool} from './native-coding-execution-pool.mjs';
 import {createNativeCodingHostObservers,createNativeCodingWorkerRegistry,createNativeCodingPermitRegistry,
   createNativeCodingResultStore} from './native-coding-host-observers.mjs';
-import {buildNativeCodingExecutionScope} from '../../../infra/client-state-runtime/native-coding-task-context.mjs';
+import {buildNativeCodingExecutionScope} from './native-coding-task-context.mjs';
 import {createNativeCodingProjectCheckpointObserver} from './native-coding-project-checkpoints.mjs';
+import {prepareNativeCodingAgentRunBridge} from './native-coding-agent-run-bridge.mjs';
 
 const UUID=/^[a-f0-9-]{36}$/,HASH=/^[a-f0-9]{64}$/;
 const fail=code=>{throw new Error(`native_coding_runtime_${code}`);};
@@ -21,9 +22,11 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   resultIndexRoot,physicalSlotBudget=2,processController=null,permitRegistry=null,resultStore=null,
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
-  observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner}={}) {
+  observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
+  agentBridgeFactory=prepareNativeCodingAgentRunBridge}={}) {
   if(typeof identity?.snapshot!=='function'||typeof signedRequest!=='function'||!runnerOptions
-    ||!['readScope','readLease','registerProvider'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
+    ||typeof agentBridgeFactory!=='function'
+    ||!['readScope','readLease','registerProvider','agentOperation'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
   if(!ownPostgres.ledger&&!['reserveExecution','advanceExecution','readExecution'].every(name=>typeof ownPostgres[name]==='function'))fail('private_ledger_required');
   const ledger=ownPostgres.ledger||{
     reserve:scope=>ownPostgres.reserveExecution(scope),
@@ -38,6 +41,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     readNativeWorker:query=>workers.readNativeWorker(query),readCriticSubject:query=>results.readCriticSubject(query)});
   const nativeIssuer=issuer||createNativeCodingHostIssuer({identity,...source});
   let closed=false,refresh=null,refreshCursor=0,refreshReason=null;
+  const activeBridges=new Set();
   const descriptors=new Map(),providerFences=new Map(),scopes=new Map(),completionAttempts=new Map();
   const checkpoints=['reconcileProject','readProjectCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
     ?createNativeCodingProjectCheckpointObserver({ownPostgres}):null;
@@ -91,7 +95,20 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       const permit=await permitFor(request.lease);
       const processControl=workers.controllerFor({provider_id:permit.provider_id,agent_id:request.lease.agent_id,
         task_id:request.lease.task_id,lease_generation:request.lease.lease_generation,prompt_sha256:digest(request.prompt)});
-      return runnerFactory({...runnerOptions,authorizeLease,processController:processControl}).run(request,options);
+      const prepareAgentBridge=async details=>{
+        if(closed)fail('closed');
+        const current=await permitFor(request.lease);
+        if(nativeCodingEnvelopeSha256(current)!==nativeCodingEnvelopeSha256(permit)
+          ||typeof source.readAgentMcpLaunchPins!=='function')fail('agent_bridge_scope_changed');
+        const pins=await source.readAgentMcpLaunchPins();
+        const bridge=await agentBridgeFactory({...details,ownPostgres,permit:structuredClone(permit),pins});
+        if(closed){await bridge.close();fail('closed');}
+        const wrapper=Object.freeze({launch:bridge.launch,
+          bindRun:proof=>{if(closed)fail('closed');return bridge.bindRun(proof);},
+          async close(){activeBridges.delete(wrapper);await bridge.close();}});
+        activeBridges.add(wrapper);return wrapper;
+      };
+      return runnerFactory({...runnerOptions,authorizeLease,processController:processControl,prepareAgentBridge}).run(request,options);
     }}),
     async onJobAttempted({request,job_proof}) {
       const value=await post('/v1/devos/mark-running',{...binding(request.lease,job_proof.payload.provider_id),
@@ -214,6 +231,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       project_checkpoints:checkpoints?.snapshot()??null,
       completion_readbacks:[...completionAttempts.values()].filter(v=>v.state==='READBACK_REQUIRED').length,
       production_qualified:false,useful_work_verified:false};},
-    async close(){closed=true;checkpoints?.close();await pool.stop();await workers.close();nativeIssuer.close();return this.snapshot();},
+    async close(){closed=true;checkpoints?.close();await Promise.allSettled([...activeBridges].map(bridge=>bridge.close()));
+      await pool.stop();await workers.close();nativeIssuer.close();return this.snapshot();},
   });
 }
