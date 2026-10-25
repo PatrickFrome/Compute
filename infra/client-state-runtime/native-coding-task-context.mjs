@@ -37,7 +37,7 @@ const text=(value,max,name)=>{if(typeof value!=='string' || !value.trim() || val
 // Called inside the private runtime Host with its own-PG task readback. It
 // never accepts a model-provided prompt/hash and includes no server config,
 // environment, connection strings, credentials or arbitrary task-spec fields.
-export function buildNativeCodingTaskContext(task,{projectId,providerId,verificationSubject=null}={}) {
+function taskContext(task,{projectId,providerId,verificationSubject=null}={},states) {
   if(!plain(task) || !UUID.test(task.task_id || '') || !UUID.test(task.workspace_id || '')
       || !UUID.test(projectId || '') || !UUID.test(providerId || '')
       || !Number.isSafeInteger(Number(task.lease_generation)) || Number(task.lease_generation)<1
@@ -45,7 +45,7 @@ export function buildNativeCodingTaskContext(task,{projectId,providerId,verifica
       || task.lease_target_id!==`codex-cli:${providerId}`
       || !Number.isSafeInteger(Number(task.lease_agent_generation_epoch)) || Number(task.lease_agent_generation_epoch)<1
       || !SHA.test(task.base_sha || '') || !['IMPLEMENTER','CRITIC'].includes(task.role)
-      || !['LEASED','RUNNING'].includes(task.state) || !plain(task.task_spec)
+      || !states.includes(task.state) || !plain(task.task_spec)
       || !Number.isFinite(Date.parse(task.lease_expires_at))) fail('lease_binding_invalid');
   const spec=task.task_spec;
   const objective=text(spec.objective ?? spec.goal,12000,'objective_invalid');
@@ -78,4 +78,15 @@ export function buildNativeCodingTaskContext(task,{projectId,providerId,verifica
   if(Buffer.byteLength(prompt)>32000) fail('prompt_budget_exceeded');
   lease.prompt_sha256=createHash('sha256').update(prompt).digest('hex');
   return Object.freeze({value:Object.freeze(lease),task_prompt:prompt});
+}
+
+export function buildNativeCodingTaskContext(task,options) {
+  return taskContext(task,options,['LEASED','RUNNING']);
+}
+
+// Historical acceptance reconstructs identical prompt bytes without changing
+// the recorded task state or treating an expired/completed lease as runnable.
+export function buildNativeCodingHistoricalTaskContext(task,options) {
+  return Object.freeze({...taskContext(task,options,['RESULT_READY','COMPLETED']),
+    historical_readback_only:true,launch_authorized:false});
 }

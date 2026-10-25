@@ -35,6 +35,7 @@ function childrenProposal(value) {
 export class AutonomousProjectTaskRuntime {
   #request; #journal; #materialize; #isStopped; #prepared = new Map(); #pending = new Map();
   #operations = new Set(); #closing = false; #closePromise = null;
+  #nativeCodingRuntime = null;
   #last = { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'IDLE', ...flags };
   constructor({ request, journal, materializeProject, isStopped = () => false } = {}) {
     if (typeof request !== 'function' || typeof materializeProject !== 'function' || typeof isStopped !== 'function'
@@ -56,6 +57,10 @@ export class AutonomousProjectTaskRuntime {
   }
   snapshot() { return structuredClone({ ...this.#last, pending_effects: this.#pending.size, in_flight_operations: this.#operations.size,
     physical_provider_creation_claimed: false, project_history_source: 'SIGNED_POSTGRESQL' }); }
+  bindNativeCodingRuntime(runtime) {
+    if(runtime!==null&&typeof runtime?.observeProjectCheckpoints!=='function')fail('native_checkpoint_runtime_invalid');
+    this.#nativeCodingRuntime=runtime;
+  }
   #active(snapshot) {
     if (this.#isStopped() || ['STOPPED', 'CANCELLED'].includes(snapshot?.state) || snapshot?.policy?.owner_stop === true) fail('owner_stopped');
   }
@@ -64,7 +69,11 @@ export class AutonomousProjectTaskRuntime {
     const value = await this.#post('reconcile', { project_id: null });
     if (value.schema !== 'metaengine.devos.project-reconcile.v1' || value.project_id !== null
         || !Array.isArray(value.projects) || value.projects.length > 4 || value.bounded_projects !== 4) fail('reconcile_sweep_invalid');
-    this.#last = { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'PROJECTS_RECONCILED', projects_reconciled: value.projects.length, ...flags };
+    const candidates=value.projects.filter(project=>project.native_checkpoint_pending===true)
+      .map(project=>({...project.native_checkpoint_candidate,project_id:project.project_id}));
+    const nativeCheckpoints=this.#nativeCodingRuntime?.observeProjectCheckpoints(candidates)??null;
+    this.#last = { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'PROJECTS_RECONCILED', projects_reconciled: value.projects.length,
+      native_checkpoints:nativeCheckpoints,...flags };
     return this.snapshot();
   }
   async #post(operation, body) {

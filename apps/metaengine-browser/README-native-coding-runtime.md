@@ -11,7 +11,8 @@ Native main supplies `createNativeCodingRuntime` with:
 * `identity`: the existing enrolled device signing capability.
 * `ownPostgres`: the private owned-Host IPC capability, exposing `readScope`,
   `readLease`, `registerProvider`, `reserveExecution`, `advanceExecution`, and
-  `readExecution` (or a private `ledger` with `reserve`, `advance`, `read`).
+  `readExecution` (or a private `ledger` with `reserve`, `advance`, `read`),
+  plus `reconcileProject` and read-only `readProjectCheckpoint` for acceptance.
 * `signedRequest(path,{payload})`: the existing authenticated device HTTP path.
 * `observerOptions`: packaged Electron `app`, `resourcesPath`, the absolute
   `cliPath`, the absolute protected `gitExecutable`, and protected sandbox
@@ -61,6 +62,23 @@ after the private Host returns the exact registered receipt and matching W30
 task state/summary. Removing an ambiguous provider from the roster cannot
 clear its fence. Restart observation only reads the durable ledger; it never
 replays a process.
+
+The existing project reconcile stage creates a typed native CRITIC task from
+a registered writer result. `observeProjectCheckpoints` starts one background
+Host acceptance pass and returns immediately. Historical job signatures and
+ledger scopes retain their original native Host/process births; acceptance
+separately reads today's installed image, PG identity and exact Git artifact.
+The Host registers a canonical checkpoint, advances both historical executions
+and completes the verified pair in one synchronous serializable transaction.
+Direct `ADVANCE_EXECUTION` to CHECKPOINTED remains forbidden. After a lost ACK,
+retained selectors keep reading the checkpoint even if the completed tasks
+disappear from the public reconcile sweep. Only acknowledged cache entries can
+be retired; unresolved writes are never evicted to make space.
+
+The worktree remains `CHECKPOINTED_PENDING_COMMIT`. Acceptance does not grant a
+successor lease: preserved Git commit and new base/permit admission are separate
+remaining steps. Agent-visible messages, peer overview, child admission and
+client/computer tool execution also require an installed trial.
 
 This implementation is `LOCAL_OPERATOR_QA`. Source tests, a sandbox canary,
 process launch, or a RESULT_READY receipt do not prove useful work, independent

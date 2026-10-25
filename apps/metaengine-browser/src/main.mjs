@@ -2111,6 +2111,7 @@ function closeManagedTaskProjectHost() {
   autonomousProjectRuntime = null;
   nativeSupervisor?.bindDevosProjectRuntime(null);
   nativeSupervisor?.bindNativeCodingRuntime(null);
+  projectRuntime?.bindNativeCodingRuntime(null);
   if (host || projectRuntime || coding || codingHost) {
     managedTaskProjectHostDrainPending = true;
     managedTaskProjectHostClosing = (async () => {
@@ -2270,6 +2271,7 @@ async function initNativeSupervisor() {
       } catch(error) {recordStartupSubsystemDegraded('NATIVE_CODING_RUNTIME',error);}
     }
   }
+  autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
   try { await ensureInterruptedSetupRecovery(); }
   catch (error) {
     nativeSupervisor.setInterruptedSetupRecoveryFence(true);

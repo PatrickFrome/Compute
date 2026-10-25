@@ -28,14 +28,19 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
     ['destruktion_meta.project_verifier_reference_transport_h205f22()']);
   const unbounded = plan.migrations.find(row => row.source === mandatorySources.at(-1));
   assert.deepEqual(unbounded.signatures, ['destruktion_meta.project_unbounded_defaults_h205f22()']);
-  const nativeSources=['20261022070000_native_coding_execution_ledger_v1.sql','20261023082533_native_coding_operator_qa_admission_v1.sql'];
-  assert.deepEqual(sources.slice(mandatorySources.length,mandatorySources.length+2),nativeSources);
+  const nativeSources=['20261022070000_native_coding_execution_ledger_v1.sql','20261023082533_native_coding_operator_qa_admission_v1.sql',
+    '20261025070000_native_coding_project_continuation_v1.sql'];
+  assert.deepEqual(sources.slice(mandatorySources.length,mandatorySources.length+nativeSources.length),nativeSources);
   const ledger=plan.migrations.find(row=>row.source===nativeSources[0]),admission=plan.migrations.find(row=>row.source===nativeSources[1]);
   assert.equal(ledger.signatures.length,3);assert(ledger.signatures.every(value=>value.startsWith('destruktion_meta.')));
   assert.equal(ledger.relations.length,1);assert.equal(admission.relations.length,3);
   assert.equal(admission.signatures.filter(value=>value.startsWith('public.')).length,2);
   assert.deepEqual(admission.triggers.map(row=>row.name),['native_coding_claim_admission_trg','native_coding_task_transition_guard_trg']);
-  const extras = plan.migrations.slice(mandatorySources.length+2);
+  const checkpoint=plan.migrations.find(row=>row.source===nativeSources[2]);
+  assert.equal(checkpoint.relations.length,2);assert.equal(checkpoint.signatures.length,7);
+  assert(checkpoint.signatures.every(value=>value.startsWith('destruktion_meta.')));
+  assert.deepEqual(checkpoint.triggers.map(row=>row.name),['native_coding_execution_worktree_fence_trg']);
+  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
   assert(extras.length <= 1, 'unrecognized extra migration requires an explicit contract');

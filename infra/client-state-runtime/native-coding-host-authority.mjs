@@ -4,6 +4,7 @@ import {verifyNativeCodingProviderDescriptor,verifyNativeCodingJobProof,nativeCo
 import {validateCodexCliResult} from '../../apps/metaengine-browser/src/codex-cli-result-schema.mjs';
 import {buildNativeCodingTaskContext,buildNativeCodingExecutionScope,nativeCodingCanonicalJson as json,
   nativeCodingCanonicalSha256 as sha} from './native-coding-task-context.mjs';
+import {createNativeCodingCheckpointVerifier} from './native-coding-checkpoint-verifier.mjs';
 
 const fail=reason=>{throw new Error('native_coding_host_'+reason);};
 const same=(a,b)=>json(a)===json(b);
@@ -19,7 +20,7 @@ const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)
 
 // Only runtime-host constructs this capability. The IPC protocol exposes
 // these fixed operations, never this connection or arbitrary SQL/functions.
-export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt}={}) {
+export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope}={}) {
   if(typeof sql?.unsafe!=='function'||typeof sql?.begin!=='function'
     ||![readNativeScope,readNativeWorker,readProtectedReceipt].every(x=>typeof x==='function')) fail('private_dependencies_required');
   async function owner(tx) {
@@ -29,6 +30,62 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
   await owner(sql);
   let closed=false;
   const open=()=>{if(closed)fail('closed');};
+  const checkpointVerifier=typeof readCheckpointScope==='function'
+    ?createNativeCodingCheckpointVerifier({readProtectedReceipt,readCheckpointScope}):null;
+  const checkpointSelectors=['writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation'];
+  const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+  function projectId(value){if(!uuid.test(value||''))fail('project_id_invalid');return value;}
+  function projectResult(id,state,candidate=null,digest=null) {
+    return {schema:'metaengine.native-coding.project-checkpoint.v1',project_id:id,state,checkpoint_sha256:digest,
+      ...Object.fromEntries(checkpointSelectors.map(key=>[key,candidate?.[key]??null])),successor_admitted:false,authority_effect:false};
+  }
+  async function checkpointCandidate(tx,id) {
+    const rows=await tx.unsafe('select destruktion_meta.native_coding_checkpoint_candidate_v1($1::uuid) as value',[id]);
+    if(rows.length!==1)fail('checkpoint_candidate_unavailable');
+    const value=rows[0].value;if(value===null)return null;
+    if(!exact(value,checkpointSelectors)||!uuid.test(value.writer_task_id||'')||!uuid.test(value.critic_task_id||'')
+      ||value.writer_task_id===value.critic_task_id||['writer_lease_generation','critic_lease_generation'].some(key=>!Number.isSafeInteger(value[key])||value[key]<1))fail('checkpoint_candidate_invalid');
+    return value;
+  }
+  async function checkpointReadback(tx,id) {
+    const rows=await tx.unsafe(`select to_jsonb(k) as checkpoint,
+      (we.state='CHECKPOINTED' and ce.state='CHECKPOINTED' and we.checkpoint_sha256=k.checkpoint_sha256
+        and ce.checkpoint_sha256=k.checkpoint_sha256 and w.state='COMPLETED' and c.state='COMPLETED'
+        and f.state='CHECKPOINTED_PENDING_COMMIT' and f.checkpoint_sha256=k.checkpoint_sha256) as finalized
+      from destruktion_meta.native_coding_checkpoint_h205f22 k
+      join destruktion_meta.native_coding_execution_h205f22 we on we.task_id=k.writer_task_id and we.lease_generation=k.writer_lease_generation
+      join destruktion_meta.native_coding_execution_h205f22 ce on ce.task_id=k.critic_task_id and ce.lease_generation=k.critic_lease_generation
+      join destruktion_meta.devos_fleet_task_h205f22 w on w.task_id=k.writer_task_id
+      join destruktion_meta.devos_fleet_task_h205f22 c on c.task_id=k.critic_task_id
+      join destruktion_meta.native_coding_worktree_fence_h205f22 f on f.workspace_id=k.workspace_id and f.root_identity_sha256=k.root_identity_sha256
+        and f.writer_task_id=k.writer_task_id and f.writer_lease_generation=k.writer_lease_generation and f.project_id=k.project_id
+      where k.project_id=$1::uuid order by k.created_at desc,k.checkpoint_id limit 1`,[id]);
+    if(!rows.length)return null;
+    const {checkpoint:k,finalized}=rows[0],record=k.checkpoint;
+    if(finalized!==true||record?.schema!=='metaengine.native-coding.checkpoint.v1'||record.project_id!==id
+      ||k.canonical_checkpoint!==json(record)||k.checkpoint_sha256!==sha(record)
+      ||checkpointSelectors.some(key=>String(k[key])!==String(record[key])))return projectResult(id,'READBACK_REQUIRED',k);
+    return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',record,k.checkpoint_sha256);
+  }
+  async function checkpointBundle(tx,id,taskId,generation) {
+    const rows=await tx.unsafe(`select p.permit,
+      jsonb_build_object('workspace_id',p.workspace_id,'device_id',p.device_id,'client_id',p.client_id,
+        'admin_grant_epoch',p.admin_grant_epoch,'revoked_at',p.revoked_at) as permit_binding,
+      jsonb_build_object('device_id',d.device_id,'client_id',d.client_id,'profile',d.profile,'public_jwk',d.public_jwk,
+        'key_fingerprint_sha256',d.key_fingerprint_sha256,'admin_grant_epoch',d.admin_grant_epoch) as device,
+      to_jsonb(j) as registration,to_jsonb(e) as execution,to_jsonb(t) as task
+      from destruktion_meta.native_coding_job_registration_h205f22 j
+      join destruktion_meta.native_coding_operator_permit_h205f22 p using(permit_id)
+      join destruktion_meta.native_coding_execution_h205f22 e using(task_id,lease_generation)
+      join destruktion_meta.devos_fleet_task_h205f22 t on t.task_id=j.task_id and t.lease_generation=j.lease_generation
+      join destruktion_meta.project_task_h205f22 pt on pt.task_id=t.task_id
+      join public.compute_fabric_a2_browser_device_h205f22 d on d.device_id=p.device_id and d.client_id=p.client_id
+      where j.task_id=$1::uuid and j.lease_generation=$2::bigint and pt.project_id=$3::uuid
+        and p.revoked_at is null and d.active and d.revoked_at is null and d.access_tier='ADMIN' and d.admin_revoked_at is null
+        and d.admin_grant_epoch=p.admin_grant_epoch and d.admin_scopes @> '["CONTROL_PLANE","DEVOS"]'::jsonb
+      for update of j,e for share of p,d,pt`,[taskId,generation,id]);
+    if(rows.length!==1)fail('checkpoint_registered_pair_unavailable');return rows[0];
+  }
   function validateContext(c) {
     const p=c?.permit,d=c?.device;
     if(c?.schema!=='metaengine.native-coding.admission-context.v1'||c.source!=='PROTECTED_OWN_PG_OPERATOR_REGISTRY'
@@ -249,6 +306,49 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return ledger(tx).advance(scope,transition);
       });
     },
-    close(){closed=true;},
+    async READ_PROJECT_CHECKPOINT({project_id}) {
+      open();const id=projectId(project_id),candidate=await checkpointCandidate(sql,id);open();
+      if(candidate)return projectResult(id,'PENDING',candidate);
+      const result=await checkpointReadback(sql,id);open();return result??projectResult(id,'PENDING');
+    },
+    async RECONCILE_PROJECT({project_id}) {
+      const id=projectId(project_id);
+      return write(async tx=>{
+        const candidate=await checkpointCandidate(tx,id);
+        if(candidate===null)return await checkpointReadback(tx,id)??projectResult(id,'PENDING');
+        if(!checkpointVerifier)fail('checkpoint_private_reader_unbound');
+        // Same lock order as the existing W30/project reconciler: tasks first,
+        // then project. No caller-provided receipt or Host incarnation enters.
+        const locks=await tx.unsafe(`select task_id from destruktion_meta.devos_fleet_task_h205f22
+          where task_id in ($1::uuid,$2::uuid) order by task_id for update`,[candidate.writer_task_id,candidate.critic_task_id]);
+        if(locks.length!==2)fail('checkpoint_tasks_unavailable');
+        const projects=await tx.unsafe('select to_jsonb(r) as project from destruktion_meta.project_run_h205f22 r where project_id=$1::uuid for share',[id]);
+        if(projects.length!==1)fail('checkpoint_project_unavailable');
+        const writer=await checkpointBundle(tx,id,candidate.writer_task_id,candidate.writer_lease_generation);
+        const critic=await checkpointBundle(tx,id,candidate.critic_task_id,candidate.critic_lease_generation);
+        const verified=await checkpointVerifier.verify({project:projects[0].project,writer,critic});open();
+        const k=verified.checkpoint;
+        const inserted=await tx.unsafe(`insert into destruktion_meta.native_coding_checkpoint_h205f22
+          (checkpoint_id,workspace_id,project_id,writer_task_id,writer_lease_generation,critic_task_id,critic_lease_generation,
+            writer_run_id,critic_run_id,writer_receipt_sha256,critic_receipt_sha256,result_sha256,git_artifact_sha256,
+            source_head,root_identity_sha256,checkpoint,canonical_checkpoint,checkpoint_sha256)
+          values($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::bigint,$6::uuid,$7::bigint,$8::uuid,$9::uuid,$10::text,$11::text,
+            $12::text,$13::text,$14::text,$15::text,$16::text::jsonb,$16::text,$17::text) returning checkpoint_sha256`,
+          [k.checkpoint_id,k.workspace_id,k.project_id,k.writer_task_id,k.writer_lease_generation,k.critic_task_id,k.critic_lease_generation,
+            k.writer_run_id,k.critic_run_id,k.writer_receipt_sha256,k.critic_receipt_sha256,k.result_sha256,k.git_artifact_sha256,
+            k.source_head,k.root_identity_sha256,verified.canonical_checkpoint,verified.checkpoint_sha256]);
+        if(inserted.length!==1||inserted[0].checkpoint_sha256!==verified.checkpoint_sha256)fail('checkpoint_insert_unconfirmed');
+        for(const value of [verified.critic,verified.writer])await ledger(tx).advance(value.execution_scope,
+          {from:'RESULT_READY',to:'CHECKPOINTED',evidence_sha256:value.receipt.result_sha256,
+            critic_proof_sha256:verified.critic.receipt_sha256,checkpoint_sha256:verified.checkpoint_sha256});
+        open();
+        const finalized=await tx.unsafe('select destruktion_meta.native_coding_finalize_checkpoint_v1($1::uuid) as value',[k.checkpoint_id]);
+        if(finalized.length!==1||finalized[0].value?.state!=='CHECKPOINTED_PENDING_COMMIT'
+          ||finalized[0].value.checkpoint_sha256!==verified.checkpoint_sha256||finalized[0].value.successor_admitted!==false
+          ||checkpointSelectors.some(key=>String(finalized[0].value[key])!==String(k[key])))fail('checkpoint_finalize_unconfirmed');
+        return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',k,verified.checkpoint_sha256);
+      });
+    },
+    close(){closed=true;checkpointVerifier?.close();},
   });
 }

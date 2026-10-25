@@ -81,7 +81,7 @@ The source now binds protected operator-path/permit readers, an owned Host IPC
 capability and enrolled-device signatures in main. The same W30 allocator and
 heartbeat admit typed native providers, dispatch their existing leases and
 collect protected results. Browser census/capacity and native physical slots
-remain separate. IPC exposes six fixed operations, no credentials or SQL.
+remain separate. IPC exposes eight fixed operations, no credentials or SQL.
 
 Provider preparation runs in one bounded background pass driven by that
 heartbeat. A slow provider/Host does not block the heartbeat or start another
@@ -92,11 +92,24 @@ state_owner LOGIN: 10/10 PASS, including joins, canonical digest constraints and
 atomic job/result rollback. OS callbacks in that test are explicit fixtures,
 so this is SQL evidence only. Source syntax checks cover 210 registered files.
 
-Project reconciliation still accepts browser-specific result claims. It needs
-a typed native independent-Critic verifier, a protected own-PG checkpoint and
-bounded next-task admission. Host intentionally rejects CHECKPOINTED until that
-verifier exists. No native permit has been published and no model execution has
-been claimed in the installed client. After completing this remaining path,
-build a distinct native-capable package and run the goal/restart trial.
+Project reconciliation now has a separate typed native path. It queues an
+independent CRITIC through existing W30, and the private Host validates both
+protected results against original signed process/lease scopes and current
+physical image/PG/Git readback. One synchronous serializable transaction stores
+the canonical checkpoint, advances both executions and completes the pair.
+The SQL path passed 10 disposable-PG tests; the actual Host query/transaction
+composition passed 3 further disposable-PG tests. Native OS/image/Git callbacks
+in these PG tests are generated fixtures, not installed execution evidence.
+The new nonblocking checkpoint/runtime integration passed 50 targeted tests.
+
+Host still rejects caller-driven CHECKPOINTED transitions. The worktree fence
+remains CHECKPOINTED_PENDING_COMMIT until the reviewed bytes are preserved in
+Git and new base/permit admission is implemented. Unknown checkpoint ACKs use
+retained readback even after tasks disappear from the public queue.
+
+No native permit has been published and no model execution has been claimed in
+the installed client. Agent-visible messaging/overview, child-agent admission,
+client/computer tools and repeated goal/restart continuation remain required.
+Build a distinct native-capable package after finishing that path.
 No browser target/conversation proof may be forged to admit a CLI provider, and
 an old ambiguous chat send must not be cleared or replayed by this integration.

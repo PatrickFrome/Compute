@@ -3,8 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
-const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION'];
-const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION']);
+const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT'];
+const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT']);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
   'REQUEST_TIMEOUT','CHILD_EXIT','CHANNEL_CLOSED','SEND_FAILED','CLIENT_CLOSED','SERVER_CLOSED']);
@@ -50,6 +50,9 @@ function scope(value,reservation=false) {
 function payload(action,value) {
   json(value);
   if(action==='READ_SCOPE')keys(value,[]);
+  else if(action==='RECONCILE_PROJECT'||action==='READ_PROJECT_CHECKPOINT'){
+    keys(value,['project_id']);if(!UUID.test(value.project_id||''))invalid('INVALID_PAYLOAD');
+  }
   else if(action==='READ_LEASE'){
     keys(value,['workspace_id','project_id','task_id','agent_id','lease_generation','provider_id']);
     if(!['workspace_id','project_id','task_id','provider_id'].every(key=>UUID.test(value[key]))
@@ -136,6 +139,8 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     registerProvider:descriptor=>invoke('REGISTER_PROVIDER',{descriptor}),
     readExecution:scope=>invoke('READ_EXECUTION',{scope}),reserveExecution:scope=>invoke('RESERVE_EXECUTION',{scope}),
     advanceExecution:(scope,transition)=>invoke('ADVANCE_EXECUTION',{scope,transition}),
+    reconcileProject:project_id=>invoke('RECONCILE_PROJECT',{project_id}),
+    readProjectCheckpoint:project_id=>invoke('READ_PROJECT_CHECKPOINT',{project_id}),
     close:()=>stop('CLIENT_CLOSED'),snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:pending.size,closed,automatic_retry_allowed:false}),
   });
 }

@@ -67,6 +67,20 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
       'destruktion_meta.native_coding_provider_registration_h205f22','destruktion_meta.native_coding_job_registration_h205f22']),
     triggers:Object.freeze([{relation:'destruktion_meta.devos_fleet_claim_h205f22',name:'native_coding_claim_admission_trg',signature:'destruktion_meta.native_coding_claim_admission_v1()'},
       {relation:'destruktion_meta.devos_fleet_task_h205f22',name:'native_coding_task_transition_guard_trg',signature:'destruktion_meta.native_coding_task_transition_guard_v1()'}])},
+  // Native independent acceptance remains inside the existing project cycle.
+  {path:'20261025070000_native_coding_project_continuation_v1.sql',
+    signature:'destruktion_meta.native_coding_reserve_worktree_v1(uuid,bigint)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_reserve_worktree_v1(uuid,bigint)',
+      'destruktion_meta.native_coding_execution_worktree_fence_v1()',
+      'destruktion_meta.native_coding_project_result_bound_v1(uuid)',
+      'destruktion_meta.native_coding_checkpoint_candidate_v1(uuid)',
+      'destruktion_meta.native_coding_project_reconcile_writer_v1(uuid,text)',
+      'destruktion_meta.native_coding_project_completion_ready_v1(uuid)',
+      'destruktion_meta.native_coding_finalize_checkpoint_v1(uuid)']),
+    source_url:new URL('../../supabase/migrations/20261025070000_native_coding_project_continuation_v1.sql',import.meta.url),
+    relations:Object.freeze(['destruktion_meta.native_coding_worktree_fence_h205f22','destruktion_meta.native_coding_checkpoint_h205f22']),
+    triggers:Object.freeze([{relation:'destruktion_meta.native_coding_execution_h205f22',
+      name:'native_coding_execution_worktree_fence_trg',signature:'destruktion_meta.native_coding_execution_worktree_fence_v1()'}])},
   // P3 opt-in fleet DAG: qualified only for self-owned local PostgreSQL;
   // the existing devos lease inserts into the same canonical claim table.
   { path: 'fleet-coordination-claim-guard-v1.sql', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()',

@@ -65,6 +65,7 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/private-windows-storage-acl.mjs',
   'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs',
   'apps/metaengine-browser/src/codex-cli-runner.mjs',
+  'apps/metaengine-browser/src/native-coding-git-proof.mjs',
   'apps/metaengine-browser/src/codex-cli-result-schema.mjs',
 ]);
 function sourcePathAllowed(value) {

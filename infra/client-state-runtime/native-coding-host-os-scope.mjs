@@ -6,6 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {nativeCodingCanonicalJson} from './native-coding-task-context.mjs';
+import {readNativeCodingGitProof} from '../../apps/metaengine-browser/src/native-coding-git-proof.mjs';
 import {readNativeCodingWindowsProcess,readNativeCodingProtectedJson,readNativeCodingSandboxEvidence}
   from '../../apps/metaengine-browser/src/native-coding-host-observers.mjs';
 
@@ -58,7 +59,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if((await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/).slice(0,4).join('\n')!==before.slice(0,4).join('\n')) fail('postgres_changed');
     return {system_identifier:row.system_identifier,postmaster:publicProcess(native),data_directory_identity_sha256};
   }
-  async function readNativeScope(permit) {
+  async function readNativeScope(permit,includeSandbox=true) {
     const pg=await postgres(),host=await readNativeCodingWindowsProcess(parentPid);
     const base={postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
     if(permit===null) return base;
@@ -79,9 +80,21 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
       {windowsHide:true,shell:false,timeout:10000,maxBuffer:4096,env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'}});
     pending.child?.stdin?.end();const head=(await pending).stdout.trim();
     const worktree={path:permit.worktree.path,root_identity_sha256,base_sha:head};
+    if(!includeSandbox)return {...base,artifact,worktree};
     const sandbox=await readNativeCodingSandboxEvidence({pin:operator.sandbox_receipts[permit.role],cliPath:operator.cli_executable,
       worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid});
     return {...base,artifact,worktree,sandbox};
+  }
+  // Acceptance reads physical current bytes and current Host identity without
+  // manufacturing a fresh launch proof for a historical worker/canary.
+  async function readCheckpointScope(permit) {
+    const current=await readNativeScope(permit,false);
+    const operator=await readNativeCodingOperatorPaths(config.state_directory);
+    const env={SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),
+      GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'};
+    const git=await readNativeCodingGitProof(permit.worktree.path,{env,gitExecutable:operator.git_executable});
+    if(git.head!==current.worktree.base_sha)fail('checkpoint_worktree_changed');
+    return {...current,git};
   }
   function journalPath(operator,scope,permit,name) {
     const key=createHash('sha256').update(JSON.stringify({task_id:scope.task_id,lease_generation:scope.lease_generation,role:permit.role})).digest('hex');
@@ -107,5 +120,5 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if(result.sha256!==receipt.result_sha256||nativeCodingCanonicalJson(result.value)!==nativeCodingCanonicalJson(receipt.result)) fail('result_bytes_mismatch');
     return receipt;
   }
-  return Object.freeze({readNativeScope,readNativeWorker,readProtectedReceipt});
+  return Object.freeze({readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope});
 }

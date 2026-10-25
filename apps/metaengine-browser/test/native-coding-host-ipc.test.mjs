@@ -30,6 +30,8 @@ const operations={
  READ_EXECUTION:async value=>({state:'RESERVED',scope:value.scope}),
  RESERVE_EXECUTION:async value=>{++calls;if(mode==='exit-write')process.exit(19);if(mode==='slow-write')await delay(180);return {state:'RESERVED',scope:value.scope};},
  ADVANCE_EXECUTION:async value=>{++calls;return {state:value.transition.to,has_job_proof:!!value.transition.job_proof,has_result_receipt:!!value.transition.result_receipt};},
+ RECONCILE_PROJECT:async value=>{++calls;if(mode==='throw-write')throw Error('checkpoint_unknown');return {project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'};},
+ READ_PROJECT_CHECKPOINT:async value=>({project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'}),
 };
 const send=(frame,callback)=>{
  const copy=structuredClone(frame);
@@ -85,6 +87,8 @@ test('real private parent/child IPC supports all fixed actions including transac
     {state:'ATTEMPTED',has_job_proof:true,has_result_receipt:false});
   assert.deepEqual(await client.advanceExecution(reserved,{...transition('ATTEMPTED','RESULT_READY'),result_receipt:{schema:'metaengine.codex-cli.run-receipt.v1',state:'RESULT_READY'}}),
     {state:'RESULT_READY',has_job_proof:false,has_result_receipt:true});
+  const project=id();assert.deepEqual(await client.reconcileProject(project),{project_id:project,state:'CHECKPOINTED_PENDING_COMMIT'});
+  assert.deepEqual(await client.readProjectCheckpoint(project),{project_id:project,state:'CHECKPOINTED_PENDING_COMMIT'});
 });
 
 test('out-of-order replies cannot swap concurrent lease requests',async t=>{
@@ -104,6 +108,7 @@ test('client rejects SQL, DSNs, unknown fields and missing evidence before any s
   const descriptor=envelope('metaengine.codex-cli.transport-proof.v1');descriptor.payload.secret='postgresql://do-not-transport/credential';
   await assert.rejects(client.registerProvider(descriptor),error=>error.reason==='INVALID_PAYLOAD');
   await assert.rejects(client.advanceExecution({...scope(),reservation_id:id()},transition('RESERVED','ATTEMPTED')),error=>error.reason==='INVALID_PAYLOAD');
+  await assert.rejects(client.reconcileProject({project_id:id(),checkpoint_sha256:'a'.repeat(64)}),error=>error.reason==='INVALID_PAYLOAD');
   assert.equal((await stats()).calls,0);
 });
 

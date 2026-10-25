@@ -8,6 +8,7 @@ import {createNativeCodingExecutionPool} from './native-coding-execution-pool.mj
 import {createNativeCodingHostObservers,createNativeCodingWorkerRegistry,createNativeCodingPermitRegistry,
   createNativeCodingResultStore} from './native-coding-host-observers.mjs';
 import {buildNativeCodingExecutionScope} from '../../../infra/client-state-runtime/native-coding-task-context.mjs';
+import {createNativeCodingProjectCheckpointObserver} from './native-coding-project-checkpoints.mjs';
 
 const UUID=/^[a-f0-9-]{36}$/,HASH=/^[a-f0-9]{64}$/;
 const fail=code=>{throw new Error(`native_coding_runtime_${code}`);};
@@ -38,6 +39,8 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   const nativeIssuer=issuer||createNativeCodingHostIssuer({identity,...source});
   let closed=false,refresh=null,refreshCursor=0,refreshReason=null;
   const descriptors=new Map(),providerFences=new Map(),scopes=new Map(),completionAttempts=new Map();
+  const checkpoints=['reconcileProject','readProjectCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
+    ?createNativeCodingProjectCheckpointObserver({ownPostgres}):null;
 
   const selectors=async()=>{
     const rows=await permits.listProviderSelectors();
@@ -200,12 +203,17 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       return providerSnapshot();
     },
     dispatchLease(lease){if(closed)return fence('STOPPED');return pool.dispatch(lease);},
+    observeProjectCheckpoints(candidates){
+      if(!checkpoints){if(candidates?.length)fail('private_checkpoint_capability_required');return null;}
+      return checkpoints.observe(candidates);
+    },
     async observeLease(lease){if(closed)return fence('STOPPED');const row=await pool.observe(lease);return row.state==='RESULT_READY'?complete(lease,row):row;},
     async completeFromTrustedCommand(payload){const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));},
     snapshot(){return {...pool.snapshot(),schema:'metaengine.native-coding.runtime.v1',provider_fences:providerFences.size,
       provider_refresh_running:refresh!==null,provider_refresh_reason:refreshReason,
+      project_checkpoints:checkpoints?.snapshot()??null,
       completion_readbacks:[...completionAttempts.values()].filter(v=>v.state==='READBACK_REQUIRED').length,
       production_qualified:false,useful_work_verified:false};},
-    async close(){closed=true;await pool.stop();await workers.close();nativeIssuer.close();return this.snapshot();},
+    async close(){closed=true;checkpoints?.close();await pool.stop();await workers.close();nativeIssuer.close();return this.snapshot();},
   });
 }
