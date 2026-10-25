@@ -83,6 +83,24 @@ Physical PostgreSQL schema/ACL roundtrip verification is recorded separately in
 cluster; no production roles or databases were used. The full attached installer
 test still requires Windows and the exact newly built package.
 
+## First remote CI and current source seal
+
+Draft [PR #1347](https://github.com/PatrickFrome/Compute/pull/1347) contains the
+functional repair commit `cff3496e8510223f0b98d585a83bfc42d9f63c8d`. Its full ME2
+TypeScript/package workflow and checkpoint-PostgreSQL job passed. The first
+[Ubuntu Current Source job](https://github.com/PatrickFrome/Compute/actions/runs/40215080496/job/121234361318)
+stopped before the full suites because the current source manifest retained 14
+older blob IDs, including two inherited from the fixture follow-up.
+
+The follow-up updates only `current_tree_blobs`: 14 reviewed existing entries
+and ten additional reviewed files, for **571 sealed paths**. Every other manifest
+field, historical ledger, package transition, version and qualification flag is
+unchanged. The source-seal assertions are unchanged. The complete ten-file
+historical/current source CI preflight now passes **124/124**, without skips,
+using the real Git ancestry. Details and full output are in
+`source-seal-refresh.json` and `source-seal-regressions.txt` beside the other
+verification receipts. New-HEAD CI remains a separate qualification gate.
+
 ## Remaining acceptance gates
 
 1. Read the running Windows client/Host generation, native admission reason and
