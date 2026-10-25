@@ -10,14 +10,10 @@ import { useToast } from "@/hooks/use-toast";
 import { refreshClientRuntimeStatus, useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
-import { GlobalDialogs } from "@/components/me2/shell/dialogs";
 import { InterruptedSetupRecovery } from "@/components/me2/interrupted-setup-recovery";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 const CodePage = lazy(() => import("@/components/me2/pages/code").then((m) => ({ default: m.CodePage })));
 const TasksPage = lazy(() => import("@/components/me2/pages/tasks").then((m) => ({ default: m.TasksPage })));
-const SupervisorPage = lazy(() => import("@/components/me2/pages/supervisor").then((m) => ({ default: m.SupervisorPage })));
-const MemoryPage = lazy(() => import("@/components/me2/pages/memory").then((m) => ({ default: m.MemoryPage })));
-const ObservabilityPage = lazy(() => import("@/components/me2/pages/observability").then((m) => ({ default: m.ObservabilityPage })));
 const OperatorObservatoryPage = lazy(() => import("@/components/me2/pages/operator-observatory").then((m) => ({ default: m.OperatorObservatoryPage })));
 const SystemPage = lazy(() => import("@/components/me2/pages/system").then((m) => ({ default: m.SystemPage })));
 
@@ -456,7 +452,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         </span>
       ) : null}
       {readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || readiness?.reason === "AGENT_ORIGIN_UNPROVEN" ? (
-        <button type="button" onClick={() => setPage("supervisor")} className="h-8 shrink-0 px-2.5 text-[12px] text-amber-200" data-testid="client-inspect-sessions">Check sessions</button>
+        <button type="button" onClick={() => setPage("operator")} className="h-8 shrink-0 px-2.5 text-[12px] text-amber-200" data-testid="client-inspect-sessions">View runtime status</button>
       ) : null}
       {readiness?.reason === "WORKSPACE_EXECUTION_PAUSED" || recoveryResult?.state === "RECONCILE_REQUIRED" || recoveryResult?.state === "ABSENCE_CONFIRMED" ? (
         <button
@@ -517,9 +513,6 @@ function PageOutlet({ page }: { page: PageKey }) {
   switch (page) {
     case "code": return <CodePage />;
     case "tasks": return <TasksPage />;
-    case "supervisor": return <SupervisorPage />;
-    case "memory": return <MemoryPage />;
-    case "observability": return <ObservabilityPage />;
     case "operator": return <OperatorObservatoryPage />;
     case "system": return <SystemPage />;
     default: return null;
@@ -536,7 +529,6 @@ function actorTone(actor: PrimaryChatActor) {
 function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean; onPickerOpenChange: (open: boolean) => void }) {
   const setPage = useMe2((s) => s.setPage);
   const { roster, state, refresh } = usePrimaryChatRoster();
-  const setChatId = useMe2((s) => s.setChatId);
   const attemptedInitial = useRef<string | null>(null);
   const selectionInFlight = useRef(false);
   const [selecting, setSelecting] = useState<string | null>(null);
@@ -565,7 +557,6 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
       }
       // Selection changes only after an exact native acknowledgement, never
       // optimistically before IPC. The roster owns the visible current row.
-      setChatId(actor.actor_id);
       onPickerOpenChange(false);
       await refresh();
     } catch {
@@ -575,7 +566,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
       selectionInFlight.current = false;
       setSelecting(null);
     }
-  }, [onPickerOpenChange, refresh, setChatId, state]);
+  }, [onPickerOpenChange, refresh, state]);
 
   // One bounded startup choice only when Browser has no selected managed actor.
   // No retry loop: exact binding must already exist for selection to succeed.
@@ -642,7 +633,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
         {selectionError ? <p role="alert" className="px-3 pb-3 text-[12px] text-amber-300">{selectionError}</p> : null}
         {state === "LIVE" && ordered.length === 0 ? <div className="mx-3 rounded-xl bg-zinc-900/70 p-4 text-[13px] leading-relaxed text-zinc-400">
           <p>{query ? "No matching agents." : "No verified sessions are available yet."}</p>
-          {!query ? <><p className="mt-2">Check agent setup and any interrupted connections.</p><button type="button" onClick={() => setPage("supervisor")} className="mt-3 min-h-8 px-2 text-[12px] text-cyan-200">View agent status</button></> : null}
+          {!query ? <><p className="mt-2">Check agent setup and any interrupted connections.</p><button type="button" onClick={() => setPage("operator")} className="mt-3 min-h-8 px-2 text-[12px] text-cyan-200">View agent status</button></> : null}
         </div> : null}
         {supervisors.length ? section("Supervisors", supervisors) : null}
         {agents.length ? section("Agents", agents) : null}
@@ -684,7 +675,7 @@ function PrimaryChatFleetWorkspace({ pickerOpen, onPickerOpenChange }: { pickerO
       >
         <div className="absolute inset-0 grid place-items-center p-8 text-center text-[13px] text-zinc-400">
           <div className="max-w-[420px]"><h1 className="mb-3 text-[24px] font-medium tracking-tight text-zinc-200">A place for your next task</h1><p className="leading-relaxed">Describe what you want to build, or choose an agent conversation from the sidebar. Your projects and history stay on this computer.</p>
-            <div className="mt-5 flex justify-center gap-2"><button type="button" onClick={() => setPage("tasks")} className="mc-soft-action min-h-9 px-4 text-[13px]">Projects and tasks</button><button type="button" onClick={() => setPage("supervisor")} className="min-h-9 px-4 text-[13px]">Agent status</button></div>
+            <div className="mt-5 flex justify-center gap-2"><button type="button" onClick={() => setPage("tasks")} className="mc-soft-action min-h-9 px-4 text-[13px]">Projects and tasks</button><button type="button" onClick={() => setPage("operator")} className="min-h-9 px-4 text-[13px]">Agent status</button></div>
           </div>
         </div>
       </section>
@@ -696,10 +687,6 @@ export function Me2Shell() {
   const page = useMe2((s) => s.page);
   const init = useMe2((s) => s.init);
   const paletteOpen = useMe2((s) => s.paletteOpen);
-  const dialog = useMe2((s) => s.dialog);
-  const detail = useMe2((s) => s.detail);
-  const peekTarget = useMe2((s) => s.peekTarget);
-  const chromeOverlaySources = useMe2((s) => s.chromeOverlaySources);
   const overlayScope = useMe2((s) => s.recentPages);
   const [fleetPickerScope, setFleetPickerScope] = useState<typeof overlayScope | null>(null);
   const [goalDetailScope, setGoalDetailScope] = useState<typeof overlayScope | null>(null);
@@ -720,8 +707,7 @@ export function Me2Shell() {
     return () => window.removeEventListener("me2:toast", h);
   }, [toast]);
 
-  const overlaysOpen = Boolean(dialog || detail);
-  const nativeOverlayOpen = Boolean(paletteOpen || overlaysOpen || peekTarget || chromeOverlaySources.length > 0 || fleetPickerOpen || goalDetailOpen);
+  const nativeOverlayOpen = Boolean(paletteOpen || fleetPickerOpen || goalDetailOpen);
 
   useEffect(() => {
     const shell = shellBridge();
@@ -748,7 +734,6 @@ export function Me2Shell() {
         {mainWorkspace ? <PrimaryChatFleetWorkspace pickerOpen={fleetPickerOpen} onPickerOpenChange={setFleetPickerOpen} /> : <Suspense fallback={<p role="status" className="p-6 text-[13px] text-zinc-400">Opening tools…</p>}><PageOutlet page={page} /></Suspense>}
       </main>
       {paletteOpen ? <CommandPalette /> : null}
-      {overlaysOpen ? <GlobalDialogs /> : null}
     </div>
   );
 }
