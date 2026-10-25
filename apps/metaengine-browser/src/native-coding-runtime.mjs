@@ -146,12 +146,39 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     },
     async readPriorExecution(raw) {
       let scope=scopes.get(key(raw));
-      if(!scope) {
-        const permit=await permitFor(raw),context=await taskContext(raw,permit);
-        const host=(await source.readNativeHost({provider_id:permit.provider_id,agent_id:permit.agent_id})).value;
-        scope=buildNativeCodingExecutionScope(permit,context.value,host.host_process);
-      }
-      return ledger.read(scope);
+      if(scope)return ledger.read(scope);
+      assertOpen();
+      // A fresh Browser cannot reconstruct the old signed Host birth. Only the
+      // private Host selects that scope from the existing durable execution.
+      if(typeof ownPostgres.readPriorExecution!=='function')return fence('HOLD',{reason:'PRIVATE_PRIOR_EXECUTION_READBACK_UNAVAILABLE'});
+      const permit=await permitFor(raw);assertOpen();
+      if(raw.agent_generation_epoch!==permit.agent_generation_epoch)fail('prior_execution_selector_changed');
+      const selector={workspace_id:permit.workspace_id,project_id:permit.project_id,task_id:raw.task_id,
+        lease_generation:raw.lease_generation,agent_id:permit.agent_id,provider_id:permit.provider_id,
+        agent_generation_epoch:permit.agent_generation_epoch};
+      const result=await ownPostgres.readPriorExecution(selector);assertOpen();
+      const fields=['schema','source','state','reason','selector','execution_scope','execution','receipt_sha256','task_state',
+        'task_result_summary','readback_only','physical_effect_replayed','automatic_retry_allowed','authority_effect'];
+      if(result?.schema!=='metaengine.native-coding.execution-readback.v1'||result.source!=='PRIVATE_RUNTIME_HOST_OWN_PG'
+        ||Object.keys(result).sort().join()!==fields.sort().join()
+        ||!['HOLD','READBACK_ONLY'].includes(result.state)||result.readback_only!==true
+        ||result.physical_effect_replayed!==false||result.automatic_retry_allowed!==false||result.authority_effect!==false
+        ||!result.selector||Object.keys(result.selector).length!==Object.keys(selector).length
+        ||Object.keys(selector).some(name=>result.selector[name]!==selector[name]))fail('prior_execution_readback_invalid');
+      if(result.state==='READBACK_ONLY'){
+        const saved=result.execution_scope,e=result.execution;
+        if(result.reason!=='PROTECTED_RESULT_VERIFIED'||!HASH.test(result.receipt_sha256||'')
+          ||!saved||!e||!['RESULT_READY','CHECKPOINTED'].includes(e.state)||e.automatic_retry_allowed!==false||e.authority_effect!==false
+          ||saved.workspace_id!==selector.workspace_id||saved.task_id!==selector.task_id||saved.agent_id!==selector.agent_id
+          ||saved.lease_generation!==selector.lease_generation||saved.agent_generation_epoch!==selector.agent_generation_epoch
+          ||saved.target_id!==`codex-cli:${selector.provider_id}`||!HASH.test(saved.scope_sha256||'')
+          ||!/^pid:[1-9][0-9]*:created_100ns:[1-9][0-9]{16,18}$/.test(saved.host_incarnation||'')
+          ||Object.keys(saved).some(name=>['lease_generation','agent_generation_epoch'].includes(name)?Number(e[name])!==saved[name]:e[name]!==saved[name]))
+          fail('prior_execution_readback_invalid');
+      }else if(result.receipt_sha256!==null)fail('prior_execution_readback_invalid');
+      // This is observation only: never copy the historical scope into the
+      // current runner's scope map, advance its ledger, or POST completion.
+      return result;
     },
   });
   async function complete(lease,row) {
