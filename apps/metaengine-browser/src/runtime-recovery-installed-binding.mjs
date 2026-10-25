@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
-import {createReadStream} from 'node:fs';
+import nativeFs from 'node:fs';
 import fs from 'node:fs/promises';
+import {createRequire} from 'node:module';
 import path from 'node:path';
 import {validateLocalStateProviderConfig,localStateProviderOwnerFile} from './local-state-provider-policy.mjs';
 import {validatePackagedLocalRuntimeBinding} from './local-runtime-host-controller.mjs';
@@ -11,24 +12,29 @@ const hash=value=>createHash('sha256').update(value).digest('hex');
 const HASH=/^[a-f0-9]{64}$/;
 const fail=()=>{throw Error('runtime_recovery_installed_binding_unproven');};
 const samePath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
+// Electron's ordinary fs treats app.asar as a virtual directory. Custody pins
+// require the physical archive and its metadata; package.json reads below must
+// retain ASAR support. Never fall back to virtual fs inside Electron.
+const physicalFs=process.versions.electron?createRequire(import.meta.url)('original-fs'):nativeFs;
+const physical=physicalFs.promises;
 async function regular(file,maximum) {
   if(typeof file!=='string'||!path.isAbsolute(file)||/^(?:\\\\|\/\/)/.test(file))fail();
   let current=path.parse(file).root;
   for(const segment of path.relative(current,file).split(path.sep).filter(Boolean)) {
-    current=path.join(current,segment);if((await fs.lstat(current)).isSymbolicLink())fail();
+    current=path.join(current,segment);if((await physical.lstat(current)).isSymbolicLink())fail();
   }
-  const stat=await fs.lstat(file);
-  if(!stat.isFile()||stat.nlink!==1||stat.size<1||stat.size>maximum||!samePath(await fs.realpath(file),file))fail();
+  const stat=await physical.lstat(file);
+  if(!stat.isFile()||stat.nlink!==1||stat.size<1||stat.size>maximum||!samePath(await physical.realpath(file),file))fail();
   return stat;
 }
 const unchanged=(a,b)=>a.ino===b.ino&&a.size===b.size&&a.mtimeMs===b.mtimeMs;
 async function bytes(file,maximum) {
-  const before=await regular(file,maximum),value=await fs.readFile(file),after=await regular(file,maximum);
+  const before=await regular(file,maximum),value=await physical.readFile(file),after=await regular(file,maximum);
   if(!unchanged(before,after)||value.length!==before.size)fail();return value;
 }
 async function fileHash(file) {
   const before=await regular(file,1024*1024*1024),digest=createHash('sha256');
-  for await(const chunk of createReadStream(file))digest.update(chunk);
+  for await(const chunk of physicalFs.createReadStream(file))digest.update(chunk);
   if(!unchanged(before,await regular(file,1024*1024*1024)))fail();return digest.digest('hex');
 }
 function postgresProof(value) {

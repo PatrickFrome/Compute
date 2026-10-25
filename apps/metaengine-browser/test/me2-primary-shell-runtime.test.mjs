@@ -108,13 +108,13 @@ test('R97 Package Smoke captures the actual single-main ME2 surface, not legacy 
   assert.match(packageSmokeWorkflow, /WaitForExit\(135000\)/);
   assert.match(packageSmokeWorkflow, /r85_visual_evidence_process_timeout/);
   assert.match(packageSmokeWorkflow, /r85-primary-visual\.stderr\.log/);
-  assert.match(r85VisualHarness, /metaengine\.browser\.r97-visual-evidence\.v1/);
+  assert.match(r85VisualHarness, /metaengine\.browser\.r97-visual-evidence\.v2/);
   assert.match(r85VisualHarness, /primary_me2_ui_captured:\s*true/);
   assert.match(r85VisualHarness, /legacy_shell_captured:\s*false/);
   assert.match(r85VisualHarness, /remote_browser_content_captured:\s*false/);
   assert.match(r85VisualHarness, /remote_browser_transport_blocked:\s*true/);
   assert.match(r85VisualHarness, /exact_main_workspace:\s*false/);
-  assert.match(r85VisualHarness, /advanced_surfaces_settings_only:\s*false/);
+  assert.match(r85VisualHarness, /settings_controls_scoped_and_routes_verified:\s*false/);
   assert.match(r85VisualHarness, /capturePage\(\)/);
   assert.match(r85VisualHarness, /ME2_UI_HEALTH_URL/);
   assert.match(r85VisualHarness, /VISUAL_PHASE_TIMEOUT_MS = 120_000/);

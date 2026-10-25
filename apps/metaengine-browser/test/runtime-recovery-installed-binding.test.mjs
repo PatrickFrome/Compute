@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
+import {execFile} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,4 +69,67 @@ test('operator gate, other package version and manifest mutation deny all recove
 test('physical PostgreSQL image mutation changes the immutable continuity pin',async t=>{
   const f=await fixture(t),before=await f.read();await fs.writeFile(f.pgExe,'changed synthetic image');
   assert.notEqual((await f.read()).pg_identity_sha256,before.pg_identity_sha256);
+});
+
+test('real Electron pins physical ASAR bytes while package reads remain archive-aware',async t=>{
+  const electron=process.env.METAENGINE_ELECTRON_BINARY;
+  if(!electron){t.skip('Set METAENGINE_ELECTRON_BINARY to run the real Electron ASAR boundary regression');return;}
+  assert.ok(path.isAbsolute(electron));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-recovery-electron-')));
+  t.after(async()=>{assert.ok(root.startsWith(await fs.realpath(os.tmpdir())));await fs.rm(root,{recursive:true,force:true});});
+  const entry=path.join(root,'probe.mjs');
+  const imports=[
+    "import assert from 'node:assert/strict';",
+    "import {createHash,randomUUID} from 'node:crypto';",
+    "import fs from 'node:fs/promises';",
+    "import os from 'node:os';",
+    "import path from 'node:path';",
+    "import raw from 'original-fs';",
+    "import {app} from 'electron';",
+    `import {createInstalledRuntimeRecoveryBindingReader} from ${JSON.stringify(new URL('../src/runtime-recovery-installed-binding.mjs',import.meta.url).href)};`,
+    `import {runtimeRecoveryPostgresProof} from ${JSON.stringify(new URL('../../../infra/client-state-runtime/runtime-recovery-postgres-proof.mjs',import.meta.url).href)};`,
+    "const hash=value=>createHash('sha256').update(value).digest('hex');",
+  ];
+  const probe=`
+let exitCode=0;
+try {
+  const f=await fixture({after:()=>{}});
+  const packageBytes=Buffer.from(JSON.stringify(f.pkg));
+  const header=Buffer.from(JSON.stringify({files:{'package.json':{offset:'0',size:packageBytes.length}}}));
+  const headerBuffer=Buffer.alloc(8+Math.ceil(header.length/4)*4);
+  headerBuffer.writeUInt32LE(headerBuffer.length-4,0);headerBuffer.writeUInt32LE(header.length,4);header.copy(headerBuffer,8);
+  const sizeBuffer=Buffer.alloc(8);sizeBuffer.writeUInt32LE(4,0);sizeBuffer.writeUInt32LE(headerBuffer.length,4);
+  const archive=Buffer.concat([sizeBuffer,headerBuffer,packageBytes]),appPath=f.options.app.getAppPath();
+  await raw.promises.writeFile(appPath,archive);
+  assert.equal((await fs.lstat(appPath)).isDirectory(),true);
+  assert.equal((await raw.promises.lstat(appPath)).isFile(),true);
+  // Exercise the production default package reader, rather than a mock which
+  // would hide accidentally switching internal archive reads to original-fs.
+  const {readPackage,...options}=f.options;
+  const read=createInstalledRuntimeRecoveryBindingReader(options),ready=await read();
+  assert.equal(ready.normal_bootstrap_ready,true);assert.equal(ready.asar_sha256,hash(archive));
+  await f.stop();const stopped=await read();assert.equal(stopped.normal_bootstrap_ready,false);
+  assert.equal(stopped.asar_sha256,ready.asar_sha256);
+  await raw.promises.link(appPath,path.join(f.root,'archive-hardlink'));
+  await assert.rejects(read(),/binding_unproven/);
+  console.log(JSON.stringify({schema:'metaengine.test.runtime-recovery-asar.v1',state:'PASS',
+    actual_electron:process.versions.electron,physical_archive_sha256:ready.asar_sha256,
+    archive_aware_package_read:true,hardlink_rejected:true,installed_runtime_proof:false,authority_effect:false}));
+} catch(error) {exitCode=1;console.error(error.stack||error);}
+// Electron keeps archive handles cached until exit. The parent removes this
+// private temporary tree after process completion, including on assertion failure.
+app.exit(exitCode);
+`;
+  await fs.writeFile(entry,[...imports,fixture.toString(),probe].join('\n'));
+  const {stdout,stderr}=await new Promise((resolve,reject)=>{
+    const child=execFile(electron,[entry],{windowsHide:true,timeout:30000,maxBuffer:32768,
+      env:{...process.env,TEMP:root,TMP:root,TMPDIR:root}},(error,stdout,stderr)=>{
+      if(error){error.message+='\n'+stdout+'\n'+stderr;reject(error);}else resolve({stdout,stderr});
+    });child.stdin?.end();
+  });
+  const receipt=stdout.split(/\r?\n/).filter(Boolean).map(line=>{try{return JSON.parse(line);}catch{return null;}})
+    .find(value=>value?.schema==='metaengine.test.runtime-recovery-asar.v1');
+  assert.equal(receipt?.state,'PASS',stdout+'\n'+stderr);
+  assert.equal(receipt?.archive_aware_package_read,true);assert.equal(receipt?.hardlink_rejected,true);
+  assert.equal(receipt?.installed_runtime_proof,false);
 });

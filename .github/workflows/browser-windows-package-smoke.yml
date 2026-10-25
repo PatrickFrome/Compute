@@ -379,7 +379,8 @@ jobs:
           $evidencePath = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
           if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'r85_visual_evidence_json_missing' }
           $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
-          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v1') { throw 'r97_visual_evidence_schema_invalid' }
+          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v2') { throw 'r97_visual_evidence_schema_invalid' }
+          if ($evidence.PSObject.Properties.Name -contains 'advanced_surfaces_settings_only' -or $evidence.settings_controls_scoped_and_routes_verified -isnot [bool] -or $evidence.settings_controls_scoped_and_routes_verified -ne $true) { throw 'r97_settings_scope_not_verified' }
           if ([string]$evidence.source_head -ne [string]$env:ME2_BUILD_SHA) { throw 'r85_visual_evidence_source_head_drift' }
           if ($evidence.primary_me2_ui_captured -ne $true `
               -or $evidence.legacy_shell_captured -ne $false `
@@ -388,7 +389,7 @@ jobs:
               -or -not (@($evidence.blocked_remote_browser_ports) -contains '3042') `
               -or -not (@($evidence.blocked_remote_browser_ports) -contains '3043') `
               -or $evidence.exact_main_workspace -ne $true `
-              -or $evidence.advanced_surfaces_settings_only -ne $true `
+              -or $evidence.settings_controls_scoped_and_routes_verified -ne $true `
               -or $evidence.command_search_available -ne $true `
               -or $evidence.command_palette_legibility_verified -ne $true `
               -or $evidence.command_palette_focus_verified -ne $true `

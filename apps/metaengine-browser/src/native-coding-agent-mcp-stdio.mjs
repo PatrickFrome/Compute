@@ -76,7 +76,7 @@ function argumentsFor(name,args) {
 // assertInvocationAuthorized and operations MUST be private live Host closures
 // before deployment. ClientInfo/_meta and model arguments never select scope.
 export function createNativeCodingAgentMcpStdioAdapter({binding,operations,assertInvocationAuthorized,
-  allowedTools=['project_overview','project_history_page'],input,output,timeoutMs=15000,maxInflight=8,maxFrameBytes=256*1024,maxIntents=256,
+  allowedTools=['project_overview','project_history_page'],input,output,timeoutMs=63000,maxInflight=8,maxFrameBytes=256*1024,maxIntents=256,
   writeIntentAuthority='LOCAL_ADAPTER'}={}) {
   if(!keys(binding,['run_id','workspace_id','project_id','task_id','lease_generation','agent_id','agent_generation_epoch','provider_id','role'])
     ||['run_id','workspace_id','project_id','task_id','provider_id'].some(key=>!UUID.test(binding[key]||''))
@@ -84,7 +84,7 @@ export function createNativeCodingAgentMcpStdioAdapter({binding,operations,asser
     ||!integer(binding.lease_generation,1,Number.MAX_SAFE_INTEGER)||!integer(binding.agent_generation_epoch,1,Number.MAX_SAFE_INTEGER)
     ||typeof assertInvocationAuthorized!=='function'||!Array.isArray(allowedTools)||!allowedTools.length||allowedTools.length>TOOLS.length
     ||new Set(allowedTools).size!==allowedTools.length||allowedTools.some(name=>!TOOLS.includes(name)||typeof operations?.[name]!=='function')
-    ||typeof input?.on!=='function'||typeof output?.write!=='function'||!integer(timeoutMs,1,20000)||!integer(maxInflight,1,16)
+    ||typeof input?.on!=='function'||typeof output?.write!=='function'||!integer(timeoutMs,1,68000)||!integer(maxInflight,1,16)
     ||!integer(maxFrameBytes,1024,256*1024)||!integer(maxIntents,1,1024)
     ||!['LOCAL_ADAPTER','PRIVATE_HOST_BROKER'].includes(writeIntentAuthority))fail('private_capabilities_required');
   const scope=Object.freeze(structuredClone(binding)),allowed=new Set(allowedTools),intents=new Map(),active=new Map();

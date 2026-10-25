@@ -220,6 +220,17 @@ if (guard.installer_shutdown_control) {
       app.exit(1);
       return;
     }
+    // The diagnostic dialog can be the only window before main.mjs loads.
+    // Rejecting this import leaves Electron alive with its singleton lock and
+    // no window after OK. Exit only after the controller confirms that this
+    // launch owns no surviving runtime tree; uncertainty retains the fence.
+    const cleanup = await runtimeController
+      ?.then(controller => controller.stopOwnedLocalRuntimeHost())
+      .catch(() => ({ cleanup_confirmed: false }));
+    if (cleanup?.cleanup_confirmed === true) {
+      app.exit(1);
+      return;
+    }
     throw error;
     }
   }

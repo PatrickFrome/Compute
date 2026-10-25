@@ -111,6 +111,34 @@ test('explicit choice, pins, separate credentials and local ports reject before 
   assert.deepEqual(f.events, []); await assertDataPreserved(f);
 });
 
+test('explicit attached upgrade authenticates existing direct credentials before atomic migrations/grant refresh and never provisions a role', async t => {
+  const f = await fixture(t); f.options.ownerAction = 'UPGRADE_EXISTING_LOCAL_POSTGRES_17';
+  f.hooks.inspectApiLogin = async ({ sql, apiLogin }) => {
+    assert.equal(sql, f.apiSql); assert.equal(apiLogin, f.options.apiLogin); f.events.push('existing-api-auth');
+  };
+  f.hooks.provisionApiLogin = async () => { throw new Error('must_not_provision_or_rotate_password'); };
+  f.hooks.refreshApiRpcGrants = async value => {
+    assert.equal(value.login, f.options.apiLogin); assert.equal(value.roleMode, 'direct');
+    assert.equal('password' in value, false); assert.equal(f.events.includes('commit'), false); f.events.push('refresh');
+  };
+  const receipt = await onboardAttachedPostgres(f.options, f.hooks);
+  assert.equal(receipt.existing_api_credentials_preserved, true); assert.equal(receipt.api_login_created, false);
+  assert(f.events.indexOf('existing-api-auth') < f.events.indexOf('begin'));
+  assert(f.events.indexOf('migrations') < f.events.indexOf('refresh'));
+  assert(f.events.indexOf('refresh') < f.events.indexOf('transaction-admission'));
+  assert(f.events.indexOf('commit') < f.events.indexOf('reconnect-admission'));
+  await assertDataPreserved(f);
+});
+
+test('bad existing API credentials reject an attached upgrade before lock/schema/role effects', async t => {
+  const f = await fixture(t); f.options.ownerAction = 'UPGRADE_EXISTING_LOCAL_POSTGRES_17';
+  f.hooks.inspectApiLogin = async () => { throw new Error('private_auth_failure'); };
+  await assert.rejects(onboardAttachedPostgres(f.options, f.hooks), /attached_onboarding_preflight_failed/);
+  assert.equal(f.events.includes('begin'), false); assert.equal(f.events.includes('migrations'), false);
+  await assert.rejects(fs.stat(path.join(f.options.stateDirectory, 'runtime-host-lock.json')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(f.options.runtimeConfigFile), { code: 'ENOENT' }); await assertDataPreserved(f);
+});
+
 test('missing vault, bad PG17, physical overlap and aliases fail before connection, preserving existing cluster', async t => {
   const f = await fixture(t);
   await assert.rejects(onboardAttachedPostgres({ ...f.options, stateDirectory: f.options.pgDataDirectory,
@@ -220,7 +248,7 @@ function admissionSql(changes = {}) {
 test('API catalog probe admits zero-membership direct credentials with explicit per-column and RPC grants only', async () => {
   const result = await inspectAttachedApiAdmission({ sql: admissionSql(), apiLogin: 'restricted_api' });
   assert.equal(result.memberships, 0); assert.equal(result.api_role_mode, 'direct'); assert.equal(result.api_login_service_role_grants_modified, false);
-  assert.equal(result.rpc_names_granted, RPC_ALLOWLIST.length); assert.equal(result.tables_granted, 5);
+  assert.equal(result.rpc_names_granted, RPC_ALLOWLIST.length); assert.equal(result.tables_granted, Object.keys(TABLE_ALLOWLIST).length);
   assert.equal(result.database_sql_privileges_exact_allowlist, false); assert.equal(result.application_rows_read, false);
   assert.equal(result.insert_columns_granted, 7);
 });
@@ -328,4 +356,3 @@ test('negative, excessive and invalid postmaster timestamp drift cannot mutate a
   }
   assert.equal(postmasterPidStartEpochMatchesLive(epoch,'invalid'),false);
 });
-

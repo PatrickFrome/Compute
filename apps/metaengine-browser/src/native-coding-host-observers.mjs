@@ -1,5 +1,5 @@
-import fs from 'node:fs/promises';
-import {createReadStream} from 'node:fs';
+import nodeFs from 'node:fs';
+import {createRequire} from 'node:module';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
@@ -8,6 +8,15 @@ import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
 import {readWindowsSandboxHostBoot,windowsSandboxBootIdentity,evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
+
+// Electron's normal fs treats app.asar as a virtual directory. Image identity,
+// inventories and hashes require the physical archive file. Failure to load the
+// physical reader under Electron must fail closed instead of falling back to
+// virtual metadata. Only reads *inside* the archive use Electron's normal fs.
+const physicalFs=process.versions.electron?createRequire(import.meta.url)('original-fs'):nodeFs;
+const fs=physicalFs.promises;
+const createReadStream=physicalFs.createReadStream;
+const archiveFs=nodeFs.promises;
 
 const run = promisify(execFile);
 const HASH=/^[a-f0-9]{64}$/, UUID=/^[a-f0-9-]{36}$/, HEAD=/^[a-f0-9]{40}$/;
@@ -307,7 +316,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     preparingImage=(async()=>{
       const paths=await imagePaths();if(!paths.asar.toLowerCase().endsWith('app.asar'))fail('installed_asar_required');
       const before=await imageInventory(paths);
-      const pkg=readPackage?await readPackage():JSON.parse(await fs.readFile(path.join(paths.asar,'package.json'),'utf8'));
+      const pkg=readPackage?await readPackage():JSON.parse(await archiveFs.readFile(path.join(paths.asar,'package.json'),'utf8'));
       const binding=pkg?.metaengineClientStateRuntime;
       if(!HASH.test(binding?.bundle_sha256||'')||!HEAD.test(binding?.source_head_sha||'')||binding.package_version!==pkg.version)fail('installed_package_binding_invalid');
       const verifiedResources=await verifyResources({bundleDirectory:paths.bundle,expectedBundleDigest:binding.bundle_sha256});
@@ -345,7 +354,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
       const files={entrypoint:'native-coding-agent-mcp-entry.mjs',broker:'native-coding-agent-mcp-broker.mjs',adapter:'native-coding-agent-mcp-stdio.mjs'};
       const bridgeSha256={};
       for(const [key,name]of Object.entries(files)){
-        const bytes=await fs.readFile(path.join(paths.asar,'src',name));
+        const bytes=await archiveFs.readFile(path.join(paths.asar,'src',name));
         if(!bytes.length||bytes.length>256*1024)fail('agent_bridge_source_budget');bridgeSha256[key]=digest(bytes);
       }
       if(preparedImage.inventory!==await imageInventory(paths))fail('agent_bridge_image_changed');

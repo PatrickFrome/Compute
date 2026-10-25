@@ -182,9 +182,10 @@ jobs:
           $evidencePath = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
           if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'client_source_visual_evidence_missing' }
           $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
-          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v1' -or $evidence.ok -ne $true) {
+          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v2' -or $evidence.ok -ne $true) {
             throw 'client_source_visual_evidence_invalid'
           }
+          if ($evidence.PSObject.Properties.Name -contains 'advanced_surfaces_settings_only' -or $evidence.settings_controls_scoped_and_routes_verified -isnot [bool] -or $evidence.settings_controls_scoped_and_routes_verified -ne $true) { throw 'r97_settings_scope_not_verified' }
           if ([string]$evidence.source_head -ne [string]$env:ME2_BUILD_SHA) { throw 'client_source_visual_source_head_drift' }
           Write-Host ($evidence | ConvertTo-Json -Compress -Depth 8)
 

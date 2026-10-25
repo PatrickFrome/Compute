@@ -128,8 +128,9 @@ jobs:
           $json = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
           if (-not (Test-Path $json -PathType Leaf)) { throw 'w62_r97_receipt_missing' }
           $evidence = Get-Content $json -Raw | ConvertFrom-Json
-          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v1' -or $evidence.source_head -ne $env:ME2_BUILD_SHA) { throw 'w62_r97_receipt_source_drift' }
-          foreach ($key in @('primary_me2_ui_captured','remote_browser_transport_blocked','exact_main_workspace','advanced_surfaces_settings_only','command_search_available','command_palette_legibility_verified','command_palette_focus_verified','native_geometry_verified','narrow_agent_picker_verified','goal_status_focus_verified','settings_routes_verified','settings_loading_bounded','connected_not_ready_verified','positive_readiness_verified','paused_readiness_verified','stale_readiness_cleared','selection_fail_closed','ime_submission_guard_verified','goal_submit_once_verified','presentation_only')) {
+          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v2' -or $evidence.source_head -ne $env:ME2_BUILD_SHA) { throw 'w62_r97_receipt_source_drift' }
+          if ($evidence.PSObject.Properties.Name -contains 'advanced_surfaces_settings_only' -or $evidence.settings_controls_scoped_and_routes_verified -isnot [bool] -or $evidence.settings_controls_scoped_and_routes_verified -ne $true) { throw 'r97_settings_scope_not_verified' }
+          foreach ($key in @('primary_me2_ui_captured','remote_browser_transport_blocked','exact_main_workspace','settings_controls_scoped_and_routes_verified','command_search_available','command_palette_legibility_verified','command_palette_focus_verified','native_geometry_verified','narrow_agent_picker_verified','goal_status_focus_verified','settings_routes_verified','settings_loading_bounded','connected_not_ready_verified','positive_readiness_verified','paused_readiness_verified','stale_readiness_cleared','selection_fail_closed','ime_submission_guard_verified','goal_submit_once_verified','presentation_only')) {
             if ($evidence.$key -ne $true) { throw "w62_r97_negative_or_visual_gate_failed:$key" }
           }
           if ($evidence.ok -ne $true) { throw 'w69_r97_visual_not_complete' }
