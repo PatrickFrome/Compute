@@ -79,7 +79,8 @@ jobs:
             test/codex-cli-runner.test.mjs \
             test/codex-cli-sandbox-probe.test.mjs \
             test/native-coding-host-observers.test.mjs \
-            test/windows-local-computer-executor.test.mjs
+            test/windows-local-computer-executor.test.mjs \
+            test/codex-cli-windows-output-order.test.mjs
       - name: Exercise all Browser mechanics including real local IPC
         # Explicit status function retains full coverage after a failed/timed-out
         # probe. That failure still fails this job; cancellation remains honored.
@@ -94,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           node ../../.github/browser-ci-resource-observation.mjs full-browser-suite
-          node --test --test-concurrency=4 test/*.test.mjs
+          node --test --test-concurrency=4 'test/*.test.mjs'
       - name: Inspect generated artifacts and prove tracked source unchanged
         if: ${{ !cancelled() && steps.qualification_prerequisites.outcome == 'success' }}
         shell: bash

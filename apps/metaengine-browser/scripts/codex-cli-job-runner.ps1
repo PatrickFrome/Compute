@@ -134,9 +134,9 @@ public static class MetaengineCodexJob {
       if(DateTime.UtcNow>=deadline) throw new InvalidOperationException("codex_job_deadline_expired_before_resume");
       byte[] prompt=Convert.FromBase64String(resumeBody.Substring(separator+1));
       if(prompt.Length>65536) throw new InvalidOperationException("codex_job_prompt_too_large");
-      var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
       Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");
       Emit("{\"type\":\"resumed\"}");
+      var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
       IntPtr inputHandle=stdinWrite; stdinWrite=IntPtr.Zero;
       var inputTask=Task.Run(()=> { using(var input=new FileStream(new SafeFileHandle(inputHandle,true),FileAccess.Write)) input.Write(prompt,0,prompt.Length); });
       var control=Task.Run(()=>Console.In.ReadLine()); string reason=null;

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { createCodexCliWindowsProcessController } from '../src/codex-cli-windows-process-controller.mjs';
+import { withOwnedCodexCliProcess } from './fixtures/with-owned-codex-cli-process.mjs';
 
 // Generated protocol doubles only: no Windows process, PowerShell, Job Object,
 // executable hash or native cleanup is qualified by these tests.
@@ -59,6 +60,51 @@ function cancellationReceipt(f) {
     tree_cleanup_confirmed: true, process_tree_control: 'WINDOWS_JOB_OBJECT',
     job_accounting: { active_processes: 0, total_processes: 1, total_terminated_processes: 0 } };
 }
+
+for (const mode of ['proof assertion', 'expired original deadline']) {
+  test(`owned physical fixture cleans up after ${mode} before RESUME without hiding its failure`, async t => {
+    const f = fixture(t);
+    if (mode === 'expired original deadline') f.spec.deadlineAt = new Date(Date.now() - 1).toISOString();
+    const handle = await readyHandle(f);
+    const cleanupIssued = new Promise(resolve => f.helper.stdin.once('finish', resolve));
+    let primaryError, settled = false;
+    const owned = withOwnedCodexCliProcess({ async spawn() { return handle; } }, f.spec, async h => {
+      try {
+        if (mode === 'proof assertion') assert.fail('injected proof assertion before RESUME');
+        else await h.resume('private prompt');
+      } catch (error) { primaryError = error; throw error; }
+    });
+    owned.then(() => { settled = true; }, () => { settled = true; });
+    const rejected = assert.rejects(owned, error => error === primaryError
+      && (mode === 'proof assertion' ? error.code === 'ERR_ASSERTION' : /deadline_expired_before_resume/.test(error.message)));
+    await cleanupIssued;
+    assert.ok(!f.input.includes('RESUME ')); assert.ok(!f.input.includes('private prompt'));
+    const receipt = cancellationReceipt(f); assert.equal(receipt.reason, 'TEST_CLEANUP');
+    assert.equal(settled, false);
+    f.frame(receipt); await Promise.resolve(); assert.equal(settled, false);
+    f.helper.emit('close', 0); await rejected;
+    assert.equal((await handle.completion).tree_cleanup_confirmed, true);
+    assert.equal(f.kills, 0);
+  });
+}
+
+test('owned physical fixture awaits completion even after terminate rejects and reports both errors', async () => {
+  const primary = new assert.AssertionError({ message: 'injected proof assertion before RESUME' });
+  const cleanup = Error('injected cleanup failure');
+  const completion = Promise.withResolvers(), terminating = Promise.withResolvers();
+  const handle = { stdout: new PassThrough(), stderr: new PassThrough(), completion: completion.promise,
+    async terminate() { terminating.resolve(); throw cleanup; } };
+  let settled = false;
+  const owned = withOwnedCodexCliProcess({ async spawn() { return handle; } }, {}, async () => { throw primary; });
+  owned.then(() => { settled = true; }, () => { settled = true; });
+  const rejected = assert.rejects(owned,
+    error => error instanceof AggregateError && error.cause === primary
+      && error.errors.length === 2 && error.errors[0] === primary && error.errors[1] === cleanup);
+  await terminating.promise; await Promise.resolve(); await Promise.resolve();
+  assert.equal(settled, false);
+  completion.resolve({ tree_cleanup_confirmed: false }); await rejected;
+  assert.equal((await handle.completion).tree_cleanup_confirmed, false);
+});
 
 async function pendingRejection(f, expected) {
   let settled = false;

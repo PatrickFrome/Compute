@@ -27,7 +27,7 @@ const workflowCases=[
     ['metaengine-browser-self-update-e2e.yml','Parse and contract gates','npm test',false],
     ['browser-agent-result-installer-source-qualification.yml','Prove full Browser regression','npm test',true],
     ['client-live-mechanics-recovery-v1.yml','Exercise all Browser mechanics including real local IPC',
-      'node --test --test-concurrency=4 test/*.test.mjs',true],
+      "node --test --test-concurrency=4 'test/*.test.mjs'",true],
   ];
 
 function assertWorkflowMode(source,[file,step,command,matrix]){
