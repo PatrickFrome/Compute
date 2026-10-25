@@ -103,36 +103,51 @@ public static class MetaengineJobBirthObserver {
     } finally { if(!CloseHandle(snapshot)) ok=false; }
     return ok;
   }
-  static void CaptureFailureInventory(IntPtr guard,Accounting accounting,uint helperPid,uint childPid,IntPtr helper,IntPtr child,
-    int polls,uint firstActive,uint minActive,uint maxActive) {
-    // Observation only: native Job-list IDs are compared with already-pinned
-    // identities, never opened or used to authorize termination. No PID/path is
-    // exported. A partial list cannot establish a complete active-process set.
+  sealed class Inventory {
+    public bool queryOk,complete,helperListed,childListed;
+    public uint assigned,listed,returned; public int error,other,invalid,duplicates;
+    public readonly HashSet<ulong> otherPids=new HashSet<ulong>();
+  }
+  static Inventory ReadInventory(IntPtr guard,uint helperPid,uint childPid) {
+    // A complete bounded native association list must include both exact known
+    // identities once. Auxiliary IDs remain opaque: no PID is opened and no
+    // name, count or snapshot hint grants individual identity/effect authority.
     IntPtr information=IntPtr.Zero;
     try {
       const int capacity=256; int bytes=checked(8+capacity*IntPtr.Size);
       information=Marshal.AllocHGlobal(bytes); Marshal.Copy(new byte[bytes],0,information,bytes);
-      uint returned; bool ok=QueryInformationJobObject(guard,3,information,(uint)bytes,out returned); int error=ok ? 0 : Marshal.GetLastWin32Error();
-      uint assigned=0,listed=0; bool helperListed=false,childListed=false; int other=0,invalid=0,duplicates=0;
-      bool header=(ok || error==234) && returned>=8 && returned<=(uint)bytes;
-      var seen=new HashSet<ulong>(); var otherPids=new HashSet<ulong>();
+      var result=new Inventory();
+      result.queryOk=QueryInformationJobObject(guard,3,information,(uint)bytes,out result.returned); result.error=result.queryOk ? 0 : Marshal.GetLastWin32Error();
+      bool header=(result.queryOk || result.error==234) && result.returned>=8 && result.returned<=(uint)bytes;
+      var seen=new HashSet<ulong>();
       if(header) {
-        assigned=unchecked((uint)Marshal.ReadInt32(information,0)); listed=unchecked((uint)Marshal.ReadInt32(information,4));
-        if(listed<=(uint)capacity && returned>=8+listed*(uint)IntPtr.Size) {
-          for(int i=0;i<(int)listed;i++) {
+        result.assigned=unchecked((uint)Marshal.ReadInt32(information,0)); result.listed=unchecked((uint)Marshal.ReadInt32(information,4));
+        if(result.listed<=(uint)capacity && result.returned>=8+result.listed*(uint)IntPtr.Size) {
+          for(int i=0;i<(int)result.listed;i++) {
             int at=8+i*IntPtr.Size;
             ulong pid=IntPtr.Size==4 ? unchecked((uint)Marshal.ReadInt32(information,at)) : unchecked((ulong)Marshal.ReadInt64(information,at));
-            if(pid==0 || pid>UInt32.MaxValue) { invalid++; continue; }
-            if(!seen.Add(pid)) { duplicates++; continue; }
-            if(pid==helperPid) helperListed=true; else if(pid==childPid) childListed=true; else { other++; otherPids.Add(pid); }
+            if(pid==0 || pid>UInt32.MaxValue) { result.invalid++; continue; }
+            if(!seen.Add(pid)) { result.duplicates++; continue; }
+            if(pid==helperPid) result.helperListed=true; else if(pid==childPid) result.childListed=true; else { result.other++; result.otherPids.Add(pid); }
           }
         } else header=false;
       }
-      bool complete=ok && header && assigned==listed && invalid==0 && duplicates==0;
+      result.complete=result.queryOk && header && result.assigned==result.listed && result.invalid==0 && result.duplicates==0;
+      return result;
+    } finally { if(information!=IntPtr.Zero) Marshal.FreeHGlobal(information); }
+  }
+  static void CaptureFailureInventory(Inventory inventory,Accounting accounting,IntPtr helper,IntPtr child,
+    int polls,uint firstActive,uint minActive,uint maxActive) {
+    // Preserve the failing native-list snapshot; do not substitute a later read
+    // or use diagnostic names/accounting as an acceptance predicate.
+    try {
+      const int capacity=256; bool ok=inventory.queryOk,complete=inventory.complete,helperListed=inventory.helperListed,childListed=inventory.childListed;
+      uint assigned=inventory.assigned,listed=inventory.listed,returned=inventory.returned;
+      int error=inventory.error,other=inventory.other,invalid=inventory.invalid,duplicates=inventory.duplicates;
       // Snapshot names are allowlisted hints, not pinned identities or liveness
       // proof. PID reuse can invalidate a hint; no such ID authorizes an effect.
       int consoleHosts,compilers,unclassified,snapshotSeen;
-      bool snapshotOk=DiagnosticSnapshotHints(otherPids,out consoleHosts,out compilers,out unclassified,out snapshotSeen);
+      bool snapshotOk=DiagnosticSnapshotHints(inventory.otherPids,out consoleHosts,out compilers,out unclassified,out snapshotSeen);
       FailureInventoryJson="{\"diagnostic_only\":true,\"native_qualification_proven\":false,\"active_processes\":"+accounting.active.ToString(CultureInfo.InvariantCulture)
         +",\"total_processes\":"+accounting.total.ToString(CultureInfo.InvariantCulture)+",\"limit_terminated_processes\":"+accounting.terminated.ToString(CultureInfo.InvariantCulture)
         +",\"accounting_polls\":"+polls.ToString(CultureInfo.InvariantCulture)+",\"first_active_processes\":"+firstActive.ToString(CultureInfo.InvariantCulture)
@@ -153,7 +168,7 @@ public static class MetaengineJobBirthObserver {
       FailureInventoryJson="{\"diagnostic_only\":true,\"native_qualification_proven\":false,\"capture_failed\":true,\"active_processes\":"
         +accounting.active.ToString(CultureInfo.InvariantCulture)+",\"total_processes\":"+accounting.total.ToString(CultureInfo.InvariantCulture)
         +",\"limit_terminated_processes\":"+accounting.terminated.ToString(CultureInfo.InvariantCulture)+"}";
-    } finally { if(information!=IntPtr.Zero) Marshal.FreeHGlobal(information); }
+    }
   }
   static void GuardLimits(IntPtr guard) {
     uint handleFlags; Require(GetHandleInformation(guard,out handleFlags) && (handleFlags&1)==0,"outer_noninherited");
@@ -182,7 +197,8 @@ public static class MetaengineJobBirthObserver {
       return result;
     }
   }
-  public static void Run(string powershell,string helperPath,string request,string cwd,string channel,string nonce,string childPath,string childSha) {
+  public static void Run(string powershell,string helperPath,string request,string cwd,string channel,string nonce,string childPath,string childSha,string scenario) {
+    Require(scenario=="BOUND" || scenario=="UNASSIGNED_CONTROL","fixture_scenario"); bool control=scenario=="UNASSIGNED_CONTROL";
     Require(Path.IsPathRooted(powershell) && Path.IsPathRooted(helperPath) && Path.IsPathRooted(cwd) && Path.IsPathRooted(channel) && Path.IsPathRooted(childPath),"absolute_paths");
     Require(SamePath(Path.GetDirectoryName(helperPath),cwd) && SamePath(Path.GetDirectoryName(channel),cwd),"private_fixture_paths");
     Require(System.Text.RegularExpressions.Regex.IsMatch(nonce,"\\A[a-f0-9]{64}\\z") && System.Text.RegularExpressions.Regex.IsMatch(childSha,"\\A[a-f0-9]{64}\\z"),"fixture_identity");
@@ -191,7 +207,9 @@ public static class MetaengineJobBirthObserver {
       Require(BitConverter.ToString(sha.ComputeHash(file)).Replace("-","").ToLowerInvariant()==childSha,"child_digest");
     }
     IntPtr guard=IntPtr.Zero,stdinRead=IntPtr.Zero,stdinWrite=IntPtr.Zero,stdoutRead=IntPtr.Zero,stdoutWrite=IntPtr.Zero,stderrRead=IntPtr.Zero,stderrWrite=IntPtr.Zero,child=IntPtr.Zero;
-    var helper=new ProcessInfo(); Drain stdout=null,stderr=null; bool helperBound=false,childOwned=false,observed=false; long helperBirth=0,childBirth=0; uint childPid=0,childCode=0;
+    var helper=new ProcessInfo(); Drain stdout=null,stderr=null; Inventory inventory=null;
+    bool helperBound=false,childOwned=false,observed=false,innerObserved=false,controlSurvived=false,childExitConfirmed=false;
+    long helperBirth=0,childBirth=0; uint childPid=0,childCode=0,cleanupChildCode=0;
     Exception primary=null; var cleanupErrors=new List<Exception>();
     try {
       guard=CreateJobObject(IntPtr.Zero,null); Require(guard!=IntPtr.Zero,"outer_create");
@@ -266,19 +284,27 @@ public static class MetaengineJobBirthObserver {
         Require(QueryInformationJobObject(guard,1,out accounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero),"outer_accounting");
         if(accountingPolls++==0) firstActive=accounting.active;
         if(accounting.active<minActive) minActive=accounting.active; if(accounting.active>maxActive) maxActive=accounting.active;
-        if(accounting.active==2) break;
+        inventory=ReadInventory(guard,helper.pid,childPid);
+        if(inventory.complete && inventory.helperListed && inventory.childListed) break;
         Require(WaitForSingleObject(child,0)==0x102 && WaitForSingleObject(helper.process,0)==0x102,"both_live_during_accounting");
         Thread.Sleep(10);
       } while(DateTime.UtcNow<accountingDeadline);
-      if(accounting.active!=2 || accounting.total<2) CaptureFailureInventory(guard,accounting,helper.pid,childPid,helper.process,child,accountingPolls,firstActive,minActive,maxActive);
-      Require(accounting.active==2 && accounting.total>=2,"outer_active_identity_set");
+      if(!inventory.complete || !inventory.helperListed || !inventory.childListed) CaptureFailureInventory(inventory,accounting,helper.process,child,accountingPolls,firstActive,minActive,maxActive);
+      Require(inventory.complete && inventory.helperListed && inventory.childListed,"outer_known_identity_inventory");
+      Require(GetProcessId(helper.process)==helper.pid && Birth(helper.process)==helperBirth && GetProcessId(child)==childPid && Birth(child)==childBirth,"known_identity_before_helper_kill");
+      Require(IsProcessInJob(helper.process,guard,out membership) && membership && IsProcessInJob(child,guard,out membership) && membership,"known_membership_before_helper_kill");
       Require(WaitForSingleObject(child,0)==0x102 && WaitForSingleObject(helper.process,0)==0x102,"both_live_before_helper_kill");
       Require(Interlocked.Read(ref stdout.bytes)==0 && Interlocked.Read(ref stderr.bytes)==0,"never_ready_before_helper_kill");
       Require(TerminateProcess(helper.process,91),"forced_exact_helper_kill");
       Require(WaitForSingleObject(helper.process,5000)==0,"helper_exit_wait"); uint helperCode;
       Require(GetExitCodeProcess(helper.process,out helperCode) && helperCode==91,"forced_helper_exit_code");
-      Require(WaitForSingleObject(child,5000)==0,"inner_last_close_child_exit");
-      Require(GetExitCodeProcess(child,out childCode) && childCode!=259,"child_exit_readback");
+      if(!control) {
+        Require(WaitForSingleObject(child,5000)==0,"inner_last_close_child_exit");
+        Require(GetExitCodeProcess(child,out childCode) && childCode!=259,"child_exit_readback"); innerObserved=true;
+      } else {
+        Require(WaitForSingleObject(child,5000)==0x102,"unassigned_control_survives_helper_exit");
+        Require(GetExitCodeProcess(child,out childCode) && childCode==259,"unassigned_control_still_active"); controlSurvived=true;
+      }
       // The OUTER Job is still held, has only KILL_ON_CLOSE limits, and has not
       // been terminated. It cannot supply the observed INNER last-close kill.
       GuardLimits(guard); observed=true;
@@ -291,6 +317,12 @@ public static class MetaengineJobBirthObserver {
       if(child!=IntPtr.Zero && childOwned && WaitForSingleObject(child,0)!=0) Cleanup(cleanupErrors,()=>Require(TerminateProcess(child,125),"owned_child_final_cleanup"));
       if(helper.process!=IntPtr.Zero) Cleanup(cleanupErrors,()=>Require(WaitForSingleObject(helper.process,5000)==0,"helper_cleanup_wait"));
       if(child!=IntPtr.Zero && childOwned) Cleanup(cleanupErrors,()=>Require(WaitForSingleObject(child,5000)==0,"child_cleanup_wait"));
+      if(child!=IntPtr.Zero && childOwned) Cleanup(cleanupErrors,()=> {
+        uint code; Require(GetExitCodeProcess(child,out code) && code!=259,"child_cleanup_exit_readback");
+        if(control) Require(code==125,"unassigned_control_cleanup_code");
+        else if(innerObserved) Require(code==childCode,"child_exit_code_stable");
+        cleanupChildCode=code; childExitConfirmed=true;
+      });
       foreach(Drain drain in new[]{stdout,stderr}) if(drain!=null) {
         Cleanup(cleanupErrors,()=>Require(drain.task.Wait(5000),"pipe_drain_wait"));
         Cleanup(cleanupErrors,()=>drain.stream.Dispose());
@@ -302,16 +334,19 @@ public static class MetaengineJobBirthObserver {
     if(primary!=null) cleanupErrors.Insert(0,primary);
     if(cleanupErrors.Count>0) throw new AggregateException("observer_failed",cleanupErrors);
     Require(observed,"observation_complete");
+    Require(childExitConfirmed && inventory!=null,"owned_cleanup_complete");
     Require(stdout!=null && stderr!=null && Interlocked.Read(ref stdout.bytes)==0 && Interlocked.Read(ref stderr.bytes)==0,"helper_never_ready_or_resumed");
-    Console.Out.WriteLine("{\"nonce\":\""+nonce+"\",\"helper_pid\":"+helper.pid+",\"helper_birth_100ns\":\""+helperBirth+"\",\"child_pid\":"+childPid+",\"child_birth_100ns\":\""+childBirth+
-      "\",\"child_image_verified\":true,\"child_parent_verified\":true,\"outer_membership_verified\":true,\"inner_cleanup_observed\":true,\"helper_exit_confirmed\":true,\"child_exit_confirmed\":true,\"child_exit_code\":"+childCode+
+    Console.Out.WriteLine("{\"scenario\":\""+scenario+"\",\"nonce\":\""+nonce+"\",\"helper_pid\":"+helper.pid+",\"helper_birth_100ns\":\""+helperBirth+"\",\"child_pid\":"+childPid+",\"child_birth_100ns\":\""+childBirth+
+      "\",\"child_image_verified\":true,\"child_parent_verified\":true,\"outer_membership_verified\":true,\"outer_inventory_complete\":true,\"outer_known_helper_listed\":true,\"outer_known_child_listed\":true,\"outer_listed_processes\":"+inventory.listed+
+      ",\"outer_auxiliary_entries\":"+inventory.other+",\"auxiliary_authority_granted\":false,\"inner_cleanup_observed\":"+(innerObserved?"true":"false")+",\"unassigned_control_survived\":"+(controlSurvived?"true":"false")+
+      ",\"child_exit_before_outer_cleanup\":"+(innerObserved?"true":"false")+",\"helper_exit_confirmed\":true,\"child_exit_confirmed\":true,\"child_code_before_outer_cleanup\":"+childCode+",\"child_exit_code\":"+cleanupChildCode+
       ",\"outer_guard_open_during_observation\":true,\"outer_termination_after_observation\":true,\"handles_closed\":true}"); Console.Out.Flush();
   }
 }
 '@
 $request = [Console]::In.ReadLine() | ConvertFrom-Json
 [MetaengineJobBirthObserver]::Run([string]$request.powershell_path,[string]$request.helper_path,[string]$request.helper_request,[string]$request.cwd,
-  [string]$request.birth_channel_path,[string]$request.nonce,[string]$request.expected_child_path,[string]$request.expected_child_sha256)
+  [string]$request.birth_channel_path,[string]$request.nonce,[string]$request.expected_child_path,[string]$request.expected_child_sha256,[string]$request.scenario)
 } catch {
   $phase = 'compile_or_request'
   $inventory = 'null'

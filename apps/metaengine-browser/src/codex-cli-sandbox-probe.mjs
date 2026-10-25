@@ -105,8 +105,12 @@ if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $bi
 @{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;
 system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
 last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress`;
-  const {stdout}=await exec(POWERSHELL,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
+  const pending=exec(POWERSHELL,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
     {windowsHide:true,shell:false,timeout:12000,maxBuffer:8192,env:fixedWindowsNativeReadEnvironment()});
+  // This fixed encoded read has no interactive input; close its unused pipe
+  // before awaiting completion, just like the native process inventory reader.
+  pending.child?.stdin?.end();
+  const {stdout}=await pending;
   const value=JSON.parse(stdout.trim());
   if(value.system_process)value.system_process.created_at=new Date(value.system_process.created_at).toISOString();
   windowsSandboxBootIdentity(value);return value;

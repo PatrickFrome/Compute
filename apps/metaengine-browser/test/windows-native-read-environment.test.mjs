@@ -115,6 +115,20 @@ test('boot reader uses shared fixed context with unchanged script identity and12
   assert.deepEqual(value, boot());
 });
 
+test('boot read closes unused input before awaiting completion and preserves transport refusal', async t => {
+  controlledEnvironment(t);let closed=0,resolveRead;
+  const pending=new Promise(resolve=>{resolveRead=resolve;});
+  pending.child={stdin:{end(){closed++;}}};
+  const reading=readWindowsSandboxHostBoot({platform:'win32',exec:()=>pending});
+  const closedBeforeSettlement=closed;
+  resolveRead({stdout:JSON.stringify(boot())});assert.deepEqual(await reading,boot());
+  assert.equal(closedBeforeSettlement,1,'fixed noninteractive reader must send EOF before waiting');
+  const failure=Object.assign(Error('fixture_transport_timeout'),{killed:true,signal:'SIGTERM'});
+  const rejected=Promise.reject(failure);rejected.child={stdin:{end(){closed++;}}};
+  await assert.rejects(readWindowsSandboxHostBoot({platform:'win32',exec:()=>rejected}),error=>error===failure);
+  assert.equal(closed,2);
+});
+
 test('process reader uses shared fixed context, validated PID and15s budget while retaining stdin close and identity validation', async t => {
   controlledEnvironment(t); let call, inputClosed = 0;
   const exec = (exe, args, options) => {
